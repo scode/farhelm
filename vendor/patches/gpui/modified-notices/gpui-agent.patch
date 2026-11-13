@@ -1,0 +1,45 @@
+diff --git a/gpui/Cargo.toml b/gpui/Cargo.toml
+index 1878a22..a86fd6b 100644
+--- a/gpui/Cargo.toml
++++ b/gpui/Cargo.toml
+@@ -1,3 +1,4 @@
++# Modified for Farhelm: changed or added by the patch layers in vendor/patches/gpui/ (vendor/README.md, "GPUI").
+ [workspace]
+ resolver = "3"
+ members = ["gpui-agent", "testapp"]
+diff --git a/gpui/gpui-agent/Cargo.toml b/gpui/gpui-agent/Cargo.toml
+index 4da08f9..ea15978 100644
+--- a/gpui/gpui-agent/Cargo.toml
++++ b/gpui/gpui-agent/Cargo.toml
+@@ -1,3 +1,4 @@
++# Modified for Farhelm: changed or added by the patch layers in vendor/patches/gpui/ (vendor/README.md, "GPUI").
+ [package]
+ name = "gpui-agent"
+ version = "0.1.0"
+diff --git a/gpui/gpui-agent/src/compat.rs b/gpui/gpui-agent/src/compat.rs
+index 60889e1..8fb16ff 100644
+--- a/gpui/gpui-agent/src/compat.rs
++++ b/gpui/gpui-agent/src/compat.rs
+@@ -1,3 +1,4 @@
++// Modified for Farhelm: changed or added by the patch layers in vendor/patches/gpui/ (vendor/README.md, "GPUI").
+ //! The calls whose shape differs between Zed's GPUI and the `gpui-pre 0.3.9` snapshot that
+ //! gpui-kit 0.8 pins. The `gpui-pre-0-3-9` feature picks the older shape; `zed` and
+ //! `gpui-pre-0-3-12` share the newer one.
+diff --git a/gpui/gpui-agent/src/lib.rs b/gpui/gpui-agent/src/lib.rs
+index 5c29248..f85b68e 100644
+--- a/gpui/gpui-agent/src/lib.rs
++++ b/gpui/gpui-agent/src/lib.rs
+@@ -1,3 +1,4 @@
++// Modified for Farhelm: changed or added by the patch layers in vendor/patches/gpui/ (vendor/README.md, "GPUI").
+ //! Lets the `gpui-agent` command line see and drive this app.
+ //!
+ //! Call [`init`] once at startup. It does nothing unless the app was started with
+diff --git a/gpui/testapp/Cargo.toml b/gpui/testapp/Cargo.toml
+index 4a86acf..603f47c 100644
+--- a/gpui/testapp/Cargo.toml
++++ b/gpui/testapp/Cargo.toml
+@@ -1,3 +1,4 @@
++# Modified for Farhelm: changed or added by the patch layers in vendor/patches/gpui/ (vendor/README.md, "GPUI").
+ [package]
+ name = "gpui-agent-testapp"
+ version = "0.1.0"

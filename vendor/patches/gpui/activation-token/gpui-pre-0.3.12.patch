@@ -1,0 +1,35 @@
+diff --git a/src/platform.rs b/src/platform.rs
+index ff19aff..3148dc2 100644
+--- a/src/platform.rs
++++ b/src/platform.rs
+@@ -1290,6 +1290,12 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
+         answers: &[PromptButton],
+     ) -> Option<oneshot::Receiver<usize>>;
+     fn activate(&self);
++    /// Activates with a token another client obtained (Wayland xdg-activation),
++    /// as when a second launch hands its launcher's token to this process.
++    /// Platforms that need no token activate as usual.
++    fn activate_with_token(&self, _token: String) {
++        self.activate();
++    }
+     /// Requests that the operating system draw attention to this window.
+     fn request_attention(&self) {}
+     fn is_active(&self) -> bool;
+diff --git a/src/window.rs b/src/window.rs
+index 2693757..0b388cc 100644
+--- a/src/window.rs
++++ b/src/window.rs
+@@ -7117,6 +7117,13 @@ impl Window {
+         self.platform_window.activate();
+     }
+ 
++    /// Like [`Self::activate_window`], with an xdg-activation token from another
++    /// client. Wayland compositors grant focus to a valid token; elsewhere this
++    /// is an ordinary activation.
++    pub fn activate_window_with_token(&self, token: String) {
++        self.platform_window.activate_with_token(token);
++    }
++
+     /// Requests that the operating system draw attention to this window.
+     pub fn request_attention(&self) {
+         self.platform_window.request_attention();

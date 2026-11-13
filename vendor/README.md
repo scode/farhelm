@@ -1,4 +1,4 @@
-# Vendored terminal crates
+# Vendored crates
 
 NOTE: Do not edit the code under `alacritty_terminal/` or `vte/` directly. Each tree is an upstream crate plus the patch
 next to it in `patches/`, and the procedure below depends on that staying true. A change goes into the tree and the
@@ -10,6 +10,9 @@ restore need, caps on what hostile program output can make them store, two histo
 more query for the handler to answer, nine bug fixes, emoji variation widths following Ghostty, and one mode change (the
 UTF-8 and SGR mouse encodings as separate modes, which upstream, like xterm, makes exclusive). The root `Cargo.toml`
 swaps these trees in for the crates.io versions with `[patch.crates-io]`.
+
+The GPUI crates and the gpui-agent automation bridge, which the desktop GUI builds on, are vendored here too and have
+their own section at the end, [GPUI](#gpui). Everything else in this file is about the two terminal crates.
 
 ## What is here
 
@@ -1233,3 +1236,221 @@ To upgrade to a new version:
   `alacritty_terminal` upgrade, also start `pair-tests/Cargo.lock` again from a copy of the new crate's `Cargo.lock` and
   let one unlocked `cargo test` there adjust it.
 - A `vte` upgrade usually comes with an `alacritty_terminal` upgrade that requires it; upgrade them together.
+
+## GPUI
+
+NOTE: As with the terminal crates, do not edit the code under `gpui-pre/`, `gpui-pre-linux/`, `gpui-pre-wgpu/`,
+`gpui-pre-macos/` or `gpui-agent/` directly. Each tree is a published source plus the patch files in `patches/gpui/`,
+applied in the order below, and a change goes into the tree and its patch file together.
+
+The desktop GUI is built on GPUI, Zed's GPU-rendered UI framework, through the `gpui-pre` crates (a published snapshot
+of Zed's GPUI) and GPUI Kit (`gpui-component` and `gpui-base`), all pinned exactly in the root `Cargo.toml`. Kit and
+everything else come from crates.io as published. Four of the GPUI crates are vendored because the app needs changes to
+them, and the root `Cargo.toml` swaps the vendored trees in with `[patch.crates-io]`. `gpui-agent/` is the
+test-automation bridge that lets an agent drive the running app.
+
+These trees came from a private GPUI prototype of Farhelm, which built and measured them; the changes were ported, not
+re-derived. They are the prototype's trees minus its two measurement-only layers (per-draw CPU attribution and a
+frame-wake counter for one test), plus the change notices below.
+
+### What is here
+
+| Path                    | What                                                                                    |
+| ----------------------- | --------------------------------------------------------------------------------------- |
+| `gpui-pre/`             | `gpui-pre` 0.3.12, GPUI's core                                                          |
+| `gpui-pre-linux/`       | `gpui-pre-linux` 0.3.12, the Linux platform (Wayland and X11)                           |
+| `gpui-pre-wgpu/`        | `gpui-pre-wgpu` 0.3.12, the wgpu renderer Linux uses                                    |
+| `gpui-pre-macos/`       | `gpui-pre-macos` 0.3.12, the macOS platform                                             |
+| `gpui-agent/`           | `wsp-labs/gpui-agent` at `c9b8b6328877755685e1233b3770f78a68f2a5d1`, the bridge and CLI |
+| `patches/gpui/<layer>/` | one directory per patch layer, one patch per tree it touches                            |
+
+The four GPUI trees started as the published `.crate` files, unpacked unmodified. Their SHA-256 checksums match both a
+fresh download from `https://static.crates.io/crates/<name>/<name>-0.3.12.crate` and the `cksum` field in the crates.io
+index (checked 2026-11-13):
+
+- `gpui-pre-0.3.12.crate`: `29db89613527079737f53752eab27fb65c9a7dd94979256c65a0e590c9fd34d8`
+- `gpui-pre-linux-0.3.12.crate`: `54bab418d0b7c027af9495f278619b46887362b3bd6446e246c87c5b0fa167df`
+- `gpui-pre-wgpu-0.3.12.crate`: `dc76608d385f6d0dcbad44504b1bf669dac3b7d7ffa2885acdb7c1c358caf852`
+- `gpui-pre-macos-0.3.12.crate`: `2de7d3f4ad51ac387e822495db363fcc1188d349793365731d054444c4cb06ee`
+
+One file of the published `gpui-pre` is not checked in: `examples/image/black-cat-typing.gif`, a 4.5 MB animation that
+two upstream examples load at run time. It is half the tree's size and nothing builds from it. Each manifest records Zed
+revision `d2a4fb6ded7c470be25d1541281da3882495b65b`. The other GPUI crates, including `gpui-pre-platform` (which picks
+the platform crate) and `gpui_macros`, stay ordinary registry dependencies.
+
+`gpui-agent/` is the upstream repository at that commit without its `.git`, `docs/` (a demo GIF and a screenshot),
+`scripts/` (upstream's end-to-end and recipe scripts) and `patches/` (upstream's own copies of the bridge patches for
+gpui-pre 0.3.9 and for Zed; the 0.3.12 ports here supersede them, and only upstream's README still links to them). Its
+in-app crate (`gpui/gpui-agent/`), protocol crate (`crates/protocol/`), CLI (`crates/cli/`), README and license are
+retained. So is its small test app (`gpui/testapp/`): the in-app crate inherits its manifest settings from
+`gpui/Cargo.toml`, whose workspace lists the test app as a member, so dropping it would take one more local patch.
+
+### Licenses
+
+The GPUI crates and gpui-agent are Apache-2.0 only; each tree keeps its license file (`LICENSE-APACHE`, and
+`gpui-agent/LICENSE`). Apache-2.0 requires modified files to say so, so the last layer, `modified-notices`, puts a
+one-line `Modified for Farhelm` comment at the top of every file an earlier layer changed or added (29 files; the
+bridge's `gpui/Cargo.lock` is left without one, because cargo rewrites lockfiles), the same marker the terminal crates
+use, so one search finds every modified vendored file. Unlike the terminal crates' patches, these layers do not mark
+each patched spot with a `Farhelm patch` comment: they were carried over from the prototype as they were, and the patch
+files themselves are the record of what changed. `THIRD_PARTY_NOTICES.md` has the entries, including one for the Lucide
+icons GPUI Kit bundles.
+
+Zed's crates other than `gpui`, `gpui_macros`, `gpui_platform`, `gpui_util`, `gpui_tokio` and `scheduler` are treated as
+GPL unless checked; none of their code is here, and none may be copied in. The `gpui-pre-*` utility crates in this graph
+(`gpui-pre-sum-tree`, `-collections`, `-refineable`, `-http-client`, `-util` and the rest) are published copies of Zed
+crates; every one of them declares Apache-2.0, which was checked on 2026-11-13.
+
+### The patch layers
+
+Here's what each layer changes and why, in application order. Sizes are `git apply --numstat` added / removed lines.
+
+| Layer                  | Trees (added / removed)                                                        | Why                                                        |
+| ---------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------- |
+| `bridge`               | gpui-pre 411 / 4, gpui-pre-linux 30 / 1, gpui-pre-wgpu 147 / 101               | Hooks the automation bridge reads; window screenshots      |
+| `capture-alpha`        | gpui-pre-wgpu 6 / 1                                                            | Screenshot colors on premultiplied-alpha surfaces          |
+| `gpui-agent`           | gpui-agent 11 / 11, 29 / 11 and a lockfile refresh                             | Build the bridge against these gpui-pre 0.3.12 trees       |
+| `native-key`           | gpui-pre 354 / 11, gpui-pre-linux 89 / 4, gpui-pre-macos 27 / 17               | Physical key identity and the original Shift on key events |
+| `attachment-clipboard` | gpui-pre-linux 159 / 1, gpui-pre-macos 92 / 0                                  | Image-before-text async clipboard reads for paste          |
+| `activation-token`     | gpui-pre 13 / 0, gpui-pre-linux 9 / 0                                          | Activate a window with another client's Wayland token      |
+| `modified-notices`     | gpui-pre 11, gpui-pre-linux 8, gpui-pre-wgpu 1, gpui-pre-macos 4, gpui-agent 5 | The license's change notices (above)                       |
+
+Without the bridge's own two patches and the notices, the GPUI changes come to 1,337 added and 140 removed lines, tests
+included.
+
+- **bridge.** The bridge records what each frame drew (elements, text, accessibility roles and names, focus and input
+  targets) while it is enabled, lets its driver answer file panels and edit text inputs, and renders a window's scene to
+  an image for screenshots on Wayland and X11 (`render_to_image`, compiled only in test or bench builds, through
+  `test-support`, which the bridge's in-app crate turns on). The bridge's upstream publishes these patches only for
+  gpui-pre 0.3.9 and for Zed; these are three-way ports of the 0.3.9 copies. The hooks are compiled into every build,
+  release builds included, but stay inert unless the bridge starts, which needs the GUI's automation feature (never in
+  shipped or devbuild builds) and an explicit launch through its CLI or `GPUI_AGENT=1`.
+- **capture-alpha.** Screenshot capture reuses the window's blend pipelines, so its shader must use the surface's
+  premultiplied-alpha mode. With straight alpha hard-coded, translucent selection highlights came out opaque. This
+  changes capture only, not what is presented on screen.
+- **gpui-agent.** One patch removes upstream's optional paths to a sibling Zed checkout and points its standalone GPUI
+  workspace at patched crates; the second adds a `gpui-pre-0-3-12` feature, its compile guards and 0.3.12 versions, and
+  points that workspace's `[patch.crates-io]` at the four trees here; the third (`gpui-agent-lockfile.patch`) refreshes
+  `gpui/Cargo.lock` so that workspace resolves to them
+  (`cargo metadata --locked --all-features --manifest-path vendor/gpui-agent/gpui/Cargo.toml` succeeds and lists
+  gpui-pre 0.3.12 from the vendored paths). gpui-pre 0.3.12 already has Zed's keystroke and scroll API shapes, so the
+  bridge builds it through the same compatibility branch as its `zed` feature.
+- **native-key.** Key down and up events, and the keystroke interceptor's payload, carry the key's physical identity (an
+  XKB position name on Linux, a virtual keycode on macOS) and the original Shift, which logical keystrokes lose for
+  symbols. The terminal needs both to send the right bytes on non-US layouts. Logical key matching is unchanged. Parsed
+  or injected keys, ASCII input-method commits and replayed keystrokes carry no native identity. On macOS the forwarded
+  original key-down keeps its repeat flag where upstream forced it off, so held-key filters can behave differently. The
+  layer adds fields to `KeyDownEvent` and `KeyUpEvent`, so the unpatched `gpui-pre-windows` and `gpui-pre-web` crates
+  would not compile against it; neither is a Farhelm target.
+- **attachment-clipboard.** The async clipboard read prefers images over text (and files over both on macOS), so pasting
+  a screenshot into a terminal uploads the image rather than its text label. Wayland reads the pipe on a background
+  thread. The synchronous clipboard API that text fields use keeps its text-first behavior.
+- **activation-token.** `Window::activate_window_with_token` activates a window with an xdg-activation token another
+  client obtained, which a second launch needs to bring the running app's window forward on Wayland. Upstream can only
+  request its own token, which compositors usually refuse. Other platforms fall back to plain activation.
+
+Two Linux hunks are carried but not compiled: the bridge's capture hook in `src/linux/x11/window.rs` and native-key's
+event conversion in `src/linux/x11/client.rs`. The workspace builds `gpui-pre-platform` without its `x11` feature, so
+nothing type-checks them. Linux code also cannot check the macOS tree: `gpui-pre-macos` compiles only on a Mac, so a
+change to it has to be built there.
+
+These layers make no claim about native behavior they were not tested against: native IME, real-desktop clipboard
+transfer and whether a compositor grants a forwarded activation token were not established by the prototype.
+
+NOTE: The bridge's socket is unauthenticated. Anyone who can connect to it controls the app, including its terminals and
+approval cards. Bridge runs keep it in a private 0700 directory.
+
+### Reproducing the trees
+
+Work in a scratch directory outside the checkout, holding a copy of `patches/gpui/` and an empty `vendor/`:
+
+- Download the four `.crate` files above, check their SHA-256 against the list, and unpack each into `vendor/`
+  (`tar -xzf <name>-0.3.12.crate -C vendor`), then rename `vendor/<name>-0.3.12` to `vendor/<name>`.
+- Clone `https://github.com/wsp-labs/gpui-agent`, check out `c9b8b6328877755685e1233b3770f78a68f2a5d1`, and copy its
+  contents without `.git` into `vendor/gpui-agent/`.
+- From the scratch directory, apply the layers in this order (`--directory` names the tree, and running from the scratch
+  directory keeps `git apply` from resolving paths against an enclosing repository):
+
+```sh
+git apply --directory=vendor/gpui-pre patches/gpui/bridge/gpui-pre-0.3.12.patch
+git apply --directory=vendor/gpui-pre-linux patches/gpui/bridge/gpui-pre-linux-0.3.12.patch
+git apply --directory=vendor/gpui-pre-wgpu patches/gpui/bridge/gpui-pre-wgpu-0.3.12.patch
+git apply --directory=vendor/gpui-pre-wgpu patches/gpui/capture-alpha/gpui-pre-wgpu-0.3.12.patch
+git apply --directory=vendor/gpui-agent patches/gpui/gpui-agent/gpui-agent-crates-io.patch
+git apply --directory=vendor/gpui-agent patches/gpui/gpui-agent/gpui-agent-gpui-pre-0.3.12.patch
+git apply --directory=vendor/gpui-pre patches/gpui/native-key/gpui-pre-0.3.12.patch
+git apply --directory=vendor/gpui-pre-linux patches/gpui/native-key/gpui-pre-linux-0.3.12.patch
+git apply --directory=vendor/gpui-pre-macos patches/gpui/native-key/gpui-pre-macos-0.3.12.patch
+git apply --directory=vendor/gpui-pre-linux patches/gpui/attachment-clipboard/gpui-pre-linux-0.3.12.patch
+git apply --directory=vendor/gpui-pre-macos patches/gpui/attachment-clipboard/gpui-pre-macos-0.3.12.patch
+git apply --directory=vendor/gpui-pre patches/gpui/activation-token/gpui-pre-0.3.12.patch
+git apply --directory=vendor/gpui-pre-linux patches/gpui/activation-token/gpui-pre-linux-0.3.12.patch
+git apply --directory=vendor/gpui-agent patches/gpui/gpui-agent/gpui-agent-lockfile.patch
+git apply --directory=vendor/gpui-pre patches/gpui/modified-notices/gpui-pre-0.3.12.patch
+git apply --directory=vendor/gpui-pre-linux patches/gpui/modified-notices/gpui-pre-linux-0.3.12.patch
+git apply --directory=vendor/gpui-pre-wgpu patches/gpui/modified-notices/gpui-pre-wgpu-0.3.12.patch
+git apply --directory=vendor/gpui-pre-macos patches/gpui/modified-notices/gpui-pre-macos-0.3.12.patch
+git apply --directory=vendor/gpui-agent patches/gpui/modified-notices/gpui-agent.patch
+```
+
+- Remove `vendor/gpui-agent/docs/`, `vendor/gpui-agent/scripts/`, `vendor/gpui-agent/patches/` and
+  `vendor/gpui-pre/examples/image/black-cat-typing.gif`.
+- `diff -r vendor/<tree> <checkout>/vendor/<tree>` prints nothing for each of the five trees (for `gpui-agent`, apart
+  from a `target/` left by building its CLI in the checkout).
+
+Every layer applies without offsets. The sequence was checked end to end on 2026-11-13, and against the prototype: its
+trees equal these minus the notices, with its two measurement layers added back for `gpui-pre`.
+
+Layers touch overlapping files, so to check one layer by itself with `git apply --reverse --check`, first reverse every
+later layer in a disposable copy.
+
+### Upgrading
+
+Upgrade only as a dedicated change, at a milestone, with GPUI Kit: Kit pins its gpui-pre exactly, so the two move
+together. Unpack the new crates twice, as `a/<name>` (as published) and `b/<name>`, apply each layer to `b` in order
+with `git apply`, and fix rejected hunks by hand; a three-way merge (`git apply -3` inside a scratch git repository
+holding the old pristine, old patched and new pristine trees) does most of it. Regenerate each patch from the scratch
+directory with `git diff --no-index --no-prefix a/<name> b/<name>` after each layer, and the notices layer last. The
+prototype's bump from 0.3.9 to 0.3.12 took about half an hour and found one silently non-compiling line from a three-way
+merge, so build every tree, on Linux and on a Mac, before trusting the result. Then update the checksums above, the
+version pins in the root `Cargo.toml`, and `THIRD_PARTY_NOTICES.md`.
+
+The bridge upgrades separately: copy the new upstream commit, re-apply the `gpui-agent` patches, refresh and re-record
+its lockfile patch, and update the commit here and in `THIRD_PARTY_NOTICES.md`.
+
+Bringing GPUI and Kit into the workspace moved a few existing dependencies in `Cargo.lock`, because their new dependents
+require newer versions: the `icu_*` crates from 2.3 to 2.4, with `tinystr`, `yoke`, `zerovec` and `zerovec-derive`
+(gpui-pre's `icu_segmenter` 2.4), `toml` from 0.8.2 to 0.8.23 and `toml_datetime` from 0.6.3 to 0.6.11 (Kit's
+`rust-i18n-support` needs `toml` 0.8.8 or newer), and `proc-macro-crate` from 2.0.2 to 2.0.0 (2.0.2 pins the older
+`toml_datetime`; `glib-macros` uses it). `cargo update --precise` refuses to keep any of the old versions.
+
+### Running their tests
+
+The native-key layer's test of the core, outside the workspace like the terminal crates' tests (minutes, since it builds
+GPUI on its own; `.agents/validation.md` has the recorded form):
+
+```sh
+cargo test --locked --manifest-path vendor/gpui-pre/Cargo.toml --features test-support --test native_key_metadata
+```
+
+### Staying out of the workspace's checks
+
+The same rules as the terminal crates (above) apply, for the same reasons:
+
+- The root `Cargo.toml` lists all five trees under `workspace.exclude`, so workspace clippy, fmt, test and nextest runs
+  never select them, and `-D warnings` applies only to members.
+- Dependents name GPUI by version (`gpui = { package = "gpui-pre", version = "=0.3.12" }`) and reach the trees only
+  through `[patch.crates-io]`, which `cargo fmt --all` does not follow. The bridge is the exception: the GUI will depend
+  on `gpui-agent/gpui/gpui-agent` by path, behind its automation feature, so `cargo fmt --all` would reach it once that
+  dependency exists; that crate's own workspace (`gpui-agent/gpui/Cargo.toml`) keeps it out of Farhelm's.
+- `dprint.json` excludes the five trees. This README and the patch files are still checked.
+- `scripts/check-test-sleeps.py` reads only `crates/` and `e2e/tests/`.
+- cargo-deny checks the vendored crates' declared licenses like any other dependency; its source ban does not apply to
+  path dependencies (`deny.toml`).
+
+Build the bridge's CLI from the checkout root, so it uses the repository's Rust toolchain instead of the one pinned in
+`gpui-agent/rust-toolchain.toml`:
+
+```sh
+cargo build --locked --manifest-path vendor/gpui-agent/Cargo.toml -p gpui-agent-cli
+```

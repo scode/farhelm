@@ -1,0 +1,182 @@
+diff --git a/src/linux/platform.rs b/src/linux/platform.rs
+index b24300b..7f3d6c8 100644
+--- a/src/linux/platform.rs
++++ b/src/linux/platform.rs
+@@ -1457,6 +1457,22 @@ fn guess_ascii(keycode: Keycode, shift: bool) -> Option<char> {
+     Some(c)
+ }
+ 
++#[cfg(any(feature = "wayland", feature = "x11"))]
++/// Preserve native position and Shift before logical labels or compose erase them.
++/// Keycodes without a name in the active keymap yield None. Consumers must
++/// treat unrecognised names as unknown rather than guessing from logical text.
++pub(super) fn native_key_from_xkb(
++    state: &State,
++    modifiers: gpui::Modifiers,
++    keycode: Keycode,
++) -> Option<gpui::NativeKey> {
++    let keymap = state.get_keymap();
++    Some(gpui::NativeKey {
++        identity: gpui::NativeKeyIdentity::Xkb(keymap.key_get_name(keycode)?.to_owned().into()),
++        shift: modifiers.shift,
++    })
++}
++
+ #[cfg(any(feature = "wayland", feature = "x11"))]
+ pub(super) fn keystroke_from_xkb(
+     state: &State,
+@@ -1794,6 +1810,55 @@ mod tests {
+         Ok(())
+     }
+ 
++    /// Real XKB conversion keeps the NumLock keypad distinct after GPUI's logical
++    /// labels collide. This uses installed layout data, not a native window event.
++    #[cfg(any(feature = "wayland", feature = "x11"))]
++    #[test]
++    fn native_key_metadata_distinguishes_keypad_and_preserves_symbol_shift() {
++        let context = xkb::Context::new(xkb::CONTEXT_NO_ENVIRONMENT_NAMES);
++        let keymap = xkb::Keymap::new_from_names(
++            &context,
++            "evdev",
++            "pc105",
++            "us",
++            "",
++            Some(String::new()),
++            xkb::KEYMAP_COMPILE_NO_FLAGS,
++        )
++        .unwrap();
++        let mut state = xkb::State::new(&keymap);
++        let alt = 1 << keymap.mod_get_index("Mod1");
++        let numlock = 1 << keymap.mod_get_index("Mod2");
++        state.update_mask(alt, 0, numlock, 0, 0, 0);
++        let top = keymap.key_by_name("AE01").unwrap();
++        let pad = keymap.key_by_name("KP1").unwrap();
++        let modifiers = modifiers_from_xkb(&state);
++        assert_eq!(
++            keystroke_from_xkb(&state, modifiers, top),
++            keystroke_from_xkb(&state, modifiers, pad)
++        );
++        let top_native = native_key_from_xkb(&state, modifiers, top).unwrap();
++        let pad_native = native_key_from_xkb(&state, modifiers, pad).unwrap();
++        assert_eq!(
++            top_native.identity,
++            gpui::NativeKeyIdentity::Xkb("AE01".into())
++        );
++        assert_eq!(
++            pad_native.identity,
++            gpui::NativeKeyIdentity::Xkb("KP1".into())
++        );
++        assert_ne!(top_native, pad_native);
++
++        state.update_mask(1 << keymap.mod_get_index("Shift"), 0, 0, 0, 0, 0);
++        let equal = keymap.key_by_name("AE12").unwrap();
++        let modifiers = modifiers_from_xkb(&state);
++        let logical = keystroke_from_xkb(&state, modifiers, equal);
++        assert_eq!(logical.key, "+");
++        assert!(!logical.modifiers.shift);
++        assert!(native_key_from_xkb(&state, modifiers, equal).unwrap().shift);
++        assert!(native_key_from_xkb(&state, modifiers, Keycode::new(u32::MAX)).is_none());
++    }
++
+     #[cfg(any(feature = "wayland", feature = "x11"))]
+     #[test]
+     fn rejects_null_xkb_context() {
+diff --git a/src/linux/wayland/client.rs b/src/linux/wayland/client.rs
+index 625b1d5..2eb6255 100644
+--- a/src/linux/wayland/client.rs
++++ b/src/linux/wayland/client.rs
+@@ -90,8 +90,8 @@ use super::{
+ use crate::linux::{
+     DOUBLE_CLICK_INTERVAL, LinuxCommon, LinuxKeyboardLayout, PIPE_READ_TIMEOUT, SCROLL_LINES,
+     capslock_from_xkb, cursor_style_to_icon_names, get_xkb_compose_state, is_within_click_distance,
+-    keystroke_from_xkb, keystroke_underlying_dead_key, modifiers_from_xkb, new_xkb_context,
+-    open_uri_internal, read_fd_with_timeout, reveal_path_internal,
++    keystroke_from_xkb, keystroke_underlying_dead_key, modifiers_from_xkb, native_key_from_xkb,
++    new_xkb_context, open_uri_internal, read_fd_with_timeout, reveal_path_internal,
+     wayland::{
+         clipboard::{Clipboard, DataOffer, FILE_LIST_MIME_TYPE, TEXT_MIME_TYPES},
+         cursor::Cursor,
+@@ -2178,6 +2178,9 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandClientStatePtr {
+                 let keymap_state = state.keymap_state.as_ref().unwrap();
+                 let keycode = Keycode::from(key + MIN_KEYCODE);
+                 let keysym = keymap_state.key_get_one_sym(keycode);
++                // Compose can replace the logical label; repeats must retain the
++                // same native position and pre-normalization Shift as this press.
++                let native_key = native_key_from_xkb(keymap_state, state.modifiers, keycode);
+ 
+                 match key_state {
+                     wl_keyboard::KeyState::Pressed if !keysym.is_modifier_key() => {
+@@ -2224,6 +2227,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandClientStatePtr {
+                             state.compose_state = Some(compose);
+                         }
+                         let input = PlatformInput::KeyDown(KeyDownEvent {
++                            native_key: native_key.clone(),
+                             keystroke: keystroke.clone(),
+                             is_held: false,
+                             prefer_character_input: false,
+@@ -2239,6 +2243,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandClientStatePtr {
+                             .loop_handle
+                             .insert_source(Timer::from_duration(state.repeat.delay), {
+                                 let input = PlatformInput::KeyDown(KeyDownEvent {
++                                    native_key,
+                                     keystroke,
+                                     is_held: true,
+                                     prefer_character_input: false,
+@@ -2274,6 +2279,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandClientStatePtr {
+                     }
+                     wl_keyboard::KeyState::Released if !keysym.is_modifier_key() => {
+                         let input = PlatformInput::KeyUp(KeyUpEvent {
++                            native_key,
+                             keystroke: keystroke_from_xkb(keymap_state, state.modifiers, keycode),
+                         });
+ 
+@@ -2324,6 +2330,7 @@ impl Dispatch<zwp_text_input_v3::ZwpTextInputV3, ()> for WaylandClientStatePtr {
+                     // We should only send ASCII characters to Zed, otherwise a user could remap a letter like `か` or `相`.
+                     if commit_text.len() == 1 {
+                         window.handle_input(PlatformInput::KeyDown(KeyDownEvent {
++                            native_key: None,
+                             keystroke: Keystroke {
+                                 modifiers: Modifiers::default(),
+                                 key: commit_text.clone(),
+diff --git a/src/linux/x11/client.rs b/src/linux/x11/client.rs
+index e21f019..50a12d7 100644
+--- a/src/linux/x11/client.rs
++++ b/src/linux/x11/client.rs
+@@ -51,7 +51,8 @@ use super::{
+ use crate::linux::{
+     DEFAULT_CURSOR_ICON_NAME, capslock_from_xkb, cursor_style_to_icon_names, get_xkb_compose_state,
+     is_within_click_distance, keystroke_from_xkb, keystroke_underlying_dead_key,
+-    log_cursor_icon_warning, modifiers_from_xkb, new_xkb_context, open_uri_internal,
++    log_cursor_icon_warning, modifiers_from_xkb, native_key_from_xkb, new_xkb_context,
++    open_uri_internal,
+     platform::{DOUBLE_CLICK_INTERVAL, SCROLL_LINES},
+     reveal_path_internal,
+     xdg_desktop_portal::{Event as XDPEvent, XDPEventSource},
+@@ -1201,6 +1202,11 @@ impl X11Client {
+                 };
+                 drop(state);
+                 window.handle_input(PlatformInput::KeyDown(gpui::KeyDownEvent {
++                    native_key: native_key_from_xkb(
++                        &key_event_state,
++                        modifiers,
++                        event.detail.into(),
++                    ),
+                     keystroke,
+                     is_held: false,
+                     prefer_character_input: false,
+@@ -1226,7 +1232,14 @@ impl X11Client {
+                     keystroke
+                 };
+                 drop(state);
+-                window.handle_input(PlatformInput::KeyUp(gpui::KeyUpEvent { keystroke }));
++                window.handle_input(PlatformInput::KeyUp(gpui::KeyUpEvent {
++                    native_key: native_key_from_xkb(
++                        &key_event_state,
++                        modifiers,
++                        event.detail.into(),
++                    ),
++                    keystroke,
++                }));
+             }
+             Event::XinputButtonPress(event) => {
+                 let window = self.get_window(event.event)?;

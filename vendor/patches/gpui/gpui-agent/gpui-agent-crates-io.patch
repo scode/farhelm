@@ -1,0 +1,66 @@
+--- a/gpui/Cargo.toml
++++ b/gpui/Cargo.toml
+@@ -11,10 +11,7 @@
+ [workspace.dependencies]
+ gpui-agent = { path = "gpui-agent" }
+ gpui-agent-protocol = { path = "../crates/protocol" }
+-# The `zed` feature builds against a patched Zed checkout beside this repository.
+-gpui = { path = "../../zed/crates/gpui", features = ["test-support"] }
+-gpui_linux = { path = "../../zed/crates/gpui_linux", features = ["test-support"] }
+-gpui_platform = { path = "../../zed/crates/gpui_platform", features = ["test-support", "font-kit", "wayland", "x11"] }
++# The gpui-pre recipe omits optional Zed checkout paths so Cargo can resolve this workspace independently.
+ gpui-pre = { version = "=0.3.9", features = ["test-support"] }
+ gpui-pre-linux = { version = "=0.3.9", features = ["test-support"] }
+ gpui-pre-platform = { version = "=0.3.9", features = ["test-support", "font-kit", "wayland", "x11", "runtime_shaders"] }
+@@ -23,3 +20,10 @@
+ image = { version = "0.25.1", default-features = false, features = ["png"] }
+ serde = { version = "1.0", features = ["derive"] }
+ serde_json = "1.0.144"
++
++# Keep the upstream test app on the same patched crates when run through its own workspace.
++# Consumers must repeat these overrides at their workspace root; Cargo does not inherit them.
++[patch.crates-io]
++gpui-pre = { path = "../../gpui-pre-0.3.9" }
++gpui-pre-linux = { path = "../../gpui-pre-linux-0.3.9" }
++gpui-pre-wgpu = { path = "../../gpui-pre-wgpu-0.3.9" }
+--- a/gpui/gpui-agent/Cargo.toml
++++ b/gpui/gpui-agent/Cargo.toml
+@@ -9,13 +9,12 @@
+ 
+ [features]
+ # Which GPUI to build against; pick exactly one.
+-zed = ["dep:gpui", "dep:gpui_linux"]
++zed = []
+ gpui-pre-0-3-9 = ["dep:gpui-pre", "dep:gpui-pre-linux"]
+ 
+ [dependencies]
+ anyhow.workspace = true
+ async-channel.workspace = true
+-gpui = { workspace = true, optional = true }
+ gpui-pre = { workspace = true, optional = true }
+ gpui-agent-protocol.workspace = true
+ image.workspace = true
+@@ -24,5 +23,4 @@
+ 
+ # Only to turn on test-support, which gives Linux windows render_to_image.
+ [target.'cfg(target_os = "linux")'.dependencies]
+-gpui_linux = { workspace = true, optional = true }
+ gpui-pre-linux = { workspace = true, optional = true }
+--- a/gpui/testapp/Cargo.toml
++++ b/gpui/testapp/Cargo.toml
+@@ -9,13 +9,11 @@
+ publish = false
+ 
+ [features]
+-default = ["zed"]
+-zed = ["dep:gpui", "dep:gpui_platform", "gpui-agent/zed"]
++default = []
++zed = []
+ gpui-pre-0-3-9 = ["dep:gpui-pre", "dep:gpui-pre-platform", "gpui-agent/gpui-pre-0-3-9"]
+ 
+ [dependencies]
+-gpui = { workspace = true, optional = true }
+-gpui_platform = { workspace = true, optional = true }
+ gpui-pre = { workspace = true, optional = true }
+ gpui-pre-platform = { workspace = true, optional = true }
+ gpui-agent.workspace = true

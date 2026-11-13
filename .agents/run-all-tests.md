@@ -86,6 +86,7 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   venv in your scratch directory)
 - `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`
 - `cargo check -p farhelm-ui --features desktop` and `cargo check -p farhelm-desktop`
+- `cargo clippy -p farhelm-gui --all-targets -- -D warnings`
 - `scripts/check-desktop-assets.sh` (including its head-product-assets parity fixtures)
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh`
 - `bash -n scripts/devbuild-mac.sh && bash -n scripts/test-provision-centos.sh`, and `shellcheck` on both scripts
@@ -137,6 +138,8 @@ same pin CI and release builds use; no second clippy run on floating stable is n
 - The vendored terminal crates' three recorded test commands from `.agents/validation.md` (`vendor/vte`,
   `vendor/alacritty_terminal`, and both together in `vendor/pair-tests`), which the sweep's workspace batteries never
   reach
+- The vendored GPUI core's recorded native-key test from `.agents/validation.md` (`vendor/gpui-pre`), which the
+  workspace batteries never reach either
 - The terminal emulator's ignored tests from `.agents/validation.md`, in release: the snapshot spike's full round-trip
   configuration, the review's short scripts and hostile blobs, and the per-terminal memory measurement (on Linux), whose
   assertions fail when an emulator exceeds the crate's stated budget; the workspace batteries skip ignored tests

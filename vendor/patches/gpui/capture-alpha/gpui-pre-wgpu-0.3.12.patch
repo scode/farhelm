@@ -1,0 +1,25 @@
+diff --git a/src/wgpu_renderer.rs b/src/wgpu_renderer.rs
+index 3ad23e1..37d2e8b 100644
+--- a/src/wgpu_renderer.rs
++++ b/src/wgpu_renderer.rs
+@@ -273,6 +273,11 @@ impl WgpuRenderer {
+         any(test, feature = "bench-support", feature = "test-support")
+     ))]
+     pub fn render_to_image(&mut self, scene: &Scene) -> anyhow::Result<image::RgbaImage> {
++        // Capture reuses this window's blend pipelines. Its shader output must
++        // obey the same alpha contract even though the target is offscreen;
++        // straight-alpha output into a premultiplied pipeline saturates overlays.
++        let premultiplied_alpha =
++            self.surface_config.alpha_mode == wgpu::CompositeAlphaMode::PreMultiplied;
+         let size = Size {
+             width: DevicePixels(self.surface_config.width as i32),
+             height: DevicePixels(self.surface_config.height as i32),
+@@ -298,7 +303,7 @@ impl WgpuRenderer {
+                 view_formats: &[],
+             });
+         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+-        core.render_frame(scene, &view, size, false, wgpu::Color::BLACK)?;
++        core.render_frame(scene, &view, size, premultiplied_alpha, wgpu::Color::BLACK)?;
+         read_texture(core, &texture)
+     }
+ 

@@ -15,7 +15,12 @@
     "CHANGELOG.md",
     "releasing/changelog.d/*.md",
     "vendor/alacritty_terminal/**",
-    "vendor/vte/**"
+    "vendor/vte/**",
+    "vendor/gpui-pre/**",
+    "vendor/gpui-pre-linux/**",
+    "vendor/gpui-pre-wgpu/**",
+    "vendor/gpui-pre-macos/**",
+    "vendor/gpui-agent/**"
   ],
   "plugins": [
     "npm:@dprint/json@0.25.2",

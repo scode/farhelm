@@ -168,3 +168,31 @@ top. Upstream's reference test data (`alacritty_terminal`'s `tests/`) is not inc
 `vendor/vte/LICENSE-MIT`, Copyright (c) 2016 Joe Wilm), except `vendor/vte/src/ansi.rs`, which came from
 `alacritty_terminal` and is licensed under the Apache License, Version 2.0 only. Farhelm uses both crates under the
 Apache License, Version 2.0.
+
+## GPUI crates
+
+`vendor/gpui-pre/`, `vendor/gpui-pre-linux/`, `vendor/gpui-pre-wgpu/` and `vendor/gpui-pre-macos/` are the
+[`gpui-pre`](https://crates.io/crates/gpui-pre) 0.3.12 crates from crates.io (`gpui-pre-linux`, `gpui-pre-wgpu` and
+`gpui-pre-macos` at the same version): a published snapshot of GPUI, the UI framework of the
+[Zed](https://github.com/zed-industries/zed) editor, at Zed revision `d2a4fb6ded7c470be25d1541281da3882495b65b`, with
+Farhelm's changes applied. `vendor/README.md` ("GPUI") describes the changes, and `vendor/patches/gpui/` holds them as
+patches against the published crates; each changed or added file says so in a `Modified for Farhelm` comment at its top.
+The crates are licensed under the Apache License, Version 2.0 (each tree's `LICENSE-APACHE`).
+
+## gpui-agent
+
+`vendor/gpui-agent/` is [`wsp-labs/gpui-agent`](https://github.com/wsp-labs/gpui-agent) at commit
+`c9b8b6328877755685e1233b3770f78a68f2a5d1`, the test-automation bridge for GPUI apps, with Farhelm's changes to its
+manifests, compile guards and lockfile (`vendor/patches/gpui/gpui-agent/`) and without its `docs/`, `scripts/` and
+`patches/` directories; each changed file says so in a `Modified for Farhelm` comment at its top. It is licensed under
+the Apache License, Version 2.0 (`vendor/gpui-agent/LICENSE`). Only builds with the GUI's automation feature (still to
+come) will contain it; the GPUI patch layers that it needs are compiled into every build (`vendor/README.md`, "GPUI").
+
+## GPUI Kit icons
+
+GPUI Kit's `gpui-kit-assets` 0.9.1 crate, a dependency of `gpui-component`, bundles the [Lucide](https://lucide.dev)
+icon set. Its manifest declares Apache-2.0, but the icons themselves are licensed under the ISC License (Copyright (c)
+2026 Lucide Icons and Contributors), and the icons Lucide derived from the [Feather](https://feathericons.com) project
+are licensed under the MIT License (Copyright (c) 2013-present Cole Bemis). The complete notices are in that crate's
+`LICENSE-LUCIDE`. cargo-deny checks only the declared license, so this entry records the icons' own terms; a build that
+ships the icons must carry that file's notices.

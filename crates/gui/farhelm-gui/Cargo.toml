@@ -1,0 +1,20 @@
+[package]
+name = "farhelm-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The GPUI desktop GUI: views and the app-wide foundations they build on"
+
+# A library; see `farhelm-helm/Cargo.toml` for why every non-shipping member
+# says so explicitly instead of relying on having no binary target.
+[package.metadata.dist]
+dist = false
+
+# GPUI and GPUI Kit at their exact pins (root Cargo.toml). Nothing uses them yet: depending on them here is what makes
+# Cargo.lock record the pinned versions and route gpui-pre through the vendored, patched trees.
+[dependencies]
+gpui.workspace = true
+gpui-base.workspace = true
+gpui-component.workspace = true
+gpui_platform.workspace = true

@@ -12,14 +12,23 @@ members = [
   "crates/farhelm-testtrace",
   "crates/farhelm-testtrace-macros",
   "crates/farhelm-ui",
+  "crates/gui/farhelm-gui",
   "crates/terminal-host",
 ]
-# The vendored, patched terminal crates (vendor/README.md) are not members: they
+# The vendored, patched terminal and GPUI crates (vendor/README.md) are not members: they
 # stay upstream's code under upstream's formatting and lints, and the
 # workspace's clippy, fmt and test runs never select them. Without the exclusion
 # a `cargo` command run inside vendor/ would find this workspace and refuse to
 # build a package that is under it but not a member.
-exclude = ["vendor/alacritty_terminal", "vendor/vte"]
+exclude = [
+  "vendor/alacritty_terminal",
+  "vendor/vte",
+  "vendor/gpui-pre",
+  "vendor/gpui-pre-linux",
+  "vendor/gpui-pre-wgpu",
+  "vendor/gpui-pre-macos",
+  "vendor/gpui-agent",
+]
 # Application and ordinary library members, excluding `farhelm-desktop`, so that a bare `cargo
 # build`/`test`/`clippy --all-targets` — the workspace checks the
 # inventory in .agents/validation.md runs on every change, and CI runs on an ordinary
@@ -33,6 +42,11 @@ exclude = ["vendor/alacritty_terminal", "vendor/vte"]
 # crate gets compiled: nothing in the default battery will notice it break.
 # That is what the `desktop` job's `cargo check -p farhelm-desktop` step is
 # for, and why it is not optional.
+#
+# `farhelm-gui` (the GPUI desktop GUI) is left out of the default members too: it compiles GPUI, which takes minutes
+# and needs Linux development packages (.agents/validation.md lists them). Commands on the default members (a bare
+# `cargo build`, `cargo clippy --all-targets`) skip it; `--workspace` runs, such as the workspace nextest and doctest
+# runs, DO build it, and `-p farhelm-gui` selects it on its own.
 #
 # The tracing support crates are also selected explicitly for their own checks. Selecting them
 # as normal build roots would unify their Tokio test-util feature into application builds;
@@ -269,6 +283,22 @@ farhelm-testtrace-macros = { path = "crates/farhelm-testtrace-macros" }
 farhelm-ui = { path = "crates/farhelm-ui" }
 terminal-host = { path = "crates/terminal-host" }
 
+# GPUI, Zed's GPU-rendered UI framework (the crates.io snapshot published as gpui-pre), and GPUI Kit (gpui-component and
+# its base crate), for the desktop GUI. Pinned exactly: Kit pins its GPUI exactly, and both are upgraded only together,
+# as a dedicated change (SPEC_impl.md, "GUI architecture"). gpui-pre and three of its platform crates are vendored and
+# patched (vendor/README.md, "GPUI"); the patch table below swaps them in only while these versions match.
+gpui = { package = "gpui-pre", version = "=0.3.12" }
+gpui-base = "=0.9.1"
+gpui-component = "=0.9.1"
+# Platform features, chosen rather than defaulted: `wayland` without `x11`, because Linux is supported on Wayland only
+# (SPEC.md, Topology); `font-kit` for system font lookup; `runtime_shaders`, so the macOS build needs no Xcode Metal
+# compiler and instead compiles its Metal shaders when the app starts (the startup cost of that is not measured).
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", default-features = false, features = [
+  "font-kit",
+  "wayland",
+  "runtime_shaders",
+] }
+
 # The supervisor's terminal emulator runs on patched copies of these two crates:
 # read-only accessors that snapshot and restore need, caps on what hostile
 # program output can make them store, history counters for the grid stream, and
@@ -283,6 +313,13 @@ terminal-host = { path = "crates/terminal-host" }
 [patch.crates-io]
 alacritty_terminal = { path = "vendor/alacritty_terminal" }
 vte = { path = "vendor/vte" }
+# GPUI with Farhelm's patch layers: the test-automation bridge's hooks, screenshot capture, native key identity,
+# image-first clipboard reads and Wayland activation tokens (vendor/README.md, "GPUI"). Same rule as above: depend on
+# exactly `=0.3.12`.
+gpui-pre = { path = "vendor/gpui-pre" }
+gpui-pre-linux = { path = "vendor/gpui-pre-linux" }
+gpui-pre-wgpu = { path = "vendor/gpui-pre-wgpu" }
+gpui-pre-macos = { path = "vendor/gpui-pre-macos" }
 
 # SHA-256 is compiled optimized even in debug builds. Tests hash real debug
 # binaries, which are hundreds of megabytes, and unoptimized `sha2` takes

@@ -1,0 +1,544 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index d0a404d..b150d29 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -95,6 +95,11 @@ x11 = ["scap?/x11"]
+ name = "gpui"
+ path = "src/gpui.rs"
+ 
++[[test]]
++name = "native_key_metadata"
++path = "tests/native_key_metadata.rs"
++required-features = ["test-support"]
++
+ [[example]]
+ name = "a11y"
+ path = "examples/a11y.rs"
+diff --git a/src/app.rs b/src/app.rs
+index 5052bf4..02c8651 100644
+--- a/src/app.rs
++++ b/src/app.rs
+@@ -49,15 +49,14 @@ use crate::{
+     AnyWindowHandle, AppContext, AppLifecyclePhase, Arena, ArenaBox, Asset, AssetSource,
+     BackgroundExecutor, Bounds, ClipboardItem, ClipboardReadError, CursorStyle, DispatchPhase,
+     DisplayChanges, DisplayEvent, DisplayId, EventEmitter, ExternalDragPayload, FocusHandle,
+-    FocusMap, ForegroundExecutor, Global, KeyBinding, KeyContext, Keymap, Keystroke, LayoutId,
+-    Menu, MenuItem, MissingGlyph, OwnedMenu, PathPrompt, PathPromptOptions, Pixels, Platform,
+-    PlatformDisplay, PlatformKeyboardLayout, PlatformKeyboardMapper, Point, PowerMode, Priority,
+-    PromptBuilder, PromptButton, PromptHandle, PromptLevel, Render, RenderImage,
++    FocusMap, ForegroundExecutor, Global, KeyBinding, KeyContext, KeyDownEvent, Keymap, Keystroke,
++    LayoutId, Menu, MenuItem, MissingGlyph, OwnedMenu, PathPrompt, PathPromptOptions, Pixels,
++    Platform, PlatformDisplay, PlatformKeyboardLayout, PlatformKeyboardMapper, Point, PowerMode,
++    Priority, PromptBuilder, PromptButton, PromptHandle, PromptLevel, Render, RenderImage,
+     RenderablePromptHandle, Reservation, ScreenCaptureSource, SharedString, SubscriberSet,
+-    Subscription, SvgRenderer,
+-    SystemNotification, SystemNotificationResponse, Task, TextRenderingMode, TextSystem,
+-    ThermalState, Window, WindowAppearance, WindowButtonLayout, WindowHandle, WindowId,
+-    WindowInvalidator, WindowingRequest,
++    Subscription, SvgRenderer, SystemNotification, SystemNotificationResponse, Task,
++    TextRenderingMode, TextSystem, ThermalState, Window, WindowAppearance, WindowButtonLayout,
++    WindowHandle, WindowId, WindowInvalidator, WindowingRequest,
+     colors::{Colors, GlobalColors},
+     hash, init_app_menus,
+ };
+@@ -3612,6 +3611,12 @@ pub enum InputPreference {
+ /// A keystroke event, and potentially the associated action
+ #[derive(Debug)]
+ pub struct KeystrokeEvent {
++    /// Original Down when this notification still has one. Interceptors receive
++    /// this before logical binding matching, including repeat and input preference.
++    /// Its native_key may be None for synthetic/IME input; modifier taps and
++    /// deferred replay without an original event have no Down snapshot at all.
++    /// When present, key_down.keystroke equals this notification's keystroke.
++    pub key_down: Option<KeyDownEvent>,
+     /// The keystroke that occurred
+     pub keystroke: Keystroke,
+ 
+diff --git a/src/elements/div.rs b/src/elements/div.rs
+index 5c0b382..6e8278b 100644
+--- a/src/elements/div.rs
++++ b/src/elements/div.rs
+@@ -5545,6 +5545,7 @@ mod tests {
+         cx.update_window(window, |_, window, cx| {
+             window.dispatch_event(
+                 KeyDownEvent {
++                    native_key: None,
+                     keystroke,
+                     is_held: false,
+                     prefer_character_input: false,
+@@ -5560,7 +5561,14 @@ mod tests {
+         let os = cx.read(|cx| cx.platform_info().os);
+         let keystroke = Keystroke::parse_with_os(key, os).unwrap();
+         cx.update_window(window, |_, window, cx| {
+-            window.dispatch_event(KeyUpEvent { keystroke }.to_platform_input(), cx);
++            window.dispatch_event(
++                KeyUpEvent {
++                    native_key: None,
++                    keystroke,
++                }
++                .to_platform_input(),
++                cx,
++            );
+         })
+         .unwrap();
+     }
+diff --git a/src/interactive.rs b/src/interactive.rs
+index cfb1410..5012865 100644
+--- a/src/interactive.rs
++++ b/src/interactive.rs
+@@ -1,6 +1,6 @@
+ use crate::{
+     BackGestureEvent, Bounds, Capslock, Context, Empty, IntoElement, Keystroke, LongPressEvent,
+-    Modifiers, Pixels, Point, Render, TouchDragEvent, Window, point, seal::Sealed,
++    Modifiers, Pixels, Point, Render, SharedString, TouchDragEvent, Window, point, seal::Sealed,
+ };
+ use smallvec::SmallVec;
+ use std::{any::Any, fmt::Debug, ops::Deref, path::PathBuf};
+@@ -20,9 +20,37 @@ pub trait MouseEvent: InputEvent {}
+ /// A gesture event from the platform.
+ pub trait GestureEvent: InputEvent {}
+ 
++/// Native position before logical layout translation; these domains are distinct.
++///
++/// XKB names follow the active keymap's canonical position naming (for example
++/// AE01 and KP1). Mac codes are NSEvent virtual keycodes, not DOM keyCodes.
++/// Consumers must explicitly map supported positions and leave unknown ones unknown.
++#[derive(Clone, Debug, Eq, PartialEq, Hash)]
++pub enum NativeKeyIdentity {
++    /// Canonical name from the active XKB keymap; numeric codes are keymap-specific.
++    Xkb(SharedString),
++    /// NSEvent virtual keycode, independent of the character a layout produces.
++    Mac(u16),
++}
++
++/// Native facts lost by logical keystroke normalization, independent of bindings.
++///
++/// Shift is the original event state, including symbol keys whose Keystroke
++/// modifier is cleared. This record neither identifies an IME commit nor changes
++/// Keystroke matching. Its absence means unavailable, including synthetic input.
++#[derive(Clone, Debug, Eq, PartialEq, Hash)]
++pub struct NativeKey {
++    /// Native position in its platform domain, without a guessed DOM conversion.
++    pub identity: NativeKeyIdentity,
++    /// Shift at this event, before symbols remove it from the logical Keystroke.
++    pub shift: bool,
++}
++
+ /// The key down event equivalent for the platform.
+ #[derive(Clone, Debug, Eq, PartialEq)]
+ pub struct KeyDownEvent {
++    /// Available native origin; never inferred from a logical or injected key.
++    pub native_key: Option<NativeKey>,
+     /// The keystroke that was generated.
+     pub keystroke: Keystroke,
+ 
+@@ -45,6 +73,8 @@ impl KeyEvent for KeyDownEvent {}
+ /// The key up event equivalent for the platform.
+ #[derive(Clone, Debug)]
+ pub struct KeyUpEvent {
++    /// Physical origin and release-time Shift, when supplied by the platform.
++    pub native_key: Option<NativeKey>,
+     /// The keystroke that was released.
+     pub keystroke: Keystroke,
+ }
+diff --git a/src/key_dispatch.rs b/src/key_dispatch.rs
+index e4bce61..d514bc3 100644
+--- a/src/key_dispatch.rs
++++ b/src/key_dispatch.rs
+@@ -947,6 +947,7 @@ mod tests {
+         cx.update(|window, cx| {
+             window.dispatch_event(
+                 PlatformInput::KeyDown(KeyDownEvent {
++                    native_key: None,
+                     keystroke: Keystroke {
+                         key_char: Some("ą".into()),
+                         ..Keystroke::parse("ctrl-alt-a").expect("valid keystroke")
+diff --git a/src/window.rs b/src/window.rs
+index 295e912..add4a22 100644
+--- a/src/window.rs
++++ b/src/window.rs
+@@ -2790,9 +2790,12 @@ impl Window {
+         })
+     }
+ 
++    /// Report the original Down when it is still owned by this dispatch. Replays
++    /// and modifier taps carry no guessed snapshot; observer admission is unchanged.
+     pub(crate) fn dispatch_keystroke_observers(
+         &mut self,
+         keystroke: &Keystroke,
++        key_down: Option<&KeyDownEvent>,
+         input_preference: InputPreference,
+         action: Option<&dyn Action>,
+         context_stack: Vec<KeyContext>,
+@@ -2801,6 +2804,7 @@ impl Window {
+         cx.keystroke_observers.clone().retain(move |callback| {
+             (callback)(
+                 &KeystrokeEvent {
++                    key_down: key_down.cloned(),
+                     keystroke: keystroke.clone(),
+                     input_preference,
+                     action: action.map(|action| action.boxed_clone()),
+@@ -2812,9 +2816,14 @@ impl Window {
+         });
+     }
+ 
++    /// Expose original event context before bindings without changing the logical
++    /// Keystroke used by the keymap. Stopping propagation suppresses bindings
++    /// and bubble-phase handlers. Upstream still invokes the first capture-phase
++    /// key listener on the dispatch path, and KeyUp is not intercepted here.
+     pub(crate) fn dispatch_keystroke_interceptors(
+         &mut self,
+         keystroke: &Keystroke,
++        key_down: Option<&KeyDownEvent>,
+         input_preference: InputPreference,
+         context_stack: Vec<KeyContext>,
+         cx: &mut App,
+@@ -2822,6 +2831,7 @@ impl Window {
+         cx.keystroke_interceptors.clone().retain(move |callback| {
+             (callback)(
+                 &KeystrokeEvent {
++                    key_down: key_down.cloned(),
+                     keystroke: keystroke.clone(),
+                     input_preference,
+                     action: None,
+@@ -6002,6 +6012,7 @@ impl Window {
+         let keystroke = keystroke.with_simulated_ime();
+         let result = self.dispatch_event(
+             PlatformInput::KeyDown(KeyDownEvent {
++                native_key: None,
+                 keystroke: keystroke.clone(),
+                 is_held: false,
+                 prefer_character_input: false,
+@@ -6537,6 +6548,7 @@ impl Window {
+         cx.propagate_event = true;
+         self.dispatch_keystroke_interceptors(
+             &keystroke,
++            event.downcast_ref::<KeyDownEvent>(),
+             input_preference,
+             self.context_stack(),
+             cx,
+@@ -6617,6 +6629,7 @@ impl Window {
+                 if !cx.propagate_event {
+                     self.dispatch_keystroke_observers(
+                         &keystroke,
++                        event.downcast_ref::<KeyDownEvent>(),
+                         input_preference,
+                         Some(binding.action.as_ref()),
+                         match_result.context_stack,
+@@ -6703,7 +6716,14 @@ impl Window {
+         }
+ 
+         if let Some(keystroke) = recognized_keystroke {
+-            self.dispatch_keystroke_observers(keystroke, input_preference, None, context_stack, cx);
++            self.dispatch_keystroke_observers(
++                keystroke,
++                event.downcast_ref::<KeyDownEvent>(),
++                input_preference,
++                None,
++                context_stack,
++                cx,
++            );
+         }
+     }
+ 
+@@ -6896,6 +6916,7 @@ impl Window {
+ 
+         'replay: for replay in replays {
+             let event = KeyDownEvent {
++                native_key: None,
+                 keystroke: replay.keystroke.clone(),
+                 is_held: false,
+                 prefer_character_input: true,
+@@ -6907,6 +6928,7 @@ impl Window {
+                 if !cx.propagate_event {
+                     self.dispatch_keystroke_observers(
+                         &replay.keystroke,
++                        None,
+                         InputPreference::KeyBindings,
+                         Some(binding.action.as_ref()),
+                         Vec::default(),
+@@ -9554,6 +9576,7 @@ mod tests {
+             window.draw(cx).clear(cx);
+             window.dispatch_event(
+                 PlatformInput::KeyDown(KeyDownEvent {
++                    native_key: None,
+                     keystroke: Keystroke::parse("down").expect("valid keystroke"),
+                     is_held: false,
+                     prefer_character_input: false,
+diff --git a/tests/native_key_metadata.rs b/tests/native_key_metadata.rs
+new file mode 100644
+index 0000000..557ca69
+--- /dev/null
++++ b/tests/native_key_metadata.rs
+@@ -0,0 +1,271 @@
++//! Focused native-origin dispatch tests using the public fake-platform API.
++
++use gpui::{
++    Context, Entity, FocusHandle, IntoElement, KeyBinding, KeyDownEvent, Keystroke, Modifiers,
++    PlatformInput, Render, TestAppContext, VisualTestContext, Window, actions,
++};
++use std::{
++    cell::{Cell, RefCell},
++    rc::Rc,
++};
++
++actions!(native_input_test, [TestAction, SecondaryTestAction]);
++
++/// A terminal-like raw sink exposes leakage after an interceptor or binding.
++/// These events are explicitly injected; this view proves dispatch semantics,
++/// not that any OS produced the supplied physical metadata.
++struct NativeInputTestView {
++    focus_handle: FocusHandle,
++    downs: Rc<RefCell<Vec<KeyDownEvent>>>,
++    ups: Rc<RefCell<Vec<gpui::KeyUpEvent>>>,
++    actions: Rc<Cell<usize>>,
++}
++
++impl Render for NativeInputTestView {
++    /// Bind raw sinks to the focus path so handled app input cannot be mistaken
++    /// for a terminal delivery merely because dispatch constructed an event.
++    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
++        use gpui::{InteractiveElement as _, Styled as _};
++        let downs = self.downs.clone();
++        let ups = self.ups.clone();
++        let actions = self.actions.clone();
++        gpui::div()
++            .key_context("Terminal")
++            .track_focus(&self.focus_handle)
++            .size_full()
++            .on_key_down(move |event, _, _| downs.borrow_mut().push(event.clone()))
++            .on_key_up(move |event, _, _| ups.borrow_mut().push(event.clone()))
++            .on_action(move |_: &TestAction, _, _| actions.set(actions.get() + 1))
++    }
++}
++
++/// Use real fake-platform dispatch so matching, phase and observer behavior
++/// are tested together rather than copied into a test-only dispatcher.
++fn native_input_view(
++    cx: &mut TestAppContext,
++    bindings: impl IntoIterator<Item = KeyBinding>,
++) -> (Entity<NativeInputTestView>, &mut VisualTestContext) {
++    cx.update(|cx| cx.bind_keys(bindings));
++    let (view, cx) = cx.add_window_view(|_, cx| NativeInputTestView {
++        focus_handle: cx.focus_handle(),
++        downs: Rc::default(),
++        ups: Rc::default(),
++        actions: Rc::default(),
++    });
++    let focus = cx.update(|_, cx| view.read(cx).focus_handle.clone());
++    cx.update(|window, cx| {
++        window.focus(&focus, cx);
++        window.activate_window();
++    });
++    (view, cx)
++}
++
++/// A physical app reservation must see the original repeat/preference fields
++/// before the same logical chord can invoke an action or reach a bubble-phase
++/// terminal sink. This does not test capture listeners or suppress matching Up.
++#[gpui::test]
++fn native_key_metadata_interceptor_precedes_logical_matching(cx: &mut TestAppContext) {
++    let (view, cx) = native_input_view(
++        cx,
++        [KeyBinding::new("ctrl-a", TestAction, Some("Terminal"))],
++    );
++    let original = KeyDownEvent {
++        native_key: Some(gpui::NativeKey {
++            identity: gpui::NativeKeyIdentity::Xkb("AC08".into()),
++            shift: true,
++        }),
++        keystroke: Keystroke::parse("ctrl-a").unwrap(),
++        is_held: true,
++        prefer_character_input: true,
++    };
++    let seen = Rc::new(RefCell::new(Vec::new()));
++    let _interceptor = cx.update(|_, cx| {
++        cx.intercept_keystrokes({
++            let seen = seen.clone();
++            move |event, _, cx| {
++                let down = event.key_down.as_ref().expect("original Down available");
++                seen.borrow_mut().push(down.clone());
++                if matches!(
++                    &down.native_key,
++                    Some(gpui::NativeKey { identity: gpui::NativeKeyIdentity::Xkb(name), .. })
++                        if name.as_ref() == "AC08"
++                ) {
++                    cx.stop_propagation();
++                }
++            }
++        })
++    });
++    let observed = Rc::new(RefCell::new(Vec::new()));
++    let _observer = cx.update(|_, cx| {
++        cx.observe_keystrokes({
++            let observed = observed.clone();
++            move |event, _, _| observed.borrow_mut().push(event.key_down.clone())
++        })
++    });
++    let result =
++        cx.update(|window, cx| window.dispatch_event(PlatformInput::KeyDown(original.clone()), cx));
++    assert!(!result.propagate);
++    assert_eq!(&*seen.borrow(), &[original.clone()]);
++    assert!(observed.borrow().is_empty());
++    view.read_with(cx, |view, _| {
++        assert_eq!(view.actions.get(), 0);
++        assert!(view.downs.borrow().is_empty());
++    });
++
++    // Physical metadata must not change ordinary logical keybinding matching.
++    let other = KeyDownEvent {
++        native_key: Some(gpui::NativeKey {
++            identity: gpui::NativeKeyIdentity::Xkb("AC01".into()),
++            shift: false,
++        }),
++        is_held: false,
++        ..original
++    };
++    cx.update(|window, cx| {
++        window.dispatch_event(PlatformInput::KeyDown(other.clone()), cx);
++    });
++    view.read_with(cx, |view, _| {
++        assert_eq!(view.actions.get(), 1);
++        assert!(view.downs.borrow().is_empty());
++    });
++    assert_eq!(&*observed.borrow(), &[Some(other)]);
++}
++
++/// Press/repeat and release preserve their own snapshots through raw handlers;
++/// Linux XKB tests separately cover how native Shift survives normalization.
++#[gpui::test]
++fn native_key_metadata_down_up_and_repeat(cx: &mut TestAppContext) {
++    let (view, cx) = native_input_view(cx, []);
++    let press = KeyDownEvent {
++        native_key: Some(gpui::NativeKey {
++            identity: gpui::NativeKeyIdentity::Xkb("AE12".into()),
++            shift: true,
++        }),
++        keystroke: Keystroke::parse("ctrl-+").unwrap(),
++        is_held: false,
++        prefer_character_input: false,
++    };
++    let repeat = KeyDownEvent {
++        is_held: true,
++        ..press.clone()
++    };
++    let release = gpui::KeyUpEvent {
++        native_key: Some(gpui::NativeKey {
++            identity: gpui::NativeKeyIdentity::Xkb("AE12".into()),
++            shift: false,
++        }),
++        keystroke: press.keystroke.clone(),
++    };
++    let observed = Rc::new(RefCell::new(Vec::new()));
++    let _observer = cx.update(|_, cx| {
++        cx.observe_keystrokes({
++            let observed = observed.clone();
++            move |event, _, _| observed.borrow_mut().push(event.key_down.clone())
++        })
++    });
++    cx.update(|window, cx| {
++        window.dispatch_event(PlatformInput::KeyDown(press.clone()), cx);
++        window.dispatch_event(PlatformInput::KeyDown(repeat.clone()), cx);
++        window.dispatch_event(PlatformInput::KeyUp(release.clone()), cx);
++    });
++    view.read_with(cx, |view, _| {
++        assert_eq!(&*view.downs.borrow(), &[press.clone(), repeat.clone()]);
++        let ups = view.ups.borrow();
++        assert_eq!(ups.len(), 1);
++        assert_eq!(ups[0].native_key, release.native_key);
++    });
++    assert_eq!(&*observed.borrow(), &[Some(press), Some(repeat)]);
++}
++
++/// Parsed input has a real synthetic Down snapshot but no physical origin;
++/// pending-prefix replay must not invent an original event it never stored.
++#[gpui::test]
++fn native_key_metadata_synthetic_and_replay_absence(cx: &mut TestAppContext) {
++    let (_, cx) = native_input_view(
++        cx,
++        [
++            KeyBinding::new("ctrl-b", TestAction, Some("Terminal")),
++            KeyBinding::new("ctrl-b h", SecondaryTestAction, Some("Terminal")),
++        ],
++    );
++    let intercepted = Rc::new(RefCell::new(Vec::new()));
++    let _interceptor = cx.update(|_, cx| {
++        cx.intercept_keystrokes({
++            let intercepted = intercepted.clone();
++            move |event, _, _| intercepted.borrow_mut().push(event.key_down.clone())
++        })
++    });
++    let observed = Rc::new(RefCell::new(Vec::new()));
++    let _observer = cx.update(|_, cx| {
++        cx.observe_keystrokes({
++            let observed = observed.clone();
++            move |event, _, _| {
++                observed.borrow_mut().push((
++                    event.key_down.clone(),
++                    event.keystroke.clone(),
++                    event
++                        .action
++                        .as_ref()
++                        .is_some_and(|action| action.as_any().is::<TestAction>()),
++                ))
++            }
++        })
++    });
++    cx.simulate_keystrokes("x");
++    let replayed = Keystroke::parse("ctrl-b").unwrap();
++    assert!(
++        intercepted.borrow()[0]
++            .as_ref()
++            .unwrap()
++            .native_key
++            .is_none()
++    );
++    assert!(
++        observed.borrow()[0]
++            .0
++            .as_ref()
++            .unwrap()
++            .native_key
++            .is_none()
++    );
++    // A deferred native-origin prefix must not acquire a fabricated original
++    // snapshot when the pending algorithm replays only its logical Keystroke.
++    cx.update(|window, cx| {
++        window.dispatch_event(
++            PlatformInput::KeyDown(KeyDownEvent {
++                native_key: Some(gpui::NativeKey {
++                    identity: gpui::NativeKeyIdentity::Xkb("AB05".into()),
++                    shift: false,
++                }),
++                keystroke: Keystroke::parse("ctrl-b").unwrap(),
++                is_held: false,
++                prefer_character_input: false,
++            }),
++            cx,
++        );
++    });
++    assert!(
++        intercepted
++            .borrow()
++            .last()
++            .unwrap()
++            .as_ref()
++            .unwrap()
++            .native_key
++            .is_some()
++    );
++    cx.simulate_keystrokes("x");
++    assert!(
++        observed
++            .borrow()
++            .iter()
++            .any(|(down, keystroke, action)| down.is_none() && keystroke == &replayed && *action),
++        "the shorter binding must replay without original Down"
++    );
++    cx.simulate_modifiers_change(Modifiers::shift());
++    cx.simulate_modifiers_change(Modifiers::none());
++    assert!(
++        intercepted.borrow().last().unwrap().is_none(),
++        "a modifier tap is not an original Down"
++    );
++}

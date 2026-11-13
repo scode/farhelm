@@ -1,0 +1,36 @@
+diff --git a/src/events.rs b/src/events.rs
+index 63650e2..3513ed0 100644
+--- a/src/events.rs
++++ b/src/events.rs
+@@ -1,3 +1,4 @@
++// Modified for Farhelm: changed or added by the patch layers in vendor/patches/gpui/ (vendor/README.md, "GPUI").
+ use gpui::{
+     Capslock, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, ModifiersChangedEvent, MouseButton,
+     MouseDownEvent, MouseExitEvent, MouseMoveEvent, MousePressureEvent, MouseUpEvent,
+diff --git a/src/pasteboard.rs b/src/pasteboard.rs
+index df5d4c8..eabddea 100644
+--- a/src/pasteboard.rs
++++ b/src/pasteboard.rs
+@@ -1,3 +1,4 @@
++// Modified for Farhelm: changed or added by the patch layers in vendor/patches/gpui/ (vendor/README.md, "GPUI").
+ use std::ffi::CStr;
+ use std::path::PathBuf;
+ 
+diff --git a/src/platform.rs b/src/platform.rs
+index f838092..da81886 100644
+--- a/src/platform.rs
++++ b/src/platform.rs
+@@ -1,3 +1,4 @@
++// Modified for Farhelm: changed or added by the patch layers in vendor/patches/gpui/ (vendor/README.md, "GPUI").
+ use crate::{
+     AppleActivity, AppleDispatcher, BoolExt, MacDisplay, MacKeyboardLayout, MacKeyboardMapper,
+     MacWindow, events::key_to_menu_equivalent, main_thread_marker, ns_string,
+diff --git a/src/window.rs b/src/window.rs
+index 45271dc..d35d399 100644
+--- a/src/window.rs
++++ b/src/window.rs
+@@ -1,3 +1,4 @@
++// Modified for Farhelm: changed or added by the patch layers in vendor/patches/gpui/ (vendor/README.md, "GPUI").
+ use crate::{
+     BoolExt, MacDisplay, MetalFrames, NSRange, NSStringExt, TISCopyCurrentKeyboardInputSource,
+     TISGetInputSourceProperty, WindowFrameSource, events::platform_input_from_native,
