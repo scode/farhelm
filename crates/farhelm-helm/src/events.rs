@@ -44,10 +44,8 @@
 //! ## Authenticated, still bounded
 //!
 //! The API router rejects an invalid device secret before this upgrade is
-//! reached, and token rotation closes an admitted feed through the
-//! [`crate::auth::AuthenticatedSocket`] carried into its serving task. That
-//! boundary is not a substitute for resource limits: one authenticated tab
-//! can still open sockets in a loop or stop reading. The subscriber cap,
+//! reached. That boundary is not a substitute for resource limits: one
+//! authenticated client can still open sockets in a loop or stop reading. The subscriber cap,
 //! inbound frame/message limits, and write deadline keep those failures
 //! bounded without pretending the credential makes clients infallible. The
 //! subscriber cap is paired with an idle Ping: a subscriber that vanishes
@@ -55,9 +53,8 @@
 //! before its seat returns. Browsers answer WebSocket Pings automatically;
 //! this keepalive is for peers that disappear without a FIN.
 
+use crate::AppState;
 use crate::manager::FleetEvents;
-use crate::{AppState, auth::AuthenticatedSocket};
-use axum::Extension;
 use axum::extract::{State, WebSocketUpgrade, ws};
 use axum::response::IntoResponse;
 use std::sync::Arc;
@@ -144,7 +141,6 @@ pub(crate) const MAX_SUBSCRIBERS: usize = 64;
 pub(crate) async fn events_ws(
     State(state): State<Arc<AppState>>,
     upgrade: WebSocketUpgrade,
-    Extension(auth): Extension<AuthenticatedSocket>,
 ) -> impl IntoResponse {
     let events = Arc::clone(state.manager.events());
     let capacity = state.event_subscriber_cap;
@@ -169,7 +165,7 @@ pub(crate) async fn events_ws(
         .max_frame_size(MAX_CLIENT_FRAME)
         .max_message_size(MAX_CLIENT_FRAME)
         .on_upgrade(move |socket| async move {
-            serve_events(events, socket, auth).await;
+            serve_events(events, socket).await;
             drop(seat);
         })
         .into_response()
@@ -203,7 +199,7 @@ pub(crate) async fn events_ws(
 /// and a parked task is not reading either, so it would not even notice the
 /// socket close. Abandoning such a subscriber is safe precisely because the
 /// feed is stateless: whatever it missed is one handshake away.
-async fn serve_events(events: Arc<FleetEvents>, socket: ws::WebSocket, auth: AuthenticatedSocket) {
+async fn serve_events(events: Arc<FleetEvents>, socket: ws::WebSocket) {
     // `SinkExt` is not imported here: the only send this function makes goes
     // through [`notify`], which owns the write deadline.
     use futures_util::StreamExt;
@@ -219,18 +215,17 @@ async fn serve_events(events: Arc<FleetEvents>, socket: ws::WebSocket, auth: Aut
     // SEEN — otherwise the wait below would fire immediately and send the
     // same number twice.
     let current = *revisions.borrow_and_update();
-    if !notify(&mut tx, current, &auth).await {
+    if !notify(&mut tx, current).await {
         return;
     }
     loop {
         tokio::select! {
-            _ = auth.revoked() => return,
             () = &mut idle => {
                 if awaiting_liveness {
                     tracing::debug!("an event subscriber did not answer its keepalive; dropping the subscription");
                     return;
                 }
-                if !ping(&mut tx, &auth).await {
+                if !ping(&mut tx).await {
                     return;
                 }
                 awaiting_liveness = true;
@@ -244,7 +239,7 @@ async fn serve_events(events: Arc<FleetEvents>, socket: ws::WebSocket, auth: Aut
                     return;
                 }
                 let revision = *revisions.borrow_and_update();
-                if !notify(&mut tx, revision, &auth).await {
+                if !notify(&mut tx, revision).await {
                     return;
                 }
                 // No idle reset here: a write is not evidence the peer is
@@ -283,18 +278,15 @@ async fn serve_events(events: Arc<FleetEvents>, socket: ws::WebSocket, auth: Aut
 /// stopped reading, and the two deserve the same answer — the caller returns,
 /// the socket drops, and the seat is released. See [`serve_events`] for why a
 /// stalled subscriber must not be waited on.
-async fn notify<S>(tx: &mut S, revision: u64, auth: &AuthenticatedSocket) -> bool
+async fn notify<S>(tx: &mut S, revision: u64) -> bool
 where
     S: futures_util::SinkExt<ws::Message> + Unpin,
 {
-    let sent = tokio::select! {
-        biased;
-        _ = auth.revoked() => return false,
-        sent = tokio::time::timeout(
-            WRITE_DEADLINE,
-            tx.send(ws::Message::Text(notification(revision).into())),
-        ) => sent,
-    };
+    let sent = tokio::time::timeout(
+        WRITE_DEADLINE,
+        tx.send(ws::Message::Text(notification(revision).into())),
+    )
+    .await;
     match sent {
         // The send completed; whether it SUCCEEDED is the same question as
         // whether this subscription continues.
@@ -312,17 +304,16 @@ where
 
 /// Send a keepalive Ping without allowing a dead or wedged peer to pin the
 /// serving task.
-async fn ping<S>(tx: &mut S, auth: &AuthenticatedSocket) -> bool
+async fn ping<S>(tx: &mut S) -> bool
 where
     S: futures_util::SinkExt<ws::Message> + Unpin,
 {
-    tokio::select! {
-        biased;
-        _ = auth.revoked() => false,
-        sent = tokio::time::timeout(WRITE_DEADLINE, tx.send(ws::Message::Ping(Vec::new().into()))) => {
-            matches!(sent, Ok(Ok(())))
-        }
-    }
+    let sent = tokio::time::timeout(
+        WRITE_DEADLINE,
+        tx.send(ws::Message::Ping(Vec::new().into())),
+    )
+    .await;
+    matches!(sent, Ok(Ok(())))
 }
 
 #[cfg(test)]
@@ -1147,11 +1138,9 @@ mod tests {
             }
         }
 
-        let harness = rest_harness::idle_helm().await;
-        let auth = harness.state.auth.socket_session();
         let started = tokio::time::Instant::now();
         assert!(
-            !super::notify(&mut NeverReady, 7, &auth).await,
+            !super::notify(&mut NeverReady, 7).await,
             "a peer that never accepts the write must be abandoned rather than waited on"
         );
         assert_eq!(
@@ -1162,21 +1151,9 @@ mod tests {
 
         let mut writable = futures_util::sink::drain();
         assert!(
-            super::notify(&mut writable, 7, &auth).await,
+            super::notify(&mut writable, 7).await,
             "a peer that is still reading must keep its subscription"
         );
-    }
-
-    /// A revocation already waiting wins even against an immediately writable
-    /// sink. Since the handshake and every later revision share `notify`, this
-    /// pins the no-send-after-rotation boundary for the whole feed.
-    #[farhelm_testtrace::test]
-    async fn revocation_wins_every_feed_send() {
-        let harness = rest_harness::idle_helm().await;
-        let auth = harness.state.auth.socket_session();
-        harness.state.auth.rotate().await.unwrap();
-        let mut writable = futures_util::sink::drain();
-        assert!(!super::notify(&mut writable, 7, &auth).await);
     }
 
     /// Reconnecting re-handshakes — the same immediate current revision a

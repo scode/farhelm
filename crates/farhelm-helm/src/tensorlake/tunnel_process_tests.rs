@@ -326,7 +326,7 @@ fn serve_standalone_child(dir: &Path) {
         crate::HelmArgs {
             port: 0,
             state_dir: Some(dir.join("helm")),
-            ui_dist: None,
+            test_credential_file: None,
             ensure_hosts: None,
             payload_dir: None,
             release_base_url: None,

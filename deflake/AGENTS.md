@@ -112,10 +112,10 @@ evidence paths, and continue. Either way do not stop the sweep and do not rerun 
 per-test id, the daemon stopped early or a rerun's report was missing, unreadable, or did not name that test as failed.
 Read the rerun reasons and evidence; report runner or evidence problems as tooling problems, rather than recording them
 as flakes. If the daemon stopped before classification, record the original failure with `Cause: unknown` and say
-classification did not happen. For a `phase` id on a nextest or Playwright phase it means the battery failed without
-naming a test (build error, recorder refusal, runner timeout), and the driver deliberately does not rerun a whole
-battery to classify that: read the phase log's tail, and treat it as an environment or tooling problem to report to the
-user, not as a flake to record.
+classification did not happen. For a `phase` id on a nextest phase it means the battery failed without naming a test
+(build error, recorder refusal, runner timeout), and the driver deliberately does not rerun a whole battery to classify
+that: read the phase log's tail, and treat it as an environment or tooling problem to report to the user, not as a flake
+to record.
 
 **`failure` on a `phase` id of a monolithic battery** (doctests, install.sh, CentOS, desktop smoke, JS). The whole
 battery was rerun three times, so the verdict means what it does for a test, and the flake and deterministic rules in

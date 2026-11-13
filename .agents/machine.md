@@ -10,20 +10,20 @@ cleaning up. When you change a sentence that also appears in the root, change bo
 
 Several agents work on this project at once, on this machine, as the same unix user, each in its own checkout or jj
 workspace. The harnesses are built so that concurrent runs do not collide: every test picks its ports from the kernel
-(the Rust e2e harness binds port 0, the Playwright config and the desktop smoke ask for a free port per run, the CentOS
-script lets docker choose), state lives in per-run random directories under `/tmp` addressed by private supervisor and
-terminal host sockets, systemd scopes and units carry a UUID, and the CentOS script's ssh alias is suffixed per run. Do
-not reintroduce a fixed port, a fixed path under `/tmp` or `$HOME`, a fixed unit or container name, or a fixed ssh alias
-in a harness; when a harness genuinely needs a stable name, derive it from the run's own random directory.
+(the Rust e2e harness binds port 0, the desktop smoke asks for a free port per run, the CentOS script lets docker
+choose), state lives in per-run random directories under `/tmp` addressed by private supervisor and terminal host
+sockets, systemd scopes and units carry a UUID, and the CentOS script's ssh alias is suffixed per run. Do not
+reintroduce a fixed port, a fixed path under `/tmp` or `$HOME`, a fixed unit or container name, or a fixed ssh alias in
+a harness; when a harness genuinely needs a stable name, derive it from the run's own random directory.
 
 What is NOT isolated, and what follows from it:
 
-- One agent per checkout or workspace. Playwright's stack-info and auth files, `.ci-nextest/`, and the dx output under
-  `target/` are per checkout. Two agents in one tree race on all of them. Sibling checkouts and `jj workspace`
-  directories are the supported shape; a shared `CARGO_TARGET_DIR` across workspaces is fine for cargo (it locks) but
-  not for the dx build: the desktop smoke serializes its own cargo and dx builds behind `/tmp/fh-build.lock`, and
-  nothing serializes other dx builds. (Fixed lock files like that one, and the CentOS script's lock next to the ssh
-  config, are the exception the fixed-path rule allows: a lock exists to be shared, and it names no state.)
+- One agent per checkout or workspace. `.ci-nextest/` and the dx output under `target/` are per checkout. Two agents in
+  one tree race on all of them. Sibling checkouts and `jj workspace` directories are the supported shape; a shared
+  `CARGO_TARGET_DIR` across workspaces is fine for cargo (it locks) but not for the dx build: the desktop smoke
+  serializes its own cargo and dx builds behind `/tmp/fh-build.lock`, and nothing serializes other dx builds. (Fixed
+  lock files like that one, and the CentOS script's lock next to the ssh config, are the exception the fixed-path rule
+  allows: a lock exists to be shared, and it names no state.)
 - Processes you did not start are someone else's. A helm or supervisor answering on a port you did not choose, a
   `farhelm-<uuid>-*.scope` unit whose UUID no run of yours minted, an `fh-it.*`, `fh-e2e.*` or `fh-smoke.*` directory
   holding a live flock, or a docker container from the CentOS script: leave them alone. The teststate sweep already
@@ -87,18 +87,14 @@ also stages image copies under `/var/tmp` unless `TMPDIR` says otherwise, so run
 
 Leave these where they already go:
 
-- The checkout's own build output (`target/`, `e2e/node_modules`, the dx output), which stays wherever the build puts
-  it.
-- Shared caches of standard tools: cargo's registry, rustup toolchains, npm and bun caches, Playwright's browsers in
-  `~/.cache/ms-playwright`, dprint's plugins. Use them the way the tools do by default; do not redirect them.
+- The checkout's own build output (`target/`, the dx output), which stays wherever the build puts it.
+- Shared caches of standard tools: cargo's registry, rustup toolchains, npm and bun caches, dprint's plugins. Use them
+  the way the tools do by default; do not redirect them.
 - State created by the repo's harnesses and scripts: the `fh-it.*`, `fh-e2e.*` and `fh-smoke.*` test directories (the
   last the desktop smoke's), and the CentOS and installer-test directories. Supervisor and terminal host sockets live
   inside the test directories, unix socket paths are limited to about 108 bytes, and the teststate sweep only looks
   directly under `/tmp`. For the same reason, do not point `TMPDIR` at your scratch directory when running tests or repo
   scripts: plain `tempfile::tempdir()` tests honor it, and some of them bind sockets.
-- The test recorder's durable browser timing records in `~/.local/state/farhelm-e2e-timings/`
-  (`docs/test-run-evidence.md`), the maintainer's chosen exception to "nothing in `$HOME`": a few kilobytes per run,
-  kept on purpose beyond the temporary tree's cleanup. Do not delete them as stray scratch.
 - Anything of your own that binds a unix socket, such as a hand-started supervisor or terminal host. Put that directly
   under `/tmp` with a random name, because `/tmp/farhelm-tmp/<uuid>/` already spends over 50 of the 108 bytes.
 - Anything another rule tells you to keep somewhere specific, such as goal files and working logs.

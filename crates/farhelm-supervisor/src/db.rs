@@ -65,8 +65,7 @@ pub fn open_private(path: &Path, label: &str) -> anyhow::Result<Connection> {
 ///
 /// For callers whose whole point is to act on state someone else created,
 /// where a mistyped path answered with a new empty database would report
-/// success while the real one is untouched (offline `token rotate` is the
-/// case that needed it). The flag omission is the guarantee; a caller that
+/// success while the real one is untouched. The flag omission is the guarantee; a caller that
 /// wants a friendlier message for the absent case checks first, but that
 /// check alone would race the file's deletion.
 pub fn open_private_existing(path: &Path, label: &str) -> anyhow::Result<Connection> {

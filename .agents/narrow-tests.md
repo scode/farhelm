@@ -1,9 +1,9 @@
 # Narrow test runs
 
-How to reproduce a test failure without paying for a whole battery. The full lists in `.agents/validation.md` — the
-check inventory and the Playwright merge gate — are unchanged and still decide when work is done; this page is about the
-loop before that. When you are chasing one failure, one flake, or one behavior change, start with the narrowest run that
-could reproduce it and widen only when the narrow run will not.
+How to reproduce a test failure without paying for a whole battery. The check inventory in `.agents/validation.md` is
+unchanged and still decides when work is done; this page is about the loop before that. When you are chasing one
+failure, one flake, or one behavior change, start with the narrowest run that could reproduce it and widen only when the
+narrow run will not.
 
 NOTE: a flake first seen in a full-battery run is not evidence that only the full battery can reproduce it. Most of this
 suite's historical flakes had local causes — a teardown race, a timeout tuned too tight, a poller losing to a slow
@@ -16,8 +16,8 @@ scratch.
 Climb one rung at a time, and only when the rung below failed to reproduce:
 
 1. The exact failing test, repeated in a loop.
-2. Its module (Rust) or spec file (Playwright), still on one engine.
-3. Its test binary at the release gate's runner budget, or the spec file on both engines.
+2. Its module.
+3. Its test binary at the release gate's runner budget.
 4. The full battery, exactly as AGENTS.md states it.
 
 Repetition belongs on every rung: a flake that fires once in twenty runs needs twenty runs of evidence, and twenty runs
@@ -103,35 +103,6 @@ iteration is compile-one-crate plus the selected tests. For calibration, measure
 single supervisor unit test cost ~30s wall (compile of the just-built crate's test target; the test itself ran in
 0.03s), a single e2e integration test ~40s wall (0.44s of test), and an 18-test e2e module rerun with everything warm
 5.5s. Once the build is warm, the cost of a repetition loop is essentially the tests you selected and nothing else.
-
-## Playwright: one spec, one engine
-
-For a selected spec under both engines, use the
-[recorded browser mode](../docs/test-run-evidence.md#recorded-browser-runs) to retain validated per-engine counts and
-fixed runner policy. The single-engine commands below remain useful for the first reproduction step; use generic command
-recording for those, since strict browser mode refuses project overrides.
-
-The browser suite is ~400 tests per engine across 33 spec files, and `e2e/playwright.config.ts` already defines one
-project per (engine, spec file): `chromium-terminal-tabs`, `webkit-feed`, and so on. That makes file-level selection
-first-class:
-
-- Check what a selection matches (free, no stack boot): `npx playwright test --list --project=chromium-feed`.
-- One spec file on one engine: `npx playwright test --project=chromium-feed`.
-- One test: `npx playwright test --project=chromium-feed -g "a rename in one client"`. Measured on a 4-vCPU sandbox: a
-  3-test spec file ran in 11s wall including the stack boot; one test at `--repeat-each=2` in 6.5s.
-- Flake loop: add `--repeat-each=20`. Playwright restarts nothing between repeats, so this also probes state leakage
-  between iterations of the same test.
-
-Every run, however narrow, boots the real stacks once: one per worker slot, three in all (`start-stack.sh` via the
-config's `webServer` entries, a few seconds), even when the selection is a single test that only one worker will run.
-Playwright spreads the selection's (engine, spec file) projects over up to three workers. Every run also needs the
-prerequisites built first: `cargo build` and the `dx build` web bundle, per AGENTS.md's merge-gate paragraph. That cost
-is per-invocation, not per-test, so a `--repeat-each=20` loop pays it once.
-
-Engine choice: chromium is the faster iteration engine; webkit is the desktop stand-in, so a report that smells
-desktop-family (see `docs/desktop-web-triage.md`) should reproduce on `webkit-<spec>` before anyone blames shared code.
-Selecting any spec in isolation is safe, including `terminal-multihost`: projects carry no ordering constraint, because
-the multihost spec puts the second host back before it ends.
 
 ## JS unit tests
 

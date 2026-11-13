@@ -3,7 +3,7 @@ import unittest
 import copy
 import uuid
 
-from test_run_summary import BROWSER_COUNTS, flake_summary, manifest_summary, reported_counts
+from test_run_summary import flake_summary, manifest_summary, reported_counts
 
 
 class FlakeSummaryTest(unittest.TestCase):
@@ -76,18 +76,6 @@ class ReportCountsTest(unittest.TestCase):
         self.assertIsNone(reported_counts(runner))
         self.assertIsNone(reported_counts(None))
         self.assertIsNone(reported_counts({"name": "generic", "prepared": True, "report": {"complete": True}}))
-
-    def test_browser_engine_counts_and_expected_failures_remain_distinct(self):
-        """A known expected failure is executed coverage, not an unexpected failure or skip."""
-        bucket = dict.fromkeys(BROWSER_COUNTS, 0)
-        bucket.update(tests=1, failed=1, expected=1, expected_failures=1)
-        total = {name: count * 2 for name, count in bucket.items()}
-        total["global_errors"] = 0
-        runner = {"name": "playwright", "prepared": True, "report": {
-            "complete": True, "counts": total, "engines": {"chromium": bucket.copy(), "webkit": bucket.copy()}}}
-        self.assertEqual(reported_counts(runner)["counts"]["expected_failures"], 2)
-        runner["report"]["engines"]["webkit"]["expected_failures"] = 0
-        self.assertIsNone(reported_counts(runner))
 
 
 class ManifestSummaryTest(unittest.TestCase):

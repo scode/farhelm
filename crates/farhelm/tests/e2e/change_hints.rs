@@ -122,7 +122,7 @@ async fn supervisor_side_changes_reach_the_helm_without_its_poll() {
         &["--backstop-refresh-secs", "3600"],
     )
     .await;
-    let secret = device_secret(supervisor.state.path(), &helm.base).await;
+    let secret = device_secret(supervisor.state.path()).await;
     let client = client_with_secret(&secret);
     // The first poll runs at connect, before the hour starts; after it, only
     // hints refresh this host. Connected alone is not that premise: the

@@ -156,8 +156,8 @@ pub fn default_state_dir() -> anyhow::Result<std::path::PathBuf> {
 /// asks and as the unit-directory rule already does for `XDG_CONFIG_HOME`.
 /// Taken literally it would resolve against each process's own working
 /// directory: systemd starts the services in `$HOME`, while an operator
-/// command like `farhelm helm token show` runs wherever the shell is, so the
-/// two would read different state trees.
+/// command like `farhelm helm checkout-config` runs wherever the shell is, so
+/// the two would read different state trees.
 pub fn default_state_dir_for(
     xdg_state_home: Option<&std::ffi::OsStr>,
     home: &std::path::Path,
@@ -291,8 +291,9 @@ mod tests {
     /// Why: taken literally it resolves against each process's working
     /// directory, and `farhelm helm setup` pinned it unresolved into both
     /// units. systemd starts them in `$HOME` while an operator command runs
-    /// wherever its shell is, so `farhelm helm token show` could read a
-    /// different state tree and print a token the running helm rejects. The
+    /// wherever its shell is, so an operator command such as `farhelm helm
+    /// checkout-config` could read a different state tree than the running
+    /// helm. The
     /// XDG Base Directory spec says to ignore a relative value. Spec: the home
     /// layout is used instead, and with no HOME either, the environment path
     /// refuses rather than inventing one.

@@ -3,6 +3,7 @@
 //! remain the production implementations.
 
 use super::*;
+use crate::provisioning::e2e::{E2ePayloads, E2eProvisioningBackend};
 use crate::rest_harness::{FleetBuilder, Harness};
 use crate::tensorlake::e2e::{E2eTensorlake, FakeModel};
 use crate::tensorlake::prepared::{PreparedInstallFacts, PreparedSnapshot};

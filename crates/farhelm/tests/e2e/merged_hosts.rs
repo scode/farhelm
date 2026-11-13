@@ -166,7 +166,7 @@ async fn two_real_hosts_serve_one_merged_list_and_both_are_operable() {
     .expect("write the ensure-hosts file");
 
     let helm = helm_process(local.state.path(), Some(&ensure)).await;
-    let client = authenticated_client(local.state.path(), &helm.base).await;
+    let client = authenticated_client(local.state.path()).await;
 
     let hosts = await_fleet_connected(&client, &helm.base).await;
     let rows = hosts["hosts"].as_array().unwrap();

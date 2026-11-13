@@ -565,7 +565,7 @@ impl DesktopBootstrap {
                     farhelm_helm::HelmArgs {
                         port,
                         state_dir: Some(helm_state),
-                        ui_dist: None,
+                        test_credential_file: None,
                         ensure_hosts: None,
                         payload_dir: helm_payload_dir(),
                         release_base_url: None,

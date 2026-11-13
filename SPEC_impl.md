@@ -13,7 +13,7 @@ of it in the same change.
 
 Rust throughout, async on tokio, one cargo workspace. The only sanctioned non-Rust runtime code is the terminal island,
 the grid client that draws every terminal, and the thin JS interop around it (see GUI; "Terminal widget: the grid
-island", "The grid client"), plus Playwright test code in TypeScript.
+island", "The grid client").
 
 Motivation: single language across supervisor, helm, CLI, and UI maximizes shared types and lets one test suite exercise
 real components. tokio because the chosen web stack (axum, tungstenite) lives there; no exotic async needs exist that
@@ -23,11 +23,11 @@ would justify anything else.
 
 Once the helm or a supervisor accepts a request that changes state, the server owns carrying it out. The work runs on a
 task the server owns, not on the task serving the client's connection, and that connection's handler only waits for the
-result. A client that disconnects, reloads, has its credential rotated, or is cancelled loses the reply, never part of
-the work. This applies wherever a connection's task can be cancelled: helm HTTP and WebSocket handlers, which the web
-framework drops when the client goes away, supervisor request handlers, which are aborted after a grace period when the
-helm's connection closes, and the helm's answers to agent requests relayed by a supervisor, whose read-only answers are
-aborted when that supervisor's connection ends.
+result. A client that disconnects, reloads, or is cancelled loses the reply, never part of the work. This applies
+wherever a connection's task can be cancelled: helm HTTP and WebSocket handlers, which the web framework drops when the
+client goes away, supervisor request handlers, which are aborted after a grace period when the helm's connection closes,
+and the helm's answers to agent requests relayed by a supervisor, whose read-only answers are aborted when that
+supervisor's connection ends.
 
 For authenticated helm HTTP routes, ownership is the router's default for methods other than GET and HEAD. It begins
 after authentication and before typed request parsing, so a valid request can finish parsing and take effect after its
@@ -1845,28 +1845,28 @@ because a surface can lay descendants out beyond it, as a session's confirmation
 on anything absolutely or fixed positioned between the target and the surface is not background either, because such a
 popover can overlap the band: those panels' top edges do. And a press over an `inert` descendant (a stale session's tab
 strip) is not background, because hit testing skips inert elements and would otherwise hand the press to the row behind
-a visible tab. The classifier is one exported function, which the browser suite runs over the whole band. Double-click
-zoom/restore is decided on the press's own mousedown, before any dragging for that press begins: the script reads the
-mousedown's DOM `detail` — which WebKit sets from the incoming native click count (`NSEvent.clickCount`, copied
-statelessly through `WebEventFactory::createWebMouseEvent`, `WebEventConversion`, and
-`EventHandler::handleMousePressEvent`'s per-press assignment) — and synchronously POSTs it, with an eligibility bit
-saying whether the preceding primary press landed on the same connected surface's background and the background verdict,
-to a Rust asset-handler route ahead of the interpreter's own event send for the same press. That chain proves
-propagation of an incoming native count, not AppKit's classification itself: that the press after a drag-consumed
-release carries count 2 is an assumption, unobserved here, and native zoom/restore awaits the manual Mac checklist. A
-document-level capture listener runs strictly before the interpreter's delegated bubble listener, and both sends are
-synchronous XHRs on the page's one JS thread, so each POST is answered before its press's event send starts and the Rust
-side pairs the two by order. Every press inside a surface POSTs, background or not, so the handler always consumes the
-report for its own press. The handler then zooms exactly once for an eligible repeat press and never drags it, drags an
-ordinary background press, and does nothing at all for a cross-target repeat (no zoom AND no drag), a press that is not
-on background, or a press whose report is missing: without a verdict a press cannot be told apart from a button press.
-There is no `dblclick` handler. The first press's mouse-up may never reach the view once native dragging starts, and
-that is harmless here: the count is assigned fresh from each press's own platform event rather than accumulated across
-the release, and the release-dependent click/dblclick synthesis is on a path this design never uses. Fullscreen
-suppresses both actions explicitly (`toggle_maximized` has no fullscreen check of its own, and Tao defers a fullscreen
-maximize change until exit). The route is registered from the window root, which never unmounts, and the page listener
-survives component remounts. Complementary loss in both directions at once — report A arrives, event A never consumes
-it, report B fails to replace it, event B consumes A — borrows the wrong press's report and stays a documented residual.
+a visible tab. The classifier is one exported function. Double-click zoom/restore is decided on the press's own
+mousedown, before any dragging for that press begins: the script reads the mousedown's DOM `detail` — which WebKit sets
+from the incoming native click count (`NSEvent.clickCount`, copied statelessly through
+`WebEventFactory::createWebMouseEvent`, `WebEventConversion`, and `EventHandler::handleMousePressEvent`'s per-press
+assignment) — and synchronously POSTs it, with an eligibility bit saying whether the preceding primary press landed on
+the same connected surface's background and the background verdict, to a Rust asset-handler route ahead of the
+interpreter's own event send for the same press. That chain proves propagation of an incoming native count, not AppKit's
+classification itself: that the press after a drag-consumed release carries count 2 is an assumption, unobserved here,
+and native zoom/restore awaits the manual Mac checklist. A document-level capture listener runs strictly before the
+interpreter's delegated bubble listener, and both sends are synchronous XHRs on the page's one JS thread, so each POST
+is answered before its press's event send starts and the Rust side pairs the two by order. Every press inside a surface
+POSTs, background or not, so the handler always consumes the report for its own press. The handler then zooms exactly
+once for an eligible repeat press and never drags it, drags an ordinary background press, and does nothing at all for a
+cross-target repeat (no zoom AND no drag), a press that is not on background, or a press whose report is missing:
+without a verdict a press cannot be told apart from a button press. There is no `dblclick` handler. The first press's
+mouse-up may never reach the view once native dragging starts, and that is harmless here: the count is assigned fresh
+from each press's own platform event rather than accumulated across the release, and the release-dependent
+click/dblclick synthesis is on a path this design never uses. Fullscreen suppresses both actions explicitly
+(`toggle_maximized` has no fullscreen check of its own, and Tao defers a fullscreen maximize change until exit). The
+route is registered from the window root, which never unmounts, and the page listener survives component remounts.
+Complementary loss in both directions at once — report A arrives, event A never consumes it, report B fails to replace
+it, event B consumes A — borrows the wrong press's report and stays a documented residual.
 
 The drag itself is started with `performWindowDragWithEvent:` on the window's own NSWindow, not through Tao's
 `drag_window`. Tao hands AppKit `NSApp.currentEvent`, assuming the press is still current when the Dioxus handler runs.
@@ -1931,12 +1931,8 @@ are clipped to whole final lines using their definite line height and bottom scr
 `Full details in Hosts` notice. Smaller messages stay whole. Each fresh clone repeats this sizing, so a larger window or
 shorter diagnosis restores the whole text. The card remains pointer-inert, and the expanded Hosts row retains the full
 diagnosis. The terminal's link-target display keeps its own shape and carries no `data-tooltip`, so two popups never
-stack. Coverage is guarded by a browser sweep (`e2e/tests/tooltip-coverage.spec.ts`) that visits the states the suite's
-fixtures reach and fails on any visible `button`, `[role=button]`, `[role=tab]`, `[role=menuitem]`, `a[href]`, `select`,
-`summary`, checkbox or radio button without hover text (for the last two, on the `label` that wraps them), exempting
-only described items in the session and host rows' menus and described template-number options. The local and remote
-host marks carry their hover text inside the icon component itself, so the session rows and the host rows both get it
-without either row's layout changing.
+stack. The local and remote host marks carry their hover text inside the icon component itself, so the session rows and
+the host rows both get it without either row's layout changing.
 
 Known risks, accepted deliberately:
 
@@ -2651,12 +2647,11 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   registered on glibc Linux only; elsewhere every host start from a unit test is refused (libtest rejects the
   arguments), so those tests fail by name rather than run on another kind of terminal. Those that need a real terminal
   run on such hosts (`tests::host_supervisor`); the tests of ending the old terminals build an earlier release's tmux
-  server by hand. The browser suite's stacks and the README and docs media stacks run the bare `farhelm supervisor run`,
-  so they test what ships, and the browser suite checks that every terminal it attaches is a host. Known gaps, behaviors
-  terminal hosts showed differently from what this document says, found when their tests moved to hosts and reported
-  rather than fixed: a create or a tab open in a directory that cannot be entered is refused by the host's own start
-  rather than recorded as a launch error (or a refused open) naming the directory, and a 0x0 attach leaves the terminal
-  at its size.
+  server by hand. The README and docs media stacks run the bare `farhelm supervisor run`, so they test what ships. Known
+  gaps, behaviors terminal hosts showed differently from what this document says, found when their tests moved to hosts
+  and reported rather than fixed: a create or a tab open in a directory that cannot be entered is refused by the host's
+  own start rather than recorded as a launch error (or a refused open) naming the directory, and a 0x0 attach leaves the
+  terminal at its size.
 - **Creating agents in hosts** (`service/core/host_launch.rs`): every create starts its agent in a host, and a new tab
   opens in one ("Tabs in hosts" below). A create commits the kind with the launching row, before anything starts, so a
   crash between the start and its confirmation leaves a row that says where to look. A retried keyed create whose
@@ -3075,12 +3070,11 @@ directory within an owned run directory (its dead-run sweep, and every `TestDir`
 directory for a later sweep when it cannot confirm a host ended or could not read the whole tree. A socket that only
 refuses connections counts as left by a killed host after three seconds of refusals, never sooner, since on macOS a live
 host with a full backlog refuses too, and then only when no process of the same user still serves that socket by its
-command line. The e2e fixtures and the supervisor's own unit tests keep their state in such directories. The shell
-harnesses (the browser suite's `e2e/start-stack.sh` and the desktop smoke) instead run
-`farhelm internal stop-terminal-hosts` on each state directory that has a `hosts` entry, but only once the supervisor
-that could start another host there is seen gone (the stack waits for its helm too). They keep the directory when that
-supervisor is not gone within its bound or the command does not exit 0. The stack's directory is then left to the sweep;
-the desktop smoke's run directory stays for a person to retry.
+command line. The e2e fixtures and the supervisor's own unit tests keep their state in such directories. The desktop
+smoke instead runs `farhelm internal stop-terminal-hosts` on each state directory that has a `hosts` entry, but only
+once the supervisor that could start another host there is seen gone (the stack waits for its helm too). They keep the
+directory when that supervisor is not gone within its bound or the command does not exit 0, and its run directory then
+stays for a person to retry.
 
 ### Launch failure classification
 
@@ -3557,15 +3551,15 @@ destination dialing and active relays, so an untrusted supervisor cannot exceed 
 cannot claim ports or manage either kind of relay. These messages and directional EOF require a protocol bump.
 
 The embedded helm owns IPv4 loopback listeners by session, canonical target and remote port. Each listens on a
-kernel-selected port bound without `SO_REUSEADDR` and never on the remote port number: that number could be the
-standalone helm's 7433, whose origin holds a browser's helm credential, and on macOS a reusable `127.0.0.1` bind may
-shadow another program's wildcard listener. Reuse stays off for the kernel-chosen bind as well, since BSD-derived
-kernels check only exact-address clashes when picking a port for a reusable socket. If the kernel hands back the remote
-number by chance, the helm binds again while holding it. Listeners live in memory through agent stop/restart and host
-disconnect. Every accepted socket resolves the current coherent session route again; the original host and any known
-installation identity must still match. Successful deletion or replacement closes the old session's listeners and
-admitted relays; failed deletion preserves them. Shutdown closes them before host connections, and weak application
-references keep an idle listener from retaining the helm.
+kernel-selected port bound without `SO_REUSEADDR` and never on the remote port number: that number could be a port a
+local program expects to use, such as the standalone helm's 7433 (the rule began when a signed-in browser kept its helm
+credential at that origin), and on macOS a reusable `127.0.0.1` bind may shadow another program's wildcard listener.
+Reuse stays off for the kernel-chosen bind as well, since BSD-derived kernels check only exact-address clashes when
+picking a port for a reusable socket. If the kernel hands back the remote number by chance, the helm binds again while
+holding it. Listeners live in memory through agent stop/restart and host disconnect. Every accepted socket resolves the
+current coherent session route again; the original host and any known installation identity must still match. Successful
+deletion or replacement closes the old session's listeners and admitted relays; failed deletion preserves them. Shutdown
+closes them before host connections, and weak application references keep an idle listener from retaining the helm.
 
 Helm schema 55 adds nullable `preferences.tunnel_consent`. Only true authorizes publication. The mutation gate orders
 listener creation, consent persistence and successful deletion cleanup; it never covers relay traffic or the native
@@ -5668,18 +5662,17 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   attempt WAL before migrations, warning and continuing in the current mode if conversion fails or does not return
   `wal`. Non-owning opens never convert; every ordinary read-write connection selects `synchronous=NORMAL` only after
   reading an actual WAL mode and otherwise retains FULL. This accepts losing the last commits on an OS crash or power
-  loss without weakening database consistency; process crashes preserve commits. Web-token rotation temporarily uses
-  FULL for its token replacement and device-credential deletion transaction, so a power loss cannot restore credentials
-  whose revocation was acknowledged (EXTRA if the file still uses a rollback journal). It restores the connection's
-  prior sync setting afterwards. Host removal, host command, YOLO and both browser-link permission setters, and patches
-  that set or clear tunnel consent, use the same barrier so a power loss cannot restore acknowledged trust revocations.
-  Unrelated preference patches remain NORMAL. On macOS, FULL and EXTRA make these writes durable only up to the drive's
-  cache: SQLite does not request `F_FULLFSYNC`. The maintainer accepted this limit, judging the additional protection
-  marginal and expecting most Macs running Farhelm to have batteries. First-contact identity recording can remain
-  NORMAL: a forgotten consumer copy is learned again from the supervisor's durable source identity. Schema and local-row
-  setup are atomic or repeatable database-only work. The separate checkout-config CLI opener is unchanged and keeps
-  FULL. Backup and restore must keep each database with the `-wal` and `-shm` files its backup includes and remove
-  current sidecars absent from that backup before restoring, so unrelated journal data is not replayed.
+  loss without weakening database consistency; process crashes preserve commits. Host removal, host command, YOLO and
+  both browser-link permission setters, and patches that set or clear tunnel consent, temporarily use FULL (EXTRA if the
+  file still uses a rollback journal) so a power loss cannot restore acknowledged trust revocations, and restore the
+  connection's prior sync setting afterwards. Unrelated preference patches remain NORMAL. On macOS, FULL and EXTRA make
+  these writes durable only up to the drive's cache: SQLite does not request `F_FULLFSYNC`. The maintainer accepted this
+  limit, judging the additional protection marginal and expecting most Macs running Farhelm to have batteries.
+  First-contact identity recording can remain NORMAL: a forgotten consumer copy is learned again from the supervisor's
+  durable source identity. Schema and local-row setup are atomic or repeatable database-only work. The separate
+  checkout-config CLI opener is unchanged and keeps FULL. Backup and restore must keep each database with the `-wal` and
+  `-shm` files its backup includes and remove current sidecars absent from that backup before restoring, so unrelated
+  journal data is not replayed.
 - Helm schema 36 drops the `profiles` catalog and its remembered default with no conversion (SPEC.md, the launch-kinds
   upgrade paragraph). Cached session rows may still carry the removed `source_profile` member; serde ignores it, so they
   keep listing without a rewrite. Helm schema 37 converts every cached session for launch kinds (see "Launch kinds: one
@@ -6052,38 +6045,24 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   file, an unusable destination, or a destination listed twice fails startup with the entry named and nothing written,
   since a helm that came up with three of five guaranteed hosts looks healthy and is not.
 - axum serving: REST for CRUD (sessions, hosts), a WebSocket event stream for live session-list updates, and a WebSocket
-  per attached terminal. A standalone helm also serves the static UI bundle; the desktop's embedded helm uses the same
-  API routes with no static fallback, no token-exchange route, and a fresh kernel-selected loopback port. Loopback bind
-  enforced — refuses non-loopback per SPEC.md.
-- Web token: random 128-bit value minted on the helm's first run and stored recoverably in helm.db so `token show` can
-  print it. Browser auth exchanges it once for a random 128-bit device secret returned in the response body; the browser
-  keeps that secret in origin-scoped localStorage, whose origin includes the loopback port, and sends it explicitly as a
-  Bearer credential on REST requests and a credential-bearing WebSocket subprotocol during upgrades. The helm stores
-  only the device secret's SHA-256 hash, and rotation deletes all device credential rows, rejecting their use on new
-  requests. Already-admitted HTTP requests may finish. The current implementation also closes browser terminal and
-  event-feed sockets on rotation; SPEC.md permits either closing or retaining those existing connections, so preserving
-  that behavior is not a reason to add cancellation machinery elsewhere. This deliberately gives up HttpOnly: script
-  execution in the authenticated origin can read the secret, but such a script can already drive the same API, while
-  port scoping prevents an unrelated loopback service from receiving an ambient host-scoped credential. The loopback
-  Origin guard remains defense in depth; no ambient browser credential remains, so this flow has no CSRF edge. The
-  `dioxus://` and `wry://` Origin exemption exists only on the embedded helm; a standalone helm has no custom-scheme
-  page to authorize and refuses those origins.
+  per attached terminal. The helm serves no page; the desktop's embedded helm uses a fresh kernel-selected loopback
+  port. Loopback bind enforced — refuses non-loopback per SPEC.md.
 - The desktop app's two credentials (one for native REST, one for the webview's page memory and WebSocket subprotocols)
-  bypass that exchange. The embedded helm mints them in memory at startup and hands them to the desktop process through
-  `run_embedded`'s readiness channel; it keeps only their SHA-256 digests, in memory, and checks them before any stored
-  rows. It rejects stored browser rows from the shared state directory, so only the current launch can authenticate.
-  They are never device rows, so rotation's delete and the 64-row eviction cannot reach them, and sockets they
-  authenticate are not closed by rotation. No HTTP route mints one, and the embedded helm serves no browser UI. They die
-  with the process, so nothing persists or accumulates across launches, and the app keeps none on disk. With nothing to
-  revoke, the desktop has no re-authentication path: a native 401 is reported as an error, and the window's failure page
-  with its Retry button is left for genuinely broken states, such as a webview credential that fails validation or the
-  event-socket probe. The page keeps its secret in memory for the life of the window, and removes any legacy
-  `farhelm.device-secret` key on each credentialed authentication attempt as best effort. A debug page reload discards
-  that page copy; nothing hands the page its credential again, so its terminals, attachment uploads and event feed
-  cannot authenticate until the app is relaunched. The shipped release desktop configuration does not expose the debug
-  context-menu reload control, so that debug-only behavior is outside the supported product lifetime. Like a browser's,
-  the webview's secret is readable by script in the window; unlike a browser's, a stolen one survives rotation and ends
-  only when the app quits.
+  are the only credentials the helm accepts in production; there is no browser sign-in. The one other credential is the
+  test hook `farhelm helm run --test-credential-file PATH` (hidden): a standalone helm mints one in memory the same way
+  and writes it to a new 0600 file, so end-to-end tests can reach the real binary's API. The embedded helm mints them in
+  memory at startup and hands them to the desktop process through `run_embedded`'s readiness channel; it keeps only
+  their SHA-256 digests, in memory, so only the current launch can authenticate. No HTTP route mints one, and the
+  embedded helm serves no browser UI. They die with the process, so nothing persists or accumulates across launches, and
+  the app keeps none on disk. With nothing to revoke, the desktop has no re-authentication path: a native 401 is
+  reported as an error, and the window's failure page with its Retry button is left for genuinely broken states, such as
+  a webview credential that fails validation or the event-socket probe. The page keeps its secret in memory for the life
+  of the window, and removes any legacy `farhelm.device-secret` key on each credentialed authentication attempt as best
+  effort. A debug page reload discards that page copy; nothing hands the page its credential again, so its terminals,
+  attachment uploads and event feed cannot authenticate until the app is relaunched. The shipped release desktop
+  configuration does not expose the debug context-menu reload control, so that debug-only behavior is outside the
+  supported product lifetime. The webview's secret is readable by script in the window, and a stolen one ends only when
+  the app quits.
 - The loopback guard accepts `Host` and `Origin` only as the IPv4 literal `127.0.0.1:<port>` (bare `127.0.0.1` on port
   80, where browsers omit the default port), or (in embedded mode only) the native webview's custom schemes as Origin.
   That exemption is a scheme prefix and cannot be narrower in a useful way: dioxus-desktop hardcodes the page URL
@@ -6706,19 +6685,19 @@ key and answers the count, a 400 without a key, or a 502 with the classified fai
 
 The REST client is a `TensorlakeApi` trait with one implementation per caller: reqwest against
 `https://api.tensorlake.ai` in production, the same client pointed at a loopback stub in unit tests, an offline
-implementation for test-built helms, and the browser suite's fake. Every call takes the key explicitly; `ApiKey` has no
-`Debug` or `Display`. The trait carries sandbox listing, lookup, creation from an image or snapshot, suspend, resume and
-termination, plus taking, looking up, listing and deleting snapshots. Requests follow no redirects and are not retried;
-a call has a 30-second bound and a create ten minutes. A create that times out may still be waiting for capacity on
-Tensorlake's side and start later, so a timeout does not mean "not created": callers reconcile by the sandbox name they
-chose. The create request always states `auto_resume`, because Tensorlake's default lets proxied traffic, a gateway ssh
-connection included, wake a suspended sandbox; with it off such traffic gets a prompt 409 instead, which keeps resuming
-the user's decision. Path arguments are single percent-encoded segments. Replies decode leniently: unknown fields are
-ignored, most fields are optional, and an unknown status decodes as `Unknown` (so an unknown snapshot status cannot tell
-"still working" from a new kind of failure, and pollers bound their wait). Failures are classified as auth (401, 403),
-not found (404), conflict (409), refused (400, 422), other status, transport and undecodable reply. Server messages are
-kept for display, bounded, whitespace-collapsed, stripped of presentation-unsafe characters, and have the key replaced
-should a server echo it.
+implementation for test-built helms, and a filesystem-controlled fake for unit tests. Every call takes the key
+explicitly; `ApiKey` has no `Debug` or `Display`. The trait carries sandbox listing, lookup, creation from an image or
+snapshot, suspend, resume and termination, plus taking, looking up, listing and deleting snapshots. Requests follow no
+redirects and are not retried; a call has a 30-second bound and a create ten minutes. A create that times out may still
+be waiting for capacity on Tensorlake's side and start later, so a timeout does not mean "not created": callers
+reconcile by the sandbox name they chose. The create request always states `auto_resume`, because Tensorlake's default
+lets proxied traffic, a gateway ssh connection included, wake a suspended sandbox; with it off such traffic gets a
+prompt 409 instead, which keeps resuming the user's decision. Path arguments are single percent-encoded segments.
+Replies decode leniently: unknown fields are ignored, most fields are optional, and an unknown status decodes as
+`Unknown` (so an unknown snapshot status cannot tell "still working" from a new kind of failure, and pollers bound their
+wait). Failures are classified as auth (401, 403), not found (404), conflict (409), refused (400, 422), other status,
+transport and undecodable reply. Server messages are kept for display, bounded, whitespace-collapsed, stripped of
+presentation-unsafe characters, and have the key replaced should a server echo it.
 
 The helm tag is the first eight bytes of SHA-256 over a fixed domain prefix and the registry namespace, written as four
 base-36 digits; a unit test pins its value for a fixed namespace, because changing the derivation would rename every
@@ -6733,18 +6712,6 @@ reply, not a failed read; a failed create answers its reason. The registration c
 quoted as one POSIX shell word, rather than the file's path, which would only mean something on the helm's machine. A
 production helm whose HTTPS client cannot be built (no CA certificates) answers every Tensorlake call with a reason that
 says so.
-
-The browser suite's fake is enabled like the provisioning backend's: `FARHELM_E2E_TENSORLAKE_DIR`, read once at helm
-startup in non-test builds, must name a directory that canonicalizes inside the helm's state directory and holds the
-`farhelm-e2e-tensorlake-v1` marker; startup warns. Specs write `config.json` (the key it accepts, the account's
-sandboxes, failures to inject per operation, how many polls a snapshot takes, and the fake shell's behavior: hold every
-command, fail a build step with given stderr, answer one with given stdout) and read `events.jsonl`, one line per call
-recording only whether the key matched, plus one per shell command naming its sandbox and step. The fake keeps the
-sandboxes and snapshots the helm created in `state.json` (`FakeModel`, the same model the helm's unit tests drive in
-memory: unique live names, 404 for unknown IDs, a snapshot that completes after its polls), so a spec can assert what is
-left billing. The same fake stands in for the snapshot build's ssh shell and refuses a sandbox its model does not have
-running. Suspend and resume are logged operations that change the model's state; a repeated request for the current
-state succeeds, and a request against a terminated sandbox is refused.
 
 ## Adding Tensorlake hosts
 
@@ -7519,16 +7486,14 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   default folder and all-hosts command can also be saved in Settings; host settings exposes each host's folder, while
   per-host command overrides remain CLI-only. The command neither initializes missing state nor migrates an incompatible
   database, and never creates target directories or runs the hook.
-- `farhelm helm run` — run the helm (flags: `--port`, `--state-dir`, `--ui-dist`, `--ensure-hosts <file>`,
-  `--payload-dir <dir>` (env `FARHELM_HELM_PAYLOAD_DIR`), `--release-base-url <url>` (env `FARHELM_RELEASE_BASE_URL`)).
-  The last two select where "Add host" provisioning payloads come from — an operator-staged directory (verified not at
-  all, D3) or a download source other than the default, this build's own release on get.farhelm.io (D2); `--payload-dir`
-  wins if both are given (D18). It takes no session or transport flags: M1's `--ssh`, `--cwd`, `--agent`, `--title`,
-  `--remote-farhelm`, and `--remote-state-dir` were dropped with M6's registry (user decision 2026-08-04). A helm drives
-  every registered host at once, so a flag naming one of them could only ever have meant the wrong thing; the last two
-  live on as per-host registry fields, and creation is `POST /api/sessions`, which is where the host selection belongs.
-  A release build compiles its own web UI in (`FARHELM_UI_DIST` at build time); `--ui-dist` still overrides it at
-  runtime, and an ordinary developer build with neither serves the API alone.
+- `farhelm helm run` — run the helm (flags: `--port`, `--state-dir`, `--ensure-hosts <file>`, `--payload-dir <dir>` (env
+  `FARHELM_HELM_PAYLOAD_DIR`), `--release-base-url <url>` (env `FARHELM_RELEASE_BASE_URL`)). The last two select where
+  "Add host" provisioning payloads come from — an operator-staged directory (verified not at all, D3) or a download
+  source other than the default, this build's own release on get.farhelm.io (D2); `--payload-dir` wins if both are given
+  (D18). It takes no session or transport flags: M1's `--ssh`, `--cwd`, `--agent`, `--title`, `--remote-farhelm`, and
+  `--remote-state-dir` were dropped with M6's registry (user decision 2026-08-04). A helm drives every registered host
+  at once, so a flag naming one of them could only ever have meant the wrong thing; the last two live on as per-host
+  registry fields, and creation is `POST /api/sessions`, which is where the host selection belongs.
 - `farhelm helm setup [--state-dir DIR] [--port N] [--no-supervisor] [--dry-run]`, and
   `farhelm helm setup --uninstall [--dry-run]` — write, enable, and remove this machine's systemd user units for the
   helm and its supervisor. Linux only (it exits 2 elsewhere, pointing macOS at the desktop app). One state directory is
@@ -7542,7 +7507,6 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   the helm's own machine at all: an absent one is answered with "run `farhelm helm setup` here", a unit already running
   that same binary is named as setup's or its author's and left alone, and a supervisor that ANSWERS is discovered and
   registered exactly as a remote one is.
-- `farhelm helm token show|rotate` — web-token bootstrap and rotation.
 - `farhelm supervisor run` — run the supervisor in the foreground; this is SPEC.md's "run the binary with arguments in a
   terminal" path.
 - `farhelm spawn [--cwd <dir>] (--inherit-agent | <launch flags>) [--title ...] [--parent ...] [--idempotency-key ...]`
@@ -7719,12 +7683,12 @@ release procedure surfaces the raise for the maintainer's decision before procee
 The dx-produced bundle went away because a bare binary has nowhere to put a `Resources/` directory, and Dioxus's
 `asset!()` files were the only thing that needed one. They are served instead from the UI tree compiled into
 `farhelm-helm`, through a `dioxus-desktop` asset handler registered on `/assets/*`, handed to the webview over the
-`dioxus://` scheme. The embedded helm does not serve this tree to browsers; standalone helm builds may serve the
-compiled-in tree or an explicit `--ui-dist` directory. Registering a handler for a path prefix takes precedence over
-dioxus's own filesystem resolver, so there is no bundle-directory fallback at all; the price is that the desktop build's
-asset set and the web bundle's must be identical, which `scripts/check-desktop-assets.sh` enforces on every change. The
-desktop page declares UTF-8 in its head, and every `text/*` asset response declares `charset=utf-8`. Without these
-declarations WebKit can use a locale-dependent legacy encoding, garbling literal UTF-8 in the stylesheet and scripts.
+`dioxus://` scheme. The helm does not serve this tree over HTTP. Registering a handler for a path prefix takes
+precedence over dioxus's own filesystem resolver, so there is no bundle-directory fallback at all; the price is that the
+desktop build's asset set and the web bundle's must be identical, which `scripts/check-desktop-assets.sh` enforces on
+every change. The desktop page declares UTF-8 in its head, and every `text/*` asset response declares `charset=utf-8`.
+Without these declarations WebKit can use a locale-dependent legacy encoding, garbling literal UTF-8 in the stylesheet
+and scripts.
 
 A releasable `farhelm-desktop` must be produced by `dx`, not by Cargo alone. The `asset!()` macro emits a placeholder
 into a `__ASSETS__` link section and dx rewrites those symbols with content-hashed names after linking; a plain
@@ -8647,9 +8611,6 @@ becomes exactly this target list.
 The testing story is a first-class requirement — agents verifying GUI behavior without a human is a standing project
 constraint (see the GUI section's motivation), not an afterthought:
 
-- **Playwright (TypeScript) drives the web build in headless Chromium** against a real helm and real supervisor on
-  Linux. DOM assertions and screenshots both work because the UI is real DOM. This is the canonical GUI verification
-  path for agents. Its stacks' supervisors create every terminal in a terminal host, as shipped ones do.
 - **A fake agent** — `farhelm-fixtures fake-agent --script basic|altscreen|mouse-modes|spawn|agent-relay`, from the
   `farhelm-fixtures` package, a test-only binary that is never shipped (the product binary carries no fixtures) — stands
   in for Claude Code/Codex across this suite's integration and e2e tests. Its deterministic scripts cover prompt/echo
@@ -8659,10 +8620,9 @@ constraint (see the GUI section's motivation), not an afterthought:
   `--settings` argv, runs it, obeys the pointer line that hook prints by running `farhelm agent instructions`, and then
   serves `$farhelm ...` requests typed into its terminal by running the shipped `farhelm agent` verbs. Everything on
   either side of one link is the real product; the single stand-in is what DECIDES a conversation started, which is the
-  part CI cannot have. That script is what makes the whole agent-relay chain testable end to end
-  (`e2e/tests/agent-relay.spec.ts`). The spawn suite also has an automated real-Claude leg that creates a jj workspace
-  and spawns into it; CI leaves it gated because vendor credentials and network access are absent, and a developer
-  enables it manually with `FARHELM_REAL_AGENT=1`.
+  part CI cannot have. The spawn suite also has an automated real-Claude leg that creates a jj workspace and spawns into
+  it; CI leaves it gated because vendor credentials and network access are absent, and a developer enables it manually
+  with `FARHELM_REAL_AGENT=1`.
 - Rust integration tests exercise the supervisor with real terminal hosts and the framing protocol with golden cases;
   farhelm-proto keeps wire compatibility testable.
 - **Terminal hosts are tested against real hosts on real ptys.** The host crate has a test bar of its own
@@ -8672,14 +8632,12 @@ constraint (see the GUI section's motivation), not an afterthought:
   it. The supervisor's side starts real hosts from the built `farhelm`, never inside a test process, since a host forks;
   the emulator is held to Farhelm's answer table, screen-text format and modes by its own tests (the recorded agents'
   startup probes among them), the status readers by the captured agent screens painted into it, and its snapshot round
-  trip by property tests; and the grid client has a static-page browser suite fed recorded grid streams beside the
-  browser suite, which runs every terminal in a host on a real stack. `.agents/validation.md` names the selections.
+  trip by property tests. `.agents/validation.md` names the selections.
 - **`node --test` unit-tests the asset-JS layer's pure functions**, under `crates/farhelm-ui/js-tests/` (outside
   `assets/` for source/test separation — bundling itself is by explicit `asset!` registration, so placement alone
   neither includes nor excludes a file). It covers the pure parts of the page's scripts, the grid client's decoder,
-  input rules and link recognition among them. Node's built-in runner over vitest/jest: node is already a CI requirement
-  for Playwright, so this is zero new dependencies, and the asset-JS layer has no bundler for a module-tooling-heavy
-  runner to pay for (PLAN_M6_5.md item 1).
+  input rules and link recognition among them. Node's built-in runner over vitest/jest: the asset-JS layer has no
+  bundler for a module-tooling-heavy runner to pay for (PLAN_M6_5.md item 1).
 - **A CentOS Stream 9 container stands in for a host that is not the CI runner.** Provisioning accepts any Linux host
   with a usable systemd user manager, but every provisioning integration test dials `localhost`, and both CI and the
   release gate run on Ubuntu — so the case the retired `ID=ubuntu` gate existed to forbid, a helm installing onto a

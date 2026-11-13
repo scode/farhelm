@@ -1,9 +1,9 @@
 # Checking delays in tests
 
-`scripts/check-test-sleeps.py` finds delay calls in Rust and browser test source and requires a reason for each one. Use
-the inventory to inspect intent before changing a test: readiness polling belongs in a named helper, while an
-observation window or deliberate timing stimulus may need to remain. An annotation records a reason; it does not prove
-that reason is sound. Apply [.agents/test-authoring.md](../.agents/test-authoring.md) when reviewing the result.
+`scripts/check-test-sleeps.py` finds delay calls in Rust test source and requires a reason for each one. Use the
+inventory to inspect intent before changing a test: readiness polling belongs in a named helper, while an observation
+window or deliberate timing stimulus may need to remain. An annotation records a reason; it does not prove that reason
+is sound. Apply [.agents/test-authoring.md](../.agents/test-authoring.md) when reviewing the result.
 
 Install the small pinned parser packages in an isolated environment outside the checkout, then invoke that interpreter.
 Agents create it in their scratch directory (`AGENTS.md`, "Agent scratch space"), not under `~/.cache` or `~/.local`,
@@ -27,23 +27,22 @@ Explain the observable window, scheduling stimulus, deadline or helper responsib
 annotations, strings containing annotation text, block comments and doc comments do not count. A rationale on a shared
 source line can cover multiple delay calls on that line; the reviewer must check that it explains each one.
 
-The checker reads Rust under `crates/` and TypeScript under `e2e/tests/`. Integration-test directories and the
-`farhelm-teststate` fixture crate are test infrastructure throughout. Other Rust files are checked in test-attributed or
-test-only `cfg` declarations, including their external module files. An alternative production condition such as
-`cfg(any(test, target_os = "macos"))` does not establish test-only scope. Missing or ambiguous test-module sources fail
-the check. Conditional module paths (`cfg_attr` containing `path`) fail explicitly because the checker does not evaluate
-attribute-dependent source selection. Generated dependency/build directories (`node_modules`, `target`, `.git`, `.jj`)
-are excluded; other symlinks fail discovery rather than silently hiding a source subtree.
+The checker reads Rust under `crates/`. Integration-test directories and the `farhelm-teststate` fixture crate are test
+infrastructure throughout. Other Rust files are checked in test-attributed or test-only `cfg` declarations, including
+their external module files. An alternative production condition such as `cfg(any(test, target_os = "macos"))` does not
+establish test-only scope. Missing or ambiguous test-module sources fail the check. Conditional module paths (`cfg_attr`
+containing `path`) fail explicitly because the checker does not evaluate attribute-dependent source selection. Generated
+dependency/build directories (`node_modules`, `target`, `.git`, `.jj`) are excluded; other symlinks fail discovery
+rather than silently hiding a source subtree.
 
 Recognition uses [Tree-sitter syntax trees](https://github.com/tree-sitter/py-tree-sitter) and the
 [Rust module path rules](https://doc.rust-lang.org/reference/items/modules.html). It recognizes Rust `sleep` and
-`sleep_until`, including qualified calls and macro token trees, and browser `setTimeout`, `setInterval` and
-`waitForTimeout`. Playwright `test.setTimeout` and `testInfo.setTimeout` configure deadlines and are excluded. Explicit
-import renames are recognized regardless of declaration order. Transparent callee parentheses and TypeScript type
-assertions preserve recognition. Strings, comments and regex text remain inert; expressions inside template literals
-remain code. The checker does not expand macros or perform type resolution, arbitrary function-value alias analysis, or
-interprocedural timing analysis. A same-named custom function is still a candidate; moving a delay behind a newly named
-wrapper requires review of that wrapper's responsibility.
+`sleep_until`, including qualified calls and macro token trees. Explicit import renames are recognized regardless of
+declaration order. Strings and comments remain inert. (The syntax module still recognizes browser delays from when the
+checker also read the removed Playwright suite; nothing feeds it TypeScript now.) The checker does not expand macros or
+perform type resolution, arbitrary function-value alias analysis, or interprocedural timing analysis. A same-named
+custom function is still a candidate; moving a delay behind a newly named wrapper requires review of that wrapper's
+responsibility.
 
 Source reads are bounded to 2 MiB per file, 64 MiB total, 10,000 files and 100,000 directory entries. Reports are
 bounded to 10,000 calls and an 8 MiB cumulative budget for annotation/report fields; formatted JSON is capped at 16 MiB.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Require an explanatory sleep-ok comment for delays in Rust and browser test code."""
+"""Require an explanatory sleep-ok comment for delays in Rust test code."""
 from __future__ import annotations
 
 import argparse
@@ -73,11 +73,7 @@ def sources(root, budget):
     errors, not evidence of an empty suite.
     """
     found = {}
-    # Discovery begins below e2e, so check that fixed parent explicitly too.
-    # O_NOFOLLOW on e2e/tests alone would protect only the tests component.
-    parent_fd = os.open(root / 'e2e', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
-    os.close(parent_fd)
-    pending = [root / 'crates', root / 'e2e' / 'tests']
+    pending = [root / 'crates']
     while pending:
         budget.check()
         directory = pending.pop()
@@ -98,8 +94,7 @@ def sources(root, budget):
                         pending.append(path)
                         continue
                     relative = path.relative_to(root)
-                    if not (relative.parts[0] == 'crates' and path.suffix == '.rs'
-                            or relative.parts[:2] == ('e2e', 'tests') and path.suffix == '.ts'):
+                    if not (relative.parts[0] == 'crates' and path.suffix == '.rs'):
                         continue
                     if len(found) >= 10000:
                         raise ValueError('source inventory exceeded its file budget')
@@ -141,12 +136,12 @@ def standard_crate_root(path):
 def inventory(source_files, budget):
     """Propagate external test-module scope before interpreting delay calls.
 
-    Integration-test directories, browser tests and the teststate fixture
-    crate are entirely test infrastructure. Elsewhere, test attributes and
+    Integration-test directories and the teststate fixture crate are
+    entirely test infrastructure. Elsewhere, test attributes and
     source-declared test-only module edges determine scope.
     """
     whole = {path for path in source_files if integration_source(path)
-             or path.startswith(('e2e/tests/', 'crates/farhelm-teststate/'))}
+             or path.startswith('crates/farhelm-teststate/')}
     edges = {}
     for path, source in source_files.items():
         budget.check()

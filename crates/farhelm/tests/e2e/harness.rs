@@ -773,10 +773,20 @@ pub(crate) async fn helm_process_with_args(
 ) -> HelmProcess {
     use tokio::io::{AsyncBufReadExt, BufReader};
 
+    // A helm restarted on the same state directory writes a fresh credential;
+    // the file from the previous process would make `create_new` refuse.
+    let credential = test_credential_path(state_dir);
+    match std::fs::remove_file(&credential) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!("removing {}: {error}", credential.display()),
+    }
     let mut command = tokio::process::Command::new(farhelm_bin());
     command
         .args(["helm", "run", "--port", "0", "--state-dir"])
-        .arg(state_dir);
+        .arg(state_dir)
+        .arg("--test-credential-file")
+        .arg(&credential);
     if let Some(ensure) = ensure_hosts {
         command.arg("--ensure-hosts").arg(ensure);
     }
@@ -804,47 +814,35 @@ pub(crate) async fn helm_process_with_args(
     }
 }
 
-/// Exchange the shipped CLI's bootstrap token for the device secret every
-/// later request in a real-stack test carries.
+/// Where [`helm_process`] asks the helm to write its test credential.
+///
+/// Inside the state directory, which is private to the test; one helm at a
+/// time owns that directory, so one file name is enough.
+fn test_credential_path(state_dir: &std::path::Path) -> std::path::PathBuf {
+    state_dir.join("test-device-credential")
+}
+
+/// The device secret every later request in a real-stack test carries: the
+/// credential the helm [`helm_process`] started minted for itself and wrote
+/// to its `--test-credential-file`, before printing the address that
+/// [`helm_process`] waits for.
 ///
 /// Returned as the raw secret rather than only as a configured client
 /// because the WebSocket routes cannot use an HTTP client at all: they
 /// carry the credential in `Sec-WebSocket-Protocol` instead of a header a
 /// `reqwest::Client` default can supply.
-pub(crate) async fn device_secret(state_dir: &std::path::Path, base: &str) -> String {
-    let output = tokio::process::Command::new(farhelm_bin())
-        .args(["helm", "token", "show", "--state-dir"])
-        .arg(state_dir)
-        .output()
+pub(crate) async fn device_secret(state_dir: &std::path::Path) -> String {
+    let path = test_credential_path(state_dir);
+    let secret = tokio::fs::read_to_string(&path)
         .await
-        .expect("run token show");
-    assert!(
-        output.status.success(),
-        "token show failed: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let token = String::from_utf8(output.stdout)
-        .expect("the token is UTF-8")
-        .trim()
-        .to_string();
-    assert!(!token.is_empty(), "token show must print a credential");
-
-    let response = reqwest::Client::new()
-        .post(format!("{base}/api/auth/token"))
-        .json(&serde_json::json!({ "token": token }))
-        .send()
-        .await
-        .expect("token exchange reached the helm");
-    assert!(
-        response.status().is_success(),
-        "token exchange answered {}",
-        response.status()
-    );
-    let exchange: serde_json::Value = response.json().await.expect("decode device exchange");
-    exchange["device_secret"]
-        .as_str()
-        .expect("the exchange returns a device secret")
-        .to_string()
+        .unwrap_or_else(|error| {
+            panic!(
+                "reading the helm's test credential {}: {error}",
+                path.display()
+            )
+        });
+    assert!(!secret.is_empty(), "the helm wrote an empty credential");
+    secret
 }
 
 /// An HTTP client carrying `secret` on every request.
@@ -863,11 +861,8 @@ pub(crate) fn client_with_secret(secret: &str) -> reqwest::Client {
 
 /// [`device_secret`] and [`client_with_secret`] together, for the callers
 /// that never need the secret itself.
-pub(crate) async fn authenticated_client(
-    state_dir: &std::path::Path,
-    base: &str,
-) -> reqwest::Client {
-    client_with_secret(&device_secret(state_dir, base).await)
+pub(crate) async fn authenticated_client(state_dir: &std::path::Path) -> reqwest::Client {
+    client_with_secret(&device_secret(state_dir).await)
 }
 
 /// GET a JSON body from the helm, failing the test on a non-2xx.

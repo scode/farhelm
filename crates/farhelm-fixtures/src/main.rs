@@ -13,8 +13,7 @@
 //!
 //! The e2e tests find this binary next to the `farhelm` binary they test,
 //! in the same target directory; `.config/nextest.toml` builds it before any
-//! e2e test runs. The browser suite's `e2e/start-stack.sh` finds it the same
-//! way after `cargo build`, which builds it as a default member.
+//! e2e test runs.
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -112,18 +111,11 @@ enum Cmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         extra: Vec<String>,
     },
-    /// Reap dead test-harness state dirs under /tmp (see farhelm_teststate
-    /// for the naming scheme and flock liveness protocol). Called by
-    /// e2e/start-stack.sh at stack startup; the Rust integration tests
-    /// reach the same sweep in-process. Best-effort and always exits 0 —
-    /// a broken sweep must not block testing.
-    SweepTestState,
     /// Start one real terminal host in a state directory's socket
     /// directory, the way the supervisor starts one, and print
     /// `<pid> <socket>` once it is ready. For harnesses that must show
-    /// which hosts their cleanup ends and which it leaves alone
-    /// (`scripts/test-start-stack-cleanup.sh`, the desktop smoke, the e2e
-    /// suite's `terminal_host_cleanup`). The host outlives this command;
+    /// which hosts their cleanup ends and which it leaves alone (the
+    /// desktop smoke, the e2e suite's `terminal_host_cleanup`). The host outlives this command;
     /// the caller ends it.
     SpawnTerminalHost {
         /// The `farhelm` binary the host runs as
@@ -169,14 +161,6 @@ fn main() -> anyhow::Result<()> {
                 },
             )
         }
-        Cmd::SweepTestState => {
-            let outcome = farhelm_teststate::sweep(
-                std::path::Path::new(farhelm_teststate::TMP_ROOT),
-                &farhelm_teststate::SweepPolicy::default(),
-            );
-            farhelm_teststate::report(&outcome);
-            Ok(())
-        }
         Cmd::SpawnTerminalHost { farhelm, state_dir } => spawn_host::run(&farhelm, &state_dir),
     }
 }
@@ -185,20 +169,9 @@ fn main() -> anyhow::Result<()> {
 mod tests {
     use super::*;
 
-    /// The sweep verb parses — the exact invocation
-    /// e2e/start-stack.sh performs, pinned here so a
-    /// rename breaks a test instead of silently breaking the script's
-    /// startup sweep.
-    #[farhelm_testtrace::test]
-    fn sweep_test_state_parses() {
-        let cli = Cli::try_parse_from(["farhelm-fixtures", "sweep-test-state"]).unwrap();
-        assert!(matches!(cli.command, Cmd::SweepTestState));
-    }
-
     /// The host-spawning verb parses with both of its paths: the exact
-    /// invocation `scripts/test-start-stack-cleanup.sh` performs, pinned so
-    /// that a rename fails here instead of leaving that script's decoy host
-    /// unstarted.
+    /// invocation the desktop smoke performs, pinned so that a rename fails
+    /// here instead of leaving that script's decoy host unstarted.
     #[farhelm_testtrace::test]
     fn spawn_terminal_host_parses() {
         let cli = Cli::try_parse_from([

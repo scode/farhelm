@@ -239,7 +239,7 @@ async fn host_add_cli_reports_accepted_edited_destination_and_declined() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let supervisor = supervisor_process().await;
     let helm = helm_process(supervisor.state.path(), None).await;
-    let secret = device_secret(supervisor.state.path(), &helm.base).await;
+    let secret = device_secret(supervisor.state.path()).await;
     let client = client_with_secret(&secret);
     await_local_host(&client, &helm.base).await;
     let work = farhelm_teststate::tempdir().unwrap();
@@ -338,7 +338,7 @@ async fn browser_link_cli_waits_without_fencing_and_reports_each_answer() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let supervisor = supervisor_process().await;
     let helm = helm_process(supervisor.state.path(), None).await;
-    let secret = device_secret(supervisor.state.path(), &helm.base).await;
+    let secret = device_secret(supervisor.state.path()).await;
     let client = client_with_secret(&secret);
     await_local_host(&client, &helm.base).await;
     let work = farhelm_teststate::tempdir().expect("link requester workdir");
@@ -614,7 +614,7 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
 
     let supervisor = supervisor_process().await;
     let helm = helm_process(supervisor.state.path(), None).await;
-    let secret = device_secret(supervisor.state.path(), &helm.base).await;
+    let secret = device_secret(supervisor.state.path()).await;
     let client = client_with_secret(&secret);
     await_local_host(&client, &helm.base).await;
     allow_agents_without_asking(&client, &helm.base).await;
@@ -760,7 +760,7 @@ async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
 
     let supervisor = supervisor_process().await;
     let helm = helm_process(supervisor.state.path(), None).await;
-    let secret = device_secret(supervisor.state.path(), &helm.base).await;
+    let secret = device_secret(supervisor.state.path()).await;
     let client = client_with_secret(&secret);
     await_local_host(&client, &helm.base).await;
     allow_agents_without_asking(&client, &helm.base).await;
@@ -907,12 +907,11 @@ async fn the_shipped_agent_lifecycle_commands_act_through_the_real_helm() {
 ///
 /// SPEC.md's agent section covers a CROSS-host clone, and it is not
 /// exercised here: a second host in this suite would have to be an ssh row, which
-/// needs passwordless `ssh localhost` — a machine prerequisite this Rust
-/// suite deliberately does not have (see how every other test in this file
-/// settles for the one local row). The Playwright stack DOES provision
-/// that, so the cross-host case lives in `e2e/tests/agent-relay.spec.ts`
-/// and this test covers everything about the two verbs that does not need
-/// a second machine.
+/// needs passwordless `ssh localhost` — a machine prerequisite this file
+/// deliberately does not assume (see how every other test in this file
+/// settles for the one local row). The cross-host case was covered end to
+/// end by the browser suite, which is gone. This test covers everything
+/// about the two verbs that does not need a second machine.
 ///
 /// ## Templates and spawn's launch flags
 ///
@@ -936,7 +935,7 @@ async fn the_shipped_agent_creating_commands_act_through_the_real_helm() {
 
     let supervisor = supervisor_process().await;
     let helm = helm_process(supervisor.state.path(), None).await;
-    let secret = device_secret(supervisor.state.path(), &helm.base).await;
+    let secret = device_secret(supervisor.state.path()).await;
     let client = client_with_secret(&secret);
     await_local_host(&client, &helm.base).await;
     allow_agents_without_asking(&client, &helm.base).await;
@@ -1215,7 +1214,7 @@ async fn an_authenticated_agent_clone_starts_a_structured_successor() {
     ])
     .await;
     let helm = helm_process(supervisor.state.path(), None).await;
-    let secret = device_secret(supervisor.state.path(), &helm.base).await;
+    let secret = device_secret(supervisor.state.path()).await;
     let client = client_with_secret(&secret);
     await_local_host(&client, &helm.base).await;
     allow_agents_without_asking(&client, &helm.base).await;
@@ -1361,7 +1360,7 @@ async fn keyed_agent_create_and_clone_need_fresh_approval_after_delete() {
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
     let supervisor = supervisor_process().await;
     let helm = helm_process(supervisor.state.path(), None).await;
-    let secret = device_secret(supervisor.state.path(), &helm.base).await;
+    let secret = device_secret(supervisor.state.path()).await;
     let client = client_with_secret(&secret);
     await_local_host(&client, &helm.base).await;
     let hosts = get_json(&client, &format!("{}/api/hosts", helm.base)).await;

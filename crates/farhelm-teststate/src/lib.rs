@@ -1,13 +1,13 @@
 //! Shared /tmp discipline for Farhelm's test harnesses: one naming scheme,
 //! one liveness protocol, one sweep.
 //!
-//! Every harness that builds state under /tmp — the Playwright stack script,
-//! the desktop smoke, the Rust integration tests and the test recorder's
+//! Every harness that builds state under /tmp — the desktop smoke, the Rust integration tests and the test recorder's
 //! per-command TMPDIR — leaks that state when it is killed
 //! without running its cleanup (SIGKILL, OOM, a crashed shell). One long day
 //! of killed runs accumulated 423 orphans (~22 GB) and hit disk-full. The
-//! old defense was a shell `find` in e2e/start-stack.sh that matched only
-//! its own `fh-e2e.*` prefix and only ran when a new stack started; the
+//! old defense was a shell `find` in the (since removed) browser suite's
+//! stack script that matched only its own `fh-e2e.*` prefix and only ran
+//! when a new stack started; the
 //! Rust tests' `tempfile::tempdir()` dirs (`.tmpXXXXXX`) matched nothing
 //! and were never reclaimed.
 //!
@@ -28,9 +28,7 @@
 //! - A **sweep** ([`sweep`]): reaps dead runs, ends their orphaned terminal
 //!   hosts ([`hosts`]) and any tmux server a killed test left in them (see
 //!   `TMUX_SOCKET_WALK_DEPTH`'s docs), and runs from every harness entry
-//!   point — the stack script invokes `farhelm-fixtures sweep-test-state` at
-//!   startup, and the Rust tests sweep once per process through [`tempdir`]
-//!   — so a long-lived session cleans up after its dead predecessors instead
+//!   point — the Rust tests sweep once per process through [`tempdir`] — so a long-lived session cleans up after its dead predecessors instead
 //!   of accumulating without bound.
 //!
 //! Product code must never depend on this crate; it exists for harnesses
@@ -64,15 +62,15 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 /// Where the family lives. Hardcoded rather than honoring TMPDIR because
-/// e2e/start-stack.sh hardcodes /tmp too (short socket paths under
+/// scripts/desktop-smoke.sh hardcodes /tmp too (short socket paths under
 /// SUN_LEN, no predictable-name pre-creation) and the sweep must look
 /// where creators actually create; a TMPDIR-honoring sweep on a machine
 /// with TMPDIR set would silently stop matching the script's dirs.
 pub const TMP_ROOT: &str = "/tmp";
 
-/// The Playwright stack script's prefix (e2e/start-stack.sh's `mktemp`),
-/// kept unchanged from the pre-crate era so orphans from before this
-/// crate existed remain sweepable.
+/// The prefix of the removed browser suite's stack script (its `mktemp`).
+/// Nothing creates these any more; the prefix stays in the family so the
+/// directories that suite left behind remain sweepable.
 const PLAYWRIGHT_PREFIX: &str = "fh-e2e.";
 
 /// Prefix used by [`tempdir`] for the Rust integration tests' dirs.

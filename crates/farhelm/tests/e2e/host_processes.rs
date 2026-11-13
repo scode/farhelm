@@ -909,7 +909,7 @@ async fn a_host_terminal_reaches_a_browser_through_the_helm_as_a_grid() {
     let mut stack = HostStack::new().await;
     stack.start().await;
     let helm = helm_process(&stack.state, None).await;
-    let secret = device_secret(&stack.state, &helm.base).await;
+    let secret = device_secret(&stack.state).await;
     let http = client_with_secret(&secret);
     await_local_host(&http, &helm.base).await;
     let (status, body) = post(

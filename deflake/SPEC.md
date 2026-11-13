@@ -93,8 +93,6 @@ The sweep is the AGENTS.md finishing-work inventory minus what cannot flake: for
 generated-file and asset-parity checks, and shellcheck are not run. Slow deterministic batteries (CentOS provisioning,
 desktop smoke) ARE run; the run is meant to take hours in the background and their cost in inference is zero when green.
 
-The browser suite runs both engines, as the merge gate does.
-
 ## Non-goals
 
 This tooling does not decide what a flake's cause is, does not fix flakes on its own, does not validate PRs (the

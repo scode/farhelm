@@ -236,10 +236,9 @@ def current_pointer(checkout: pathlib.Path) -> pathlib.Path:
 
 @dataclass(frozen=True)
 class TestId:
-    """One excludable unit: a nextest case, a Playwright case, or a whole phase.
+    """One excludable unit: a nextest case or a whole phase.
 
-    `kind` is `nextest` (binary id + full test name), `playwright` (spec file
-    relative to e2e/tests plus the leaf title), or `phase` (a monolithic
+    `kind` is `nextest` (binary id + full test name) or `phase` (a monolithic
     battery with no per-test selection, identified by its phase name). The
     textual form is the line format of known-flakes.txt.
     """
@@ -252,9 +251,9 @@ class TestId:
 
     @staticmethod
     def parse(line: str) -> "TestId":
-        """Inverse of `line`. The last field may contain spaces (Playwright titles)."""
+        """Inverse of `line`. The last field may contain spaces."""
         kind, _, rest = line.strip().partition(" ")
-        if kind in {"nextest", "playwright"}:
+        if kind == "nextest":
             first, _, last = rest.strip().partition(" ")
             if first and last.strip():
                 return TestId(kind, (first, last.strip()))
@@ -268,8 +267,8 @@ def parse_known_flakes(text: str) -> list[TestId]:
 
     A trailing comment on an entry line is stripped, which is where the slug
     naming the TODO.md entry lives. A comment starts at a `#` that begins the
-    line or follows at least two spaces (or a tab); a `#` inside a Playwright
-    title, which is normally preceded by one space, stays part of the id.
+    line or follows at least two spaces (or a tab); a `#` preceded by one
+    space stays part of the id.
     Malformed lines are errors rather than silently skipped: a typo that made
     an entry unparseable would otherwise quietly put a known flake back into
     the sweep.
@@ -304,31 +303,6 @@ def nextest_exclusion(ids: list[TestId]) -> list[str]:
     if not terms:
         return []
     return ["-E", "not (" + " | ".join(terms) + ")"]
-
-
-def playwright_title_regex(spec: str, title: str) -> str:
-    """A grep regex that selects one case under both engines.
-
-    Playwright matches grep against the space-joined title path, which starts
-    with the project name (`chromium-feed`) and the spec file and ends with the
-    leaf title, so anchoring the file and the title's end is enough. It can
-    overshoot onto a case whose title ends with the same words, which for a
-    rerun means extra evidence and for an exclusion means a logged overreach.
-
-    Two Playwright 1.62 details a future reader should know: CLI grep regexes
-    are compiled case-insensitively, and the grep subject has any `@tags`
-    appended after the title, so a tagged test would escape the `$` anchor.
-    No spec uses tags today; if one starts to, drop the anchor.
-    """
-    return re.escape(spec) + " .*" + re.escape(title) + "$"
-
-
-def playwright_exclusion(ids: list[TestId]) -> list[str]:
-    """`--grep-invert` over every Playwright id, or nothing when none apply."""
-    patterns = [playwright_title_regex(s, t) for s, t in (i.parts for i in ids if i.kind == "playwright")]
-    if not patterns:
-        return []
-    return ["--grep-invert", "|".join(f"(?:{p})" for p in patterns)]
 
 
 # ---------------------------------------------------------------------------
@@ -367,14 +341,10 @@ def rerun_conclusion(test: TestId, status: int, evidence: pathlib.Path | None) -
     if evidence is None:
         return False, "rerun has no evidence announcement"
     try:
-        if test.kind == "nextest":
-            failures = nextest_failures(
-                (evidence / "nextest" / "default" / "junit.xml").read_text(encoding="utf-8"),
-                require_execution=True,
-            )
-        else:
-            report = json.loads((evidence / "playwright.json").read_text(encoding="utf-8"))
-            failures = [failed for failed, _, _ in playwright_failures(report)]
+        failures = nextest_failures(
+            (evidence / "nextest" / "default" / "junit.xml").read_text(encoding="utf-8"),
+            require_execution=True,
+        )
     except (OSError, ValueError, ET.ParseError, AttributeError, TypeError) as error:
         return False, f"rerun report unreadable: {type(error).__name__}"
     if test in failures:
@@ -424,40 +394,6 @@ def nextest_failures(junit_text: str, require_execution: bool = False) -> list[T
             if case.find("failure") is not None or case.find("error") is not None:
                 failed.append(TestId("nextest", (binary, case.attrib.get("name", ""))))
     return failed
-
-
-def playwright_failures(report: dict) -> list[tuple[TestId, str, str]]:
-    """Unexpected cases from a Playwright JSON report: (id, project, message).
-
-    One case runs under both engines and appears once per project; the id
-    (spec file, leaf title) is engine-agnostic on purpose, since a known flake
-    is excluded from both engines. The project name travels alongside so the
-    event can say which engine failed.
-    """
-    found = []
-
-    def walk(suite: dict, file: str | None):
-        file = suite.get("file") or file
-        for spec in suite.get("specs", []):
-            spec_file = spec.get("file") or file or ""
-            for test in spec.get("tests", []):
-                if test.get("status") in {"unexpected", "flaky"}:
-                    results = test.get("results") or []
-                    message = ""
-                    if results and isinstance(results[0], dict):
-                        error = results[0].get("error") or {}
-                        message = str(error.get("message") or "")
-                    found.append((
-                        TestId("playwright", (spec_file, spec.get("title", ""))),
-                        str(test.get("projectName", "")),
-                        message,
-                    ))
-        for child in suite.get("suites", []):
-            walk(child, file)
-
-    for suite in report.get("suites", []):
-        walk(suite, None)
-    return found
 
 
 def read_evidence_output(run_dir: pathlib.Path) -> str:
@@ -526,8 +462,7 @@ def nextest_excerpt(output: str, test_name: str) -> str:
 class Phase:
     """One battery of the sweep and how to run, re-run, and read it.
 
-    `kind` decides failure granularity: `nextest` and `playwright` phases yield
-    per-test ids from their reports and rerun single tests; `monolithic` phases
+    `kind` decides failure granularity: `nextest` phases yield per-test ids from their reports and rerun single tests; `monolithic` phases
     (doctests, scripts with no per-scenario selection) are one id each and are
     rerun whole. `argv` is the recorder child command; `rerun` builds the child
     command for one id.
@@ -548,11 +483,6 @@ def nextest_rerun(phase: Phase, test: TestId) -> list[str]:
     return [*phase.argv, "-E", f"binary_id(={binary}) & test(={name})"]
 
 
-def playwright_rerun(phase: Phase, test: TestId) -> list[str]:
-    spec, title = test.parts
-    return ["npx", "playwright", "test", spec, "-g", playwright_title_regex(spec, title)]
-
-
 PROFILES = ("full", "eval")
 
 
@@ -565,8 +495,8 @@ def phases(profile: str = "full") -> list[Phase]:
 
     The `eval` profile exists to exercise the driver and the agent protocol
     end to end in minutes rather than hours: the same phase kinds, the same
-    recorder modes, but narrow selections (one small crate, one small spec
-    file) and none of the slow deterministic batteries. It is for validating
+    recorder modes, but narrow selections (one small crate) and none of the
+    slow deterministic batteries. It is for validating
     this tooling, never for a real deflake run; its selections say nothing
     about the suite.
     """
@@ -575,9 +505,6 @@ def phases(profile: str = "full") -> list[Phase]:
             Phase("rust-nextest", "nextest", "farhelm-proto unit tests (eval profile)", "4 nextest slots; retries 0",
                   ["cargo", "nextest", "run", "-p", "farhelm-proto", "--lib"],
                   rerun=nextest_rerun, runner="nextest"),
-            Phase("browser", "playwright", "feed spec, both engines (eval profile)", "3 browser workers, one stack each; retries 0",
-                  ["npx", "playwright", "test", "feed.spec.ts"], cwd="e2e", rerun=playwright_rerun,
-                  runner="playwright"),
             Phase("js-unit", "monolithic", "asset JavaScript unit harness", "node default discovery",
                   ["bash", "-c", "cd crates/farhelm-ui/js-tests && node --test"]),
             Phase("install-sh", "monolithic", "install.sh harness", "single process",
@@ -589,9 +516,6 @@ def phases(profile: str = "full") -> list[Phase]:
     return [
         Phase("rust-nextest", "nextest", "workspace Rust targets", "4 nextest slots; retries 0",
               workspace_nextest, rerun=nextest_rerun, runner="nextest"),
-        Phase("browser", "playwright", "browser suite, both engines", "3 browser workers, one stack each; retries 0",
-              ["npx", "playwright", "test"], cwd="e2e", rerun=playwright_rerun,
-              runner="playwright"),
         Phase("desktop-nextest", "nextest", "desktop Rust targets", "4 nextest slots; retries 0",
               desktop_nextest, rerun=nextest_rerun, runner="nextest"),
         Phase("rust-doctests", "monolithic", "workspace doctests", "4 doctest threads",
@@ -1184,8 +1108,8 @@ class Daemon:
         # The sweep tree is a detached git worktree, not a jj workspace. A jj
         # workspace of a colocated repo carries only `.jj` (verified on jj
         # 0.45.1), and the recorder locates the checkout with
-        # `git rev-parse --show-toplevel`, so it refused every nextest and
-        # Playwright phase there. jj resolves the base revision (so `main`, a
+        # `git rev-parse --show-toplevel`, so it refused every nextest phase
+        # there. jj resolves the base revision (so `main`, a
         # change id, or any revset works) and git owns the tree; the
         # checkout's jj view never sees or snapshots it.
         log = self.run.phases / "prepare-workspace.log"
@@ -1236,8 +1160,6 @@ class Daemon:
             ("tmux", ["tmux", "-V"], "."),
             ("cargo-build", ["cargo", "build"], "."),
             ("dx-build", ["dx", "build", "--package", "farhelm-ui", "--platform", "web", "--release"], "crates/farhelm-ui"),
-            ("npm", ["npm", "ci"], "e2e"),
-            ("browsers", ["npx", "playwright", "install", "chromium", "webkit"], "e2e"),
         ]
         for name, argv, cwd in steps:
             if self.stop_requested:
@@ -1304,8 +1226,6 @@ class Daemon:
             argv = list(phase.argv)
             if phase.kind == "nextest":
                 argv += nextest_exclusion(excluded)
-            elif phase.kind == "playwright":
-                argv += playwright_exclusion(excluded)
             log = self.run.phases / f"{sweep:02d}-{phase.name}.log"
             status = self._run(self.recorder_argv(phase, argv, "development", PHASE_TIMEOUT_SECONDS), log,
                                self.workspace / phase.cwd, phase.name)
@@ -1336,15 +1256,6 @@ class Daemon:
                 output = read_evidence_output(evidence)
                 for t in nextest_failures(junit):
                     failures.append((t, {"excerpt": nextest_excerpt(output, t.parts[1])}))
-            elif phase.kind == "playwright" and evidence:
-                report = json.loads((evidence / "playwright.json").read_text(encoding="utf-8"))
-                merged: dict[TestId, dict] = {}
-                for t, project, message in playwright_failures(report):
-                    entry = merged.setdefault(t, {"projects": [], "excerpt": ""})
-                    entry["projects"].append(project)
-                    if message and not entry["excerpt"]:
-                        entry["excerpt"] = message[-EXCERPT_LIMIT:]
-                failures = list(merged.items())
         except (OSError, ValueError, ET.ParseError) as error:
             self.say(f"[{phase.name}] could not read reports: {error!r}")
         if not failures:
@@ -1361,7 +1272,7 @@ class Daemon:
             if self.stop_requested:
                 return
             if test.kind == "phase" and phase.kind != "monolithic":
-                # Rerunning a whole nextest or Playwright battery three times
+                # Rerunning a whole nextest battery three times
                 # to classify a build or runner failure would cost hours and,
                 # under the rerun timeout, manufacture a "deterministic"
                 # verdict out of three timeouts. The agent reads the log.

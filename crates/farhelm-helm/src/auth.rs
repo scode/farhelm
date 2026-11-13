@@ -1,37 +1,38 @@
-//! Browser authentication at the helm's HTTP boundary.
+//! Device authentication at the helm's HTTP boundary.
 //!
-//! The web token is the recoverable bootstrap secret the user can print with
-//! `farhelm helm token show`. A browser exchanges it once for a random device
-//! secret; only that secret's SHA-256 digest is stored. REST carries it
-//! in `Authorization`, while browser WebSockets offer it as a subprotocol so
-//! the credential remains scoped to the helm's complete origin, port included.
+//! Every protected API method, both WebSocket handshakes included, needs a
+//! device credential. The helm mints those credentials in memory for one
+//! process lifetime and hands them only to callers inside that process: the
+//! desktop app that embeds the helm (two per launch, see
+//! [`crate::EmbeddedReady`]) and, for tests, a standalone helm started with
+//! the hidden `--test-credential-file` flag. Only each secret's SHA-256 digest
+//! is kept, and nothing is written to `helm.db`, so a credential dies with the
+//! process and no HTTP request can obtain one.
 //!
-//! The desktop app is the one exception to the exchange. A helm embedded in
-//! the desktop process mints that app's own two device secrets in memory at
-//! startup and hands them to its owner directly ([`AuthState::mint_embedded_device`]).
-//! They never reach the database, so token rotation and the cap on
-//! remembered browser credentials cannot revoke them, and no HTTP request can
-//! obtain one: the desktop window never has a credential to lose or renew
-//! (SPEC.md "Security", "Client to helm").
+//! NOTE: There is no browser sign-in. The browser UI, its bootstrap token and
+//! the device rows a token exchange created were removed when the GUI moved to
+//! a native desktop app. Older helms left a `web_token` row and
+//! `device_sessions` rows in `helm.db`; this module never reads them, so they
+//! authenticate nothing. The tables stay only because dropping them would be a
+//! schema migration.
 //!
-//! The middleware in this module covers every protected API method, including
-//! both WebSocket handshakes. The static bundle, bootstrap exchange, and the
-//! attachment OPTIONS preflight remain reachable before a device has
-//! authenticated; the preflight carries no credentials by browser contract.
+//! REST carries the credential in `Authorization: Bearer`, while WebSockets
+//! offer it as a subprotocol, because a WebSocket client in a web view cannot
+//! set an `Authorization` header on the upgrade.
 
-use crate::{AppState, store::HelmStore};
 use anyhow::Context;
-use axum::extract::{Json, Request, State};
+use axum::extract::{Request, State};
 use axum::http::{StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use base64::Engine;
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use subtle::ConstantTimeEq;
 
-/// Application protocol every authenticated browser WebSocket offers.
+use crate::AppState;
+
+/// Application protocol every authenticated WebSocket offers.
 ///
 /// The device secret is a second offered protocol. Selecting this stable
 /// value satisfies the WebSocket negotiation contract without reflecting a
@@ -42,306 +43,56 @@ pub(crate) const WS_PROTOCOL: &str = "farhelm";
 /// protocol token.
 const WS_DEVICE_PREFIX: &str = "farhelm-device-";
 
-/// URL-safe base64 without padding encodes a 128-bit token in 22 characters.
-const SECRET_LENGTH: usize = 22;
-
 /// Structured marker emitted only by the device-authentication boundary.
 /// Shared with the UI, which branches on it, through `farhelm-proto`.
 pub(crate) const AUTH_REQUIRED_CODE: &str = farhelm_proto::http::AUTH_REQUIRED_CODE;
 
-#[derive(Debug, thiserror::Error)]
-enum ExchangeError {
-    #[error("operating-system randomness is unavailable")]
-    Randomness(#[source] anyhow::Error),
-    #[error("the system clock is unavailable")]
-    Clock(#[source] anyhow::Error),
-    #[error("authentication storage is unavailable")]
-    Storage(#[source] anyhow::Error),
-    #[error("the serving helm has not loaded its bootstrap token")]
-    TokenNotLoaded,
-}
-
-/// Safe categories the private control protocol may return to a local CLI.
-#[derive(Debug, thiserror::Error)]
-pub(crate) enum RotationError {
-    #[error("operating-system randomness is unavailable")]
-    Randomness(#[source] anyhow::Error),
-    #[error("the system clock is unavailable")]
-    Clock(#[source] anyhow::Error),
-    #[error("authentication storage is unavailable; inspect the helm logs")]
-    Storage(#[source] anyhow::Error),
-}
-
-/// Authentication state shared by the HTTP boundary and the local token
-/// control socket.
+/// The credentials this helm process minted, as digests.
 ///
-/// The broadcast is process-local on purpose. Rotation is executed inside
-/// the serving helm whenever one is running, so the same operation that
-/// commits the database transaction can close every admitted socket without
-/// polling or a durable auth epoch.
-///
-/// The bootstrap token is loaded before HTTP serving and cached here so an
-/// invalid public exchange never contends for SQLite. The database still
-/// validates every cache-approved exchange in the same immediate transaction
-/// that inserts its device row; that transaction is the authority when a
-/// rotation and exchange overlap.
-///
-/// `embedded_devices` holds the digests of the in-memory credentials an
-/// embedding desktop process was given. They live exactly as long as this
-/// process, which is also the desktop app's lifetime, so nothing about them
-/// needs persisting, revoking, or evicting.
-#[derive(Clone)]
+/// They live exactly as long as the process, so nothing about them needs
+/// persisting, revoking or evicting. A credential from another helm process,
+/// including an earlier launch on the same state directory, is refused.
+#[derive(Clone, Default)]
 pub(crate) struct AuthState {
-    store: HelmStore,
-    token: Arc<tokio::sync::RwLock<Option<String>>>,
-    rotation: Arc<tokio::sync::Mutex<()>>,
-    revocations: tokio::sync::broadcast::Sender<()>,
-    embedded_devices: Arc<std::sync::RwLock<Vec<[u8; 32]>>>,
-    /// Embedded helms deliberately reject durable browser credentials. The
-    /// helm recognizes only the two credentials minted in this process, so an
-    /// old credential left in the shared state directory cannot authenticate
-    /// against a later desktop launch.
-    accepts_stored_devices: bool,
-}
-
-/// Which kind of credential a request authenticated with, which decides
-/// whether token rotation applies to it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum AcceptedDevice {
-    /// A browser device row minted by the bootstrap exchange: revoked by
-    /// rotation and subject to the cap on remembered credentials.
-    Stored,
-    /// One of the embedding desktop app's in-memory credentials: valid for
-    /// the life of this helm process, whatever rotation does.
-    Embedded,
+    devices: Arc<std::sync::RwLock<Vec<[u8; 32]>>>,
 }
 
 impl AuthState {
-    /// Build the standalone authority used by browser-auth fixtures.
-    #[cfg(test)]
-    pub(crate) fn new(store: HelmStore) -> AuthState {
-        Self::for_mode(store, crate::ServingMode::Standalone)
+    pub(crate) fn new() -> AuthState {
+        AuthState::default()
     }
 
-    /// Bind credential admission to the same mode that selects the routes.
-    /// Embedded helms share durable state with standalone helms but accept
-    /// only their own launch's in-memory credentials.
-    pub(crate) fn for_mode(store: HelmStore, mode: crate::ServingMode) -> AuthState {
-        let (revocations, _) = tokio::sync::broadcast::channel(16);
-        AuthState {
-            store,
-            token: Arc::new(tokio::sync::RwLock::new(None)),
-            rotation: Arc::new(tokio::sync::Mutex::new(())),
-            revocations,
-            embedded_devices: Arc::new(std::sync::RwLock::new(Vec::new())),
-            accepts_stored_devices: mode == crate::ServingMode::Standalone,
-        }
-    }
-
-    /// Mint a device secret for the desktop app that embeds this helm.
+    /// Mint a device credential for a caller inside this process.
     ///
-    /// Only [`crate::run_embedded`] calls this, in process, before the helm
-    /// announces readiness; there is deliberately no HTTP route to it, so a
-    /// browser on the same loopback port can never obtain a credential that
-    /// rotation would not revoke. That single caller IS the guarantee: any
-    /// new caller needs the same scrutiny, since no test can catch a route
-    /// that leaks one. The secret is held as a digest in memory
-    /// only: it is not a device row, so rotation's delete and the exchange's
-    /// eviction never see it, and it dies with the process.
-    pub(crate) fn mint_embedded_device(&self) -> anyhow::Result<String> {
+    /// The callers are [`crate::run_embedded`] (for the desktop app that owns
+    /// the helm) and a standalone helm given `--test-credential-file`, both
+    /// before the helm announces readiness. There is deliberately no HTTP route
+    /// to this, and any new caller needs the same scrutiny: no test can catch a
+    /// route that leaks a credential.
+    pub(crate) fn mint_device(&self) -> anyhow::Result<String> {
         let secret = mint_secret()?;
-        self.embedded_devices
+        self.devices
             .write()
-            .expect("embedded device list poisoned")
+            .expect("device list poisoned")
             .push(digest(secret.as_bytes()));
         Ok(secret)
     }
 
-    /// Return the stable bootstrap token and retain it for lock-free exchange
-    /// rejection. Production calls this before HTTP serving begins.
-    pub(crate) async fn token(&self) -> anyhow::Result<String> {
-        if let Some(token) = self.token.read().await.as_ref() {
-            return Ok(token.clone());
-        }
-        let token = show_token(&self.store).await?;
-        let mut cached = self.token.write().await;
-        Ok(cached.get_or_insert(token).clone())
-    }
-
-    /// Rotate the bootstrap token, delete every device row in the same
-    /// transaction, then revoke every live authenticated socket.
+    /// Whether `secret` is one this process minted.
     ///
-    /// Revocation follows the commit. Broadcasting first would close clients
-    /// even when SQLite rejected the rotation and left their credentials valid.
-    pub(crate) async fn rotate(&self) -> Result<String, RotationError> {
-        let _serialized = self.rotation.lock().await;
-        let replacement = mint_secret().map_err(RotationError::Randomness)?;
-        let created_at = unix_timestamp().map_err(RotationError::Clock)?;
-        let token = self
-            .store
-            .rotate_web_token(replacement, created_at)
-            .await
-            .map_err(RotationError::Storage)?;
-        *self.token.write().await = Some(token.clone());
-        let _ = self.revocations.send(());
-        Ok(token)
-    }
-
-    /// Mint and persist one browser device credential for test setup.
-    ///
-    /// Production exchange uses [`Self::exchange`] so token validation and
-    /// insertion remain one transaction. This helper still goes through that
-    /// boundary rather than writing an otherwise-impossible device row.
-    #[cfg(test)]
-    pub(crate) async fn mint_device(&self) -> anyhow::Result<String> {
-        let token = self.token().await?;
-        self.exchange(token)
-            .await?
-            .context("the stored web token must authenticate its own device exchange")
-    }
-
-    /// Exchange one valid bootstrap token for a new device secret.
-    async fn exchange(&self, supplied_token: String) -> Result<Option<String>, ExchangeError> {
-        let expected = self
-            .token
-            .read()
-            .await
-            .clone()
-            .ok_or(ExchangeError::TokenNotLoaded)?;
-        let accepted: bool = digest(expected.as_bytes())
-            .ct_eq(&digest(supplied_token.as_bytes()))
-            .into();
-        if !accepted {
-            return Ok(None);
-        }
-
-        let secret = mint_secret().map_err(ExchangeError::Randomness)?;
-        let created_at = unix_timestamp().map_err(ExchangeError::Clock)?;
-        let accepted = self
-            .store
-            .exchange_device_session(supplied_token, digest(secret.as_bytes()), created_at)
-            .await
-            .map_err(ExchangeError::Storage)?;
-        Ok(accepted.then_some(secret))
-    }
-
-    /// Validate a device secret: the embedding desktop app's in-memory
-    /// credentials first, then the stored browser rows by digest primary key.
-    ///
-    /// The in-memory comparison is constant-time per entry and visits every
-    /// entry, like the token check, so timing says nothing about which
-    /// embedded credential (if any) a guess came close to.
-    async fn accepts_device(&self, secret: &str) -> anyhow::Result<Option<AcceptedDevice>> {
+    /// Constant-time per entry and visits every entry, so timing says nothing
+    /// about which credential (if any) a guess came close to.
+    fn accepts_device(&self, secret: &str) -> bool {
         let supplied = digest(secret.as_bytes());
-        let embedded = self
-            .embedded_devices
+        let found = self
+            .devices
             .read()
-            .expect("embedded device list poisoned")
+            .expect("device list poisoned")
             .iter()
             .fold(subtle::Choice::from(0), |found, known| {
                 found | known.ct_eq(&supplied)
             });
-        if bool::from(embedded) {
-            return Ok(Some(AcceptedDevice::Embedded));
-        }
-        if !self.accepts_stored_devices {
-            return Ok(None);
-        }
-        Ok(self
-            .store
-            .has_device_session(supplied)
-            .await?
-            .then_some(AcceptedDevice::Stored))
-    }
-
-    /// Subscribe before authenticating a WebSocket handshake so rotation
-    /// cannot land in the gap between admission and subscription.
-    pub(crate) fn socket_session(&self) -> AuthenticatedSocket {
-        AuthenticatedSocket {
-            revocations: Some(Arc::new(tokio::sync::Mutex::new(
-                self.revocations.subscribe(),
-            ))),
-        }
-    }
-}
-
-/// The revocation subscription carried from authenticated middleware into a
-/// WebSocket serving task.
-///
-/// Wrapped so axum can clone request extensions. A request owns one receiver;
-/// the clone moved into `on_upgrade` is the only consumer that waits on it.
-///
-/// `revocations` is `None` for a socket the embedding desktop app opened
-/// with one of its in-memory credentials. Rotation does not revoke those
-/// credentials, so it must not close their sockets either: the desktop
-/// window's terminals and event feed stay up through `farhelm helm token
-/// rotate`.
-#[derive(Clone)]
-pub(crate) struct AuthenticatedSocket {
-    revocations: Option<Arc<tokio::sync::Mutex<tokio::sync::broadcast::Receiver<()>>>>,
-}
-
-impl AuthenticatedSocket {
-    /// A socket that no rotation revokes, for an embedded credential.
-    fn unrevocable() -> AuthenticatedSocket {
-        AuthenticatedSocket { revocations: None }
-    }
-
-    /// Resolve when token rotation invalidates this socket's device session.
-    /// Never resolves for an embedded credential's socket.
-    pub(crate) async fn revoked(&self) {
-        match &self.revocations {
-            Some(revocations) => {
-                let _ = revocations.lock().await.recv().await;
-            }
-            None => std::future::pending().await,
-        }
-    }
-
-    /// Observe a revocation that already landed without waiting for a future
-    /// rotation. A lag or sender shutdown is equally terminal: either means
-    /// this socket can no longer prove it remained continuously authorized.
-    pub(crate) async fn is_revoked(&self) -> bool {
-        use tokio::sync::broadcast::error::TryRecvError;
-
-        let Some(revocations) = &self.revocations else {
-            return false;
-        };
-        match revocations.lock().await.try_recv() {
-            Ok(()) | Err(TryRecvError::Lagged(_) | TryRecvError::Closed) => true,
-            Err(TryRecvError::Empty) => false,
-        }
-    }
-}
-
-/// The deliberately small public bootstrap request body.
-#[derive(Deserialize)]
-pub(crate) struct TokenExchange {
-    token: String,
-}
-
-/// Successful bootstrap exchange response. The browser persists this value in
-/// origin-scoped localStorage and supplies it explicitly on every API edge.
-#[derive(Serialize)]
-pub(crate) struct DeviceExchange {
-    device_secret: String,
-}
-
-/// `POST /api/auth/token`: exchange the recoverable bootstrap token for a
-/// persistent, origin-scoped device secret.
-pub(crate) async fn exchange_token(
-    State(state): State<Arc<AppState>>,
-    Json(exchange): Json<TokenExchange>,
-) -> Response {
-    if !valid_secret_shape(&exchange.token) {
-        return unauthenticated();
-    }
-    match state.auth.exchange(exchange.token).await {
-        Ok(Some(device_secret)) => {
-            (StatusCode::OK, Json(DeviceExchange { device_secret })).into_response()
-        }
-        Ok(None) => unauthenticated(),
-        Err(error) => exchange_internal_error(error),
+        bool::from(found)
     }
 }
 
@@ -359,7 +110,7 @@ pub(crate) async fn validate_device() -> StatusCode {
 /// WebSocket upgrade is reached.
 pub(crate) async fn require_device_session(
     State(state): State<Arc<AppState>>,
-    mut request: Request,
+    request: Request,
     next: Next,
 ) -> Response {
     let websocket_request = request
@@ -367,63 +118,18 @@ pub(crate) async fn require_device_session(
         .get(header::UPGRADE)
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.eq_ignore_ascii_case("websocket"));
-    let websocket = websocket_device_secret(request.headers());
-    let socket_session = websocket_request.then(|| state.auth.socket_session());
-    let supplied = if websocket_request {
-        websocket.as_deref()
+    let accepted = if websocket_request {
+        websocket_device_secret(request.headers())
+            .is_some_and(|secret| state.auth.accepts_device(&secret))
     } else {
         authorization_device_secret(request.headers())
+            .is_some_and(|secret| state.auth.accepts_device(secret))
     };
-    match supplied {
-        Some(secret) => match state.auth.accepts_device(secret).await {
-            Ok(Some(accepted)) => {
-                if let Some(socket_session) = socket_session {
-                    // The subscription was taken before the check (see
-                    // `socket_session`); an embedded credential swaps it for
-                    // one rotation cannot close.
-                    let socket_session = match accepted {
-                        AcceptedDevice::Stored => socket_session,
-                        AcceptedDevice::Embedded => AuthenticatedSocket::unrevocable(),
-                    };
-                    request.extensions_mut().insert(socket_session);
-                }
-                next.run(request).await
-            }
-            Ok(None) => unauthenticated(),
-            Err(error) => internal_error(error),
-        },
-        None => unauthenticated(),
+    if accepted {
+        next.run(request).await
+    } else {
+        unauthenticated()
     }
-}
-
-/// Return the stored token, minting the first one without assuming this
-/// caller wins a concurrent first-use race.
-pub(crate) async fn show_token(store: &HelmStore) -> anyhow::Result<String> {
-    if let Some(token) = store.web_token().await? {
-        return Ok(token);
-    }
-    store
-        .web_token_or_insert(mint_secret()?, unix_timestamp()?)
-        .await
-}
-
-/// Return the stored bootstrap token without creating one.
-///
-/// This is the read-only path for a CLI that observed a serving helm owning
-/// the state directory. That helm must remain the only process allowed to
-/// initialize authentication state while it is running.
-pub(crate) async fn show_existing_token(store: &HelmStore) -> anyhow::Result<String> {
-    store
-        .web_token()
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("the serving helm has no token"))
-}
-
-/// Rotate directly in storage. Used only when no serving helm control socket
-/// exists, so there can be no live WebSocket in that process to revoke.
-pub(crate) async fn rotate_offline(store: &HelmStore) -> anyhow::Result<String> {
-    let replacement = mint_secret()?;
-    store.rotate_web_token(replacement, unix_timestamp()?).await
 }
 
 /// Extract the one exact REST authentication scheme this API accepts.
@@ -459,21 +165,12 @@ fn websocket_device_secret(headers: &axum::http::HeaderMap) -> Option<String> {
     application.then_some(secret).flatten()
 }
 
-/// Fixed-size digest used as the device-session primary key.
+/// Fixed-size digest of a credential, the only form this process keeps.
 fn digest(value: &[u8]) -> [u8; 32] {
     Sha256::digest(value).into()
 }
 
-/// Reject malformed bootstrap candidates before doing storage or hashing
-/// work. Valid tokens are exactly one unpadded base64url encoding of 128 bits.
-fn valid_secret_shape(secret: &str) -> bool {
-    secret.len() == SECRET_LENGTH
-        && secret
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-}
-
-/// Mint a URL-safe 128-bit credential without padding or punctuation that a
+/// Mint a URL-safe 128-bit credential without padding or punctuation, which
 /// HTTP and WebSocket protocol tokens can carry without escaping.
 fn mint_secret() -> anyhow::Result<String> {
     let mut bytes = [0u8; 16];
@@ -481,59 +178,11 @@ fn mint_secret() -> anyhow::Result<String> {
     Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
 }
 
-fn unix_timestamp() -> anyhow::Result<i64> {
-    let seconds = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .context("system clock is before the Unix epoch")?
-        .as_secs();
-    i64::try_from(seconds).context("system clock does not fit in SQLite INTEGER")
-}
-
 fn unauthenticated() -> Response {
     (
         StatusCode::UNAUTHORIZED,
         [(header::CONTENT_TYPE, "application/json")],
         format!(r#"{{"error":"unauthenticated","code":"{AUTH_REQUIRED_CODE}"}}"#),
-    )
-        .into_response()
-}
-
-/// Return only fixed, actionable failure categories while logging the full
-/// causal chain for the operator who can act on it.
-fn exchange_internal_error(error: ExchangeError) -> Response {
-    tracing::error!(error = %error, source = ?std::error::Error::source(&error), "device exchange failed internally");
-    let (code, detail) = match error {
-        ExchangeError::Randomness(_) => (
-            "randomness_unavailable",
-            "operating-system randomness is unavailable; retry after checking the helm host",
-        ),
-        ExchangeError::Clock(_) => (
-            "clock_unavailable",
-            "the helm host clock is unavailable; correct it and retry",
-        ),
-        ExchangeError::Storage(_) => (
-            "authentication_storage_unavailable",
-            "authentication storage is unavailable; inspect the helm logs and retry",
-        ),
-        ExchangeError::TokenNotLoaded => (
-            "authentication_not_ready",
-            "device authentication is not ready; retry after the helm finishes starting",
-        ),
-    };
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        [(header::CONTENT_TYPE, "application/json")],
-        serde_json::json!({ "error": code, "detail": detail }).to_string(),
-    )
-        .into_response()
-}
-
-fn internal_error(error: anyhow::Error) -> Response {
-    tracing::error!(error = %error, "browser authentication failed internally");
-    (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        [(header::CONTENT_TYPE, "application/json")],
-        r#"{"error":"internal"}"#,
     )
         .into_response()
 }
@@ -571,7 +220,8 @@ mod tests {
 
     /// The middleware boundary is structural: an ordinary REST route is
     /// refused before its handler, and the outer build-stamp layer still
-    /// decorates that refusal so skew wins over login in the browser.
+    /// decorates that refusal so a client can tell version skew from a
+    /// missing credential.
     #[farhelm_testtrace::test]
     async fn unauthenticated_rest_is_structured_401_with_a_build_stamp() {
         let harness = rest_harness::idle_helm().await;
@@ -599,7 +249,7 @@ mod tests {
 
     /// WebSockets are HTTP until the upgrade completes, so every protected
     /// socket route must answer a missing device secret with 401 rather than
-    /// opening and then emitting a close code the browser has to reinterpret.
+    /// opening and then emitting a close code the client has to reinterpret.
     #[farhelm_testtrace::test]
     async fn unauthenticated_websocket_is_refused_before_upgrade() {
         let mut harness = rest_harness::idle_helm().await;
@@ -619,83 +269,83 @@ mod tests {
         }
     }
 
-    /// The bootstrap path is public, returns a device secret in its body, and
-    /// that secret alone authenticates later reads through Authorization.
+    /// Only credentials minted by this process authenticate. One minted by
+    /// another helm process, an earlier launch on the same state directory
+    /// included, must be refused: that is what lets the desktop app treat its
+    /// credentials as worthless once it exits.
     #[farhelm_testtrace::test]
-    async fn token_exchange_mints_an_explicit_device_session() {
+    fn credentials_are_scoped_to_the_minting_process() {
+        let this_process = AuthState::new();
+        let other_process = AuthState::new();
+        let ours = this_process.mint_device().unwrap();
+        let theirs = other_process.mint_device().unwrap();
+        assert!(this_process.accepts_device(&ours));
+        assert!(!this_process.accepts_device(&theirs));
+        assert!(!this_process.accepts_device(""));
+    }
+
+    /// A browser credential an older helm stored in `helm.db` no longer
+    /// authenticates anything.
+    ///
+    /// Why it matters: state directories that ran an older helm still hold
+    /// `device_sessions` rows from browser sign-in, and the table stays
+    /// because dropping it would be a schema migration. If anything still read
+    /// those rows, a leaked browser credential would outlive the feature.
+    /// Spec: a request carrying a secret whose digest is a stored row is
+    /// refused with 401, while the identical request carrying a credential
+    /// this process minted succeeds. The second half is the control: without
+    /// it, a 401 could come from the request's shape (its host, route or
+    /// header form) rather than from the ignored row.
+    #[farhelm_testtrace::test]
+    async fn a_device_row_left_by_an_older_helm_does_not_authenticate() {
         let harness = rest_harness::idle_helm().await;
-        let token = harness.state.auth.rotate().await.unwrap();
-        let exchange = Request::builder()
-            .method("POST")
-            .uri("/api/auth/token")
-            .header(header::HOST, "127.0.0.1:7433")
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(serde_json::json!({"token": token}).to_string()))
-            .unwrap();
+        let stored = "AAAAAAAAAAAAAAAAAAAAAA";
+        harness
+            .store
+            .conn()
+            .lock()
+            .execute(
+                "INSERT INTO device_sessions (cookie_hash, created_at) VALUES (?1, ?2)",
+                rusqlite::params![digest(stored.as_bytes()).to_vec(), 1],
+            )
+            .expect("fixture premise: the old table still accepts a row");
+        // One request shape for both credentials, so only the secret differs.
+        let list_sessions = |secret: &str| {
+            Request::builder()
+                .uri("/api/sessions")
+                .header(header::HOST, "127.0.0.1:7433")
+                .header(header::AUTHORIZATION, format!("Bearer {secret}"))
+                .body(Body::empty())
+                .unwrap()
+        };
         let response = harness
             .unauthenticated_router()
-            .oneshot(exchange)
+            .oneshot(list_sessions(stored))
             .await
             .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-        assert_eq!(response.status(), StatusCode::OK);
-        assert!(response.headers().get(header::SET_COOKIE).is_none());
-        let body: serde_json::Value =
-            serde_json::from_slice(&to_bytes(response.into_body(), 1024).await.unwrap()).unwrap();
-        let secret = body["device_secret"].as_str().unwrap();
-        let expected: [u8; 32] = Sha256::digest(secret.as_bytes()).into();
-        assert_eq!(
-            harness.store.device_session_hashes().await.unwrap(),
-            vec![expected],
-            "the independent SHA-256 digest must be the sole stored credential form"
-        );
-
-        let validation = Request::builder()
-            .uri("/api/auth/device")
-            .header(header::HOST, "127.0.0.1:7433")
-            .header(header::AUTHORIZATION, format!("Bearer {secret}"))
-            .body(Body::empty())
-            .unwrap();
+        let minted = harness.state.auth.mint_device().unwrap();
         let response = harness
             .unauthenticated_router()
-            .oneshot(validation)
+            .oneshot(list_sessions(&minted))
             .await
             .unwrap();
         assert_eq!(
             response.status(),
-            StatusCode::NO_CONTENT,
-            "standalone validation must accept the exchanged credential"
-        );
-
-        let read = Request::builder()
-            .uri("/api/sessions")
-            .header(header::HOST, "127.0.0.1:7433")
-            .header(header::AUTHORIZATION, format!("Bearer {secret}"))
-            .body(Body::empty())
-            .unwrap();
-        let response = harness
-            .unauthenticated_router()
-            .oneshot(read)
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-
-        assert_eq!(
-            harness.store.device_session_count().await.unwrap(),
-            1,
-            "validation must not mint a replacement device row"
+            StatusCode::OK,
+            "control: the same request with a credential this helm minted must authenticate"
         );
     }
 
     /// The desktop webview's credential-validation route keeps readable
     /// success and failure answers on the embedded helm. This pins both
     /// outcomes because the UI must distinguish an expired credential from a
-    /// valid one. Standalone refusal of the same custom-scheme Origin is
-    /// pinned by `embedded_mode_has_no_browser_ui_or_token_exchange`.
+    /// valid one.
     #[farhelm_testtrace::test]
     async fn embedded_device_validation_cors_is_readable_for_success_and_failure() {
         let harness = rest_harness::idle_helm().await.embedded();
-        let secret = harness.state.auth.mint_embedded_device().unwrap();
+        let secret = harness.state.auth.mint_device().unwrap();
         for (label, credential, status) in [
             ("valid embedded credential", secret, StatusCode::NO_CONTENT),
             (
@@ -725,416 +375,8 @@ mod tests {
         }
     }
 
-    /// A browser must be able to load the application before it has a credential;
-    /// otherwise there is nowhere to present the in-page token form.
-    #[farhelm_testtrace::test]
-    async fn static_bundle_is_public() {
-        let harness = rest_harness::idle_helm().await;
-        let dist = tempfile::tempdir().unwrap();
-        std::fs::write(dist.path().join("index.html"), "token prompt shell").unwrap();
-        let request = Request::builder()
-            .uri("/")
-            .header(header::HOST, "127.0.0.1:7433")
-            .body(Body::empty())
-            .unwrap();
-        let response = crate::build_router(
-            Arc::clone(&harness.state),
-            crate::UiSource::Dir(dist.path().to_path_buf()),
-            7433,
-        )
-        .oneshot(request)
-        .await
-        .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            to_bytes(response.into_body(), 1024).await.unwrap(),
-            "token prompt shell"
-        );
-    }
-
-    /// The recoverable token is durable rather than process-local: `show`
-    /// after a helm restart must print the same value until rotation.
-    #[farhelm_testtrace::test]
-    async fn token_show_survives_a_helm_restart() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("helm.db");
-        let store = HelmStore::open(&path).await.unwrap();
-        let before = show_token(&store).await.unwrap();
-        drop(store);
-        let reopened = HelmStore::open(&path).await.unwrap();
-        let after = show_token(&reopened).await.unwrap();
-        assert_eq!(after, before);
-    }
-
-    /// The exchange accepts the token only in its JSON body. A wrong body
-    /// remains wrong even if the correct token is smuggled into the query,
-    /// and neither refusal may leave a device row behind.
-    #[farhelm_testtrace::test]
-    async fn refused_exchanges_never_mint_a_device_session() {
-        let harness = rest_harness::idle_helm().await;
-        let token = harness.state.auth.token().await.unwrap();
-        let before = harness.store.device_session_count().await.unwrap();
-        let wrong = if token == "AAAAAAAAAAAAAAAAAAAAAA" {
-            "BBBBBBBBBBBBBBBBBBBBBB"
-        } else {
-            "AAAAAAAAAAAAAAAAAAAAAA"
-        };
-        for uri in [
-            "/api/auth/token".to_string(),
-            format!("/api/auth/token?token={token}"),
-        ] {
-            let request = Request::builder()
-                .method("POST")
-                .uri(uri)
-                .header(header::HOST, "127.0.0.1:7433")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(serde_json::json!({"token": wrong}).to_string()))
-                .unwrap();
-            let response = harness
-                .unauthenticated_router()
-                .oneshot(request)
-                .await
-                .unwrap();
-            assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-        }
-        assert_eq!(harness.store.device_session_count().await.unwrap(), before);
-    }
-
-    /// Invalid, well-shaped tokens are rejected from the in-memory authority
-    /// even while another connection holds SQLite's write lock. Reaching the
-    /// exchange transaction would make this call wait behind that lock.
-    #[farhelm_testtrace::test]
-    async fn invalid_exchange_never_touches_sqlite() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("helm.db");
-        let store = HelmStore::open(&path).await.unwrap();
-        let auth = AuthState::new(store);
-        let token = auth.token().await.unwrap();
-        let wrong = if token == "AAAAAAAAAAAAAAAAAAAAAA" {
-            "BBBBBBBBBBBBBBBBBBBBBB"
-        } else {
-            "AAAAAAAAAAAAAAAAAAAAAA"
-        };
-        let mut blocker = rusqlite::Connection::open(&path).unwrap();
-        let _transaction = blocker
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .unwrap();
-
-        let result = tokio::time::timeout(
-            std::time::Duration::from_millis(100),
-            auth.exchange(wrong.to_string()),
-        )
-        .await
-        .expect("invalid validation must not wait for SQLite")
-        .unwrap();
-        assert!(result.is_none());
-    }
-
-    /// Storage failures return a fixed actionable category and never expose
-    /// SQLite trigger text supplied by the database.
-    #[farhelm_testtrace::test]
-    async fn exchange_storage_failure_is_actionable_and_sanitized() {
-        let harness = rest_harness::idle_helm().await;
-        let token = harness.state.auth.token().await.unwrap();
-        harness.store.refuse_device_inserts_for_test().await;
-        let request = Request::builder()
-            .method("POST")
-            .uri("/api/auth/token")
-            .header(header::HOST, "127.0.0.1:7433")
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(serde_json::json!({"token": token}).to_string()))
-            .unwrap();
-        let response = harness
-            .unauthenticated_router()
-            .oneshot(request)
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-        let body = String::from_utf8(to_bytes(response.into_body(), 1024).await.unwrap().to_vec())
-            .unwrap();
-        assert!(body.contains("authentication_storage_unavailable"));
-        assert!(body.contains("inspect the helm logs"));
-        assert!(!body.contains("secret database detail"));
-    }
-
-    /// A failed rotation preserves all three old-authority facts: token,
-    /// device admission, and the absence of a live-socket revocation event.
-    #[farhelm_testtrace::test]
-    async fn failed_rotation_keeps_old_credentials_and_sockets() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("helm.db");
-        let store = HelmStore::open(&path).await.unwrap();
-        let auth = AuthState::new(store);
-        let old_token = auth.token().await.unwrap();
-        let old_device = auth.mint_device().await.unwrap();
-        let socket = auth.socket_session();
-        let conn = rusqlite::Connection::open(&path).unwrap();
-        conn.execute_batch(
-            "CREATE TRIGGER refuse_auth_delete BEFORE DELETE ON device_sessions \
-             BEGIN SELECT RAISE(ABORT, 'scripted rotation failure'); END;",
-        )
-        .unwrap();
-
-        assert!(matches!(
-            auth.rotate().await,
-            Err(RotationError::Storage(_))
-        ));
-        assert_eq!(auth.token().await.unwrap(), old_token);
-        assert_eq!(
-            auth.accepts_device(&old_device).await.unwrap(),
-            Some(AcceptedDevice::Stored)
-        );
-        assert!(
-            tokio::time::timeout(std::time::Duration::from_millis(50), socket.revoked())
-                .await
-                .is_err(),
-            "a transaction that did not commit must not revoke live sockets"
-        );
-    }
-
-    /// Reusing one valid bootstrap token yields independent device authority,
-    /// never a deterministic derivative of the token or prior exchange.
-    #[farhelm_testtrace::test]
-    async fn repeated_exchanges_mint_distinct_independently_usable_devices() {
-        let harness = rest_harness::idle_helm().await;
-        let token = harness.state.auth.token().await.unwrap();
-        let first = exchange_through_router(&harness, &token).await;
-        let second = exchange_through_router(&harness, &token).await;
-        assert_ne!(first, second);
-        for secret in [&first, &second] {
-            assert_eq!(
-                base64::engine::general_purpose::URL_SAFE_NO_PAD
-                    .decode(secret)
-                    .unwrap()
-                    .len(),
-                16
-            );
-        }
-        for secret in [first, second] {
-            let request = Request::builder()
-                .uri("/api/sessions")
-                .header(header::HOST, "127.0.0.1:7433")
-                .header(header::AUTHORIZATION, format!("Bearer {secret}"))
-                .body(Body::empty())
-                .unwrap();
-            let response = harness
-                .unauthenticated_router()
-                .oneshot(request)
-                .await
-                .unwrap();
-            assert_eq!(response.status(), StatusCode::OK);
-        }
-    }
-
-    /// Device sessions have no server-side age cutoff: rotation, not a wall
-    /// clock comparison, is the sole expiry mechanism specified for v1.
-    #[farhelm_testtrace::test]
-    async fn arbitrarily_old_device_session_authenticates_until_rotation() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
-        let auth = AuthState::new(store.clone());
-        let secret = "AAAAAAAAAAAAAAAAAAAAAA";
-        store
-            .insert_device_session(digest(secret.as_bytes()), i64::MIN)
-            .await
-            .unwrap();
-        assert_eq!(
-            auth.accepts_device(secret).await.unwrap(),
-            Some(AcceptedDevice::Stored)
-        );
-        auth.token().await.unwrap();
-        auth.rotate().await.unwrap();
-        assert_eq!(auth.accepts_device(secret).await.unwrap(), None);
-    }
-
-    /// A desktop launch shares the state directory with standalone helm
-    /// commands, so old browser rows may still be present. Its in-memory
-    /// authority must nevertheless admit only the credentials minted during
-    /// that launch.
-    #[farhelm_testtrace::test]
-    async fn embedded_auth_rejects_stored_devices() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
-        let stored = "AAAAAAAAAAAAAAAAAAAAAA";
-        store
-            .insert_device_session(digest(stored.as_bytes()), i64::MIN)
-            .await
-            .unwrap();
-        assert_eq!(
-            AuthState::new(store.clone())
-                .accepts_device(stored)
-                .await
-                .unwrap(),
-            Some(AcceptedDevice::Stored),
-            "fixture premise: the stored row is valid on a standalone helm"
-        );
-        let auth = AuthState::for_mode(store, crate::ServingMode::Embedded);
-
-        assert_eq!(auth.accepts_device(stored).await.unwrap(), None);
-        let current = auth.mint_embedded_device().unwrap();
-        assert_eq!(
-            auth.accepts_device(&current).await.unwrap(),
-            Some(AcceptedDevice::Embedded)
-        );
-    }
-
-    /// The desktop app's own credentials are exempt from rotation: after
-    /// `farhelm helm token rotate` an embedded credential still
-    /// authenticates while a browser credential minted beside it does not,
-    /// and the embedded one was never a database row for rotation's delete
-    /// to reach. This is what keeps the desktop window from ever having to
-    /// sign in again (SPEC.md "Security", "Client to helm").
-    #[farhelm_testtrace::test]
-    async fn rotation_revokes_browser_credentials_but_not_embedded_ones() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
-        let auth = AuthState::new(store.clone());
-        let embedded = auth.mint_embedded_device().unwrap();
-        let browser = auth.mint_device().await.unwrap();
-        assert_eq!(
-            store.device_session_hashes().await.unwrap(),
-            vec![digest(browser.as_bytes())],
-            "only the browser credential may be stored"
-        );
-
-        auth.rotate().await.unwrap();
-
-        assert_eq!(
-            auth.accepts_device(&embedded).await.unwrap(),
-            Some(AcceptedDevice::Embedded)
-        );
-        assert_eq!(auth.accepts_device(&browser).await.unwrap(), None);
-    }
-
-    /// The cap on remembered browser credentials evicts the oldest stored
-    /// rows, and a desktop credential must never be one of them: many
-    /// browser sign-ins used to evict the desktop app's own credentials and
-    /// force its hidden re-authentication.
-    #[farhelm_testtrace::test]
-    async fn browser_exchanges_past_the_cap_never_evict_embedded_credentials() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
-        let auth = AuthState::new(store.clone());
-        let embedded = auth.mint_embedded_device().unwrap();
-        let first_browser = auth.mint_device().await.unwrap();
-        for _ in 0..crate::store::MAX_DEVICE_SESSIONS {
-            auth.mint_device().await.unwrap();
-        }
-        // Premise: the cap really did evict something, so the embedded
-        // credential surviving is not just an under-filled table.
-        assert_eq!(auth.accepts_device(&first_browser).await.unwrap(), None);
-        assert_eq!(
-            store.device_session_count().await.unwrap(),
-            crate::store::MAX_DEVICE_SESSIONS
-        );
-        assert_eq!(
-            auth.accepts_device(&embedded).await.unwrap(),
-            Some(AcceptedDevice::Embedded)
-        );
-    }
-
-    /// The public bootstrap exchange yields an ordinary stored credential,
-    /// which rotation revokes, never an embedded one: a browser on the
-    /// loopback port must not be able to obtain a credential `token rotate`
-    /// cannot take back. This covers the one route that mints credentials;
-    /// the guarantee against any OTHER route handing out an embedded one is
-    /// structural (`mint_embedded_device` has a single, in-process caller),
-    /// not something a test can enumerate.
-    #[farhelm_testtrace::test]
-    async fn the_bootstrap_exchange_only_mints_stored_credentials() {
-        let harness = rest_harness::idle_helm().await;
-        let token = harness.state.auth.token().await.unwrap();
-        let exchanged = exchange_through_router(&harness, &token).await;
-        assert_eq!(
-            harness.state.auth.accepts_device(&exchanged).await.unwrap(),
-            Some(AcceptedDevice::Stored)
-        );
-        harness.state.auth.rotate().await.unwrap();
-        assert_eq!(
-            harness.state.auth.accepts_device(&exchanged).await.unwrap(),
-            None
-        );
-    }
-
-    /// Rotation closes every live browser WebSocket, but a socket the
-    /// desktop app opened with its embedded credential stays open: its
-    /// credential is still valid, and closing it would make the window's
-    /// terminals and event feed drop and reconnect for nothing. Driven
-    /// through the real middleware with a WebSocket-shaped request; the
-    /// probe handler rotates after admission and reports what the socket's
-    /// revocation subscription saw.
-    #[farhelm_testtrace::test]
-    async fn rotation_closes_browser_sockets_but_not_embedded_ones() {
-        let harness = rest_harness::idle_helm().await;
-        let auth = harness.state.auth.clone();
-        let app = axum::Router::new()
-            .route(
-                "/probe",
-                axum::routing::get(
-                    move |axum::Extension(socket): axum::Extension<AuthenticatedSocket>| {
-                        let auth = auth.clone();
-                        async move {
-                            auth.rotate().await.unwrap();
-                            if socket.is_revoked().await {
-                                "revoked"
-                            } else {
-                                "open"
-                            }
-                        }
-                    },
-                ),
-            )
-            .layer(axum::middleware::from_fn_with_state(
-                Arc::clone(&harness.state),
-                require_device_session,
-            ));
-        let probe = |secret: String| {
-            Request::builder()
-                .uri("/probe")
-                .header(header::UPGRADE, "websocket")
-                .header(
-                    header::SEC_WEBSOCKET_PROTOCOL,
-                    format!("{WS_PROTOCOL}, {WS_DEVICE_PREFIX}{secret}"),
-                )
-                .body(Body::empty())
-                .unwrap()
-        };
-        let read = |response: Response| async move {
-            assert_eq!(response.status(), StatusCode::OK);
-            String::from_utf8(to_bytes(response.into_body(), 64).await.unwrap().to_vec()).unwrap()
-        };
-
-        let embedded = harness.state.auth.mint_embedded_device().unwrap();
-        let response = app.clone().oneshot(probe(embedded)).await.unwrap();
-        assert_eq!(read(response).await, "open");
-
-        let browser = harness.state.auth.mint_device().await.unwrap();
-        let response = app.oneshot(probe(browser)).await.unwrap();
-        assert_eq!(read(response).await, "revoked");
-    }
-
-    /// Drive the public exchange route and decode its explicit credential.
-    async fn exchange_through_router(harness: &rest_harness::Harness, token: &str) -> String {
-        let request = Request::builder()
-            .method("POST")
-            .uri("/api/auth/token")
-            .header(header::HOST, "127.0.0.1:7433")
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(serde_json::json!({"token": token}).to_string()))
-            .unwrap();
-        let response = harness
-            .unauthenticated_router()
-            .oneshot(request)
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body: serde_json::Value =
-            serde_json::from_slice(&to_bytes(response.into_body(), 1024).await.unwrap()).unwrap();
-        body["device_secret"].as_str().unwrap().to_string()
-    }
-
-    /// Both bootstrap and device credentials carry the promised 128 bits,
-    /// rather than merely looking random as encoded strings.
+    /// Device credentials carry the promised 128 bits, rather than merely
+    /// looking random as encoded strings.
     #[farhelm_testtrace::test]
     fn minted_credentials_decode_to_exactly_128_bits() {
         for _ in 0..32 {
@@ -1144,95 +386,5 @@ mod tests {
                 .unwrap();
             assert_eq!(decoded.len(), 16);
         }
-    }
-
-    /// Two first-use readers on separate SQLite connections converge on the
-    /// same committed singleton instead of each reporting its own candidate.
-    #[farhelm_testtrace::test]
-    async fn concurrent_first_mint_returns_one_committed_token() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("helm.db");
-        let first = HelmStore::open(&path).await.unwrap();
-        let second = HelmStore::open(&path).await.unwrap();
-        let (first, second) = tokio::join!(show_token(&first), show_token(&second));
-        assert_eq!(first.unwrap(), second.unwrap());
-    }
-
-    /// Rotation and exchange serialize at one immediate transaction. If
-    /// validation pauses while holding that transaction, the later rotation
-    /// deletes the admitted row rather than letting an old token mint after it.
-    #[farhelm_testtrace::test]
-    async fn rotation_cannot_be_overtaken_by_a_validated_exchange() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("helm.db");
-        let exchanger = HelmStore::open(&path).await.unwrap();
-        let rotator = HelmStore::open(&path).await.unwrap();
-        let old = "AAAAAAAAAAAAAAAAAAAAAA".to_string();
-        exchanger.web_token_or_insert(old.clone(), 1).await.unwrap();
-
-        let (validated_tx, validated_rx) = tokio::sync::oneshot::channel();
-        let (release_tx, release_rx) = std::sync::mpsc::channel();
-        let exchange = tokio::spawn(async move {
-            exchanger
-                .exchange_device_session_with_pause(
-                    old,
-                    [9; 32],
-                    2,
-                    Box::new(move || {
-                        let _ = validated_tx.send(());
-                        release_rx.recv().unwrap();
-                    }),
-                )
-                .await
-        });
-        validated_rx.await.unwrap();
-
-        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
-        let rotation = tokio::spawn(async move {
-            let _ = started_tx.send(());
-            rotator
-                .rotate_web_token("BBBBBBBBBBBBBBBBBBBBBB".to_string(), 3)
-                .await
-        });
-        started_rx.await.unwrap();
-        release_tx.send(()).unwrap();
-        assert!(exchange.await.unwrap().unwrap());
-        rotation.await.unwrap().unwrap();
-
-        let store = HelmStore::open(&path).await.unwrap();
-        assert!(!store.has_device_session([9; 32]).await.unwrap());
-    }
-
-    /// Device rows stop at the documented cap and evict the oldest exact row
-    /// when the next profile authenticates.
-    #[farhelm_testtrace::test]
-    async fn device_session_cap_is_exact_and_evicts_the_oldest() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
-        let token = "AAAAAAAAAAAAAAAAAAAAAA".to_string();
-        store.web_token_or_insert(token.clone(), 1).await.unwrap();
-        for index in 0..=crate::store::MAX_DEVICE_SESSIONS {
-            assert!(
-                store
-                    .exchange_device_session(
-                        token.clone(),
-                        [u8::try_from(index).unwrap(); 32],
-                        i64::try_from(index).unwrap(),
-                    )
-                    .await
-                    .unwrap()
-            );
-        }
-        assert_eq!(
-            store.device_session_count().await.unwrap(),
-            crate::store::MAX_DEVICE_SESSIONS
-        );
-        assert!(!store.has_device_session([0; 32]).await.unwrap());
-        assert!(
-            store
-                .has_device_session([u8::try_from(crate::store::MAX_DEVICE_SESSIONS).unwrap(); 32])
-                .await
-                .unwrap()
-        );
     }
 }

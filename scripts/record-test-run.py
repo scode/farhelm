@@ -43,15 +43,13 @@ try:
     sys.dont_write_bytecode = True
     import test_run_traces
     import test_run_nextest
-    import test_run_playwright
-    import test_run_timings
 finally:
     sys.dont_write_bytecode = _previous_bytecode_setting
     del _previous_bytecode_setting
 
 
 SCHEMA_VERSION = 1
-RUNNER_MODULES = {"nextest": test_run_nextest, "playwright": test_run_playwright}
+RUNNER_MODULES = {"nextest": test_run_nextest}
 PROBE_TIMEOUT_SECONDS = 5.0
 PROBE_SAMPLE_LIMIT = 64 * 1024
 PROBE_KILL_GRACE_SECONDS = 0.5
@@ -1497,7 +1495,7 @@ def prepare_root(
 # command a private TMPDIR in farhelm-teststate's sweep family, holds the
 # family's liveness lock on it for the run, and removes it afterwards. A
 # recorder that is itself killed leaves it to that sweep, which every Rust
-# test process and browser stack runs over /tmp.
+# test process runs over /tmp.
 
 CHILD_TMP_ROOT = pathlib.Path("/tmp")
 # Must match farhelm-teststate's `RECORDER_TMP_PREFIX`, `RANDOM_SUFFIX_LEN`
@@ -1619,7 +1617,7 @@ def release_child_tmp(child_tmp: ChildTmp) -> dict[str, object]:
 # The default root lives in /tmp, which the shared Linux host empties only at
 # boot or after 30 days, and agents there record about 250 runs a day: by
 # 2026-11 the root held 18 GB, two fifths of it from runs that passed, whose
-# raw traces and Playwright artifacts nobody reads. A passing run in the
+# raw traces nobody reads. A passing run in the
 # default root therefore drops those bulky parts as soon as it ends (its
 # manifest, output, reports and counts stay), and a later invocation removes
 # whole passing runs once they are a few days old. Failed, refused,
@@ -1627,7 +1625,7 @@ def release_child_tmp(child_tmp: ChildTmp) -> dict[str, object]:
 # evidence `.agents/test-evidence.md` says to keep. An explicit
 # `--output-root` opts out of both, since its owner chose to keep everything.
 
-PASSED_RUN_BULK = ("traces.tar", "test-traces", test_run_playwright.ARTIFACTS)
+PASSED_RUN_BULK = ("traces.tar", "test-traces")
 PASSED_RUN_RETENTION_SECONDS = 3 * 24 * 60 * 60
 PRUNE_MANIFEST_LIMIT = 4 * 1024 * 1024
 
@@ -1858,10 +1856,8 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
             return exit_code
 
         if args.runner is not None:
-            expected_cwd = checkout / "e2e" if checkout and args.runner == "playwright" else checkout
-            if checkout is None or cwd != expected_cwd:
-                location = "checkout e2e directory" if args.runner == "playwright" else "checkout root"
-                raise UsageRefusal(f"{args.runner} mode must run from the {location}")
+            if checkout is None or cwd != checkout:
+                raise UsageRefusal(f"{args.runner} mode must run from the checkout root")
             runner_module = RUNNER_MODULES[args.runner]
             manifest.data["runner"] = {"name": args.runner, "prepared": False}
             manifest.write()
@@ -1885,8 +1881,6 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
         trace_root, trace_fd = test_run_traces.create_run_root(run_dir)
         child_env[test_run_traces.TRACE_ENV] = os.fspath(trace_root)
         owned_environment = (test_run_traces.TRACE_ENV,)
-        if args.runner == "playwright":
-            owned_environment += ("FARHELM_PLAYWRIGHT_POLICY_FILE",)
         manifest.data["environment"] = environment_evidence(
             ambient, child_env, args.keep_farhelm_env, recorder_owned=owned_environment,
         )
@@ -1960,29 +1954,15 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
             # an evidence failure. Preserve its actual child status and never
             # replace an existing nonzero test/timeout/interruption result.
             counts = report.get("counts", {})
-            if args.runner == "playwright":
-                report_problem = test_run_playwright.success_problem(report)
-            else:
-                report_problem = None
-                if (not report["complete"] or counts.get("tests", 0) == counts.get("skipped", 0)
-                        or any(counts.get(name, 0) for name in ("failures", "errors", "flaky"))):
-                    report_problem = "nextest report missing, incomplete, or inconsistent with success"
+            report_problem = None
+            if (not report["complete"] or counts.get("tests", 0) == counts.get("skipped", 0)
+                    or any(counts.get(name, 0) for name in ("failures", "errors", "flaky"))):
+                report_problem = "nextest report missing, incomplete, or inconsistent with success"
             if final_exit == 0 and report_problem:
                 final_exit = 125
                 manifest.data["outcome"] = "recorder-error"
                 manifest.data["recorder"]["exit_code"] = final_exit
                 manifest.data["recorder"]["error"] = report_problem
-            # The durable timing record (test_run_timings.py) outlives this
-            # run's evidence. It is written only from a structurally complete
-            # report, after the outcome above is final, and a failure to write
-            # it is noted here without touching the run's result.
-            if args.runner == "playwright" and report.get("complete") is True:
-                try:
-                    timing_path = test_run_timings.publish(
-                        ambient, manifest.data, run_dir, test_run_playwright.WORKERS)
-                    manifest.data["runner"]["timing_record"] = {"path": os.fspath(timing_path)}
-                except Exception as error:
-                    manifest.data["runner"]["timing_record"] = {"error": type(error).__name__}
             try:
                 manifest.write()
             except Exception as error:
