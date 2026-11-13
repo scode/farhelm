@@ -145,9 +145,10 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   operations, fresh-versus-update installer entrypoints, fixed command-only execution and provenance, bounded pre-action
   provider recovery, structured native actions, restart handoff failures, durable update evidence, exact native
   update-channel readouts, normal Finder readiness, conditional product confirmations, remote menu Remove/re-add and
-  Uninstall with independent effect receipts, old-session survival/migration and calibrated window-trace and bonus
-  gesture-readiness gates. The guest-only Swift helper separately needs SDK type-check and read-only runtime validation
-  in an owned disposable guest. None establishes live release product checks. Report platform skips.
+  Uninstall with independent effect receipts, old-session survival and Restart onto a new terminal host, and calibrated
+  window-trace and bonus gesture-readiness gates. The guest-only Swift helper separately needs SDK type-check and
+  read-only runtime validation in an owned disposable guest. None establishes live release product checks. Report
+  platform skips.
 - Terminal host coverage and mutation testing from `.agents/validation.md`
   (`cargo +nightly llvm-cov -p terminal-host --branch -- --test-threads=1`, and
   `RUST_TEST_THREADS=1 cargo mutants -p terminal-host` run the contained way that entry gives; both on one test thread,

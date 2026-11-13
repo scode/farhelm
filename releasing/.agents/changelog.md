@@ -123,8 +123,9 @@ instruction for older sections; the checker accepts the historical formats that 
 Every commit on main whose Conventional Commit type is `feat`, `fix`, `perf`, `style`, or `revert`, and every commit of
 any type marked `!`, is expected in the changelog of the next stable release. `style` is on the list because in this
 repository it means UI styling, which users see. `docs`, `refactor`, `test`, `chore`, and `ci` are not expected; add one
-by hand during curation when it matters to a user (a tmux pin change, say). A `revert` of something that shipped in a
-stable release is an entry; a revert of something that never shipped only removes the original's fragment.
+by hand during curation when it matters to a user (a raised requirement on a tool users install, say). A `revert` of
+something that shipped in a stable release is an entry; a revert of something that never shipped only removes the
+original's fragment.
 
 The rule of thumb is exactly that: if a required commit turns out to have nothing user-facing, the maintainer excludes
 it at curation time and nothing else has to happen.

@@ -61,15 +61,25 @@ mod tests {
                 started.status.is_some_and(|status| status.success()),
                 "{started:?}"
             );
-            let text = guard.diagnostic_text();
-            assert!(text.contains("guard-owned"), "{text}");
+            // Premise: the guarded session exists before the guard drops.
+            let mut probe = std::process::Command::new(executable);
+            probe
+                .args(["-S"])
+                .arg(&socket)
+                .args(["has-session", "-t", "guard-owned"]);
+            let present = run_bounded(&mut probe, &limits).unwrap();
+            assert!(
+                present.status.is_some_and(|status| status.success()),
+                "{present:?}"
+            );
+            // Only events after this point count as the Drop's evidence. The
+            // first iteration may have captured nothing yet.
             let boundary = capture
                 .snapshot()
                 .unwrap()
                 .events()
                 .last()
-                .unwrap()
-                .sequence;
+                .map(|event| event.sequence);
             let result = if disposition < 3 {
                 std::panic::catch_unwind(|| -> Result<(), &'static str> {
                     let _guard = guard;
@@ -104,7 +114,7 @@ mod tests {
             if disposition < 3 {
                 let evidence = capture
                     .matching_events(|event| {
-                        event.sequence > boundary
+                        boundary.is_none_or(|boundary| event.sequence > boundary)
                             && event
                                 .fields
                                 .get("text")
@@ -114,7 +124,7 @@ mod tests {
                 assert!(!evidence.is_empty(), "Drop lost the live session snapshot");
                 let shutdown = capture
                     .matching_events(|event| {
-                        event.sequence > boundary
+                        boundary.is_none_or(|boundary| event.sequence > boundary)
                             && event
                                 .fields
                                 .get("message")

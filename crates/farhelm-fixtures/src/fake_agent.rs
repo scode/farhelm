@@ -27,25 +27,17 @@ pub enum Script {
     Basic,
     /// Full-screen app on the alternate screen.
     Altscreen,
-    /// Raw non-UTF-8 output for byte-fidelity tests.
-    Binary,
     /// Numbered records emitted as fast as the pty will take them, once
     /// one input byte has arrived after `FAKE-AGENT READY`, for flood tests.
-    /// Deliberately unlike `Counter`, which paces itself: this one exists to
-    /// be FASTER than any consumer on the path and to emit far more bytes
-    /// than every bound on it combined. See `flood_gated`'s own docs for the
-    /// record shape tests key on and why it waits for a byte.
+    /// It exists to be FASTER than any consumer on the path and to emit far
+    /// more bytes than every bound on it combined. See `flood_gated`'s own
+    /// docs for the record shape tests key on and why it waits for a byte.
     FloodGated,
-    /// Continuous numbered records for replay/live cutover tests.
-    Counter,
-    /// Raw-mode hex echo of every input byte, for input-fidelity tests.
-    Hexecho,
     /// Enables mouse reporting on cue (`legacy` for DECSET 1000 alone,
     /// `sgr` to add DECSET 1006 on top), while hex-echoing every input
-    /// byte like [`Script::Hexecho`]. The reattach-restoration fixture for
-    /// `PaneModes`' mouse fields (PLAN_M6_5.md item 2) — see
-    /// [`mouse_modes`]'s own docs for why the two cues are separate and
-    /// how the echo is shared with `Hexecho` rather than reimplemented.
+    /// byte. The reattach-restoration fixture for `PaneModes`' mouse fields
+    /// (PLAN_M6_5.md item 2) — see [`mouse_modes`]'s own docs for why the
+    /// two cues are separate.
     MouseModes,
     /// Spawns a child process and prints both pids, for process-tree-kill
     /// tests.
@@ -302,10 +294,7 @@ pub fn run(
         Script::Replay => replay_transcript(replay),
         Script::Basic => basic(),
         Script::Altscreen => altscreen(),
-        Script::Binary => binary(),
         Script::FloodGated => flood_gated(),
-        Script::Counter => counter(),
-        Script::Hexecho => hexecho(),
         Script::MouseModes => mouse_modes(),
         // The trailing command prevents shells such as bash from replacing
         // themselves with sleep; tests require an intermediate shell.
@@ -1808,68 +1797,6 @@ fn altscreen() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Emit a byte that is invalid UTF-8 ON REQUEST, then exit.
-///
-/// This script exists because terminal output is bytes, not text. A
-/// lossy conversion in the live control path would replace 0xff and
-/// still leave every ordinary fake-agent test green. Capture replay is
-/// deliberately outside this contract: tmux may canonicalize invalid
-/// source bytes when it stores the terminal grid.
-///
-/// The invalid byte is held back until a byte arrives on stdin rather than
-/// written at startup, because the test that reads it attaches AFTER
-/// creating the session. Under load the fixture used to win that race,
-/// the byte landed in the attach snapshot (where tmux is allowed to
-/// canonicalize it) instead of the live stream, and the assertion that
-/// the live stream preserved it failed with nothing actually wrong. Output
-/// caused by input sent through an attachment is live by construction.
-fn binary() -> anyhow::Result<()> {
-    use std::io::Read as _;
-
-    let mut out = std::io::stdout().lock();
-    // Raw mode BEFORE the ready marker, for the reason `hexecho` documents:
-    // the test sends its request the instant it sees READY, so the mode has
-    // to be in force by then. Raw mode is what makes the request a single
-    // byte rather than a line: in the pty's default canonical mode the
-    // kernel holds input until a line terminator it recognizes, which
-    // turned "send one newline through the attachment" into a dependency on
-    // how tmux and the line discipline spell that newline, and on a loaded
-    // release runner the marker once never came at all.
-    set_raw_mode()?;
-    out.write_all(b"FAKE-AGENT READY\r\n")?;
-    out.flush()?;
-
-    let mut request = [0u8; 1];
-    // EOF reads as `Ok(0)`, and a closed stdin is not a request: emitting
-    // the marker then would let a torn-down pane "prove" that input crossed
-    // an attachment that never sent any.
-    if std::io::stdin().lock().read(&mut request)? == 0 {
-        return Ok(());
-    }
-    out.write_all(b"\xffBINARY-MARKER\r\n")?;
-    out.flush()?;
-    Ok(())
-}
-
-/// Emit an unbroken numbered stream until the surrounding tmux session
-/// kills the process.
-///
-/// Each record is flushed separately and fits in one PTY write. Replay
-/// cutover tests can therefore distinguish a real gap or overlap from
-/// buffering in this fixture: the expected transcript is a consecutive
-/// integer range with every value appearing once.
-fn counter() -> anyhow::Result<()> {
-    let mut out = std::io::stdout().lock();
-    writeln!(out, "FAKE-AGENT READY\r")?;
-    out.flush()?;
-    for sequence in 0_u64.. {
-        writeln!(out, "CUTOVER-{sequence:08}\r")?;
-        out.flush()?;
-        std::thread::sleep(std::time::Duration::from_millis(2));
-    }
-    unreachable!("the counter fixture runs until its session is killed")
-}
-
 /// Number of `FLOOD-` records [`flood_gated`] emits. See its docs for the
 /// sizing argument; at 16 bytes per record this is ~12 MiB.
 pub const FLOOD_RECORDS: u64 = 800_000;
@@ -1886,12 +1813,10 @@ pub const FLOOD_RECORDS: u64 = 800_000;
 ///   per-terminal queue), so a test that stalls a viewer mid-burst is
 ///   genuinely provoking flow control rather than watching a queue quietly
 ///   swallow the whole run.
-/// - **Speed.** Unpaced writes — unlike [`counter`], which sleeps between
-///   records so replay-cutover tests can reason about individual PTY
-///   writes. Buffered through one `BufWriter` for throughput, since this
-///   fixture wants bytes on the wire fast rather than per-record write
-///   boundaries. A producer slower than the consumer could never fill
-///   anything.
+/// - **Speed.** Unpaced writes, buffered through one `BufWriter` for
+///   throughput, since this fixture wants bytes on the wire fast rather than
+///   per-record write boundaries. A producer slower than the consumer could
+///   never fill anything.
 /// - **Consecutive, fixed-width record numbers.** This is what makes both
 ///   loss and duplication detectable at all: correct delivery is exactly
 ///   `n, n+1, n+2, ...`, so a gap is loss and a repeat or a step backwards
@@ -1909,10 +1834,9 @@ pub const FLOOD_RECORDS: u64 = 800_000;
 ///   the test says so.
 fn flood_gated() -> anyhow::Result<()> {
     let mut out = std::io::stdout().lock();
-    // Raw mode BEFORE the ready marker, as `hexecho`'s own docs explain:
-    // terminal mode bits live in the pty's line discipline, not the
-    // pane, so a test that sends its gate byte the instant it sees READY
-    // must always find raw mode already established. Without this, the
+    // Raw mode BEFORE the ready marker, as `set_raw_mode`'s docs explain:
+    // a test that sends its gate byte the instant it sees READY must
+    // always find raw mode already established. Without this, the
     // pty's default canonical mode would hold the gate byte in its own
     // line buffer until a newline arrived, since one arbitrary byte is not
     // itself a complete line — turning a single-byte gate into a
@@ -1925,19 +1849,17 @@ fn flood_gated() -> anyhow::Result<()> {
     let mut gate = [0u8; 1];
     std::io::stdin().lock().read_exact(&mut gate)?;
 
-    emit_flood_records(&mut out, "FLOOD-DONE")?;
+    emit_flood_records(&mut out)?;
 
     let mut line = String::new();
     std::io::stdin().lock().read_line(&mut line)?;
     Ok(())
 }
 
-/// Emit [`FLOOD_RECORDS`] numbered records at full speed, followed by
-/// `completion`.
-///
-/// What follows the burst (an idle wait for [`flood_gated`]) is the
-/// caller's.
-fn emit_flood_records(out: &mut impl Write, completion: &str) -> anyhow::Result<()> {
+/// Emit [`FLOOD_RECORDS`] numbered records at full speed, followed by the
+/// `FLOOD-DONE` marker [`flood_gated`]'s tests key on. What follows the burst
+/// (its idle wait) is the caller's.
+fn emit_flood_records(out: &mut impl Write) -> anyhow::Result<()> {
     // One buffered writer, flushed once at the end, deliberately: this
     // fixture wants throughput, not per-record write boundaries. Records
     // split across PTY writes are fine — every consumer on this path is
@@ -1949,59 +1871,21 @@ fn emit_flood_records(out: &mut impl Write, completion: &str) -> anyhow::Result<
     }
     buffered.flush()?;
     drop(buffered);
-    writeln!(out, "{completion}\r")?;
+    writeln!(out, "FLOOD-DONE\r")?;
     out.flush()?;
     Ok(())
 }
 
-/// Echo every input byte back as lowercase hex, one space-separated line
-/// per read, so a test can observe input-byte fidelity through terminal
-/// OUTPUT.
-///
-/// Exists because the tmux `paste-buffer` input-mangling bug (control
-/// bytes like DEL/ESC/ETX arriving caret-escaped as `^?`/`^[`/`^C`) was
-/// invisible to `basic` and every other script here: they read stdin in
-/// the pty's default canonical mode, where the kernel line discipline
-/// itself intercepts or reinterprets those bytes (erase, escape, SIGINT)
-/// before an app ever sees them — so a mangled byte and a correct one
-/// produced the same visible effect. `hexecho` puts its stdin into raw
-/// mode specifically to remove that filter: whatever byte crosses the
-/// wire is exactly the byte printed here, which is what makes the fixture
-/// able to tell "arrived as 0x7f" apart from "arrived as the two
-/// characters `^` and `?`".
-fn hexecho() -> anyhow::Result<()> {
-    let mut out = std::io::stdout().lock();
-
-    // Raw mode BEFORE the ready marker — unlike `basic`'s bracketed-paste
-    // enable, which is a pane escape sequence tmux records the instant it
-    // is written. Terminal mode bits live in the pty's line discipline,
-    // not the pane, so a test that sends input the instant it sees READY
-    // must always find raw mode already established; printing READY
-    // first would let a fast test race a still-canonical pty and land its
-    // control bytes in cooked mode, defeating the whole point of this
-    // fixture.
-    set_raw_mode()?;
-
-    writeln!(out, "FAKE-AGENT READY\r")?;
-    out.flush()?;
-
-    hex_echo_loop(&mut out, |_out, _chunk| Ok(()))
-}
-
-/// Read stdin until EOF, hex-echoing every chunk exactly as [`hexecho`]
-/// always has, but first handing the raw chunk to `on_chunk` — the shared
-/// body behind both `hexecho` and [`mouse_modes`], which reacts to input
-/// (turning on a DECSET mode) while STILL owing the caller the same
-/// byte-visible echo. Splitting the reaction out as a callback rather than
-/// duplicating the read loop is what keeps there being exactly one place
-/// that decides how input bytes become hex text; a second hand-rolled copy
-/// is exactly the drift this refactor exists to prevent.
+/// Read stdin until EOF, echoing every chunk back as lowercase hex, one
+/// space-separated line per read, after first handing the raw chunk to
+/// `on_chunk`. [`mouse_modes`] uses the callback to react to input
+/// (turning on a DECSET mode) while still giving the test a byte-visible
+/// echo of everything that arrived, so a test can observe input-byte
+/// fidelity through terminal OUTPUT.
 ///
 /// Caller order matters and is deliberately NOT this function's job: raw
 /// mode and the READY marker must both be established before the first
-/// byte can arrive (see `hexecho`'s own docs for why), and different
-/// scripts may need script-specific setup in between — `mouse_modes` has
-/// none today, but a future caller might.
+/// byte can arrive (see [`set_raw_mode`] for why).
 fn hex_echo_loop<W: Write>(
     out: &mut W,
     mut on_chunk: impl FnMut(&mut W, &[u8]) -> anyhow::Result<()>,
@@ -2186,8 +2070,7 @@ impl CueScanner {
 }
 
 /// Enable mouse reporting on cue, hex-echoing every input byte the whole
-/// time (via [`hex_echo_loop`], shared with [`hexecho`] rather than
-/// reimplemented). The reattach-restoration fixture for the one
+/// time (via [`hex_echo_loop`]). The reattach-restoration fixture for the one
 /// `PaneModes` branch with no end-to-end coverage before this
 /// (PLAN_M6_5.md item 2): mouse modes set by an agent must survive a
 /// client detaching and reattaching, exactly like bracketed paste already
@@ -2221,9 +2104,9 @@ impl CueScanner {
 fn mouse_modes() -> anyhow::Result<()> {
     let mut out = std::io::stdout().lock();
 
-    // Same ordering rationale as `hexecho`: raw mode must be live before
-    // the ready marker is even flushed, or a fast test's first cue could
-    // land in a still-canonical pty.
+    // Raw mode must be live before the ready marker is even flushed (see
+    // `set_raw_mode`), or a fast test's first cue could land in a
+    // still-canonical pty.
     set_raw_mode()?;
 
     writeln!(out, "FAKE-AGENT READY\r")?;
@@ -2594,8 +2477,18 @@ fn spawner_cloaked() -> anyhow::Result<()> {
 /// Put this process's controlling terminal into raw mode: no canonical
 /// line editing, no signal-generating control characters, no local echo.
 ///
-/// Nothing upstream configures the pty this way — tmux hands out an
-/// ordinary cooked-mode pty, and `basic` deliberately reads via
+/// Raw mode is what lets a script see input bytes as they are: in the pty's
+/// default canonical mode the kernel line discipline itself holds input
+/// until a line terminator and intercepts or reinterprets control bytes
+/// (erase, escape, SIGINT) before the program reads them. Scripts that need
+/// that call this BEFORE printing `FAKE-AGENT READY`: terminal mode bits
+/// live in the pty's line discipline, not in anything a test observes, so
+/// a test that sends input the instant it sees READY must always find raw
+/// mode already established; printing READY first would let a fast test
+/// race a still-canonical pty.
+///
+/// Nothing upstream configures the pty this way — a terminal host hands
+/// out an ordinary cooked-mode pty, and `basic` deliberately reads via
 /// `BufRead::lines` to exercise that default. `cfmakeraw` is not POSIX
 /// itself (POSIX standardizes termios but not this convenience function);
 /// it is a BSD-originated libc extension present on Linux and every other

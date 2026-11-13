@@ -80,9 +80,9 @@ With the base, version and announcements settled, the process is:
 - Give the bump its own PR (above the announcements commit when needed, otherwise on the stack tip or main). The small
   announcements PR is the only RC-specific merge this procedure authorizes; the bump and the in-flight stack never merge
   for the release's sake. Push the tag `vX.Y.Z-rc.N` at the bump commit and the workflow runs from the tag. Its build
-  gate runs the retained Rust targets, JS, CentOS, and native desktop checks while excluding the tmux e2e suite (see
-  `AGENTS.md`, "Tests and validation", and the inventory in `.agents/validation.md`); that gate is the release's
-  validation, so local slow-battery reruns are not a prerequisite for tagging.
+  gate runs the retained Rust targets, including the full farhelm integration suite, JS, CentOS, and native desktop
+  checks (see `AGENTS.md`, "Tests and validation", and the inventory in `.agents/validation.md`); that gate is the
+  release's validation, so local slow-battery reruns are not a prerequisite for tagging.
 - Watch the workflow run to completion rather than fire-and-forgetting it, then verify the GitHub release: every asset
   the release contract names present, no `SHA256SUMS` or `SHA256SUMS.minisig`, and the release marked prerelease
   (cargo-dist does that for `-rc.N` versions on its own).

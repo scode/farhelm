@@ -536,8 +536,8 @@ systemd or SSH substrate ran.
   tests start outlive the killed tests. Every surviving mutant is killed by a test or listed with its reason in that
   file.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal emulator' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-terminal-emulator`
-  — the supervisor's terminal emulator (`crates/farhelm-terminal-emulator/`), run in-process with no pty, tmux or
-  network: Farhelm's query-answer table, side effects by feed mode (live, replay of seen and of unseen output), the
+  — the supervisor's terminal emulator (`crates/farhelm-terminal-emulator/`), run in-process with no pty or network:
+  Farhelm's query-answer table, side effects by feed mode (live, replay of seen and of unseen output), the
   synchronized-output deadline on a hand-stepped clock (and its flush before a resize), the snapshot split candidate on
   agent-shaped reads, a property test that whole, byte-at-a-time, chunked and candidate-split feeding end in the same
   state once any open update is flushed, the handler's forwarding as a property test against a bare
@@ -575,14 +575,14 @@ systemd or SSH substrate ran.
   columns, 60 screen rows and 12,000 history lines, measured in sequence. Each reports five encodes' median and spread,
   blob size and history dropped. Fixture shape and repeated bytes are asserted; elapsed time is not. Compare on the same
   machine with load recorded. Generic recording permits `--no-capture`; the controlled nextest mode does not. Run it
-  when the snapshot encoder changes, beside correctness and memory checks; minutes, no tmux or network.
+  when the snapshot encoder changes, beside correctness and memory checks; minutes, no network.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'agent screen fixtures' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/^agent_kind::screen_fixtures::/) | test(/^agent_kind::status_line_fixtures::/)'`
   — status detection against the captured agent screens (`crates/farhelm-supervisor/tests/fixtures/screens/` and
   `tests/fixtures/status-lines/`, `docs/agent-screen-fixtures.md`): the fixtures' shape and privacy checks, each screen
   read as the state it was captured in by its harness's reader, the permission-mode footers, and each screen painted
   into the supervisor's terminal emulator reading back as the same text, with every row on its own row, and read by its
-  reader as the captured screen is. No tmux: the captured text is the expected value. Seconds, in-process. Part of the
-  workspace nextest run; run it when a status reader, the emulator crate, `vendor/` or the fixtures change.
+  reader as the captured screen is. The captured text is the expected value. Seconds, in-process. Part of the workspace
+  nextest run; run it when a status reader, the emulator crate, `vendor/` or the fixtures change.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'grid input encoder' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/^grid_input::/)'`
   — the supervisor's encoder of grid viewer input (`crates/farhelm-supervisor/src/grid_input.rs`): keys against
   Farhelm's key table `crates/farhelm-supervisor/tests/fixtures/grid-keys.jsonl` (the sequence for every key code below

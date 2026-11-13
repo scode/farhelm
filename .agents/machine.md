@@ -11,10 +11,10 @@ cleaning up. When you change a sentence that also appears in the root, change bo
 Several agents work on this project at once, on this machine, as the same unix user, each in its own checkout or jj
 workspace. The harnesses are built so that concurrent runs do not collide: every test picks its ports from the kernel
 (the Rust e2e harness binds port 0, the Playwright config and the desktop smoke ask for a free port per run, the CentOS
-script lets docker choose), state lives in per-run random directories under `/tmp` addressed by private tmux and
-supervisor sockets, systemd scopes and units carry a UUID, and the CentOS script's ssh alias is suffixed per run. Do not
-reintroduce a fixed port, a fixed path under `/tmp` or `$HOME`, a fixed unit or container name, or a fixed ssh alias in
-a harness; when a harness genuinely needs a stable name, derive it from the run's own random directory.
+script lets docker choose), state lives in per-run random directories under `/tmp` addressed by private supervisor and
+terminal host sockets, systemd scopes and units carry a UUID, and the CentOS script's ssh alias is suffixed per run. Do
+not reintroduce a fixed port, a fixed path under `/tmp` or `$HOME`, a fixed unit or container name, or a fixed ssh alias
+in a harness; when a harness genuinely needs a stable name, derive it from the run's own random directory.
 
 What is NOT isolated, and what follows from it:
 
@@ -92,15 +92,15 @@ Leave these where they already go:
 - Shared caches of standard tools: cargo's registry, rustup toolchains, npm and bun caches, Playwright's browsers in
   `~/.cache/ms-playwright`, dprint's plugins. Use them the way the tools do by default; do not redirect them.
 - State created by the repo's harnesses and scripts: the `fh-it.*`, `fh-e2e.*` and `fh-smoke.*` test directories (the
-  last the desktop smoke's), and the CentOS and installer-test directories. Supervisor and tmux sockets live inside the
-  test directories, unix socket paths are limited to about 108 bytes, and the teststate sweep only looks directly under
-  `/tmp`. For the same reason, do not point `TMPDIR` at your scratch directory when running tests or repo scripts: plain
-  `tempfile::tempdir()` tests honor it, and some of them bind sockets.
+  last the desktop smoke's), and the CentOS and installer-test directories. Supervisor and terminal host sockets live
+  inside the test directories, unix socket paths are limited to about 108 bytes, and the teststate sweep only looks
+  directly under `/tmp`. For the same reason, do not point `TMPDIR` at your scratch directory when running tests or repo
+  scripts: plain `tempfile::tempdir()` tests honor it, and some of them bind sockets.
 - The test recorder's durable browser timing records in `~/.local/state/farhelm-e2e-timings/`
   (`docs/test-run-evidence.md`), the maintainer's chosen exception to "nothing in `$HOME`": a few kilobytes per run,
   kept on purpose beyond the temporary tree's cleanup. Do not delete them as stray scratch.
-- Anything of your own that binds a unix socket, such as a hand-started supervisor or a `tmux -S` server. Put that
-  directly under `/tmp` with a random name, because `/tmp/farhelm-tmp/<uuid>/` already spends over 50 of the 108 bytes.
+- Anything of your own that binds a unix socket, such as a hand-started supervisor or terminal host. Put that directly
+  under `/tmp` with a random name, because `/tmp/farhelm-tmp/<uuid>/` already spends over 50 of the 108 bytes.
 - Anything another rule tells you to keep somewhere specific, such as goal files and working logs.
 
 This rule governs agents, not harness code: a harness still must not use a fixed path, per "Sharing the machine with

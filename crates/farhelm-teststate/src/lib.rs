@@ -26,12 +26,12 @@
 //!   SIGKILL — which is exactly where a PID file would lie (PID reuse,
 //!   reboots) and where the old pure age gate had to wait an hour.
 //! - A **sweep** ([`sweep`]): reaps dead runs, ends their orphaned terminal
-//!   hosts ([`hosts`]) and tmux servers, and runs from every harness entry
-//!   point — the stack script
-//!   invokes `farhelm-fixtures sweep-test-state` at startup, and the Rust
-//!   tests sweep once per process through [`tempdir`] — so a long-lived
-//!   session cleans up after its dead predecessors instead of
-//!   accumulating without bound.
+//!   hosts ([`hosts`]) and any tmux server a killed test left in them (see
+//!   `TMUX_SOCKET_WALK_DEPTH`'s docs), and runs from every harness entry
+//!   point — the stack script invokes `farhelm-fixtures sweep-test-state` at
+//!   startup, and the Rust tests sweep once per process through [`tempdir`]
+//!   — so a long-lived session cleans up after its dead predecessors instead
+//!   of accumulating without bound.
 //!
 //! Product code must never depend on this crate; it exists for harnesses
 //! and for the hidden `internal` CLI namespace that scripts call.
@@ -134,10 +134,17 @@ pub const LOCK_FILE_NAME: &str = "fh-run.lock";
 pub const KEEP_FILE_NAME: &str = "fh-keep";
 
 /// How deep [`reap`] looks for orphaned `tmux.sock` sockets inside a dead
-/// dir. Depth 3 covers everything the harnesses build today (the stack
-/// script's nested `remote/tmux.sock` is depth 2) with headroom, while
-/// keeping the walk bounded on a dir full of unexpected junk. A future
-/// layout deeper than this must raise the constant or its servers leak.
+/// dir.
+///
+/// Farhelm runs no tmux, but a few tests still start a real server on a
+/// `tmux.sock`: the ones that build an earlier release's layout by hand (a
+/// server on a state directory's `tmux.sock`) to check that a starting
+/// supervisor ends it, and this crate's and the e2e guard's own tests.
+/// Their guards stop it, but a test process killed before its teardown
+/// leaves it running with nothing else to end it, which is why the sweep
+/// keeps this kill. Depth 3 covers those state directories with headroom,
+/// while keeping the walk bounded on a dir full of unexpected junk. A layout
+/// deeper than this must raise the constant or its servers leak.
 const TMUX_SOCKET_WALK_DEPTH: usize = 3;
 
 /// How long one `tmux kill-server` gets before the sweep gives up on it.
@@ -505,7 +512,7 @@ fn flock_blocking(file: &File) -> io::Result<()> {
 /// The hosts and the tmux servers go first, and both cover the bounded
 /// walk ([`hosts::HOST_SOCKET_WALK_DEPTH`], [`TMUX_SOCKET_WALK_DEPTH`]),
 /// not just the top level: the stack script nests a second supervisor's
-/// state (and its tmux server and hosts) at `remote/`, and a server whose
+/// state (and its hosts) at `remote/`, and a server whose
 /// socket dir is deleted out from under it lingers forever — the old shell
 /// sweep had exactly that gap. Both are bounded; when one cannot be
 /// confirmed or the pass's budget is exhausted, keep the directory so a

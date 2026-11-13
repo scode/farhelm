@@ -6,9 +6,8 @@
 //! banner's worth of tests — it is what remains of the pre-banner region
 //! once the shared infrastructure was extracted to `harness`, kept as one
 //! unit because the source gives it no finer seams to split along. A few
-//! small fixtures live here too (`ToggleWriteFailure`, `with_status`,
-//! `hex_tokens`, and friends) because nothing outside this module ever
-//! calls them.
+//! small fixtures live here too (`ToggleWriteFailure`, `with_status`, and
+//! friends) because nothing outside this module ever calls them.
 
 use crate::harness::*;
 
@@ -2646,49 +2645,6 @@ async fn create_with_degenerate_size_clamps_to_1x1() {
     // And the session is real, not just accepted: it must be listed.
     let listed = h.client.list_sessions().await.expect("list");
     assert!(listed.sessions.iter().any(|s| s.id == session.id));
-}
-
-/// Extract every two-hex-digit token from `hexecho`'s output, discarding
-/// which line or read() call each token arrived on.
-///
-/// `hexecho` flushes a fresh line per raw `read()`, and reads can split
-/// arbitrarily at PTY/tmux boundaries — a single input byte sequence can
-/// legitimately arrive as hex tokens on two or more separate lines. A
-/// prior version of this test's assertion instead required the whole
-/// expected payload's hex to appear on one line, which is only true when
-/// the PTY happens not to split that particular read; this reassembles
-/// the byte stream in order regardless of where the line breaks fell, so
-/// the assertion below holds independent of read-boundary behavior.
-///
-/// Terminal presentation sequences are normalized before splitting, not
-/// treated as whitespace, because the stream glues them straight onto pane text. The
-/// attach replay ends with synthesized restoration sequences, the cursor
-/// address among them, and nothing puts whitespace between that tail and
-/// the first live bytes. When READY was captured into the replay, the wait
-/// for it can return with that tail still queued, so the input-triggered
-/// hex line that follows reads `ESC[2;1H61` in the transcript, which a
-/// whitespace split drops whole, `61` included. Whether READY lands in the
-/// replay or arrives live is a scheduling accident, so the tokenizer has to
-/// be indifferent to it.
-fn hex_tokens(text: &str) -> Vec<u8> {
-    normalize_pane_text(text.as_bytes())
-        .split_whitespace()
-        .filter(|token| token.len() == 2 && token.bytes().all(|b| b.is_ascii_hexdigit()))
-        .map(|token| u8::from_str_radix(token, 16).expect("validated two ASCII hex digits"))
-        .collect()
-}
-
-/// The tokenizer must recover every byte from the exact transcript shape
-/// that flaked under load: a replay's trailing cursor address glued to the
-/// first hex token, with the acknowledgement on its own line. A whitespace
-/// split alone reads this as seven bytes, not eight.
-#[farhelm_testtrace::test]
-fn hex_tokens_survive_a_cursor_address_glued_to_the_first_token() {
-    let transcript = "FAKE-AGENT READY\r\n\x1b[2;1H61 7f 62 1b 5b 41 03\r\n7a\r\n\x1b(B\x1b[0m";
-    assert_eq!(
-        hex_tokens(transcript),
-        [0x61, 0x7f, 0x62, 0x1b, 0x5b, 0x41, 0x03, 0x7a]
-    );
 }
 
 /// PLAN_M2.md's headline SQLite behavior: session metadata must survive
