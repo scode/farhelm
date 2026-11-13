@@ -81,7 +81,8 @@ When a confirmation opens, Enter confirms it; **Cancel** backs out. The YOLO que
 [session-owned sandboxes](/docs/using/tensorlake-sandboxes/#delete-a-session-in-its-own-sandbox) always confirm Delete.
 Unless another session still uses it, the session's checkout is deleted permanently, bypassing the checkout trash, and
 deleting the last session there also destroys the whole environment and all its files. When Farhelm cannot reach the
-Farhelm inside the environment, Delete offers to destroy the whole environment instead, with a warning. Their Suspend,
+Farhelm inside the environment, Delete offers to destroy the whole environment instead, with a warning. Deleting several
+marked sessions works the same way, one session at a time. Their Suspend,
 Resume and Stop and suspend controls act on that environment. The earlier experimental containerized sessions support
 [Delete only](/docs/agents/containerized-sessions/#earlier-containerized-sessions).
 
@@ -108,8 +109,8 @@ keyboard, including Rename and the quick switcher.
 To stop, delete, replace, restart and close shell tabs on the first click, turn on **Skip session confirmations** in
 the **Sessions** section of **Settings**, behind the gear at the foot of the [navigation rail](/docs/using/manage-hosts/), the column of icons down the left edge
 of the sidebar. It starts off and applies to your
-helm; other open windows pick it up when they reload. Environment deletion, YOLO, host and trash questions keep their
-own rules, and **Restart with** still opens the launcher.
+helm; other open windows pick it up when they reload. Delete of a session in a container or sandbox, YOLO, host and
+trash questions keep their own rules, and **Restart with** still opens the launcher.
 
 On an ordinary host, a [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout) stays while another
 session uses it; deleting its last session moves the directory, including uncommitted work, into

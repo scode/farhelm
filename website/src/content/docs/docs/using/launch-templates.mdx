@@ -257,19 +257,23 @@ Here `api-repo` supplies the host and directory, so the command needs neither `-
 as `--model` act as further changes after the templates, and `farhelm agent templates` lists the templates and what each
 sets.
 
-Recipe-based environment launches are available through the UI. Agent requests for those launches remain unavailable.
-Farhelm also refuses requests from agents inside session-owned containers or sandboxes.
+An agent on an ordinary host can also use a template whose **Runs on** is a recipe. That starts a session in a new
+sandbox or container, and Farhelm
+[always asks you first](/docs/using/approve-agent-requests/#new-sandboxes-and-containers). An agent inside a sandbox or
+container can use only templates that set no host and no recipe, and cannot list or change templates
+([Agents in sandboxes and containers](/docs/using/approve-agent-requests/#agents-in-sandboxes-and-containers)).
 
 An agent on an ordinary host can start a fresh managed checkout with a template too, or give `farhelm agent create --gh acme/web` directly
 (`--github` is an alias). `--title "Fix parser"` names its directory `web-fix-parser`; without a title Farhelm picks
 the next free `web-N`. The approval card shows the repository and exact directory before starting it.
 
 `farhelm spawn` always starts on the agent's own host and never makes a fresh checkout, so it refuses a template that
-sets a host or a managed checkout. `farhelm agent clone` copies the source's existing directory and takes no repository
-option. On a host that asks before YOLO launches, an agent cannot use a template that makes the launch YOLO or a custom
+sets a host or a managed checkout. `farhelm agent clone` of a session on an ordinary host copies its existing
+directory and takes no repository option; cloning a sandbox or container session starts a new one from the same recipe
+instead. On a host that asks before YOLO launches, an agent cannot use a template that makes the launch YOLO or a custom
 command ([Approve what agents do](/docs/using/approve-agent-requests/#yolo-sessions-and-custom-commands)).
 
-Agents can also create, edit, and delete templates with `farhelm agent template create`, `edit`, and `delete`.
+Agents on ordinary hosts can also create, edit, and delete templates with `farhelm agent template create`, `edit`, and `delete`.
 Create and edit accept `--gh`/`--github` for a managed checkout, or `--cwd` for an existing directory, and
 `--title-kind base` or `fixed` to choose the kind of session name.
 They can assign **⚡** with `--quick-launch` or a number with `--key 1` (using any digit from 1–9 or 0). An edit can

@@ -22,7 +22,8 @@ trashed checkouts whose files could not be freed. It turns red with an unread co
 bell while keeping the problem listed until it is resolved. Host setup and update problems are not listed there; they
 show on the host's mark and in the rows above your sessions, described next.
 
-Hosts with a problem, an update, or setup still running also appear above your sessions, so you can keep track of them
+Hosts with a problem, an update, setup still running, or a sandbox or container being deleted also appear above your
+sessions, so you can keep track of them
 while you work. While a setup, update or uninstall runs, its row names the current step; hover anywhere on the row to
 see every step and the reason for any problem. Select a row or its **Details** button to open the host list at that
 host. The list disappears when nothing needs attention and while the full host list is open.
@@ -71,7 +72,8 @@ still be reachable ([The pieces](/docs/how-it-works/the-pieces/)).
 **Run farhelm commands without asking** also covers session actions on every other host and changes to your launch
 templates. Changing one switch does not change the other; you can change either while the broader permission is on.
 [Approve what agents do](/docs/using/approve-agent-requests/#stop-asking-for-a-host) explains their limits: wrapper
-prefixes can still need your own approval, host changes always do, and YOLO or custom-command launches still need the
+prefixes can still need your own approval, host changes and
+[new sandboxes or containers](/docs/using/approve-agent-requests/#new-sandboxes-and-containers) always do, and YOLO or custom-command launches still need the
 separate YOLO permission. A plain restart, including of a YOLO session, needs no YOLO permission.
 
 **Open links without asking** and **Open local-network links without asking** are separate permissions for opening this
@@ -182,7 +184,8 @@ sandbox after its plan's idle limit; [Tensorlake sandboxes](/docs/using/tensorla
 24-hour limit on Usage Credits and launching after resume.
 
 **Delete sandbox** permanently deletes the sandbox, its files, sessions and snapshots taken from it. It always asks,
-regardless of **Remove hosts without asking**. Keep work you need elsewhere first. If deletion fails, the host stays
+regardless of **Remove hosts without asking**. Keep work you need elsewhere first. While Farhelm deletes it, the host
+shows **Deleting…**. If deletion fails, the host stays
 listed with the reason; try **Delete sandbox** again to finish. This needs a saved Tensorlake API key. Its recipe and
 the recipe's prepared snapshot remain available for new hosts.
 

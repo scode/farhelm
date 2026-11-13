@@ -31,6 +31,9 @@ everything that still ran in them:
 Programs that old agents and tabs had left running in the background are stopped too, wherever Farhelm can tell which
 session they belong to. Any it cannot tell are stopped when you delete their session.
 
+If Farhelm could not end the old tmux, it logged why and started anyway, treating those sessions as ended. An agent
+could then still be running in an old terminal, so **Restart** would start a second one beside it.
+
 The old notification asking you to restart such a session is now greyed and marked **Resolved**
 ([Read the session list](/docs/using/session-list/#when-a-row-shows-a-bell) says how notifications work).
 
@@ -76,10 +79,11 @@ and
 show the behavior Farhelm will revisit.
 
 Programs in Farhelm's terminals see `TERM_PROGRAM=farhelm`, with Farhelm's version in `TERM_PROGRAM_VERSION`. `TMUX` is
-unset. If a startup file of your login shell starts tmux whenever it is not already inside tmux, it does so in Farhelm's
-terminals too, including while the agent starts. One that replaces the shell with tmux (`exec tmux`) keeps the agent
-from starting at all, and the session's terminal shows your tmux instead. To leave Farhelm's terminals alone, have the
-startup file skip tmux when `TERM_PROGRAM` is `farhelm`.
+unset. An agent started, or a tab opened, before 0.36.0 keeps the environment it started with, which still claims to be
+tmux, until you restart the agent or close the tab. If a startup file of your login shell starts tmux whenever it is not
+already inside tmux, it does so in Farhelm's terminals too, including while the agent starts. One that replaces the
+shell with tmux (`exec tmux`) keeps the agent from starting at all, and the session's terminal shows your tmux instead.
+To leave Farhelm's terminals alone, have the startup file skip tmux when `TERM_PROGRAM` is `farhelm`.
 
 ## Farhelm no longer needs tmux
 
@@ -91,6 +95,11 @@ Earlier versions installed their own copy of tmux on remote Linux hosts whose tm
 most of them (Ubuntu 24.04 and Debian 13 included). Typing `tmux` in a session or terminal tab on such a host ran that
 copy rather than the host's own. Updating the host, or adding it again, now removes Farhelm's copy, so `tmux` there runs
 the host's own tmux, or is not found if the host has none. A copy that a Farhelm update before 0.18.0 put next to
-`farhelm` in a shared folder such as `~/.local/bin` is left alone, since it may be yours; delete it if it is not. If you
-use tmux on that host, install it yourself. A tmux you had already started from Farhelm's copy keeps running until you
-end it.
+`farhelm` in a shared directory such as `~/.local/bin` is left alone, since it may be yours; delete it if it is not. If
+you use tmux on that host, install it yourself. A tmux you had already started from Farhelm's copy keeps running until
+you end it.
+
+On a Linux machine, once `farhelm helm setup` or an update rewrites Farhelm's service there, sessions no longer get the
+directory of the tmux Farhelm used to run added to their `PATH`. A tmux you installed in a directory your login shell
+does not put on its `PATH` (Linuxbrew's, say) is found from a session only once your shell's startup files add that
+directory.
