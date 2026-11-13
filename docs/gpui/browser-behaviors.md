@@ -26,25 +26,24 @@ marked ask were decided by the maintainer on 2026-11-13; see Decisions at the en
 Measured vs. inferred: every code and test citation was read at 24bc0580. Statements about what WKWebView or a browser
 does by default (page zoom in the Mac app, primary-selection behavior on Linux) are inferred, not tested, and say so.
 
-74 entries: 51 keep, 24 drop, 4 record only. D3, D9, E5, F5 and L9 carry one keep line and one drop line and count under
+74 entries: 50 keep, 25 drop, 4 record only. D3, D9, E5, F5 and L9 carry one keep line and one drop line and count under
 both.
 
 ## A. Text selection and clipboard
 
-**A1. Selecting and copying non-input text (labels, help, dialog text, header, session titles)** — **keep**
+**A1. Selecting and copying non-input text (labels, help, dialog text, header, session titles)** — **drop** (decided
+2026-11-13)
 
-- SPEC, "Session list": "Shift marking does not extend the page's text selection, and ordinary dragging still selects
-  text." SPEC, "Opening and closing" (dialogs): "A primary click on empty space keeps focus on the control in use ...;
-  text can still be selected."
-- Code: `ui/assets/app.css` leaves text selectable by default. It turns selection off only during the app's own drags
-  (app.css:862-865 sidebar resize, 1042 window drag strip, 2814 pin drag) and on the terminal grid, which has its own
-  selection (app.css:8636-8637). Copy of a page selection in the Mac app comes from the native Edit menu
-  (`ui/src/desktop/menu.rs:58-67`).
-- Tests: `settings.spec.ts:806-816` ("dragging over help text must still select it"); `window-chrome.spec.ts:183-193`
-  (double-click on the version selects a word); `bulk-session-actions.spec.ts:~395-470` (a selection in a session title
-  survives Shift-click marking); `launcher-enter.spec.ts:177` (a click on an empty gap selects nothing).
-- GPUI home: component layer (a selectable-text element: drag, double/triple click, Cmd+C, selection suppressed while an
-  app drag runs). GPUI text is not selectable out of the box, so this is a sizable piece.
+- Decided: no general selectable labels. The copy buttons and copy menu items the old app already has are ported (A3),
+  and nothing else; selection and copy in the terminal (A2) and in text fields (E1-E3) are unaffected. An area that
+  finds a case that seems really important raises it with the maintainer instead of adding a copy affordance on its own.
+- At 24bc0580, SPEC's "Session list" said "Shift marking does not extend the page's text selection, and ordinary
+  dragging still selects text", and its "Opening and closing" (dialogs) said "text can still be selected"; both were
+  reworded when this was decided.
+- Code at 24bc0580: `ui/assets/app.css` leaves text selectable by default and turns it off only during the app's own
+  drags (app.css:862-865, 1042, 2814) and on the terminal grid (app.css:8636-8637). Tests that pinned it:
+  `settings.spec.ts:806-816`, `window-chrome.spec.ts:183-193`, `bulk-session-actions.spec.ts:~395-470`,
+  `launcher-enter.spec.ts:177`.
 
 **A2. Terminal selection and copy** — **keep**
 
@@ -56,7 +55,7 @@ both.
 - Tests: `terminal-clipboard.spec.ts` (458, 525, 568, 618, 687).
 - GPUI home: terminal; Cmd+C / select-all through actions/keymap.
 
-**A3. Clipboard writes for copy buttons (directory, command line, Copy plan, Copy ID)** — **keep**
+**A3. Clipboard writes for copy buttons and copy menu items (directory, command line, Copy plan, Copy ID)** — **keep**
 
 - SPEC, "Terminal experience": "Clipboard writes use the system clipboard and fail silently." and "Clipboard operations
   are explicitly best-effort and silent on failure".
@@ -633,7 +632,7 @@ browsers)** — **keep**
 Every ask entry was answered by the maintainer on 2026-11-13: Tab on macOS follows the system setting and Linux Tab
 reaches every focusable control (C2); no reload command (L5); no resize grip (E4); no text drops into fields (H2);
 right-to-left text gets only what GPUI gives (J6); no whole-interface zoom (L1); Linux middle-click paste in the
-terminal only (M2).
+terminal only (M2); no general selectable label text (A1).
 
 Some of these decisions change visible behavior in ways SPEC.md does not state yet: a terminal selection setting the
 Linux primary selection (M2), multi-line boxes growing to a cap and then scrolling (E4), Tab reaching every control on

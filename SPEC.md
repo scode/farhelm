@@ -2175,9 +2175,8 @@ The open session is separate from the **marked** sessions. Shift+click on a row 
 session to that row in displayed order, without opening it; each range click replaces the previous marking. When the
 open session is not displayed, it marks only the clicked row. Cmd+click or Ctrl+click toggles one row on every platform,
 including the open row. Shift takes precedence when both kinds of modifier are held. A plain accepted row click opens
-that session and clears all marks. Shift marking does not extend the page's text selection, and ordinary dragging still
-selects text. Row controls keep their own actions. The open row keeps its blue fill; a distinct side marker and tint
-identify marked rows.
+that session and clears all marks. Row controls keep their own actions. The open row keeps its blue fill; a distinct
+side marker and tint identify marked rows.
 
 Marks belong to the window and are not saved. Counts, offered actions and targets include only marked rows displayed
 now. Filtering or opening Hosts retains hidden marks but never counts or acts on them; failed listings expose no
@@ -3250,11 +3249,10 @@ a submitted launch is pending, its hidden launcher releases that isolation until
 question.
 
 A primary click on empty space keeps focus on the control in use in the session launcher, Restart with, the dialogs that
-share the host and Settings installer, and the session row and header Stop, Restart, Replace and Delete questions; text
-can still be selected. Rename, tab close, the interrupted card's Replace question and the host update confirmation do
-not have this rule yet. If a dialog container itself has focus, Enter presses its enabled main action, including a
-destructive confirmation. A dialog without one main action does nothing on container Enter. Held or composing Enter
-cannot confirm.
+share the host and Settings installer, and the session row and header Stop, Restart, Replace and Delete questions.
+Rename, tab close, the interrupted card's Replace question and the host update confirmation do not have this rule yet.
+If a dialog container itself has focus, Enter presses its enabled main action, including a destructive confirmation. A
+dialog without one main action does nothing on container Enter. Held or composing Enter cannot confirm.
 
 Closing something the user opened returns focus to where it was before it opened, on every platform, including those
 where clicking the button that opened it did not move focus to the button.
