@@ -4,8 +4,6 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 
 ## v0.39.0 - 2026-11-13
 
-**DRAFT release notes - not yet finalized**
-
 ### 💥 Breaking
 
 - This release *requires* you to update your remote hosts. (#3348, #3359, #3369)
