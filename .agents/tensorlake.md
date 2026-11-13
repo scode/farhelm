@@ -65,12 +65,12 @@ was there.
    `cargo build` (the e2e harness needs `target/debug/farhelm-fixtures`, which nextest's setup script would otherwise
    build), then `cargo nextest archive --locked -p <package> ... --archive-file <file>`. If a browser run on the same
    build is also wanted, start it first and wait until it has packed: the test build relinks `target/debug/farhelm` with
-   test features. The Rust packer also prepares this revision's static native-musl CLI and pinned static tmux through
-   `scripts/build-podman-test-payloads.sh`. Install `musl-tools`, `file`, binutils and the tmux builder's prerequisites
-   locally. A matching absolute `FARHELM_HELM_PAYLOAD_DIR` can supply these ordinary installer inputs. The packer stages
-   them once even for a narrow initial filter, because the staging snapshot can later run another selection from the
-   same archive. An intentional `FARHELM_TEST_SKIP_PODMAN=1` avoids this build and is forwarded to every shard. Record
-   the missing real-environment coverage.
+   test features. The Rust packer also prepares this revision's static native-musl CLI payload through
+   `scripts/build-podman-test-payloads.sh`. Install `musl-tools`, `file` and binutils locally. A matching absolute
+   `FARHELM_HELM_PAYLOAD_DIR` can supply this ordinary installer input. The packer stages it once even for a narrow
+   initial filter, because the staging snapshot can later run another selection from the same archive. An intentional
+   `FARHELM_TEST_SKIP_PODMAN=1` avoids this build and is forwarded to every shard. Record the missing real-environment
+   coverage.
 2. `scripts/tensorlake/rust-tests.ts run --scratch <dir> --template <snapshot> --prefix <name-prefix> --shards <n> --archive <file> --out <dir> [-- <nextest filter arguments>]`.
    It uploads the archive (about a gigabyte), source, tools and static provisioning payloads once, to a staging sandbox,
    snapshots that, and clones the snapshot for every shard. The staging snapshot is kept, so rerunning the same archive

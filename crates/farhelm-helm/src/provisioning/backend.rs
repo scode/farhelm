@@ -1,7 +1,7 @@
 //! The system-facing half of provisioning executes the same action vocabulary
 //! for the local machine or through a remote machine's execution route.
 
-use super::plan::{DirectorySpec, PayloadKind, PayloadTarget, ProvisioningTarget};
+use super::plan::{DirectorySpec, PayloadTarget, ProvisioningTarget};
 use crate::manager::peer_text;
 use async_trait::async_trait;
 use farhelm_proto::ControlMsg;
@@ -16,8 +16,8 @@ use tracing::warn;
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 pub(super) const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
-/// The uninstall stop step's bound: [`COMMAND_TIMEOUT`] for its systemd,
-/// tmux and cleanup commands, plus the time this build's
+/// The uninstall stop step's bound: [`COMMAND_TIMEOUT`] for its systemd and
+/// cleanup commands, plus the time this build's
 /// `farhelm internal stop-terminal-hosts` takes at most between them, and ten
 /// seconds for starting that program and its runtime on a loaded host. The
 /// remote `farhelm` may come from another release, whose bound is not part of
@@ -154,16 +154,9 @@ pub(crate) struct Reach {
     /// carried through purely so the plan text can name the host it
     /// inspected — see `ProvisioningPlan::confirmation`.
     pub(super) distro_id: String,
-    pub(super) needs_tmux: bool,
     /// The inspected per-user launchd domain on a Mac. Kept in frozen plan
     /// actions so execution cannot switch the service to a different user.
     pub(super) launchd_domain: Option<String>,
-    /// The host's OWN tmux executable, absolute, when it cleared the
-    /// floor — `None` whenever `needs_tmux` is set, and always on a Mac.
-    ///
-    /// The whole executable, not just its directory, because uninstall's
-    /// stop runs it by name to end the private tmux server.
-    pub(super) host_tmux: Option<PathBuf>,
 }
 
 /// Supported hosts continue to a plan; refusals retain a reason for the panel.
@@ -435,12 +428,12 @@ pub(crate) trait ProvisioningBackend: Send + Sync {
         target: &ProvisioningTarget,
         directories: &[DirectorySpec],
     ) -> Result<ActionOutcome, BackendFailure>;
-    /// Transfer a remote binary into its nonce temporary before installation.
-    /// Local plans have no upload action and must not call this method.
+    /// Transfer the `farhelm` payload into its nonce temporary before
+    /// installation. Local plans have no upload action and must not call
+    /// this method.
     async fn upload_path(
         &self,
         target: &ProvisioningTarget,
-        kind: PayloadKind,
         payload: &PreparedPayload,
         destination: &Path,
         temporary: &Path,
@@ -448,7 +441,6 @@ pub(crate) trait ProvisioningBackend: Send + Sync {
     async fn install_path(
         &self,
         target: &ProvisioningTarget,
-        kind: PayloadKind,
         payload: &PreparedPayload,
         destination: &Path,
         temporary: &Path,
@@ -561,19 +553,28 @@ pub(crate) trait ProvisioningBackend: Send + Sync {
         destination: &Path,
     ) -> Result<ActionOutcome, BackendFailure>;
     /// Stop the supervisor, then end the terminal hosts of `state_dir` with
-    /// the installed `farhelm_program`, then its private tmux server at the
-    /// frozen socket. Planning removes and reloads the unit first; an
-    /// inactive unit skips only the systemd command, since its hosts and its
-    /// private server may survive. Failure to confirm every host stopped, or
-    /// to end a reachable server, fails the step and permits retry.
+    /// the installed `farhelm_program`. Planning removes and reloads the
+    /// unit first; an inactive unit skips only the systemd command, since
+    /// its hosts may survive. Failure to confirm every host stopped fails
+    /// the step and permits retry.
     async fn stop(
         &self,
         target: &ProvisioningTarget,
         unit: &str,
         farhelm_program: &Path,
         state_dir: &Path,
-        tmux_program: &Path,
-        tmux_socket: &Path,
+    ) -> Result<ActionOutcome, BackendFailure>;
+    /// Delete one file, such as the bundled tmux an earlier release
+    /// installed. An absent file is a skip, so a rerun, or a host that
+    /// never had the file, passes. A symlink is removed, never its target.
+    /// Absence must be positively known: a path that cannot be looked up (a
+    /// parent directory the user cannot search) fails rather than skips, and
+    /// so does anything else that `rm -f` refuses (a directory, a file in a
+    /// directory the user cannot write).
+    async fn remove_file(
+        &self,
+        target: &ProvisioningTarget,
+        path: &Path,
     ) -> Result<ActionOutcome, BackendFailure>;
     /// Delete one directory tree; an absent one is a skip, and one that is
     /// itself a symlink is refused rather than unlinked, because removing
@@ -2683,8 +2684,8 @@ impl ProvisioningBackend for SystemBackend {
     }
 
     async fn inspect(&self, target: &ProbeTarget) -> Result<ReachOutcome, BackendFailure> {
-        // The Linux inspection itself runs systemd and tmux commands. Choose
-        // the OS before either, so remote Macs never probe those substrates.
+        // The Linux inspection itself runs systemd commands. Choose the OS
+        // before it, so remote Macs never probe that substrate.
         let system = self
             .require_shell(
                 &target.transport,
@@ -2744,10 +2745,6 @@ impl ProvisioningBackend for SystemBackend {
             "if [ -r /etc/os-release ]; then . /etc/os-release; fi; \
                       printf '%s\\0%s\\0%s\\0' 'farhelm-reach-v1' \"${{ID-}}\" \"${{HOME-}}\"; \
                       uname -m | tr -d '\\n'; printf '\\0'; \
-                      if command -v tmux >/dev/null 2>&1; then command -v tmux | tr -d '\\n'; fi; \
-                      printf '\\0'; \
-                      if command -v tmux >/dev/null 2>&1; then tmux -V | tr -d '\\n'; fi; \
-                      printf '\\0'; \
                       manager={manager}; unit_dir={unit_dir}; \
                       if [ \"$manager\" = usable ] && [ -z \"$unit_dir\" ]; then \
                         unit_dir=$HOME/.config/systemd/user; fi; \
@@ -2833,7 +2830,6 @@ impl ProvisioningBackend for SystemBackend {
     async fn upload_path(
         &self,
         target: &ProvisioningTarget,
-        _kind: PayloadKind,
         payload: &PreparedPayload,
         destination: &Path,
         temporary: &Path,
@@ -2851,7 +2847,6 @@ impl ProvisioningBackend for SystemBackend {
     async fn install_path(
         &self,
         target: &ProvisioningTarget,
-        _kind: PayloadKind,
         payload: &PreparedPayload,
         destination: &Path,
         temporary: &Path,
@@ -3256,30 +3251,26 @@ resolve() {
         })
     }
 
-    /// End the service, the state directory's terminal hosts and any tmux
-    /// server that outlived its process-only policy. A retry may find the
-    /// unit forgotten but its hosts or its tmux still alive, or all of them
-    /// gone and the lib directory, with the installed `farhelm` and any
-    /// private tmux client in it, already removed.
+    /// End the service and the state directory's terminal hosts. A retry
+    /// may find the unit forgotten but its hosts still alive, or all of them
+    /// gone and the lib directory, with the installed `farhelm` in it,
+    /// already removed.
     async fn stop(
         &self,
         target: &ProvisioningTarget,
         unit: &str,
         farhelm_program: &Path,
         state_dir: &Path,
-        tmux_program: &Path,
-        tmux_socket: &Path,
     ) -> Result<ActionOutcome, BackendFailure> {
-        const CONTEXT: &str = "stopping the supervisor, its terminal hosts and private tmux server";
+        const CONTEXT: &str = "stopping the supervisor and its terminal hosts";
         require_remote(target, CONTEXT)?;
-        // Stop the supervisor before ending its hosts and its tmux server
-        // directly. The daemon-reload before this step has already dropped
-        // the removed unit's process-only stop policy, so this stop signals
-        // the supervisor, its terminal hosts and the private tmux server in
-        // its group together; the orderly terminal shutdown no longer runs
-        // ahead of tmux here. The steps after it end what outlived the
-        // supervisor, such as hosts and a server left running by a stop
-        // under the old policy.
+        // Stop the supervisor before ending its hosts directly. The
+        // daemon-reload before this step has already dropped the removed
+        // unit's process-only stop policy, so this stop signals the
+        // supervisor and everything in its group together (a private tmux
+        // server an earlier release left there included). The steps after it
+        // end what outlived the supervisor, such as hosts left running by a
+        // stop under the old policy.
         //
         // Terminal hosts come first of those, through the installed
         // farhelm's `internal stop-terminal-hosts`, whose command line and
@@ -3304,18 +3295,13 @@ resolve() {
         // by hand, never reading as success. The state directory is absolute,
         // as the command requires: planning refuses any other.
         //
-        // Only exact socket-bound absence diagnostics excuse a failed tmux
-        // command; permission, executable and protocol failures retain the host.
-        // stat reports the lookup failure instead of collapsing all errors
-        // into false, as shell existence predicates do. It receives one path
-        // in the C locale: only the known GNU, uutils and BusyBox missing-path
-        // diagnostics excuse bypassing a client (or a farhelm) that may already
-        // have been removed on a lib-gone retry. Other lookup errors retain the host.
-        // tmux leaves its socket behind on exit. Remove it while the frozen
-        // client is still available, so a retry after lib removal can prove
-        // absence without trying to execute that now-missing client.
+        // Lookups go through `stat` in the C locale rather than shell
+        // existence predicates, which collapse every error into false: only
+        // the known GNU, uutils and BusyBox missing-path diagnostics excuse
+        // treating `hosts`, or the `farhelm` a lib-gone retry no longer has,
+        // as absent. Other lookup errors retain the host.
         let script = format!(
-            "export LC_ALL=C; socket={socket}; tmux={tmux}; farhelm={farhelm}; \
+            "export LC_ALL=C; farhelm={farhelm}; \
              data={data}; hosts=$data/{hosts}; changed=no; \
              state=$(systemctl --user show -p ActiveState --value -- {unit}) || exit 1; \
              case \"$state\" in inactive|failed) ;; \
@@ -3351,36 +3337,77 @@ resolve() {
              else status=$?; case \"$inspection\" in \
                  {missing}) ;; \
                  *) printf '%s\\n' \"$inspection\" >&2; exit \"$status\" ;; esac; fi; \
-             if inspection=$(stat -L -c '%F' -- \"$socket\" 2>&1); then :; \
-               else status=$?; case \"$inspection\" in \
-                 {missing}) \
-                   if [ \"$changed\" = no ]; then printf absent; fi; exit 0 ;; \
-                 *) printf '%s\\n' \"$inspection\" >&2; exit \"$status\" ;; esac; fi; \
-             if error=$(\"$tmux\" -S \"$socket\" kill-server 2>&1); then :; else status=$?; \
-             case \"$error\" in \
-               \"no server running on $socket\"|\"error connecting to $socket (No such file or directory)\") \
-                 if [ \"$changed\" = no ]; then printf absent; fi ;; \
-               *) printf '%s\\n' \"$error\" >&2; exit \"$status\" ;; esac; fi; \
-             rm -f -- \"$socket\" || exit 1",
+             if [ \"$changed\" = no ]; then printf absent; fi",
             unit = crate::ssh::shell_quote(unit),
             farhelm = shell_path(farhelm_program)?,
             data = shell_path(state_dir)?,
             hosts = farhelm_supervisor::hosts::HOSTS_DIR_NAME,
             missing = STAT_MISSING_PATH_PATTERNS,
-            tmux = shell_path(tmux_program)?,
-            socket = shell_path(tmux_socket)?,
         );
         let output = self
             .require_shell_within(target, &script, CONTEXT, STOP_SUPERVISOR_TIMEOUT)
             .await?;
         Ok(if output.stdout == b"absent" {
             ActionOutcome::Skipped(
-                "the supervisor, its terminal hosts and private tmux server were already gone"
-                    .to_string(),
+                "the supervisor and its terminal hosts were already gone".to_string(),
             )
         } else {
             ActionOutcome::Completed
         })
+    }
+
+    /// The local transport serves plans for the helm's own machine, which
+    /// only tests and fixtures make; production never sets up the local row
+    /// from the panel, but nothing about removing one file is unsafe there.
+    async fn remove_file(
+        &self,
+        target: &ProvisioningTarget,
+        path: &Path,
+    ) -> Result<ActionOutcome, BackendFailure> {
+        let skipped = || ActionOutcome::Skipped(format!("{} was already gone", path.display()));
+        match target {
+            // `unlink` keeps the remote command's contract on its own: only
+            // ENOENT is absence, so an unsearchable parent (EACCES) or a
+            // directory (EISDIR) fails, and a symlink is unlinked, never
+            // followed.
+            ProvisioningTarget::Local => match tokio::fs::remove_file(path).await {
+                Ok(()) => Ok(ActionOutcome::Completed),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(skipped()),
+                Err(error) => Err(BackendFailure::new(
+                    format!("removing {}", path.display()),
+                    error.to_string(),
+                )),
+            },
+            ProvisioningTarget::Remote(_) => {
+                // The lookup goes through `stat` in the C locale, as the stop
+                // script's do, because the shell's `-e` and `-L` answer false
+                // for any error: a parent directory the user cannot search
+                // would read as "already gone" and the step would report a
+                // removal it never made. Only the known missing-path
+                // diagnostics count as absence; any other lookup error fails
+                // the step with `stat`'s own message. `stat` without `-L`
+                // describes a symlink itself, so a dangling link counts as
+                // present and is removed, while a link's target is never
+                // touched.
+                let script = format!(
+                    "export LC_ALL=C; f={file}; \
+                     if inspection=$(stat -c '%F' -- \"$f\" 2>&1); then rm -f -- \"$f\"; \
+                     else status=$?; case \"$inspection\" in \
+                       {missing}) printf absent ;; \
+                       *) printf '%s\\n' \"$inspection\" >&2; exit \"$status\" ;; esac; fi",
+                    file = shell_path(path)?,
+                    missing = STAT_MISSING_PATH_PATTERNS,
+                );
+                let output = self
+                    .require_shell(target, &script, &format!("removing {}", path.display()))
+                    .await?;
+                Ok(if output.stdout == b"absent" {
+                    skipped()
+                } else {
+                    ActionOutcome::Completed
+                })
+            }
+        }
     }
 
     /// Planning refuses a lib directory that is itself a symlink, and
@@ -3664,23 +3691,6 @@ fn lower_hex(digest: &[u8]) -> String {
     out
 }
 
-/// Whether a host's own `tmux -V` output clears the supervisor's version
-/// floor, deciding whether provisioning installs Farhelm's private build.
-///
-/// The comparison is imported from the supervisor rather than reimplemented
-/// so the two can never disagree. Divergence here is not a cosmetic bug: a
-/// laxer test would accept a host tmux, skip the payload, and hand the
-/// remote supervisor a binary it then refuses at startup — provisioning
-/// would report success on a host that cannot start.
-///
-/// Conservative in the same direction the supervisor is: anything
-/// unparseable — including the empty string a host with no tmux reports —
-/// requests the private payload rather than assuming compatibility.
-pub(super) fn tmux_meets_floor(output: &str) -> bool {
-    farhelm_supervisor::tmux::parse_tmux_version(output)
-        .is_ok_and(|version| version >= farhelm_supervisor::tmux::TMUX_FLOOR)
-}
-
 /// The remote host's stderr from a degraded `loginctl enable-linger`, as the
 /// helm's log line carries it: escaped and bounded by [`peer_text`].
 ///
@@ -3817,15 +3827,15 @@ pub(super) fn manager_unit_dir_from_probe(output: &[u8]) -> Result<ManagerUnitDi
 /// Nothing here gates on the distro ID. Every real requirement is a
 /// capability the probe measured directly: a payload architecture, a
 /// usable systemd user manager (with a resolvable, absolute unit
-/// directory), and — checked further down — an acceptable tmux or the
-/// ability to install one. The ID is parsed and carried into `Reach`
+/// directory) and a unit that `farhelm helm setup` does not own there.
+/// The ID is parsed and carried into `Reach`
 /// purely so the confirmation plan can name the host it inspected; an
 /// empty ID (no `/etc/os-release` at all) is not a reason to refuse a
 /// host whose manager is otherwise usable, so it flows through as an
 /// empty string rather than a rejection.
 pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendFailure> {
     let fields: Vec<&[u8]> = output.split(|byte| *byte == 0).collect();
-    if fields.len() != 10 || fields[0] != REACH_RECORD_MARKER.as_bytes() || !fields[9].is_empty() {
+    if fields.len() != 8 || fields[0] != REACH_RECORD_MARKER.as_bytes() || !fields[7].is_empty() {
         return Err(BackendFailure::new(
             "the provisioning reach check returned malformed output",
             String::from_utf8_lossy(output),
@@ -3857,8 +3867,8 @@ pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendF
             )));
         }
     };
-    if fields[6] != b"usable" {
-        let reason = if fields[6] == b"unsupported-xdg" {
+    if fields[4] != b"usable" {
+        let reason = if fields[4] == b"unsupported-xdg" {
             "the systemd user manager reports a relative XDG_CONFIG_HOME, so Farhelm cannot determine its unit directory"
         } else {
             "automatic provisioning requires a usable systemd user manager"
@@ -3881,7 +3891,7 @@ pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendF
             "automatic provisioning cannot represent this host's HOME at its text-only plan boundary ({error}); run the supervisor manually with explicit paths."
         )));
     }
-    let user_unit_dir = bytes_path(fields[7]).map_err(|error| {
+    let user_unit_dir = bytes_path(fields[5]).map_err(|error| {
         BackendFailure::new(
             "the host reported an unusable systemd user unit directory",
             error.to_string(),
@@ -3902,7 +3912,7 @@ pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendF
     // unit removal re-check the marker (see `install_bytes` and
     // `remove_unit`), because a plan is confirmed some time after this
     // inspection.
-    match fields[8] {
+    match fields[6] {
         b"" => {}
         b"setup" => return Ok(ReachOutcome::SetupManaged),
         _ => {
@@ -3912,24 +3922,16 @@ pub(super) fn parse_reach_output(output: &[u8]) -> Result<ReachOutcome, BackendF
             ));
         }
     }
-    let tmux_path = bytes_path(fields[4]).map_err(|error| {
-        BackendFailure::new("the host reported an unusable tmux path", error.to_string())
-    })?;
-    let tmux = String::from_utf8_lossy(fields[5]);
-    let tmux_ok =
-        tmux_meets_floor(&tmux) && tmux_path.is_absolute() && path_text(&tmux_path).is_ok();
     Ok(ReachOutcome::Supported(Reach {
         home,
         user_unit_dir,
         arch,
         distro_id,
-        needs_tmux: !tmux_ok,
         launchd_domain: None,
-        host_tmux: tmux_ok.then_some(tmux_path),
     }))
 }
 
-/// Mac discovery does not ask about tmux or systemd. A missing command is a
+/// Mac discovery does not ask about systemd. A missing command is a
 /// capability refusal, while the desktop app is an ownership refusal shared
 /// by setup, Update and uninstall. The current helm owns this private record.
 const MACOS_REACH_SH: &str = r#"
@@ -3992,9 +3994,7 @@ pub(super) fn parse_macos_reach_output(output: &[u8]) -> Result<ReachOutcome, Ba
         home,
         arch: PayloadTarget::MacosAarch64,
         distro_id: "macOS".into(),
-        needs_tmux: false,
         launchd_domain: Some(format!("user/{uid}")),
-        host_tmux: None,
     }))
 }
 
@@ -4018,9 +4018,9 @@ mod macos_reach_tests {
     }
 
     /// Apple silicon must choose Darwin bytes and freeze the SSH user's
-    /// domain without requiring any tmux or Linux manager evidence.
+    /// domain without requiring any Linux manager evidence.
     #[test]
-    fn mac_reach_selects_darwin_payload_and_no_tmux() {
+    fn mac_reach_selects_darwin_payload() {
         let ReachOutcome::Supported(reach) =
             parse_macos_reach_output(&record("/Users/host", "arm64", "501", "", "")).unwrap()
         else {
@@ -4032,7 +4032,6 @@ mod macos_reach_tests {
             reach.user_unit_dir,
             Path::new("/Users/host/Library/LaunchAgents")
         );
-        assert!(!reach.needs_tmux && reach.host_tmux.is_none());
     }
 
     /// Capability/ownership refusals must name the obstacle and never send

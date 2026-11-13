@@ -81,14 +81,16 @@ terminal too, including while the agent starts. One that replaces the shell with
 starting at all, and the session's terminal shows your tmux instead. To leave Farhelm's terminals alone, have the
 startup file skip tmux when `TERM_PROGRAM` is `farhelm`.
 
-## tmux is still needed
+## Farhelm no longer needs tmux
 
-Setting up a remote Linux host still checks the host's tmux, and brings Farhelm's own copy when the host has no new
-enough one. Nothing else does: the Farhelm desktop app and a Linux machine running the helm no longer need tmux. Remote
-Macs set up over SSH do not require or install tmux ([Add a remote host](/docs/get-started/add-a-remote-host/) covers
-both kinds of host).
+Nothing in Farhelm needs tmux any more: not the desktop app, not a Linux machine running the helm, and not a remote
+host. Farhelm itself no longer runs tmux for any session either: it ends the tmux it ran old terminals in when it
+updates, and never starts one again.
 
-Farhelm itself no longer runs tmux for any session: it ends the tmux it ran old terminals in when it updates, and never
-starts one again.
-
-A later release will say when setting up a remote Linux host stops needing tmux.
+Earlier versions installed their own copy of tmux on remote Linux hosts whose tmux was too old or missing, which was
+most of them (Ubuntu 24.04 and Debian 13 included). Typing `tmux` in a session or terminal tab on such a host ran that
+copy rather than the host's own. Updating the host, or adding it again, now removes Farhelm's copy, so `tmux` there runs
+the host's own tmux, or is not found if the host has none. A copy that a Farhelm update before 0.18.0 put next to
+`farhelm` in a shared folder such as `~/.local/bin` is left alone, since it may be yours; delete it if it is not. If you
+use tmux on that host, install it yourself. A tmux you had already started from Farhelm's copy keeps running until you
+end it.

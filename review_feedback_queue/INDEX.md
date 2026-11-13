@@ -259,10 +259,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   transform newline-bearing path text before comparing identities. A supported incidental path and complete layout
   defeating all removal guards remain missing; this is separate from the repaired ordinary path cases.
 
-- [`offline-uninstall-live-tmux-history-unresolved.md`](offline-uninstall-live-tmux-history-unresolved.md) — The offline
-  retry can omit the session check, but a supported history leaving the unit file gone, unit stopped, supervisor absent
-  and private tmux alive remains unestablished. Active-unit repairs do not explicitly accept losing surviving sessions.
-
 - [`older-direct-bun-omp-reporter-gap.md`](older-direct-bun-omp-reporter-gap.md) — Older direct-Bun launches keep a
   permissive reporter corridor. A nested interactive OMP receiving the required reporter and ancestry remains
   unestablished; only the proven older-release subset has filter coverage.

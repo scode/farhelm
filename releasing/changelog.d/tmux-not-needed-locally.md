@@ -14,8 +14,6 @@ the next `farhelm helm setup` or Update rewrites it; the line is ignored. Where 
 directory that only that `PATH` entry made reachable (Linuxbrew's, say), the programs in that directory, such as
 `tmux`, are found from a session on that machine only if your login shell's own `PATH` includes it.
 
-Setting up a remote Linux host still checks its tmux and installs Farhelm's own copy when it has no new enough one.
-
 Context for curation: the supervisor itself finds `systemd-run`, `systemctl` and `git` through that same `PATH`, which
 is now only its own directory then `/usr/local/bin:/usr/bin:/bin`. On a machine that keeps those programs elsewhere,
 such as NixOS, and whose tmux lived in that same directory, the old service found them only through the tmux entry;

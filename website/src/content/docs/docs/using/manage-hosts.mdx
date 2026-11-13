@@ -131,9 +131,8 @@ This applies to SSH hosts. A Tensorlake host has [Delete sandbox](#suspend-or-de
 **Uninstall** first shows what it will remove from the host: the [supervisor](/docs/how-it-works/the-pieces/)'s service
 and Farhelm's program files, each with its path there. On a remote Mac this removes its background job and the job's
 file in `~/Library/LaunchAgents`. It also names the directory that holds the host's Farhelm data, which it keeps, and
-stops the small Farhelm processes that keep its terminals running. On Linux it also ends the tmux that sessions from
-before [new terminals](/docs/using/new-terminals/) run in. Nothing changes
-until you select **Uninstall** in that dialog. Once it is done, the host is gone from the list. A short line above it confirms the
+stops the small Farhelm processes that keep its terminals running. Nothing changes until you select **Uninstall** in
+that dialog. Once it is done, the host is gone from the list. A short line above it confirms the
 removal; hover over the line to see where the data remains, or use its Copy button to copy that directory's path. You
 can dismiss the line with ×. Delete the directory on the host yourself if you want the data gone too.
 

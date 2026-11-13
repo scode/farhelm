@@ -31,7 +31,7 @@ pub(crate) struct Fixture {
 /// defaults would fail logind/home validation before an intended later fault.
 fn behavior() -> serde_json::Value {
     serde_json::json!({"home":"/home/ubuntu","user_unit_dir":"/home/ubuntu/.config/systemd/user",
-        "needs_tmux":false,"message":"injected backend boundary"})
+        "message":"injected backend boundary"})
 }
 
 impl Fixture {

@@ -5,39 +5,6 @@ deliberately not TODO.md: entries there describe work that is still wanted, whil
 decided to live with — usually because the defect lives below farhelm (tmux, the kernel, a library) or because the only
 fix would cost more than the bug does. An entry moves out of this file only if that calculus changes.
 
-## Abrupt supervisor death can crash the private tmux server, killing every session
-
-This applied while the supervisor ran its terminals in a private tmux server. It runs none any more (old terminals are
-ended at its start), so a supervisor death can no longer take sessions with it this way. The entry stays because the
-installation's tmux version floor cites it (`crates/farhelm-supervisor/src/tmux.rs`).
-
-If the supervisor died without running any cleanup — SIGKILL, OOM kill, a segfault — while its tmux control clients
-still had queued output, the private tmux server itself sometimes aborted. When that happened every session on that
-server died with it: agent processes, tabs, scrollback, all of it. Farhelm's durable state survived (the sessions were
-rediscovered as exited on the next supervisor start), but the running work in those sessions was gone.
-
-Here's the TLDR of the mechanics. The kernel closes a dead process's file descriptors, so the server saw EOF and EPIPE
-on the dead supervisor's control-client pipes, some of which still carried queued pane output. tmux accounts that queued
-output in blocks, and the teardown that follows can race the accounting into a state where a buffer holds fewer bytes
-than its own bookkeeping claims. tmux's codebase uses `fatal()` the way other projects use assertions: on an internal
-invariant violation it aborts the whole server rather than continue with state it no longer trusts. Reaching the
-corrupted state at all is tmux's bug, not ours; a server should treat "a client died mid-block" as routine.
-
-What we observed and how sure we were of it: 5 aborts in roughly 5,000 supervisor-SIGKILL iterations on a saturated
-4-core box running distro tmux 3.6 (2026-08-18), each leaving "no server running" behind with no farhelm-side error. The
-identification with tmux's `fatal: not enough data` abort — the same class the pinned-3.7b regression suite existed for,
-where it was triggered by unsafe live teardown of an output-bearing control client — was inferred from the matching
-trigger shape, not captured directly: the dying server's stderr was not being recorded. It was never established whether
-tmux 3.7b's teardown fixes cover this post-mortem path, nor which distro versions are affected beyond 3.6. The archived
-M6.5 flake ledger (under lore/) had independently seen the private tmux server die under load before the trigger was
-understood.
-
-Why it was not fixed: there was nothing to fix on our side of the line. Farhelm's own teardown paths disabled output
-through an acknowledged boundary before closing any control client, precisely to avoid this abort, but a SIGKILLed
-supervisor runs nothing. A planned stop (SIGTERM, SIGINT, SIGHUP, or the desktop app's closing tether) ran that orderly
-shutdown, so only a death that runs no code was left, and the only code that could have made post-mortem teardown safe
-was tmux's.
-
 ## A host install or update can hang until the helm restarts if a local ssh helper keeps its output open
 
 If the helm stops a stalled or failed transfer of Farhelm's files to a host while a local helper started by ssh still

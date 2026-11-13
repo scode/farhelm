@@ -204,8 +204,8 @@ jobs:
       - name: "Prepare rootless Podman integration fixtures"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: |
-          # The focused nextest setup builds native musl payloads before cargo-dist
-          # has produced any release artifact. It reuses the pinned static tmux above.
+          # The focused nextest setup builds the native musl farhelm payload before
+          # cargo-dist has produced any release artifact.
           sudo apt-get install -y podman uidmap slirp4netns fuse-overlayfs musl-tools dbus-user-session
           # Hosted jobs have no login session. Podman's production probe needs the
           # runner's user manager, its environment and a usable transient scope;

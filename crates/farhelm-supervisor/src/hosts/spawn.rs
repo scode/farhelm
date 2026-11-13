@@ -645,10 +645,10 @@ mod tests {
     /// A stand-in first stage at `dir/name` running `body` under `/bin/sh`.
     /// Commands in it use absolute paths: the spawn gives it no `PATH`.
     ///
-    /// The script is run once before it is returned, as `tmux.rs`'s
-    /// `probe_fixture` does: writing an executable and spawning it at once
-    /// races `ETXTBSY` against any other thread's fork, which may still hold
-    /// the descriptor that wrote it. The warm-up run exits before the body.
+    /// The script is run once before it is returned: writing an executable
+    /// and spawning it at once races `ETXTBSY` against any other thread's
+    /// fork, which may still hold the descriptor that wrote it. The warm-up
+    /// run exits before the body.
     fn starter(dir: &Path, name: &str, body: &str) -> PathBuf {
         use std::os::unix::fs::OpenOptionsExt as _;
         let path = dir.join(name);

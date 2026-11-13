@@ -57,6 +57,14 @@ const UNINSTALL_REFUSAL_NAMED_SESSIONS: usize = 10;
 
 const ATTACH_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// What a failed removal of the bundled tmux means for the host, as the
+/// run's own message says it. "May have", because a failure is not proof
+/// the file is still there: a command that timed out or lost its SSH
+/// connection may already have removed it. The step's own message adds the
+/// host's error; the run's message stays this one line, so a reader who
+/// sees both does not get the error twice.
+const BUNDLED_TMUX_MAY_REMAIN: &str = "the bundled tmux may have been left in place";
+
 const MAX_PENDING_PLANS: usize = 64;
 const MAX_CONCURRENT_RUNS: usize = 4;
 const MAX_CONCURRENT_PLANS: usize = 4;
@@ -1691,10 +1699,10 @@ impl ProvisioningService {
     /// unit file: with no unit file left nothing can start the supervisor
     /// again, so the remaining steps may go ahead without a connection, but
     /// only on positive evidence that no supervisor answers and that systemd
-    /// no longer runs its unit. A supervisor that exited while its
-    /// terminals survived (its terminal hosts, or the private tmux server)
-    /// still passes, with their sessions unchecked; nothing here covers
-    /// that route.
+    /// no longer runs its unit. A supervisor that exited while its terminal
+    /// hosts survived still passes, with their sessions unchecked; nothing
+    /// here covers that route.
+    ///
     /// A host whose supervisor answers but cannot be used (another protocol,
     /// an identity problem) is refused outright, because something is
     /// running there and, for an identity problem, the destination may now
@@ -2644,14 +2652,33 @@ impl ProvisioningService {
                 return;
             }
         };
+        // A completed run can still carry warnings, and the run's own message
+        // is the line a reader sees without opening the steps. Each degraded
+        // step adds what it means for the host, so a refused linger and a
+        // tmux left in place are both named and neither speaks for the other.
+        let mut warnings = Vec::new();
         for (index, action) in plan.actions.iter().enumerate() {
             let index = offset + index;
             self.set_step(host, index, StepStatus::Running, None).await;
-            let outcome = self.execute_action(host, &plan, action, &prepared).await;
+            let outcome = self
+                .execute_action(host, &plan, action, prepared.as_ref())
+                .await;
             let (status, message) = match outcome {
                 Ok(ActionOutcome::Completed) => (StepStatus::Completed, None),
                 Ok(ActionOutcome::Skipped(message)) => (StepStatus::Skipped, Some(message)),
-                Ok(ActionOutcome::Degraded(message)) => (StepStatus::Degraded, Some(message)),
+                Ok(ActionOutcome::Degraded(message)) => {
+                    warnings.push(match action {
+                        ProvisioningAction::EnableLinger {
+                            login_start_if_refused,
+                            ..
+                        } => login_start_if_refused.clone(),
+                        ProvisioningAction::RemoveBundledTmux { .. } => {
+                            BUNDLED_TMUX_MAY_REMAIN.to_string()
+                        }
+                        _ => message.clone(),
+                    });
+                    (StepStatus::Degraded, Some(message))
+                }
                 Err(error) => {
                     self.fail_action(host, plan.operation, index, action, error)
                         .await;
@@ -2663,56 +2690,21 @@ impl ProvisioningService {
         let mut memory = self.memory.lock().await;
         if let Some(run) = memory.runs.get_mut(&host) {
             run.status = RunStatus::Completed;
-            let degraded = run
-                .steps
-                .iter()
-                .any(|step| step.status == StepStatus::Degraded);
-            run.message = degraded.then(|| "starts at login, not at boot".to_string());
+            run.message = (!warnings.is_empty()).then(|| warnings.join("; "));
         }
         memory.busy.remove(&host);
         drop(memory);
         self.manager.events().bump();
     }
 
-    /// Resolve and stage every payload before the first plan action runs.
-    /// A missing release artifact is a planning/execution boundary failure,
-    /// not permission to leave newly created directories on the host.
-    ///
-    /// Each payload is prepared once, even though remote plans report upload
-    /// and installation as separate actions. A cold host needs both
-    /// a `farhelm` and a `tmux`, the download source locks per asset so
-    /// those two never contend, and a serial walk would make cold-provision
-    /// latency the sum of two multi-megabyte downloads while holding one of
-    /// only `MAX_CONCURRENT_RUNS` fleet-wide slots. The fan-out is bounded
-    /// by the plan itself — a plan carries at most one payload of each
-    /// [`PayloadKind`] — so no explicit limit is needed here; if that ever
-    /// stops being true this needs a semaphore rather than a bigger fan-out.
-    ///
-    /// Each future carries its own action index so a failure still names the
-    /// plan step the user is looking at. Nothing on the host is touched until
-    /// every payload is prepared.
-    ///
-    /// `join_all`, NOT `try_join_all`, and the difference matters (F6, review
-    /// round 2). `try_join_all` drops the remaining futures the moment one
-    /// fails — but a dropped future does not stop the `spawn_blocking` task a
-    /// sibling may have running, and tokio keeps that closure alive to
-    /// completion. Dropping the future DOES release the per-asset mutex and
-    /// abandon the `OnceCell` initialisation that were the only guarantee of
-    /// a single writer, so an immediate retry could start deleting and
-    /// rewriting the same fixed staging, marker, and binary paths while the
-    /// detached publication was still writing them. Awaiting every future and
-    /// only then returning the first error costs one extra download on a
-    /// failing run and keeps cache-write ownership single at all times.
-    ///
-    /// Not covered by a test of its own: reproducing it needs a failure
-    /// injected between a sibling's entry into `spawn_blocking` and its exit,
-    /// which is not reachable through any seam the service exposes today.
-    /// This comment is the record of why the cheaper `try_join_all` is wrong
-    /// here.
+    /// Resolve and stage the plan's payload before the first plan action
+    /// runs. A missing release artifact is a planning/execution boundary
+    /// failure, not permission to leave newly created directories on the
+    /// host; the failure names the plan step the payload belongs to.
     async fn prepare_payloads(
         &self,
         plan: &ProvisioningPlan,
-    ) -> Result<HashMap<super::plan::PayloadKind, PreparedPayload>, (usize, BackendFailure)> {
+    ) -> Result<Option<PreparedPayload>, (usize, BackendFailure)> {
         super::installation::prepare_payloads(self.payloads.as_ref(), plan).await
     }
 
@@ -2760,7 +2752,7 @@ impl ProvisioningService {
         host: HostId,
         plan: &ProvisioningPlan,
         action: &ProvisioningAction,
-        prepared: &HashMap<super::plan::PayloadKind, PreparedPayload>,
+        prepared: Option<&PreparedPayload>,
     ) -> Result<ActionOutcome, BackendFailure> {
         match action {
             ProvisioningAction::EnsureDirectories { .. }
@@ -2777,6 +2769,20 @@ impl ProvisioningService {
                     prepared,
                 )
                 .await
+            }
+            // By the time this runs the new supervisor is already up, and
+            // the file at stake is one Farhelm no longer uses, so a removal
+            // that fails leaves a working install. Failing the run would
+            // report Update or Add as failed and ask for a rerun that the
+            // install does not need; a warning on the step says what may be left.
+            ProvisioningAction::RemoveBundledTmux { path } => {
+                Ok(match self.backend.remove_file(&plan.target, path).await {
+                    Ok(outcome) => outcome,
+                    Err(error) => ActionOutcome::Degraded(format!(
+                        "{BUNDLED_TMUX_MAY_REMAIN}: {}",
+                        error.rendered()
+                    )),
+                })
             }
             ProvisioningAction::WriteLaunchAgent {
                 content,
@@ -2829,18 +2835,9 @@ impl ProvisioningService {
                 unit,
                 farhelm_program,
                 state_dir,
-                tmux_program,
-                tmux_socket,
             } => {
                 self.backend
-                    .stop(
-                        &plan.target,
-                        unit,
-                        farhelm_program,
-                        state_dir,
-                        tmux_program,
-                        tmux_socket,
-                    )
+                    .stop(&plan.target, unit, farhelm_program, state_dir)
                     .await
             }
             ProvisioningAction::RemoveDirectory { path } => {

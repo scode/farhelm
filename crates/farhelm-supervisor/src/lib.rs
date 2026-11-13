@@ -5,11 +5,9 @@
 //! knowledge of other hosts. Its protocol is reached over a unix socket,
 //! remotely via `farhelm internal stdio`
 //! through the user's ssh. Each terminal runs in its own terminal host
-//! process (`hosts` module); the `tmux` module keeps only the tmux version
-//! floor remote provisioning checks a host against. The wire protocol is
-//! farhelm-proto (`service` module); the launch path through the user's
-//! login shell and the exec shim lives in `launch`; SQLite-backed session
-//! metadata lives in `store`.
+//! process (`hosts` module). The wire protocol is farhelm-proto (`service`
+//! module); the launch path through the user's login shell and the exec
+//! shim lives in `launch`; SQLite-backed session metadata lives in `store`.
 //! A full-authority connection may also claim IPv4 loopback listeners for
 //! recipe tunnels. They carry only relayed TCP, never this protocol, and end
 //! with that connection; the helm restricts their use to Tensorlake hosts.
@@ -90,7 +88,6 @@ pub mod service;
 pub mod session_hold;
 pub mod store;
 pub mod terminal_process;
-pub mod tmux;
 pub mod version_lock;
 pub mod working_copies;
 

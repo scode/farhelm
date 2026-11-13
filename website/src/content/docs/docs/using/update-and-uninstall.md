@@ -74,7 +74,9 @@ Your remote hosts are not updated automatically unless you turn on **Update remo
 under **Hosts**, or choose **Always update** above your sessions. Once Farhelm on your Mac has restarted on a new
 version, the **Hosts** button at the foot of the navigation rail shows an up-arrow, hosts that run an older version
 appear above your sessions with an **Update** button, and the host list lets you update them too; see
-[Manage hosts](/docs/using/manage-hosts/#update-a-host).
+[Manage hosts](/docs/using/manage-hosts/#update-a-host). Updating a Linux host removes the copy of tmux that earlier
+versions of Farhelm installed there, so `tmux` typed in a session afterwards no longer runs that copy
+([New terminals](/docs/using/new-terminals/#farhelm-no-longer-needs-tmux) says more).
 
 To remove Farhelm, see [Uninstall Farhelm](/docs/get-started/uninstall/). Uninstall keeps your managed checkouts,
 including their trash and [prepared checkouts](/docs/using/start-a-session/#prepared-checkouts) inside your Mac's

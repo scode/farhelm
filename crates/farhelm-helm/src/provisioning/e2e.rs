@@ -6,7 +6,7 @@ use super::backend::{
     ProvisioningBackend, Reach, ReachOutcome, UninstallInspection,
 };
 use super::payloads::PayloadSource;
-use super::plan::{DirectorySpec, PayloadKind, PayloadTarget, ProvisioningTarget};
+use super::plan::{DirectorySpec, PayloadTarget, ProvisioningTarget};
 use anyhow::{Context as _, bail};
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -63,7 +63,6 @@ struct E2eBehavior {
     dial_state_dir: Option<String>,
     home: String,
     user_unit_dir: String,
-    needs_tmux: bool,
     hold_actions: bool,
     fail_action: Option<String>,
     action_delay_ms: u64,
@@ -83,7 +82,6 @@ impl Default for E2eBehavior {
             dial_state_dir: Some("/var/lib/farhelm-e2e".to_string()),
             home: "/home/farhelm-e2e".to_string(),
             user_unit_dir: "/home/farhelm-e2e/.config/systemd/user".to_string(),
-            needs_tmux: false,
             hold_actions: false,
             fail_action: None,
             action_delay_ms: 0,
@@ -322,9 +320,7 @@ impl ProvisioningBackend for E2eProvisioningBackend {
                 user_unit_dir: PathBuf::from(behavior.user_unit_dir),
                 arch: PayloadTarget::LinuxX86_64,
                 distro_id: "ubuntu".to_string(),
-                needs_tmux: behavior.needs_tmux,
                 launchd_domain: None,
-                host_tmux: (!behavior.needs_tmux).then(|| PathBuf::from("/usr/bin/tmux")),
             })),
             E2eInspectOutcome::Manual => Ok(ReachOutcome::Manual(behavior.message)),
             E2eInspectOutcome::Error => Err(BackendFailure::new(
@@ -345,38 +341,22 @@ impl ProvisioningBackend for E2eProvisioningBackend {
     async fn upload_path(
         &self,
         target: &ProvisioningTarget,
-        kind: PayloadKind,
         _payload: &PreparedPayload,
         _destination: &Path,
         _temporary: &Path,
     ) -> Result<ActionOutcome, BackendFailure> {
-        self.action(
-            target,
-            match kind {
-                PayloadKind::Farhelm => "upload-farhelm",
-                PayloadKind::Tmux => "upload-tmux",
-            },
-        )
-        .await
+        self.action(target, "upload-farhelm").await
     }
 
     async fn install_path(
         &self,
         target: &ProvisioningTarget,
-        kind: PayloadKind,
         _payload: &PreparedPayload,
         _destination: &Path,
         _temporary: &Path,
         _mode: u32,
     ) -> Result<ActionOutcome, BackendFailure> {
-        self.action(
-            target,
-            match kind {
-                PayloadKind::Farhelm => "install-farhelm",
-                PayloadKind::Tmux => "install-tmux",
-            },
-        )
-        .await
+        self.action(target, "install-farhelm").await
     }
 
     async fn install_bytes_checked(
@@ -499,10 +479,19 @@ impl ProvisioningBackend for E2eProvisioningBackend {
         _unit: &str,
         _farhelm_program: &Path,
         _state_dir: &Path,
-        _tmux_program: &Path,
-        _tmux_socket: &Path,
     ) -> Result<ActionOutcome, BackendFailure> {
         self.action(target, "stop-supervisor").await
+    }
+
+    /// Recorded under the plan step's id: the bundled tmux's removal is the
+    /// only file removal a plan makes through this method, and the suite's
+    /// `fail_action` names plan steps.
+    async fn remove_file(
+        &self,
+        target: &ProvisioningTarget,
+        _path: &Path,
+    ) -> Result<ActionOutcome, BackendFailure> {
+        self.action(target, "remove-bundled-tmux").await
     }
 
     async fn remove_directory(
@@ -538,7 +527,7 @@ pub(super) struct E2ePayloads(pub(super) PathBuf);
 
 #[async_trait]
 impl PayloadSource for E2ePayloads {
-    async fn path(&self, _payload: PayloadKind, _arch: PayloadTarget) -> anyhow::Result<PathBuf> {
+    async fn path(&self, _arch: PayloadTarget) -> anyhow::Result<PathBuf> {
         Ok(self.0.clone())
     }
 }

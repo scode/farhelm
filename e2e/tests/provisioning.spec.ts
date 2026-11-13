@@ -50,7 +50,6 @@ type Behavior = {
   dial_state_dir?: string | null;
   home?: string;
   user_unit_dir?: string;
-  needs_tmux?: boolean;
   hold_actions?: boolean;
   fail_action?: string | null;
   action_delay_ms?: number;

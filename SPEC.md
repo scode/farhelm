@@ -179,6 +179,15 @@ not a supported target: Farhelm accommodates them only where that takes a trivia
 complexity on them. On Linux, no usable systemd user manager or an architecture with no payload falls back to the manual
 path (run the binary yourself), on the best-effort basis described in [Supported host setup](#supported-host-setup).
 
+Setting up or updating a remote Linux host neither needs nor installs tmux. Earlier releases installed their own tmux
+build as `~/.local/lib/farhelm/tmux`, and its directory comes first on the `PATH` sessions start with, so a `tmux` typed
+in a session there ran that copy. Every Linux setup and Update plan therefore removes that file as a step of its own,
+after the supervisor is started or restarted, and a `tmux` typed in a session afterwards no longer runs that copy. A
+copy that an update before 0.18.0 put beside `farhelm` in a shared folder such as `~/.local/bin` is not removed, since
+it may be the user's own, as 0.18.0's release notes said. A host without the file finds the step already done. A removal
+that fails ends the step with a warning that says the file may have been left in place, and the setup or Update still
+completes, since the new supervisor already runs.
+
 A remote Mac's setup installs `farhelm` in `~/.local/lib/farhelm`, keeps its state in `~/.local/state/farhelm`, and
 writes `~/Library/LaunchAgents/io.farhelm.supervisor.plist` for the SSH user's launchd domain. Setup, Update and
 uninstall do not check for, install, run or mention tmux on this path; old tmux terminals on remote Macs are
@@ -202,8 +211,10 @@ intact. Losing the helm never strands a provisioned host.
 Removing Farhelm from a remote host is a host action too, the uninstall item in that host's menu, with no command-line
 counterpart. The helm plans the removal over SSH and shows it before touching the host: the supervisor's user service
 and its unit file or launchd plist go, any terminal hosts are ended, and Farhelm's private lib directory with the binary
-is removed. On Linux the private tmux server is ended too, and any private tmux binary goes with the lib directory; a
-remote Mac has no tmux step. Each file or directory is named by its path on the host (the private tmux server and the
+is removed, with any tmux binary an earlier release left there. Uninstall has no tmux step of its own: stopping the
+supervisor's service ends whatever still runs under it, an earlier release's private tmux server included, but one that
+outlived a supervisor stopped before uninstall (on a host never updated to a release that ends it at startup, say) keeps
+running, which the maintainer accepted on 2026-11-11. Each file or directory is named by its path on the host (the
 terminal hosts are named without their socket paths); terminal hosts that cannot be confirmed ended keep the lib
 directory in place and the host listed, for a retry; the host's Farhelm data directory stays, named by its path, with a
 note that deleting it by hand removes the data too. Nothing changes until the user confirms. Setup and uninstall
@@ -3009,9 +3020,9 @@ whatever the agent renders is what you see. There is no composer, no message abs
   failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those
   sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still
   running. After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.
-  Neither the Mac app nor a Linux machine set up with `farhelm helm setup` needs tmux. Setting up a remote Linux host
-  still checks for a supported tmux and installs Farhelm's own build when the host has none; a remote Mac set up over
-  SSH never uses tmux (see Topology).
+  Nothing in Farhelm needs tmux: not the Mac app, not a Linux machine set up with `farhelm helm setup`, and not a remote
+  host. Setting up or updating a remote Linux host removes the tmux build earlier releases installed there (see
+  Topology).
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, down to a floor below which it is detached as stalled. No viewer can stop a
@@ -5260,12 +5271,8 @@ is zsh, and inside containers that run wrapped agents.
 An agent harness version is supported until a newer release of that harness has been out for two weeks. Things move fast
 in this space; Farhelm adds no code or complexity to support older versions.
 
-tmux is an implementation detail, and setting up a remote Linux host is the only place Farhelm still looks for one. The
-supported tmux there is either the pinned build Farhelm itself installs, or the stock tmux package of the Linux
-distribution, at or above the version floor, run as the real binary. Using the distribution's package is a convenience
-that keeps its security patches, not an integration promise. Anything else is unsupported, including wrapper scripts,
-custom or patched builds, and configuration or behavior a stock package would not bring. Farhelm need not add code or
-complexity to accommodate unsupported shells or tmux programs.
+No supported environment needs tmux: Farhelm neither requires nor looks for one on any machine. A tmux the user runs in
+a session is one of their own programs, like any other they run there.
 
 Usernames of up to 20 characters must work on Linux and macOS with Farhelm's default state directory locations, on the
 helm's machine and on every host, including wherever Farhelm places sockets or other files whose paths the system limits
@@ -5292,14 +5299,14 @@ commands, nor detect or refuse them. This trust covers only that user configurat
 the escaping rule in [Local authority and trust between hosts](#local-authority-and-trust-between-hosts) still applies.
 
 Confirmed 2026-10-10: a configuration Farhelm does not support is refused with a clear message rather than left to
-undefined behavior, except where this section says otherwise (other login shells, unsupported tmux programs, filesystem
-aliasing outside the home-folder exception below, out-of-band manipulation of managed checkouts and the trash, including
-uncommon filesystems under them, a checkout root reachable from more than one host, the proxy case below, and
-hand-edited Farhelm service units under [Supported host setup](#supported-host-setup)). An install whose `farhelm`
-program path contains `$` is unsupported and refused, because systemd does not decode `$$` in a service's program
-position, so a service written for that path could not start. The supervisor also refuses startup when the Farhelm
-program folder put on session `PATH` contains `:`, naming the folder; the desktop app shows the same refusal before
-starting its supervisor, because a colon would split that folder into unintended command-search directories.
+undefined behavior, except where this section says otherwise (other login shells, filesystem aliasing outside the
+home-folder exception below, out-of-band manipulation of managed checkouts and the trash, including uncommon filesystems
+under them, a checkout root reachable from more than one host, the proxy case below, and hand-edited Farhelm service
+units under [Supported host setup](#supported-host-setup)). An install whose `farhelm` program path contains `$` is
+unsupported and refused, because systemd does not decode `$$` in a service's program position, so a service written for
+that path could not start. The supervisor also refuses startup when the Farhelm program folder put on session `PATH`
+contains `:`, naming the folder; the desktop app shows the same refusal before starting its supervisor, because a colon
+would split that folder into unintended command-search directories.
 
 Two host aliases that reach the same host, user and port through different `ProxyCommand` routes are unsupported. The
 helm shares SSH connections by OpenSSH's connection hash, which does not include the proxy command, so such aliases may

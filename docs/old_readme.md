@@ -68,10 +68,9 @@ network interface), and "add host" is discovery-first: if a supervisor is alread
 registered as-is and never restarted or replaced.
 
 NOTE on tmux: sessions run in Farhelm's own terminal hosts, not in tmux; the supervisor runs no tmux, and at startup
-ends the private tmux server earlier releases ran sessions in. Neither the desktop app nor `farhelm helm setup` needs
-tmux. Automatic setup of a remote Linux host still checks the host's tmux against 3.7c, in tmux's own release spelling
-(`3.7c`, `3.8`; development builds such as `next-3.8` and distro-decorated versions are refused rather than guessed
-about), and installs Farhelm's pinned static build when the host has nothing acceptable.
+ends the private tmux server earlier releases ran sessions in. Nothing in Farhelm needs tmux: not the desktop app, not
+`farhelm helm setup`, and not a remote host. Automatic setup and Update of a remote Linux host remove the static tmux
+earlier releases installed in `~/.local/lib/farhelm`, so `tmux` typed in a session there is the host's own, if any.
 
 ### Linux hosts
 
@@ -83,14 +82,14 @@ optional step so the supervisor starts at boot and survives logout (some managed
 runs only while you are logged in). Each registered host row later offers an update action with the same
 plan-then-confirm handshake. RHEL-family hosts with SELinux enforcing are untested.
 
-The binaries that plan installs are fetched, not carried: the helm downloads the host's `farhelm` — and a `tmux`, if the
-host has none at or above the floor — from the GitHub release matching the helm's own version, checks the release's
-`SHA256SUMS` against a signature it verifies with a key built into farhelm, checks each file's SHA-256, caches them
-under the helm's state directory, and pushes them over SSH. So the helm's machine needs to reach `github.com` at that
-moment; the host never does, before or after. Anything that fails verification is refused, never used. An offline or
-air-gapped helm points `farhelm helm run --payload-dir` at a directory holding the release's files exactly as downloaded
-from the releases page — that directory is trusted as-is, because you put it there. A farhelm you built from source
-downloads nothing by default and says so instead (see "Development" below).
+The binary that plan installs is fetched, not carried: the helm downloads the host's `farhelm` from the GitHub release
+matching the helm's own version, checks the release's `SHA256SUMS` against a signature it verifies with a key built into
+farhelm, checks the file's SHA-256, caches it under the helm's state directory, and pushes it over SSH. So the helm's
+machine needs to reach `github.com` at that moment; the host never does, before or after. Anything that fails
+verification is refused, never used. An offline or air-gapped helm points `farhelm helm run --payload-dir` at a
+directory holding the release's files exactly as downloaded from the releases page — that directory is trusted as-is,
+because you put it there. A farhelm you built from source downloads nothing by default and says so instead (see
+"Development" below).
 
 That GitHub release is the DEFAULT source, not the only one. `farhelm helm run --release-base-url <url>` (or
 `FARHELM_RELEASE_BASE_URL`) points the same verified download at any server publishing the release's files under that

@@ -100,7 +100,7 @@
   // check for this destination from Farhelm's test stand-in, as a reachable
   // Ubuntu machine with nothing set up, so the setup confirmation shows the
   // real plan with this invented home directory. No shot confirms the setup.
-  add_host: { ssh: "dev@new-box", home: "/home/dev", needs_tmux: true },
+  add_host: { ssh: "dev@new-box", home: "/home/dev" },
 
   // The folders the launcher offers under its folder field, from the same
   // rewritten reply.

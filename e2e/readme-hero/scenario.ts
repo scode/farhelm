@@ -72,8 +72,6 @@ export interface ScenarioLaunch {
 export interface ScenarioAddHost {
   ssh: string;
   home: string;
-  /** Whether the invented host lacks a new enough tmux, so the plan includes placing one. */
-  needs_tmux?: boolean;
 }
 
 /**
@@ -285,7 +283,6 @@ export function loadScenario(dir: string = SCENARIO_DIR): Scenario {
       fail("add_host.ssh must be a literal destination that no staged host uses");
     }
     if (!addHost.home || !addHost.home.startsWith("/")) fail("add_host.home must be an absolute path");
-    if (addHost.needs_tmux !== undefined && typeof addHost.needs_tmux !== "boolean") fail("add_host.needs_tmux must be a boolean");
   }
 
   const templates = (raw.templates as ScenarioTemplate[] | undefined) ?? [];
@@ -348,7 +345,6 @@ export function addHostConfig(scenario: Scenario): string {
         inspect: "supported",
         home: host.home,
         user_unit_dir: `${host.home}/.config/systemd/user`,
-        needs_tmux: host.needs_tmux ?? false,
       },
     },
   });
