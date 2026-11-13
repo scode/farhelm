@@ -60,33 +60,6 @@ if ! "$REAL_FARHELM" --version >/dev/null 2>&1; then
   exit 2
 fi
 
-# The tmux floor the installer has to advise, read from the release pins rather
-# than spelled out in this file. install.sh cannot read the pins itself (it
-# runs from `curl | sh` with nothing beside it), so its floor is a literal, and
-# the supervisor's TMUX_FLOOR is tied to the same pin by a Rust test. Deriving
-# every floor-dependent case below from the pin is what makes a floor bump fail
-# here until install.sh's comparison and message follow it; with the floor
-# spelled out in this file too, the old installer and its old tests would keep
-# agreeing with each other.
-read_pinned_tmux_floor() {
-  local pins="$REPO_ROOT/.github/release/source-pins.env" lines
-  lines=$(grep -c '^TMUX_VERSION=' "$pins") || true
-  if [ "$lines" != 1 ]; then
-    echo "expected exactly one TMUX_VERSION in $pins, found $lines" >&2
-    exit 1
-  fi
-  sed -n 's/^TMUX_VERSION=//p' "$pins"
-}
-TMUX_FLOOR=$(read_pinned_tmux_floor)
-if ! [[ "$TMUX_FLOOR" =~ ^([0-9]+)\.([0-9]+)([a-z]?)$ ]]; then
-  echo "the pinned tmux version '$TMUX_FLOOR' is not MAJOR.MINOR[letter]" >&2
-  exit 1
-fi
-TMUX_FLOOR_MAJOR=${BASH_REMATCH[1]}
-TMUX_FLOOR_MINOR=${BASH_REMATCH[2]}
-TMUX_FLOOR_LETTER=${BASH_REMATCH[3]}
-TMUX_FLOOR_HINT="Farhelm needs tmux $TMUX_FLOOR or newer before it can start."
-
 WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/farhelm-install-test.XXXXXX")
 SERVER_PID=""
 
@@ -140,12 +113,11 @@ not_contains() { [[ "$1" != *"$2"* ]]; }
 # Fixture construction. Every release fixture is a directory of the exact
 # assets a real GitHub release publishes: archives named
 # `<package>-<target>.tar.gz` holding one member at `<package>-<target>/
-# <binary>`, bare tmux-<target> files, and a SHA256SUMS covering whichever
-# of those are present. The "binaries" are two-line shell scripts, per the
-# committed fixtures' own convention (crates/farhelm-helm/tests/fixtures/
-# release/README.md) — except farhelm's specifically prints `farhelm
-# <version>`, because install.sh's own version check depends on that exact
-# text.
+# <binary>`, and a SHA256SUMS covering whichever of those are present.
+# The "binaries" are two-line shell scripts, per the committed fixtures' own
+# convention (crates/farhelm-helm/tests/fixtures/release/README.md) — except
+# farhelm's specifically prints `farhelm <version>`, because install.sh's own
+# version check depends on that exact text.
 # ---------------------------------------------------------------------------
 
 # write_binary DIR MEMBER_NAME CONTENT_LINE
@@ -457,9 +429,8 @@ server_request_count() {
 # ---------------------------------------------------------------------------
 # A curated $PATH: symlinks to the real tools install.sh needs, built once
 # and then pared down (a symlink omitted, or a fake substituted) per
-# scenario, so "prerequisite missing" and "tmux at version X" tests control
-# exactly one variable each rather than install.sh's whole ambient
-# environment.
+# scenario, so "prerequisite missing" tests control exactly one variable
+# each rather than install.sh's whole ambient environment.
 # ---------------------------------------------------------------------------
 # gzip is not something install.sh calls directly or documents as a
 # prerequisite -- but GNU tar's `-z` shells out to a separate `gzip`
@@ -507,19 +478,6 @@ case "$1" in
 esac
 UNAMEEOF
   chmod 755 "$dir/uname"
-}
-
-# write_fake_tmux DIR VERSION_OUTPUT
-# Adds a `tmux` to DIR that ignores its arguments and just prints
-# VERSION_OUTPUT (the whole line, including the leading "tmux " that real
-# tmux -V produces) -- used for the closing-message tmux-hint fixtures
-# below. An empty VERSION_OUTPUT is used for the "malformed" case, printing
-# something that fails to parse as a version at all.
-write_fake_tmux() {
-  local dir=$1 output=$2
-  mkdir -p "$dir"
-  printf '#!/bin/sh\necho "%s"\n' "$output" >"$dir/tmux"
-  chmod 755 "$dir/tmux"
 }
 
 TOOLCHAIN_FULL="$WORKDIR/toolchain-full"
@@ -1525,12 +1483,7 @@ INSTALL_K1="$HOME_K1/.local/bin"
 mkdir -p "$INSTALL_K1"
 printf '#!/bin/sh\necho my own wrapper\n' >"$INSTALL_K1/farhelm"
 K1_OWN=$(cat "$INSTALL_K1/farhelm")
-K1_TOOLS="$WORKDIR/toolchain-k1"
-mkdir -p "$K1_TOOLS"
-cp -a "$TOOLCHAIN_FULL"/. "$K1_TOOLS/"
-write_fake_tmux "$K1_TOOLS" "tmux $TMUX_FLOOR"
-check "K1 premise: tmux meets the floor" [ "$("$K1_TOOLS/tmux" -V)" = "tmux $TMUX_FLOOR" ]
-run_install "$K1_TOOLS" "$HOME_K1" "$BASE/good" 1.2.3
+run_install "$TOOLCHAIN_FULL" "$HOME_K1" "$BASE/good" 1.2.3
 check "K1 (the user's own farhelm): the install exits 0" [ "$RC" -eq 0 ]
 K1_KEPT=$(kept_files "$INSTALL_K1")
 check "K1: exactly one kept copy exists" [ "$(printf '%s\n' "$K1_KEPT" | grep -c .)" -eq 1 ]
@@ -1913,27 +1866,21 @@ done
 # ===========================================================================
 # Approved report text, including blank lines and order. Real updates start
 # from a verified installer-owned pair, so kept-file notices cannot hide a
-# wrong update classification. tmux fixtures isolate the launch prerequisite.
-# Exact update reports also rule out the fresh-install feedback invitation;
-# all three tmux variants must keep unattended update output unchanged.
+# wrong update classification. The exact update report also rules out the
+# fresh-install feedback invitation, which unattended updates inside the app
+# must not print.
 # ===========================================================================
 echo
 echo "== closing-message contract =="
 assert_closing_message_contract() {
-  local label=$1 is_update=$2 tmux_kind=$3
-  local tools="$WORKDIR/toolchain-report-$label" home="$WORKDIR/home-report-$label"
-  mkdir -p "$tools"
-  cp -a "$TOOLCHAIN_FULL"/. "$tools/"
-  case "$tmux_kind" in
-    floor) write_fake_tmux "$tools" "tmux $TMUX_FLOOR" ;;
-    old) write_fake_tmux "$tools" "tmux 3.4" ;;
-  esac
+  local label=$1 is_update=$2
+  local home="$WORKDIR/home-report-$label"
   if [ "$is_update" = yes ]; then
-    run_install "$tools" "$home" "$BASE/good" 1.2.3
+    run_install "$TOOLCHAIN_FULL" "$home" "$BASE/good" 1.2.3
     check "report ($label): update premise succeeds" [ "$RC" -eq 0 ]
     check "report ($label): update premise is the current layout" assert_current_record "$home"
   fi
-  run_install "$tools" "$home" "$BASE/good-v2" 1.2.4
+  run_install "$TOOLCHAIN_FULL" "$home" "$BASE/good-v2" 1.2.4
   check "report ($label): install succeeds" [ "$RC" -eq 0 ]
   local expected
   if [ "$is_update" = yes ]; then
@@ -1941,13 +1888,9 @@ assert_closing_message_contract() {
 
    Quit and reopen Farhelm to finish updating. Your sessions keep running.'
   else
-    expected='✅ Farhelm 1.2.4 is installed.'
-    if [ "$tmux_kind" = floor ]; then
-      expected+='
+    expected="✅ Farhelm 1.2.4 is installed.
 
-   Open Farhelm from Spotlight or ~/Applications.'
-    fi
-    expected+="
+   Open Farhelm from Spotlight or ~/Applications.
 
 💬 I'd love to hear what you think, even a quick throwaway
    comment. In Farhelm, click ? at the top of the sidebar and
@@ -1958,38 +1901,13 @@ assert_closing_message_contract() {
   expected+='
 
    To uninstall later, run: ~/.local/bin/farhelm uninstall'
-  if [ "$tmux_kind" != floor ]; then
-    expected+="
-
-⚠️  $TMUX_FLOOR_HINT"
-    if [ "$tmux_kind" = absent ]; then
-      expected+='
-   This Mac has none. Install it with Homebrew: brew install tmux'
-    else
-      expected+='
-   This Mac has tmux 3.4. Upgrade it with Homebrew: brew upgrade tmux'
-    fi
-    expected+='
-   No Homebrew yet? Install it first: https://brew.sh/'
-    if [ "$is_update" = yes ]; then
-      expected+='
-
-   Then quit and reopen Farhelm to finish updating.'
-    else
-      expected+='
-
-   Then open Farhelm from Spotlight or ~/Applications.'
-    fi
-  fi
   check "report ($label): exact approved plain text" [ "$OUT" = "$expected" ]
   check "report ($label): redirected stdout has no escapes" not_contains "$OUT" $'\033'
   check "report ($label): redirected stderr has no escapes" not_contains "$ERR" $'\033'
   check "report ($label): no progress on redirected stderr" not_contains "$ERR" 'Downloading Farhelm'
 }
-for report_tmux in floor absent old; do
-  assert_closing_message_contract "fresh-$report_tmux" no "$report_tmux"
-  assert_closing_message_contract "update-$report_tmux" yes "$report_tmux"
-done
+assert_closing_message_contract fresh no
+assert_closing_message_contract update yes
 
 # NO_COLOR must not be needed to make redirected output safe to consume.
 # Both unset and set cases are covered; the exact-report cases above use unset.
@@ -2015,7 +1933,6 @@ import tempfile
 import time
 
 installer, tools, linux_tools, work, base = sys.argv[1:]
-assert not (Path(tools) / "tmux").exists(), "terminal-report fixture requires absent tmux"
 
 
 def capture(label, stdout_tty, stderr_tty, no_color=None, linux=False):
@@ -2085,7 +2002,6 @@ for out_tty, err_tty in ((True, True), (True, False), (False, True), (False, Fal
     label = f"{int(out_tty)}-{int(err_tty)}"
     out, err = capture(label, out_tty, err_tty)
     assert (b"\x1b[1;32m" in out) == out_tty, (label, out)
-    assert (b"\x1b]8;;https://brew.sh/" in out) == out_tty, (label, out)
     assert (b"Downloading Farhelm 1.2.3" in err) == err_tty, (label, err)
     assert (b"[1/2]" in err and b"[2/2]" in err) == err_tty, (label, err)
     assert (b"100.0%" in err) == err_tty, (label, err)
@@ -2097,27 +2013,23 @@ for out_tty, err_tty in ((True, True), (True, False), (False, True), (False, Fal
     if not err_tty:
         assert b"\x1b" not in err, err
     if out_tty and err_tty:
-        assert b"This Mac has none." in out, out
+        # Only color codes come out: any other escape (a hyperlink, say)
+        # survives this stripping and fails the exact comparison.
         plain = re.sub(rb"\x1b\[[0-9;]*m", b"", out)
-        plain = re.sub(rb"\x1b\]8;;[^\x1b]*\x1b\\", b"", plain)
         expected = ("✅ Farhelm 1.2.3 is installed.\n\n"
+                    "   Open Farhelm from Spotlight or ~/Applications.\n\n"
                     "💬 I'd love to hear what you think, even a quick throwaway\n"
                     "   comment. In Farhelm, click ? at the top of the sidebar and\n"
                     "   choose Send feedback; it comes privately to me, the maintainer.\n"
                     "   If you'd rather discuss it in the open, file a GitHub issue\n"
                     "   at https://github.com/scode/farhelm/issues instead.\n\n"
-                    "   To uninstall later, run: ~/.local/bin/farhelm uninstall\n\n"
-                    "⚠️  Farhelm needs tmux 3.7c or newer before it can start.\n"
-                    "   This Mac has none. Install it with Homebrew: brew install tmux\n"
-                    "   No Homebrew yet? Install it first: https://brew.sh/\n\n"
-                    "   Then open Farhelm from Spotlight or ~/Applications.\n").encode()
+                    "   To uninstall later, run: ~/.local/bin/farhelm uninstall\n").encode()
         assert plain == expected, (plain, expected)
         print("Observed terminal report:\n" + out.decode())
         print("Observed terminal progress:\n" + err.decode())
 
 out, err = capture("no-color", True, True, no_color="1")
-assert b"\x1b[" not in out and b"\x1b[" not in err, (out, err)
-assert b"\x1b]8;;https://brew.sh/" in out, out
+assert b"\x1b" not in out and b"\x1b[" not in err, (out, err)
 assert b"Downloading Farhelm" in err and b"100.0%" in err, err
 out, err = capture("empty-no-color", True, True, no_color="")
 assert b"\x1b[1;32m" in out and b"\x1b[1m" in err, (out, err)
@@ -2128,59 +2040,6 @@ for terminal in (False, True):
     assert (b"\x1b[1;31m" in err) == terminal, err
     assert b"Downloading" not in err, err
 PYTTY
-
-# Boundary comparison stays tied to the pinned floor. A present but malformed
-# tmux reports its raw version output rather than claiming tmux is absent.
-run_tmux_case() {
-  local label=$1 tmux_output=$2 expect_hint=$3
-  local tools="$WORKDIR/toolchain-tmux-$label" home="$WORKDIR/home-tmux-$label"
-  mkdir -p "$tools"
-  cp -a "$TOOLCHAIN_FULL"/. "$tools/"
-  if [ -n "$tmux_output" ]; then
-    write_fake_tmux "$tools" "$tmux_output"
-  fi
-  run_install "$tools" "$home" "$BASE/good" 1.2.3
-  check "tmux hint ($label): install succeeds" [ "$RC" -eq 0 ]
-  if [ "$expect_hint" = yes ]; then
-    check "tmux hint ($label): present" contains "$OUT" "$TMUX_FLOOR_HINT"
-    if [ -n "$tmux_output" ]; then
-      check "tmux hint ($label): reports the actual version output" \
-        contains "$OUT" "This Mac has tmux ${tmux_output#tmux }. Upgrade it with Homebrew: brew upgrade tmux"
-    else
-      check "tmux hint ($label): reports absence" contains "$OUT" "This Mac has none."
-    fi
-  else
-    check "tmux hint ($label): absent" not_contains "$OUT" "$TMUX_FLOOR_HINT"
-  fi
-}
-run_tmux_case "absent" "" yes
-run_tmux_case "malformed" "tmux next-3.8" yes
-# The boundary cases come from the pinned floor (see read_pinned_tmux_floor):
-# the previous release both bare and with the last possible patch letter
-# (so a floor raised by a minor release cannot leave the old letter check
-# accepting e.g. 3.7z), the same minor without its patch letter and with the
-# letter before it, the floor itself, and one minor release above. A `.0`
-# floor has no minor to step down, so its previous release is taken from the
-# major below.
-if [ "$TMUX_FLOOR_MINOR" -gt 0 ]; then
-  previous_release="$TMUX_FLOOR_MAJOR.$((TMUX_FLOOR_MINOR - 1))"
-else
-  previous_release="$((TMUX_FLOOR_MAJOR - 1)).99"
-fi
-run_tmux_case "below-floor" "tmux $previous_release" yes
-run_tmux_case "below-floor-last-patch" "tmux ${previous_release}z" yes
-if [ -n "$TMUX_FLOOR_LETTER" ]; then
-  no_letter="tmux $TMUX_FLOOR_MAJOR.$TMUX_FLOOR_MINOR"
-  run_tmux_case "below-floor-no-letter" "$no_letter" yes
-  if [ "$TMUX_FLOOR_LETTER" != a ]; then
-    letters=abcdefghijklmnopqrstuvwxyz
-    prefix=${letters%%"$TMUX_FLOOR_LETTER"*}
-    previous_letter="tmux $TMUX_FLOOR_MAJOR.$TMUX_FLOOR_MINOR${prefix: -1}"
-    run_tmux_case "below-floor-letter" "$previous_letter" yes
-  fi
-fi
-run_tmux_case "at-floor" "tmux $TMUX_FLOOR" no
-run_tmux_case "above-floor" "tmux $TMUX_FLOOR_MAJOR.$((TMUX_FLOOR_MINOR + 1))" no
 
 # ===========================================================================
 # Scenario: no side effects outside the bin directory and bundle (F27).
@@ -2558,15 +2417,6 @@ check "F9: Applications directory is not group/world-writable" \
   [ "$(stat -c %a "$HOMEUMASK/Applications")" = "755" ]
 check "F9: bundle Contents directory is not group/world-writable" \
   [ "$(stat -c %a "$HOMEUMASK/Applications/Farhelm.app/Contents")" = "755" ]
-
-# ===========================================================================
-# Scenario: multiline tmux output is rejected as a whole, not scanned line
-# by line, for a valid version (F12).
-# ===========================================================================
-echo
-echo "== F12: multiline tmux -V output is rejected wholesale =="
-run_tmux_case "banner-then-valid" "$(printf 'some vendor banner\ntmux %s' "$TMUX_FLOOR")" yes
-run_tmux_case "two-valid-lines" "$(printf 'tmux %s\ntmux 3.8' "$TMUX_FLOOR")" yes
 
 # ===========================================================================
 # Scenario: a colon-containing HOME still installs without PATH advice.

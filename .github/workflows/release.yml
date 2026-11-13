@@ -355,8 +355,6 @@ jobs:
           evidence_dir="$RUNNER_TEMP/desktop-smoke-evidence"
           mkdir -p "$evidence_dir"
           for evidence in "$RUNNER_TEMP"/desktop-smoke/*.log "$RUNNER_TEMP"/desktop-smoke/*.png "$RUNNER_TEMP"/desktop-smoke/*.txt \
-            "$RUNNER_TEMP"/desktop-smoke/tmux-preflight-missing.stderr \
-            "$RUNNER_TEMP"/desktop-smoke/tmux-preflight-belowfloor.stderr \
             "$RUNNER_TEMP"/desktop-smoke/pf-bogus-state.stderr; do
             if [ -f "$evidence" ] && [ ! -L "$evidence" ]; then
               cp -- "$evidence" "$evidence_dir/"

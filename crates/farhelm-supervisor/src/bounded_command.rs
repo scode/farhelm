@@ -11,9 +11,6 @@
 //! is read up to a byte cap, and one byte past it counts as a refusal rather
 //! than a truncation. And the whole run, reading included, ends at a
 //! deadline.
-//!
-//! The synchronous tmux probe (`tmux::probe_tmux`) keeps its own runner on
-//! purpose: `farhelm helm setup` calls it with no async runtime available.
 
 use std::io;
 use std::process::{ExitStatus, Output, Stdio};

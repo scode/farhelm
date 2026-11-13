@@ -83,14 +83,12 @@ startup file skip tmux when `TERM_PROGRAM` is `farhelm`.
 
 ## tmux is still needed
 
-The Farhelm desktop app and setup on Linux hosts still require tmux for now and check its version: keep it installed on
-those machines. On your local Mac, the desktop app does not start without a new enough tmux;
-[Install Farhelm](/docs/get-started/install/#if-the-installer-asks-for-tmux) says which version. Setting up a remote
-Linux host still checks the host's tmux too, and brings Farhelm's own copy when the host has no new enough one. Remote
+Setting up a remote Linux host still checks the host's tmux, and brings Farhelm's own copy when the host has no new
+enough one. Nothing else does: the Farhelm desktop app and a Linux machine running the helm no longer need tmux. Remote
 Macs set up over SSH do not require or install tmux ([Add a remote host](/docs/get-started/add-a-remote-host/) covers
-both).
+both kinds of host).
 
 Farhelm itself no longer runs tmux for any session: it ends the tmux it ran old terminals in when it updates, and never
 starts one again.
 
-A later release will say when Farhelm stops needing tmux.
+A later release will say when setting up a remote Linux host stops needing tmux.

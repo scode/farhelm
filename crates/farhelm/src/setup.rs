@@ -18,8 +18,8 @@
 //! ## Why everything is injected
 //!
 //! `SetupContext` carries the whole process environment this command
-//! depends on — the executable, `HOME`, `PATH`, `XDG_CONFIG_HOME`,
-//! `FARHELM_TMUX`, and the temporary directory — captured ONCE in `main`.
+//! depends on — the executable, `HOME`, the working directory, both XDG
+//! base directories, and the temporary directory — captured ONCE in `main`.
 //! [`UnitManager`] is the seam for `systemctl --user`, and output goes
 //! through a `Write`. Nothing below reads the environment, spawns
 //! `systemctl`, or prints to stdout on its own, which is what lets the
@@ -43,10 +43,6 @@ use farhelm_helm::units::{
 use farhelm_helm::units::{
     HelmUnitInputs, SupervisorUnitInputs, is_simple_service, managed, render_helm_unit,
     render_supervisor_unit, user_unit_dir,
-};
-#[cfg(any(target_os = "linux", test))]
-use farhelm_supervisor::tmux::{
-    TMUX_FLOOR, TmuxProbeError, TmuxSupport, candidates_on_path, probe_tmux,
 };
 use std::ffi::OsStr;
 #[cfg(any(target_os = "linux", test))]
@@ -84,10 +80,8 @@ pub struct SetupContext {
     pub exe: PathBuf,
     pub home: PathBuf,
     pub cwd: PathBuf,
-    pub path: OsString,
     pub xdg_config_home: Option<OsString>,
     pub xdg_state_home: Option<OsString>,
-    pub tmux_env: Option<OsString>,
     pub temp_dir: PathBuf,
 }
 
@@ -96,10 +90,10 @@ impl SetupContext {
     /// Resolve one operator-supplied path the way the operator meant it:
     /// relative to where they ran the command.
     ///
-    /// Symlinks are deliberately NOT resolved. Homebrew's `bin/tmux` is a
-    /// symlink into a versioned Cellar directory, and pinning the resolved
-    /// path would break the unit on the next `brew upgrade`; the same
-    /// applies to a state directory reached through a stable symlink.
+    /// Symlinks are deliberately NOT resolved: a state directory reached
+    /// through a stable symlink stays pinned through that symlink, so
+    /// repointing the symlink later moves the unit with it instead of
+    /// stranding it on the old target.
     fn absolute(&self, path: &Path) -> PathBuf {
         if path.is_absolute() {
             path.to_path_buf()
@@ -133,13 +127,10 @@ pub struct SetupOptions {
     /// Port to pin into the helm unit (default: the helm's own).
     #[arg(long)]
     pub port: Option<u16>,
-    /// Pin this tmux binary instead of the one on PATH.
-    #[arg(long = "tmux", value_name = "PATH")]
-    pub tmux: Option<PathBuf>,
     /// Manage only the helm unit, leaving the supervisor to whoever owns
     /// it here — a unit you wrote yourself, another service manager, or a
     /// supervisor somebody starts by hand. Setup then neither writes nor
-    /// touches farhelm-supervisor.service, and does not look for a tmux.
+    /// touches farhelm-supervisor.service.
     #[arg(long)]
     pub no_supervisor: bool,
     /// Print what would be written and run, and change nothing.
@@ -148,7 +139,7 @@ pub struct SetupOptions {
     /// Remove the units setup wrote, and only those.
     #[arg(
         long,
-        conflicts_with_all = ["state_dir", "port", "tmux", "no_supervisor"]
+        conflicts_with_all = ["state_dir", "port", "no_supervisor"]
     )]
     pub uninstall: bool,
 }
@@ -657,31 +648,12 @@ fn install(
 
     let mut planned = Vec::new();
     if !opts.no_supervisor {
-        // The stand-in keeps `--dry-run` useful on a machine that has no
-        // acceptable tmux yet: the operator still sees the unit they would
-        // get, with the one unknown spelled out.
-        let tmux = match choose_tmux(ctx, opts) {
-            TmuxDecision::Accepted { program, warning } => {
-                if let Some(warning) = warning {
-                    line!(report, "note: {warning}");
-                }
-                program
-            }
-            TmuxDecision::Refused(refusal) => {
-                if !opts.dry_run {
-                    bail!(refusal);
-                }
-                line!(report, "note: {refusal}");
-                PathBuf::from("<tmux>")
-            }
-        };
         planned.push(PlannedUnit {
             name: SUPERVISOR_UNIT_NAME,
             path: unit_dir.join(SUPERVISOR_UNIT_NAME),
             text: managed(render_supervisor_unit(&SupervisorUnitInputs {
                 farhelm: &exe,
                 state_dir: &state_dir,
-                tmux: &tmux,
             })?),
         });
     }
@@ -1080,7 +1052,7 @@ fn lock_unit_directory(unit_dir: &Path) -> anyhow::Result<SetupLock> {
 /// A unit whose file changed while it was RUNNING has to be restarted:
 /// `daemon-reload` teaches systemd the new definition and `enable --now`
 /// starts a stopped unit, but neither makes a running process adopt a new
-/// executable, state directory, tmux path, or port. Remembering that only
+/// executable, state directory, or port. Remembering that only
 /// in this invocation's memory was a real hole — a run that published the
 /// bytes and then failed (at the reload, at an enable, at the other
 /// restart) left the next run seeing a file that already matched, calling
@@ -1501,157 +1473,6 @@ fn looks_like_a_build_tree(exe: &Path, temp_dir: &Path) -> bool {
     exe.starts_with(resolved.as_deref().unwrap_or(temp_dir))
 }
 
-/// Which tmux the supervisor unit should pin, or why none of the
-/// candidates will do.
-#[cfg(any(target_os = "linux", test))]
-enum TmuxDecision {
-    Accepted {
-        program: PathBuf,
-        /// Printed as a note. Present only for a tmux newer than the
-        /// version this project is tested against.
-        warning: Option<String>,
-    },
-    Refused(String),
-}
-
-/// Pick a tmux by the installation's rule (`resolve_tmux_program`): this
-/// command's `--tmux`, then `FARHELM_TMUX`, then `PATH` — and hold it to
-/// the installation's floor.
-///
-/// Setup NEVER installs tmux. That is a deliberate boundary: this command
-/// manages systemd units on a machine the operator administers, and a CLI
-/// that quietly fetched a terminal multiplexer would be doing something
-/// the operator did not ask for. Remote provisioning is the place that
-/// installs a tmux, and only onto hosts it also owns the layout of.
-#[cfg(any(target_os = "linux", test))]
-fn choose_tmux(ctx: &SetupContext, opts: &SetupOptions) -> TmuxDecision {
-    // An explicitly named tmux is the operator's choice, so its failure is
-    // the answer — searching on past it would silently pin something they
-    // did not ask for.
-    if let Some(named) = opts.tmux.as_deref().or_else(|| {
-        ctx.tmux_env
-            .as_ref()
-            .filter(|value| !value.is_empty())
-            .map(Path::new)
-    }) {
-        return decide_tmux(ctx.absolute(named));
-    }
-    // PATH is a list, and `execvp` treats it as one: an entry that looks
-    // executable but cannot be spawned — a `noexec` mount, an execute bit
-    // for a group this process is not in — is skipped rather than fatal.
-    // Stopping at the first such shadow used to refuse setup outright on a
-    // machine with a perfectly good tmux one entry further along.
-    let decision = 'search: {
-        let mut first_failure = None;
-        for candidate in candidates_on_path(&ctx.path, "tmux") {
-            let candidate = ctx.absolute(&candidate);
-            match probe_tmux(&candidate) {
-                Err(error @ TmuxProbeError::NotRunnable(_)) => {
-                    first_failure
-                        .get_or_insert_with(|| refuse_tmux(&found_phrase(&candidate, &error)));
-                }
-                probed => break 'search finish_tmux(candidate, probed),
-            }
-        }
-        // Nothing on PATH ran. The first candidate's failure is the
-        // actionable one — it is what `execvp` would have complained about,
-        // and what the operator sees at the front of their PATH.
-        first_failure.unwrap_or_else(|| refuse_tmux("none"))
-    };
-    // Any PATH-discovery refusal says so when the search walked past a tmux
-    // that a relative entry reaches: otherwise "found none", or "found tmux
-    // 3.6 at /usr/bin/tmux", contradicts the tmux the operator's own shell
-    // runs through `.`, and leaves them guessing why setup ignored it.
-    match (decision, skipped_relative_tmux(ctx)) {
-        (TmuxDecision::Refused(message), Some(skipped)) => TmuxDecision::Refused(format!(
-            "{message} PATH also reaches {skipped} through a relative entry, which setup never \
-             pins; pass --tmux {skipped} to use it anyway.",
-            skipped = skipped.display()
-        )),
-        (decision, _) => decision,
-    }
-}
-
-/// A `tmux` that a relative (or empty) PATH entry would have found, resolved
-/// against setup's working directory, for the refusal message only.
-///
-/// `candidates_on_path` never offers these (see its docs for why), so this is
-/// purely diagnostic: it never feeds a pin.
-#[cfg(any(target_os = "linux", test))]
-fn skipped_relative_tmux(ctx: &SetupContext) -> Option<PathBuf> {
-    std::env::split_paths(&ctx.path)
-        .filter(|dir| !dir.is_absolute())
-        .map(|dir| ctx.absolute(&dir.join("tmux")))
-        .find(|candidate| candidate.is_file())
-}
-
-/// Probe one named candidate and turn the outcome into a decision.
-#[cfg(any(target_os = "linux", test))]
-fn decide_tmux(candidate: PathBuf) -> TmuxDecision {
-    let probed = probe_tmux(&candidate);
-    finish_tmux(candidate, probed)
-}
-
-/// Apply the shared version policy to a completed probe without spawning again.
-/// PATH discovery has already probed each candidate, while explicit overrides
-/// reach this policy through `decide_tmux`.
-#[cfg(any(target_os = "linux", test))]
-fn finish_tmux(
-    candidate: PathBuf,
-    probed: Result<farhelm_supervisor::tmux::TmuxProbe, TmuxProbeError>,
-) -> TmuxDecision {
-    let probe = match probed {
-        Ok(probe) => probe,
-        Err(error) => return refuse_tmux(&found_phrase(&candidate, &error)),
-    };
-    // The probe echoes back the program it actually spawned; using that
-    // rather than the caller's spelling keeps the message true even when
-    // the two could differ.
-    let named = probe.program.display();
-    if probe.support == TmuxSupport::BelowFloor {
-        return refuse_tmux(&format!("tmux {} at {named}", probe.version));
-    }
-    TmuxDecision::Accepted {
-        // Above the pin is accepted, not refused: Homebrew ships versions
-        // nobody has audited Farhelm against long before the floor moves,
-        // and refusing them would strand people on the release this
-        // project itself recommends installing. The note is what makes a
-        // later bug report start from the right place.
-        warning: (probe.support == TmuxSupport::AbovePin).then(|| {
-            format!(
-                "the tmux {} at {named} is newer than the version Farhelm is tested against \
-                 ({TMUX_FLOOR}); this combination is unaudited",
-                probe.version
-            )
-        }),
-        program: probe.program,
-    }
-}
-
-/// How one rejected candidate is named in the refusal, with the detail the
-/// probe collected — the errno, or what the program actually printed.
-#[cfg(any(target_os = "linux", test))]
-fn found_phrase(candidate: &Path, error: &TmuxProbeError) -> String {
-    let named = candidate.display();
-    match error {
-        TmuxProbeError::Unparseable(_) => format!("an unparseable tmux at {named} ({error})"),
-        // A candidate that hung or flooded is reported the same way as one
-        // that would not start: from the operator's side it is the same
-        // problem, and the detail says which.
-        _ => format!("a tmux at {named} that could not be run ({error})"),
-    }
-}
-
-/// Keep every rejected tmux candidate's remediation and setup boundary consistent.
-#[cfg(any(target_os = "linux", test))]
-fn refuse_tmux(found: &str) -> TmuxDecision {
-    TmuxDecision::Refused(format!(
-        "farhelm needs tmux {TMUX_FLOOR} or newer on this machine and found {found}. Install one \
-         (Linuxbrew: brew install tmux; or a distro package at or above {TMUX_FLOOR}) or pass \
-         --tmux /path/to/tmux, then rerun setup. Setup never installs tmux."
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1788,9 +1609,8 @@ mod tests {
         }
     }
 
-    /// A fixture machine: a home directory, a unit directory, a fake
-    /// installed farhelm, and a `PATH` holding whatever tmux the test
-    /// wants found.
+    /// A fixture machine: a home directory, a unit directory, and a fake
+    /// installed farhelm.
     struct Fixture {
         root: tempfile::TempDir,
     }
@@ -1814,15 +1634,6 @@ mod tests {
             self.home().join(".config/systemd/user")
         }
 
-        /// The path a `PATH` search should find, holding a script that
-        /// prints `version` for `-V`.
-        fn tmux_dir(&self, version: &str) -> PathBuf {
-            let dir = self.root.path().join("tmuxbin");
-            std::fs::create_dir_all(&dir).unwrap();
-            write_script(&dir.join("tmux"), &format!("printf '{version}\\n'"));
-            dir
-        }
-
         /// The directory a fixture run pretends to have been started in.
         /// Injected rather than taken from the test process, which must
         /// never change its own working directory.
@@ -1841,38 +1652,22 @@ mod tests {
             FakeUnits::default().reporting(&format!("HOME={}\n", self.home().display()))
         }
 
-        /// A context whose `PATH` is exactly `dirs`, so no tmux from the
-        /// machine running the tests can leak into a decision.
-        fn context(&self, dirs: &[PathBuf]) -> SetupContext {
+        /// A context built only from the fixture, so nothing from the
+        /// environment of the machine running the tests can leak into a
+        /// decision.
+        fn context(&self) -> SetupContext {
             SetupContext {
                 exe: self.root.path().join("bin/farhelm"),
                 home: self.home(),
                 cwd: self.cwd(),
-                path: std::env::join_paths(dirs).unwrap(),
                 xdg_config_home: None,
                 xdg_state_home: None,
-                tmux_env: None,
                 // Deliberately NOT the fixture root: the fixture lives
                 // under the real temporary directory, and pointing the
                 // build-tree check at that would make every test refuse.
                 temp_dir: self.root.path().join("no-such-temp"),
             }
         }
-    }
-
-    fn write_script(path: &Path, body: &str) {
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o755)
-            .open(path)
-            .unwrap();
-        file.write_all(format!("#!/bin/sh\n{body}\n").as_bytes())
-            .unwrap();
-        drop(file);
-        wait_until_executable(path);
     }
 
     /// The fixture's standalone executable, written once so preflight can
@@ -1897,32 +1692,6 @@ mod tests {
         .unwrap();
     }
 
-    /// Run the freshly written script once, retrying `ETXTBSY`, so the
-    /// test that follows cannot fail on it.
-    ///
-    /// This is a real race and it bit a full-suite run: writing an
-    /// executable and immediately exec'ing it fails with `ETXTBSY` while
-    /// ANY process holds the file open for writing, and in a
-    /// multi-threaded test binary another thread's `fork` can duplicate
-    /// this file's descriptor into a child that has not reached its own
-    /// `exec` yet. Close-on-exec bounds that window to microseconds but
-    /// does not remove it. Once this succeeds, no descriptor to the file
-    /// is open for writing anywhere and every later spawn is safe.
-    fn wait_until_executable(path: &Path) {
-        const ETXTBSY: i32 = 26;
-        for _ in 0..200 {
-            match std::process::Command::new(path).arg("-V").output() {
-                Ok(_) => return,
-                Err(error) if error.raw_os_error() == Some(ETXTBSY) => {
-                    // sleep-ok: retry only the inherited-writer exec race; a completed spawn, not elapsed time, admits the fixture.
-                    std::thread::sleep(std::time::Duration::from_millis(5));
-                }
-                Err(error) => panic!("fixture script {} is not runnable: {error}", path.display()),
-            }
-        }
-        panic!("fixture script {} stayed busy", path.display());
-    }
-
     fn run(ctx: &SetupContext, opts: &SetupOptions, units: &mut FakeUnits) -> (String, String) {
         let mut out = Vec::new();
         match run_setup(ctx, opts, units, &mut out) {
@@ -1937,13 +1706,12 @@ mod tests {
     #[farhelm_testtrace::test]
     fn setup_refuses_dollar_program_paths_before_writing_units() {
         let fixture = Fixture::new();
-        let tmux = fixture.tmux_dir("tmux 3.7c");
         let executable = fixture.root.path().join("dollar$install/farhelm");
         std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
         std::fs::write(&executable, b"fixture executable").unwrap();
         assert!(executable.is_file());
         assert!(!fixture.unit_dir().exists());
-        let mut ctx = fixture.context(&[tmux]);
+        let mut ctx = fixture.context();
         ctx.exe = executable.clone();
         for no_supervisor in [false, true] {
             let mut manager = fixture.manager();
@@ -1982,7 +1750,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn a_first_install_writes_both_units_reloads_and_enables() {
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         let mut units = fixture.manager();
         assert_eq!(
             units
@@ -2010,7 +1778,17 @@ mod tests {
             std::fs::read_to_string(fixture.unit_dir().join("farhelm-supervisor.service")).unwrap();
         assert!(is_managed(&supervisor), "{supervisor}");
         assert!(!supervisor.contains('@'), "{supervisor}");
-        assert!(supervisor.contains("FARHELM_TMUX="));
+        // Setup names no tmux: the supervisor runs none, and its `PATH` is
+        // the installed farhelm's directory plus the fixed base.
+        assert!(!supervisor.contains("FARHELM_TMUX"), "{supervisor}");
+        let bin = std::fs::canonicalize(fixture.root.path().join("bin")).unwrap();
+        assert!(
+            supervisor.contains(&format!(
+                "Environment=\"PATH={}:/usr/local/bin:/usr/bin:/bin\"\n",
+                bin.display()
+            )),
+            "{supervisor}"
+        );
         let helm =
             std::fs::read_to_string(fixture.unit_dir().join("farhelm-helm.service")).unwrap();
         assert!(is_managed(&helm), "{helm}");
@@ -2042,7 +1820,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn custom_state_sign_in_advice_keeps_the_pinned_directory() {
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         let opts = SetupOptions {
             state_dir: Some(PathBuf::from("state with 'quote")),
             ..SetupOptions::default()
@@ -2077,7 +1855,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn environment_state_sign_in_advice_keeps_the_resolved_directory() {
         let fixture = Fixture::new();
-        let mut ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let mut ctx = fixture.context();
         let selected = fixture.home().join("xdg state with 'quote");
         let pinned = selected.join("farhelm");
         ctx.xdg_state_home = Some(selected.into_os_string());
@@ -2118,7 +1896,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn an_unchanged_rerun_writes_nothing_but_still_reloads_and_enables() {
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         run(&ctx, &SetupOptions::default(), &mut fixture.manager());
         let mut units = fixture.manager().active(&["farhelm-helm.service"]);
         let (output, error) = run(&ctx, &SetupOptions::default(), &mut units);
@@ -2144,7 +1922,7 @@ mod tests {
     fn only_a_changed_unit_that_was_active_is_restarted() {
         for active in [true, false] {
             let fixture = Fixture::new();
-            let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+            let ctx = fixture.context();
             run(&ctx, &SetupOptions::default(), &mut fixture.manager());
             let mut units = if active {
                 fixture.manager().active(&["farhelm-helm.service"])
@@ -2172,10 +1950,8 @@ mod tests {
     }
 
     /// `--no-supervisor` is for a machine whose supervisor is somebody
-    /// else's job. It must not render, probe tmux for, enable, or so much
-    /// as READ a supervisor unit — and with no tmux on PATH at all it must
-    /// still succeed, which is the property that proves the tmux check was
-    /// skipped rather than merely tolerated.
+    /// else's job. It must not render, enable, or so much as READ a
+    /// supervisor unit.
     ///
     /// The case that matters is the flag's actual use: a supervisor unit
     /// somebody else already wrote is sitting there. Ordinary setup would
@@ -2185,7 +1961,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn no_supervisor_leaves_a_foreign_supervisor_unit_untouched() {
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[]);
+        let ctx = fixture.context();
         std::fs::create_dir_all(fixture.unit_dir()).unwrap();
         let foreign = fixture.unit_dir().join("farhelm-supervisor.service");
         let bytes = b"[Unit]\nDescription=not farhelm's\n";
@@ -2221,7 +1997,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn pinned_flags_reach_the_units_they_belong_to() {
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         let opts = SetupOptions {
             state_dir: Some(PathBuf::from("/srv/state")),
             port: Some(9000),
@@ -2253,7 +2029,7 @@ mod tests {
         let build_tree = fixture.root.path().join("target/debug");
         std::fs::create_dir_all(&build_tree).unwrap();
         std::fs::write(build_tree.join("farhelm"), b"#!/bin/sh\n").unwrap();
-        let mut ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let mut ctx = fixture.context();
         ctx.exe = build_tree.join("farhelm");
 
         let (_, error) = run(&ctx, &SetupOptions::default(), &mut fixture.manager());
@@ -2322,102 +2098,10 @@ mod tests {
     #[farhelm_testtrace::test]
     fn a_binary_under_the_temporary_directory_is_refused() {
         let fixture = Fixture::new();
-        let mut ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let mut ctx = fixture.context();
         ctx.temp_dir = fixture.root.path().to_path_buf();
         let (_, error) = run(&ctx, &SetupOptions::default(), &mut fixture.manager());
         assert!(error.contains("looks like a build tree"), "{error}");
-    }
-
-    /// Every way a tmux can fail to qualify has its own clause in the
-    /// refusal, because "install a newer tmux" and "the binary you named
-    /// does not run" need different fixes. The text is asserted whole:
-    /// it is the entire guidance a stuck operator gets.
-    ///
-    /// Each clause carries the probe's own detail — the errno, or what the
-    /// candidate actually printed — because "could not be run" without it
-    /// leaves the operator guessing between a typo, a permission problem,
-    /// and a missing interpreter.
-    #[farhelm_testtrace::test]
-    fn each_unusable_tmux_is_named_in_the_refusal() {
-        let fixture = Fixture::new();
-        let empty = fixture.root.path().join("empty");
-        std::fs::create_dir_all(&empty).unwrap();
-
-        let missing = fixture.root.path().join("nowhere/tmux");
-        let old = fixture.tmux_dir("tmux 3.6").join("tmux");
-        let fixture_garbage = Fixture::new();
-        let garbage = fixture_garbage.tmux_dir("not-tmux 3.7c").join("tmux");
-        for (tmux, expected) in [
-            (None, "none".to_string()),
-            (
-                Some(missing.clone()),
-                format!(
-                    "a tmux at {} that could not be run (No such file or directory (os error 2))",
-                    missing.display()
-                ),
-            ),
-            (Some(old.clone()), format!("tmux 3.6 at {}", old.display())),
-            (
-                Some(garbage.clone()),
-                format!(
-                    "an unparseable tmux at {} (it printed \"not-tmux 3.7c\")",
-                    garbage.display()
-                ),
-            ),
-        ] {
-            let ctx = fixture.context(std::slice::from_ref(&empty));
-            let opts = SetupOptions {
-                tmux,
-                ..SetupOptions::default()
-            };
-            let (_, error) = run(&ctx, &opts, &mut fixture.manager());
-            assert_eq!(
-                error,
-                format!(
-                    "farhelm needs tmux 3.7c or newer on this machine and found {expected}. \
-                     Install one (Linuxbrew: brew install tmux; or a distro package at or above \
-                     3.7c) or pass --tmux /path/to/tmux, then rerun setup. Setup never installs \
-                     tmux."
-                )
-            );
-        }
-    }
-
-    /// A refused tmux must not stop `--dry-run` from showing the unit:
-    /// the stand-in names the one field the operator still has to supply.
-    #[farhelm_testtrace::test]
-    fn a_dry_run_renders_a_placeholder_for_a_tmux_it_would_refuse() {
-        let fixture = Fixture::new();
-        let empty = fixture.root.path().join("empty");
-        std::fs::create_dir_all(&empty).unwrap();
-        let ctx = fixture.context(&[empty]);
-        let opts = SetupOptions {
-            dry_run: true,
-            ..SetupOptions::default()
-        };
-        let (output, error) = run(&ctx, &opts, &mut fixture.manager());
-        assert!(error.is_empty(), "{error}");
-        assert!(output.contains("note: farhelm needs tmux"), "{output}");
-        assert!(
-            output.contains("Environment=\"FARHELM_TMUX=<tmux>\""),
-            "{output}"
-        );
-        assert!(!fixture.unit_dir().exists());
-    }
-
-    /// A tmux above the pin is accepted — refusing it would strand people
-    /// on Homebrew's current release — but the operator is told, so a
-    /// later bug report starts from the right place.
-    #[farhelm_testtrace::test]
-    fn a_tmux_newer_than_the_pin_is_accepted_with_a_warning() {
-        let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 9.9")]);
-        let (output, error) = run(&ctx, &SetupOptions::default(), &mut fixture.manager());
-        assert!(error.is_empty(), "{error}");
-        assert!(
-            output.contains("is newer than the version Farhelm is tested against (3.7c); this combination is unaudited"),
-            "{output}"
-        );
     }
 
     /// The ownership rule, in the direction that matters: setup must
@@ -2427,7 +2111,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn an_unmarked_unit_file_is_refused_rather_than_overwritten() {
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         std::fs::create_dir_all(fixture.unit_dir()).unwrap();
         let path = fixture.unit_dir().join("farhelm-supervisor.service");
         std::fs::write(&path, b"[Unit]\nDescription=mine\n").unwrap();
@@ -2455,7 +2139,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn setup_and_legacy_uninstall_refuse_a_non_simple_second_unit() {
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         let (_, error) = run(&ctx, &SetupOptions::default(), &mut fixture.manager());
         assert!(error.is_empty(), "{error}");
         let supervisor_path = fixture.unit_dir().join(SUPERVISOR_UNIT_NAME);
@@ -2504,7 +2188,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn uninstall_removes_only_marked_units_and_reports_drop_ins() {
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         run(&ctx, &SetupOptions::default(), &mut fixture.manager());
         // BOTH units get a drop-in: a regression that hard-coded the
         // notice or the preservation to one of them would otherwise pass.
@@ -2565,7 +2249,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn uninstall_refuses_a_unit_it_does_not_own() {
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[]);
+        let ctx = fixture.context();
         std::fs::create_dir_all(fixture.unit_dir()).unwrap();
         let path = fixture.unit_dir().join("farhelm-supervisor.service");
         std::fs::write(&path, b"[Unit]\n").unwrap();
@@ -2588,7 +2272,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn a_dry_run_uninstall_changes_nothing() {
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         run(&ctx, &SetupOptions::default(), &mut fixture.manager());
         let mut units = fixture.manager();
         let opts = SetupOptions {
@@ -3099,7 +2783,7 @@ mod tests {
     fn the_unit_directory_follows_xdg_config_home() {
         let fixture = Fixture::new();
         let xdg = fixture.root.path().join("xdg");
-        let mut ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let mut ctx = fixture.context();
         ctx.xdg_config_home = Some(xdg.clone().into_os_string());
         let mut units = fixture
             .manager()
@@ -3123,7 +2807,7 @@ mod tests {
     fn a_unit_directory_the_manager_does_not_read_is_refused_before_any_write() {
         let fixture = Fixture::new();
         let elsewhere = fixture.root.path().join("srv-config");
-        let mut ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let mut ctx = fixture.context();
         ctx.xdg_config_home = Some(elsewhere.clone().into_os_string());
         // The manager was started without one, so it reads $HOME/.config.
         let mut units = fixture.manager();
@@ -3154,7 +2838,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn uninstall_refuses_a_unit_directory_the_manager_does_not_read() {
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         // Install through the manager's own directory first, so there is
         // something real for a mis-pointed uninstall to miss.
         run(&ctx, &SetupOptions::default(), &mut fixture.manager());
@@ -3162,7 +2846,7 @@ mod tests {
         assert!(installed.is_file());
 
         let elsewhere = fixture.root.path().join("srv-config");
-        let mut mispointed = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let mut mispointed = fixture.context();
         mispointed.xdg_config_home = Some(elsewhere.clone().into_os_string());
         let opts = SetupOptions {
             uninstall: true,
@@ -3226,7 +2910,7 @@ mod tests {
 
         // The caller was run with some other HOME and no XDG_CONFIG_HOME,
         // so it selects a directory of its own.
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         let manager =
             || FakeUnits::default().reporting(&format!("HOME={}\n", managers_home.display()));
         let expected = format!(
@@ -3271,7 +2955,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn a_manager_with_no_usable_environment_is_refused() {
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         let mut units = FakeUnits::default().reporting("LANG=C\n");
         let (_, error) = run(&ctx, &SetupOptions::default(), &mut units);
         assert!(
@@ -3296,7 +2980,7 @@ mod tests {
         use std::os::fd::AsRawFd as _;
 
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         std::fs::create_dir_all(fixture.unit_dir()).unwrap();
         let held = std::fs::OpenOptions::new()
             .create(true)
@@ -3370,7 +3054,7 @@ mod tests {
     fn a_dry_run_notes_a_unit_directory_the_manager_does_not_read() {
         let fixture = Fixture::new();
         let elsewhere = fixture.root.path().join("srv-config");
-        let mut ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let mut ctx = fixture.context();
         ctx.xdg_config_home = Some(elsewhere.clone().into_os_string());
         let opts = SetupOptions {
             dry_run: true,
@@ -3398,7 +3082,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn setup_refuses_when_no_user_manager_answers() {
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         let mut units = fixture
             .manager()
             .without_a_manager("Failed to connect to bus: No medium found");
@@ -3541,7 +3225,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn the_default_state_directory_follows_xdg_state_home() {
         let fixture = Fixture::new();
-        let mut ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let mut ctx = fixture.context();
         ctx.xdg_state_home = Some(PathBuf::from("/srv/xdg-state").into_os_string());
         // The manager disagrees about the state tree (and agrees about
         // the unit directory, which is the only thing setup refuses over).
@@ -3579,150 +3263,6 @@ mod tests {
         );
     }
 
-    /// `FARHELM_TMUX` is how the desktop app and a systemd unit name a
-    /// tmux that is not on the shell's `PATH`; setup honours the same
-    /// variable, and `--tmux` still wins over it.
-    #[farhelm_testtrace::test]
-    fn the_tmux_environment_capture_is_honoured_and_the_flag_beats_it() {
-        let fixture = Fixture::new();
-        let empty = fixture.root.path().join("empty");
-        std::fs::create_dir_all(&empty).unwrap();
-        let from_env = fixture.tmux_dir("tmux 3.7c").join("tmux");
-        let mut ctx = fixture.context(&[empty]);
-        ctx.tmux_env = Some(from_env.clone().into_os_string());
-        let (_, error) = run(&ctx, &SetupOptions::default(), &mut fixture.manager());
-        assert!(error.is_empty(), "{error}");
-        let supervisor =
-            std::fs::read_to_string(fixture.unit_dir().join("farhelm-supervisor.service")).unwrap();
-        assert!(
-            supervisor.contains(&format!("FARHELM_TMUX={}", from_env.display())),
-            "{supervisor}"
-        );
-
-        let other = Fixture::new();
-        let flagged = other.tmux_dir("tmux 3.7c").join("tmux");
-        let opts = SetupOptions {
-            tmux: Some(flagged.clone()),
-            ..SetupOptions::default()
-        };
-        let (_, error) = run(&ctx, &opts, &mut fixture.manager());
-        assert!(error.is_empty(), "{error}");
-        let supervisor =
-            std::fs::read_to_string(fixture.unit_dir().join("farhelm-supervisor.service")).unwrap();
-        assert!(
-            supervisor.contains(&format!("FARHELM_TMUX={}", flagged.display())),
-            "{supervisor}"
-        );
-    }
-
-    /// An EMPTY `FARHELM_TMUX` means "no override" to whoever wrote it —
-    /// a unit or profile line with nothing after the `=`. Reading it as a
-    /// program name could only ever fail, so discovery must fall through
-    /// to PATH, which is what the supervisor's own resolver does.
-    #[farhelm_testtrace::test]
-    fn an_empty_tmux_environment_capture_falls_through_to_path() {
-        let fixture = Fixture::new();
-        let on_path = fixture.tmux_dir("tmux 3.7c");
-        let mut ctx = fixture.context(std::slice::from_ref(&on_path));
-        ctx.tmux_env = Some(OsString::new());
-        let (_, error) = run(&ctx, &SetupOptions::default(), &mut fixture.manager());
-        assert!(error.is_empty(), "{error}");
-        let supervisor =
-            std::fs::read_to_string(fixture.unit_dir().join("farhelm-supervisor.service")).unwrap();
-        assert!(
-            supervisor.contains(&format!("FARHELM_TMUX={}", on_path.join("tmux").display())),
-            "{supervisor}"
-        );
-    }
-
-    /// A relative spelling of `target` that resolves to it from this test
-    /// process's own working directory, which is read, never changed.
-    ///
-    /// PATH discovery checks candidates with ordinary filesystem calls, so a
-    /// relative entry is resolved against the PROCESS's working directory,
-    /// not the injected `SetupContext::cwd`. A regression test for the
-    /// relative-entry filter needs an entry that really reaches a fixture
-    /// from there; otherwise dropping the filter would go unnoticed.
-    fn relative_to_process_cwd(target: &Path) -> PathBuf {
-        let cwd = std::env::current_dir().unwrap();
-        let mut relative = PathBuf::new();
-        for _ in cwd.components().skip(1) {
-            relative.push("..");
-        }
-        relative.join(target.strip_prefix("/").unwrap())
-    }
-
-    /// Why this matters: with `.` (or any relative entry) on PATH, running
-    /// setup inside a checkout that ships an executable named `tmux` used to
-    /// pin that checkout's file into the boot-time supervisor unit, so it
-    /// ran every Farhelm session at every boot. Spec: PATH discovery only
-    /// considers absolute entries, so a relative entry's tmux is never
-    /// pinned, even ahead of a good absolute one; and every refusal from PATH
-    /// discovery (nothing else found, an absolute tmux below the floor, one
-    /// that cannot run) names the skipped tmux and how to use it anyway.
-    ///
-    /// The relative entry is a nested path that reaches the fixture from the
-    /// test process's working directory, the same way `.` would reach one in
-    /// the directory setup runs from; `.` itself cannot point at a fixture
-    /// without changing that directory, which these tests never do. The
-    /// context's `cwd` is the process's real one so setup resolves the entry
-    /// the same way discovery does.
-    #[farhelm_testtrace::test]
-    fn a_tmux_reached_through_a_relative_path_entry_is_never_pinned() {
-        let setup_with = |extra: Option<&str>| {
-            let fixture = Fixture::new();
-            let checkout = fixture.root.path().join("checkout-bin");
-            std::fs::create_dir_all(&checkout).unwrap();
-            write_script(&checkout.join("tmux"), "printf 'tmux 3.7c\\n'");
-            let relative = relative_to_process_cwd(&checkout);
-            // Premise: the relative entry really reaches an acceptable tmux.
-            assert!(relative.join("tmux").is_file(), "{}", relative.display());
-            let mut path = vec![PathBuf::from("."), relative];
-            if let Some(version) = extra {
-                path.push(fixture.tmux_dir(version));
-            }
-            let mut ctx = fixture.context(&path);
-            ctx.cwd = std::env::current_dir().unwrap();
-            let (_, error) = run(&ctx, &SetupOptions::default(), &mut fixture.manager());
-            let unit =
-                std::fs::read_to_string(fixture.unit_dir().join("farhelm-supervisor.service")).ok();
-            (fixture, checkout, error, unit)
-        };
-        let skipped_note = |checkout: &Path| {
-            format!(
-                "PATH also reaches {} through a relative entry, which setup never pins",
-                std::env::current_dir()
-                    .unwrap()
-                    .join(relative_to_process_cwd(checkout))
-                    .join("tmux")
-                    .display()
-            )
-        };
-
-        // An acceptable absolute tmux later on PATH is the one pinned.
-        let (fixture, _, error, unit) = setup_with(Some("tmux 3.7c"));
-        assert!(error.is_empty(), "{error}");
-        let unit = unit.expect("setup wrote the supervisor unit");
-        let absolute = fixture.root.path().join("tmuxbin/tmux");
-        assert!(
-            unit.contains(&format!("FARHELM_TMUX={}", absolute.display())),
-            "{unit}"
-        );
-        assert!(!unit.contains("checkout-bin"), "{unit}");
-
-        // Nothing else usable: refused, naming the skipped one.
-        let (_, checkout, error, unit) = setup_with(None);
-        assert!(error.contains("found none."), "{error}");
-        assert!(error.contains(&skipped_note(&checkout)), "{error}");
-        assert!(unit.is_none());
-
-        // An absolute tmux below the floor: its own detail AND the note.
-        let (_, checkout, error, unit) = setup_with(Some("tmux 3.6"));
-        assert!(error.contains("found tmux 3.6 at"), "{error}");
-        assert!(error.contains(&skipped_note(&checkout)), "{error}");
-        assert!(unit.is_none());
-    }
-
     /// A relative path means "relative to where I ran this", and systemd
     /// would read it as "relative to the service's working directory" —
     /// the user's home for a user unit. Pinning one verbatim is how a
@@ -3734,16 +3274,9 @@ mod tests {
     #[farhelm_testtrace::test]
     fn relative_paths_are_resolved_against_the_directory_setup_ran_in() {
         let fixture = Fixture::new();
-        let tmux_dir = fixture.tmux_dir("tmux 3.7c");
-        // The fixture's cwd holds a relative tmux of its own, so `--tmux
-        // ./tmux` has something to resolve to.
-        std::fs::create_dir_all(fixture.cwd()).unwrap();
-        write_script(&fixture.cwd().join("tmux"), "printf 'tmux 3.7c\\n'");
-
-        let ctx = fixture.context(&[tmux_dir]);
+        let ctx = fixture.context();
         let opts = SetupOptions {
             state_dir: Some(PathBuf::from("relative/state")),
-            tmux: Some(PathBuf::from("./tmux")),
             ..SetupOptions::default()
         };
         let (_, error) = run(&ctx, &opts, &mut fixture.manager());
@@ -3755,10 +3288,6 @@ mod tests {
                 "--state-dir \"{}/relative/state\"",
                 fixture.cwd().display()
             )),
-            "{supervisor}"
-        );
-        assert!(
-            supervisor.contains(&format!("FARHELM_TMUX={}/./tmux", fixture.cwd().display())),
             "{supervisor}"
         );
         // The helm unit pins the same resolved directory, so the two
@@ -3783,7 +3312,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn a_hyphen_leading_state_directory_survives_the_child_parser() {
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         let opts = SetupOptions {
             state_dir: Some(PathBuf::from("--port")),
             ..SetupOptions::default()
@@ -3815,33 +3344,6 @@ mod tests {
         ));
     }
 
-    /// PATH is a list and `execvp` treats it as one: an entry that looks
-    /// executable but will not spawn is skipped. Refusing there would
-    /// strand an operator whose PATH happens to carry a broken `tmux`
-    /// ahead of a working one — a `noexec` mount or a wrong-group execute
-    /// bit produces exactly that shape.
-    #[farhelm_testtrace::test]
-    fn an_unrunnable_path_entry_does_not_hide_a_usable_tmux() {
-        let fixture = Fixture::new();
-        let shadow = fixture.root.path().join("shadow");
-        std::fs::create_dir_all(&shadow).unwrap();
-        write_script(&shadow.join("tmux"), "true");
-        // Executable, but there is no such interpreter, so the spawn
-        // itself fails — the same answer the OS gives for `noexec`.
-        std::fs::write(shadow.join("tmux"), b"#!/nonexistent/interpreter\n").unwrap();
-        let usable = fixture.tmux_dir("tmux 3.7c");
-
-        let ctx = fixture.context(&[shadow, usable.clone()]);
-        let (_, error) = run(&ctx, &SetupOptions::default(), &mut fixture.manager());
-        assert!(error.is_empty(), "{error}");
-        let supervisor =
-            std::fs::read_to_string(fixture.unit_dir().join("farhelm-supervisor.service")).unwrap();
-        assert!(
-            supervisor.contains(&format!("FARHELM_TMUX={}", usable.join("tmux").display())),
-            "{supervisor}"
-        );
-    }
-
     /// `is-active` answers 3 for an inactive unit and 0 for a running one.
     /// ANY other status is an operational failure — no user manager, a
     /// permission problem, a signal — and reading it as "inactive" would
@@ -3851,7 +3353,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn an_unclassifiable_is_active_result_stops_before_the_unit_is_replaced() {
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         let mut units = fixture.manager().script(
             "is-active farhelm-supervisor.service",
             1,
@@ -3895,7 +3397,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn a_failure_on_the_second_unit_leaves_both_units_unwritten() {
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         let (_, error) = run(&ctx, &SetupOptions::default(), &mut fixture.manager());
         assert!(error.is_empty(), "{error}");
         let supervisor_path = fixture.unit_dir().join("farhelm-supervisor.service");
@@ -3939,7 +3441,7 @@ mod tests {
     fn both_of_systemds_not_running_answers_mean_no_restart() {
         for stopped in [true, false] {
             let fixture = Fixture::new();
-            let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+            let ctx = fixture.context();
             run(&ctx, &SetupOptions::default(), &mut fixture.manager());
             // Loaded-but-stopped answers 3; the default fake has never
             // heard of the unit and answers 4.
@@ -3980,7 +3482,7 @@ mod tests {
     /// run dies anywhere between the write and the restart, the file now
     /// matches what the retry wants, so the retry calls it unchanged —
     /// and used to report success over both services still running the
-    /// old executable, state directory, tmux path, and port.
+    /// old executable, state directory, and port.
     ///
     /// Every failure point between publication and the last restart is
     /// covered, including the gap BETWEEN the two restarts, which is the
@@ -4005,7 +3507,7 @@ mod tests {
             ("restart farhelm-helm.service", vec![helm]),
         ] {
             let fixture = Fixture::new();
-            let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+            let ctx = fixture.context();
             run(&ctx, &SetupOptions::default(), &mut fixture.manager());
 
             // Both units change (the state directory reaches both) and
@@ -4070,7 +3572,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn a_changed_but_stopped_unit_owes_no_restart() {
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         run(&ctx, &SetupOptions::default(), &mut fixture.manager());
         let changed = SetupOptions {
             port: Some(7999),
@@ -4101,7 +3603,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn uninstall_clears_an_outstanding_restart_obligation() {
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         run(&ctx, &SetupOptions::default(), &mut fixture.manager());
         let changed = SetupOptions {
             port: Some(7999),
@@ -4138,7 +3640,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn an_uninstall_retry_issues_a_reload_that_failed_after_deletion() {
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         run(&ctx, &SetupOptions::default(), &mut fixture.manager());
         let uninstall = SetupOptions {
             uninstall: true,
@@ -4186,7 +3688,7 @@ mod tests {
         }
 
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         let mut units = fixture.manager();
         let error = run_setup(
             &ctx,
@@ -4227,7 +3729,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn an_unreadable_unit_file_reports_the_read_failure_not_an_ownership_claim() {
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         std::fs::create_dir_all(fixture.unit_dir()).unwrap();
         let path = fixture.unit_dir().join("farhelm-supervisor.service");
         // Valid marker line, invalid UTF-8 after it: read_to_string fails
@@ -4257,7 +3759,7 @@ mod tests {
         // A directory and a symlink are both "not a regular file", and a
         // symlink is the one that could otherwise redirect a write.
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         std::fs::create_dir_all(fixture.unit_dir()).unwrap();
         let supervisor = fixture.unit_dir().join("farhelm-supervisor.service");
         std::fs::create_dir_all(&supervisor).unwrap();
@@ -4270,7 +3772,7 @@ mod tests {
         assert!(!fixture.unit_dir().join("farhelm-helm.service").exists());
 
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         std::fs::create_dir_all(fixture.unit_dir()).unwrap();
         let target = fixture.root.path().join("elsewhere.service");
         std::fs::write(&target, managed("[Unit]\n".to_string())).unwrap();
@@ -4291,7 +3793,7 @@ mod tests {
         // The second target is the one that proves preflight order: an
         // installable supervisor, a foreign helm unit.
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         std::fs::create_dir_all(fixture.unit_dir()).unwrap();
         let helm = fixture.unit_dir().join("farhelm-helm.service");
         std::fs::write(&helm, b"[Unit]\nDescription=mine\n").unwrap();
@@ -4323,7 +3825,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn uninstall_refuses_a_foreign_second_target_before_removing_the_first() {
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         run(&ctx, &SetupOptions::default(), &mut fixture.manager());
         let helm = fixture.unit_dir().join("farhelm-helm.service");
         std::fs::write(&helm, b"[Unit]\nDescription=mine\n").unwrap();
@@ -4358,7 +3860,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn a_dry_run_previews_the_status_query_and_the_conditional_restart() {
         let fixture = Fixture::new();
-        let ctx = fixture.context(&[fixture.tmux_dir("tmux 3.7c")]);
+        let ctx = fixture.context();
         // A first install leaves the helm unit unchanged for the dry run
         // below, so the transcript covers both a changed and an unchanged
         // unit in one pass.
@@ -4404,10 +3906,11 @@ mod tests {
     }
 
     /// The CLI grammar itself: that `farhelm helm setup` is reachable
-    /// under these exact flag names, and that `--uninstall` refuses the
-    /// four flags that would ask it to install something at the same
-    /// time. Every other test here builds `SetupOptions` directly and so
-    /// proves nothing about the parser.
+    /// under these exact flag names, that `--uninstall` refuses the three
+    /// flags that would ask it to install something at the same time, and
+    /// that the removed `--tmux` is refused rather than silently accepted.
+    /// Every other test here builds `SetupOptions` directly and so proves
+    /// nothing about the parser.
     #[farhelm_testtrace::test]
     fn the_setup_command_line_parses_and_enforces_its_conflicts() {
         let parsed = crate::Cli::try_parse_from([
@@ -4418,8 +3921,6 @@ mod tests {
             "/srv/state",
             "--port",
             "7433",
-            "--tmux",
-            "/usr/bin/tmux",
             "--no-supervisor",
             "--dry-run",
         ])
@@ -4432,7 +3933,6 @@ mod tests {
         };
         assert_eq!(options.state_dir.as_deref(), Some(Path::new("/srv/state")));
         assert_eq!(options.port, Some(7433));
-        assert_eq!(options.tmux.as_deref(), Some(Path::new("/usr/bin/tmux")));
         assert!(options.no_supervisor);
         assert!(options.dry_run);
         assert!(!options.uninstall);
@@ -4446,7 +3946,6 @@ mod tests {
         for conflicting in [
             vec!["--state-dir", "/srv/state"],
             vec!["--port", "7433"],
-            vec!["--tmux", "/usr/bin/tmux"],
             vec!["--no-supervisor"],
         ] {
             let mut argv = vec!["farhelm", "helm", "setup", "--uninstall"];
@@ -4456,5 +3955,14 @@ mod tests {
                 "{argv:?} must be refused"
             );
         }
+
+        // `--tmux` was removed outright (setup names no tmux any more). A
+        // script that still passes it must fail loudly, not have the value
+        // swallowed by some other argument.
+        let error =
+            crate::Cli::try_parse_from(["farhelm", "helm", "setup", "--tmux", "/usr/bin/tmux"])
+                .err()
+                .expect("the removed --tmux flag must be refused");
+        assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
     }
 }

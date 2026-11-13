@@ -2582,9 +2582,9 @@ fn print_agent_listing(verb: farhelm_proto::AgentVerb, json: bool) -> anyhow::Re
 /// depend on, once, and hand it to the command.
 ///
 /// This is the ONLY place those variables are read. Everything the setup
-/// path decides — the unit directory, the default state directory, which
-/// tmux to pin, whether the binary looks like a build artifact — follows
-/// from this one capture, which is what makes the command testable
+/// path decides — the unit directory, the default state directory, where
+/// relative paths point, whether the binary looks like a build artifact —
+/// follows from this one capture, which is what makes the command testable
 /// without a test ever mutating its own process environment.
 ///
 /// No tokio runtime: setup is synchronous, spawns `systemctl` with
@@ -2601,10 +2601,8 @@ fn run_helm_setup(options: setup::SetupOptions) -> anyhow::Result<()> {
         home: PathBuf::from(home),
         cwd: std::env::current_dir()
             .context("locating the directory farhelm helm setup was run from")?,
-        path: std::env::var_os("PATH").unwrap_or_default(),
         xdg_config_home: std::env::var_os("XDG_CONFIG_HOME"),
         xdg_state_home: std::env::var_os("XDG_STATE_HOME"),
-        tmux_env: std::env::var_os(farhelm_supervisor::tmux::TMUX_PROGRAM_ENV),
         temp_dir: std::env::temp_dir(),
     };
     let mut units = setup::SystemctlUnitManager;

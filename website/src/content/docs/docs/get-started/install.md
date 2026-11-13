@@ -27,21 +27,6 @@ it. If an install was cut short, by a reboot or a power loss say, running the in
 the copy it left behind. An installation older than v0.23.0 cannot be updated this way: the installer refuses and says
 how to remove it first. Your data can stay, but the new version may not be able to use all of it.
 
-## If the installer asks for tmux
-
-Farhelm needs tmux 3.7c or newer on your Mac. New sessions no longer run inside tmux, but sessions started by earlier
-versions of Farhelm still do, so Farhelm keeps requiring it for now
-([Move sessions to new terminals](/docs/using/new-terminals/)). The installer may tell you that your Mac has none, or
-one that is too old. If it does, install or upgrade it with Homebrew:
-
-```sh
-brew install tmux
-```
-
-(`brew upgrade tmux` for an older one; if you do not have Homebrew yet, [brew.sh](https://brew.sh/) has the one-line
-install.) Farhelm will not start until a new enough tmux is in place. If the installer does not mention tmux, you
-already have what you need.
-
 ## Open Farhelm
 
 Open Farhelm from Spotlight or from `~/Applications`. The app starts everything it needs by itself: there is no

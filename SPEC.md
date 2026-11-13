@@ -76,10 +76,7 @@ One control plane, two ways to face it:
 
 1. **Native Mac app**: `farhelm-desktop`, a bare binary that opens the UI in a native window and starts the helm and a
    local supervisor beside it, so the Mac itself is a host. This is the setup when the Mac is your main machine. It
-   bundles no tmux: it requires Homebrew's (at or above the version floor SPEC_impl.md's terminal-substrate section
-   defines), finds it in the Homebrew prefixes itself because GUI apps do not inherit the shell `PATH`, and refuses to
-   start — naming the binary, the version found, and the floor — when none acceptable exists; `FARHELM_TMUX` overrides
-   the choice.
+   neither needs nor looks for tmux.
 2. **Web interface**: a standalone helm — wherever it runs — serves a browser UI with the same capabilities, so a helm
    running on a Linux host is fully usable with nothing installed on the client machine. The native app's embedded helm
    is an internal part of the app: it serves only its own window, on a loopback port chosen for that launch, and serves
@@ -189,7 +186,7 @@ unsupported. There is no macOS version floor: inspection refuses a Mac missing a
 command. Setup, Update (manual, Update all and automatic) and uninstall are unsupported when the Farhelm desktop app is
 installed in `~/Applications/Farhelm.app` or `/Applications/Farhelm.app`, and the refusal says so without suggesting
 starting a supervisor by hand. Discovery still adopts a supervisor already running there, including the app's, without
-restarting or replacing it. The desktop app's own local supervisor and Homebrew tmux requirement are unchanged.
+restarting or replacing it. The desktop app's own local supervisor is unchanged.
 
 Tensorlake's prepared snapshots include the login-manager and lingering preparation: Farhelm uses passwordless sudo to
 start the login manager and enable lingering for the sandbox user before installing its supervisor in the snapshot.
@@ -3012,8 +3009,9 @@ whatever the agent renders is what you see. There is no composer, no message abs
   failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those
   sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still
   running. After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.
-  Installing Farhelm still requires a supported tmux, except on a remote Mac set up over SSH, which never uses tmux (see
-  Topology).
+  Neither the Mac app nor a Linux machine set up with `farhelm helm setup` needs tmux. Setting up a remote Linux host
+  still checks for a supported tmux and installs Farhelm's own build when the host has none; a remote Mac set up over
+  SSH never uses tmux (see Topology).
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, down to a floor below which it is detached as stalled. No viewer can stop a
@@ -5262,13 +5260,12 @@ is zsh, and inside containers that run wrapped agents.
 An agent harness version is supported until a newer release of that harness has been out for two weeks. Things move fast
 in this space; Farhelm adds no code or complexity to support older versions.
 
-tmux is an implementation detail. The supported tmux is either the pinned build Farhelm itself installs or ships, or the
-stock tmux package of the platform's standard package source (the Linux distribution, or Homebrew on a Mac), at or above
-the version floor, run as the real binary. Using the distribution's package is a convenience that keeps its security
-patches, not an integration promise. Anything else is unsupported, including wrapper scripts, custom or patched builds,
-and configuration or behavior a stock package would not bring. `farhelm helm setup --tmux` and `FARHELM_TMUX` exist to
-choose among supported binaries, not to support arbitrary programs. Farhelm need not add code or complexity to
-accommodate unsupported shells or tmux programs.
+tmux is an implementation detail, and setting up a remote Linux host is the only place Farhelm still looks for one. The
+supported tmux there is either the pinned build Farhelm itself installs, or the stock tmux package of the Linux
+distribution, at or above the version floor, run as the real binary. Using the distribution's package is a convenience
+that keeps its security patches, not an integration promise. Anything else is unsupported, including wrapper scripts,
+custom or patched builds, and configuration or behavior a stock package would not bring. Farhelm need not add code or
+complexity to accommodate unsupported shells or tmux programs.
 
 Usernames of up to 20 characters must work on Linux and macOS with Farhelm's default state directory locations, on the
 helm's machine and on every host, including wherever Farhelm places sockets or other files whose paths the system limits

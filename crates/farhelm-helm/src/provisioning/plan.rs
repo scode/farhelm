@@ -848,10 +848,7 @@ impl PlanLayout {
                 host_arch: reach.arch,
             });
         }
-        // Whichever branch runs, `tmux_program` ends up naming the exact
-        // executable the supervisor must drive — see `supervisor_unit`
-        // for why a directory on PATH is not enough.
-        let tmux_program = if reach.needs_tmux {
+        if reach.needs_tmux {
             let tmux_path = lib_dir.join("tmux");
             let tmux_temporary = temporary(
                 &tmux_path,
@@ -876,17 +873,11 @@ impl PlanLayout {
             actions.push(ProvisioningAction::InstallPayload {
                 payload: PayloadKind::Tmux,
                 arch: reach.arch,
-                destination: tmux_path.clone(),
+                destination: tmux_path,
                 temporary: tmux_temporary,
             });
-            tmux_path
-        } else {
-            reach
-                .host_tmux
-                .clone()
-                .expect("reach accepted the host tmux, so it recorded which one")
-        };
-        let content = supervisor_unit(&farhelm_path, &state_dir, &tmux_program)?;
+        }
+        let content = supervisor_unit(&farhelm_path, &state_dir)?;
         actions.extend([
             ProvisioningAction::WriteUnit {
                 unit: self.unit_name.clone(),
@@ -1243,35 +1234,11 @@ fn unit_failure(error: anyhow::Error) -> BackendFailure {
 /// "setup owns this file", and provisioning's remote units are owned by
 /// the provisioning workflow instead.
 ///
-/// `tmux_program` is pinned into the unit as `FARHELM_TMUX`, and that is
-/// the load-bearing part: PATH alone was not enough to express which tmux
-/// provisioning approved. An OBSOLETE private tmux left by an earlier
-/// install used to shadow an accepted host tmux — provisioning would
-/// report success, skip the payload because the host binary cleared the
-/// floor, and then restart the supervisor onto the below-floor leftover it
-/// had just declined to replace. Naming the executable outright removes
-/// the ambiguity, on both branches: the host binary when it was accepted,
-/// the freshly installed payload when it was not.
-///
-/// The unit's PATH now follows from those two executables (see the shared
-/// renderer) rather than from a separately supplied lib and host-tmux
-/// directory. That is the same set in every case provisioning produces —
-/// the layout puts `farhelm` in the lib directory, and an ACCEPTED host
-/// tmux is the program being pinned — with one deliberate difference: when
-/// provisioning installs its own tmux payload, the directory of the host's
-/// REJECTED tmux no longer joins PATH. Nothing needs it there; the payload
-/// answers `tmux` by name from the lib directory that comes first anyway.
-pub(super) fn supervisor_unit(
-    farhelm: &Path,
-    state_dir: &Path,
-    tmux_program: &Path,
-) -> Result<String, BackendFailure> {
-    render_supervisor_unit(&SupervisorUnitInputs {
-        farhelm,
-        state_dir,
-        tmux: tmux_program,
-    })
-    .map_err(unit_failure)
+/// The unit names no tmux and puts no tmux directory on `PATH`: the
+/// supervisor starts none. Its `PATH` is the directory holding `farhelm`
+/// and the base directories the shared renderer appends.
+pub(super) fn supervisor_unit(farhelm: &Path, state_dir: &Path) -> Result<String, BackendFailure> {
+    render_supervisor_unit(&SupervisorUnitInputs { farhelm, state_dir }).map_err(unit_failure)
 }
 
 #[cfg(test)]

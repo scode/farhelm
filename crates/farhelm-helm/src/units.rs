@@ -44,9 +44,9 @@ pub const SUPERVISOR_UNIT_NAME: &str = "farhelm-supervisor.service";
 /// no opinion about helms.
 pub const HELM_UNIT_NAME: &str = "farhelm-helm.service";
 
-/// The supervisor unit as reviewed, with `@…@` placeholders for the three
+/// The supervisor unit as reviewed, with `@…@` placeholders for the two
 /// paths [`SupervisorUnitInputs`] supplies plus the `@PATH@` this module
-/// derives from two of them. Shared with remote provisioning.
+/// derives from the program's. Shared with remote provisioning.
 const SUPERVISOR_UNIT_TEMPLATE: &str = include_str!("../units/farhelm-supervisor.service.in");
 
 /// The helm unit as reviewed. `@HELM_ARGS@` is what makes it a template
@@ -54,21 +54,21 @@ const SUPERVISOR_UNIT_TEMPLATE: &str = include_str!("../units/farhelm-supervisor
 /// depend on how setup was invoked.
 const HELM_UNIT_TEMPLATE: &str = include_str!("../units/farhelm-helm.service.in");
 
-/// The tail of the SUPERVISOR unit's search path, after the directories
-/// its own two executables live in. The helm unit sets no `PATH` at all —
-/// it shells out to nothing.
+/// The tail of the SUPERVISOR unit's search path, after the directory its
+/// own executable lives in. The helm unit sets no `PATH` at all — it shells
+/// out to nothing.
 const BASE_PATH: [&str; 3] = ["/usr/local/bin", "/usr/bin", "/bin"];
 
 /// The paths the supervisor unit pins.
 ///
-/// `tmux` is the executable, not a directory, and that is load-bearing:
-/// it is pinned into the unit as `FARHELM_TMUX` so the supervisor drives
-/// the exact binary whoever rendered this unit approved, rather than
-/// whatever `PATH` resolves at start time.
+/// There is deliberately no tmux here. The supervisor runs every session in
+/// a terminal host and starts no tmux, so nothing the unit could name would
+/// be read. A unit an earlier release rendered still carries a
+/// `FARHELM_TMUX=` line until it is rendered again; the supervisor ignores
+/// it, and keeps it out of the sessions it starts.
 pub struct SupervisorUnitInputs<'a> {
     pub farhelm: &'a Path,
     pub state_dir: &'a Path,
-    pub tmux: &'a Path,
 }
 
 /// The paths and flags the helm unit pins.
@@ -94,16 +94,14 @@ pub struct HelmUnitInputs<'a> {
 /// Render the supervisor unit. The result is UNMARKED; setup wraps it in
 /// [`managed`], provisioning does not.
 ///
-/// `PATH` is composed here, from the directories holding the two
-/// executables the unit names plus [`BASE_PATH`]. Farhelm's own directory
-/// comes first so a host where Farhelm supplied tmux finds that payload,
-/// and tmux's directory joins for the separate reason that a systemd user
-/// manager process does not necessarily inherit the login shell's `PATH` —
-/// anything the supervisor or a session shells out to should still find
-/// tmux by name. A program with no directory part (the `<tmux>` stand-in
-/// `farhelm helm setup --dry-run` renders when it could not find a real
-/// one) contributes no `PATH` entry rather than an empty one, which POSIX
-/// would read as the current directory.
+/// `PATH` is composed here: the directory holding the Farhelm program the
+/// unit runs, then [`BASE_PATH`]. A systemd user manager does not
+/// necessarily inherit the login shell's `PATH`, so this is what the
+/// supervisor shells out with and what its sessions' login shells start
+/// from before their startup files run. Farhelm's directory comes first so
+/// `farhelm` resolves to this installation's copy. A program with no
+/// directory part contributes no `PATH` entry rather than an empty one,
+/// which POSIX would read as the current directory.
 ///
 /// `KillMode=process` in the template is equally deliberate: the terminals
 /// own the durable sessions (each new terminal's terminal host, and the
@@ -114,33 +112,28 @@ pub struct HelmUnitInputs<'a> {
 /// So is `UnsetEnvironment=` for the three session markers
 /// (`FARHELM_SESSION_ID`, `FARHELM_AGENT_ID`, `FARHELM_TAB_ID`). The kill
 /// sweep claims every process carrying a session's markers, and nothing
-/// exempts the supervisor or its tmux server. A tab's startup file that runs
+/// exempts the supervisor. A tab's startup file that runs
 /// a bare `systemctl --user import-environment` (or `dbus-update-activation-
 /// environment --systemd --all`) copies that tab's markers into the user
 /// manager, and the next supervisor it starts would inherit them: deleting
 /// that session, or closing that tab, would then make the supervisor signal
-/// itself, and a tmux server it started would take every old session's
-/// panes with it. A supervisor systemd manages never legitimately belongs to
+/// itself. A supervisor systemd manages never legitimately belongs to
 /// a session, so stripping them costs nothing. This covers only supervisors
 /// started through this unit; SPEC_impl.md records the limit.
 ///
 /// Fails when any path cannot cross a text boundary faithfully (see
 /// [`path_text`]), the Farhelm program path contains `$`, or a `PATH`
 /// component contains `:`, which systemd's `Environment=` grammar cannot
-/// represent. Dollars remain supported in arguments and environment values;
-/// the program position does not decode the `$$` used for arguments.
+/// represent. Dollars remain supported in the state directory argument; the
+/// program position does not decode the `$$` used for arguments.
 pub fn render_supervisor_unit(inputs: &SupervisorUnitInputs) -> anyhow::Result<String> {
     let farhelm = systemd_program(inputs.farhelm)?;
-    let mut search: Vec<&Path> = Vec::new();
-    for program in [inputs.farhelm, inputs.tmux] {
-        if let Some(dir) = program.parent().filter(|dir| !dir.as_os_str().is_empty())
-            && !search.contains(&dir)
-        {
-            search.push(dir);
-        }
-    }
-    let mut components = Vec::with_capacity(search.len() + BASE_PATH.len());
-    for dir in search {
+    let mut components = Vec::with_capacity(1 + BASE_PATH.len());
+    if let Some(dir) = inputs
+        .farhelm
+        .parent()
+        .filter(|dir| !dir.as_os_str().is_empty())
+    {
         let text = path_text(dir)?;
         if text.contains(':') {
             bail!(
@@ -157,7 +150,6 @@ pub fn render_supervisor_unit(inputs: &SupervisorUnitInputs) -> anyhow::Result<S
             ("@FARHELM@", &farhelm),
             ("@STATE_DIR@", &systemd_arg(inputs.state_dir)?),
             ("@PATH@", &environment_value(&components.join(":"))),
-            ("@TMUX@", &environment_value(&path_text(inputs.tmux)?)),
         ],
     ))
 }
@@ -450,9 +442,9 @@ pub(crate) fn systemd_arg(path: &Path) -> anyhow::Result<String> {
 
 /// Escape one value for the body of a systemd `Environment="…"` line.
 ///
-/// Shared by `PATH` and `FARHELM_TMUX` so the two cannot drift; the
-/// escaping rules are [`systemd_arg`]'s, minus the surrounding quotes the
-/// template already supplies — and minus the dollar.
+/// Used for the supervisor unit's `PATH`; the escaping rules are
+/// [`systemd_arg`]'s, minus the surrounding quotes the template already
+/// supplies — and minus the dollar.
 ///
 /// That asymmetry is deliberate and is systemd's, not ours: `Environment=`
 /// assignments are NOT variable-expanded (only `EnvironmentFile=` and the
@@ -871,7 +863,6 @@ mod tests {
         use farhelm_supervisor::launch::{AGENT_ID_ENV_VAR, SESSION_ID_ENV_VAR, TAB_ID_ENV_VAR};
         let unit = render_supervisor_unit(&SupervisorUnitInputs {
             farhelm: Path::new("/usr/local/bin/farhelm"),
-            tmux: Path::new("/usr/bin/tmux"),
             state_dir: Path::new("/srv/farhelm"),
         })
         .unwrap();
@@ -905,7 +896,6 @@ mod tests {
         let supervisor = render_supervisor_unit(&SupervisorUnitInputs {
             farhelm: Path::new("/home/u/.local/bin/farhelm"),
             state_dir: Path::new("/home/u/.local/state/farhelm"),
-            tmux: Path::new("/home/linuxbrew/.linuxbrew/bin/tmux"),
         })
         .unwrap();
         assert_eq!(
@@ -918,9 +908,7 @@ mod tests {
                 "Type=simple\n",
                 "ExecStart=\"/home/u/.local/bin/farhelm\" supervisor run --state-dir ",
                 "\"/home/u/.local/state/farhelm\"\n",
-                "Environment=\"PATH=/home/u/.local/bin:/home/linuxbrew/.linuxbrew/bin:",
-                "/usr/local/bin:/usr/bin:/bin\"\n",
-                "Environment=\"FARHELM_TMUX=/home/linuxbrew/.linuxbrew/bin/tmux\"\n",
+                "Environment=\"PATH=/home/u/.local/bin:/usr/local/bin:/usr/bin:/bin\"\n",
                 "UnsetEnvironment=FARHELM_SESSION_ID FARHELM_AGENT_ID FARHELM_TAB_ID\n",
                 "KillMode=process\n",
                 "Restart=on-failure\n",
@@ -985,10 +973,9 @@ mod tests {
         assert!(no_port.contains("ExecStart=\"/bin/farhelm\" helm run --state-dir \"/state\"\n"));
     }
 
-    /// Dollar arguments must still survive the new program-path refusal.
-    /// Systemd expands arguments and leaves Environment values literal;
-    /// applying the program restriction to either would reject supported
-    /// state directories or change which tmux the supervisor runs.
+    /// Dollar arguments must still survive the program-path refusal.
+    /// Systemd expands arguments, so applying the program restriction to
+    /// them would reject supported state directories.
     #[farhelm_testtrace::test]
     fn dollars_are_escaped_in_commands_and_decoded_on_read_back() {
         for path in [
@@ -1000,7 +987,6 @@ mod tests {
             let unit = render_supervisor_unit(&SupervisorUnitInputs {
                 farhelm: Path::new("/usr/bin/farhelm"),
                 state_dir: Path::new(path),
-                tmux: Path::new("/usr/bin/tmux"),
             })
             .unwrap();
             assert!(
@@ -1030,24 +1016,6 @@ mod tests {
                 Some(PathBuf::from("/usr/bin/farhelm"))
             );
         }
-
-        // `Environment=` is NOT expanded by systemd, so a dollar stays
-        // single there. Doubling it would hand the supervisor a literal
-        // `$$` in its PATH.
-        let unit = render_supervisor_unit(&SupervisorUnitInputs {
-            farhelm: Path::new("/usr/bin/farhelm"),
-            state_dir: Path::new("/state"),
-            tmux: Path::new("/opt/$NAME/tmux"),
-        })
-        .unwrap();
-        assert!(
-            unit.contains("Environment=\"PATH=/usr/bin:/opt/$NAME:/usr/local/bin:/usr/bin:/bin\""),
-            "{unit}"
-        );
-        assert!(
-            unit.contains("Environment=\"FARHELM_TMUX=/opt/$NAME/tmux\""),
-            "{unit}"
-        );
     }
 
     /// Both local units must refuse the path before writing an unusable
@@ -1063,7 +1031,6 @@ mod tests {
             let supervisor = render_supervisor_unit(&SupervisorUnitInputs {
                 farhelm: Path::new(path),
                 state_dir: Path::new("/state"),
-                tmux: Path::new("/usr/bin/tmux"),
             })
             .unwrap_err();
             let helm = render_helm_unit(&HelmUnitInputs {
@@ -1087,24 +1054,17 @@ mod tests {
     /// `Environment=` has its own escape branch, so the characters that
     /// are only covered for `ExecStart` elsewhere need their own complete
     /// expectations here: a quote or backslash reaching systemd unescaped
-    /// ends the assignment early and leaves the supervisor with a PATH or
-    /// a pinned tmux that is not the one this render chose.
+    /// ends the assignment early and leaves the supervisor with a PATH that
+    /// is not the one this render chose.
     #[farhelm_testtrace::test]
     fn environment_values_escape_quotes_and_backslashes() {
         let unit = render_supervisor_unit(&SupervisorUnitInputs {
-            farhelm: Path::new("/opt/a\"b/farhelm"),
+            farhelm: Path::new("/opt/a\"b\\c/farhelm"),
             state_dir: Path::new("/state"),
-            tmux: Path::new("/opt/c\\d/tmux"),
         })
         .unwrap();
         assert!(
-            unit.contains(
-                "Environment=\"PATH=/opt/a\\\"b:/opt/c\\\\d:/usr/local/bin:/usr/bin:/bin\"\n"
-            ),
-            "{unit}"
-        );
-        assert!(
-            unit.contains("Environment=\"FARHELM_TMUX=/opt/c\\\\d/tmux\"\n"),
+            unit.contains("Environment=\"PATH=/opt/a\\\"b\\\\c:/usr/local/bin:/usr/bin:/bin\"\n"),
             "{unit}"
         );
     }
@@ -1118,19 +1078,18 @@ mod tests {
     fn inserted_text_is_never_rescanned_as_template_syntax() {
         let unit = render_supervisor_unit(&SupervisorUnitInputs {
             farhelm: Path::new("/opt/@STATE_DIR@/farhelm"),
-            state_dir: Path::new("/opt/@TMUX@"),
-            tmux: Path::new("/opt/@PATH@/tmux"),
+            state_dir: Path::new("/opt/@PATH@"),
         })
         .unwrap();
         assert!(
             unit.contains(
                 "ExecStart=\"/opt/@STATE_DIR@/farhelm\" supervisor run --state-dir \
-                 \"/opt/@TMUX@\"\n"
+                 \"/opt/@PATH@\"\n"
             ),
             "{unit}"
         );
         assert!(
-            unit.contains("Environment=\"FARHELM_TMUX=/opt/@PATH@/tmux\"\n"),
+            unit.contains("Environment=\"PATH=/opt/@STATE_DIR@:/usr/local/bin:/usr/bin:/bin\"\n"),
             "{unit}"
         );
     }
@@ -1143,18 +1102,15 @@ mod tests {
         let percent = render_supervisor_unit(&SupervisorUnitInputs {
             farhelm: Path::new("/tmp/%h/farhelm"),
             state_dir: Path::new("/tmp/state"),
-            tmux: Path::new("/tmp/%h/tmux"),
         })
         .unwrap();
         assert!(percent.contains("\"/tmp/%%h/farhelm\""));
         assert!(percent.contains("PATH=/tmp/%%h:"));
-        assert!(percent.contains("Environment=\"FARHELM_TMUX=/tmp/%%h/tmux\""));
 
         assert!(
             render_supervisor_unit(&SupervisorUnitInputs {
                 farhelm: Path::new("/tmp/farhelm"),
                 state_dir: Path::new("/tmp/state\nother"),
-                tmux: Path::new("/tmp/tmux"),
             })
             .is_err()
         );
@@ -1162,7 +1118,6 @@ mod tests {
             render_supervisor_unit(&SupervisorUnitInputs {
                 farhelm: Path::new("/tmp/with:colon/farhelm"),
                 state_dir: Path::new("/tmp/state"),
-                tmux: Path::new("/tmp/tmux"),
             })
             .is_err()
         );
@@ -1176,15 +1131,6 @@ mod tests {
                 render_supervisor_unit(&SupervisorUnitInputs {
                     farhelm: Path::new("/tmp/farhelm"),
                     state_dir: &non_utf8,
-                    tmux: Path::new("/tmp/tmux"),
-                })
-                .is_err()
-            );
-            assert!(
-                render_supervisor_unit(&SupervisorUnitInputs {
-                    farhelm: Path::new("/tmp/farhelm"),
-                    state_dir: Path::new("/tmp/state"),
-                    tmux: &non_utf8,
                 })
                 .is_err()
             );
@@ -1209,18 +1155,19 @@ mod tests {
 
     /// A program with no directory part must not contribute an empty
     /// `PATH` component: POSIX reads one as the current directory, which
-    /// would let a stray `tmux` in whatever directory the user manager
-    /// started in win.
+    /// would let a stray program in whatever directory the user manager
+    /// started in win. Every caller passes an absolute program today; this
+    /// pins the guard that keeps a future relative one from opening that
+    /// hole.
     #[farhelm_testtrace::test]
     fn a_bare_program_name_contributes_no_path_entry() {
         let unit = render_supervisor_unit(&SupervisorUnitInputs {
-            farhelm: Path::new("/opt/farhelm"),
+            farhelm: Path::new("farhelm"),
             state_dir: Path::new("/state"),
-            tmux: Path::new("<tmux>"),
         })
         .unwrap();
         assert!(
-            unit.contains("Environment=\"PATH=/opt:/usr/local/bin:/usr/bin:/bin\""),
+            unit.contains("Environment=\"PATH=/usr/local/bin:/usr/bin:/bin\""),
             "{unit}"
         );
     }
@@ -1248,7 +1195,6 @@ mod tests {
         let unit = render_supervisor_unit(&SupervisorUnitInputs {
             farhelm: Path::new("/home/u/we ird/%farhelm\"\\bin"),
             state_dir: Path::new("/state"),
-            tmux: Path::new("/usr/bin/tmux"),
         })
         .unwrap();
         assert_eq!(

@@ -217,18 +217,14 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
 
   # Decide styling per output stream: redirecting a report must not put
   # terminal controls in it even when progress still goes to a terminal.
-  # NO_COLOR suppresses color and emphasis. OSC 8 links are emitted whenever
-  # stdout is a terminal, independently of NO_COLOR (the approved P2 behavior).
+  # NO_COLOR suppresses color and emphasis.
   init_output() {
-    OUT_GREEN='' OUT_YELLOW='' OUT_CYAN='' OUT_DIM='' OUT_RESET=''
+    OUT_GREEN='' OUT_CYAN='' OUT_DIM='' OUT_RESET=''
     ERR_BOLD='' ERR_RED='' ERR_CYAN='' ERR_DIM='' ERR_RESET=''
     ERR_TERMINAL=0
-    BREW_LINK=https://brew.sh/
     if [ -t 1 ]; then
-      BREW_LINK=$(printf '\033]8;;https://brew.sh/\033\134https://brew.sh/\033]8;;\033\134')
       if [ -z "${NO_COLOR:-}" ]; then
         OUT_GREEN=$(printf '\033[1;32m')
-        OUT_YELLOW=$(printf '\033[1;33m')
         OUT_CYAN=$(printf '\033[36m')
         OUT_DIM=$(printf '\033[2m')
         OUT_RESET=$(printf '\033[0m')
@@ -1243,53 +1239,16 @@ EOF
       "$LSREGISTER" -f "$app_path" >/dev/null 2>&1 || true
     fi
 
-    # 8. Report. Choose the action from this run's outcome and the local
-    # tmux prerequisite. Fresh-install launch advice follows its remedy. An
-    # update keeps the approved restart/session-survival line and also ends
-    # with the prescribed reminder after tmux advice. Uninstall stays visible.
-    # Fresh installs invite feedback before the kept-file and uninstall notices.
-    # Parse the whole tmux version output, not a matching line inside a banner.
-    tmux_have="none"
-    meets_floor=0
-    tmux_present=0
-    if command -v tmux >/dev/null 2>&1; then
-      tmux_present=1
-      tmux_version_output=$(tmux -V 2>/dev/null || true)
-      tmux_have=${tmux_version_output#tmux }
-    else
-      tmux_version_output=""
-    fi
-    case "$tmux_version_output" in
-      *"$NEWLINE"* | *"$CR"*) parsed="" ;;
-      *) parsed=$(printf '%s' "$tmux_version_output" | sed -n 's/^tmux \([0-9][0-9]*\)\.\([0-9][0-9]*\)\([a-z]\{0,1\}\)$/\1 \2 \3/p') ;;
-    esac
-    if [ -n "$parsed" ]; then
-      # shellcheck disable=SC2086 # word-splitting $parsed into its 2-3 fields is the point
-      set -- $parsed
-      tmux_major=$1
-      tmux_minor=$2
-      tmux_letter=${3:-}
-      if [ "$tmux_major" -gt 3 ]; then
-        meets_floor=1
-      elif [ "$tmux_major" -eq 3 ]; then
-        if [ "$tmux_minor" -gt 7 ]; then
-          meets_floor=1
-        elif [ "$tmux_minor" -eq 7 ]; then
-          case "$tmux_letter" in
-            "" | a | b) meets_floor=0 ;;
-            *) meets_floor=1 ;;
-          esac
-        fi
-      fi
-    fi
+    # 8. Report. The first lines say what to do next: an update is finished
+    # by quitting and reopening Farhelm, a fresh install by opening it. Fresh
+    # installs then invite feedback, before the kept-file notices and the
+    # uninstall command, which every run prints.
     if [ "$updated_installation" -eq 1 ]; then
       printf '✅ %sFarhelm %s is ready.%s\n' "$OUT_GREEN" "$VERSION_NUM" "$OUT_RESET"
       printf '\n   Quit and reopen Farhelm to finish updating. Your sessions keep running.\n'
     else
       printf '✅ %sFarhelm %s is installed.%s\n' "$OUT_GREEN" "$VERSION_NUM" "$OUT_RESET"
-      if [ "$meets_floor" -eq 1 ]; then
-        printf '\n   Open Farhelm from Spotlight or ~/Applications.\n'
-      fi
+      printf '\n   Open Farhelm from Spotlight or ~/Applications.\n'
       # Updates also run unattended inside the app; invite feedback only when
       # someone first installs it, before the kept-file and uninstall notices.
       printf "\n💬 I'd love to hear what you think, even a quick throwaway\n"
@@ -1302,20 +1261,6 @@ EOF
       printf '\n%s\n' "$KEPT_NOTES"
     fi
     printf '\n%s   To uninstall later, run:%s %s~/.local/bin/farhelm uninstall%s\n' "$OUT_DIM" "$OUT_RESET" "$OUT_CYAN" "$OUT_RESET"
-    if [ "$meets_floor" -ne 1 ]; then
-      printf '\n⚠️  %sFarhelm needs tmux 3.7c or newer before it can start.%s\n' "$OUT_YELLOW" "$OUT_RESET"
-      if [ "$tmux_present" -eq 0 ]; then
-        printf '   This Mac has none. Install it with Homebrew: %sbrew install tmux%s\n' "$OUT_CYAN" "$OUT_RESET"
-      else
-        printf '   This Mac has tmux %s. Upgrade it with Homebrew: %sbrew upgrade tmux%s\n' "$tmux_have" "$OUT_CYAN" "$OUT_RESET"
-      fi
-      printf '   No Homebrew yet? Install it first: %s%s%s\n' "$OUT_CYAN" "$BREW_LINK" "$OUT_RESET"
-      if [ "$updated_installation" -eq 1 ]; then
-        printf '\n   Then quit and reopen Farhelm to finish updating.\n'
-      else
-        printf '\n   Then open Farhelm from Spotlight or ~/Applications.\n'
-      fi
-    fi
   }
 
   main "$@"
