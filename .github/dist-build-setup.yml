@@ -60,11 +60,6 @@
 #   the checked-out rust-toolchain.toml and install the pinned toolchain on
 #   first use. dist adds release target triples to that same toolchain.
 #   No second toolchain manager or copy of the version is needed here.
-#
-# These steps do NOT run in the global job, which is where dist builds the
-# `extra-artifacts` tmux binaries. `scripts/build-tmux-assets.sh` therefore
-# provisions its own toolchain; see the extra-artifacts comment in
-# `crates/farhelm/Cargo.toml`.
 
 - name: Assert the tag names this workspace's exact version
   # cargo-dist accepts several tag spellings for the same version — `0.0.3`,
@@ -165,11 +160,11 @@
   run: sudo apt-get update && sudo apt-get install -y python3-venv
 
 - name: Build pinned tmux
-  # Built from the checksummed source pins, not restored from a cache: the
-  # tests must run on the tmux the product actually supports. The version
-  # floor is SPEC_impl.md's tmux policy — the floor IS the release the
-  # suite's tmux tests run against — and the exact release is pinned
-  # in `.github/release/source-pins.env`, which the build script asserts
+  # The pinned test tmux, built from the checksummed source pins rather
+  # than restored from a cache. The tests that still need a tmux (ending an
+  # earlier release's server at startup, and a user's own tmux under a
+  # session's scope) run against it; the exact release is pinned in
+  # `.github/release/source-pins.env`, which the build script asserts
   # against what it produced.
   if: runner.os == 'Linux' && runner.arch == 'X64'
   run: scripts/build-pinned-tmux-ci.sh

@@ -119,7 +119,7 @@ pub const RELEASE_KEY_RING: &[&str] = &[
 pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Size ceiling for `SHA256SUMS` and its signature. Both are a few hundred
-/// bytes by construction (six lines, one signature), so anything larger is
+/// bytes by construction (five lines, one signature), so anything larger is
 /// not a checksum file at all — a login page, an error document, a wrong
 /// URL. The cap exists so a hostile or misconfigured server cannot make the
 /// helm buffer an unbounded response while it is still deciding whether to
@@ -800,25 +800,22 @@ impl ReleasePayloadSource {
     }
 }
 
-impl ReleasePayloadSource {
-    /// Download, verify and unpack one published archive's `member`,
-    /// returning the cached executable: the whole of [`PayloadSource::path`]
-    /// once the target has picked its archive.
-    ///
-    /// Takes the asset by name rather than by target so a test can ask for
-    /// an asset the signed fixture manifest leaves out; production only ever
-    /// asks for the `farhelm` archive of a host's target.
-    async fn archive_member(&self, asset: &str, member: &str) -> anyhow::Result<PathBuf> {
+#[async_trait]
+impl PayloadSource for ReleasePayloadSource {
+    async fn path(&self, target: PayloadTarget) -> anyhow::Result<PathBuf> {
+        let archive = assets::farhelm_archive_for(target);
+        let asset = assets::archive_name(archive);
+        let member = archive.member;
         self.housekeep().await?;
 
         // Held across every await below, so a concurrent request for the
         // same asset waits and then observes the cache hit the first one
         // produced instead of downloading a second copy over the first.
-        let lock = self.asset_lock(asset);
+        let lock = self.asset_lock(&asset);
         let _guard = lock.lock().await;
 
         let binary = self.cache_dir.join(format!("{asset}.bin"));
-        if self.cached(asset).await? {
+        if self.cached(&asset).await? {
             return Ok(binary);
         }
 
@@ -828,9 +825,9 @@ impl ReleasePayloadSource {
         let version = &self.version;
         let expected = sums
             .entries
-            .get(asset)
+            .get(&asset)
             .ok_or_else(|| anyhow!("SHA256SUMS for v{version} has no entry for {asset}"))?;
-        let downloaded = self.download_verified(asset, expected).await?;
+        let downloaded = self.download_verified(&asset, expected).await?;
 
         // Everything from here is blocking work on whole-binary-sized files
         // — extraction, hashing, two fsyncs — so the entire publication runs
@@ -839,9 +836,8 @@ impl ReleasePayloadSource {
         let staged = self.cache_dir.join(format!("{asset}.bin.part"));
         let marker = self.cache_dir.join(format!("{asset}.bin.sha256"));
         let published = binary.clone();
-        let member = member.to_string();
         tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-            extract_single_member(&downloaded, &member, &staged)?;
+            extract_single_member(&downloaded, member, &staged)?;
             let digest = sha256_file(&staged)?;
             // Marker first, then the rename: a crash between the two leaves
             // a marker with no `.bin`, which the cache check reads as a
@@ -855,15 +851,6 @@ impl ReleasePayloadSource {
         .await
         .context("the payload extraction task panicked")??;
         Ok(binary)
-    }
-}
-
-#[async_trait]
-impl PayloadSource for ReleasePayloadSource {
-    async fn path(&self, target: PayloadTarget) -> anyhow::Result<PathBuf> {
-        let archive = assets::farhelm_archive_for(target);
-        self.archive_member(&assets::archive_name(archive), archive.member)
-            .await
     }
 }
 
@@ -1475,7 +1462,7 @@ pub(super) mod test_support {
     use axum::extract::State;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-    /// The miniature release served to every test — six assets, a real
+    /// The miniature release served to every test — four archives, a real
     /// `SHA256SUMS`, and a real minisign signature carrying this version in
     /// its trusted comment. See that directory's `README.md`.
     pub(in crate::provisioning) const FIXTURE_DIR: &str =
@@ -1937,7 +1924,7 @@ mod tests {
         assert_eq!(requests.len(), 5, "{requests:?}");
     }
 
-    /// Spec: the committed fixture set really is the six-asset release the
+    /// Spec: the committed fixture set really is the four-archive release the
     /// rest of this module's tests assume — the manifest names match
     /// [`assets::sums_members`] exactly, every listed digest matches the
     /// file on disk, and all four archives hold exactly one REGULAR member
@@ -2512,35 +2499,49 @@ mod tests {
     /// rather than downloaded unverified — the case a release that shipped
     /// an incomplete checksum file would produce.
     ///
-    /// Driven by `variants/without-tmux`, a separately signed checksum file,
+    /// Driven by `variants/without-linux-aarch64`, a separately signed
+    /// checksum file that leaves out the arm64 Linux `farhelm` archive,
     /// because serving an edited one would fail the signature check first
-    /// and never reach this path. The one asset that variant leaves out is
-    /// not a `farhelm` archive, so the test asks for it by name through the
-    /// source's inner fetch rather than through a host target.
+    /// and never reach this path. The archive itself is still served, so the
+    /// refusal comes from the manifest, not from a failed download.
     #[farhelm_testtrace::test]
     async fn an_asset_absent_from_sha256sums_is_refused() {
         let release = FixtureRelease::start(vec![
             (
                 "SHA256SUMS",
-                Override::Body(fixture_bytes("variants/without-tmux/SHA256SUMS")),
+                Override::Body(fixture_bytes("variants/without-linux-aarch64/SHA256SUMS")),
             ),
             (
                 "SHA256SUMS.minisig",
-                Override::Body(fixture_bytes("variants/without-tmux/SHA256SUMS.minisig")),
+                Override::Body(fixture_bytes(
+                    "variants/without-linux-aarch64/SHA256SUMS.minisig",
+                )),
             ),
         ])
         .await;
         let cache = tempfile::tempdir().unwrap();
 
-        let left_out = "tmux-aarch64-unknown-linux-musl";
+        let left_out = farhelm_asset(PayloadTarget::LinuxAarch64);
+        let manifest = fixture_bytes("variants/without-linux-aarch64/SHA256SUMS");
+        let listed = parse_sums(std::str::from_utf8(&manifest).unwrap()).unwrap();
+        assert!(
+            !listed.contains_key(&left_out) && listed.len() == assets::sums_members().len() - 1,
+            "the fixture premise: the variant leaves out {left_out} and nothing else: {listed:?}"
+        );
+
         let error = release
             .source(cache.path())
-            .archive_member(left_out, "tmux")
+            .path(PayloadTarget::LinuxAarch64)
             .await
             .unwrap_err();
         assert_eq!(
             format!("{error:#}"),
             format!("SHA256SUMS for v{FIXTURE_VERSION} has no entry for {left_out}")
+        );
+        assert!(
+            !release.requests().contains(&left_out),
+            "an asset the signed manifest does not list must not be downloaded: {:?}",
+            release.requests()
         );
     }
 

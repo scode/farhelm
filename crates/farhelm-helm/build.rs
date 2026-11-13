@@ -2,7 +2,7 @@
 //! `include_dir!` tree. No directory means a normal development build with
 //! no web UI embedded (D12/D13).
 //!
-//! Provisioning payloads (the musl `farhelm`/tmux binaries) are no longer
+//! Provisioning payloads (the `farhelm` binaries hosts are sent) are no longer
 //! embedded here (D2): they are downloaded or staged from a directory at
 //! runtime — see `src/provisioning/payloads.rs`. This file used to also
 //! read a build-time payload-directory variable and generate byte

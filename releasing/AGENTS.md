@@ -53,11 +53,18 @@ compatible release path with the maintainer before continuing; this decision doe
 cherry-picking or backporting source into the ordinary main-based release.
 
 The workflow builds the release, validates it, and publishes its archives on a GitHub release. It signs nothing: CI
-never sees a signing key. A release reaches users only once the maintainer has signed its `SHA256SUMS` (the six payloads
-plus its `install.sh`) and published it on get.farhelm.io, from a trusted host with tooling that deliberately lives
-outside this repository; agents do not author, run, or replace that step. Until then nothing installs it: the installer
-and the helm read get.farhelm.io only. `dist-workspace.toml`'s header and SPEC_impl.md's "Verification chain (D3)" say
-why.
+never sees a signing key. A release reaches users only once the maintainer has signed its `SHA256SUMS` and published it
+on get.farhelm.io, from a trusted host with tooling that deliberately lives outside this repository; agents do not
+author, run, or replace that step. Until then nothing installs it: the installer and the helm read get.farhelm.io only.
+`dist-workspace.toml`'s header and SPEC_impl.md's "Verification chain (D3)" say why.
+
+The signed `SHA256SUMS` lists exactly five files, sorted by name: the four archives
+`farhelm-aarch64-apple-darwin.tar.gz`, `farhelm-aarch64-unknown-linux-musl.tar.gz`,
+`farhelm-desktop-aarch64-apple-darwin.tar.gz` and `farhelm-x86_64-unknown-linux-musl.tar.gz`, then the release's
+`install.sh`. Earlier releases also listed two bare tmux builds, `tmux-aarch64-unknown-linux-musl` and
+`tmux-x86_64-unknown-linux-musl`; no release built from this source publishes them, and the `sign-sums` job refuses a
+release that carries either, so signing tooling that still expects them must stop expecting them. That job's last step
+prints the five digests in the signed file's form, to compare against.
 
 The installed app also reads `https://get.farhelm.io/advisories` and `advisories.minisig` on each update check. This is
 a separate, mutable publication; changing `/latest` or a release's signed checksums is not a substitute. The

@@ -4,12 +4,15 @@
 #
 # ## Why this is its own script
 #
-# Two places need exactly this verdict and must not drift: the tmux producer
-# (`scripts/build-tmux-assets.sh`, checking what it just built) and the release
+# Several places need exactly this verdict and must not drift: the release
 # validation gate (`.github/workflows/sign-sums.yml`, checking what was
-# actually published). A payload that fails here reaches a host we do not control, where
-# a missing loader or a wrong machine is a first-exec failure with nothing
-# nearby to explain it.
+# actually published), and the scripts that build a Linux `farhelm` payload
+# for a test or a development build to push (`scripts/test-provision-centos.sh`,
+# `scripts/build-podman-test-payloads.sh`, and `scripts/devbuild-mac.sh` when
+# `readelf` is available). A
+# payload that fails here reaches a host we do not control, where a missing
+# loader or a wrong machine is a first-exec failure with nothing nearby to
+# explain it.
 #
 # ## The failure mode this is shaped around
 #

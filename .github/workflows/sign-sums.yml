@@ -17,14 +17,15 @@
 #
 # ## What the checksums do and do not cover
 #
-# `SUMS_MEMBERS` is the six payloads the helm and `install.sh` download: four
-# archives and two tmux builds. The signed `SHA256SUMS` on get.farhelm.io
-# covers those and the release's `install.sh`. cargo-dist also publishes
-# metadata beside them — `dist-manifest.json`, a `.sha256` per archive, and
-# its own lowercase `sha256.sum` — none of which Farhelm reads. This job is
-# where the COMPLETE release inventory is known: it requires every name
-# Farhelm's release contract promises and rejects any name outside the
-# allowlist, so a seventh product artifact fails the release rather than
+# `SUMS_MEMBERS` is the four archives the helm and `install.sh` download:
+# `farhelm` for x86_64 Linux, arm64 Linux and Apple-silicon macOS, and the
+# macOS desktop shell. The signed `SHA256SUMS` on get.farhelm.io covers
+# those and the release's `install.sh`, and nothing else. cargo-dist also
+# publishes metadata beside them — `dist-manifest.json`, a `.sha256` per
+# archive, and its own lowercase `sha256.sum` — none of which Farhelm reads.
+# This job is where the COMPLETE release inventory is known: it requires
+# every name Farhelm's release contract promises and rejects any name outside
+# the allowlist, so a fifth product artifact fails the release rather than
 # sitting on it outside what gets signed.
 #
 # The published-payload list is duplicated from `assets.rs`'s `sums_members()`,
@@ -53,16 +54,14 @@ on:
 # and keeping context-bearing values at job scope keeps this block trivially
 # correct.
 env:
-  # The six names `SHA256SUMS` covers, sorted. Keep them sorted and keep the
-  # markers: `assets.rs`'s parity test reads this block verbatim.
+  # The four payload names `SHA256SUMS` covers, sorted. Keep them sorted and
+  # keep the markers: `assets.rs`'s parity test reads this block verbatim.
   # BEGIN SUMS MEMBERS
   SUMS_MEMBERS: |
     farhelm-aarch64-apple-darwin.tar.gz
     farhelm-aarch64-unknown-linux-musl.tar.gz
     farhelm-desktop-aarch64-apple-darwin.tar.gz
     farhelm-x86_64-unknown-linux-musl.tar.gz
-    tmux-aarch64-unknown-linux-musl
-    tmux-x86_64-unknown-linux-musl
   # END SUMS MEMBERS
   # cargo-dist metadata the release contract PROMISES. Unsigned — Farhelm reads
   # none of it — but required as stable, machine-readable release metadata for
@@ -122,7 +121,7 @@ jobs:
       # Two questions at once, because both are about the release's asset
       # list as a whole:
       #
-      # - is every promised asset there? The six payloads plus the cargo-dist
+      # - is every promised asset there? The four payloads plus the cargo-dist
       #   metadata the release contract names. A silently missing manifest
       #   would leave a nominally complete release without its promised
       #   machine-readable inventory.
@@ -239,17 +238,13 @@ jobs:
       # (D4). A dynamically linked one would install fine and fail at first
       # exec on the host, far from anything that could explain it.
       #
-      # `check-static-elf.sh` is the same script the tmux producer runs on what
-      # it built; here it runs on what was published. It fails when an
-      # inspection FAILS, not only when an inspection reports something bad.
+      # `check-static-elf.sh` is the same script the CentOS provisioning test
+      # and the Podman test payloads run on what they built; here it runs on
+      # what was published. It fails when an inspection FAILS, not only when
+      # an inspection reports something bad.
       - name: Assert the Linux payloads are static
         run: |
           set -euo pipefail
-          # The bare tmux binaries get the same treatment as the extracted
-          # ones: they travel the same path onto the same hosts, and the
-          # global job that built them is not the one that published them.
-          cp assets/tmux-*-unknown-linux-musl binaries/
-
           for binary in binaries/*-unknown-linux-musl; do
             case "$binary" in
               *x86_64-unknown-linux-musl) target=x86_64-unknown-linux-musl ;;

@@ -70,20 +70,6 @@ pub fn archive_name(archive: &ReleaseArchive) -> String {
     format!("{}-{}.tar.gz", archive.package, archive.target)
 }
 
-/// Name the bare static tmux build for a Linux host, refusing a Mac target.
-/// Remote Macs use terminal hosts exclusively and have no tmux payload. A
-/// caller must handle that unsupported request before doing any source I/O,
-/// rather than falling back to the Linux build for the same architecture.
-pub fn tmux_name(target: PayloadTarget) -> anyhow::Result<&'static str> {
-    match target {
-        PayloadTarget::LinuxX86_64 => Ok("tmux-x86_64-unknown-linux-musl"),
-        PayloadTarget::LinuxAarch64 => Ok("tmux-aarch64-unknown-linux-musl"),
-        PayloadTarget::MacosAarch64 => {
-            anyhow::bail!("remote macOS hosts do not support tmux payloads")
-        }
-    }
-}
-
 /// Select the CLI/supervisor archive for every supported provisioning target.
 /// The desktop shell is never installed over SSH. This lookup reuses the
 /// release inventory, including the Mac archive already used by the installer.
@@ -99,32 +85,25 @@ pub fn farhelm_archive_for(target: PayloadTarget) -> &'static ReleaseArchive {
         .expect("RELEASE_ARCHIVES carries a farhelm archive for every PayloadTarget target")
 }
 
-/// The six payload names `SHA256SUMS` lists, sorted — every
-/// [`RELEASE_ARCHIVES`] entry plus both tmux builds. The signed file on
-/// get.farhelm.io also lists the release's `install.sh`; that seventh entry
-/// is the updater's, not a payload, which is why it is not here. The
-/// `sign-sums` release job validates exactly this list, in this order, out of
-/// its own hardcoded copy, and prints their digests (with the installer's)
-/// in the form of the signed file; the parity test below reads that copy
-/// back out of the workflow and compares, which is what keeps the validated
-/// set and the helm's download expectations from drifting apart.
+/// The payload names `SHA256SUMS` lists, sorted: the archive name of every
+/// [`RELEASE_ARCHIVES`] entry, and nothing else. The signed file on
+/// get.farhelm.io also lists the release's `install.sh`; that fifth entry is
+/// the updater's, not a payload, which is why it is not here. The `sign-sums`
+/// release job validates exactly this list, in this order, out of its own
+/// hardcoded copy, and prints their digests (with the installer's) in the
+/// form of the signed file; the parity test below reads that copy back out
+/// of the workflow and compares, which is what keeps the validated set and
+/// the helm's download expectations from drifting apart.
 ///
 /// Still called from nowhere but tests, and deliberately so: the download
 /// source looks each asset up by name in whatever `SHA256SUMS` it fetched
-/// rather than demanding this exact file list, because a release that grows a
-/// seventh asset must not make every older helm refuse it. The consumers this
-/// exists for are the `sign-sums` job and `install.sh`'s asset table
+/// rather than demanding this exact file list, because a release that grows
+/// or drops an asset must not make every older helm refuse it. The consumers
+/// this exists for are the `sign-sums` job and `install.sh`'s asset table
 /// (Step 6), neither of which is Rust.
 #[allow(dead_code)]
 pub fn sums_members() -> Vec<String> {
     let mut members: Vec<String> = RELEASE_ARCHIVES.iter().map(archive_name).collect();
-    for target in [PayloadTarget::LinuxX86_64, PayloadTarget::LinuxAarch64] {
-        members.push(
-            tmux_name(target)
-                .expect("Linux has a released tmux payload")
-                .to_string(),
-        );
-    }
     members.sort();
     members
 }
@@ -148,21 +127,6 @@ mod tests {
         );
     }
 
-    /// Spec: `tmux_name` names the two published Linux tmux builds and
-    /// nothing else — there is no macOS or Windows tmux payload to confuse
-    /// this with.
-    #[farhelm_testtrace::test]
-    fn tmux_name_covers_both_linux_architectures() {
-        assert_eq!(
-            tmux_name(PayloadTarget::LinuxX86_64).unwrap(),
-            "tmux-x86_64-unknown-linux-musl"
-        );
-        assert_eq!(
-            tmux_name(PayloadTarget::LinuxAarch64).unwrap(),
-            "tmux-aarch64-unknown-linux-musl"
-        );
-    }
-
     /// The OS is part of payload selection: arm64 Linux and macOS must not
     /// share an archive merely because their machine architecture matches.
     #[farhelm_testtrace::test]
@@ -179,23 +143,12 @@ mod tests {
         }
     }
 
-    /// No Mac tmux asset exists; rejecting the pair here keeps both source
-    /// implementations from selecting a Linux executable by architecture.
+    /// Spec: `sums_members` is exactly the four published archive names,
+    /// sorted, which is the order `SHA256SUMS` itself must list them in
+    /// (plan §1). Nothing but archives: every payload a release publishes is
+    /// one `farhelm` or `farhelm-desktop` archive from [`RELEASE_ARCHIVES`].
     #[farhelm_testtrace::test]
-    fn tmux_name_refuses_macos() {
-        assert_eq!(
-            tmux_name(PayloadTarget::MacosAarch64)
-                .unwrap_err()
-                .to_string(),
-            "remote macOS hosts do not support tmux payloads"
-        );
-    }
-
-    /// Spec: `sums_members` is exactly the six published names — four
-    /// archives plus two tmux builds — sorted, which is the order
-    /// `SHA256SUMS` itself must list them in (plan §1).
-    #[farhelm_testtrace::test]
-    fn sums_members_is_exactly_the_six_sorted_names() {
+    fn sums_members_is_exactly_the_four_sorted_archive_names() {
         // Already lexically sorted (F25, review round 1): the literal
         // itself expresses the required order, so nothing here mutates it.
         let expected = vec![
@@ -203,8 +156,6 @@ mod tests {
             "farhelm-aarch64-unknown-linux-musl.tar.gz".to_string(),
             "farhelm-desktop-aarch64-apple-darwin.tar.gz".to_string(),
             "farhelm-x86_64-unknown-linux-musl.tar.gz".to_string(),
-            "tmux-aarch64-unknown-linux-musl".to_string(),
-            "tmux-x86_64-unknown-linux-musl".to_string(),
         ];
         assert_eq!(sums_members(), expected);
     }

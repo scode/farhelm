@@ -190,8 +190,9 @@ changes in step 4's changelog PR. Stable re-cuts carry over the settled list wit
    asset the release contract names present and NO `SHA256SUMS` or `SHA256SUMS.minisig` (those belong on get.farhelm.io;
    the workflow refuses them), the release NOT marked prerelease, and the release page showing the changelog section
    above the download tables with the heading text as its name. Tell the maintainer it is ready to sign and publish at
-   its version path, and hand them exactly this line, with the version filled in, to run from their release management
-   location (outside this repository; agents never run it):
+   its version path, that its signed `SHA256SUMS` lists exactly the five files `releasing/AGENTS.md`, "Rules for every
+   release", names (four archives and `install.sh`, no tmux builds), and hand them exactly this line, with the version
+   filled in, to run from their release management location (outside this repository; agents never run it):
 
    ```
    ./bin/publish-release.sh vX.Y.Z && ./bin/deploy.sh
