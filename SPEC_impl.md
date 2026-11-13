@@ -1501,22 +1501,7 @@ delayed ending keys remain unprotected. Installation is idempotent across authen
 terminal's input field retains its own input-method handling. Browser tests replay both orders and pin the overlap
 omission; they do not establish real Mac IME or desktop-shell behavior.
 
-## Terminal widget: the grid island
-
-Every terminal runs in a terminal host ("Terminal host") and is interpreted by the supervisor's emulator, so the browser
-draws a grid stream with its own grid client ("The grid client", at the end of this section), mounted as a JS island
-inside the Dioxus tree. Grid messages flow WebSocket → the grid component directly, bypassing Dioxus state entirely.
-Dioxus owns everything around the terminal (tabs, status, dialogs), not the terminal's content path. Everything is a
-static asset (no CDN — the UI must be fully self-contained, consistent with SPEC.md's no-public-relay,
-no-third-party-services posture and the loopback deployment). Terminals that earlier releases ran in a private tmux
-server were drawn by a vendored xterm.js; much of the grid client's behavior was ported from it or made to match it, and
-the grid client's file headers state each kept rule in their own terms, naming xterm.js only as a rule's origin (the
-code ported from it is listed in `THIRD_PARTY_NOTICES.md`).
-
-JetBrains Mono Nerd Font is vendored for the same self-contained reason, and terminal.js gives it to the grid as its
-`fontFamily`. The terminal and the interface's technical values share the same two cached `.woff2` files; ordinary
-interface text uses Inter. A terminal mounts only once both bundled mono weights have loaded, the same as its bundled
-scripts, with no fallback font. Inter is not a terminal-mount prerequisite.
+## GUI: sidebar, sounds, text size, quick switcher and shortcuts
 
 Sidebar width lives in `sidebar-width.js`, shared by web and desktop. It reads localStorage once at script load
 (`farhelm.sidebar-width`): plain content-width digits only, clamped to 240–600px, with 340px for absent, malformed or
@@ -1704,14 +1689,28 @@ edited titles keep ordinary validation and refusal behavior. Naming and shortcut
 generation-fenced, post-unmount terminal focus return. The terminal's existing modal guard withholds focus while naming
 is mounted; an unrevealed terminal retains its ordinary reveal-time handoff after early dismissal.
 
+## Terminal widget: the grid island
+
+Every terminal runs in a terminal host ("Terminal host") and is interpreted by the supervisor's emulator, so the browser
+draws a grid stream with its own grid client ("The grid client", at the end of this section), mounted as a JS island
+inside the Dioxus tree. Grid messages flow WebSocket → the grid component directly, bypassing Dioxus state entirely.
+Dioxus owns everything around the terminal (tabs, status, dialogs), not the terminal's content path. Everything is a
+static asset (no CDN — the UI must be fully self-contained, consistent with SPEC.md's no-public-relay,
+no-third-party-services posture and the loopback deployment). Some of the grid client's code is ported from xterm.js and
+VS Code, with its attribution kept beside it and listed in `THIRD_PARTY_NOTICES.md`.
+
+JetBrains Mono Nerd Font is vendored for the same self-contained reason, and terminal.js gives it to the grid as its
+`fontFamily`. The terminal and the interface's technical values share the same two cached `.woff2` files; ordinary
+interface text uses Inter. A terminal mounts only once both bundled mono weights have loaded, the same as its bundled
+scripts, with no fallback font. Inter is not a terminal-mount prerequisite.
+
 Motivation: full escape-sequence fidelity is a SPEC.md requirement, and the supervisor's emulator (`alacritty_terminal`,
 "The supervisor's terminal emulator") already interprets every byte, keeps the scrollback across supervisor restarts and
 answers the program's queries; the browser only has to draw a grid of styled text as ordinary DOM, which keeps the most
 important widget testable in an ordinary browser. Routing high-frequency output through a reactive framework would be a
-performance disaster, so the bypass is load-bearing, not an optimization. Before terminal hosts, terminals ran in tmux
-and the page drew them with xterm.js, then the only battle-tested embeddable terminal (VS Code); a pure-Rust wasm
-terminal in the page had been rejected as a project in itself that reintroduced the untestable-canvas problem, an
-objection that does not apply to an emulator in the supervisor.
+performance disaster, so the bypass is load-bearing, not an optimization. An emulator in the page, a pure-Rust wasm one
+say, was rejected: it is a project in itself, and it would draw to a canvas, which ordinary browser tests cannot
+inspect.
 
 No code Farhelm owns may ever drop a terminal's output silently: every Farhelm-side bound on the way to a viewer is
 backpressure, a skipped intermediate screen with the current one sent (never a lost scrollback line), or a visible
@@ -1768,6 +1767,8 @@ scrollbar, and marks a withheld link press as ineligible. Resize repositions the
 listeners, cancels timers and invalidates deferred work. The notice driver's teardown runs before the grid becomes a
 frozen takeover snapshot, so that snapshot remains selectable without raising guidance.
 
+### Links in terminals
+
 Terminal web-link click ownership is the nullable `terminal_link_click` shared preference added by helm schema 46:
 `intercept` is the default, `both` preserves Farhelm activation plus program mouse reporting, and `program` disables
 Farhelm's web activation. The settings radio buttons use the ordinary sparse preference queue. `PreferencesGate`
@@ -1817,12 +1818,12 @@ is two or more letters, which keeps version and directory text such as `v1.2/` o
 not judging scheme-less IP text. The warning shows the link's text with Unicode format characters (bidi controls,
 zero-width characters) as visible escapes, because the terminal stores them unapplied and HTML would apply them.
 
-In grid terminals, `grid-buffer.js` resolves directly continuing pieces with generated ids matching `^\d+_alacritty$`
-and equal targets to the first piece's id and target. Pieces continue when adjacent on a row, or from a soft-wrapped
-row's last cell into column zero of the next (including the synthetic padding before a wrapped wide character). Explicit
-program ids stay separate from generated ids. Per-question row caching keeps resolution linear in the runs examined,
-with at most 128 rows of backward discovery. The underline and the link lines' tags use the same identity, as do the
-rows captured as hover and late-answer evidence.
+`grid-buffer.js` resolves directly continuing pieces with generated ids matching `^\d+_alacritty$` and equal targets to
+the first piece's id and target. Pieces continue when adjacent on a row, or from a soft-wrapped row's last cell into
+column zero of the next (including the synthetic padding before a wrapped wide character). Explicit program ids stay
+separate from generated ids. Per-question row caching keeps resolution linear in the runs examined, with at most 128
+rows of backward discovery. The underline and the link lines' tags use the same identity, as do the rows captured as
+hover and late-answer evidence.
 
 Only the spelling distinguishes generated ids: a program can send `id=7_alacritty` itself. This is acceptable because
 joining requires equal targets, and such a contiguous chain is a subset of what a shared explicit id already joins. The
@@ -1850,21 +1851,20 @@ less the element's padding and a 14-pixel scrollbar. The fixed reference preserv
 making later answers independent of resize history. Drawing still rounds cells at the supervisor-committed size, never
 at the proposal reference. An observation whose pane, character metrics and pixel ratio are all unchanged proposes
 nothing, and no per-terminal sizing state is retained across visits. The measurement, the 14-pixel scrollbar reserve and
-the padding were first those of xterm.js 6.0 and its fit add-on, so panes kept their rows and columns when the grid
-replaced it; they are Farhelm's fit contract now. Browser checks hold the fit to its independently computed formula
-across text sizes and pixel ratios. Rendering is one element per visible row with its runs as spans reused in place,
-painted at most once per animation frame however many messages arrive; the choice between boxing every non-ASCII cell
-and letting characters the font draws at the cell width flow inline came from a renderer benchmark against xterm.js,
-recorded in the file's header. Input goes up as small JSON messages (keys, text, pastes, mouse and focus events), never
-as encoded bytes: the supervisor encodes them from the terminal's modes (`crates/farhelm-supervisor/src/grid_input.rs`).
-Which keydowns reach the program, and the bytes each key and click becomes, are Farhelm's own contract, written down as
-checked-in tables (`grid-keys.jsonl` and `grid-mouse.jsonl` under `crates/farhelm-supervisor/tests/fixtures/`, and the
-page's keydown and Alt-click tables under `crates/farhelm-ui/js-tests/fixtures/input/`) that the page's code and the
-supervisor's encoder are held to, the key table by both. They are the xterm family's encodings, which shells and agents
-expect, and were first computed by xterm.js 6.0.0, so programs kept reading the same keys and clicks when the grid
-replaced it. The client sends no flow-control pause or resume: it applies every message as it arrives, applying a large
-history in slices between frames so that the screen stays usable, and the helm pauses a grid stream on its own queue
-instead.
+the padding are Farhelm's fit contract: changing any of them changes the rows and columns of every pane at the same
+size, which programs see as a resize. Browser checks hold the fit to its independently computed formula across text
+sizes and pixel ratios. Rendering is one element per visible row with its runs as spans reused in place, painted at most
+once per animation frame however many messages arrive; the choice between boxing every non-ASCII cell and letting
+characters the font draws at the cell width flow inline came from a renderer benchmark, recorded in the file's header.
+Input goes up as small JSON messages (keys, text, pastes, mouse and focus events), never as encoded bytes: the
+supervisor encodes them from the terminal's modes (`crates/farhelm-supervisor/src/grid_input.rs`). Which keydowns reach
+the program, and the bytes each key and click becomes, are Farhelm's own contract, written down as checked-in tables
+(`grid-keys.jsonl` and `grid-mouse.jsonl` under `crates/farhelm-supervisor/tests/fixtures/`, and the page's keydown and
+Alt-click tables under `crates/farhelm-ui/js-tests/fixtures/input/`) that the page's code and the supervisor's encoder
+are held to, the key table by both. They are the xterm family's encodings, which shells and agents expect; a changed row
+is a key or click a program reads differently. The client sends no flow-control pause or resume: it applies every
+message as it arrives, applying a large history in slices between frames so that the screen stays usable, and the helm
+pauses a grid stream on its own queue instead.
 
 History stays in binary form until a reader asks for a row. Arrival owns an exact copy of the message's row region and a
 typed offset index, validates its declared links once, and checks every row envelope. The existing sliced drain then
@@ -1896,14 +1896,14 @@ every update: the protocol only grows, and every client release must keep workin
 (a host lives for weeks and must keep neither pruning nor uninstall waiting) and runs before anything starts a thread,
 since the host forks. Every create starts its agent in a host, every new tab opens in one, and every Restart starts a
 new one ("Creating agents in hosts", "Tabs in hosts" and "Restarting a host agent" below): every terminal the supervisor
-serves is a host. Old tmux terminals, which earlier supervisors created, are ended when this release starts ("Terminal
-substrate: private tmux server"). Each session row records its agent terminal's kind (the supervisor schema 32 column
-`terminal_kind`), which is `tmux` for a row an earlier release wrote and `host` once a create or a Restart wrote it, and
-where that terminal is (`terminal_address`: a tmux pane id, never looked up again, or a host's socket name). Schema 33
-changes nothing stored: it came with the flag that first turned host terminals on (since removed), so that every build
-at 32, which stores the kind without handling a host row everywhere, refuses a database such a supervisor has opened.
-Schema 34 stores no tmux concepts for a terminal that is not a tmux one: no row stores a tmux session name (a session's
-was `fh-` and its id), and the address that held a host's socket name in a column named `pane` has a name of its own.
+serves is a host. Old tmux terminals, which earlier supervisors created, are ended at startup ("Ending the old private
+tmux server"). Each session row records its agent terminal's kind (the supervisor schema 32 column `terminal_kind`),
+which is `tmux` for a row an earlier release wrote and `host` once a create or a Restart wrote it, and where that
+terminal is (`terminal_address`: a tmux pane id, never looked up again, or a host's socket name). Schema 33 changes
+nothing stored: it came with the flag that first turned host terminals on (since removed), so that every build at 32,
+which stores the kind without handling a host row everywhere, refuses a database such a supervisor has opened. Schema 34
+stores no tmux concepts for a terminal that is not a tmux one: no row stores a tmux session name (a session's was `fh-`
+and its id), and the address that held a host's socket name in a column named `pane` has a name of its own.
 
 The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
 
@@ -1968,29 +1968,28 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   (it may have been an unrelated process with a socket of the same name elsewhere) until the socket is judged gone too.
   Through another spelling of the state directory than the supervisor used (a symlink to it), a live host still stops
   through the protocol, but one that cannot take `Shutdown` stays unconfirmed, since the signal needs the exact
-  spelling. A host whose socket file was deleted by hand inside an intact `hosts` directory is not found, as a tmux
-  server whose socket was deleted is not. On Linux the remote uninstall's stop of the supervisor's unit ends such hosts
-  with the unit's control group while the unit is still running; a host left behind by a unit that was already inactive
-  or failed, with its socket deleted by hand, is not found, as with tmux. Hosts are handled at once. The whole command
-  takes at most 30 seconds: finding and stopping the hosts at most 29, after which a listing not finished, or a host
-  still being handled, counts as not confirmed; then at most one second for its report on stderr, which it gives up on
-  rather than wait for a reader that stopped reading. (In the Mac app's version layout the version hold every `farhelm`
-  command takes first can add its own wait of up to five seconds before that.) Stdout stays empty; stderr has one line
-  per host for people and logs, which nothing may parse. It ends the hosts and nothing else: the programs in them get
-  the terminal's hangup, descendants that ignore it are left to the session's scope or the supervisor's unit as with
-  tmux, and it takes no lock, so a supervisor still running there loses its hosts. **Exit status 0 is the only
-  success**, and all it means is this: every host whose socket the listing found directly in `<dir>/hosts` was confirmed
-  stopped, and `<dir>/hosts` was listed whole as a real directory (or does not exist). The directory is listed once, so
-  a host that a supervisor still running there starts afterwards is not covered; callers stop the supervisor first.
-  Anything else means a host may still run: 1 when one could not be confirmed stopped or the listing was refused or
-  incomplete, 2 for a usage error, and anything else (such as a panic's 101) for a failure of the command itself. A
-  `farhelm` from before the command also exits 2, as for any unknown subcommand, so a caller never reads 2 as "no
-  hosts". A caller decides whether to run the command by whether `<dir>/hosts` exists: every `farhelm` that can create
-  that directory has the command. **This command line and that meaning of exit status 0 are a stable surface.** A newer
-  helm runs the command on remote hosts whose installed `farhelm` may be older than itself, so every later release keeps
-  accepting this spelling with this meaning, under the rules of "What running sessions hold across versions" (new
-  spellings beside old ones, never a new meaning for an old one; a later release may make exit 0 stronger, never
-  weaker).
+  spelling. A host whose socket file was deleted by hand inside an intact `hosts` directory is not found. On Linux the
+  remote uninstall's stop of the supervisor's unit ends such hosts with the unit's control group while the unit is still
+  running; a host left behind by a unit that was already inactive or failed, with its socket deleted by hand, is not
+  found. Hosts are handled at once. The whole command takes at most 30 seconds: finding and stopping the hosts at most
+  29, after which a listing not finished, or a host still being handled, counts as not confirmed; then at most one
+  second for its report on stderr, which it gives up on rather than wait for a reader that stopped reading. (In the Mac
+  app's version layout the version hold every `farhelm` command takes first can add its own wait of up to five seconds
+  before that.) Stdout stays empty; stderr has one line per host for people and logs, which nothing may parse. It ends
+  the hosts and nothing else: the programs in them get the terminal's hangup, descendants that ignore it are left to the
+  session's scope or the supervisor's unit, and it takes no lock, so a supervisor still running there loses its hosts.
+  **Exit status 0 is the only success**, and all it means is this: every host whose socket the listing found directly in
+  `<dir>/hosts` was confirmed stopped, and `<dir>/hosts` was listed whole as a real directory (or does not exist). The
+  directory is listed once, so a host that a supervisor still running there starts afterwards is not covered; callers
+  stop the supervisor first. Anything else means a host may still run: 1 when one could not be confirmed stopped or the
+  listing was refused or incomplete, 2 for a usage error, and anything else (such as a panic's 101) for a failure of the
+  command itself. A `farhelm` from before the command also exits 2, as for any unknown subcommand, so a caller never
+  reads 2 as "no hosts". A caller decides whether to run the command by whether `<dir>/hosts` exists: every `farhelm`
+  that can create that directory has the command. **This command line and that meaning of exit status 0 are a stable
+  surface.** A newer helm runs the command on remote hosts whose installed `farhelm` may be older than itself, so every
+  later release keeps accepting this spelling with this meaning, under the rules of "What running sessions hold across
+  versions" (new spellings beside old ones, never a new meaning for an old one; a later release may make exit 0
+  stronger, never weaker).
 - **Discovery** (`hosts/registry.rs`) finds a state directory's hosts again by scanning its socket directory, never by a
   stored list: it connects to every socket there, reads each host's `Info` and decodes its tag, and identifies hosts
   only by their tags. A missing socket directory means no hosts; one in a refused shape fails the scan before anything
@@ -2158,85 +2157,84 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   restarts" below); a Restart replaces the agent's host with a new one ("Restarting a host agent" below), starts a
   session that has no terminal (an old one ended at startup included) in a new, empty one, and leaves the session's tab
   hosts as they are.
-- **Every new terminal in a host.** A supervisor creates every terminal in a terminal host; nothing selects tmux, and
-  the supervisor never starts a tmux server (one an earlier supervisor left is ended at startup, "Terminal substrate:
-  private tmux server"). A supervisor inside a test binary cannot start a host from its own executable; in builds with
-  test seams, one whose launch shim program is not its own executable starts hosts from that program (the built
-  `farhelm` for the e2e suite's in-process supervisors) unless `SupervisorSeams::host_program` names another, while a
-  real `farhelm supervisor run` starts them the shipped way even when built with test seams. The e2e harness's terminal
-  helpers read a grid stream's rows as text and type as grid `text` input. The supervisor crate's own unit tests have no
-  `farhelm`, so their test binary is its own host program: started with a host's command line
-  (`internal terminal-host --socket <path>`), a loader initializer in it runs the host crate's entry point before
-  libtest's `main` starts any thread, and exits (`hosts::test_program`). It is registered on glibc Linux only; elsewhere
-  every host start from a unit test is refused (libtest rejects the arguments), so those tests fail by name rather than
-  run on another kind of terminal. Those that need a real terminal run on such hosts (`tests::host_supervisor`); the
-  tests of ending the old terminals build an earlier release's tmux server by hand. The browser suite's stacks and the
-  README and docs media stacks run the bare `farhelm supervisor run`, so they test what ships, and the browser suite
-  checks that every terminal it attaches is a host. Known gaps, behaviors new terminals showed differently from what
-  this document says, found when their tests moved to hosts and reported rather than fixed: a create or a tab open in a
-  directory that cannot be entered is refused by the host's own start rather than recorded as a launch error (or a
-  refused open) naming the directory, and a 0x0 attach leaves the terminal at its size.
+- **Every terminal in a host.** A supervisor creates every terminal in a terminal host and never starts a tmux server
+  (one an earlier supervisor left is ended at startup, "Ending the old private tmux server"). A supervisor inside a test
+  binary cannot start a host from its own executable; in builds with test seams, one whose launch shim program is not
+  its own executable starts hosts from that program (the built `farhelm` for the e2e suite's in-process supervisors)
+  unless `SupervisorSeams::host_program` names another, while a real `farhelm supervisor run` starts them the shipped
+  way even when built with test seams. The e2e harness's terminal helpers read a grid stream's rows as text and type as
+  grid `text` input. The supervisor crate's own unit tests have no `farhelm`, so their test binary is its own host
+  program: started with a host's command line (`internal terminal-host --socket <path>`), a loader initializer in it
+  runs the host crate's entry point before libtest's `main` starts any thread, and exits (`hosts::test_program`). It is
+  registered on glibc Linux only; elsewhere every host start from a unit test is refused (libtest rejects the
+  arguments), so those tests fail by name rather than run on another kind of terminal. Those that need a real terminal
+  run on such hosts (`tests::host_supervisor`); the tests of ending the old terminals build an earlier release's tmux
+  server by hand. The browser suite's stacks and the README and docs media stacks run the bare `farhelm supervisor run`,
+  so they test what ships, and the browser suite checks that every terminal it attaches is a host. Known gaps, behaviors
+  terminal hosts showed differently from what this document says, found when their tests moved to hosts and reported
+  rather than fixed: a create or a tab open in a directory that cannot be entered is refused by the host's own start
+  rather than recorded as a launch error (or a refused open) naming the directory, and a 0x0 attach leaves the terminal
+  at its size.
 - **Creating agents in hosts** (`service/core/host_launch.rs`): every create starts its agent in a host, and a new tab
   opens in one ("Tabs in hosts" below). A create commits the kind with the launching row, before anything starts, so a
   crash between the start and its confirmation leaves a row that says where to look. A retried keyed create whose
   interrupted row is a tmux row (left by an older supervisor) keeps that kind through the store's takeover, so a row
   that turns out to have launched replays as itself; one the takeover claims is refused before anything starts and
   rolled back like a launch whose spec never landed, the refusal settled against its intent key: the evidence that
-  allowed the retry was gathered for tmux, so starting it in a host instead would be a guess, and no tmux terminal is
-  created any more. A host launch shares everything with a pane's up to the command (the spec, the hooks, the login
-  shell, and the shim's command line with its `systemd-run --user --scope` wrapper exactly where a pane has it), and the
-  host's child runs that command: the agent keeps its launch scope, and the host gets no scope of its own, living in the
-  supervisor's control group as the tmux server does. The child's environment (`host_child_env`, the same for agent and
-  tab hosts) is the supervisor's own environment with the launch environment over it, then the terminal's own variables
-  over both: `TERM=xterm-256color` (the terminal type the emulator implements), `COLORTERM=truecolor`,
-  `TERM_PROGRAM=farhelm` and `TERM_PROGRAM_VERSION` set to the build's version, the one the emulator's XTVERSION answer
-  names. These four are always set, so a supervisor started from some other terminal passes none of its claims on. Then
-  `SHELL` (the user's login shell, also when a test seam replaces the launch shell), `PWD`, and `PATH` as
-  `/usr/bin:/bin` when nothing gave one. `TMUX`, `TMUX_PANE` and systemd's `LISTEN_*` are never passed on: a supervisor
-  started inside the user's own tmux has the first two, and the child is in no tmux. Nothing claims tmux, and no tmux is
-  asked anything for the launch. A login shell's startup file that starts tmux when `TMUX` is unset therefore runs
-  during the agent's launch, as in any terminal outside tmux (SPEC.md, "Session view"); until 2026-11 the child got
-  `TERM_PROGRAM=tmux`, the private server's version and a placeholder `TMUX` that held such an autostart back, and a
-  host started then keeps that environment until its agent is restarted. The container environment uses this ordinary
-  path inside its own supervisor. The host's tag binds it to the session and the launch generation, and confirming the
-  launch writes the socket's name to the row's `terminal_address`. **The launch record**: the socket's name is drawn
-  before the host's first stage starts, and before that first stage is given the spec (it starts nothing until it has
-  read it whole), the launch's artifacts record the socket's name and the first stage's process, pinned to its start
-  identity (`<state>/launch/<id>.<generation>.host`). A supervisor that dies after the record leaves a first stage that
-  can still start the host on its own, and the record is how a retry finds it; one that dies before it leaves a first
-  stage whose stdin ends without a spec, which starts nothing. A failed host start is classified from the first stage's
-  exit status: a refusal, or an unfinished start the spawn confirmed ended, leaves nothing, and the create rolls back as
-  for an absent tmux session; a host that may still run (an unfinished start not confirmed ended, or a host that
-  reported ready but cannot be used) is ended through the protocol or by the verified signal, and only when that cannot
-  be confirmed is the launching row kept (with its record). A create that lost to Delete, or whose confirmation failed,
-  sweeps the agent's process tree and then ends its host the same way: through its runtime's `Shutdown` within 15
-  seconds (a runtime takes it up only between its other work, which a snapshot encode can hold), and otherwise, with the
-  runtime stopped so that it cannot take the host back, by its socket within `stop-terminal-hosts`'s per-host limits.
-  The socket file a host ended by a signal leaves is then removed, judged gone again first. A retried create whose row
-  shows no launch asks, in order: whether the session's published entry holds a host (a create kept as a launching
-  record publishes the host it could not end), which is the launch; whether a launch record exists, without which no
-  host start ever got its spec; whether the recorded first stage still runs, in which case it is waited for up to five
-  seconds and then ended with the verified signal; and finally what is at the recorded socket. A host whose tag names
-  the session's first launch is the launch, and anything else that answers leaves the retry unresolved. Nothing there is
-  absence only once no live process names the socket on its command line: a second stage the first stage forked before
-  it ended still binds the socket and starts the child before its readiness report finds the first stage gone and it
-  ends both, so the socket is looked at again for up to five seconds while such a process remains, and the retry is left
-  unresolved if one stays. The record stays through an agent's launch error (the error settles the agent, not its host,
-  which may still run with the failed launch's final screen and is named nowhere else while the row's `terminal_address`
-  is empty). A retry that finds the host replays the session as created and starts nothing; the interrupted attempt's
-  host itself stays running, and a restarted supervisor's reload adopts it by its tag. The supervisor-wide `host_scan`
-  lock keeps host spawns (holding it shared from just before the first stage starts until the host's entry is published,
-  or until the create gives the host up) apart from what must not overlap them (holding it exclusively): the removal of
-  an ended host's socket file (by a create or by Delete), whose re-verifying removal requires that nothing binds sockets
-  in the directory meanwhile, and any scan of the socket directory inside a running supervisor (today `serve`'s reload),
-  since a scan would take a host over from the create that is starting it. Delete's settling of its session's launch
-  records takes no part in it: the session's lifecycle claim keeps that session's own creates out. A session kept as a
-  launching record with its host unconfirmed ended has that host ended by its Delete, which finds it by the launch
-  record.
+  allowed the retry was gathered for tmux, so starting it in a host instead would be a guess, and this supervisor
+  creates no tmux terminal. The launch is built up to its command as any launch is (the spec, the hooks, the login
+  shell, and the shim's command line with its `systemd-run --user --scope` wrapper), and the host's child runs that
+  command: the agent keeps its launch scope, and the host gets no scope of its own, living in the supervisor's control
+  group. The child's environment (`host_child_env`, the same for agent and tab hosts) is the supervisor's own
+  environment with the launch environment over it, then the terminal's own variables over both: `TERM=xterm-256color`
+  (the terminal type the emulator implements), `COLORTERM=truecolor`, `TERM_PROGRAM=farhelm` and `TERM_PROGRAM_VERSION`
+  set to the build's version, the one the emulator's XTVERSION answer names. These four are always set, so a supervisor
+  started from some other terminal passes none of its claims on. Then `SHELL` (the user's login shell, also when a test
+  seam replaces the launch shell), `PWD`, and `PATH` as `/usr/bin:/bin` when nothing gave one. `TMUX`, `TMUX_PANE` and
+  systemd's `LISTEN_*` are never passed on: a supervisor started inside the user's own tmux has the first two, and the
+  child is in no tmux. Nothing claims tmux, and no tmux is asked anything for the launch. A login shell's startup file
+  that starts tmux when `TMUX` is unset therefore runs during the agent's launch, as in any terminal outside tmux
+  (SPEC.md, "Session view"); until 2026-11 the child got `TERM_PROGRAM=tmux`, the private server's version and a
+  placeholder `TMUX` that held such an autostart back, and a host started then keeps that environment until its agent is
+  restarted. The container environment uses this ordinary path inside its own supervisor. The host's tag binds it to the
+  session and the launch generation, and confirming the launch writes the socket's name to the row's `terminal_address`.
+  **The launch record**: the socket's name is drawn before the host's first stage starts, and before that first stage is
+  given the spec (it starts nothing until it has read it whole), the launch's artifacts record the socket's name and the
+  first stage's process, pinned to its start identity (`<state>/launch/<id>.<generation>.host`). A supervisor that dies
+  after the record leaves a first stage that can still start the host on its own, and the record is how a retry finds
+  it; one that dies before it leaves a first stage whose stdin ends without a spec, which starts nothing. A failed host
+  start is classified from the first stage's exit status: a refusal, or an unfinished start the spawn confirmed ended,
+  leaves nothing, and the create rolls back as for a launch that started nothing; a host that may still run (an
+  unfinished start not confirmed ended, or a host that reported ready but cannot be used) is ended through the protocol
+  or by the verified signal, and only when that cannot be confirmed is the launching row kept (with its record). A
+  create that lost to Delete, or whose confirmation failed, sweeps the agent's process tree and then ends its host the
+  same way: through its runtime's `Shutdown` within 15 seconds (a runtime takes it up only between its other work, which
+  a snapshot encode can hold), and otherwise, with the runtime stopped so that it cannot take the host back, by its
+  socket within `stop-terminal-hosts`'s per-host limits. The socket file a host ended by a signal leaves is then
+  removed, judged gone again first. A retried create whose row shows no launch asks, in order: whether the session's
+  published entry holds a host (a create kept as a launching record publishes the host it could not end), which is the
+  launch; whether a launch record exists, without which no host start ever got its spec; whether the recorded first
+  stage still runs, in which case it is waited for up to five seconds and then ended with the verified signal; and
+  finally what is at the recorded socket. A host whose tag names the session's first launch is the launch, and anything
+  else that answers leaves the retry unresolved. Nothing there is absence only once no live process names the socket on
+  its command line: a second stage the first stage forked before it ended still binds the socket and starts the child
+  before its readiness report finds the first stage gone and it ends both, so the socket is looked at again for up to
+  five seconds while such a process remains, and the retry is left unresolved if one stays. The record stays through an
+  agent's launch error (the error settles the agent, not its host, which may still run with the failed launch's final
+  screen and is named nowhere else while the row's `terminal_address` is empty). A retry that finds the host replays the
+  session as created and starts nothing; the interrupted attempt's host itself stays running, and a restarted
+  supervisor's reload adopts it by its tag. The supervisor-wide `host_scan` lock keeps host spawns (holding it shared
+  from just before the first stage starts until the host's entry is published, or until the create gives the host up)
+  apart from what must not overlap them (holding it exclusively): the removal of an ended host's socket file (by a
+  create or by Delete), whose re-verifying removal requires that nothing binds sockets in the directory meanwhile, and
+  any scan of the socket directory inside a running supervisor (today `serve`'s reload), since a scan would take a host
+  over from the create that is starting it. Delete's settling of its session's launch records takes no part in it: the
+  session's lifecycle claim keeps that session's own creates out. A session kept as a launching record with its host
+  unconfirmed ended has that host ended by its Delete, which finds it by the launch record.
 - **Tabs in hosts** (`service/core/host_tabs.rs`): every tab is a terminal host of its own. The tab-open gate asks the
   agent's host: it must still run (with its program or its final screen); one that has ended is the restart gap, and one
   that cannot be read refuses. The tab host's child is today's tab chain (the forwarder, then `internal tab-shell`, in
-  the tab's own scope when there is a user manager), with the environment a pane's command gets plus the tab's markers
+  the tab's own scope when there is a user manager), with the environment an agent's command gets plus the tab's markers
   and credential, which reach only the child; it starts at the size of the agent's terminal (its host's emulator; 80x24
   when that cannot be read). Its tag names the session, the tab, whether it runs in its own scope, and its creation
   time, which is never at or below the newest of the session's tabs, so a clock stepped backwards cannot reorder them.
@@ -2295,20 +2293,20 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   maintainer-approved narrowing of the goal's "from the old emulator" (DECISION, 2026-11-02): SPEC.md promises the
   scrollback only while the terminal still exists, and keeping it for a host that died would need a second encode path
   for a rare case. The new launch then starts in a new host through the create's start (the launch record, `host_scan`,
-  adoption) at the old terminal's size, seeded with an initial snapshot of that history above a blank screen in default
-  modes with no title, fitted to `MAX_SNAPSHOT` by leaving out the oldest history (marked trimmed): the scrollback stays
-  and the previous run's visible frame is not painted back, which is SPEC.md's Restart promise. A session with no old
-  runtime to read restarts with an empty terminal. A viewer attached to the old host is detached before the relaunch
-  ("session restarted") and attaches again to the new host's grid stream; nothing streams from the old host afterwards.
-  Once the new launch is published (confirmed, or published as launching when only the confirmation's write failed), the
-  old host is ended through its runtime's `Shutdown`, else by the verified signal to the process the runtime adopted
-  (only on a platform that named no peer, so that no process was adopted, a host at its socket whose tag names this
-  session is shut down over a new connection), and every launch record of the session naming its socket is removed; a
-  host that cannot be confirmed ended is logged and left to the session's Delete, which finds it by its record, and to
-  the next start. Ending it before the reply keeps Delete out meanwhile; a wedged old host can hold the reply for the
-  runtime's 15-second `Shutdown` bound plus the verified signal's graces. A replacement that does not start is unwound
-  as a failed create is: a host the start may have left is ended, the launch's spec, waypoint and host record are
-  removed and its process tree swept, and the failure is definitive, so the previous outcome, the row's
+  adoption) at the previous terminal's size, seeded with an initial snapshot of that history above a blank screen in
+  default modes with no title, fitted to `MAX_SNAPSHOT` by leaving out the oldest history (marked trimmed): the
+  scrollback stays and the previous run's visible frame is not painted back, which is SPEC.md's Restart promise. A
+  session with no old runtime to read restarts with an empty terminal. A viewer attached to the old host is detached
+  before the relaunch ("session restarted") and attaches again to the new host's grid stream; nothing streams from the
+  old host afterwards. Once the new launch is published (confirmed, or published as launching when only the
+  confirmation's write failed), the old host is ended through its runtime's `Shutdown`, else by the verified signal to
+  the process the runtime adopted (only on a platform that named no peer, so that no process was adopted, a host at its
+  socket whose tag names this session is shut down over a new connection), and every launch record of the session naming
+  its socket is removed; a host that cannot be confirmed ended is logged and left to the session's Delete, which finds
+  it by its record, and to the next start. Ending it before the reply keeps Delete out meanwhile; a wedged old host can
+  hold the reply for the runtime's 15-second `Shutdown` bound plus the verified signal's graces. A replacement that does
+  not start is unwound as a failed create is: a host the start may have left is ended, the launch's spec, waypoint and
+  host record are removed and its process tree swept, and the failure is definitive, so the previous outcome, the row's
   `terminal_address` and the old host as the session's terminal come back (the generation stays advanced, so the row's
   `terminal_address` then names a host tagged with an earlier generation, which reload takes as the row's own). The
   restored terminal, like a published one, goes back only before an orderly stop gathers the host terminals (otherwise a
@@ -2389,19 +2387,19 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   strand a thread each. A host's grid stream ends with its host, before Delete takes the attachment lock to detach the
   session's viewers, so until a Delete has detached them (or returned) every natural verdict of a stream of that session
   ("session terminal ended", a failed stream or input) waits (`Supervisor::deletes_in_progress`, one entry per session,
-  added under its lifecycle claim). The viewer then hears the Delete's notice, as an old terminal's viewer does:
-  "session deleted", or, when the Delete failed after detaching it, why it failed; only when the Delete failed before
-  detaching it is the natural verdict sent. A stall detach does not wait. **The residual**: a host the session no longer
-  records (a record deleted by hand) is not found; a recorded host that answers nothing gets the verified signal but
-  gives no sweep root; a read stuck in the kernel holds one thread until it returns; and these keep a session
-  undeletable until a person deals with them: a record that cannot be read or decoded, a record whose socket serves
-  another terminal's host, a recorded host whose process is not known, whose command line the verified signal rejects
-  (it does not end with `--socket` and that socket's path), or that survives SIGKILL, and a recorded host whose child
-  runs but cannot be read to pin it. A session whose agent terminal is a startup placeholder (a host a restarted
-  supervisor could not adopt, "Across supervisor restarts" below) has no runtime: the launch record naming its socket is
-  settled like any other. A placeholder no record names is ended only when the host at its socket answers with a tag
-  naming the session (then it is counted, rooted and shut down like a recorded host of the session); anything else there
-  keeps the session and is never signalled, since nothing but the socket's name ties that process to the session.
+  added under its lifecycle claim). The viewer then hears the Delete's notice: "session deleted", or, when the Delete
+  failed after detaching it, why it failed; only when the Delete failed before detaching it is the natural verdict sent.
+  A stall detach does not wait. **The residual**: a host the session no longer records (a record deleted by hand) is not
+  found; a recorded host that answers nothing gets the verified signal but gives no sweep root; a read stuck in the
+  kernel holds one thread until it returns; and these keep a session undeletable until a person deals with them: a
+  record that cannot be read or decoded, a record whose socket serves another terminal's host, a recorded host whose
+  process is not known, whose command line the verified signal rejects (it does not end with `--socket` and that
+  socket's path), or that survives SIGKILL, and a recorded host whose child runs but cannot be read to pin it. A session
+  whose agent terminal is a startup placeholder (a host a restarted supervisor could not adopt, "Across supervisor
+  restarts" below) has no runtime: the launch record naming its socket is settled like any other. A placeholder no
+  record names is ended only when the host at its socket answers with a tag naming the session (then it is counted,
+  rooted and shut down like a recorded host of the session); anything else there keeps the session and is never
+  signalled, since nothing but the socket's name ties that process to the session.
 - **Across supervisor restarts** (`service/core/host_handover.rs`) a host terminal keeps running, and its session keeps
   its state. An orderly stop checkpoints hosts with at least 1 MiB of processed output since their latest known snapshot
   under one ten-second deadline that runs beside the output clients' ten seconds. Its own encodes use at most half the
@@ -2442,14 +2440,14 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   agent at an earlier generation is the row's own: only a confirmation writes `terminal_address`, a Restart empties it,
   and one that failed definitively puts back the `terminal_address` of the host that stays the session's terminal. A
   host found is adopted as recovered (its snapshot restored, the tail replayed under the replay policy) and taken as a
-  found pane is: an unconfirmed launch found by its tag is confirmed with its socket's name. A host that may run and
+  found terminal is: an unconfirmed launch found by its tag is confirmed with its socket's name. A host that may run and
   cannot be used (no answer, another protocol version, busy, a tag this build cannot read, a tag naming another launch,
   a socket directory that cannot be scanned, a launch record that cannot be read) is left as it is and never treated as
   gone: the session holds a handle that answers as unavailable, never no terminal, which records nothing durable (not
   even a launch sentinel, also in later observations), lists the session as unknown and makes the verbs refuse. A host
   row's host is absent only when no live host carries its tag and nothing serves the socket the row names (names are
   drawn fresh per launch) or its file is missing, or when the launch never reached a host (unconfirmed, with no launch
-  record); the session is then reconciled as a vanished pane's. A host whose child exited while no supervisor was
+  record); the session is then reconciled as a vanished terminal's. A host whose child exited while no supervisor was
   attached reads as running until its runtime has replayed the exit record, after which the ticker records the exit,
   with any never-started classification; reload confirms such a session's launch, but leaves a durable stop request as
   it is, so that the exit is recorded as stopped by the user, and clears it only for a child the host reports alive. The
@@ -2573,10 +2571,10 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   link target, plus at most one row more), so a resend goes out over many cycles with the screen current in each. The
   attach's catch-up ends early when history changes shape under it, leaving the reset to the live path's settle rule,
   and is followed at once by a live cycle, since its later reads take history only. The program's exit is `state`'s,
-  over the final screen; a host that is gone ends the attachment as a dead pane's, and an unavailable one as a failed
-  stream. An attach to a host that cannot be read is refused as `Unavailable` before anything is taken over, with a
-  message that says what can help: a handle whose reason may pass becomes attachable once re-adoption replaces it with a
-  runtime (the viewer attaches again then), while a reason that will not pass stays refused until the supervisor
+  over the final screen; a host that is gone ends the attachment as a dead terminal's, and an unavailable one as a
+  failed stream. An attach to a host that cannot be read is refused as `Unavailable` before anything is taken over, with
+  a message that says what can help: a handle whose reason may pass becomes attachable once re-adoption replaces it with
+  a runtime (the viewer attaches again then), while a reason that will not pass stays refused until the supervisor
   restarts. Clipboard writes reach the viewer from the attachment's notice subscription; while the viewer is behind only
   the latest is kept. Viewer input is decoded and encoded where the connection reads it, with the modes and size the
   status carries, never waiting there, and handed to the attachment's own input pump, which writes it through one input
@@ -2678,51 +2676,49 @@ ground-state check a snapshot needs, and fixes), plus Farhelm's policy around th
 queries, tracks the modes that input encoding needs, gives status detection its screen text and title, serves the grid
 stream, and is snapshotted ("Terminal snapshots", below). The screen text is Farhelm's own format, defined in the
 crate's `screen` module (the visible or alternate screen, one line per row, trailing blanks trimmed, tabs over blank
-cells kept as tabs). It has the shape of tmux's `capture-pane -p` on purpose, so that one set of status reader rules
-reads both it and the screens captured from the old tmux terminals.
+cells kept as tabs). It has the shape of tmux's `capture-pane -p` on purpose: many of the captured agent screens status
+detection is tested against were captured that way, and one set of status reader rules reads both.
 
 Its query answers are Farhelm's own table, recorded in the crate's `queries` module and pinned by its tests: an answer
 says what is true of this emulator or names the assumption it makes, and the emulator declines (answers nothing) rather
-than claim a feature it lacks. The table started as the answers old terminals gave (tmux's, and xterm.js's for the color
-queries tmux passed through), which the agents it runs were tested against, and keeps them wherever they are true here;
-the rows that depart say why (DECID is answered as DA1, which vte cannot tell it from, and color answers end the way
-their query did). So device attributes say `CSI ? 1 ; 2 c` (alacritty alone says a VT102); the secondary attributes are
-alacritty's own and claim no other terminal, since a program that believes it runs in tmux may wrap its output in tmux's
-passthrough envelope, which this emulator drops; `CSI 14 t` assumes a 16 by 32 pixel cell, since nobody reports the
-viewer's; XTVERSION names Farhelm and its version, because Claude Code asks nothing further, synchronized output
-included, without an answer; and color queries are answered from Farhelm's terminal theme (Ghostty's palette, as the
-browser's) or the colors the program set. Known limitations, accepted: a few queries `vte` does not parse go unanswered,
-and a query inside an open synchronized update is answered when the update ends rather than at once. Keyboard input
-keeps today's legacy xterm encoding: the kitty keyboard protocol stays off (turning it on would change the Shift+Enter
-and Escape handling SPEC.md promises) and its query unanswered, and OSC 52 writes are honored while reads are never
-answered. The encoding itself is the supervisor's (`grid_input.rs`, "The grid client"). `vte` holds a synchronized
-update's bytes until the update ends, and its 150 ms safety deadline is not self-driving: the runtime wakes at the
-deadline on its own clock and draws the update, and also draws one left open when the child exits, when a replay ends
-and before a resize; `vte` itself ends one whose bytes reach its 2 MiB buffer. Each of those can draw a frame the
-program had not finished. The safety deadline, the buffer limit, a resize, the child's exit and the end of a replay are
-examples of the deliberate exceptions to frames never being drawn half done; a recovering replay also draws an open
-update where it crosses from output an earlier supervisor was sent to output none was, and where it crosses a gap,
-though it carries on to the same final state. No test holds the emulator to a live tmux: the crate's own tests pin the
-answer table, the screen-text format and the modes as Farhelm's, and the supervisor's screen fixture tests paint every
-captured agent screen into the emulator and run its status reader on the emulator's text.
+than claim a feature it lacks. Its rows are answers the supported agents are tested against, each kept only where it is
+true of this emulator; the rows that depart say why (DECID is answered as DA1, which vte cannot tell it from, and color
+answers end the way their query did). So device attributes say `CSI ? 1 ; 2 c` (alacritty alone says a VT102); the
+secondary attributes are alacritty's own and claim no other terminal, since a program that believes it runs in tmux may
+wrap its output in tmux's passthrough envelope, which this emulator drops; `CSI 14 t` assumes a 16 by 32 pixel cell,
+since nobody reports the viewer's; XTVERSION names Farhelm and its version, because Claude Code asks nothing further,
+synchronized output included, without an answer; and color queries are answered from Farhelm's terminal theme (Ghostty's
+palette, as the browser's) or the colors the program set. Known limitations, accepted: a few queries `vte` does not
+parse go unanswered, and a query inside an open synchronized update is answered when the update ends rather than at
+once. Keyboard input keeps today's legacy xterm encoding: the kitty keyboard protocol stays off (turning it on would
+change the Shift+Enter and Escape handling SPEC.md promises) and its query unanswered, and OSC 52 writes are honored
+while reads are never answered. The encoding itself is the supervisor's (`grid_input.rs`, "The grid client"). `vte`
+holds a synchronized update's bytes until the update ends, and its 150 ms safety deadline is not self-driving: the
+runtime wakes at the deadline on its own clock and draws the update, and also draws one left open when the child exits,
+when a replay ends and before a resize; `vte` itself ends one whose bytes reach its 2 MiB buffer. Each of those can draw
+a frame the program had not finished. The safety deadline, the buffer limit, a resize, the child's exit and the end of a
+replay are examples of the deliberate exceptions to frames never being drawn half done; a recovering replay also draws
+an open update where it crosses from output an earlier supervisor was sent to output none was, and where it crosses a
+gap, though it carries on to the same final state. The crate's own tests pin the answer table, the screen-text format
+and the modes as Farhelm's, and the supervisor's screen fixture tests paint every captured agent screen into the
+emulator and run its status reader on the emulator's text.
 
 Emoji and text variation selectors follow Ghostty's default Unicode width rules: only eligible bases change width,
-selectors after a combining mark are ignored, and text presentation can narrow a wide character. (Old terminals differ
-here: tmux widens any character followed by U+FE0F and never narrows.) Two exceptions keep the existing saved state
-sufficient: with autowrap off at the right edge, a plain space counts as empty when choosing the selector's target,
-where Ghostty distinguishes a printed space from an erased cell; and a one-column terminal keeps the existing drop of
-too-wide input before processing a pending wrap. Both are pinned against the source-derived behavior of Ghostty commit
-`c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed`
+selectors after a combining mark are ignored, and text presentation can narrow a wide character. Two exceptions keep the
+existing saved state sufficient: with autowrap off at the right edge, a plain space counts as empty when choosing the
+selector's target, where Ghostty distinguishes a printed space from an erased cell; and a one-column terminal keeps the
+existing drop of too-wide input before processing a pending wrap. Both are pinned against the source-derived behavior of
+Ghostty commit `c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed`
 ([target selection, lines 1939–1967](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/terminal/Terminal.zig#L1939-L1967),
 [one-column input, lines 2189–2262](https://github.com/ghostty-org/ghostty/blob/c7f68a7f48c6a5b357689eb8c2328bc2dab5d8ed/src/terminal/Terminal.zig#L2189-L2262)).
 
 Unattached vowel or trailing signs use ordinary scalar printing, including zero-width combining storage. Selectors apply
 only to the immediately preceding stored character, so a retained sign blocks a following selector. At the right edge
-with autowrap off, an unattached zero-width sign instead joins the cell before the last-column character under the tmux
-parity rule, so a following selector applies to the last-column character; the resulting retained-text order is
-accepted.
+with autowrap off, an unattached zero-width sign instead joins the cell before the last-column character, so a following
+selector applies to the last-column character; this is how Farhelm's terminals behaved before terminal hosts, kept as it
+is, and the resulting retained-text order is accepted.
 
-New terminals discard the ignored-format character class before storing output, even without an emoji or selector:
+Terminals discard the ignored-format character class before storing output, even without an emoji or selector:
 zero-width space, directional marks, embeddings and isolates, line and paragraph separators, word joiner, BOM, two
 Hangul fillers, and the remaining ranges in the vendored `emoji_ignored_format` classifier. Scrollback, snapshots and
 copied text therefore omit those characters. The program's input and files are unaffected. This broader formatting
@@ -2767,8 +2763,8 @@ trimmed. The mark survives later snapshots and restores, the blob carrying how m
 it ends, so that the viewer can say history was trimmed until the program clears its history or the history has turned
 over. Only if no history is left either does it drop the screens' contents (the supervisor then asks for a redraw).
 Ordinary terminals stay far below the limit: 12,000 lines of 200 columns encode to about 3.6 MiB. Restart seeds the new
-host the same way, with a snapshot of the old terminal's history above a blank screen in default modes, read from the
-old host's emulator.
+host the same way, with a snapshot of the old host's history above a blank screen in default modes, read from the old
+host's emulator.
 
 The memory budget for one supervisor-side terminal at Farhelm's full scrollback (12,000 lines, 200 columns) is 80 MiB
 for ordinary output (measured: 56 MiB, about 24 bytes a cell), and hostile output is bounded at about 190 MiB: the grid
@@ -2781,14 +2777,11 @@ least 12 terminals per GiB doing ordinary work and at least 5 per GiB if all of 
 ("Memory budget") have the measurements and the arithmetic. Each terminal host process is bounded on its own by its
 journal cap and `MAX_SNAPSHOT`.
 
-## Terminal substrate: private tmux server
+## Ending the old private tmux server
 
-This section covers the old terminals: the private tmux server releases before terminal hosts ran every terminal in,
-which later releases kept running beside terminal hosts. This release ends them at startup (below); every terminal runs
-in a terminal host ("Terminal host"). Nothing in an installation requires, looks for or installs a tmux: not the
-installer, the desktop app, `farhelm helm setup`, or provisioning of a Linux host or a Mac. The running supervisor runs
-no tmux at all, and its driver of the old terminals is gone: what remains is the startup step that ends them (below).
-Linux provisioning's one tmux-related step removes the copy earlier releases installed (below).
+Releases before terminal hosts ran every terminal in a private tmux server per state directory, and later releases kept
+those old terminals running beside terminal hosts; a starting supervisor ends that server. ("Provisioning" covers
+removing the tmux build earlier releases installed.)
 
 Ending the old terminals (`service::core::old_terminals`) is the one tmux-related step the running supervisor keeps, and
 works whether or not any tmux program exists. A supervisor that holds its state directory's claim runs it after the
@@ -2827,51 +2820,7 @@ unresolved `old_terminal` notification resolved. A failure anywhere is logged an
 start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still
 running), and the step's own work, the server's end and the sweeps (not the reload's host discovery between them), has
 one 15-second budget (`OLD_TERMINALS_DEADLINE`), half the 30 seconds the helm allows a supervisor it restarted during
-Update to come back (`farhelm-helm`'s provisioning `ATTACH_TIMEOUT`). `FARHELM_TMUX` is no longer passed to a terminal
-host's child (`host_launch`'s `NOT_INHERITED`). Nothing this release starts or renders sets it, but a supervisor unit an
-earlier release wrote keeps setting it until its next setup or Update; the supervisor ignores it.
-
-The native desktop stores a versioned physical-pixel outer-frame rectangle and maximized flag separately from client
-credentials. Bootstrap's already resolved state directory is reused, so persistence cannot silently move to the current
-working directory if path resolution fails again. A missing file keeps the first-run window builder defaults; corrupt,
-unsupported, or display-unsafe state gets a monitor-fitting centered fallback. The geometry check requires the complete
-saved frame to fit one connected monitor and avoids arithmetic overflow. Tao provides monitor rectangles rather than
-work areas, so the fallback caps its size and a real macOS display/decorations check remains necessary. Wayland's raw
-window handle marks positions as unreliable: its move events do not replace the remembered position, and restore keeps a
-usable saved size while preserving maximization while the compositor chooses placement. Restore converts the saved outer
-size through Tao's inner-size API using the current outer-minus-inner decoration extent; a real macOS
-display/decorations check remains necessary. Fullscreen observations never replace the last ordinary frame or maximize
-state. The final state is written through a private sibling file and rename on close, with one best-effort retry at
-event-loop teardown; the rename is atomic for readers but parent-directory durability across a machine crash is best
-effort. Failures warn without preventing startup.
-
-The supervisor runs no tmux, and neither `farhelm supervisor run` nor `farhelm helm setup` takes a `--tmux`. The
-supervisor unit, whether provisioning or `farhelm helm setup` renders it, names no tmux and puts no tmux directory on
-`PATH`: its `PATH` is the directory of the Farhelm program it runs, then `/usr/local/bin:/usr/bin:/bin`
-(`farhelm_helm::units::render_supervisor_unit`). The Mac app bundles none and needs none, and hands its managed
-supervisor no tmux.
-
-Earlier releases' Linux provisioning required a host tmux at or above a version floor (3.7c at the end) and, on most
-hosts, installed a private static build as `~/.local/lib/farhelm/tmux` to meet it. That directory holds the host's
-`farhelm` too, so it comes first on the unit's `PATH` and on the `PATH` a session starts with
-(`LaunchSpec.farhelm_bin_dir`), and a `tmux` typed in a session ran that copy rather than the host's own. Provisioning
-no longer inspects, downloads, uploads or installs any tmux, and every Linux Add and Update plan removes that file
-instead, as the step `remove-bundled-tmux` ("Remove the bundled tmux") between starting or restarting the supervisor and
-connecting to it, so that it never deletes a program an earlier supervisor that is still running may use. The step is in
-every Linux plan whether or not the file exists, because planning does not inspect for it and a missing file is a skip;
-it always names the private lib directory's `tmux`, never a file beside a registered binary that lives elsewhere (a
-shared bin directory may hold the user's own `tmux`). A remote Mac never had one and its plans have no such step. A
-personal tmux server the user started from the bundled copy keeps running from the deleted file. The remote removal
-looks the file up with `stat` in the C locale, like uninstall's stop step, and only the known missing-path diagnostics
-count as absence, so a parent directory the user cannot search fails the lookup rather than reading as already gone. A
-failed removal degrades the step instead of failing the run: the new supervisor already runs and the install does not
-depend on the file, so the run completes with a warning that the file may have been left in place (a command that timed
-out or lost its connection may still have removed it). Snapshot preparation skips the step, as it skips attachment and
-lingering: the sandbox image it installs into has no Farhelm installation (preparation refuses setup-managed installs
-and copied state), so it is not expected to carry an earlier tmux.
-
-Every pre-window desktop refusal prints one plain `farhelm-desktop: ...` stderr line and exits 1, and on macOS also
-sends it to Console and a critical native alert so a Finder or Spotlight launch has a visible diagnostic.
+Update to come back (`farhelm-helm`'s provisioning `ATTACH_TIMEOUT`).
 
 ## Helm ↔ supervisor transport: system ssh + stdio protocol
 
@@ -2921,13 +2870,12 @@ The ssh child's stderr is piped and relayed as bounded, control-escaped tracing 
 inherited. Inheriting is defensible for the single-host path a user started by hand; for a registered host it hands a
 remote party a direct, unbounded write channel to the operator's own terminal, escape sequences included. The relay
 drains continuously (a full stderr pipe would wedge the child), caps each line, stops logging after a per-connection
-budget while still draining, and Debug-escapes what it does log — the same treatment the supervisor gives tmux's exit
-reasons, for the same reason. All peer-supplied text is normalized the same way wherever the helm logs or retains it,
-including identifiers and successful-attachment trace fields, not only errors. Host-manager diagnostics may be noisy and
-may repeat indefinitely: every failed attempt and refresh remains in the stderr trail, including a peer that returns the
-same error on every refresh. A collision check still emits one summary event for that refresh, rather than one event per
-colliding row. The SSH stderr relay's separate per-connection budget still bounds which child lines it logs while it
-continues draining the pipe.
+budget while still draining, and Debug-escapes what it does log. All peer-supplied text is normalized the same way
+wherever the helm logs or retains it, including identifiers and successful-attachment trace fields, not only errors.
+Host-manager diagnostics may be noisy and may repeat indefinitely: every failed attempt and refresh remains in the
+stderr trail, including a peer that returns the same error on every refresh. A collision check still emits one summary
+event for that refresh, rather than one event per colliding row. The SSH stderr relay's separate per-connection budget
+still bounds which child lines it logs while it continues draining the pipe.
 
 For failed connection attempts the relay also retains the newest two diagnostic lines, each capped at 512 raw bytes,
 including a current unterminated segment. It continues observing markers and the tail after the logging budget is spent;
@@ -3061,16 +3009,16 @@ the input builders with the valid input fixtures, some of which are allowed wire
 last paste part, for one); they also hold the client's hand-copied input bounds to the invalid input fixtures.
 
 `SessionInfo` carries a `last_activity_at` (unix seconds) beside `created_at`: the last time the supervisor observed
-that session's agent pane change. It was added WITHIN protocol version 11 rather than bumping it, per the running rule
-every version since 3 has followed — a new optional field with a decode default, whose omission a receiver can ignore
-harmlessly, is additive; a new tagged variant or a required field is not. Absent means the sender predates the field and
-decodes to 0, which a receiver reads as "unknown, fall back to `created_at`" and never as an instant in 1970. This is
-recorded here because the per-version changelog in `lore/` is frozen at the moment it was written and is not maintained
-as the protocol grows. The identity hook's pair — `ControlMsg::ReportConversation` and `ConversationReported` — went the
-other way and took the protocol to version 12, since two new tagged variants are exactly what an older decoder refuses
-outright instead of ignoring. The pair was later removed without a bump, when reports moved to files (see "The
-per-launch identity hook"): only a hook ever sent it, a helm and a supervisor sharing a version never exchange it, and a
-hook older than its supervisor during an upgrade is the accepted gap that move describes.
+that session's agent terminal change. It was added WITHIN protocol version 11 rather than bumping it, per the running
+rule every version since 3 has followed — a new optional field with a decode default, whose omission a receiver can
+ignore harmlessly, is additive; a new tagged variant or a required field is not. Absent means the sender predates the
+field and decodes to 0, which a receiver reads as "unknown, fall back to `created_at`" and never as an instant in 1970.
+This is recorded here because the per-version changelog in `lore/` is frozen at the moment it was written and is not
+maintained as the protocol grows. The identity hook's pair — `ControlMsg::ReportConversation` and `ConversationReported`
+— went the other way and took the protocol to version 12, since two new tagged variants are exactly what an older
+decoder refuses outright instead of ignoring. The pair was later removed without a bump, when reports moved to files
+(see "The per-launch identity hook"): only a hook ever sent it, a helm and a supervisor sharing a version never exchange
+it, and a hook older than its supervisor during an upgrade is the accepted gap that move describes.
 
 Protocol version 31 gives every terminal detach a code beside its reason. `ControlMsg::Detached` carries a `DetachCode`
 (`taken_over`, `stalled`, `tab_closed`, `replaced`, `other`), a non-displacing attach refused because another client
@@ -3216,7 +3164,7 @@ detect it, defend against it, or degrade gracefully under it.
 ### What the helm believes from a supervisor
 
 The helm's trust in an attached supervisor is scoped by effect, not by connection. A supervisor is believed about things
-that affect only its own host: which of its sessions sent an upcall, that one of its sessions exited, what its panes
+that affect only its own host: which of its sessions sent an upcall, that one of its sessions exited, what its terminals
 show. A lie about those damages only that host, where the supervisor already has full authority. Anything whose effect
 reaches beyond its own host (another host's sessions, another supervisor, the helm's machine, or the helm's own state
 such as settings and credentials) is allowed only where the spec grants it, and a request's arrival on a supervisor
@@ -3251,11 +3199,11 @@ reservation matches the full request and key lifetime, has settled `Failed`, has
 the 24-hour refusal window. Legacy tombstone fingerprint matching remains readable; new refusals keep the fingerprint
 and error detail as written, and new Deletes remove the reservation. The ordinary rollback paths settle that state only
 after confirming the session's terminal is gone; a retained or ambiguous launch does not qualify. That is not proof that
-every descendant of the failed launch stopped: the rollback after a failed tmux creation accepts a systemd scope kill it
-could not confirm once the portable sweep finds nothing, and after a failed database confirmation a sweep error only
-adds to the returned error. A survivor of either can then keep running beside the fresh attempt this proof allows, which
-needs two coinciding faults and falls under SPEC.md's two-fault exception in "Lifecycle operations". Keeping the session
-when such cleanup is unconfirmed is deferred in TODO.md's entry on requiring a systemd user manager on Linux.
+every descendant of the failed launch stopped: the rollback after a failed terminal creation accepts a systemd scope
+kill it could not confirm once the portable sweep finds nothing, and after a failed database confirmation a sweep error
+only adds to the returned error. A survivor of either can then keep running beside the fresh attempt this proof allows,
+which needs two coinciding faults and falls under SPEC.md's two-fault exception in "Lifecycle operations". Keeping the
+session when such cleanup is unconfirmed is deferred in TODO.md's entry on requiring a systemd user manager on Linux.
 Managed-checkout and agent-request recovery encodings are excluded. This is reply metadata: the stored refusal and its
 same-key replay do not change. Missing proof, including a failed proof lookup, stays inconclusive. The helm accepts this
 host-local statement only on a `CreateSession` reply and translates it to its existing definitely-unaccepted HTTP
@@ -3302,16 +3250,16 @@ them.
 
 Version 33 adds a second message in that direction, `ControlMsg::SessionsChanged`: a content-free hint that something a
 user can see about the host's sessions changed. The helm still learns WHAT changed by drain; the hint only moves the
-drain earlier. The supervisor owes a hint whenever a value it would list actually changes (a pane dying, a status
+drain earlier. The supervisor owes a hint whenever a value it would list actually changes (a terminal exiting, a status
 transition, the activity and work-start stamps advancing, a restart offer changing, and every lifecycle mutation), never
 merely because a listing was served, so hints and the refreshes they cause cannot feed each other. It coalesces owed
 hints into at most one per 200 ms and sends each on the ordinary writer queue of every connection that declared itself
 the owning helm's (version 73, above), dropping it rather than blocking when that queue is full. Replies never run a
-capture sweep or commit outcomes; a pane-death wake hints before observation and an outcome change hints again. The helm
-refreshes the hinted host at once, unless a refresh that started with a hint pending began less than that same 200 ms
-ago (`SESSIONS_CHANGED_MIN_GAP` in the protocol crate, which both ends use); then it waits out the rest of the gap, and
-the one refresh that follows answers every hint that arrived meanwhile. Supervisor messages are untrusted, so the helm
-enforces the gap itself rather than relying on the supervisor's spacing. Only a hint's own wake waits: the poll, a
+capture sweep or commit outcomes; a terminal-exit wake hints before observation and an outcome change hints again. The
+helm refreshes the hinted host at once, unless a refresh that started with a hint pending began less than that same 200
+ms ago (`SESSIONS_CHANGED_MIN_GAP` in the protocol crate, which both ends use); then it waits out the rest of the gap,
+and the one refresh that follows answers every hint that arrived meanwhile. Supervisor messages are untrusted, so the
+helm enforces the gap itself rather than relying on the supervisor's spacing. Only a hint's own wake waits: the poll, a
 user's refresh and a nudge do not. A refresh a hint caused always raises a feed event, even when the cache compares
 equal: a tab opened and exited between two refreshes leaves the cache unchanged but a client's optimistic tab behind.
 The three-second poll stays as the backstop and keeps its changed-only rule. A hint stays pending until a refresh that
@@ -3856,8 +3804,8 @@ Each selected spare removal emits one info completion event with its repository,
 total and removal times in milliseconds, and counts of files and directories actually removed, including partial counts
 after a failure.
 
-Startup collects exact launch-generation, preparation-state and owned-pane evidence before the blocking cache sweep. A
-still-live clone claim is retained, including a live NotStarted preparation that can begin cloning after the sample;
+Startup collects exact launch-generation, preparation-state and agent-terminal evidence before the blocking cache sweep.
+A still-live clone claim is retained, including a live NotStarted preparation that can begin cloning after the sample;
 failed or uncertain liveness observations retain possible claims rather than inferring abandonment. Spare cleanup runs
 under the cache sweep's existing nonblocking repository lock, skips held locks, and evicts ready spares with the same
 thirty-day cache observation. Missing ready content alone never permits forgetting a location with a surviving claim. A
@@ -3938,8 +3886,9 @@ The worker persists namespace identity before creating a strict private building
 `internal build-spare-guard` in a new session with a retained stdin owner pipe and nice 10, before login initialization.
 The guard verifies it leads that session/group, starts OS owner-EOF and ten-minute deadline watches, then runs the
 frozen user's shell with `-l -i -c` and null stdin, execing `internal build-spare`. Session credentials, markers and
-reporter authority are scrubbed before startup; private tmux variables remain through rc files as in visible launches
-and are removed from Git afterwards. The helper uses the same session-bin PATH projection, ordinary Git configuration,
+reporter authority are scrubbed before startup; an ambient `TMUX` and `TMUX_PANE` (a supervisor started inside the
+user's tmux) remain through rc files, unlike a visible launch's, whose terminal host child never gets them, and are
+removed from Git afterwards. The helper uses the same session-bin PATH projection, ordinary Git configuration,
 credential helpers and URL rewrites. It forces `GIT_TERMINAL_PROMPT=0`, `/bin/false` Git/SSH askpass and
 `SSH_ASKPASS_REQUIRE=never` after rc files. No Farhelm post-clone command, trust operation or agent runs in a spare;
 ordinary Git hooks and checkout filters remain the user's Git policy.
@@ -4203,33 +4152,33 @@ channel records these notices.
 - The supervisor's shared agent-launch builder also writes the intended working directory into the launch spec. After
   checkout preparation, the shim enters it before exec and supplies matching `PWD`; a failed chdir prevents the agent
   from executing and writes the ordinary launch-failure sentinel naming the directory. Entry is separate from exec so an
-  absent or non-executable agent is reported as a program failure, rather than a directory problem. tmux's `-c` alone is
-  insufficient because tmux falls back to HOME when it cannot enter the folder, and login-shell startup may cd again.
-  Older specs lacking the optional field retain their inherited directory. Terminal tabs run `internal tab-shell` inside
-  their existing scope, through the app's forwarder in the Mac app's version layout (which claims the version it starts;
-  see "Side-by-side versions inside Farhelm.app") and the supervisor's own program elsewhere; the helper enters the
-  folder and scrubs the agent/private-tmux markers before execing the login shell. A failed tab entry reaches the
-  existing dead-before-open refusal with its last output. This keeps tab startup inside containment and preserves a tab
-  shell's own startup-file cd, while agent startup restores the session folder after those files have run.
-- Status heuristics: periodic sampling of each live agent pane's visible grid (for an agent in a terminal host, its
-  emulator's screen text, in Farhelm's screen-text format, which an old terminal's tmux capture shares, so one set of
-  readers serves both), read by one screen reader per agent kind (`agent_kind::screen_reader`). Sampling must never sit
-  on the attach/input path — SPEC.md forbids status from gating interaction. The supervisor's own ticker takes the
-  samples and stores one reading per successful capture; replies only map the stored reading, and classification sits
-  BELOW the recorded-error and dead-pane rules in the existing precedence, so a reading only chooses among the live
-  statuses of a terminal its tmux pane or terminal host reports alive. The generic reader is observed output alone,
-  counted in a session's OWN samples rather than in elapsed time: three consecutive samples showing an unchanged screen
-  reads idle, anything else live reads running, and it never reads waiting (a blocked agent and a finished one are
-  equally quiet). Counting samples rather than seconds is load-bearing — the sampler works through live panes on a
-  budgeted round robin, so a session's real sampling period grows with the fleet, and any wall-clock window would
-  eventually report a continuously-working agent as idle because the HOST was busy. A new launch reads running before
-  its first comparison. A reloaded live pane instead reports provisional `unknown` until a changed screen, a reading
-  from recognized content, or three quiet comparisons provide fresh status evidence (a recognized idle prompt therefore
-  ends the gap on its first sample); a recognized waiting prompt is reported at once. Dead-pane and recorded-error
-  outcomes bypass that provisional state. The helm retains the prior status from its per-host cache for an `unknown`
-  reply, if it has one, and replaces the rest of the row as usual. Its identity-less in-memory list follows the same
-  rule within a connection. Disconnect clears those rows by the existing identity-less host rule, so there is no
-  previous status to retain after its supervisor restarts.
+  absent or non-executable agent is reported as a program failure, rather than a directory problem. Starting the
+  terminal in the directory is not enough on its own, because login-shell startup may cd again. Older specs lacking the
+  optional field retain their inherited directory. Terminal tabs run `internal tab-shell` inside their existing scope,
+  through the app's forwarder in the Mac app's version layout (which claims the version it starts; see "Side-by-side
+  versions inside Farhelm.app") and the supervisor's own program elsewhere; the helper enters the folder and removes the
+  agent markers and any `TMUX` or `TMUX_PANE` before execing the login shell. A failed tab entry reaches the existing
+  dead-before-open refusal with its last output. This keeps tab startup inside containment and preserves a tab shell's
+  own startup-file cd, while agent startup restores the session folder after those files have run.
+- Status heuristics: periodic sampling of each live agent terminal's visible screen (its emulator's screen text, in
+  Farhelm's screen-text format, which the captured agent screens share, "The supervisor's terminal emulator"), read by
+  one screen reader per agent kind (`agent_kind::screen_reader`). Sampling must never sit on the attach/input path —
+  SPEC.md forbids status from gating interaction. The supervisor's own ticker takes the samples and stores one reading
+  per successful capture; replies only map the stored reading, and classification sits BELOW the recorded-error and
+  dead-terminal rules in the existing precedence, so a reading only chooses among the live statuses of a terminal its
+  terminal host reports alive. The generic reader is observed output alone, counted in a session's OWN samples rather
+  than in elapsed time: three consecutive samples showing an unchanged screen reads idle, anything else live reads
+  running, and it never reads waiting (a blocked agent and a finished one are equally quiet). Counting samples rather
+  than seconds is load-bearing — the sampler works through live terminals on a budgeted round robin, so a session's real
+  sampling period grows with the fleet, and any wall-clock window would eventually report a continuously-working agent
+  as idle because the HOST was busy. A new launch reads running before its first comparison. A reloaded live terminal
+  instead reports provisional `unknown` until a changed screen, a reading from recognized content, or three quiet
+  comparisons provide fresh status evidence (a recognized idle prompt therefore ends the gap on its first sample); a
+  recognized waiting prompt is reported at once. Dead-terminal and recorded-error outcomes bypass that provisional
+  state. The helm retains the prior status from its per-host cache for an `unknown` reply, if it has one, and replaces
+  the rest of the row as usual. Its identity-less in-memory list follows the same rule within a connection. Disconnect
+  clears those rows by the existing identity-less host rule, so there is no previous status to retain after its
+  supervisor restarts.
 
   Claude Code and Codex have dedicated readers that answer from recognized content ("anchored" readings) rather than
   change counting, because both redraw parts of their screen while idle (Claude's `/clear` hint, Codex's recap block and
@@ -4243,28 +4192,29 @@ channel records these notices.
   ellipsis remains idle. Reply text of the same shape just above the input box (`- Ran the suite… (2 failures)`) also
   reads as working; that cosmetic false positive is accepted. Claude's explicit `Waiting for N background … to finish`
   announcement in that same position also means the turn is still working, while footer hints and a listed task without
-  that announcement remain idle. Codex animates a Braille spinner in its pane title for the whole of a turn (its
-  on-screen `Working (…)` widget appears only during tool runs, never while prose streams, so the title is fetched with
-  a separate `display-message` for Codex sessions only — the title is written by the pane, so it never rides the
-  authoritative pane-fact query). A waiting prompt wins over a busy indicator. A recognized screen that carries no state
-  (a model picker, a transcript view) reads "can't tell" and the previous reading stands. A screen with none of the
-  anchors falls back to the generic reader for that sample, and after a few such samples in a row (so a half-drawn
-  startup frame does not count) the supervisor logs that once per run, without screen content, as likely rule drift. The
-  rules are tested against real captures under `crates/farhelm-supervisor/tests/fixtures/screens/`, which
-  `scripts/capture-agent-screens.py` re-captures from the installed agents, each run in a real terminal host with the
-  environment a supervisor gives an agent and the supervisor's emulator answering its queries (the hidden
-  `farhelm internal agent-screen`, `docs/agent-screen-fixtures.md`); versions captured before November 2026 come from a
-  tmux pane, and stay because old terminals still draw them. The earlier Codex-only masking of its composer out of
-  change comparison is gone: whenever it applied, the Codex reader now recognizes the composer and answers from content,
-  so the comparison no longer decides anything there.
+  that announcement remain idle. Codex animates a Braille spinner in its terminal title for the whole of a turn (its
+  on-screen `Working (…)` widget appears only during tool runs, never while prose streams), so its reader also asks for
+  the title the program last set, which the emulator keeps; the other readers do not ask for it. A waiting prompt wins
+  over a busy indicator. A recognized screen that carries no state (a model picker, a transcript view) reads "can't
+  tell" and the previous reading stands. A screen with none of the anchors falls back to the generic reader for that
+  sample, and after a few such samples in a row (so a half-drawn startup frame does not count) the supervisor logs that
+  once per run, without screen content, as likely rule drift. The rules are tested against real captures under
+  `crates/farhelm-supervisor/tests/fixtures/screens/`, which `scripts/capture-agent-screens.py` re-captures from the
+  installed agents, each run in a real terminal host with the environment a supervisor gives an agent and the
+  supervisor's emulator answering its queries (the hidden `farhelm internal agent-screen`,
+  `docs/agent-screen-fixtures.md`); versions captured before November 2026 come from a tmux pane and stay, because
+  agents in terminal hosts started before 0.36.0 still have the environment that draws them
+  (`docs/agent-screen-fixtures.md`). The earlier Codex-only masking of its composer out of change comparison is gone:
+  whenever it applied, the Codex reader now recognizes the composer and answers from content, so the comparison no
+  longer decides anything there.
 
   Muse also has a dedicated reader, based on manually captured 1.4.14 screens. A ruled `❯` composer followed by its
   model/workspace footer anchors idle; an adjacent `Working (… · esc to interrupt)` or `Thinking (… · esc to interrupt)`
   line above it anchors working. The timer begins with an ASCII digit; the animated glyph, provider, workspace and
   permission label are not fixed. Its current workspace-trust menu anchors waiting and takes precedence over work. No
   in-conversation question or approval dialog has been verified. Unknown screens use generic change counting; neither
-  hook events nor the pane title supplies Muse status. The old trust-only fixtures remain hint evidence, while the new
-  version directory also holds working and idle captures.
+  hook events nor the terminal title supplies Muse status. The old trust-only fixtures remain hint evidence, while the
+  new version directory also holds working and idle captures.
 - Permission-footer evidence: the same sampling pass calls the exhaustive launch-harness reader in
   `agent_kind::screen_reader`, independently of the activity kind. Its optional bool latches
   `ActivitySample::screen_yolo` on the first definite YOLO reading of a run and hints connected helms only when that
@@ -4330,43 +4280,42 @@ channel records these notices.
   ticker runs this reconciliation, as do startup, reload and decision-time Restart, without a global pass lock or
   coalescing. The ticker's pass skips a session whose capture claim is busy admitting a report and catches it on a later
   tick; Restart waits for the claim. Ordinary list and rename replies read the state those passes leave. They perform
-  one pane-state query for immediate exits and tab changes, but no capture, launch-artifact reads, cleanup or outcome
+  one terminal-state read for immediate exits and tab changes, but no capture, launch-artifact reads, cleanup or outcome
   writes. Resume readiness, launch-error classification and notification resolution may lag by one nominal two-second
-  tick; the pane-death wake commits newly dead owned agent panes without sweeping already-stopped sessions. Unreadable
-  launch evidence is logged and retried by the ticker and does not fail lists. Found but uncommitted launch errors stay
-  in generation-local memory for replies. Successful negative launch-sentinel and preparation reads settle for the
-  generation only after a durable terminal outcome and an owned pane seen dead, or proof that the launch's boot ended.
-  Schema 30 records that proof for all retained launches in the boot-change transaction, without altering already-ended
-  outcomes, and restores it on later same-boot supervisor reloads. Older rows default to unknown: a reboot an older
-  supervisor already consumed cannot be reconstructed. New launches clear the proof; a definitively aborted restart
-  restores it with the prior external run's facts under the advanced generation. Same-boot pane absence without such
-  proof keeps retrying: an empty tmux query can be transient while the shim still writes. Read errors, uncommitted
-  failures and observers without recording authority never settle reads. Rename shares the latches; relaunch and
-  supervisor reload read again. Error artifacts are cleaned once after successful accepted-create evidence preservation
-  and removal, with failed cleanup retried. Report-backed identities still refresh under their capture claim because
-  accepted reports and decision-time Restart can change the row after the pane stops. An injected launch holding no
-  identity warns once after 65 seconds from the first input frame delivered to the agent pane that holds an Enter
-  (`capture::submits_a_line`): a carriage return that is not preceded by ESC (Farhelm's own Shift+Enter sends `ESC CR`
-  to insert a newline), in a frame the grid input path queued for the agent's terminal host. A bracketed paste is judged
-  whole and never counts: its newlines reach the agent as carriage returns (the supervisor's grid input encoder converts
-  them), inside the paste markers. The terminal's automatic replies to the agent TUI's own queries (device attributes,
-  cursor position, colour answers, focus reports) never carry a carriage return, so an agent the user opened but has not
-  typed into cannot trip it. An Enter while the latest screen reading before delivery is `Waiting` answers a recognized
-  dialog and does not start the clock. An outdated waiting reading can defer the clock to the next Enter; no capture
-  runs on the input path. With no reading yet, or no dedicated reader, the existing submitted-line rule applies. The
-  spawn records whether its argv received the hook before the agent's terminal host starts, fenced by launch generation.
-  Reload restores that flag; older rows default unhooked and stay unchecked. The anchor is an in-memory monotonic
-  instant, reset with the diagnostic latch on every relaunch and supervisor restart, so a picked-up launch starts its
-  clock at the next qualifying Enter after reload rather than recovering the time of an earlier Enter. A Resume carries
-  its identity and therefore stays silent even if its new hook never reports. The warning changes no offer or admission
-  rule.
+  tick; the terminal-exit wake commits newly exited agent terminals without sweeping already-stopped sessions.
+  Unreadable launch evidence is logged and retried by the ticker and does not fail lists. Found but uncommitted launch
+  errors stay in generation-local memory for replies. Successful negative launch-sentinel and preparation reads settle
+  for the generation only after a durable terminal outcome and the agent's terminal seen exited, or proof that the
+  launch's boot ended. Schema 30 records that proof for all retained launches in the boot-change transaction, without
+  altering already-ended outcomes, and restores it on later same-boot supervisor reloads. Older rows default to unknown:
+  a reboot an older supervisor already consumed cannot be reconstructed. New launches clear the proof; a definitively
+  aborted restart restores it with the prior external run's facts under the advanced generation. A same-boot absence of
+  the agent's terminal without such proof keeps retrying. Read errors, uncommitted failures and observers without
+  recording authority never settle reads. Rename shares the latches; relaunch and supervisor reload read again. Error
+  artifacts are cleaned once after successful accepted-create evidence preservation and removal, with failed cleanup
+  retried. Report-backed identities still refresh under their capture claim because accepted reports and decision-time
+  Restart can change the row after the agent stops. An injected launch holding no identity warns once after 65 seconds
+  from the first input frame delivered to the agent's terminal that holds an Enter (`capture::submits_a_line`): a
+  carriage return that is not preceded by ESC (Farhelm's own Shift+Enter sends `ESC CR` to insert a newline), in a frame
+  the grid input path queued for the agent's terminal host. A bracketed paste is judged whole and never counts: its
+  newlines reach the agent as carriage returns (the supervisor's grid input encoder converts them), inside the paste
+  markers. The terminal's automatic replies to the agent TUI's own queries (device attributes, cursor position, colour
+  answers, focus reports) never carry a carriage return, so an agent the user opened but has not typed into cannot trip
+  it. An Enter while the latest screen reading before delivery is `Waiting` answers a recognized dialog and does not
+  start the clock. An outdated waiting reading can defer the clock to the next Enter; no capture runs on the input path.
+  With no reading yet, or no dedicated reader, the existing submitted-line rule applies. The spawn records whether its
+  argv received the hook before the agent's terminal host starts, fenced by launch generation. Reload restores that
+  flag; older rows default unhooked and stay unchecked. The anchor is an in-memory monotonic instant, reset with the
+  diagnostic latch on every relaunch and supervisor restart, so a picked-up launch starts its clock at the next
+  qualifying Enter after reload rather than recovering the time of an earlier Enter. A Resume carries its identity and
+  therefore stays silent even if its new hook never reports. The warning changes no offer or admission rule.
 
   **Codex attribution and exact-record validation.** The hook records its own process ancestry when it makes a report,
-  and the supervisor anchors that chain at the session's owned pane process (see the shared framework below). For a
-  Codex report, the innermost native executable whose basename is `codex` is the emitter. Any processes above it are
-  launch ancestry, including resident Codex-named launchers, scripts, shells and package managers. The supported process
-  chains are documented in [the Codex integration](website/src/content/docs/docs/agents/codex.md). The reporter must
-  spell the installed hook invocation (`<farhelm> internal hook …`, matched syntactically so an upgraded supervisor
+  and the supervisor anchors that chain at the session's agent terminal's root process (see the shared framework below).
+  For a Codex report, the innermost native executable whose basename is `codex` is the emitter. Any processes above it
+  are launch ancestry, including resident Codex-named launchers, scripts, shells and package managers. The supported
+  process chains are documented in [the Codex integration](website/src/content/docs/docs/agents/codex.md). The reporter
+  must spell the installed hook invocation (`<farhelm> internal hook …`, matched syntactically so an upgraded supervisor
   still accepts older hooks), and every link between that reporter and the emitter must be a narrow shell trampoline
   directly invoking it (`sh -c '<farhelm> internal hook …'` — the shape vendor hook runners produce) as exactly one
   simple command: any unquoted control operator, redirection, substitution, or other executable shell syntax refuses
@@ -4418,8 +4367,8 @@ channel records these notices.
   is separate from the lifecycle claim: a pre-publication hook must not wait for its own launcher. A repeated report
   preserves an established thread binding. Writes compare the generation and complete prior locator, including an
   initially absent capture. A report made before in-memory publication waits on disk and is applied on the first pass
-  after publication, which discovers the owned pane from tmux when the row has not recorded it yet. Historical bare
-  Codex IDs are retained but fail closed rather than being guessed into a new locator.
+  after publication, once the session's published entry holds the agent's terminal. Historical bare Codex IDs are
+  retained but fail closed rather than being guessed into a new locator.
 
   Admission and pending confirmation verify the exact file; passes, list/info snapshots and replayed creates use the
   stored binding. Restart verifies once before any launch mutation. A missing file persists withdrawal through the
@@ -4431,9 +4380,9 @@ channel records these notices.
   capture claim, complete-binding CAS, ownership provenance, and mirror helper as Codex. Its corridor requires exactly
   one native `grok` image with `--no-leader` in the option region, followed only by the hook-shaped reporter and the
   same narrow shell trampoline. A nested Grok, foreign session runtime, missing option, or unreadable argv refuses the
-  report. This is the supported native corridor. The pane process is accepted by position, so one resident wrapper keeps
-  capture, unless it looks like a Grok Farhelm does not recognise (argv[0] basename `grok`, or an image basename
-  `grok-*`): that refuses, so a recognised nested Grok cannot stand in for the session's own.
+  report. This is the supported native corridor. The terminal's root process is accepted by position, so one resident
+  wrapper keeps capture, unless it looks like a Grok Farhelm does not recognise (argv[0] basename `grok`, or an image
+  basename `grok-*`): that refuses, so a recognised nested Grok cannot stand in for the session's own.
 
   The hook parser accepts the observed snake_case and camelCase spellings for session id, event name, and transcript
   path, and requires duplicate spellings to agree after event-name normalization. `SessionStart` alone selects a UUID
@@ -4462,35 +4411,35 @@ channel records these notices.
   its argv (optional evidence: `/proc` exe plus bounded NUL cmdline on Linux, a bounded `KERN_PROCARGS2` argv reader on
   macOS, 64 KiB per process and 1 MiB per walk, with over-budget or truncated argv recorded as missing rather than
   prefix-matched), plus the working directory of Bun and Node processes, whose relative entry spelling OMP attribution
-  resolves. Collection does not know the pane, so it climbs until the ancestry ends, a process cannot be read, or a
+  resolves. Collection does not know the terminal, so it climbs until the ancestry ends, a process cannot be read, or a
   budget runs out, and notes why it stopped; every edge and image is then re-read, and the chain is cut below the first
   one that changed (an exec between observation and re-read). Anchoring runs in the supervisor, when it applies the
-  report: the chain must contain the session's current pane process, by pid and start token while that process is alive
-  and by pid alone once it has exited and tmux still lists the pane (tmux 3.8 no longer reports a dead pane's pid, so
-  there a report applied after its agent exited is refused; a known gap), and is cut there; it must be one unbroken line
-  of parents within the depth and argv budgets, re-checked because the chain is now file input. Every launch runs a new
-  pane process, so anchoring is also what ties a report to its launch, for every vendor. The per-kind step applies its
-  own restrictive corridor to the anchored chain — only the reporter plus a narrow trampoline between runtime and
-  reporter; any other session-hosting runtime or unclassified intermediary below the emitter refuses. Codex attributes
-  its hook-shaped reporter through shell-`-c` trampolines to the innermost native `codex`, accepts arbitrary ancestry
-  above it, and applies its durable process pin. Claude and Muse select their emitter by position through the same
-  narrow hook trampolines, accepts arbitrary ancestry above it, and uses the shared pin with every ancestor eligible to
-  correct it. Grok retains exactly one native image with the required `--no-leader` option. Admission runs five steps:
-  cheap envelope/kind/generation gating with no vendor I/O (the report file's discriminator check re-applied against the
-  fenced resolution, plus raw event/source/agent-identity validation before diagnostic sanitation); the unbounded
-  capture claim (one shared session-keyed `capture_locks` registry for report admission and readiness refresh, never the
-  lifecycle claim; slow waits are logged for diagnostics) and a reload comparing kind, generation, and the complete
-  prior binding; the mutation-free runtime and vendor-root proofs over the recorded chain (evidence recorded when the
-  report was made cannot change during verification, so there is no repeat walk); the atomic
-  generation-plus-complete-binding CAS committing identity, locator, provenance, source, readiness reset, and, for
-  pinned kinds, the replacement pin and any correction notification together, with the exact prior pin as an additional
-  fence; and the mirror of only the committed result into the matching current-generation entry under the same claim.
-  Rejection at any pre-write step changes nothing durable, in memory, pending, or offered. Refresh and report-only
-  reconciliation passes take the same claim and reload before mirroring, carrying the row's version beside the identity,
-  so memory-derived offers apply the same gate as row-derived ones without a second lookup — and a rejected report never
-  triggers a readiness withdrawal through them. Restart verification and lifecycle resets retain their durable
-  generation/binding fences; they do not all acquire this capture claim. The report claim has no time limit because
-  every operation under it is local and no hook waits on it; a slow wait is logged for diagnostics.
+  report: the chain must contain the session's current terminal root process (its terminal host's child), by pid and
+  start token pinned while that process ran, and by pid alone for a child that had already exited when its host was
+  adopted (`procs::TerminalAnchor`), and is cut there; it must be one unbroken line of parents within the depth and argv
+  budgets, re-checked because the chain is now file input. Every launch runs a new root process, so anchoring is also
+  what ties a report to its launch, for every vendor. The per-kind step applies its own restrictive corridor to the
+  anchored chain — only the reporter plus a narrow trampoline between runtime and reporter; any other session-hosting
+  runtime or unclassified intermediary below the emitter refuses. Codex attributes its hook-shaped reporter through
+  shell-`-c` trampolines to the innermost native `codex`, accepts arbitrary ancestry above it, and applies its durable
+  process pin. Claude and Muse select their emitter by position through the same narrow hook trampolines, accepts
+  arbitrary ancestry above it, and uses the shared pin with every ancestor eligible to correct it. Grok retains exactly
+  one native image with the required `--no-leader` option. Admission runs five steps: cheap envelope/kind/generation
+  gating with no vendor I/O (the report file's discriminator check re-applied against the fenced resolution, plus raw
+  event/source/agent-identity validation before diagnostic sanitation); the unbounded capture claim (one shared
+  session-keyed `capture_locks` registry for report admission and readiness refresh, never the lifecycle claim; slow
+  waits are logged for diagnostics) and a reload comparing kind, generation, and the complete prior binding; the
+  mutation-free runtime and vendor-root proofs over the recorded chain (evidence recorded when the report was made
+  cannot change during verification, so there is no repeat walk); the atomic generation-plus-complete-binding CAS
+  committing identity, locator, provenance, source, readiness reset, and, for pinned kinds, the replacement pin and any
+  correction notification together, with the exact prior pin as an additional fence; and the mirror of only the
+  committed result into the matching current-generation entry under the same claim. Rejection at any pre-write step
+  changes nothing durable, in memory, pending, or offered. Refresh and report-only reconciliation passes take the same
+  claim and reload before mirroring, carrying the row's version beside the identity, so memory-derived offers apply the
+  same gate as row-derived ones without a second lookup — and a rejected report never triggers a readiness withdrawal
+  through them. Restart verification and lifecycle resets retain their durable generation/binding fences; they do not
+  all acquire this capture claim. The report claim has no time limit because every operation under it is local and no
+  hook waits on it; a slow wait is logged for diagnostics.
 
   **Ownership provenance and the offer gate.** Migration 20 adds `capture_ownership_version`
   (`INTEGER NOT NULL DEFAULT 0`, identical in fresh DDL and `ALTER`, tables kept `STRICT`): 0 means not established
@@ -4507,41 +4456,42 @@ channel records these notices.
   65 adds Muse's agent kind and report discriminator; its launch harness already existed. Senders predating either
   required variant fail closed at decode and at the missing CLI flag alike. Migration 21 adds `omp_reporter_asset`
   (nullable `TEXT`, identical in fresh DDL and `ALTER`): the gated reporter asset's file name as installed by the
-  session's current launch, written pre-spawn — after the launch spec publishes, before tmux can start anything — from
-  the one place that decides injection and fenced on the launch generation, so no report of the generation can arrive
-  ahead of its provenance. Migration 22 adds `omp_launch_program` the same way: the program that launch's argv started,
-  retained beside the marker so admission classifies the current launch rather than the resume template (a future
-  resume's command). OMP admission requires the marker to name the current binary's asset with the file's bytes
-  re-verified, so changing the asset breaks reporting for every OMP session already running (see "What running sessions
-  hold across versions"); pre-21 rows adopt `NULL` and fail closed. OMP takes no Codex-style exception: every older OMP
-  row has Restart unavailable (`not_captured`) until its first proven report.
+  session's current launch, written pre-spawn — after the launch spec publishes, before its terminal host can start
+  anything — from the one place that decides injection and fenced on the launch generation, so no report of the
+  generation can arrive ahead of its provenance. Migration 22 adds `omp_launch_program` the same way: the program that
+  launch's argv started, retained beside the marker so admission classifies the current launch rather than the resume
+  template (a future resume's command). OMP admission requires the marker to name the current binary's asset with the
+  file's bytes re-verified, so changing the asset breaks reporting for every OMP session already running (see "What
+  running sessions hold across versions"); pre-21 rows adopt `NULL` and fail closed. OMP takes no Codex-style exception:
+  every older OMP row has Restart unavailable (`not_captured`) until its first proven report.
 
   **Interim ownership states.** The discriminator gate applies to every kind now: it is envelope, migrated together.
   Attribution proofs apply to Claude, Codex, Muse, Grok, and OMP. Goose and Pi retain their existing acceptance behind
   the discriminator gate, and new framework entry points default to deny rather than allow. Claude admission runs under
   the shared capture claim, reloading the complete binding and pin before attribution and committing them in one CAS.
   The report's anchored chain (`procs::positional_corridor`), skipping the hook's narrow `sh -c` trampolines, identifies
-  the first remaining process as the emitter at any depth below the pane; the pane anchor itself ends that search. Every
-  process above the emitter through the pane is retained as a correction ancestor. It is positional on purpose: no
-  executable, command-line, or environment rule recognizes Claude. Claude's native binary is named after its version and
-  npm installs run under `node`, so an image rule would have to track install layouts, and the injected `--settings`
-  hook is a vendor detail that may change on its own; the closed attempt in PR #830 shows where following either leads.
-  Claude's first admitted selecting report pins the emitter by pid and start token. Reports from that emitter preserve
-  the original stored ancestors. A recorded ancestor takes precedence over liveness checks and corrects the pin and
-  plain conversation ID, recording `ClaudePinCorrected` once per launch in the same transaction. Notification-write
-  failure rolls the correction back; reload restores a committed correction even if publication was interrupted. Like
-  `CodexPinCorrected`, it remains unresolved because it records the earlier mistaken target. A gone, reused, or
-  non-running pin releases only when its identity is absent from the incoming report's complete chain; a descendant
-  cannot inherit authority after the pinned process exits. Unavailable process evidence never releases it. Relaunch
-  clears the shared pin, and abort does not restore it. Running sessions start unpinned after upgrade: if a parent's
-  report was lost, a nested Claude carrying a reporting hook can report first and be followed until an ancestor reports
-  at start, resume, clear, compact, or the end of a turn. That gap is accepted without upgrade machinery. Claude adds no
-  transcript verification, stays at ownership version 0, and leaves its per-kind offer predicate false: changing it
-  would withdraw existing Restart offers, and the pin needs no versioned offer gate. Codex, Grok, and OMP require
-  version 1 through the single per-kind predicate every surface consults; Goose and Pi keep their existing offer
-  behavior. There is no general report epoch. Grok's locator carries only its vendor-specific selection timestamp; no
-  other kind inherits that ordering rule. OMP uses serial cancellation fences, not cross-reporter chronology.
-  Pre-discriminator senders and outdated OMP reporter assets fail closed; neither is grandfathered.
+  the first remaining process as the emitter at any depth below the terminal's root process; that anchor itself ends
+  that search. Every process above the emitter through the root process is retained as a correction ancestor. It is
+  positional on purpose: no executable, command-line, or environment rule recognizes Claude. Claude's native binary is
+  named after its version and npm installs run under `node`, so an image rule would have to track install layouts, and
+  the injected `--settings` hook is a vendor detail that may change on its own; the closed attempt in PR #830 shows
+  where following either leads. Claude's first admitted selecting report pins the emitter by pid and start token.
+  Reports from that emitter preserve the original stored ancestors. A recorded ancestor takes precedence over liveness
+  checks and corrects the pin and plain conversation ID, recording `ClaudePinCorrected` once per launch in the same
+  transaction. Notification-write failure rolls the correction back; reload restores a committed correction even if
+  publication was interrupted. Like `CodexPinCorrected`, it remains unresolved because it records the earlier mistaken
+  target. A gone, reused, or non-running pin releases only when its identity is absent from the incoming report's
+  complete chain; a descendant cannot inherit authority after the pinned process exits. Unavailable process evidence
+  never releases it. Relaunch clears the shared pin, and abort does not restore it. Running sessions start unpinned
+  after upgrade: if a parent's report was lost, a nested Claude carrying a reporting hook can report first and be
+  followed until an ancestor reports at start, resume, clear, compact, or the end of a turn. That gap is accepted
+  without upgrade machinery. Claude adds no transcript verification, stays at ownership version 0, and leaves its
+  per-kind offer predicate false: changing it would withdraw existing Restart offers, and the pin needs no versioned
+  offer gate. Codex, Grok, and OMP require version 1 through the single per-kind predicate every surface consults; Goose
+  and Pi keep their existing offer behavior. There is no general report epoch. Grok's locator carries only its
+  vendor-specific selection timestamp; no other kind inherits that ordering rule. OMP uses serial cancellation fences,
+  not cross-reporter chronology. Pre-discriminator senders and outdated OMP reporter assets fail closed; neither is
+  grandfathered.
 
   Claude's `Stop` is an ordinary selecting report carrying the current conversation ID, not a confirmation of a prior
   `SessionStart`. It can establish the first pin, select from the pinned process, or correct from a recorded ancestor,
@@ -4687,30 +4637,31 @@ channel records these notices.
   (`capture_now`: the 2 s ticker, startup, reload, Restart) and does nothing while it is not recording. It takes a slot
   by renaming it to a private name, so a hook refilling the slot meanwhile is not deleted with it, checks the report
   (the vendor naming the session's durable kind, the conversation's size bound, the sub-agent marker, each vendor's
-  source vocabulary), anchors its chain at the current pane, and runs the five-step admission. An accepted or
-  definitively refused report is deleted; one that could not be read from disk, or was refused for an `Internal` failure
-  (a store or tmux that could not be read), or was judged while a relaunch moved the session to a new generation, is put
-  back unless the slot was refilled, in which case the newer report wins, and ends that session's pass. A report made
-  under an earlier launch, or whose pane no longer exists, fails the anchor and is discarded. Reports of a session that
-  is not published yet wait for the pass after publication. Drains never overlap; a taken slot found at the start of a
-  drain belongs to a supervisor that died mid-drain and is put back. A pass that finds another drain running skips
-  draining rather than waiting behind a slow admission; Restart is the exception and waits for it, then drains again,
-  because a report waiting on disk may name the conversation it is about to resume, and after the relaunch that report
-  would be discarded as the old launch's. The watch task also waits for the drain lock, so an event is never lost to an
-  already-running drain. Every settled report leaves a verdict line in the session's hook log, beside the hook's own
-  `written` line: `acked`, or `refused` with the error kind and reason. An `acked` Stop need not change the
-  conversation: Claude's or Muse's pin can silently turn a rival away, and Codex can acknowledge a Stop without effect.
-  Delete removes the drop directory; a pass removes one whose session no longer exists, which a hook racing the delete
-  can recreate. The supervisor creates the report root with mode 0700 before attaching notify's recommended recursive
-  watcher (inotify on Linux, default FSEvents on macOS). An independent task drains the whole root; a single stored wake
-  coalesces bursts and retains events during a drain. A 100 ms pause between drains bounds the feedback from retried
-  reports linked back into place. Access events are ignored so the drain's own reads cannot keep waking it. The timer
-  remains the backstop. Watch setup or backend failure logs once and disables the watch for that supervisor lifetime,
-  without changing periodic pickup. The ticker handle owns the watcher's cooperative stop; in-flight admission completes
-  before backend drop requests native shutdown (notify's inotify thread finishes asynchronously). A closed supervisor
-  lifetime channel ends an idle watch when the last supervisor reference disappears. macOS backend batching can add
-  latency; pickup on Linux is normally well below a second. A report made while no supervisor runs waits on disk for the
-  next one; a supervisor older than the hook binary (mid-update) may miss reports briefly, which is accepted.
+  source vocabulary), anchors its chain at the current terminal's root process, and runs the five-step admission. An
+  accepted or definitively refused report is deleted; one that could not be read from disk, or was refused for an
+  `Internal` failure (a store or terminal host that could not be read), or was judged while a relaunch moved the session
+  to a new generation, is put back unless the slot was refilled, in which case the newer report wins, and ends that
+  session's pass. A report made under an earlier launch, or whose terminal no longer exists, fails the anchor and is
+  discarded. Reports of a session that is not published yet wait for the pass after publication. Drains never overlap; a
+  taken slot found at the start of a drain belongs to a supervisor that died mid-drain and is put back. A pass that
+  finds another drain running skips draining rather than waiting behind a slow admission; Restart is the exception and
+  waits for it, then drains again, because a report waiting on disk may name the conversation it is about to resume, and
+  after the relaunch that report would be discarded as the old launch's. The watch task also waits for the drain lock,
+  so an event is never lost to an already-running drain. Every settled report leaves a verdict line in the session's
+  hook log, beside the hook's own `written` line: `acked`, or `refused` with the error kind and reason. An `acked` Stop
+  need not change the conversation: Claude's or Muse's pin can silently turn a rival away, and Codex can acknowledge a
+  Stop without effect. Delete removes the drop directory; a pass removes one whose session no longer exists, which a
+  hook racing the delete can recreate. The supervisor creates the report root with mode 0700 before attaching notify's
+  recommended recursive watcher (inotify on Linux, default FSEvents on macOS). An independent task drains the whole
+  root; a single stored wake coalesces bursts and retains events during a drain. A 100 ms pause between drains bounds
+  the feedback from retried reports linked back into place. Access events are ignored so the drain's own reads cannot
+  keep waking it. The timer remains the backstop. Watch setup or backend failure logs once and disables the watch for
+  that supervisor lifetime, without changing periodic pickup. The ticker handle owns the watcher's cooperative stop;
+  in-flight admission completes before backend drop requests native shutdown (notify's inotify thread finishes
+  asynchronously). A closed supervisor lifetime channel ends an idle watch when the last supervisor reference
+  disappears. macOS backend batching can add latency; pickup on Linux is normally well below a second. A report made
+  while no supervisor runs waits on disk for the next one; a supervisor older than the hook binary (mid-update) may miss
+  reports briefly, which is accepted.
 
   Grok uses the same hook executable and report files but not this injection path. Its native TUI cannot take a
   per-launch hook overlay, so the user installs three matcher groups under `$GROK_HOME/hooks`: one each for
@@ -4781,34 +4732,34 @@ channel records these notices.
   is a composition: launch provenance (the session's durable launch record naming the current gated asset, with the
   file's bytes re-verified, so a reload is proven rather than trusted) establishes that the launch installed the gated
   reporter, and process attribution establishes that the reporter descends from that launched runtime — together they
-  imply the report passed the asset's context gate. Attribution walks the shared mechanics to the current owned pane and
-  applies OMP's restrictive corridor over the installation descriptor the durable launch argv selects — classified at
-  spawn and retained with the generation's provenance, never re-derived from the resume template: `Oj` (the selected Bun
-  running the selected bundle `dist/cli.js` or source-tree `src/cli.ts`, entry spellings resolved through symlinks
-  because the installed `omp` command is one), `Ob` (the compiled target with TUI grammar), `L` (an exact `bun x`/`bunx`
-  or expanded npm/npx argument pattern above the runtime, Bun-resulting only), `S` (a known transparent
-  `sh -c 'exec <runtime>'` trampoline, or an exec'd-away shell that leaves no link). Nested or additional
-  session-hosting runtimes of any kind, unclassified intermediaries, Node-executed OMP, unknown wrappers, ambiguous
-  package scripts, and a Bun or Node pane process above the reporting runtime whose arguments cannot be read (which
-  would otherwise let a nested runtime below it stand as the emitter) all refuse, for every launch program. Under a
-  `bun x` or npm launch, a readable pane keeps its positional exemption without an expected-launcher match, because npm
-  rewrites its process arguments and that match would refuse real launchers. An installed `omp` launch has no launcher
-  at its pane, so there any Bun or Node pane that is not the reporting runtime refuses, readable or not. The live
-  runtime argv is re-read through the same grammar injection uses, so a process that exec'd from a TUI launch into a
-  utility or print shape refuses too. Admission checks the report's recorded ancestry once, anchored to the current
-  owned pane. The source vocabulary is the asset's four tags (`session_start`, `session_switch` with its opaque upstream
-  reason, `session_branch`, `agent_end`), allowlisted at the doorway and re-checked at admission; `agent_id` stays a
-  rejection signal. The session-file header stays a pre-resume file↔id check, not ownership evidence, and a parent
-  lineage field never rejects. Supported versions are 18.2.4 and 18.2.6 with equal gate-semantic pins verified at the
-  pinned sources (static claim, no runtime probe). Compiled and package-launcher forms have chain-level shape coverage;
-  live lifecycle evidence covers the Bun-executed entry. The npm/npx patterns do not match live npm's rewritten process
-  arguments. On Debian, Ubuntu and other Linux systems whose `sh` is dash, npm's resident non-exec `sh -c` link is an
-  unclassified intermediary, so the agent runs but its conversation reports are refused and Restart stays unavailable.
-  Bash can exec that shell away, leaving npm as the pane process whose readable arguments need no launcher match; this
-  path is untested live, including on macOS. Node execution and unknown wrapper shapes remain refused, as described in
-  `website/src/content/docs/docs/agents/omp.md`. A direct `bun <entry>` launch is classified apart from `bun x` and,
-  like an installed `omp` launch, has no launcher at its pane, so a Bun or Node pane that is not the reporting runtime
-  refuses there.
+  imply the report passed the asset's context gate. Attribution walks the shared mechanics to the current agent
+  terminal's root process and applies OMP's restrictive corridor over the installation descriptor the durable launch
+  argv selects — classified at spawn and retained with the generation's provenance, never re-derived from the resume
+  template: `Oj` (the selected Bun running the selected bundle `dist/cli.js` or source-tree `src/cli.ts`, entry
+  spellings resolved through symlinks because the installed `omp` command is one), `Ob` (the compiled target with TUI
+  grammar), `L` (an exact `bun x`/`bunx` or expanded npm/npx argument pattern above the runtime, Bun-resulting only),
+  `S` (a known transparent `sh -c 'exec <runtime>'` trampoline, or an exec'd-away shell that leaves no link). Nested or
+  additional session-hosting runtimes of any kind, unclassified intermediaries, Node-executed OMP, unknown wrappers,
+  ambiguous package scripts, and a Bun or Node root process above the reporting runtime whose arguments cannot be read
+  (which would otherwise let a nested runtime below it stand as the emitter) all refuse, for every launch program. Under
+  a `bun x` or npm launch, a readable root process keeps its positional exemption without an expected-launcher match,
+  because npm rewrites its process arguments and that match would refuse real launchers. An installed `omp` launch has
+  no launcher at its terminal's root, so there any Bun or Node root process that is not the reporting runtime refuses,
+  readable or not. The live runtime argv is re-read through the same grammar injection uses, so a process that exec'd
+  from a TUI launch into a utility or print shape refuses too. Admission checks the report's recorded ancestry once,
+  anchored to the current agent terminal's root process. The source vocabulary is the asset's four tags
+  (`session_start`, `session_switch` with its opaque upstream reason, `session_branch`, `agent_end`), allowlisted at the
+  doorway and re-checked at admission; `agent_id` stays a rejection signal. The session-file header stays a pre-resume
+  file↔id check, not ownership evidence, and a parent lineage field never rejects. Supported versions are 18.2.4 and
+  18.2.6 with equal gate-semantic pins verified at the pinned sources (static claim, no runtime probe). Compiled and
+  package-launcher forms have chain-level shape coverage; live lifecycle evidence covers the Bun-executed entry. The
+  npm/npx patterns do not match live npm's rewritten process arguments. On Debian, Ubuntu and other Linux systems whose
+  `sh` is dash, npm's resident non-exec `sh -c` link is an unclassified intermediary, so the agent runs but its
+  conversation reports are refused and Restart stays unavailable. Bash can exec that shell away, leaving npm as the root
+  process whose readable arguments need no launcher match; this path is untested live, including on macOS. Node
+  execution and unknown wrapper shapes remain refused, as described in `website/src/content/docs/docs/agents/omp.md`. A
+  direct `bun <entry>` launch is classified apart from `bun x` and, like an installed `omp` launch, has no launcher at
+  its terminal's root, so a Bun or Node root process that is not the reporting runtime refuses there.
 
   **The instructions pointer.** The same hook carries a second job, added because it costs nothing extra: with
   `--announce` on its injected command line it prints one line on stdout after writing its report, telling the agent
@@ -4839,25 +4790,25 @@ channel records these notices.
 - Per-session spawn credential: random token in the session's environment (`FARHELM_SESSION_ID`,
   `FARHELM_SESSION_TOKEN`, socket path), checked by the supervisor on the unix socket. These variables, like the rest of
   what a session holds, stay meaningful to newer binaries (see "What running sessions hold across versions").
-- Process-tree ownership (SPEC.md's stop/reap promises): killing the tmux pane is not enough — tmux signals the
-  foreground process group, and daemonized descendants escape it. The portable sweep combines the pane's descendant tree
-  with environment-marker selection through the platform process API. Every marker selection requires the matching
-  `FARHELM_SESSION_ID`. The agent reap shared by Stop and Restart selects the agent's `FARHELM_AGENT_ID`; Stop then
-  closes the terminal tabs under its existing lifecycle claim, while Restart keeps them. Delete selects the whole
-  session, including tabs; closing one tab selects its exact `FARHELM_TAB_ID`. Agent selection also retains the existing
-  legacy case with neither kind marker. These are process-ownership hints, not authenticated credentials; across
-  versions they follow "What running sessions hold across versions", and nothing older than the markers themselves is
-  promised beyond the legacy case above. Launch boundaries scrub the opposite kind's marker so nested supervisors do not
-  misclassify a new agent as an outer tab's process. On both platforms the marker is read from the memory where the
-  kernel placed the environment at exec (`/proc/<pid>/environ` on Linux, `KERN_PROCARGS2` on macOS), which is live: a
-  program that rewrites its process title can overwrite it, and SPEC.md accepts that such a detached process escapes the
-  sweep.
+- Process-tree ownership (SPEC.md's stop/reap promises): ending a terminal is not enough — its hangup reaches the
+  terminal's foreground processes, and daemonized descendants escape it. The portable sweep combines the descendant tree
+  of the terminal's root process (its terminal host's child) with environment-marker selection through the platform
+  process API. Every marker selection requires the matching `FARHELM_SESSION_ID`. The agent reap shared by Stop and
+  Restart selects the agent's `FARHELM_AGENT_ID`; Stop then closes the terminal tabs under its existing lifecycle claim,
+  while Restart keeps them. Delete selects the whole session, including tabs; closing one tab selects its exact
+  `FARHELM_TAB_ID`. Agent selection also retains the existing legacy case with neither kind marker. These are
+  process-ownership hints, not authenticated credentials; across versions they follow "What running sessions hold across
+  versions", and nothing older than the markers themselves is promised beyond the legacy case above. Launch boundaries
+  scrub the opposite kind's marker so nested supervisors do not misclassify a new agent as an outer tab's process. On
+  both platforms the marker is read from the memory where the kernel placed the environment at exec
+  (`/proc/<pid>/environ` on Linux, `KERN_PROCARGS2` on macOS), which is live: a program that rewrites its process title
+  can overwrite it, and SPEC.md accepts that such a detached process escapes the sweep.
 
   Stop keeps its existing supervisor-owned mutation and lifecycle claim through the agent reap and every tab close. Its
   tab close borrows that claim instead of acquiring another one; explicit and automatic closes still own their cleanup
   task so caller cancellation cannot strand a sweep. Stop includes dead-but-unreaped tabs, attempts the other tabs after
-  a close failure, and returns the unresolved cleanup in `SessionStopped.notice`. A failed tmux discovery still permits
-  closing known host tabs. The GUI shows that notice through its ordinary per-session action result.
+  a close failure, and returns the unresolved cleanup in `SessionStopped.notice`. The GUI shows that notice through its
+  ordinary per-session action result.
 
   `StopSession.refuse_if_tabs_open` and `refuse_if_agent_running` are default-false fields omitted when false. Before
   recording intent or signalling anything, the tab guard requires a successful listing with no open tabs, and the agent
@@ -4872,13 +4823,13 @@ channel records these notices.
   helm would send unrestricted Stop without asking about tabs. Treating the change as additive would let that old client
   close tabs it never received permission to close.
 
-  Automatic tab cleanup rechecks the whole tab window under its lifecycle claim before signalling: an old ticker death
-  observation does not authorize ending a shell that is live now. Its log names the tab, pane and tmux death report.
-  Window kills validate pane and session identity in the same synchronous tmux command group as the kill, so a vanished
-  pane cannot redirect cleanup to its session's current window. Explicit tab closes and failed-open cleanup name their
-  reason. Each process-sweep signal logs the target and a capped list of successful syscall recipients. Scope signals
-  log a capped best-effort direct-member snapshot, or mark it unavailable; membership can change before systemd delivers
-  the signal, and nested cgroup members are not included in that diagnostic snapshot.
+  Automatic tab cleanup goes ahead only while the tab's runtime says its shell exited, checked under its lifecycle claim
+  before signalling: an old exit observation does not authorize ending a shell that is live now. The tab's host is then
+  ended through its runtime or by the verified signal, which checks the host's own identity, so a host that went away
+  cannot redirect cleanup to another. Explicit tab closes and failed-open cleanup name their reason. Each process-sweep
+  signal logs the target and a capped list of successful syscall recipients. Scope signals log a capped best-effort
+  direct-member snapshot, or mark it unavailable; membership can change before systemd delivers the signal, and nested
+  cgroup members are not included in that diagnostic snapshot.
 
   The sweep sends SIGTERM, allows a short grace, quiesces with SIGSTOP, re-enumerates, sends SIGKILL, and polls for
   confirmed disappearance. PID/start-time revalidation narrows reuse races; it does not make the separate identity read
@@ -4886,30 +4837,30 @@ channel records these notices.
   provide containment on Linux (M3): where a functional systemd user manager exists — probed by actually running a
   trivial transient scope and then showing, killing, and confirming the collection of it, not by `which`, and through
   absolute binary paths so a login shell's `$PATH` cannot substitute what the probe approved — each launch is wrapped in
-  its own generation-named scope (audited on systemd 255: the wrapper execs in place, so the pane's process tree, exit
-  codes, and liveness checks see exactly the unwrapped shape), the per-launch SELECTION is recorded durably as a boolean
-  while the unit name is re-derived from session id plus generation at every use (a stored name would let a tampered row
-  aim a kill at another session's unit), and stop kills through the scope first — SIGTERM, the same grace the sweep
-  gives, SIGKILL, then confirming the unit was actually collected, because `systemctl kill` returning only proves
-  delivery. The manager is probed once and the answer cached, with two exceptions. A probe that runs out of time (15
-  seconds overall, 5 per query) is not an answer, since a busy manager is not an absent one: that launch runs without
-  its own scope, and the first launch or teardown at least a minute later probes again. Teardown waits out that minute
-  too (decided 2026-09-30): Stop, Restart, Delete and tab close on a session or tab whose scope is recorded (a scoped
-  launch row, a tab window marked as opened in a scope, or an unmarked tab of a scoped session) refuse until it has
-  passed, because a scope that cannot be checked is an unconfirmed cleanup (below), and the periodic reaping of dead
-  tabs warns on each tick for the same reason. Probing again for every such teardown would cost up to the probe's 15
-  seconds each while the manager stays slow, which is what the minute exists to avoid; a timed-out probe is rare, and a
-  retry after the minute probes again and succeeds once the manager answers. A definite negative stays cached, except
-  that teardown with evidence of a scope gets one re-probe: a unit its durable row says was scoped, a tab whose window
-  records that it was opened in a scope, an unmarked tab of a scoped session, and an unmarked tab of an unscoped session
-  (skipped quietly if the manager is still unusable, since nothing shows it ever had a scope).
+  its own generation-named scope (audited on systemd 255: the wrapper execs in place, so the terminal's process tree,
+  exit codes, and liveness checks see exactly the unwrapped shape), the per-launch SELECTION is recorded durably as a
+  boolean while the unit name is re-derived from session id plus generation at every use (a stored name would let a
+  tampered row aim a kill at another session's unit), and stop kills through the scope first — SIGTERM, the same grace
+  the sweep gives, SIGKILL, then confirming the unit was actually collected, because `systemctl kill` returning only
+  proves delivery. The manager is probed once and the answer cached, with two exceptions. A probe that runs out of time
+  (15 seconds overall, 5 per query) is not an answer, since a busy manager is not an absent one: that launch runs
+  without its own scope, and the first launch or teardown at least a minute later probes again. Teardown waits out that
+  minute too (decided 2026-09-30): Stop, Restart, Delete and tab close on a session or tab whose scope is recorded (a
+  scoped launch row, or a tab whose host's tag records a scope) refuse until it has passed, because a scope that cannot
+  be checked is an unconfirmed cleanup (below), and the periodic reaping of dead tabs warns on each tick for the same
+  reason. Probing again for every such teardown would cost up to the probe's 15 seconds each while the manager stays
+  slow, which is what the minute exists to avoid; a timed-out probe is rare, and a retry after the minute probes again
+  and succeeds once the manager answers. A definite negative stays cached, except that teardown with evidence of a scope
+  gets one re-probe: a unit its durable row says was scoped, and a tab whose host's tag records that it was opened in a
+  scope.
 
   Confirmed 2026-11-08: the shared reaper skips the machine-wide marker scan and PPID walk only when containment is
   established for every target, a usable manager handles at least one named scope, every named scope is confirmed
   collected, and no validated explicit root survives afterwards. It checks only those root identities, not the process
-  table, before deciding. Confirmed 2026-11-10: stock systemd-linked tmux moves pane jobs into sibling
-  `tmux-spawn-*.scope` units. Those jobs may survive scope-only Stop, Restart, Replace, Delete or tab close, as intended
-  when running them under tmux; the server inside the scope still ends. The reaper does no tmux membership inspection.
+  table, before deciding. Confirmed 2026-11-10: a stock systemd-linked tmux the user runs in a session moves its pane
+  jobs into sibling `tmux-spawn-*.scope` units. Those jobs may survive scope-only Stop, Restart, Replace, Delete or tab
+  close, as intended when running them under tmux; the user's tmux server inside the scope still ends. The reaper does
+  no tmux membership inspection.
 
   When the conditions for scope-only cleanup do not hold, the reaper runs the existing portable sweep unchanged. A named
   scope must be observed live before signalling and confirmed collected afterwards; an already-gone or initially
@@ -4917,7 +4868,7 @@ channel records these notices.
   agent exited therefore always sweep. Scope-name provenance and containment completeness are separate inputs: a guessed
   name that is absent does not prove that a target was scoped. An unscoped launch, an unscoped tab or unavailable
   selection keeps the sweep required even when optional scope names are added. Delete combines the agent's and every
-  tab's selection, including host tags and tmux scope markers, so a scoped agent cannot hide an unscoped tab's cleanup
+  tab's selection, including what each host's tag records, so a scoped agent cannot hide an unscoped tab's cleanup
   requirement. It also keeps the sweep when discovery is incomplete: no agent terminal, or an agent host past generation
   zero, means historical unscoped tab jobs may remain. A systemd glob can supply scope handles in those cases, but
   cannot prove that no such jobs exist. Existing discovery errors still refuse Delete; a successful empty listing does
@@ -4934,36 +4885,32 @@ channel records these notices.
   the operation even when the sweep found nothing (SPEC.md, Lifecycle operations), since the scope is what catches the
   processes the sweep cannot see. A silent Farhelm waypoint step sits between the login shell and wrapper, outside the
   scope, and execs onward without changing the eventual process tree. A wrapper that fails runs before the shim can
-  write its exec-failure sentinel; the generation's waypoint and unconsumed spec on an owned dead pane distinguish that
-  **error** from a login shell that exited first.
+  write its exec-failure sentinel; the generation's waypoint and unconsumed spec in an exited agent terminal distinguish
+  that **error** from a login shell that exited first.
 
   Terminal tabs also receive separate scopes, named from the session and tab IDs. A tab has no database row, so whether
-  its open selected a scope is recorded as an option on its tmux window, and closing the tab decides from that whether
-  an unconfirmable scope fails the close. The session's own launch is no substitute: the agent and a later tab can see
-  different verdicts about the user manager. A window opened before that option existed is treated as scoped for
-  re-probe and failure policy when the session's launch was, but its unknown selection still requires the portable
-  sweep. Otherwise it still gets the one re-check of the manager, its scope skipped only if the manager stays unusable.
-  Delete collects those units both from tmux-discovered tabs and independently from the systemd manager using the
-  session-specific tab-unit glob. The second source preserves a cleanup handle when tmux no longer supplies tab IDs. A
-  manager enumeration failure is distinct from having no usable manager; it can refuse Delete before the portable sweep.
+  its open selected a scope is recorded in its host's tag, and closing the tab decides from that whether an
+  unconfirmable scope fails the close. The session's own launch is no substitute: the agent and a later tab can see
+  different verdicts about the user manager. A tab whose host's tag cannot be read (a startup placeholder) counts as
+  unscoped, which keeps the portable sweep required. Delete collects those units both from the session's tab hosts and
+  independently from the systemd manager using the session-specific tab-unit glob. The second source preserves a cleanup
+  handle when no host supplies a tab's ID any more. A manager enumeration failure is distinct from having no usable
+  manager; it can refuse Delete before the portable sweep.
 
   Containment starts at the agent launch, after login-shell initialization: the cgroup wrapper and the shim's
   environment markers deliberately exclude services started by shell startup files. A detached startup-file service may
   belong to the user's ambient login environment and need not be reaped on session teardown. A child that remains in the
-  pane's process tree can still be found by the ordinary descendant walk; this is an exclusion from guaranteed cleanup,
-  not a promise that every startup-file child survives.
+  terminal's process tree can still be found by the ordinary descendant walk; this is an exclusion from guaranteed
+  cleanup, not a promise that every startup-file child survives.
 
-  Terminal tabs are the deliberate opposite. A tab's session and tab markers are set on the tmux window before its login
-  shell starts, and its scope wraps that shell, so everything the shell's startup files start is inside the tab's
-  containment and is reaped on close, auto-reap, and Delete, subject to the same residuals as the agent's processes (see
-  below; for an unscoped tab, a detached tab-started process whose environment is unreadable escapes the sweep). The tab
-  shell is itself what closing the tab promises to kill, and a tab has no shim that could run after initialization to
-  apply containment later. The agent launch has normally already run the same startup files outside containment, so
-  guarded startup logic usually reuses that instance, with one routine exception for a tmux autostart guarded by `TMUX`
-  being unset. In an old terminal the launch removes the private server's `TMUX` and `TMUX_PANE` only after those files
-  ran, so such an autostart fires in the first tab instead, and when no tmux server of the user's is running yet, that
-  tab starts and owns it (with `exec tmux`, a detach ends both the tab and the server). In a new terminal no `TMUX` is
-  set at any point, so the autostart runs during the agent's launch, and one that execs tmux keeps the agent from
+  Terminal tabs are the deliberate opposite. A tab's session and tab markers are in its host child's environment before
+  its login shell starts, and its scope wraps that shell, so everything the shell's startup files start is inside the
+  tab's containment and is reaped on close, auto-reap, and Delete, subject to the same residuals as the agent's
+  processes (see below; for an unscoped tab, a detached tab-started process whose environment is unreadable escapes the
+  sweep). The tab shell is itself what closing the tab promises to kill, and a tab has no shim that could run after
+  initialization to apply containment later. The agent launch has normally already run the same startup files outside
+  containment, so guarded startup logic usually reuses that instance. A tmux autostart guarded by `TMUX` being unset
+  runs during the agent's launch too, since no `TMUX` is set at any point, and one that execs tmux keeps the agent from
   starting (SPEC.md, "Session view"). A shared service dies with a tab only when the tab's startup files are the first
   to start it.
 
@@ -4983,15 +4930,16 @@ channel records these notices.
   claim a process for marker text that merely appears on its command line. One Mac residual on top of the shared ones:
   macOS 26+ withholds that environment region for Apple platform binaries even from a same-uid parent (observed on real
   hardware, pinned by a macOS-only test), so a reparented descendant exec'd into `/bin/sh` or another platform binary
-  escapes the marker scan there; the PPID closure still reaps it while it remains in the pane's tree. The planned close
-  is a session-id membership channel — tmux panes are session leaders and a SID survives fork, exec, and reparenting —
-  deferred until the gap proves to matter in practice. See lore/2026-07-27-m2-process-tree-stop.md for the alternatives
-  as they looked when this was decided. Another residual applies to unscoped launches and tabs, including every host
-  without a usable user manager: a detached descendant whose environment its own user cannot read. `ssh-agent` marks
-  itself non-dumpable, which makes `/proc/<pid>/environ` unreadable even to its owner (observed, not theorized), and it
-  calls `setsid`; a setuid program's environment is unreadable the same way. The sweep treats an unreadable environment
-  as unmarked, so once such a process has left the pane's tree nothing claims it. Only cgroup containment closes this;
-  the session-id channel would not, because `setsid` gives the process a new session id.
+  escapes the marker scan there; the PPID closure still reaps it while it remains in the terminal's tree. The planned
+  close is a session-id membership channel — a terminal's root process is a session leader and a SID survives fork,
+  exec, and reparenting — deferred until the gap proves to matter in practice. See
+  lore/2026-07-27-m2-process-tree-stop.md for the alternatives as they looked when this was decided. Another residual
+  applies to unscoped launches and tabs, including every host without a usable user manager: a detached descendant whose
+  environment its own user cannot read. `ssh-agent` marks itself non-dumpable, which makes `/proc/<pid>/environ`
+  unreadable even to its owner (observed, not theorized), and it calls `setsid`; a setuid program's environment is
+  unreadable the same way. The sweep treats an unreadable environment as unmarked, so once such a process has left the
+  terminal's tree nothing claims it. Only cgroup containment closes this; the session-id channel would not, because
+  `setsid` gives the process a new session id.
 
   **Process-number reuse inside a short window is accepted, for now.** Decided 2026-10-05. Code that signals or adopts a
   process by its number may lose the race in which that process exits and the kernel hands the number to an unrelated
@@ -5019,21 +4967,22 @@ channel records these notices.
   Error responses must not claim nothing was stored when publication completion is unknown. This does not change
   prepublication staging cleanup, no-clobber semantics, prompt desktop Quit, or the healthy-local-filesystem assumption.
 - The rest of the state directory: `supervisor.sock` (the unix socket that is the supervisor's only doorway — mode 0600,
-  inside a 0700 directory, because reaching it means running commands as the user), `tmux.sock` and `tmux.conf` for the
-  private tmux server, `hosts/` (0700, the terminal hosts' sockets; see "Terminal host"), `repo-cache/` (host-local
-  repository objects and permanent locks; see "Owned checkout admission and lifetime"), `hook-log/<session>.log` (each
-  session's hook diagnostics) and `hook-reports/<session>/` (its waiting report files; see "Report files"), and
-  `launch/` holding one 0600 JSON spec per LAUNCH, named `<session>.<generation>.json`, plus a `.status` failure
-  sentinel and an empty `.waypoint` proving a scoped command reached its wrapper step. The waypoint follows the same
-  generation cleanup and superseded-launch sweep as the spec; orphan waypoints are removed too. A launch spec carries
-  the agent's command line and the session credential, but nothing the session's own database row does not already hold,
-  in the same private state directory, for the session's whole lifetime (the plaintext invocation, and the credential
-  kept so a restart can inject the same one). Removing specs is therefore tidiness, not a credential boundary: the shim
-  unlinks its spec as soon as it has read it, creation removes it if the session never starts, and the supervisor's
-  startup sweep removes specs of sessions that no longer exist and of launches a later generation superseded. A
-  current-generation spec whose launch never reached the shim (a login shell that exited in its rc files, a reboot, or a
-  stop before launch) may stay until the session is deleted, whichever path observed the outcome (startup
-  reconciliation, the runtime observers, or Stop); Delete removes it.
+  inside a 0700 directory, because reaching it means running commands as the user), `tmux.sock` and `tmux.conf` only
+  where an earlier release's private tmux server left them, removed at startup once it is gone ("Ending the old private
+  tmux server"), `hosts/` (0700, the terminal hosts' sockets; see "Terminal host"), `repo-cache/` (host-local repository
+  objects and permanent locks; see "Owned checkout admission and lifetime"), `hook-log/<session>.log` (each session's
+  hook diagnostics) and `hook-reports/<session>/` (its waiting report files; see "Report files"), and `launch/` holding
+  one 0600 JSON spec per LAUNCH, named `<session>.<generation>.json`, plus a `.status` failure sentinel and an empty
+  `.waypoint` proving a scoped command reached its wrapper step. The waypoint follows the same generation cleanup and
+  superseded-launch sweep as the spec; orphan waypoints are removed too. A launch spec carries the agent's command line
+  and the session credential, but nothing the session's own database row does not already hold, in the same private
+  state directory, for the session's whole lifetime (the plaintext invocation, and the credential kept so a restart can
+  inject the same one). Removing specs is therefore tidiness, not a credential boundary: the shim unlinks its spec as
+  soon as it has read it, creation removes it if the session never starts, and the supervisor's startup sweep removes
+  specs of sessions that no longer exist and of launches a later generation superseded. A current-generation spec whose
+  launch never reached the shim (a login shell that exited in its rc files, a reboot, or a stop before launch) may stay
+  until the session is deleted, whichever path observed the outcome (startup reconciliation, the runtime observers, or
+  Stop); Delete removes it.
 - Symlink TOCTOU hardening of the state directory is intentionally absent. The directory create, chmod, lock, socket,
   and sweep operations are plain path-based calls that follow symlinks; making them airtight means `O_NOFOLLOW` opens,
   dir-fd-relative operations, and ownership verification throughout. Exploiting the gap requires write access to a
@@ -5444,7 +5393,7 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   list silently stopped advancing; dropping it re-asks the identity question against the row as it now stands.
 - A connected host's cache refresh is one request and one replacement: a single `ListSessions`, whose reply carries the
   host's whole list, then that host's whole cache slice replaced in one identity-bound write. One request per refresh
-  bounds round trips and pane-state queries; report reconciliation stays on the supervisor's timer rather than
+  bounds round trips and terminal-state reads; report reconciliation stays on the supervisor's timer rather than
   multiplying with polls and hints. A failed refresh records the failure and keeps the previous cache, never wiping it:
   the cache's whole job is to answer "what did this host have, last we knew" while the host is unavailable, so clearing
   it on failure would destroy the answer exactly when it becomes the only one available, and would make a transient
@@ -5538,10 +5487,10 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   are serialized against the host's own refresh, and a refresh whose drain predates one of them declines to commit
   rather than erasing it.
 - One field of such a reply is NOT taken as given: a status of `unknown` never overwrites a definite one. The protocol
-  is explicit that list and rename replies compute fresh pane liveness, while create and restart replies' `unknown`
+  is explicit that list and rename replies compute fresh terminal liveness, while create and restart replies' `unknown`
   means "not yet known" rather than "not running" — a create's and a restart's replies carry it deliberately, because at
-  the instant they are built the pane exists but the agent's own exec inside it has not been observed. Recording that
-  verbatim answered a successful restart with a badge saying the helm had no idea, for a session it had definite
+  the instant they are built the terminal exists but the agent's own exec inside it has not been observed. Recording
+  that verbatim answered a successful restart with a badge saying the helm had no idea, for a session it had definite
   knowledge about a moment earlier. Keeping the previous value would leave it stale until the next refresh computes the
   truth, so such a write also WAKES that host's refresh — a refresh-only wake that cuts short the wait between drains
   and touches nothing else (distinct from the retry verb, which drops the connection and re-enters the retry ladder).
@@ -5670,9 +5619,9 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   it is the app's own outdated or wedged one), or starts `farhelm supervisor run` detached, and it keeps running after
   the app quits (see "Side-by-side versions inside Farhelm.app").
 - Schema 29 adds the supervisor session column `launch_hooked` (integer, default 0). New spawns record the argv decision
-  before tmux starts; relaunch clears it, and a pending-create retry inserts a fresh unhooked decision before spawn
-  decides again. Older supervisors refuse this upgraded database on downgrade; upgrades preserve stored conversations
-  and notifications. No hook clock or diagnostic latch is persisted.
+  before the agent's terminal starts; relaunch clears it, and a pending-create retry inserts a fresh unhooked decision
+  before spawn decides again. Older supervisors refuse this upgraded database on downgrade; upgrades preserve stored
+  conversations and notifications. No hook clock or diagnostic latch is persisted.
 - Schema 30 adds the supervisor session column `launch_boot_ended` (integer, default 0), the boot-finality proof
   described under Runtime state. Older supervisors refuse this upgraded database on downgrade.
 - Schema 32 adds the supervisor session column `terminal_kind` (text, `tmux` or `host`, held to those two by a `CHECK`,
@@ -5735,9 +5684,9 @@ beside its installation snapshot from AppBody, independently of the filtered sid
   terminal; every supervisor start now resolves every unresolved row of it in one update fenced by neither session,
   generation nor conversation (`SessionStore::resolve_notifications_of_kind`). Its successor, `old_terminal_ended`
   (`NotificationKind::OldTerminalEnded`), is recorded at startup, at the converted launch's generation, for each session
-  whose agent the startup's ending of the old terminals converted to interrupted ("Terminal substrate: private tmux
-  server"); nothing resolves it, so a later start, which resolves `old_terminal` rows, leaves it as it is. The capture
-  pass touches neither. The first two say Restart cannot resume, so they are refused whenever the launch's row holds a
+  whose agent the startup's ending of the old terminals converted to interrupted ("Ending the old private tmux server");
+  nothing resolves it, so a later start, which resolves `old_terminal` rows, leaves it as it is. The capture pass
+  touches neither. The first two say Restart cannot resume, so they are refused whenever the launch's row holds a
   captured conversation, checked in the same statement as the insert, which is also what closes the race between a
   report's commit and the tripwire. The listing carries the last 10 on `SessionInfo::notifications` as sequence number,
   time, text and an additive `resolved` bool (false omitted and the decode default): the kind and generation stay
@@ -5936,9 +5885,9 @@ at `github_token::host_file(remote_state_dir)`, the shared `github-token` basena
 The supervisor's path-injected reader trims and rejects empty/NUL or unreadable values with fixed errors; NotFound keeps
 the ordinary child environment. Host agent and tab paths inject after `host_child_env` into `ChildSpec.env`, before the
 login shell, managed clone and launch shim. Restart reuses the agent seam. LaunchSpec, launch records, host
-argv/environment and tmux `-e` never carry this value. Container environments use the same in-container host file. The
-background spare-clone guard reads the same current file into only its child command's environment before its login
-shell; its persisted `BuildSpec` stays secret-free. No protocol or terminal-host change is needed.
+argv/environment never carry this value. Container environments use the same in-container host file. The background
+spare-clone guard reads the same current file into only its child command's environment before its login shell; its
+persisted `BuildSpec` stays secret-free. No protocol or terminal-host change is needed.
 
 Without a previous successful GitHub token stamp, delivery runs the token-free
 `gh auth setup-git --force --hostname github.com`; absence is a fixed warning after installing the file, and failure
@@ -6115,11 +6064,11 @@ their reasons. No synchronous probe fan-out gates opening the launcher.
 
 Lifecycle commands run on the place host. Wrap `podman run` and `podman start` in `systemd-run --user --scope --collect`
 with a reserved environment name and a per-attempt nonce. This keeps conmon and the container's network helper outside
-the helm's cgroup and a remote SSH login's lifetime. Resolve Podman to an absolute path and strip all `FARHELM_*` and
-private tmux variables from its environment before it can initialize shared Podman processes. Session and helper
-container names and all owned image tags carry the helm tag. Labels include `farhelm.helm=<tag>` and
-`farhelm.role=session|build|prepare`. Podman storage is per Unix account, so two helms or test runs must never reuse
-each other's builder, preparer or image names.
+the helm's cgroup and a remote SSH login's lifetime. Resolve Podman to an absolute path and strip all `FARHELM_*`
+variables and `TMUX`, `TMUX_PANE` and `TMUX_TMPDIR` from its environment before it can initialize shared Podman
+processes. Session and helper container names and all owned image tags carry the helm tag. Labels include
+`farhelm.helm=<tag>` and `farhelm.role=session|build|prepare`. Podman storage is per Unix account, so two helms or test
+runs must never reuse each other's builder, preparer or image names.
 
 Managed Ubuntu bootstraps a digest-pinned fully qualified Ubuntu image in a non-systemd container, installing systemd,
 sudo, curl, git and bash, creating its login user with passwordless sudo and enabling linger before committing. The
@@ -7020,10 +6969,10 @@ uninstall take the supervisor locks; a holder at that point is reported as usual
 with an `lsof` command that shows which. A refusal after the stop says the supervisor was stopped and that opening
 Farhelm starts it again.
 
-Uninstall ends no terminal. The private tmux server and any terminal hosts (see "Terminal host") outlive the supervisor
-by design, including the supervisor uninstall stops on macOS, and keep running with their sessions; stopping sessions
-first is the operator's prerequisite (SPEC.md, "Operator prerequisites and failure behavior"). The preview says so:
-sessions and their terminals keep running without the desktop app or the supervisor, and uninstall does not end them.
+Uninstall ends no terminal. Terminal hosts (see "Terminal host") outlive the supervisor by design, including the
+supervisor uninstall stops on macOS, and keep running with their sessions; stopping sessions first is the operator's
+prerequisite (SPEC.md, "Operator prerequisites and failure behavior"). The preview says so: sessions and their terminals
+keep running without the desktop app or the supervisor, and uninstall does not end them.
 
 The confirmation preview is flushed before mutation, and subsequent progress is buffered so an output-pipe failure does
 not interrupt removal midway. Filesystem and service failures retain the CLI, report concrete paths and operation
@@ -7107,11 +7056,10 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   `crates/farhelm-helm/units/`, the same ones remote provisioning fills in, and every file setup writes starts with
   `# managed-by: farhelm helm setup`: setup overwrites or removes only files carrying that marker, and refuses anything
   else rather than replacing it. It neither needs nor looks for tmux: the supervisor unit names none and its `PATH` is
-  the installed `farhelm`'s directory plus a fixed base ("Terminal substrate: private tmux server"). The matching rule
-  on the helm side is that the hosts panel never installs or updates a supervisor on the helm's own machine at all: an
-  absent one is answered with "run `farhelm helm setup` here", a unit already running that same binary is named as
-  setup's or its author's and left alone, and a supervisor that ANSWERS is discovered and registered exactly as a remote
-  one is.
+  the installed `farhelm`'s directory plus a fixed base ("Provisioning"). The matching rule on the helm side is that the
+  hosts panel never installs or updates a supervisor on the helm's own machine at all: an absent one is answered with
+  "run `farhelm helm setup` here", a unit already running that same binary is named as setup's or its author's and left
+  alone, and a supervisor that ANSWERS is discovered and registered exactly as a remote one is.
 - `farhelm helm token show|rotate` — web-token bootstrap and rotation.
 - `farhelm supervisor run` — run the supervisor in the foreground; this is SPEC.md's "run the binary with arguments in a
   terminal" path.
@@ -7317,6 +7265,23 @@ the generic package and the Mac loses its window; delete the `dist = false` and 
 Native glue (dock/menu integration, plus whatever proves genuinely necessary — see the clipboard note in the Dioxus
 risks) lives behind a feature flag in farhelm-ui, kept deliberately thin.
 
+The native desktop stores a versioned physical-pixel outer-frame rectangle and maximized flag separately from client
+credentials. Bootstrap's already resolved state directory is reused, so persistence cannot silently move to the current
+working directory if path resolution fails again. A missing file keeps the first-run window builder defaults; corrupt,
+unsupported, or display-unsafe state gets a monitor-fitting centered fallback. The geometry check requires the complete
+saved frame to fit one connected monitor and avoids arithmetic overflow. Tao provides monitor rectangles rather than
+work areas, so the fallback caps its size and a real macOS display/decorations check remains necessary. Wayland's raw
+window handle marks positions as unreliable: its move events do not replace the remembered position, and restore keeps a
+usable saved size while preserving maximization while the compositor chooses placement. Restore converts the saved outer
+size through Tao's inner-size API using the current outer-minus-inner decoration extent; a real macOS
+display/decorations check remains necessary. Fullscreen observations never replace the last ordinary frame or maximize
+state. The final state is written through a private sibling file and rename on close, with one best-effort retry at
+event-loop teardown; the rename is atomic for readers but parent-directory durability across a machine crash is best
+effort. Failures warn without preventing startup.
+
+Every pre-window desktop refusal prints one plain `farhelm-desktop: ...` stderr line and exits 1, and on macOS also
+sends it to Console and a critical native alert so a Finder or Spotlight launch has a visible diagnostic.
+
 ### Side-by-side versions inside Farhelm.app
 
 On the Mac the app bundle holds every kept version of the command-line program side by side, so that an update never
@@ -7339,15 +7304,15 @@ since it is not the version that record would name. Recognizing the layout is by
 the shape, so elsewhere nothing changes.
 
 Inside that layout the supervisor hands sessions two different programs. Its own launch shim (`internal launch`, run in
-each session's agent terminal, a tmux window or a terminal host's child) is its own versioned program, because the
-launch description it writes is read only by its own version. A terminal tab's helper (`internal tab-shell`) starts
-through the forwarder instead: tmux, or a terminal host's first stage holding its spec, can start a tab's shell after
-the supervisor that asked for it has stopped, and the forwarder claims the version it starts, which is this supervisor's
-own while it is there. Everything a session keeps beyond its supervisor's life names the forwarder instead: the hook
-command lines, the reporter variables, and the directory put first on the session's `PATH`. Desktop-managed supervisors
-before this layout ran from `Contents/MacOS/farhelm`, so sessions they started already hold that path, and putting the
-forwarder exactly there is what keeps them working without migration; it must never move. Outside the layout the
-supervisor uses its own program for all of these, as it always has.
+each session's agent terminal, a terminal host's child) is its own versioned program, because the launch description it
+writes is read only by its own version. A terminal tab's helper (`internal tab-shell`) starts through the forwarder
+instead: a terminal host's first stage holding its spec can start a tab's shell after the supervisor that asked for it
+has stopped, and the forwarder claims the version it starts, which is this supervisor's own while it is there.
+Everything a session keeps beyond its supervisor's life names the forwarder instead: the hook command lines, the
+reporter variables, and the directory put first on the session's `PATH`. Desktop-managed supervisors before this layout
+ran from `Contents/MacOS/farhelm`, so sessions they started already hold that path, and putting the forwarder exactly
+there is what keeps them working without migration; it must never move. Outside the layout the supervisor uses its own
+program for all of these, as it always has.
 
 A target release older than the first build with this installer (`HANDOFF_FLOOR` in `install.sh`, the lowest prerelease
 of the release that brought it, so its dev builds and release candidates are never handed off) cannot do the locked work
@@ -7461,8 +7426,8 @@ one, as before. Programs outside the layout take no lock. One program in the lay
 (`internal terminal-host`, "Terminal host"), started from the supervisor's own versioned program, lives for weeks, so
 holding its version would keep pruning and uninstall waiting on every terminal ever opened. It clears
 `FARHELM_VERSION_LOCK_FD` and closes every descriptor it inherited, a forwarder's lock included, and it never runs its
-own program again; like a running agent, it needs nothing from its version once it has started. The program in it holds
-its version the way a tmux window's does (below).
+own program again; like a running agent, it needs nothing from its version once it has started. The program it runs
+holds its version itself: an agent's through the hold step, a tab's through the forwarder (below).
 
 The forwarder's contract, which a later installer may only replace by rename and only with a script that forwards every
 older invocation the same way: it resolves its own real path (it is reached through `~/.local/bin/farhelm` from a
@@ -7544,8 +7509,8 @@ is written right after the spawn, so a crash in between leaves a supervisor the 
 it answers, and not replaced on an update until it exits. A long-lived supervisor keeps its version's lock, so pruning
 keeps that version until the supervisor is replaced.
 
-A session's window, or a terminal host's child for an agent in a host, runs the supervisor's own versioned `farhelm`,
-not the forwarder, so in this layout the supervisor starts it as `<farhelm> internal hold <spec> -- <shell argv>`
+A session's agent terminal (its terminal host's child) runs the supervisor's own versioned `farhelm`, not the forwarder,
+so in this layout the supervisor starts it as `<farhelm> internal hold <spec> -- <shell argv>`
 (`crates/farhelm-supervisor/src/session_hold.rs`) to hold the version through the login shell's startup. The hold step
 takes the version lock, starts a keeper (`internal keep-version`) and waits up to ten seconds for it to report ready,
 writes `<id>.<generation>.held` beside the launch spec with its own pid, and replaces itself with the shell, which
@@ -7559,15 +7524,14 @@ share that pid. A keeper that cannot start fails the session's start, recorded i
 launch failure, and so does a hold step or shim that cannot hold its version. The marks follow the spec through the
 startup sweep, a retaken create and delete; the startup sweep's removal of an unknown or superseded launch's marks is a
 start-up cleanup the maintainer approved for this case (2026-10-24), as "Cleanup on quit" asks. On an orderly stop the
-supervisor waits up to three seconds for the windows it started to show a `held` mark naming their pane's pid (for an
-agent in a host, its child's), including windows still being created when the stop begins; every tmux query in that wait
-is cut off at the remaining budget, so a tmux server that does not answer cannot hold the stop. A window that has not
-got there by then, or whose keeper is killed before the shim holds its own lock, is unprotected until it does; if an
-install removes its version in that moment the session fails to start, visibly, and starting it again works. A shell
-whose startup files `exec` another shell never reaches the shim, and its keeper then holds the version until the window
-closes. A terminal tab needs no hold step: its window starts the tab helper through the forwarder, which claims the
-version before the helper runs (the tab's environment names this supervisor's socket, so it picks this supervisor's
-version while that is there), and the helper replaces itself with the tab's shell, which needs no version afterwards.
+supervisor waits up to three seconds for the agent terminals it started to show a `held` mark naming their host child's
+pid, including ones still being created when the stop begins. A terminal that has not got there by then, or whose keeper
+is killed before the shim holds its own lock, is unprotected until it does; if an install removes its version in that
+moment the session fails to start, visibly, and starting it again works. A shell whose startup files `exec` another
+shell never reaches the shim, and its keeper then holds the version until the terminal closes. A terminal tab needs no
+hold step: its host starts the tab helper through the forwarder, which claims the version before the helper runs (the
+tab's environment names this supervisor's socket, so it picks this supervisor's version while that is there), and the
+helper replaces itself with the tab's shell, which needs no version afterwards.
 
 ### The desktop app's updater
 
@@ -7887,12 +7851,12 @@ supervisor whose sessions were never checked.
 On a remote Mac, uninstall instead removes the plist, removes the exact frozen job with `launchctl bootout` and confirms
 it is no longer loaded, then runs the same installed `stop-terminal-hosts` command before removing the lib directory and
 forgetting the host. Bootout deliberately leaves the job's children alone, so explicit terminal-host termination is
-required. There is no tmux cleanup. A loaded job, even one with no running PID, is treated as active because launchd
-could start it; an offline retry needs both the plist gone and the job absent. Inspection first verifies that the user's
-launchd domain is available, and accepts only launchctl's specific missing-job answer as absence. Other command failures
-refuse rather than passing for an already stopped job. A loaded job's plist path must match the frozen planned path,
-using the same canonical-path and home-normalization guards as the Linux unit fragment. A stop failure or an unconfirmed
-terminal host keeps the lib directory and host listed. The kept-data note and retry behavior are the same as Linux.
+required. A loaded job, even one with no running PID, is treated as active because launchd could start it; an offline
+retry needs both the plist gone and the job absent. Inspection first verifies that the user's launchd domain is
+available, and accepts only launchctl's specific missing-job answer as absence. Other command failures refuse rather
+than passing for an already stopped job. A loaded job's plist path must match the frozen planned path, using the same
+canonical-path and home-normalization guards as the Linux unit fragment. A stop failure or an unconfirmed terminal host
+keeps the lib directory and host listed. The kept-data note and retry behavior are the same as Linux.
 
 The checks run at planning and again under the run's lock at confirmation, by planning again and requiring the same
 plan, so one piece of code decides every fact the plan rests on. A connected host needs a fresh session list (a live
@@ -8029,23 +7993,47 @@ marks every directory dedicated or shared: a dedicated one converges on its mode
 existing directory, and that is the point), while a shared one is handed to `install -d` only when it is missing, and
 the confirmation text says an existing one keeps its permissions.
 
+The supervisor runs no tmux. The supervisor unit, whether provisioning or `farhelm helm setup` renders it, names no tmux
+and puts no tmux directory on `PATH`: its `PATH` is the directory of the Farhelm program it runs, then
+`/usr/local/bin:/usr/bin:/bin` (`farhelm_helm::units::render_supervisor_unit`). The Mac app bundles none and needs none,
+and hands its managed supervisor no tmux. `FARHELM_TMUX` is no longer passed to a terminal host's child (`host_launch`'s
+`NOT_INHERITED`). Nothing this release starts or renders sets it, but a supervisor unit an earlier release wrote keeps
+setting it until its next setup or Update; the supervisor ignores it.
+
+Earlier releases' Linux provisioning required a host tmux at or above a version floor (3.7c at the end) and, on most
+hosts, installed a private static build as `~/.local/lib/farhelm/tmux` to meet it. That directory holds the host's
+`farhelm` too, so it comes first on the unit's `PATH` and on the `PATH` a session starts with
+(`LaunchSpec.farhelm_bin_dir`), and a `tmux` typed in a session ran that copy rather than the host's own. Provisioning
+no longer inspects, downloads, uploads or installs any tmux, and every Linux Add and Update plan removes that file
+instead, as the step `remove-bundled-tmux` ("Remove the bundled tmux") between starting or restarting the supervisor and
+connecting to it, so that it never deletes a program an earlier supervisor that is still running may use. The step is in
+every Linux plan whether or not the file exists, because planning does not inspect for it and a missing file is a skip;
+it always names the private lib directory's `tmux`, never a file beside a registered binary that lives elsewhere (a
+shared bin directory may hold the user's own `tmux`). A remote Mac never had one and its plans have no such step. A
+personal tmux server the user started from the bundled copy keeps running from the deleted file. The remote removal
+looks the file up with `stat` in the C locale, like uninstall's stop step, and only the known missing-path diagnostics
+count as absence, so a parent directory the user cannot search fails the lookup rather than reading as already gone. A
+failed removal degrades the step instead of failing the run: the new supervisor already runs and the install does not
+depend on the file, so the run completes with a warning that the file may have been left in place (a command that timed
+out or lost its connection may still have removed it). Snapshot preparation skips the step, as it skips attachment and
+lingering: the sandbox image it installs into has no Farhelm installation (preparation refuses setup-managed installs
+and copied state), so it is not expected to carry an earlier tmux.
+
 The Linux supervisor unit uses `KillMode=process`. Sessions started through Farhelm belong to their terminals, which
-live in the unit's control group: each new terminal's terminal host, and for old sessions the private tmux server an
-earlier supervisor launched. systemd's default `control-group` policy would kill them and every session whenever an
-explicit UPDATE restarts the supervisor. Limiting the unit stop to its main process preserves the same ownership model
-as running `farhelm supervisor run` manually: stopping the supervisor detaches management, while the terminals continue
-to own the session processes until the user deletes them, the host reboots, or Farhelm is uninstalled from the host,
-which ends the terminal hosts and the private tmux server on purpose.
+live in the unit's control group: each terminal's terminal host. systemd's default `control-group` policy would kill
+them and every session whenever an explicit UPDATE restarts the supervisor. Limiting the unit stop to its main process
+preserves the same ownership model as running `farhelm supervisor run` manually: stopping the supervisor detaches
+management, while the terminals continue to own the session processes until the user deletes them, the host reboots, or
+Farhelm is uninstalled from the host, which ends the terminal hosts on purpose.
 
 The Linux supervisor unit also sets `UnsetEnvironment=FARHELM_SESSION_ID FARHELM_AGENT_ID FARHELM_TAB_ID`. The kill
-sweep claims every process carrying a session's markers and has no exemption for the supervisor or its private tmux
-server. A tab's startup file that runs a bare `systemctl --user import-environment`, or
-`dbus-update-activation-environment --systemd --all`, copies that tab's markers into the user manager; a supervisor
-started afterwards would inherit them, and deleting that session or closing that tab would make it signal itself, and a
-tmux server it started would take every old session's panes with it. A systemd-managed supervisor never legitimately
-belongs to a session, so stripping the markers is free. This covers supervisors started through the generated unit
-(local setup and provisioning share it); one started by hand from an environment carrying markers, and other user
-services that inherited them, are not protected, and the sweep deliberately has no protected-process set.
+sweep claims every process carrying a session's markers and has no exemption for the supervisor. A tab's startup file
+that runs a bare `systemctl --user import-environment`, or `dbus-update-activation-environment --systemd --all`, copies
+that tab's markers into the user manager; a supervisor started afterwards would inherit them, and deleting that session
+or closing that tab would make it signal itself. A systemd-managed supervisor never legitimately belongs to a session,
+so stripping the markers is free. This covers supervisors started through the generated unit (local setup and
+provisioning share it); one started by hand from an environment carrying markers, and other user services that inherited
+them, are not protected, and the sweep deliberately has no protected-process set.
 
 The provisioning payloads — linux-musl `farhelm` binaries for both architectures and the Apple-silicon Darwin `farhelm`,
 the only program a host is sent — are no longer embedded in the helm's own distribution (D2). This REVERSES the earlier
@@ -8179,7 +8167,7 @@ constraint (see the GUI section's motivation), not an afterthought:
 
 - **Playwright (TypeScript) drives the web build in headless Chromium** against a real helm and real supervisor on
   Linux. DOM assertions and screenshots both work because the UI is real DOM. This is the canonical GUI verification
-  path for agents. Its stacks create new terminals, as shipped supervisors do.
+  path for agents. Its stacks' supervisors create every terminal in a terminal host, as shipped ones do.
 - **A fake agent** — `farhelm-fixtures fake-agent --script basic|altscreen|mouse-modes|spawn|agent-relay`, from the
   `farhelm-fixtures` package, a test-only binary that is never shipped (the product binary carries no fixtures) — stands
   in for Claude Code/Codex across this suite's integration and e2e tests. Its deterministic scripts cover prompt/echo
@@ -8193,8 +8181,8 @@ constraint (see the GUI section's motivation), not an afterthought:
   (`e2e/tests/agent-relay.spec.ts`). The spawn suite also has an automated real-Claude leg that creates a jj workspace
   and spawns into it; CI leaves it gated because vendor credentials and network access are absent, and a developer
   enables it manually with `FARHELM_REAL_AGENT=1`.
-- Rust integration tests exercise supervisor+tmux directly (CI provides tmux) and the framing protocol with golden
-  cases; farhelm-proto keeps wire compatibility testable.
+- Rust integration tests exercise the supervisor with real terminal hosts and the framing protocol with golden cases;
+  farhelm-proto keeps wire compatibility testable.
 - **Terminal hosts are tested against real hosts on real ptys.** The host crate has a test bar of its own
   (`crates/terminal-host/TESTING.md`: real-pty tests of the built binary, golden fixtures of every frame of every
   protocol version, property tests, at least 95% line coverage and mutation testing; the suite also runs in the focused
@@ -8344,10 +8332,10 @@ A newer `farhelm` must accept everything a running or resumable session was hand
 sessions keep running, and once Farhelm restarts on the new version, the sessions it adopts and the conversations it
 resumes reach the new binary with whatever the old one handed them. Nothing re-issues those values, and the protocol
 hello does not help, since no handshake stands between a session's command line and the program it ends up running.
-(State the supervisor keeps for itself, such as its database, its tmux window options and its scope unit names, follows
-its own migration and adoption rules instead. A terminal host is the exception that outlives every binary: its protocol,
-its client tag and the snapshots it keeps are permanent surfaces with rules of their own, in "Terminal host" and
-"Version and skew".) So the following are a compatibility surface, held to the same care as a wire format:
+(State the supervisor keeps for itself, such as its database, its launch records and its scope unit names, follows its
+own migration and adoption rules instead. A terminal host is the exception that outlives every binary: its protocol, its
+client tag and the snapshots it keeps are permanent surfaces with rules of their own, in "Terminal host" and "Version
+and skew".) So the following are a compatibility surface, held to the same care as a wire format:
 
 - The hook command lines and their flags: `farhelm internal hook --vendor <adapter>`, with or without `--announce`, as
   injected into Claude's `--settings`, Codex's `-c hooks.…` overrides and Muse's `-c hooks=…`, and as the user installs
@@ -8399,13 +8387,13 @@ being accepted; retiring one is a decision to surface, not a cleanup. Anything p
 it reaches, such as a launcher that picks which installed version to run, passes arguments, environment, stdin, stdout,
 stderr and exit status through unchanged, prints nothing of its own when it succeeds, and replaces itself with that
 binary (`exec`) rather than running it as a child: hook attribution walks the reporter's process ancestry to the
-session's pane, and an extra process in that chain is an unclassified intermediary that gets the report refused.
-Reviewers check every change that touches any of the above against this section. The launch description a supervisor
-writes for its launch shim (the `LaunchSpec` JSON under `launch/` and its status file) is outside this surface: in the
-Mac app's versioned layout the shim is the supervisor's own versioned program, which an update never removes while that
-supervisor runs (see "Side-by-side versions inside Farhelm.app"). On a Linux host, provisioning renames a new binary
-over the running one before it restarts the supervisor, and a session launched in between runs the new shim against the
-old supervisor's description; this section does not cover that window.
+session's agent terminal's root process, and an extra process in that chain is an unclassified intermediary that gets
+the report refused. Reviewers check every change that touches any of the above against this section. The launch
+description a supervisor writes for its launch shim (the `LaunchSpec` JSON under `launch/` and its status file) is
+outside this surface: in the Mac app's versioned layout the shim is the supervisor's own versioned program, which an
+update never removes while that supervisor runs (see "Side-by-side versions inside Farhelm.app"). On a Linux host,
+provisioning renames a new binary over the running one before it restarts the supervisor, and a session launched in
+between runs the new shim against the old supervisor's description; this section does not cover that window.
 
 SPEC.md (Durability and resume) has compatibility decided with the maintainer feature by feature; this section is that
 decision for what sessions hold, and it applies from here on. Breaks already decided stay as they were: hooks that
@@ -8885,14 +8873,14 @@ revalidated after approval; this path never composes a launch or applies the lau
 
 `PromptSession` is an accepted supervisor-owned mutation, so losing the requesting connection does not cancel a paste
 between its opening marker and submit. It takes the target lifecycle claim through the final confirmed send, reads its
-stored activity synchronously, and requires a live owned agent pane reading Running or Idle. No activity leaf lock or
+stored activity synchronously, and requires a live agent terminal reading Running or Idle. No activity leaf lock or
 attachment lock survives an await, and it never takes the target's agent-request fence: crossing prompt requests must
-not wait for each other's relay fences. The existing input client opens on the exact session and pane, without taking
-over a viewer, and sends one bracketed paste then the per-kind submit bytes as two confirmed sends. Its internal bounded
-chunking preserves one opening and one closing paste marker around the whole message. A one-shot session-paired tmux
-query requires `bracket_paste_flag` to be exactly on; a missing, off or malformed flag refuses delivery. Claude uses CR
-and Codex Tab, at both accepted statuses. A later native delivery route belongs behind that same per-kind strategy seam.
-There is no Farhelm prompt queue, receipt store or idempotency key. A lost or failed reply may follow partial or
+not wait for each other's relay fences. Delivery writes to the session's agent terminal through its runtime, without
+taking over a viewer: one bracketed paste, then the per-kind submit bytes, as two confirmed sends. Its internal bounded
+chunking preserves one opening and one closing paste marker around the whole message. The terminal's emulator must have
+caught up with its host and record the program's bracketed paste mode as on; otherwise delivery is refused. Claude uses
+CR and Codex Tab, at both accepted statuses. A later native delivery route belongs behind that same per-kind strategy
+seam. There is no Farhelm prompt queue, receipt store or idempotency key. A lost or failed reply may follow partial or
 complete input, so retries are new sends. Ordinary attached-client typing stays ungated; the status check is specific to
 this agent-requested operation.
 
@@ -9065,9 +9053,9 @@ placement field is needed: every next launch and new tab reads the current polic
 `LaunchSpec::browser_command` is optional with a serde default for private specs already written on disk. It carries the
 absolute `session_farhelm_exe` plus `agent open-url -- %s`, separate from harness reporter environment. The shim adds it
 only in final agent assembly after login-shell startup, preserving any inherited BROWSER, even empty; git and the
-post-clone command use the common child assembly and get no fallback. Tabs pass it through tmux `-e` without a PATH
-change; explicit launch seams and the supervisor's inherited BROWSER win, then shell startup can override it. Tests pass
-inherited browser state explicitly rather than editing or depending on their process environment.
+post-clone command use the common child assembly and get no fallback. Tabs pass it in their host child's environment
+without a PATH change; explicit launch seams and the supervisor's inherited BROWSER win, then shell startup can override
+it. Tests pass inherited browser state explicitly rather than editing or depending on their process environment.
 
 Common BROWSER readers split on colon and whitespace; Python also removes shell quotes/backslashes, and xdg-open's word
 expansion and printf interpret glob characters and backslashes. The generator therefore rejects relative paths,

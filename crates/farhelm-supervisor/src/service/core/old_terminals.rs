@@ -4,8 +4,8 @@
 //! Releases before terminal hosts ran each session's agent and shell tabs
 //! in one tmux server per supervisor, on `<state dir>/tmux.sock`. This
 //! release ends that server at startup and treats whatever ran in it as
-//! ended (SPEC.md, "Terminal experience"; SPEC_impl.md, "Terminal
-//! substrate: private tmux server"). It is the only tmux-related behavior
+//! ended (SPEC.md, "Terminal experience"; SPEC_impl.md, "Ending the
+//! old private tmux server"). It is the only tmux-related behavior
 //! the running supervisor keeps, and a later release removes it once no
 //! host can still have such a server (TODO.md's phase 3 entry).
 //!
