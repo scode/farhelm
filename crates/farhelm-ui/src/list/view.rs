@@ -1974,14 +1974,14 @@ pub(crate) fn ListView(
             // an optimistic rename.
             settle_optimistic_renames(&mut renamed.write(), &listing.sessions, index);
             // A remembered Restart outcome is retired on any committed listing
-            // that positively shows the session past it. The open view's
-            // detail read retires it the same way, but a session restarted
-            // while another one was open has no view to do that, and its
-            // outcome would stay until a second reboot made a newly opened
-            // view attach to a dead pane. Like the rename settling above, this
-            // reads the reply's own rows, so it needs no `authoritative` and
-            // runs outside the absence cleanup below: a filtered, truncated
-            // or one-session read that shows the session is evidence enough.
+            // that positively shows the session past it. The open view's detail
+            // read retires it the same way, but a session restarted while
+            // another one was open has no view to do that, and its outcome
+            // would stay until a second reboot made a newly opened view attach
+            // to an exited terminal. Like the rename settling above, this reads
+            // the reply's own rows, so it needs no `authoritative` and runs
+            // outside the absence cleanup below: a filtered, truncated or
+            // one-session read that shows the session is evidence enough.
             operations.retire_confirmed_restarts(&listing.sessions);
             // A changed consequence is a replacement question, not authority
             // for an answer already queued from the previous rendered opening.
@@ -2714,7 +2714,7 @@ pub(crate) fn ListView(
             // No optimistic flip (PLAN_M2.md design note): the row's
             // badge only ever reflects what the NEXT poll observes, so a
             // stop that silently failed can never leave the UI claiming a
-            // session is exited when tmux still disagrees.
+            // session is exited while it is still running.
             let outcome = if suspend {
                 api::stop_and_suspend(&base, &id, refuse_if_tabs_open, refuse_if_agent_running)
                     .await

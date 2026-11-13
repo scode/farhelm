@@ -1,4 +1,4 @@
-# The bytes a new terminal's program reads for each keydown: Farhelm's key contract, which the supervisor's
+# The bytes a terminal's program reads for each keydown: Farhelm's key contract, which the supervisor's
 # encoder (grid_input.rs) and the page's keyboard rules (grid-input.js) are both held to. Change it only on
 # purpose: regenerate with `node crates/farhelm-ui/js-tests/grid-input-tables.js --write` and review the diff.
 # Which keydowns are sent at all is the page's (js-tests/fixtures/input/keydown-actions.jsonl).

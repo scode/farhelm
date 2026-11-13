@@ -18,8 +18,8 @@ const CURSOR_PREFIX = "REPLAY-CURSOR:";
  * Keep an owned command quiet between explicit requests, without a shell prompt
  * or input echo changing the rows under measurement. The ready reply proves
  * live output reached this test's post-replay attachment. The replay request
- * leaves tmux's cursor immediately after a VS16 emoji, where a one-cell width
- * disagreement becomes observable when the next request prints X.
+ * leaves the terminal's cursor immediately after a VS16 emoji, where a one-cell
+ * width disagreement becomes observable when the next request prints X.
  */
 const UNICODE_COMMAND = `sh -c 'stty -echo && printf "UNICODE-READY\\n" && while IFS= read -r input; do case "$input" in ready) printf "UNICODE-LIVE\\n" ;; replay) printf "\\033[2J\\033[H${REPLAY_ROW}\\r\\n${CURSOR_PREFIX}⚠️" ;; narrow) printf "\\033[2J\\033[H⌚︎\\033[41mX\\033[0m" ;; continue) printf "X\\r\\nREPLAY-LIVE\\r\\n" ;; esac; done'`;
 

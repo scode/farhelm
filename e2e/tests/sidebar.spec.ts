@@ -595,7 +595,7 @@ const CLEANUP_LANES = 6;
  *
  * A plain loop that stopped at the first failure would abandon every
  * session after it — real sessions on the SHARED stack, still consuming a
- * pty and a tmux pane, left for every later test to trip over. Every
+ * pty and a terminal host, left for every later test to trip over. Every
  * cleanup is attempted regardless of earlier failures; their errors are
  * collected and reported together once the sweep is done, rather than
  * losing all but the first.

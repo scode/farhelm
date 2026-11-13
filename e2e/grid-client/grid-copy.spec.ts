@@ -2,12 +2,11 @@
 //
 // The emulator wraps a two-cell character that does not fit in the last
 // column onto the next row and leaves the cell before the edge empty. That
-// cell is padding, not text, so a copy across the wrap leaves it out (as an
-// old terminal's xterm.js does); a grid terminal that copied it would put a
-// space into commands, paths and URLs copied across such a wrap. This builds the grid rows the supervisor sends for such text
-// and checks the copied text, on the screen and across history and screen,
-// in a real browser's grid code. No xterm.js runs: the expected text is
-// stated, not read from another terminal.
+// cell is padding, not text, so a copy across the wrap leaves it out; a grid
+// terminal that copied it would put a space into commands, paths and URLs
+// copied across such a wrap. This builds the grid rows the supervisor sends
+// for such text and checks the copied text, on the screen and across history
+// and screen, in a real browser's grid code.
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { join } from "node:path";

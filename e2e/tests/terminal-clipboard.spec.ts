@@ -44,24 +44,24 @@
 //
 // ## Gated invocations, and the race they close
 //
-// Every fixture below that needs its process to emit something specific —
-// an OSC 52 escape, a marker line, a mouse-mode DECSET — routes it through
+// Every fixture below that needs its process to emit something specific — an
+// OSC 52 escape, a marker line, a mouse-mode DECSET — routes it through
 // `gatedShellInvocation()`, which blocks on a `read` until this test presses
 // Enter. The instinctive alternative — bake the output straight into the
-// invocation — has a real race: tmux starts an invocation's process the
-// moment the session is CREATED, independent of any client attaching, so an
-// unheld command could easily finish before Playwright has even navigated.
-// For OSC 52 specifically that is not merely slow but PERMANENTLY wrong:
-// replay (the M5 catch-up buffer, `capture-pane -e`) reconstructs the
-// pane's CURRENT rendered grid, not a literal log of every escape byte ever
-// written, and OSC 52 leaves no mark on that grid at all — a client that
-// only ever attached after the write finished would see nothing, ever. So
-// every test presses Enter only once it has confirmed BOTH that the
+// invocation — has a real race: the supervisor starts an invocation's process
+// the moment the session is CREATED, independent of any client attaching, so
+// an unheld command could easily finish before Playwright has even navigated.
+// For OSC 52 specifically that is not merely slow but PERMANENTLY wrong: the
+// catch-up an attaching client gets is the terminal's CURRENT screen and
+// scrollback from the supervisor's emulator, not a literal log of every
+// escape byte ever written, and OSC 52 leaves no mark on that grid at all — a
+// client that only ever attached after the write finished would see nothing,
+// ever. So every test presses Enter only once it has confirmed BOTH that the
 // terminal mounted and that its WebSocket is genuinely OPEN (mount alone is
 // not enough — terminal.js drops input sent before OPEN, exactly the gap
 // terminal.spec.ts's own DECRPM test works around the same way): the write
-// happens live, while this test is already attached and parsing, which is
-// the path every one of these mechanisms is actually meant to serve.
+// happens live, while this test is already attached and parsing, which is the
+// path every one of these mechanisms is actually meant to serve.
 import { expect, test } from "./helpers/evidence";
 import { type Page } from "@playwright/test";
 import { cleanupSession, createSession } from "./helpers/fleet";

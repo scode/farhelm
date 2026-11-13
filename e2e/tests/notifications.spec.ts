@@ -448,11 +448,12 @@ test.describe("session notifications", () => {
   });
 
   /** Notification text comes from a host's supervisor, so only a link to
-   * Farhelm's own docs may be clickable: the old-terminal warning ends with
-   * the page that says what to do. Assert both halves in the real list, with
-   * a foreign address beside the docs one, and that clicking opens exactly
-   * the docs URL through the app's external-link opener (observed, so the
-   * test neither navigates away nor reaches the live site). */
+   * Farhelm's own docs may be clickable: the notice that Farhelm ended a
+   * session's old terminal ends with the page that says what to do. Assert
+   * both halves in the real list, with a foreign address beside the docs one,
+   * and that clicking opens exactly the docs URL through the app's
+   * external-link opener (observed, so the test neither navigates away nor
+   * reaches the live site). */
   test("only a docs link in notification text is clickable", async ({ page, request }) => {
     const session = await createSession(request, { title: `docs-link-${Date.now()}` });
     created.push(session.id);

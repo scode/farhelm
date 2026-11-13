@@ -6,33 +6,34 @@
 //
 // ## Lines and their numbers
 //
-// A line is a history line or a screen row, named by the absolute line
-// number grid-model.js keeps: history lines by their own numbers, screen
-// row `y` as `model.screenBase + y`. Those numbers do not change when output
-// scrolls (the line that was screen row 0 is history line `screenBase`
-// once it scrolls off) or when the oldest history is dropped at the cap, so
-// a scrolled-back view and a selection anchored to them stay on the same
-// text while output continues. A position is
-// `{abs, col}`, where `col` is a cell boundary (0 to the line's width), and
-// a range is `[start, end)` between two positions.
+// A line is a history line or a screen row, named by the absolute line number
+// grid-model.js keeps: history lines by their own numbers, screen row `y` as
+// `model.screenBase + y`. Those numbers do not change when output scrolls
+// (the line that was screen row 0 is history line `screenBase` once it
+// scrolls off) or when the oldest history is dropped at the cap, so a
+// scrolled-back view and a selection anchored to them stay on the same text
+// while output continues. A position is `{abs, col}`, where `col` is a cell
+// boundary (0 to the line's width), and a range is `[start, end)` between two
+// positions.
 //
 // ## Copied text
 //
-// A selection copies the text the xterm family of terminals copies (the
-// rules are ported from xterm.js's `SelectionService.selectionText`). `selectionText`
-// joins rows with a newline, except that a row the emulator soft-wrapped
-// (`w`) continues on the next one with nothing between them; a line that
-// ends is trimmed on the right, and a wrapped one keeps its trailing blanks
-// up to its own width (history lines keep the width they were written at,
-// so this survives a resize), except the padding cell the emulator leaves
-// before a wide character that wrapped (`padsWideWrap`). A wide character
-// counts once, for the cell it starts in. Non-breaking spaces copy as
-// spaces, and Windows gets CRLF. A column selection (`columnText`) copies
-// the same columns of every line, one per line.
+// A selection copies text by rules ported from xterm.js's
+// `SelectionService.selectionText`. `selectionText` joins rows with a
+// newline, except that a row the emulator soft-wrapped (`w`) continues on the
+// next one with nothing between them; a line that ends is trimmed on the
+// right, and a wrapped one keeps its trailing blanks up to its own width
+// (history lines keep the width they were written at, so this survives a
+// resize), except the padding cell the emulator leaves before a wide
+// character that wrapped (`padsWideWrap`). A wide character counts once, for
+// the cell it starts in. Non-breaking spaces copy as spaces, and Windows gets
+// CRLF. A column selection (`columnText`) copies the same columns of every
+// line, one per line.
 //
 // The emulator cannot tell a space the program printed from a cell nothing
-// touched, so trimming drops trailing spaces where xterm.js drops only
-// untouched cells: a line that ends in printed spaces copies without them.
+// touched, so trimming drops every trailing space, printed ones included
+// (here the copy departs from the ported original, which drops only
+// untouched cells): a line that ends in printed spaces copies without them.
 //
 // ## Links
 //
@@ -98,12 +99,12 @@
   /**
    * Whether `line` (number `abs`) ends in the emulator's padding before a
    * wide character that did not fit: it wraps, its last cell is one no run
-   * covers, and the next line starts with a two-cell character (a run that
-   * is not printable ASCII and two cells wide: a printable ASCII run of two
-   * cells is two characters). That cell is not text: xterm.js leaves
-   * it out of copies (and terminal-files.js's `pathLinks` out of paths), so
-   * the copy and the word and URL searches here do too. A blank the program
-   * printed is covered by a run and stays.
+   * covers, and the next line starts with a two-cell character (a run that is
+   * not printable ASCII and two cells wide: a printable ASCII run of two
+   * cells is two characters). That cell is not text, so the copy and the word
+   * and URL searches here leave it out (and terminal-files.js's `pathLinks`
+   * leaves it out of paths). A blank the program printed is covered by a run
+   * and stays.
    */
   function padsWideWrap(source, abs, line) {
     if (!line.row.wrapped || line.row.end > line.width - 1) return false;
@@ -237,11 +238,11 @@
   }
 
   /**
-   * The word a double click at `pos` selects, the same word xterm.js selects:
-   * on a space, the run of spaces; otherwise from the clicked character
-   * outwards until a word separator, across soft wraps. The clicked character
-   * itself may be a separator, which then starts the word (a double click on
-   * "(" in "(foo)" selects "(foo"). Null when there is no line there.
+   * The word a double click at `pos` selects: on a space, the run of spaces;
+   * otherwise from the clicked character outwards until a word separator,
+   * across soft wraps. The clicked character itself may be a separator, which
+   * then starts the word (a double click on "(" in "(foo)" selects "(foo").
+   * Null when there is no line there.
    *
    * Ported from xterm.js 6.0.0's `SelectionService._getWordAt`, MIT;
    * THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
@@ -367,13 +368,13 @@
    * link also has its `id`) where `kind` is "osc" (a program's hyperlink) or
    * "text", and `ranges` are the `[start, end)` cell ranges it covers, one
    * per line, for the hover underline. An OSC 8 link is one contiguous
-   * stretch of runs of the same link on this line (xterm.js also makes
-   * one link per such stretch), including a generated-id continuation chain.
-   * A chain's tag replaces later pieces' tags, so a later piece continued by
-   * cursor movement onto an unwrapped row no longer joins that row by its own
-   * id. A text URL's ranges may cross soft wraps. Its evidence includes the
-   * search window and its boundaries: an edit outside the matched cells can
-   * extend or remove the address while leaving those cells unchanged.
+   * stretch of runs of the same link on this line, including a generated-id
+   * continuation chain. A chain's tag replaces later pieces' tags, so a later
+   * piece continued by cursor movement onto an unwrapped row no longer joins
+   * that row by its own id. A text URL's ranges may cross soft wraps. Its
+   * evidence includes the search window and its boundaries: an edit outside
+   * the matched cells can extend or remove the address while leaving those
+   * cells unchanged.
    */
   function rowLinks(source, abs) {
     const line = source.line(abs);
@@ -437,9 +438,9 @@
   }
 
   /**
-   * The text of a column (block) selection, as xterm.js copies one:
-   * every line from `start` to `end` cut to the same column span, trimmed on
-   * the right, one per line with no joining of soft wraps.
+   * The text of a column (block) selection: every line from `start` to `end`
+   * cut to the same column span, trimmed on the right, one per line with no
+   * joining of soft wraps.
    *
    * Ported from xterm.js 6.0.0's `SelectionService.selectionText` (its column
    * mode), MIT; THIRD_PARTY_NOTICES.md, "Code ported from xterm.js".
@@ -575,7 +576,7 @@
    * A line source over a grid model: `line(abs)` for any history line that has
    * been applied (when `history` is true) and every screen row, with the first
    * and last numbers there are. On the alternate screen the view passes
-   * `history: false`: the alternate screen keeps no history (as in xterm.js).
+   * `history: false`: the alternate screen keeps no history.
    */
   function modelSource(model, history = true) {
     const base = model.screenBase;

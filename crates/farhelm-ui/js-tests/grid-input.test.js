@@ -1,6 +1,6 @@
 // Unit coverage for grid-input.js, the grid terminal's input decisions.
 //
-// New terminals type the way terminals of the xterm family do, because
+// Terminals type the way terminals of the xterm family do, because
 // shells and agents read keys that way: the same keys produce sequences,
 // the same keys are left to the browser's text input, and the mouse lands
 // on the same cells. The page does not encode anything itself (the

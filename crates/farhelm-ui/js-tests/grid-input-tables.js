@@ -1,7 +1,7 @@
-// Renders the checked-in tables that pin new terminals' keyboard and
+// Renders the checked-in tables that pin terminals' keyboard and
 // Alt-click behavior, from the grid client's own code (grid-input.js).
 //
-// New terminals type the way terminals of the xterm family do, byte for
+// Terminals type the way terminals of the xterm family do, byte for
 // byte, because shells and agents read keys that way, and the page leaves
 // to the browser's text input exactly the keys whose character only the
 // browser knows (Option on a Mac, dead keys, AltGr). That behavior is
@@ -18,12 +18,12 @@
 // - `fixtures/input/move-to-cell.txt`: the arrow keys an Alt-click types to
 //   move a shell's cursor, over seeded random screens.
 //
-// The key table was first generated from the vendored xterm.js 6.0.0
-// bundle's own functions, and the other two from grid-input.js while its
-// tests held it to that bundle, so when they were frozen every row matched
-// what an old terminal does. The tables are now the reference, and nothing
-// here reads xterm.js. A deliberate change to one of these behaviors
-// regenerates the tables with
+// The key table was first generated from xterm.js 6.0.0's own functions,
+// which the keyboard code here is ported from, and the other two from
+// grid-input.js while its tests held it to them, so when the tables were
+// frozen every row matched what Farhelm's terminals did before the grid.
+// The tables are now the reference. A deliberate change to one of these
+// behaviors regenerates the tables with
 // `node crates/farhelm-ui/js-tests/grid-input-tables.js --write` (from the
 // repository root) and reviews the diff: every changed row is a key or a
 // click that a program will now read differently. Without `--write` it
@@ -216,7 +216,7 @@ function sentBytes(ev, appCursor, isMac) {
  */
 function keyTable() {
   const lines = [
-    "# The bytes a new terminal's program reads for each keydown: Farhelm's key contract, which the supervisor's",
+    "# The bytes a terminal's program reads for each keydown: Farhelm's key contract, which the supervisor's",
     "# encoder (grid_input.rs) and the page's keyboard rules (grid-input.js) are both held to. Change it only on",
     "# purpose: regenerate with `node crates/farhelm-ui/js-tests/grid-input-tables.js --write` and review the diff.",
     "# Which keydowns are sent at all is the page's (js-tests/fixtures/input/keydown-actions.jsonl).",
@@ -332,7 +332,7 @@ function keydownTable() {
     `${OUTCOME_LETTERS[i]} ${action}${cancel ? " cancelled" : ""}${dead ? ", dead key pending" : ""}`
   );
   const lines = [
-    "# What a new terminal's page does with each keydown (grid-input.js's keydownAction): Farhelm's contract for",
+    "# What a terminal's page does with each keydown (grid-input.js's keydownAction): Farhelm's contract for",
     "# which keys reach the program at keydown and which are left to the browser's text input. Change it only on",
     "# purpose: regenerate with `node crates/farhelm-ui/js-tests/grid-input-tables.js --write` and review the diff.",
     "# [\"p\", id, pattern] lines name each pattern by an id taken from its SHA-1. A pattern's position",

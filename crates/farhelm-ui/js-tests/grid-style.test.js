@@ -1,13 +1,13 @@
 // Unit coverage for grid-style.js, the mapping from a grid run's style to
 // inline CSS.
 //
-// A new terminal must look like an old one, so these cases pin the grid's
-// color rules, which are the old terminal's as Farhelm configures it: the
-// theme's palette and the standard xterm 256-color table, bold drawing
-// palette colors 0-7 in their bright twins, inverse swapping the defaults,
-// dim at half opacity, and the underline variants. They also pin that the CSS
-// is built only from fixed tables and validated integers, which is what keeps
-// a program's output from reaching style text.
+// Users notice when a terminal's colors change, so these cases pin the
+// grid's color rules: the theme's palette and the standard xterm 256-color
+// table, bold drawing palette colors 0-7 in their bright twins, inverse
+// swapping the defaults, dim at half opacity, and the underline variants.
+// They also pin that the CSS is built only from fixed tables and validated
+// integers, which is what keeps a program's output from reaching style
+// text.
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const style = require("../assets/grid-style.js");
@@ -50,7 +50,7 @@ test("palette, direct and default colors resolve to concrete values", () => {
   assert.equal(resolve([0, -1, -1]).bg, null);
 });
 
-test("bold draws palette colors 0-7 in their bright twins, as old terminals do", () => {
+test("bold draws palette colors 0-7 in their bright twins", () => {
   assert.equal(resolve([FLAGS.BOLD, 1, -1]).fg, palette[9]);
   assert.equal(resolve([FLAGS.BOLD, 9, -1]).fg, palette[9]);
   assert.equal(resolve([FLAGS.BOLD, 100, -1]).fg, palette[100]);

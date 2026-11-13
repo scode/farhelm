@@ -2,8 +2,8 @@
 // buffer of lines, and what selection copies, what a double or triple
 // click selects, and which link is under a cell.
 //
-// These rules are the old terminal's (xterm.js's selection service and the
-// web-links add-on, ported), kept because users notice when they differ:
+// These rules are ported (xterm.js's selection service and the web-links
+// add-on) and kept as they are because users notice when they change:
 // copied text that gains or loses newlines at soft wraps, a wrapped URL that
 // stops being clickable, a word selection that stops at the wrong character.
 // The rows are built by grid-model.js from wire messages, so the tests
@@ -166,8 +166,8 @@ test("an OSC 8 run is a link covering its runs, whatever its text says", () => {
   const link = buffer.linkAt(source, at(base, 5));
   assert.equal(link.kind, "osc");
   assert.equal(link.uri, "https://example.com/a");
-  // Each contiguous stretch is a link of its own, as old terminals make
-  // them; the underline is that stretch.
+  // Each contiguous stretch is a link of its own; the underline is that
+  // stretch.
   assert.deepEqual(link.ranges, [{ start: at(base, 4), end: at(base, 8) }]);
   assert.deepEqual(buffer.linkAt(source, at(base, 10)).ranges, [{ start: at(base, 9), end: at(base, 12) }]);
   assert.deepEqual(buffer.rowLinks(source, base).map((l) => [l.kind, l.uri]), [
@@ -426,8 +426,8 @@ test("hostile text stays data on the grid's lines", () => {
 });
 
 test("link lines present history at its own width and wrap across the history/screen boundary", () => {
-  // A history line written at another width keeps it (an old terminal
-  // reflows, the grid does not), and the first screen row continues the last history
+  // A history line written at another width keeps it (the grid does not
+  // reflow history), and the first screen row continues the last history
   // line when that line wrapped: the link code must see both.
   const model = build({
     cols: 6,

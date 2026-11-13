@@ -1,4 +1,4 @@
-# What a new terminal's page does with each keydown (grid-input.js's keydownAction): Farhelm's contract for
+# What a terminal's page does with each keydown (grid-input.js's keydownAction): Farhelm's contract for
 # which keys reach the program at keydown and which are left to the browser's text input. Change it only on
 # purpose: regenerate with `node crates/farhelm-ui/js-tests/grid-input-tables.js --write` and review the diff.
 # ["p", id, pattern] lines name each pattern by an id taken from its SHA-1. A pattern's position

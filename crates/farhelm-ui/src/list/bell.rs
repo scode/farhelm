@@ -36,10 +36,11 @@
 //! peer text and shown escaped and isolated like any other. The one
 //! exception is a link to a page of Farhelm's own docs
 //! ([`DOCS_LINK_PREFIX`]), which is shown as a clickable link
-//! ([`notification_runs`]): the old-terminal notification points at the page
-//! that explains what to do. Any other URL stays plain text, because a
-//! supervisor (possibly a compromised or foreign one) must not be able to
-//! put a link to anywhere it likes in front of the user.
+//! ([`notification_runs`]): the notice that Farhelm ended a session's old
+//! terminal when it started points at the page that explains what to do.
+//! Any other URL stays plain text, because a supervisor (possibly a
+//! compromised or foreign one) must not be able to put a link to anywhere
+//! it likes in front of the user.
 
 use std::rc::Rc;
 
@@ -569,8 +570,9 @@ mod tests {
     /// Farhelm's docs is cut out as a link, ending at whitespace and without
     /// trailing sentence punctuation; the text around it stays plain.
     ///
-    /// Why: the old-terminal notification ends with the docs page to read,
-    /// and a user who cannot click it has to copy a URL out of a small list.
+    /// Why: the notice that Farhelm ended a session's old terminal ends with
+    /// the docs page to read, and a user who cannot click it has to copy a
+    /// URL out of a small list.
     #[farhelm_testtrace::test]
     fn a_docs_link_in_notification_text_is_cut_out() {
         use TextRun::{DocsLink, Plain};

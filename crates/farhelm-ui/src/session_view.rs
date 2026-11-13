@@ -290,16 +290,18 @@ fn direct_restart_stops_agent(status: &SessionStatus, skip_confirmations: bool) 
 ///
 /// Hidden panes are hidden with `visibility`, not `display: none`, and
 /// that is load-bearing rather than stylistic: a `display: none` element
-/// has no layout box, so `FitAddon.fit()` would size every unselected
-/// terminal to zero columns at mount time — and every tab in a session
-/// with more than one mounts while hidden. See app.css's `.terminal-pane`.
+/// has no layout box, so an unselected terminal could not be fitted to its
+/// pane (the grid's fit proposes nothing without one) — and every tab in a
+/// session with more than one mounts while hidden. See app.css's
+/// `.terminal-pane`.
 ///
-/// A tab whose WINDOW is gone (closed from another client, erased by a
-/// reboot) needs no special case here: its attach fails and the helm
+/// A tab whose terminal host is gone (closed from another client, erased
+/// by a reboot) needs no special case here: its attach fails and the helm
 /// relays the reason as an ordinary detach notice, which is the same
 /// no-terminal explanation the session view has always rendered. A tab
-/// whose SHELL merely exited is a live, viewable dead pane, exactly as the
-/// agent terminal is.
+/// whose SHELL exits is reaped instead and disappears as if closed; only
+/// the agent terminal stays viewable after its program exits (SPEC.md,
+/// "Session view").
 ///
 /// ## Paste and drop interception (PLAN_M4.md item 7)
 ///
