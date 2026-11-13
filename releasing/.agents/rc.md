@@ -72,11 +72,16 @@ With the base, version and announcements settled, the process is:
   `[workspace.package]` and `packaging/farhelm-desktop/dist.toml`, and refresh `Cargo.lock` (running `cargo metadata`
   suffices). The release commit is exactly those three files with the message `chore: release X.Y.Z-rc.N` — the shape
   every release commit here has (#304, #311, #314).
-- Before tagging, run `cargo clean` (see `releasing/.agents/build-outputs.md`, "Build outputs"), then sanity-check the
-  announce: the version-parity tests (`cargo nextest run -p farhelm-helm --lib -E 'test(provisioning::assets)'`, through
-  the recorder) and `dist plan` naming the rc version with BOTH packages under it — a version mismatch makes the desktop
-  archive silently vanish from the release. Also `python3 releasing/check-changelog.py format`: the build gate lints
-  every fragment on every tag, so a malformed fragment anywhere in the stack fails the rc build and costs an `rc.N`.
+- Before tagging, sanity-check the announce with `dist plan` naming the rc version with BOTH packages under it — a
+  version mismatch makes the desktop archive silently vanish from the release. Also run
+  `python3 releasing/check-changelog.py format`: the build gate lints every fragment on every tag, so a malformed
+  fragment anywhere in the stack fails the rc build.
+- Run `cargo clean` (see `releasing/.agents/build-outputs.md`, "Build outputs"), then start the local version-parity
+  tests (`cargo nextest run -p farhelm-helm --lib -E 'test(provisioning::assets)'`, through the recorder). At an RC or
+  dev release, proceed to the PR and tag below without waiting for this run: it runs alongside GitHub's builds, whose
+  gate includes the same tests. A clean local build can take minutes before these small tests execute; preserving a
+  prerelease number is not a reason to delay the GitHub build. Retain and report the local result too, and fix a failure
+  forward under the existing procedure.
 - Give the bump its own PR (above the announcements commit when needed, otherwise on the stack tip or main). The small
   announcements PR is the only RC-specific merge this procedure authorizes; the bump and the in-flight stack never merge
   for the release's sake. Push the tag `vX.Y.Z-rc.N` at the bump commit and the workflow runs from the tag. Its build

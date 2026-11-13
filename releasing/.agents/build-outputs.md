@@ -1,8 +1,8 @@
 # Build outputs
 
 Why every release attempt starts and ends with `cargo clean`, and exactly when. It is on the stable release, RC release
-and dev release reading lists in `releasing/AGENTS.md`, because every release procedure cites it from its pre-tag and
-closing steps.
+and dev release reading lists in `releasing/AGENTS.md`, because every release procedure cites it from its local
+validation and closing steps. An RC or dev release's local parity run does not hold up its tag or GitHub builds.
 
 Cargo files every workspace crate's build outputs under a hash that includes the package version, and every release
 attempt changes the version. So each attempt's builds land beside the previous attempt's instead of replacing them, and
