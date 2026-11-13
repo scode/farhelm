@@ -1,0 +1,119 @@
+diff --git a/src/pasteboard.rs b/src/pasteboard.rs
+index 23ac6a0..df5d4c8 100644
+--- a/src/pasteboard.rs
++++ b/src/pasteboard.rs
+@@ -108,6 +108,41 @@ impl Pasteboard {
+         None
+     }
+ 
++    /// Payload paste preserves file priority but chooses an offered image before
++    /// its accompanying text flavor. The synchronous editor API keeps its old
++    /// text-first behavior. An offered image that cannot be read is an error;
++    /// silently falling back to its label would pretend the image was pasted.
++    ///
++    /// Since 0.3.12 the board is a non-null objc2 `Retained`, so the 0.3.9 nil-board
++    /// `Unavailable` result no longer has a representation here.
++    pub fn read_payload(&self) -> Result<Option<ClipboardItem>, gpui::ClipboardReadError> {
++        #[expect(
++            deprecated,
++            reason = "Preserve the existing file-copy pasteboard format"
++        )]
++        let filenames = unsafe { self.inner.propertyListForType(NSFilenamesPboardType) };
++        if filenames
++            .as_ref()
++            .and_then(|filenames| filenames.downcast_ref::<NSArray>())
++            .is_some_and(|filenames| filenames.count() > 0)
++        {
++            return Ok(self.read());
++        }
++        let Some(types) = self.inner.types() else {
++            return Ok(None);
++        };
++        for format in ImageFormat::iter() {
++            let ut_type = UTType::from(format);
++            if types.containsObject(ut_type.inner()) {
++                return self
++                    .read_image(format)
++                    .map(Some)
++                    .ok_or(gpui::ClipboardReadError::UnsupportedContent);
++            }
++        }
++        Ok(self.read())
++    }
++
+     fn read_image(&self, format: ImageFormat) -> Option<ClipboardItem> {
+         let ut_type = UTType::from(format);
+ 
+@@ -507,4 +542,52 @@ mod tests {
+                 .setData_forType(Some(&bytes), NSPasteboardTypeString);
+         }
+     }
++
++    /// An external mixed offer must paste encoded image bytes rather than its
++    /// text label. The old editor read stays text-first; adding file references
++    /// to that same offer restores file priority for payload-oriented paste.
++    #[test]
++    #[ignore = "requires a logged-in macOS pasteboard service; run explicitly on the GUI desktop"]
++    fn attachment_clipboard_payload_priority_preserves_sync_behavior() {
++        autoreleasepool(|_| unsafe {
++            let pasteboard = Pasteboard::unique();
++            #[expect(
++                deprecated,
++                reason = "Preserve the existing file-copy pasteboard format"
++            )]
++            let types = NSArray::from_slice(&[
++                NSPasteboardTypePNG,
++                NSPasteboardTypeString,
++                NSFilenamesPboardType,
++            ]);
++            pasteboard.inner.declareTypes_owner(&types, None);
++            let bytes = [1u8, 2, 3];
++            let data = NSData::with_bytes(&bytes);
++            pasteboard
++                .inner
++                .setData_forType(Some(&data), NSPasteboardTypePNG);
++            let text = NSData::with_bytes(b"image label");
++            pasteboard
++                .inner
++                .setData_forType(Some(&text), NSPasteboardTypeString);
++            assert!(
++                matches!(pasteboard.read().unwrap().entries.as_slice(), [ClipboardEntry::String(string)] if string.text == "image label")
++            );
++            assert!(
++                matches!(pasteboard.read_payload().unwrap().unwrap().entries.as_slice(), [ClipboardEntry::Image(image)] if image.format == ImageFormat::Png && image.bytes == bytes)
++            );
++            let paths =
++                NSArray::from_retained_slice(&[NSString::from_str("/file with spaces.png")]);
++            #[expect(
++                deprecated,
++                reason = "Preserve the existing file-copy pasteboard format"
++            )]
++            pasteboard
++                .inner
++                .setPropertyList_forType(&paths, NSFilenamesPboardType);
++            assert!(
++                matches!(pasteboard.read_payload().unwrap().unwrap().entries.first(), Some(ClipboardEntry::ExternalPaths(paths)) if paths.0.as_slice() == [PathBuf::from("/file with spaces.png")])
++            );
++        });
++    }
+ }
+diff --git a/src/platform.rs b/src/platform.rs
+index f22510f..f838092 100644
+--- a/src/platform.rs
++++ b/src/platform.rs
+@@ -1208,6 +1208,15 @@ impl Platform for MacPlatform {
+         state.general_pasteboard.read()
+     }
+ 
++    /// Preserve AppKit thread ownership while exposing attachment flavor priority.
++    /// Task::ready does not make this native pasteboard access nonblocking.
++    fn read_from_clipboard_async(
++        &self,
++    ) -> Task<Result<Option<ClipboardItem>, gpui::ClipboardReadError>> {
++        let state = self.0.lock();
++        Task::ready(state.general_pasteboard.read_payload())
++    }
++
+     fn write_to_clipboard(&self, item: ClipboardItem) {
+         let state = self.0.lock();
+         state.general_pasteboard.write(item);

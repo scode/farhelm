@@ -118,7 +118,12 @@ systemd or SSH substrate ran.
   user's own tmux (stock `/usr/bin/tmux`) under a session's scope. They use the machine's tmux and print `SKIPPED`
   without one, which is missing coverage, not a pass; the release gate installs the distribution's tmux for them. On
   Linux the workspace run needs Python 3 at `/usr/bin/python3`: besides the e2e stand-ins named below, the supervisor's
-  `managed_supervisor::` stop test runs a Python stand-in whose main thread exits before its other thread.
+  `managed_supervisor::` stop test runs a Python stand-in whose main thread exits before its other thread. `--workspace`
+  also builds the GPUI desktop GUI (`farhelm-gui`), so on Linux this run and the doctest run below need GPUI's build
+  dependencies: `pkg-config`, the fontconfig development package (`libfontconfig-dev`; fontconfig is found through
+  pkg-config at build time) and the xkbcommon one (`libxkbcommon-dev`, linked directly). FreeType is used from the
+  system when pkg-config finds version 24.3.18 or newer and is otherwise built from bundled sources with the C++
+  compiler. Wayland and Vulkan need no development package: they are loaded at run time.
 - `python3 scripts/record-test-run.py --kind development --selection 'workspace doctests' --concurrency '4 doctest threads' -- cargo test --locked --doc --workspace --exclude farhelm-desktop -- --show-output --test-threads=4`
   — preserves doctest coverage separately because nextest does not execute it.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal host' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p terminal-host`
@@ -612,6 +617,12 @@ systemd or SSH substrate ran.
   from the workspace, so no workspace test run, clippy, `cargo fmt` or dprint (beyond `vendor/README.md` and
   `vendor/pair-tests/Cargo.toml`) reaches them, and CI does not run them. Run all three when anything under `vendor/`
   changes; seconds, plus a first download of the crates' own locked dependencies.
+- `python3 scripts/record-test-run.py --kind development --selection 'vendored gpui-pre native keys' --concurrency 'libtest default threads' -- cargo test --locked --manifest-path vendor/gpui-pre/Cargo.toml --features test-support --test native_key_metadata`
+  — the vendored GPUI core's test of Farhelm's native-key layer (`vendor/README.md`, "GPUI"): original repeat, Down and
+  Up propagation, consumption before logical key matching, unchanged binding selection, and no native identity on
+  synthetic keys or replayed prefixes. Like the terminal crates, the GPUI trees are excluded from the workspace, so
+  nothing else runs it. Run it when anything under `vendor/gpui-pre*` or `vendor/patches/gpui/` changes; minutes, since
+  it builds GPUI on its own.
 - `cd crates/farhelm-ui/js-tests && node --test` — the JS unit harness for the asset-JS layer's pure functions
   (PLAN_M6_5.md item 1); node is already a CI requirement for Playwright below, so this adds no dependency. Run from
   inside the directory rather than as a glob from the repo root: node's no-argument default discovery (every `*.test.js`
@@ -678,6 +689,9 @@ systemd or SSH substrate ran.
   — preserves the desktop feature's separate doctest coverage. Desktop execution remains release-only in hosted CI.
 - `cargo check -p farhelm-desktop` — the shipped desktop binary sits outside `default-members` (so ordinary builds never
   compile WebKit), which means `-p` is the only thing that ever compiles it.
+- `cargo clippy -p farhelm-gui --all-targets -- -D warnings` — the GPUI desktop GUI also sits outside `default-members`
+  (so ordinary builds never compile GPUI), and the default-member clippy run never lints it. Needs the Linux packages
+  named under the workspace nextest run.
 - `scripts/check-desktop-assets.sh` — holds the desktop build's `asset!()` set and the web bundle's files to the same
   set, in both directions. The shipped desktop-artifact builder calls `--compare` on its actual embedded bundle, so
   release validation preserves parity without a duplicate CI rebuild. `--self-test` also proves head CSS/classic JS

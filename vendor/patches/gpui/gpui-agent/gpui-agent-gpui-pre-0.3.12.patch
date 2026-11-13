@@ -1,0 +1,97 @@
+diff --git a/gpui/Cargo.toml b/gpui/Cargo.toml
+index 3e5bb82..5907f5a 100644
+--- a/gpui/Cargo.toml
++++ b/gpui/Cargo.toml
+@@ -12,9 +12,9 @@ rust-version = "1.98"
+ gpui-agent = { path = "gpui-agent" }
+ gpui-agent-protocol = { path = "../crates/protocol" }
+ # The gpui-pre recipe omits optional Zed checkout paths so Cargo can resolve this workspace independently.
+-gpui-pre = { version = "=0.3.9", features = ["test-support"] }
+-gpui-pre-linux = { version = "=0.3.9", features = ["test-support"] }
+-gpui-pre-platform = { version = "=0.3.9", features = ["test-support", "font-kit", "wayland", "x11", "runtime_shaders"] }
++gpui-pre = { version = "=0.3.12", features = ["test-support"] }
++gpui-pre-linux = { version = "=0.3.12", features = ["test-support"] }
++gpui-pre-platform = { version = "=0.3.12", features = ["test-support", "font-kit", "wayland", "x11", "runtime_shaders"] }
+ anyhow = "1.0.86"
+ async-channel = "2.5"
+ image = { version = "0.25.1", default-features = false, features = ["png"] }
+@@ -24,6 +24,7 @@ serde_json = "1.0.144"
+ # Keep the upstream test app on the same patched crates when run through its own workspace.
+ # Consumers must repeat these overrides at their workspace root; Cargo does not inherit them.
+ [patch.crates-io]
+-gpui-pre = { path = "../../gpui-pre-0.3.9" }
+-gpui-pre-linux = { path = "../../gpui-pre-linux-0.3.9" }
+-gpui-pre-wgpu = { path = "../../gpui-pre-wgpu-0.3.9" }
++gpui-pre = { path = "../../gpui-pre" }
++gpui-pre-linux = { path = "../../gpui-pre-linux" }
++gpui-pre-wgpu = { path = "../../gpui-pre-wgpu" }
++gpui-pre-macos = { path = "../../gpui-pre-macos" }
+diff --git a/gpui/gpui-agent/Cargo.toml b/gpui/gpui-agent/Cargo.toml
+index 611aea1..4da08f9 100644
+--- a/gpui/gpui-agent/Cargo.toml
++++ b/gpui/gpui-agent/Cargo.toml
+@@ -11,6 +11,9 @@ description = "The in-app side of gpui-agent: serves a GPUI app to the gpui-agen
+ # Which GPUI to build against; pick exactly one.
+ zed = []
+ gpui-pre-0-3-9 = ["dep:gpui-pre", "dep:gpui-pre-linux"]
++# gpui-pre 0.3.12 (GPUI Kit 0.9.1) already has Zed's keystroke and scroll API shape, so
++# it compiles the same compat branch as `zed` while linking the gpui-pre crates.
++gpui-pre-0-3-12 = ["dep:gpui-pre", "dep:gpui-pre-linux"]
+ 
+ [dependencies]
+ anyhow.workspace = true
+diff --git a/gpui/gpui-agent/src/compat.rs b/gpui/gpui-agent/src/compat.rs
+index 66ddd58..60889e1 100644
+--- a/gpui/gpui-agent/src/compat.rs
++++ b/gpui/gpui-agent/src/compat.rs
+@@ -1,5 +1,6 @@
+ //! The calls whose shape differs between Zed's GPUI and the `gpui-pre 0.3.9` snapshot that
+-//! gpui-kit pins. The `gpui-pre-0-3-9` feature picks the older shape.
++//! gpui-kit 0.8 pins. The `gpui-pre-0-3-9` feature picks the older shape; `zed` and
++//! `gpui-pre-0-3-12` share the newer one.
+ 
+ use gpui::{
+     App, KeybindingKeystroke, Keystroke, Modifiers, Pixels, PlatformInput, Point, ScrollDelta,
+diff --git a/gpui/gpui-agent/src/lib.rs b/gpui/gpui-agent/src/lib.rs
+index bc373db..5c29248 100644
+--- a/gpui/gpui-agent/src/lib.rs
++++ b/gpui/gpui-agent/src/lib.rs
+@@ -3,10 +3,22 @@
+ //! Call [`init`] once at startup. It does nothing unless the app was started with
+ //! `GPUI_AGENT_SOCKET` set, which `gpui-agent launch` does.
+ 
+-#[cfg(all(feature = "zed", feature = "gpui-pre-0-3-9"))]
+-compile_error!("gpui-agent builds against one GPUI: enable `zed` or `gpui-pre-0-3-9`, not both");
+-#[cfg(not(any(feature = "zed", feature = "gpui-pre-0-3-9")))]
+-compile_error!("gpui-agent needs a GPUI: enable the `zed` or `gpui-pre-0-3-9` feature");
++#[cfg(any(
++    all(feature = "zed", feature = "gpui-pre-0-3-9"),
++    all(feature = "zed", feature = "gpui-pre-0-3-12"),
++    all(feature = "gpui-pre-0-3-9", feature = "gpui-pre-0-3-12")
++))]
++compile_error!(
++    "gpui-agent builds against one GPUI: enable one of `zed`, `gpui-pre-0-3-9`, `gpui-pre-0-3-12`"
++);
++#[cfg(not(any(
++    feature = "zed",
++    feature = "gpui-pre-0-3-9",
++    feature = "gpui-pre-0-3-12"
++)))]
++compile_error!(
++    "gpui-agent needs a GPUI: enable the `zed`, `gpui-pre-0-3-9` or `gpui-pre-0-3-12` feature"
++);
+ 
+ mod compat;
+ 
+diff --git a/gpui/testapp/Cargo.toml b/gpui/testapp/Cargo.toml
+index c87b813..4a86acf 100644
+--- a/gpui/testapp/Cargo.toml
++++ b/gpui/testapp/Cargo.toml
+@@ -12,6 +12,7 @@ publish = false
+ default = []
+ zed = []
+ gpui-pre-0-3-9 = ["dep:gpui-pre", "dep:gpui-pre-platform", "gpui-agent/gpui-pre-0-3-9"]
++gpui-pre-0-3-12 = ["dep:gpui-pre", "dep:gpui-pre-platform", "gpui-agent/gpui-pre-0-3-12"]
+ 
+ [dependencies]
+ gpui-pre = { workspace = true, optional = true }

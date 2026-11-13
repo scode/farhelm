@@ -1,0 +1,225 @@
+diff --git a/src/linux/display_connection.rs b/src/linux/display_connection.rs
+index d7849d0..d4b3e4c 100644
+--- a/src/linux/display_connection.rs
++++ b/src/linux/display_connection.rs
+@@ -190,6 +190,18 @@ impl DisplayConnection {
+         dispatch!(self, connection => connection.read_from_clipboard(), headless => None)
+     }
+ 
++    /// Wayland needs its event loop free while the external producer writes the
++    /// requested pipe. Other backends retain their existing synchronous facade.
++    pub(crate) fn read_from_clipboard_async(
++        &self,
++    ) -> gpui::Task<Result<Option<ClipboardItem>, gpui::ClipboardReadError>> {
++        match self {
++            #[cfg(feature = "wayland")]
++            Self::Wayland(connection) => connection.read_from_clipboard_async(),
++            _ => gpui::Task::ready(Ok(self.read_from_clipboard())),
++        }
++    }
++
+     #[cfg(any(feature = "wayland", feature = "x11"))]
+     pub(crate) fn window_identifier(
+         &self,
+diff --git a/src/linux/platform.rs b/src/linux/platform.rs
+index 7f3d6c8..69907e6 100644
+--- a/src/linux/platform.rs
++++ b/src/linux/platform.rs
+@@ -1173,6 +1173,13 @@ impl Platform for LinuxPlatform {
+         self.connection.borrow().read_from_clipboard()
+     }
+ 
++    /// Keep potentially blocking Wayland clipboard pipe IO off the GUI thread.
++    fn read_from_clipboard_async(
++        &self,
++    ) -> Task<Result<Option<ClipboardItem>, gpui::ClipboardReadError>> {
++        self.connection.borrow().read_from_clipboard_async()
++    }
++
+     fn add_recent_document(&self, _path: &Path) {}
+ }
+ 
+diff --git a/src/linux/wayland/client.rs b/src/linux/wayland/client.rs
+index 2eb6255..1a4a04e 100644
+--- a/src/linux/wayland/client.rs
++++ b/src/linux/wayland/client.rs
+@@ -1493,6 +1493,16 @@ impl WaylandConnection {
+         self.0.borrow_mut().clipboard.read()
+     }
+ 
++    /// Prepare the offer on the platform thread; only its pipe read runs in the
++    /// background. All state borrows end before the returned task can be awaited.
++    pub(crate) fn read_from_clipboard_async(
++        &self,
++    ) -> gpui::Task<Result<Option<gpui::ClipboardItem>, gpui::ClipboardReadError>> {
++        let state = self.0.borrow();
++        let common = state.common.borrow();
++        state.clipboard.read_async(&common.background_executor)
++    }
++
+     pub(crate) fn active_window(&self) -> Option<AnyWindowHandle> {
+         self.0
+             .borrow_mut()
+diff --git a/src/linux/wayland/clipboard.rs b/src/linux/wayland/clipboard.rs
+index 86dc7da..ca0122d 100644
+--- a/src/linux/wayland/clipboard.rs
++++ b/src/linux/wayland/clipboard.rs
+@@ -11,7 +11,10 @@ use wayland_client::{Connection, protocol::wl_data_offer::WlDataOffer};
+ use wayland_protocols::wp::primary_selection::zv1::client::zwp_primary_selection_offer_v1::ZwpPrimarySelectionOfferV1;
+ 
+ use crate::linux::platform::{PIPE_READ_TIMEOUT, read_fd_with_timeout};
+-use gpui::{ClipboardEntry, ClipboardItem, Image, ImageFormat, hash};
++use gpui::{
++    BackgroundExecutor, ClipboardEntry, ClipboardItem, ClipboardReadError, Image, ImageFormat,
++    Task, hash,
++};
+ 
+ /// Text mime types that we'll offer to other programs.
+ pub(crate) const TEXT_MIME_TYPES: [&str; 3] =
+@@ -37,6 +40,57 @@ pub(crate) struct Clipboard {
+     current_primary_offer: Option<DataOffer<ZwpPrimarySelectionOfferV1>>,
+ }
+ 
++#[cfg(test)]
++mod attachment_clipboard_tests {
++    use super::*;
++
++    /// The policy test must choose a flavor without touching native transport.
++    struct NoReceive;
++
++    impl ReceiveData for NoReceive {
++        fn receive_data(&self, _: String, _: BorrowedFd<'_>) {
++            panic!("MIME selection must not perform clipboard IO");
++        }
++    }
++
++    /// Mixed offers must request the image's actual offered MIME (including
++    /// legacy aliases), independent of producer ordering. This pins async flavor
++    /// policy only; it does not claim a native compositor or pipe-read check.
++    #[test]
++    fn attachment_clipboard_image_priority_and_aliases() {
++        for (mimes, expected) in [
++            (
++                vec!["text/plain", "image/png"],
++                Some(("image/png", Some(ImageFormat::Png))),
++            ),
++            (
++                vec!["image/png", "text/plain"],
++                Some(("image/png", Some(ImageFormat::Png))),
++            ),
++            (
++                vec!["text/plain;charset=utf-8", "image/jpg"],
++                Some(("image/jpg", Some(ImageFormat::Jpeg))),
++            ),
++            (
++                vec!["text/plain", "image/tif"],
++                Some(("image/tif", Some(ImageFormat::Tiff))),
++            ),
++            (vec!["text/plain"], Some(("text/plain", None))),
++            (
++                vec!["text/plain", "text/plain;charset=utf-8"],
++                Some(("text/plain;charset=utf-8", None)),
++            ),
++            (vec!["application/octet-stream"], None),
++        ] {
++            let mut offer = DataOffer::new(NoReceive);
++            for mime in mimes {
++                offer.add_mime_type(mime.into());
++            }
++            assert_eq!(offer.payload_mime_type(), expected);
++        }
++    }
++}
++
+ pub(crate) trait ReceiveData {
+     fn receive_data(&self, mime_type: String, fd: BorrowedFd<'_>);
+ }
+@@ -76,6 +130,27 @@ impl<T: ReceiveData> DataOffer<T> {
+         self.mime_types.iter().any(|t| t == mime_type)
+     }
+ 
++    /// Payload-oriented async reads choose an offered image before text. Keep
++    /// the old synchronous editor API's ordering and cache independent. Aliases
++    /// retain their actual offered MIME name when requesting the producer's data.
++    fn payload_mime_type(&self) -> Option<(&str, Option<ImageFormat>)> {
++        for format in ImageFormat::iter() {
++            if let Some(mime) = self
++                .mime_types
++                .iter()
++                .find(|mime| ImageFormat::from_mime_type(mime) == Some(format))
++            {
++                return Some((mime, Some(format)));
++            }
++        }
++        TEXT_MIME_TYPES.iter().find_map(|preferred| {
++            self.mime_types
++                .iter()
++                .find(|mime| mime.as_str() == *preferred)
++                .map(|mime| (mime.as_str(), None))
++        })
++    }
++
+     fn read_bytes(&self, connection: &Connection, mime_type: &str) -> Option<Vec<u8>> {
+         let pipe = Pipe::new().unwrap();
+         self.inner.receive_data(mime_type.to_string(), unsafe {
+@@ -208,6 +283,60 @@ impl Clipboard {
+         Some(item)
+     }
+ 
++    /// Issue receive/flush while the Wayland event-loop state is borrowed, then
++    /// move only the pipe to the existing background executor. Neither the offer
++    /// nor a client RefCell borrow crosses the await. This read does not update
++    /// the synchronous cache: its image-first representation may differ, and a
++    /// later selection must not inherit this captured offer's result.
++    pub fn read_async(
++        &self,
++        executor: &BackgroundExecutor,
++    ) -> Task<Result<Option<ClipboardItem>, ClipboardReadError>> {
++        let Some(offer) = self.current_offer.as_ref() else {
++            return Task::ready(Ok(None));
++        };
++        if offer.has_mime_type(&self.self_mime) {
++            return Task::ready(Ok(self.contents.clone()));
++        }
++        let Some((mime, format)) = offer.payload_mime_type() else {
++            return Task::ready(Ok(None));
++        };
++        let pipe = match Pipe::new() {
++            Ok(pipe) => pipe,
++            Err(error) => {
++                log::error!("creating async clipboard pipe: {error}");
++                return Task::ready(Err(ClipboardReadError::Unavailable));
++            }
++        };
++        offer.inner.receive_data(mime.to_owned(), unsafe {
++            BorrowedFd::borrow_raw(pipe.write.as_raw_fd())
++        });
++        let fd = pipe.read;
++        drop(pipe.write);
++        if let Err(error) = self.connection.flush() {
++            log::error!("flushing async clipboard receive: {error}");
++            return Task::ready(Err(ClipboardReadError::Unavailable));
++        }
++        executor.spawn(async move {
++            // This uses the backend's existing per-poll timeout. Dropping the
++            // GUI waiter prevents admission, but does not interrupt a blocking
++            // read already executing on this worker thread.
++            let bytes = read_fd_with_timeout(fd, PIPE_READ_TIMEOUT).map_err(|error| {
++                log::error!("reading async clipboard pipe: {error}");
++                ClipboardReadError::UnsupportedContent
++            })?;
++            let item = if let Some(format) = format {
++                let id = hash(&bytes);
++                ClipboardItem::from(Image { format, bytes, id })
++            } else {
++                ClipboardItem::new_string(
++                    String::from_utf8(bytes).map_err(|_| ClipboardReadError::UnsupportedContent)?,
++                )
++            };
++            Ok(Some(item))
++        })
++    }
++
+     pub fn read_primary(&mut self) -> Option<ClipboardItem> {
+         let offer = self.current_primary_offer.as_ref()?;
+         if let Some(cached) = self.cached_primary_read.clone() {

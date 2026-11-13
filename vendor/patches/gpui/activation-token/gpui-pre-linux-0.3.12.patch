@@ -1,0 +1,20 @@
+diff --git a/src/linux/wayland/window.rs b/src/linux/wayland/window.rs
+index d8f0757..9df2197 100644
+--- a/src/linux/wayland/window.rs
++++ b/src/linux/wayland/window.rs
+@@ -1886,6 +1886,15 @@ impl PlatformWindow for WaylandWindow {
+         }
+     }
+ 
++    fn activate_with_token(&self, token: String) {
++        let state = self.borrow();
++        let Some(activation) = state.globals.activation.clone() else {
++            drop(state);
++            return self.activate();
++        };
++        activation.activate(token, &state.surface);
++    }
++
+     fn request_attention(&self) {}
+ 
+     fn is_active(&self) -> bool {
