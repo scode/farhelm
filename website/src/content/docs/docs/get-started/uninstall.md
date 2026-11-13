@@ -25,7 +25,7 @@ Farhelm. Then run:
 It lists what it will remove and asks before removing anything. It removes the Farhelm app from `~/Applications`, with
 every version kept inside it, and the `farhelm` command from `~/.local/bin`. It keeps your data under
 `~/.local/state/farhelm`: your list of hosts, preferences, session history, logs, and the repository caches for managed
-checkouts. Your projects, your agents, tmux, and your managed checkouts (including their trash and
+checkouts. Your projects, your agents, and your managed checkouts (including their trash and
 [prepared checkouts](/docs/using/start-a-session/#prepared-checkouts) in `.farhelm-spares` inside your Mac's checkout
 directory, its own **Checkout folder** in its host settings or else **Default checkout folder** under **Settings →
 Checkouts**) are not touched. To see the list without changing anything, add `--dry-run`. If Farhelm is still open when

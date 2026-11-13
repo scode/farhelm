@@ -110,8 +110,7 @@ on while reviewing a draft are recorded the same way, per [Learning from feedbac
 - **conversation identity**, **conversation capture**, **conversation reporter**: say what the user gets ("Resume opens
   the conversation you were in").
 - **hook injection**: describe the effect, not the mechanism.
-- **pane**, **tmux session**, **socket**: say "the session's terminal"; mention tmux only where the reader has to
-  install or configure it.
+- **pane**, **socket**: say "the session's terminal".
 
 ## Cross-reference liberally
 

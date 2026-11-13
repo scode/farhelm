@@ -17,23 +17,24 @@ Run this on a development host after `claude` or `codex` was upgraded:
 - `python3 scripts/capture-agent-screens.py` (add `--harness claude` or `--harness codex` for just one).
 
 The tool launches each installed agent in a real Farhelm terminal host the size of a production terminal, as a
-supervisor starts an agent in a new terminal: the supervisor's own emulator answers the agent's startup queries, and the
-agent gets the environment a supervisor gives it (`TERM_PROGRAM=farhelm` and the rest). It drives each agent through its
-trust dialog, an idle prompt, a turn that thinks and then runs a slow shell command behind a real permission prompt, the
-finished turn, the agent's own idle-time decorations (Claude's `/clear` hint, a Codex recap), and a question form.
-Claude then runs `/compact`; its in-progress spinner is saved as `working-compacting.{txt,title}`. The wait accepts
-timers past one minute, though the saved frame may be earlier. It writes every screen, the visible screen as text as the
-status sampler reads it, to `<harness>/<version>/<expected>-<scenario>.txt`, with the terminal's title beside it in a
-`.title` file, and then runs the fixture tests through `scripts/record-test-run.py`.
+supervisor starts an agent: the supervisor's own emulator answers the agent's startup queries, and the agent gets the
+environment a supervisor gives it (`TERM_PROGRAM=farhelm` and the rest). It drives each agent through its trust dialog,
+an idle prompt, a turn that thinks and then runs a slow shell command behind a real permission prompt, the finished
+turn, the agent's own idle-time decorations (Claude's `/clear` hint, a Codex recap), and a question form. Claude then
+runs `/compact`; its in-progress spinner is saved as `working-compacting.{txt,title}`. The wait accepts timers past one
+minute, though the saved frame may be earlier. It writes every screen, the visible screen as text as the status sampler
+reads it, to `<harness>/<version>/<expected>-<scenario>.txt`, with the terminal's title beside it in a `.title` file,
+and then runs the fixture tests through `scripts/record-test-run.py`.
 
 A new version directory whose tests pass means nothing needs shipping. A failing test names the harness, version, and
 scenario of the screen that broke it, which is the screen whose rules need updating. Commit the new version directory
 either way, so the next vendor change is compared against current screens.
 
-Versions captured before November 2026 were captured in a private tmux pane (`capture-pane -p`), with the environment an
-old terminal gives its agent (Claude, for one, shows a hint about scrolling in tmux there). Keep those directories:
-sessions in old terminals, and agents started in a new terminal before the upgrade that changed its environment, still
-draw those screens until they are restarted.
+Versions captured before November 2026 were captured in a pane of the private tmux server Farhelm then ran terminals in
+(`capture-pane -p`), with the environment that pane gave its agent (Claude, for one, shows a hint about scrolling in
+tmux there). Keep those directories. No terminal runs in tmux any more, but a terminal host started by a release before
+0.36.0 kept the environment those releases gave its agent (`TERM_PROGRAM=tmux` and tmux's version), and hosts outlive
+updates: such an agent still draws those screens until it is restarted (SPEC_impl.md, "Terminal host").
 
 Each scenario is best effort. If the agent cannot be driven into a state on this host (Codex reports its question tool
 unavailable in its default mode, or an agent whose configuration already trusts `/tmp` shows no trust dialog for the

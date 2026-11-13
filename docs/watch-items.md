@@ -6,15 +6,14 @@ purpose is to prevent misdiagnosis: do not fold a new failure into one of these 
 and do not reflexively re-litigate a closed mechanism. Inherited from the retired MOPUP_TODO.md (2026-08-16); item
 numbering from that file is preserved for cross-reference with older logs.
 
-11. **Rotating load-class test flakes on stacked-PR CI.** The original root-cause claim here was wrong: matching libtest
-    threads to the runner's four vCPUs is a useful process and memory bound, but serial fresh-process runs later
-    reproduced the tmux server death. The actual trigger was closing an output-bearing tmux 3.7b control client while
-    pane bytes were still queued for it. Farhelm now establishes an acknowledged client-wide `no-output` boundary from a
-    separate tmux process before closing or reaping that client, including cancellation and failed-open paths. CI keeps
-    the four-thread cap as a resource bound and separately runs the focused teardown scenarios against the checksummed
-    pinned build (3.7b when this was written; currently 3.7c). PLAN.md's M6.5 amendment carries the detailed evidence
-    and discriminator. Any recurrence after those review units is new evidence; do not classify it as oversubscription
-    without a mechanism.
+11. **Rotating load-class test flakes on stacked-PR CI (closed: the mechanism no longer exists).** The original
+    root-cause claim here was wrong: matching libtest threads to the runner's four vCPUs is a useful process and memory
+    bound, but serial fresh-process runs later reproduced the failure, the death of the private tmux server Farhelm then
+    ran its terminals in. The actual trigger was closing an output-bearing tmux 3.7b control client while pane bytes
+    were still queued for it. Farhelm no longer runs terminals in tmux or drives tmux control clients, so that shape
+    cannot recur. The four-thread cap stays as a resource bound (`.config/nextest.toml`). `lore/PLAN.md`'s M6.5
+    amendment carries the detailed evidence and discriminator. A load-shaped flake seen now is new evidence; do not
+    classify it as oversubscription without a mechanism.
 12. **Playwright flood-harness sightings.** The flood test now lives in `e2e/tests/terminal-flood.spec.ts`. The
     second-occurrence trigger fired, but it was not a recurrence of the original `drain socket closed before FLOOD-DONE`
     error. WebKit instead exhausted a fixed 45-second completion budget while the in-page verifier was still making

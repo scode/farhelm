@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 890" role="img"
-     aria-label="Farhelm architecture: web browser and native Mac app are two faces of one helm; the helm connects to a local supervisor directly and to remote supervisors over SSH; each supervisor persists session state in SQLite and drives a private tmux server holding the agents' real terminals; dashed outlines mark processes that can restart without losing anything, and restart resumes each session's captured conversation."
+     aria-label="Farhelm architecture: web browser and native Mac app are two faces of one helm; the helm connects to a local supervisor directly and to remote supervisors over SSH; each supervisor persists session state in SQLite and runs every terminal (an agent's or a shell tab's) in a terminal host of its own, a small process that holds the terminal and outlives the supervisor; the supervisor's terminal emulator interprets each terminal's output and the helm relays the screen as a grid stream to the browser, which draws it with Farhelm's grid; dashed outlines mark processes that can restart without losing anything, and restart resumes each session's captured conversation."
      font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -20,6 +20,7 @@
   <rect x="180" y="84" width="230" height="70" rx="8" fill="#ffffff" stroke="#24292f" stroke-width="1.3" stroke-dasharray="6 4"/>
   <text x="295" y="112" font-size="14" font-weight="600" fill="#24292f" text-anchor="middle">Web browser</text>
   <text x="295" y="131" font-size="10.5" fill="#57606a" text-anchor="middle">any machine — nothing installed</text>
+  <text x="295" y="146" font-size="10.5" fill="#57606a" text-anchor="middle">draws each terminal with Farhelm's grid</text>
 
   <rect x="750" y="84" width="230" height="70" rx="8" fill="#ffffff" stroke="#24292f" stroke-width="1.3" stroke-dasharray="6 4"/>
   <text x="865" y="112" font-size="14" font-weight="600" fill="#24292f" text-anchor="middle">Native Mac app</text>
@@ -38,6 +39,7 @@
   <text x="580" y="252" font-size="14.5" font-weight="700" fill="#24292f" text-anchor="middle">Helm — the one control plane</text>
   <text x="580" y="274" font-size="11" fill="#57606a" text-anchor="middle">host registry · aggregates every host's sessions</text>
   <text x="580" y="291" font-size="11" fill="#57606a" text-anchor="middle">serves the UI · supervisors hold the truth</text>
+  <text x="580" y="308" font-size="11" fill="#57606a" text-anchor="middle">relays each terminal's grid stream and its input</text>
 
   <!-- helm.db cylinder -->
   <line x1="730" y1="272" x2="854" y2="272" stroke="#24292f" stroke-width="1.2" marker-end="url(#arrow)"/>
@@ -66,13 +68,15 @@
   <text x="1104" y="437" font-size="10.5" font-style="italic" fill="#8b949e" text-anchor="end">· any number of these</text>
 
   <!-- Supervisors (dashed: restartable) -->
-  <rect x="70" y="452" width="220" height="62" rx="8" fill="#ffffff" stroke="#24292f" stroke-width="1.4" stroke-dasharray="6 4"/>
-  <text x="180" y="478" font-size="14" font-weight="700" fill="#24292f" text-anchor="middle">Supervisor</text>
-  <text x="180" y="496" font-size="10.5" fill="#57606a" text-anchor="middle">authority on its sessions</text>
+  <rect x="70" y="452" width="220" height="72" rx="8" fill="#ffffff" stroke="#24292f" stroke-width="1.4" stroke-dasharray="6 4"/>
+  <text x="180" y="476" font-size="14" font-weight="700" fill="#24292f" text-anchor="middle">Supervisor</text>
+  <text x="180" y="494" font-size="10.5" fill="#57606a" text-anchor="middle">authority on its sessions</text>
+  <text x="180" y="510" font-size="10.5" fill="#57606a" text-anchor="middle">terminal emulator per terminal</text>
 
-  <rect x="630" y="452" width="220" height="62" rx="8" fill="#ffffff" stroke="#24292f" stroke-width="1.4" stroke-dasharray="6 4"/>
-  <text x="740" y="478" font-size="14" font-weight="700" fill="#24292f" text-anchor="middle">Supervisor</text>
-  <text x="740" y="496" font-size="10.5" fill="#57606a" text-anchor="middle">authority on its sessions</text>
+  <rect x="630" y="452" width="220" height="72" rx="8" fill="#ffffff" stroke="#24292f" stroke-width="1.4" stroke-dasharray="6 4"/>
+  <text x="740" y="476" font-size="14" font-weight="700" fill="#24292f" text-anchor="middle">Supervisor</text>
+  <text x="740" y="494" font-size="10.5" fill="#57606a" text-anchor="middle">authority on its sessions</text>
+  <text x="740" y="510" font-size="10.5" fill="#57606a" text-anchor="middle">terminal emulator per terminal</text>
 
   <!-- supervisor.db cylinders -->
   <line x1="290" y1="480" x2="348" y2="480" stroke="#24292f" stroke-width="1.2" marker-end="url(#arrow)"/>
@@ -80,7 +84,7 @@
   <path d="M350,458 v40 a75,9 0 0 0 150,0 v-40" fill="#fff1d6" stroke="#b45309" stroke-width="1.4"/>
   <ellipse cx="425" cy="458" rx="75" ry="9" fill="#ffe3b3" stroke="#b45309" stroke-width="1.4"/>
   <text x="425" y="487" font-size="12" font-weight="700" fill="#8a4b06" text-anchor="middle">supervisor.db</text>
-  <text x="425" y="526" font-size="10.5" fill="#57606a" text-anchor="middle">sessions · profiles · boot id</text>
+  <text x="425" y="526" font-size="10.5" fill="#57606a" text-anchor="middle">sessions · boot id</text>
   <text x="425" y="540" font-size="10.5" fill="#57606a" text-anchor="middle">conversation ids</text>
 
   <line x1="850" y1="480" x2="908" y2="480" stroke="#24292f" stroke-width="1.2" marker-end="url(#arrow)"/>
@@ -88,20 +92,21 @@
   <path d="M910,458 v40 a75,9 0 0 0 150,0 v-40" fill="#fff1d6" stroke="#b45309" stroke-width="1.4"/>
   <ellipse cx="985" cy="458" rx="75" ry="9" fill="#ffe3b3" stroke="#b45309" stroke-width="1.4"/>
   <text x="985" y="487" font-size="12" font-weight="700" fill="#8a4b06" text-anchor="middle">supervisor.db</text>
-  <text x="985" y="526" font-size="10.5" fill="#57606a" text-anchor="middle">sessions · profiles · boot id</text>
+  <text x="985" y="526" font-size="10.5" fill="#57606a" text-anchor="middle">sessions · boot id</text>
   <text x="985" y="540" font-size="10.5" fill="#57606a" text-anchor="middle">conversation ids</text>
 
-  <!-- Supervisor-to-tmux edges -->
-  <line x1="180" y1="514" x2="180" y2="562" stroke="#24292f" stroke-width="1.3" marker-end="url(#arrow)"/>
-  <text x="190" y="543" font-size="10.5" fill="#57606a" text-anchor="start">drives via tmux -C (control mode)</text>
+  <!-- Supervisor-to-terminal-host edges -->
+  <line x1="180" y1="524" x2="180" y2="562" stroke="#24292f" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <text x="190" y="547" font-size="10.5" fill="#57606a" text-anchor="start">one socket per terminal</text>
 
-  <line x1="740" y1="514" x2="740" y2="562" stroke="#24292f" stroke-width="1.3" marker-end="url(#arrow)"/>
-  <text x="750" y="543" font-size="10.5" fill="#57606a" text-anchor="start">drives via tmux -C (control mode)</text>
+  <line x1="740" y1="524" x2="740" y2="562" stroke="#24292f" stroke-width="1.3" marker-end="url(#arrow)"/>
+  <text x="750" y="547" font-size="10.5" fill="#57606a" text-anchor="start">one socket per terminal</text>
 
-  <!-- tmux servers (solid: outlive the supervisor) -->
+  <!-- Terminal hosts (solid: outlive the supervisor). Each terminal in a
+       session, the agent's and every shell tab's, is its own host process. -->
   <rect x="70" y="566" width="460" height="148" rx="8" fill="#ffffff" stroke="#24292f" stroke-width="1.6"/>
-  <text x="82" y="588" font-size="13" font-weight="700" fill="#24292f">private tmux server</text>
-  <text x="82" y="603" font-size="10" fill="#57606a">own socket · holds PTYs &amp; scrollback</text>
+  <text x="82" y="588" font-size="13" font-weight="700" fill="#24292f">terminal hosts — one per terminal</text>
+  <text x="82" y="603" font-size="10" fill="#57606a">each holds its PTY, its program &amp; its output</text>
 
   <rect x="90" y="614" width="200" height="88" rx="6" fill="#ffffff" stroke="#57606a" stroke-width="1.1"/>
   <text x="100" y="631" font-size="10.5" font-weight="600" fill="#57606a">session — ~/proj/app</text>
@@ -112,8 +117,8 @@
   <text x="330" y="662" font-size="10.5" font-style="italic" fill="#8b949e">…more sessions</text>
 
   <rect x="630" y="566" width="460" height="148" rx="8" fill="#ffffff" stroke="#24292f" stroke-width="1.6"/>
-  <text x="642" y="588" font-size="13" font-weight="700" fill="#24292f">private tmux server</text>
-  <text x="642" y="603" font-size="10" fill="#57606a">own socket · holds PTYs &amp; scrollback</text>
+  <text x="642" y="588" font-size="13" font-weight="700" fill="#24292f">terminal hosts — one per terminal</text>
+  <text x="642" y="603" font-size="10" fill="#57606a">each holds its PTY, its program &amp; its output</text>
 
   <rect x="650" y="614" width="200" height="88" rx="6" fill="#ffffff" stroke="#57606a" stroke-width="1.1"/>
   <text x="660" y="631" font-size="10.5" font-weight="600" fill="#57606a">session — ~/ws/api</text>
@@ -138,7 +143,7 @@
   <!-- Durability story -->
   <text x="40" y="776" font-size="14" font-weight="700" fill="#24292f">Why a restart loses nothing</text>
   <text x="40" y="800" font-size="12" fill="#24292f">client or helm dies → sessions untouched; a returning helm reloads its host registry and last-known sessions from helm.db</text>
-  <text x="40" y="822" font-size="12" fill="#24292f">supervisor restarts → tmux and the agents in it keep running; supervisor.db still knows every session, profile, and conversation</text>
+  <text x="40" y="822" font-size="12" fill="#24292f">supervisor restarts → terminal hosts and the agents in them keep running; its emulators rebuild from the hosts; supervisor.db still knows every session and conversation</text>
   <text x="40" y="844" font-size="12" fill="#24292f">host reboots → terminals are gone, conversations are not: sessions show interrupted, and restart resumes each one via its captured id (claude --resume &lt;id&gt;)</text>
-  <text x="40" y="870" font-size="11" fill="#8b949e">dashed outline = disposable, restarts freely · solid = keeps running while its host is up · amber cylinder = SQLite state, survives restarts and reboots · blue = the agent's real terminal</text>
+  <text x="40" y="870" font-size="11" fill="#8b949e">dashed outline = disposable, restarts freely · solid = keeps running while its machine is up · amber cylinder = SQLite state, survives restarts and reboots · blue = the agent's real terminal</text>
 </svg>

@@ -2,8 +2,8 @@
 
 Known bugs we are aware of but have no intention of fixing, documented because they can still bite users. This is
 deliberately not TODO.md: entries there describe work that is still wanted, while entries here describe behavior we have
-decided to live with — usually because the defect lives below farhelm (tmux, the kernel, a library) or because the only
-fix would cost more than the bug does. An entry moves out of this file only if that calculus changes.
+decided to live with — usually because the defect lives below farhelm (the kernel, a library) or because the only fix
+would cost more than the bug does. An entry moves out of this file only if that calculus changes.
 
 ## A host install or update can hang until the helm restarts if a local ssh helper keeps its output open
 

@@ -1,5 +1,12 @@
 # Codex input-area corruption investigation
 
+NOTE: This is a historical investigation record, written in September 2026 and not maintained. It traces a terminal path
+Farhelm no longer has: terminals then ran in a private tmux server and were drawn in the browser by xterm.js, and both
+are gone. Its source trace, hypotheses and next steps describe that path, not the current code, and the TODO entry it
+mentions was closed when xterm.js was removed. One result outlived it: the grid's hidden input field still opts out of
+WebKit's inline predictions (`writingsuggestions="false"` in `grid-terminal.js`), the mitigation the last section
+describes.
+
 The report remains unresolved. This investigation has not established a Farhelm defect or reproduced the reported
 scattered display fragments. A clean observation does not establish that the input or rendering path is always correct.
 
