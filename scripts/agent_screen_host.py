@@ -1,17 +1,17 @@
 """Run one program in a real Farhelm terminal host and read, type and press keys at it.
 
 The shared backend of `scripts/agent-tui.py` and `scripts/capture-agent-screens.py`. Both exist to see what a real,
-installed agent draws in a Farhelm terminal, so the program runs the way a supervisor runs an agent in a new terminal:
-in a terminal host started from the built `farhelm`, with the supervisor's own emulator answering the program's
-startup queries and the environment a supervisor gives an agent (`TERM_PROGRAM=farhelm` and the rest). The Rust side
-is the hidden `farhelm internal agent-screen` command (`crates/farhelm-supervisor/src/agent_screen.rs`, whose module
-docs describe the control socket this talks to).
+installed agent draws in a Farhelm terminal, so the program runs the way a supervisor runs an agent: in a terminal host
+started from the built `farhelm`, with the supervisor's own emulator answering the program's startup queries and the
+environment a supervisor gives an agent (`TERM_PROGRAM=farhelm` and the rest). The Rust side is the hidden
+`farhelm internal agent-screen` command (`crates/farhelm-supervisor/src/agent_screen.rs`, whose module docs describe
+the control socket this talks to).
 
 Each run lives in its own fresh directory directly under `/tmp`, holding the host's socket, the control socket, the
 command's log and its pid: unix socket paths are limited to about 104 bytes, and concurrent runs on a shared machine
 must never meet on a fixed name. Nothing of a live Farhelm is involved, and the program gets no `FARHELM_*`, `TMUX` or
 `TMUX_PANE` variable of this process's, nor an enclosing agent session's markers (`program_env`): inside a Farhelm
-session those would point the program under test at the live helm or at the session's own tmux.
+session those would point the program under test at the live helm or at a tmux the caller runs in.
 """
 
 from __future__ import annotations

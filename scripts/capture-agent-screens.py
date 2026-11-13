@@ -4,11 +4,11 @@
 The supervisor decides whether a Claude or Codex session is working, waiting on the user, or idle by recognizing what
 the agent draws, so its rules go stale whenever a vendor changes its TUI. This tool is the single thing to run after
 upgrading either agent on a development host: it launches the INSTALLED `claude` and `codex` in a real Farhelm terminal
-host sized like a production terminal, as a supervisor starts an agent in a new terminal (the supervisor's emulator
-answering the agent's startup queries, the environment a supervisor gives an agent), drives each through the states
-the readers must tell apart, and writes every screen it saw under
-`crates/farhelm-supervisor/tests/fixtures/screens/<harness>/<version>/`, then runs the fixture tests over them. New
-fixtures that the tests reject are exactly the screens whose rules need a shipped update.
+host sized like a production terminal, as a supervisor starts an agent (the supervisor's emulator answering the agent's
+startup queries, the environment a supervisor gives an agent), drives each through the states the readers must tell
+apart, and writes every screen it saw under `crates/farhelm-supervisor/tests/fixtures/screens/<harness>/<version>/`,
+then runs the fixture tests over them. New fixtures that the tests reject are exactly the screens whose rules need a
+shipped update.
 
 Each fixture is the visible screen as text, as the emulator gives it to the supervisor's status sampler
 (`Emulator::screen_text`), in `<expected>-<scenario>.txt`, with the terminal's title beside it in

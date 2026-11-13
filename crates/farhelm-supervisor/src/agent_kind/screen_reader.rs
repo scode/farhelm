@@ -119,9 +119,10 @@ pub(crate) fn workspace_trust_prompt(
 /// Requiring the question, workspace, both choices and final footer keeps quoted
 /// phrases and a completed dialog followed by ordinary output from becoming hints.
 fn muse_trust_prompt(text: &str) -> bool {
-    // capture-pane retains physical word wraps. Normalize them before checking
-    // the dialog. Muse clips its footer at narrow widths, so require its
-    // specific key hints and accept only a prefix of the remaining sentence.
+    // The screen text keeps physical word wraps (one line per terminal
+    // row). Normalize them before checking the dialog. Muse clips its footer
+    // at narrow widths, so require its specific key hints and accept only a
+    // prefix of the remaining sentence.
     // The caution, selected menu and footer must stay contiguous at the end:
     // transcript text after a completed dialog still withdraws the hint.
     let joined = text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -552,7 +553,7 @@ impl ScreenReader for ClaudeReader {
 
     fn trust_prompt(&self, text: &str) -> bool {
         let lines = content_lines(text);
-        // capture-pane preserves physical wraps. The same dialog must be
+        // The screen text keeps physical wraps. The same dialog must be
         // recognized when its question or choices span several terminal rows.
         let joined = lines
             .join(" ")

@@ -4,7 +4,7 @@
 //! # What this buys — and the guarantee it does NOT make
 //!
 //! The sweep in `service::kill_process_tree` finds a session's descendants
-//! two ways — the pane's PPID closure and a scan of `/proc/*/environ` for
+//! two ways — the terminal's PPID closure and a scan of `/proc/*/environ` for
 //! `FARHELM_SESSION_ID` — and lore/2026-07-27-m2-process-tree-stop.md
 //! records the one shape both miss: a descendant that double-forked (so no
 //! PPID walk reaches it) AND `exec`'d with a scrubbed environment (so the
@@ -45,11 +45,11 @@
 //! invoking shell with no `systemd-run` left in the tree, the command's
 //! exit status propagates unchanged, and the working directory and
 //! environment are inherited — which is what the three observers that read
-//! those facts need (`pane_process` liveness, `pane_dead_status` exit
-//! codes, and the sweep's PPID closure). It is NOT a claim that a scoped
-//! process is indistinguishable from an unscoped one in general: cgroup
-//! membership is plainly visible from inside (`/proc/self/cgroup`), and
-//! that visibility is exactly what makes the escape above possible.
+//! those facts need (the terminal host's report of its child's liveness
+//! and exit code, and the sweep's PPID closure). It is NOT a claim that a
+//! scoped process is indistinguishable from an unscoped one in general:
+//! cgroup membership is plainly visible from inside (`/proc/self/cgroup`),
+//! and that visibility is exactly what makes the escape above possible.
 //!
 //! # Unit naming
 //!

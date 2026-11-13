@@ -7055,11 +7055,11 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   from a different directory than the one this environment selects. The units are rendered from the templates in
   `crates/farhelm-helm/units/`, the same ones remote provisioning fills in, and every file setup writes starts with
   `# managed-by: farhelm helm setup`: setup overwrites or removes only files carrying that marker, and refuses anything
-  else rather than replacing it. It neither needs nor looks for tmux: the supervisor unit names none and its `PATH` is
-  the installed `farhelm`'s directory plus a fixed base ("Provisioning"). The matching rule on the helm side is that the
-  hosts panel never installs or updates a supervisor on the helm's own machine at all: an absent one is answered with
-  "run `farhelm helm setup` here", a unit already running that same binary is named as setup's or its author's and left
-  alone, and a supervisor that ANSWERS is discovered and registered exactly as a remote one is.
+  else rather than replacing it. The supervisor unit's `PATH` is the installed `farhelm`'s directory plus a fixed base
+  ("Provisioning"). The matching rule on the helm side is that the hosts panel never installs or updates a supervisor on
+  the helm's own machine at all: an absent one is answered with "run `farhelm helm setup` here", a unit already running
+  that same binary is named as setup's or its author's and left alone, and a supervisor that ANSWERS is discovered and
+  registered exactly as a remote one is.
 - `farhelm helm token show|rotate` — web-token bootstrap and rotation.
 - `farhelm supervisor run` — run the supervisor in the foreground; this is SPEC.md's "run the binary with arguments in a
   terminal" path.

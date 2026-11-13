@@ -1417,10 +1417,10 @@ async fn helm_bind_failure_happens_before_any_durable_setup() {
 
 /// Replay must reach into scrollback, not just the visible screen.
 ///
-/// This is the test that would fail if `capture-pane`'s `-S` history
-/// range were dropped: the earlier assertions all fit inside one 24-row
-/// viewport, so a screen-only capture would pass them while silently
-/// violating SPEC.md's replay floor.
+/// This is the test that would fail if replay sent only the visible
+/// screen: the earlier assertions all fit inside one 24-row viewport, so a
+/// screen-only replay would pass them while silently violating SPEC.md's
+/// replay floor.
 #[farhelm_testtrace::test]
 async fn reattach_replays_content_scrolled_off_screen() {
     let h = harness().await;
@@ -3932,10 +3932,10 @@ async fn stop_kills_a_reparented_daemon_with_no_live_pane_to_walk_from() {
     assert_eq!(launch_scope_of(&h, &session.id).await, None);
     assert!(
         !process_is_gone(daemon_pid),
-        "the survivor must be alive before the pane dies"
+        "the survivor must be alive before the agent dies"
     );
-    // Kill the pane's own process directly: the pane goes dead
-    // (remain-on-exit keeps the terminal), leaving no live pid for
+    // Kill the agent's own process directly: its terminal ends (the host
+    // keeps the ended terminal viewable), leaving no live pid for
     // kill_process_tree to walk ancestry from at all.
     // SAFETY: self_pid is a real, currently-live pid this test just
     // extracted from the fake agent's own output.

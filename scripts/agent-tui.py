@@ -2,13 +2,13 @@
 """Drive a real agent TUI (or any terminal program) by hand or from a script: start, read the screen, type, wait.
 
 Testing how a real `claude`, `codex`, `goose` and so on behave in a terminal means running the installed program in a
-terminal, reading what it draws, and typing at it. This is the one tool for that. Each run starts the program in a
-real Farhelm terminal host, as a supervisor starts an agent in a new terminal: the supervisor's own emulator answers
-the program's startup queries, the program gets the environment a supervisor gives an agent (`TERM_PROGRAM=farhelm`
-among it), and the screen reads back as status detection reads it. Each run lives in a fresh random directory directly
-under `/tmp` (unix socket paths are limited to about 104 bytes, and concurrent agents on this machine must never meet
-on a fixed name), so it never touches a live Farhelm, its supervisor, or its sessions. It needs the built `farhelm`
-(`cargo build -p farhelm`; `--farhelm` names another).
+terminal, reading what it draws, and typing at it. This is the one tool for that. Each run starts the program in a real
+Farhelm terminal host, as a supervisor starts an agent: the supervisor's own emulator answers the program's startup
+queries, the program gets the environment a supervisor gives an agent (`TERM_PROGRAM=farhelm` among it), and the screen
+reads back as status detection reads it. Each run lives in a fresh random directory directly under `/tmp` (unix socket
+paths are limited to about 104 bytes, and concurrent agents on this machine must never meet on a fixed name), so it
+never touches a live Farhelm, its supervisor, or its sessions. It needs the built `farhelm` (`cargo build -p farhelm`;
+`--farhelm` names another).
 
 Every command after `start` names the run by the directory `start` printed:
 

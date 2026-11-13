@@ -94,9 +94,9 @@ fn hex(text: &str) -> Vec<u8> {
 /// codes the rules read), every modifier set, both platforms and both
 /// cursor-key modes. Every row must match: a difference is a key that types
 /// something other than what shells and agents expect, and other than what
-/// Farhelm's terminals have always typed. The table was first computed by the
-/// xterm.js Farhelm then vendored (its own `evaluateKeyboardEvent`), and the JS harness holds the
-/// page's half of the rules to the same table. Which keydowns are sent at
+/// Farhelm's terminals have always typed. The table was first computed from
+/// the xterm.js code Farhelm's terminals used before the grid (its own
+/// `evaluateKeyboardEvent`), and the JS harness holds the page's half of the rules to the same table. Which keydowns are sent at
 /// all is the grid client's to decide and test, so the table covers
 /// keydowns it would drop too.
 #[test]

@@ -161,15 +161,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Credentials for ordinary SSH hosts.** The Credentials section of Settings serves environments through their recipes.
   Extend it so ordinary SSH hosts can use the same named credentials.
 
-- **Finish removing tmux and xterm.js after old terminals end.** Asked for by the maintainer on 2026-11-11, with the
-  removal of terminal kind tracking that the first tmux plan carried out, as one effort to remove every trace of tmux
-  and xterm.js except the startup step that turns off a supervisor's old private tmux server. The rest after the running
-  product: stop requiring, probing, installing and shipping tmux (setup, the desktop app, Linux provisioning, uninstall,
-  the installer, the bundled musl tmux in releases); drop tmux from test tooling, CI, the brick test and agent
-  instructions; then bring the specs, docs and code comments in line and audit what remains. Plan:
-  `plans/queue/tmux-drop-from-install.md`, then `plans/queue/tmux-drop-from-tooling.md` and
-  `plans/queue/tmux-drop-from-docs.md`.
-
 - **Scroll the grid terminal entirely from a back buffer it keeps itself, instead of history sent by the supervisor.**
   The page already keeps the scrollback it shows and scrolling sends nothing
   (`crates/farhelm-ui/assets/grid-terminal.js`, "Scrollback"), but that history arrives as `history` messages from the
@@ -398,13 +389,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   rule.
 - Tell users that closing, exiting, or deleting a terminal tab also stops services the tab shell's startup files started
   there first (an `ssh-agent`, an editor daemon, a detached tmux server), and that services the agent's launch started
-  first are not affected. In an old terminal a tmux autostart guarded by `TMUX` never fires during the agent's launch,
-  so when no tmux server of the user's is running yet, the first tab usually starts and owns it, and with `exec tmux` a
-  detach ends the tab and the server; in a new terminal it fires during the agent's launch instead, and one that execs
-  tmux keeps the agent from starting. Likewise, a personal tmux server or an ssh ControlMaster that the agent is the
-  first to start ends with Stop, Restart, Replace or Delete, and one a command in a tab is the first to start ends when
-  the tab closes or the session is deleted, each with everything the user later ran in it or through it, including from
-  outside Farhelm. SPEC.md's session view section and "Ownership during cleanup and provisioning" state the rules.
+  first are not affected. A tmux autostart guarded by `TMUX` fires during the agent's launch, and one that execs tmux
+  keeps the agent from starting. Likewise, a personal tmux server or an ssh ControlMaster that the agent is the first to
+  start ends with Stop, Restart, Replace or Delete, and one a command in a tab is the first to start ends when the tab
+  closes or the session is deleted, each with everything the user later ran in it or through it, including from outside
+  Farhelm. SPEC.md's session view section and "Ownership during cleanup and provisioning" state the rules.
 - Tell users what Stop, Restart, Delete and closing a tab can and cannot kill on a Mac, and on a Linux host whose
   supervisor runs without a usable systemd user manager. There, a background process that has detached from the
   session's terminal is found only through an environment marker, so one that hides or overwrites its environment
@@ -415,14 +404,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - Tell users that bash and zsh are the supported login shells on every host: agents and terminal tabs start through the
   login shell, and other shells, csh and tcsh included, may fail to launch them. SPEC.md's supported user environments
   section states the rule.
-- Tell users that agents and terminal tabs run without the private tmux server's `TMUX` and `TMUX_PANE`, as in an SSH
-  login, so shells an agent starts for its own work see no tmux either (a new terminal sets neither at any point, and
-  tells programs it is Farhelm's own terminal with `TERM_PROGRAM=farhelm`). A startup file that starts tmux when `TMUX`
-  is unset without first checking for an interactive shell (`[[ $- == *i* ]]`) or a terminal can then cut short the
-  environment an agent captures from it (Claude Code sources `.zshrc` without a terminal), leaving the agent without
-  setup made later in that file, such as a PATH entry; this is the same as running the agent in a terminal outside tmux.
-  SPEC.md's "Ownership during cleanup and provisioning" section states the rule. Plan:
-  `plans/queue/tmux-drop-from-docs.md`.
 
 ## Tricky bugs
 
@@ -660,15 +641,15 @@ are not.
   and unscoped process mixing:
   - A failed database confirmation discards cleanup ownership
     (`failed-confirmation-discard-session-despite-failed-process.md`). When a create's database confirmation fails and
-    its process sweep also fails, a successful tmux kill still drops the session record. A surviving detached process
-    then keeps running with no session left to Delete. The trigger is a local storage failure. Keep the session when
-    cleanup cannot be confirmed, so a later Delete can retry.
+    its process sweep also fails, a confirmed end of the session's terminal host still drops the session record. A
+    surviving detached process then keeps running with no session left to Delete. The trigger is a local storage
+    failure. Keep the session when cleanup cannot be confirmed, so a later Delete can retry.
 
   When executing, check that all three cases are actually gone.
 
   Once the fallback is gone, also assess what the process sweep still has to do on Linux (to look into, not decided,
-  2026-10-05). With every launch and tab in a scope, the walk from the process numbers tmux reports for a session's
-  terminals has no Linux reason left, since its stated purpose is hosts without tab scopes, and dropping it there
+  2026-10-05). With every launch and tab in a scope, the walk from the process numbers of a session's terminals (their
+  hosts' children) has no Linux reason left, since its stated purpose is hosts without tab scopes, and dropping it there
   removes the short process-number reuse race SPEC_impl.md currently accepts as an interim measure. Whether the
   environment-marker sweep should stay as a backstop, for processes that left the scope but kept the session marker (an
   agent running `systemd-run --user --scope`, say), is part of the assessment.
@@ -765,13 +746,13 @@ are not.
   `.old` parking files and the refuse-unless helpers around them — about 220 of the script's 527 logic lines (the other
   ~570 lines of the file are comments). Be honest about the size: the ~300 logic lines that remain are things any
   correct installer needs — target detection with the Rosetta case, prerequisite probing, latest-version discovery,
-  `SHA256SUMS` handling, tar member validation, the `--version` cross-check, PATH and tmux advice, the closing messages
-  — and `test-install-sh.sh` mostly tests THOSE (404, checksum mismatch, malformed archives, versions, prerequisites,
-  the closing-message contract, the nothing-outside-`$INSTALL_DIR` diff); only the forced-failure rollback leg goes.
-  Given up: a kill between the two macOS binaries' renames leaves one new and one old until the next run (the desktop
-  shell finds its sibling by path, so a mismatch shows as a refusal, not silence), and a failure after placement no
-  longer restores the previous binaries — re-run instead. A modest cut, worth taking when someone is in the file anyway
-  rather than on its own.
+  `SHA256SUMS` handling, tar member validation, the `--version` cross-check, PATH advice, the closing messages — and
+  `test-install-sh.sh` mostly tests THOSE (404, checksum mismatch, malformed archives, versions, prerequisites, the
+  closing-message contract, the nothing-outside-`$INSTALL_DIR` diff); only the forced-failure rollback leg goes. Given
+  up: a kill between the two macOS binaries' renames leaves one new and one old until the next run (the desktop shell
+  finds its sibling by path, so a mismatch shows as a refusal, not silence), and a failure after placement no longer
+  restores the previous binaries — re-run instead. A modest cut, worth taking when someone is in the file anyway rather
+  than on its own.
 
 - Fly.io Sprites as a host kind: a session backed by a per-second-billed microVM that freezes when idle, with "pause
   this host" in the UI meaning "stop paying for it". Assessed 2026-08-30 against a real sprite; the findings, the code
@@ -824,13 +805,12 @@ are not.
   navigation handler blocks every in-window navigation after the first load and hands http(s) links to the system
   browser, so no outside page or iframe runs there. Everything untrusted is rendered as text: terminal output, session
   titles and host-reported metadata, which SPEC.md's "Local authority and trust between hosts" says the GUI must treat
-  as untrusted, go through the grid's `textContent` spans (xterm.js cells for old terminals), Dioxus's escaped text or
-  `textContent`, never `innerHTML` or `dangerous_inner_html`, and Rust-built page script interpolates only
-  JSON-serialized values. Exploiting the fallback would need a new script-injection bug in Farhelm's rendering or
-  xterm.js, or a navigation escape in Dioxus or WebKit. Such script would already hold the device secret and could drive
-  the whole helm API, typing into terminals included, so the file read adds a quieter route to files rather than new
-  power. It is wanted at all because SPEC.md's "Client hardening" holds the native app to a higher bar: proportionate
-  hardening that narrows what a hypothetical flaw could reach.
+  as untrusted, go through the grid's `textContent` spans, Dioxus's escaped text or `textContent`, never `innerHTML` or
+  `dangerous_inner_html`, and Rust-built page script interpolates only JSON-serialized values. Exploiting the fallback
+  would need a new script-injection bug in Farhelm's rendering, or a navigation escape in Dioxus or WebKit. Such script
+  would already hold the device secret and could drive the whole helm API, typing into terminals included, so the file
+  read adds a quieter route to files rather than new power. It is wanted at all because SPEC.md's "Client hardening"
+  holds the native app to a higher bar: proportionate hardening that narrows what a hypothetical flaw could reach.
 
   Why it is not done yet: as of 2026-10-02 every complete fix seems to need patching Dioxus, either through a
   `[patch.crates-io]` fork of dioxus-desktop or dioxus-asset-resolver (the repo's first patched Rust dependency, to be
@@ -903,11 +883,9 @@ are not.
   channel with its `preferredNotifChannel` setting (in `/config`; values such as `iterm2`, `ghostty`, `kitty` or
   `terminal_bell`) and fires when it needs the user: a permission prompt, or sitting idle waiting for input. Codex does
   it with `notifications = true` under `[tui]` in `~/.codex/config.toml`, and fires when a turn finishes and on approval
-  requests. Inside Farhelm those codes reach the supervisor's own terminal emulator in a new terminal, which does
-  nothing with them, and tmux in an old one, which drops them unless `allow-passthrough` is on (Farhelm does not set
-  it), and past tmux they would land in xterm.js. Either way they end in Farhelm's terminal rather than a native
-  terminal app. Investigate what Farhelm could do with them: surface them as client notifications, use them as a status
-  signal, or nothing. Related to the ntfy.sh entry under Near term.
+  requests. Inside Farhelm those codes reach the supervisor's own terminal emulator, which does nothing with them, so
+  they end in Farhelm's terminal rather than a native terminal app. Investigate what Farhelm could do with them: surface
+  them as client notifications, use them as a status signal, or nothing. Related to the ntfy.sh entry under Near term.
 
 - **"Phone home" supervisors.** Allow supervisors to come up and register themselves with the helm, instead of being set
   up or pushed from the helm, so hosts show up dynamically as they come and go.

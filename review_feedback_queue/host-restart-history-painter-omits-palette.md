@@ -38,14 +38,9 @@ scrollback with colors/styles/links above a blank screen in default modes, so wh
 recoloring existing history remains a contract ambiguity for triage. Coverage rechecked across SPEC.md, SPEC_impl.md,
 TODO Planned (tip :23-25 empty), BUGS.md, plans/queue, queue INDEX and files, TRIAGE_OUTCOMES.md. No exact matching
 prior decision/item found. FILTER rare self-correcting display glitches does not cover history whose colors stay
-changed. Synthesis with g058/f2: related contract, distinct omission boundaries. Personally read parent-supplied
-official tmux 3.7c source cmd-capture-pane.c:151-254 and grid.c:787-904,1037-1125: capture emits indexed SGR from stored
-cells, no palette lookup; input.c:2903-2949 accepts OSC4 into a separate palette; tty.c:2764-2785 resolves it for live
-display. Migration feeds those indices into a fresh scratch emulator with no palette (tip snapshot/mod.rs:735-767,
-host_restart.rs:871-884, tmux.rs:4105-4110,4163-4174). Thus fixing host history painting alone cannot restore palette
-already absent at tmux capture; fixing capture to concretize RGB alone cannot repair host-to-host seeds. Preserve both
-original IDs and boundaries; a unified palette-preservation task can cover both, but neither current finding proves the
-other's cause fixed.
+changed. Synthesis with g058/f2: related contract, distinct omission boundaries; g058/f2's boundary was the palette
+missing from history captured from an old tmux terminal for Restart, a path that no longer exists now that old terminals
+are ended at startup rather than moved into hosts.
 
 Provenance: private review run `37478d09-7e36-409b-8efa-b13d1f793dd5`; original identities `g069/f1`. Original
 append-only events, revisions, withdrawals and independent judgments are retained in that run's catalogs. Locations

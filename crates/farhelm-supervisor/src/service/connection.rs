@@ -481,7 +481,7 @@ where
                             .expect("activity mutex poisoned")
                             .reading
                             .state;
-                        // The check and the send-keys delivery run under
+                        // The check and the input delivery run under
                         // ONE lock hold, like the Resize arm: releasing
                         // between them is a TOCTOU where a takeover
                         // completes in the gap and the kicked client's
