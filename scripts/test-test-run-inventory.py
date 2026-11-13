@@ -24,7 +24,6 @@ def write_run(parent, *, identity=None, code=0, kind="development", output=b""):
         "child_status": {"raw_returncode": code, "exit_code": code, "signal": None},
         "recorder": {"exit_code": code, "forced_cleanup": False, "cleanup_limit": None, "error": None},
         "source": {"complete": True, "fingerprint_sha256": "a" * 64},
-        "tmux": {"mode": "none", "uses_tmux": False},
         "console": {"worker_finished": True, "dropped_or_pending_bytes": 0},
         "output": {"eof_observed": True, "truncated": False, "omitted_bytes": 0,
                    "retained_bytes": len(output), "observed_bytes": len(output), "files_in_read_order": files},

@@ -171,8 +171,13 @@ def manifest_summary(manifest, run_id):
     """Classify independent command, recorder and coverage evidence into portable fields.
 
     A failed child can have incomplete diagnostics; a successful child can have
-    an invalid runner report. Keep those observations separate. Missing source,
-    output or substrate identity remains a coverage gap, never inferred success.
+    an invalid runner report. Keep those observations separate. Missing source
+    or output identity remains a coverage gap, never inferred success.
+
+    Records from before the recorder dropped its tmux mode carry a `tmux`
+    field describing a pinned test tmux that no longer exists. It is ignored:
+    such a record summarizes exactly as a current one, and no substrate class
+    or gap is derived from it.
     """
     if (not isinstance(manifest, dict) or type(manifest.get("schema_version")) is not int
             or manifest["schema_version"] != 1 or not canonical_uuid(run_id)
@@ -227,22 +232,6 @@ def manifest_summary(manifest, run_id):
             or not isinstance(source.get("fingerprint_sha256"), str)
             or not re.fullmatch(r"[0-9a-f]{64}", source["fingerprint_sha256"])):
         gaps.append("source_identity_incomplete")
-    tmux = manifest.get("tmux")
-    if isinstance(tmux, dict) and tmux.get("mode") == "none" and tmux.get("uses_tmux") is False:
-        result["substrate"] = "not_used"
-    elif isinstance(tmux, dict) and tmux.get("matches_required_substrate") is True:
-        actual = tmux.get("actual")
-        if (isinstance(actual, dict) and isinstance(actual.get("binary_sha256"), str)
-                and re.fullmatch(r"[0-9a-f]{64}", actual["binary_sha256"])):
-            result["substrate"] = "reported_pinned"
-        else:
-            result["substrate"] = "incomplete"
-    elif isinstance(tmux, dict) and tmux.get("matches_required_substrate") is False:
-        result["substrate"] = "different_or_unavailable"
-    else:
-        result["substrate"] = "incomplete"
-    if result["substrate"] in {"incomplete", "different_or_unavailable"}:
-        gaps.append("pinned_substrate_not_established")
     console = manifest.get("console")
     if (not isinstance(console, dict) or console.get("worker_finished") is not True
             or type(console.get("dropped_or_pending_bytes")) is not int
@@ -288,13 +277,13 @@ def aggregate_runs(records, since=None):
             result["last_date"] = max(result["last_date"] or date, date)
         group = result["kinds"].setdefault(item["kind"], {
             "run_records": 0, "child_results": {}, "recorder_results": {}, "outcomes": {},
-            "coverage_gaps": {}, "report_states": {}, "reported_cases": {}, "substrates": {},
+            "coverage_gaps": {}, "report_states": {}, "reported_cases": {},
             "raw_report_retention": {}, "output_retention": {}, "output_scans": {},
             "runs_with_skip_marker": 0, "runs_without_complete_marker_scan": 0,
         })
         group["run_records"] += 1
         for target, key in (("child_results", "child"), ("recorder_results", "recorder"), ("outcomes", "outcome"),
-                            ("report_states", "report_state"), ("substrates", "substrate"),
+                            ("report_states", "report_state"),
                             ("raw_report_retention", "raw_report_retention")):
             add_counts(group[target], {item[key]: 1})
         add_counts(group["coverage_gaps"], {name: 1 for name in item["gaps"]})

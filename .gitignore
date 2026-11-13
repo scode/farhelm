@@ -26,9 +26,11 @@ e2e/.auth/storage-state.json
 # The browser suite's per-slot equivalents of both (e2e/stack-slots.ts).
 e2e/.stacks/
 
-# Local cache and build environment for the pinned tmux regression gate.
+# Leftover of the removed pinned test tmux build, which existing checkouts may
+# still hold (a built tmux and its build tree). Nothing creates it any more and it
+# is safe to delete; it stays ignored so that jj, which tracks new files on its
+# own, never sweeps one into a commit.
 .ci-tmux/
-.ci-tmux-python/
 
 # Verified local runner binaries; release jobs install into their temporary directory.
 .ci-nextest/

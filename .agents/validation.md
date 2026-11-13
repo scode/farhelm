@@ -55,12 +55,12 @@ Rustup reads the exact compiler version, rustfmt, clippy and wasm target from `r
 release builds. Bump that file's version in a deliberate PR. Purpose-specific targets are added to that toolchain by
 their scripts; explicit `cargo +nightly` and `rustup ... --toolchain nightly` still select nightly for coverage.
 
-For Rust execution, first put the pinned nextest and tmux on PATH using the guarded setup in
-`docs/test-run-evidence.md`. Run from the checkout root with Python 3.11+ (Python 3.13+ on macOS). Use owned sandboxes
-for expensive, slow or memory-heavy checks; small focused checks can run locally. The recorder's nextest mode enforces
-four global slots, zero retries and failure on empty selection, and retains each run's configuration and JUnit report.
-Runtime `SKIPPED` messages still require reading the retained output: an early-return test is a JUnit pass, not proof
-that its required systemd or SSH substrate ran.
+For Rust execution, first put the pinned nextest on PATH using the guarded setup in `docs/test-run-evidence.md`. Run
+from the checkout root with Python 3.11+ (Python 3.13+ on macOS). Use owned sandboxes for expensive, slow or
+memory-heavy checks; small focused checks can run locally. The recorder's nextest mode enforces four global slots, zero
+retries and failure on empty selection, and retains each run's configuration and JUnit report. Runtime `SKIPPED`
+messages still require reading the retained output: an early-return test is a JUnit pass, not proof that its required
+systemd or SSH substrate ran.
 
 - The Linux `containerized_sessions` e2e module covers decoding historical stored choices, refusing creation and
   terminal/lifecycle/file access, and Delete. Its fixtures use stored rows without creating a container or base image.
@@ -103,7 +103,7 @@ that its required systemd or SSH substrate ran.
 - `cargo clippy -p farhelm --bins -- -D warnings` — lints the shipped binary's configuration, in which the supervisor's
   `test-seams` feature is off; the `--all-targets` run above always has it on, because the e2e tests enable it through a
   dev-dependency.
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'workspace Rust targets' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run --workspace --exclude farhelm-desktop`
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'workspace Rust targets' --concurrency '4 nextest slots; retries 0' -- cargo nextest run --workspace --exclude farhelm-desktop`
   — executes applicable unit and integration targets, including the support crates omitted from default-members. Nextest
   starts a process per test and bounds concurrency across binaries; the e2e group has four slots, the two-host fixture
   reserves two, and the real Podman fixture reserves all four. The release gate runs this same selection, including the
@@ -112,14 +112,16 @@ that its required systemd or SSH substrate ran.
   than `-p`, so those steps share one build; ordinary CI does not run this suite. Do not also run the old full libtest
   battery. Every terminal a test's supervisor creates is a terminal host: the e2e suite's in-process harness and its
   real supervisor process fixture start hosts from the built `farhelm`, and the supervisor's own unit tests that need a
-  real terminal run in terminal hosts their test binary starts from itself (`hosts::test_program`, glibc Linux only).
-  The tests of ending old terminals at startup, which build an earlier release's server by hand, and the test of a
-  user's own tmux under a session's scope are what the pinned tmux is for. On Linux it needs Python 3 at
-  `/usr/bin/python3`: besides the e2e stand-ins named below, the supervisor's `managed_supervisor::` stop test runs a
-  Python stand-in whose main thread exits before its other thread.
-- `python3 scripts/record-test-run.py --kind development --selection 'workspace doctests' --concurrency '4 doctest threads' --tmux required -- cargo test --locked --doc --workspace --exclude farhelm-desktop -- --show-output --test-threads=4`
+  real terminal run in terminal hosts their test binary starts from itself (`hosts::test_program`, glibc Linux only). A
+  few tests still start a real tmux server: the tests of ending old terminals at startup, which build an earlier
+  release's server by hand, the test-state cleanup's tests of a server a killed test left behind, and the test of a
+  user's own tmux (stock `/usr/bin/tmux`) under a session's scope. They use the machine's tmux and print `SKIPPED`
+  without one, which is missing coverage, not a pass; the release gate installs the distribution's tmux for them. On
+  Linux the workspace run needs Python 3 at `/usr/bin/python3`: besides the e2e stand-ins named below, the supervisor's
+  `managed_supervisor::` stop test runs a Python stand-in whose main thread exits before its other thread.
+- `python3 scripts/record-test-run.py --kind development --selection 'workspace doctests' --concurrency '4 doctest threads' -- cargo test --locked --doc --workspace --exclude farhelm-desktop -- --show-output --test-threads=4`
   — preserves doctest coverage separately because nextest does not execute it.
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal host' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p terminal-host`
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal host' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p terminal-host`
   — the terminal host crate (`crates/terminal-host/`, contract in its `SPEC.md`): real-pty tests of the built
   `terminal-host` binary (lifecycle, input, resizes, busy and takeover, shutdown, SIGTERM and SIGKILL, the exit while a
   descendant holds the pty, stuck input on the client's own connection, malformed peers, snapshots and trimming, the
@@ -134,7 +136,7 @@ that its required systemd or SSH substrate ran.
   process until it execs, and on macOS, which cannot open a pty or socket close-on-exec in one call, it can keep another
   test's for good; that test then waits for an end of output or a close that never comes
   (`crates/terminal-host/TESTING.md`).
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal host spawning, client, discovery and cleanup' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor -p farhelm-teststate -p farhelm --lib --test terminal_host_spawn --test terminal_host_client --test terminal_host_stop --test terminal_host_registry -E 'test(/^hosts::/) | binary(terminal_host_spawn) | binary(terminal_host_client) | binary(terminal_host_stop) | binary(terminal_host_registry)'`
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal host spawning, client, discovery and cleanup' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-supervisor -p farhelm-teststate -p farhelm --lib --test terminal_host_spawn --test terminal_host_client --test terminal_host_stop --test terminal_host_registry -E 'test(/^hosts::/) | binary(terminal_host_spawn) | binary(terminal_host_client) | binary(terminal_host_stop) | binary(terminal_host_registry)'`
   — the supervisor's side of terminal hosts and the harnesses' cleanup of them. The supervisor's `hosts::` unit tests
   cover the private socket directory, the socket path bound against macOS's 104-byte limit, the client tag's golden
   fixtures (`crates/farhelm-supervisor/tests/fixtures/host-tag/`, which must never change for a shipped version) and
@@ -188,7 +190,7 @@ that its required systemd or SSH substrate ran.
   boots and requires the stack's cleanup to end them, while a host in another stack's live run directory (in the sweep's
   family, its lock held and backdated past the sweep's grace) survives every phase and a directly observed sweep pass,
   which must reap a dead canary run beside it.
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminal runtime' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test terminal_host_runtime -E 'test(/^hosts::terminal::/) | binary(terminal_host_runtime)'`
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminal runtime' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test terminal_host_runtime -E 'test(/^hosts::terminal::/) | binary(terminal_host_runtime)'`
   — the supervisor's runtime for a terminal in a terminal host (`crates/farhelm-supervisor/src/hosts/terminal.rs`). The
   `hosts::terminal::` unit tests (also part of the `hosts::` selection above) drive it against stand-in hosts in the
   test process: the replay policy (a recovered adoption answering the queries no supervisor saw and only those,
@@ -245,7 +247,7 @@ that its required systemd or SSH substrate ran.
   orderly checkpoint and ending in a gap; a sequence longer than the cap written while away ending in a gap; the FIFO
   helpers giving up within their bound when nobody is at the other end; a resize; and a shutdown confirmed by the host's
   process. Seconds, part of the workspace nextest run; the focused macOS CI job runs it too, in the terminal host step.
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminal switch points' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/core::tests::host_terminals::/) | test(/^service::session_hosts::/) | test(sweep_launch_dir_keeps_every_host_record) | test(/^host_terminals::/)'`
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminal switch points' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/core::tests::host_terminals::/) | test(/^service::session_hosts::/) | test(sweep_launch_dir_keeps_every_host_record) | test(/^host_terminals::/)'`
   — the supervisor's terminal switch points with a terminal host behind a session's agent (`Terminal` in
   `crates/farhelm-supervisor/src/service/terminals.rs`). The unit tests (`service::core::tests::host_terminals`) use a
   stand-in host in the test process (`hosts::terminal::test_host`) whose child is a `sleep` the stand-in owns: status
@@ -286,7 +288,7 @@ that its required systemd or SSH substrate ran.
   running. Linux only (the e2e suite), a few minutes (several tests wait out a stopped host's connect deadline); part of
   the workspace nextest run. Run it when a switch point, the host runtime's adapters, the status evidence, the grid
   attach path or Delete's handling of hosts change.
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'creating agents in terminal hosts' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/core::host_launch::/) | test(/a_retry_finds_the_sessions_own_published_host/) | test(/^hosts::spawn::/) | test(/^host_creates::/)'`
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'creating agents in terminal hosts' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/core::host_launch::/) | test(/a_retry_finds_the_sessions_own_published_host/) | test(/^hosts::spawn::/) | test(/^host_creates::/)'`
   — a create starting its agent in a terminal host, where every create starts it
   (`crates/farhelm-supervisor/src/service/core/host_launch.rs`). The unit tests pin the host child's environment as a
   function of its inputs (the supervisor's environment passed through, `TERM_PROGRAM=farhelm` with the version the
@@ -312,12 +314,12 @@ that its required systemd or SSH substrate ran.
   left a host, which the create ends and removes the socket of; stand-in hosts that cannot be used, ended by the
   verified signal and rolled back, or kept as a launching record when the signal must not touch them; and a keyed create
   an older supervisor started in tmux and was interrupted after its launching row (made by writing the row's kind)
-  refused when retried, its row rolled back, no host started, and a second retry refused the same way. Needs the pinned
-  tmux first on `PATH` and Python 3 at `/usr/bin/python3` (the stand-in hosts). Linux only, two or three minutes
-  (several tests wait out client deadlines); part of the workspace nextest run. Environment supervisors use the same
-  ordinary host launch path, exercised by the real Podman suite above. Run this selection when the create path, the
-  launch spec's composition, the host spawn or the launch identity's rollback or evidence changes.
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'restarting host agents' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/host_handover::tests::/) | test(a_terminal_less_host_row_restarts_in_a_host_never_in_tmux) | test(/a_restart_seed_|_seed_of_an?_|a_seed_whose_runtime|a_stop_during_a_restarts_seed|a_restart_without_consent_touches_no_program|a_restart_asks_again_for_consent/) | test(a_failed_host_restart_after_a_stop_began_restores_a_placeholder) | test(restart_of_a_host_agent_stops_its_tree_before_a_new_host_starts) | test(/^host_relaunches::/)'`
+  refused when retried, its row rolled back, no host started, and a second retry refused the same way. Needs Python 3 at
+  `/usr/bin/python3` (the stand-in hosts). Linux only, two or three minutes (several tests wait out client deadlines);
+  part of the workspace nextest run. Environment supervisors use the same ordinary host launch path, exercised by the
+  real Podman suite above. Run this selection when the create path, the launch spec's composition, the host spawn or the
+  launch identity's rollback or evidence changes.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'restarting host agents' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/host_handover::tests::/) | test(a_terminal_less_host_row_restarts_in_a_host_never_in_tmux) | test(/a_restart_seed_|_seed_of_an?_|a_seed_whose_runtime|a_stop_during_a_restarts_seed|a_restart_without_consent_touches_no_program|a_restart_asks_again_for_consent/) | test(a_failed_host_restart_after_a_stop_began_restores_a_placeholder) | test(restart_of_a_host_agent_stops_its_tree_before_a_new_host_starts) | test(/^host_relaunches::/)'`
   — Restart of an agent in a terminal host (`crates/farhelm-supervisor/src/service/core/host_restart.rs`) and the
   startup rules for the hosts a restart left (`host_handover`, "Superseded agent hosts" and a restart that never started
   its replacement). The unit tests pin the superseded rule as a function of a host's tag and its session's row
@@ -354,11 +356,11 @@ that its required systemd or SSH substrate ran.
   history; a restart interrupted after its new host started, and one after its confirmation, each converging at the next
   start (the new host adopted and confirmed, the old host ended and its record removed); an earlier host stopped with
   SIGSTOP left alone by the next start and ended by the one after; a restart whose row is deleted through the store
-  mid-launch ending both hosts; and Delete after an interrupted restart ending both generations' hosts. Needs the pinned
-  tmux first on `PATH` and Python 3 at `/usr/bin/python3` (the unusable host's stand-in). Linux only (the e2e suite),
-  about three minutes; part of the workspace nextest run. Run it when Restart's host path, the host spawn, the runtime's
-  seed, reload's host attribution or the superseded rule changes.
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminals across supervisor restarts' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/a_prompt_waits_for_a_recovered_host_terminal_to_catch_up|spare_claims_read_a_host_rows_own_host|a_stop_request_survives_a_restart|an_unreadable_launch_record_leaves_its_session_unavailable|an_orderly_stop_ends_its_encodes_before_its_runtime_drops|a_readoption_that_loses_its_fence|readoption_|a_scan_restricted_to_some_names|delete_settles_the_record_of_a_startup_placeholders_socket/) | test(/^host_restarts::/)'`
+  mid-launch ending both hosts; and Delete after an interrupted restart ending both generations' hosts. Needs Python 3
+  at `/usr/bin/python3` (the unusable host's stand-in). Linux only (the e2e suite), about three minutes; part of the
+  workspace nextest run. Run it when Restart's host path, the host spawn, the runtime's seed, reload's host attribution
+  or the superseded rule changes.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminals across supervisor restarts' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/a_prompt_waits_for_a_recovered_host_terminal_to_catch_up|spare_claims_read_a_host_rows_own_host|a_stop_request_survives_a_restart|an_unreadable_launch_record_leaves_its_session_unavailable|an_orderly_stop_ends_its_encodes_before_its_runtime_drops|a_readoption_that_loses_its_fence|readoption_|a_scan_restricted_to_some_names|delete_settles_the_record_of_a_startup_placeholders_socket/) | test(/^host_restarts::/)'`
   — a restarted supervisor keeping its host terminals (`crates/farhelm-supervisor/src/service/core/host_handover.rs`):
   the orderly stop's checkpoints, reload finding each host row's host again, and re-adoption of hosts that were
   unavailable. The unit tests (in `service::core::tests::host_terminals`, against stand-in hosts, some bound in the
@@ -389,16 +391,16 @@ that its required systemd or SSH substrate ran.
   gathering, on a runtime the test owns, publishing a placeholder, its runtime stopped and its held encode cancelled,
   and the runtime dropping at once; and a host stopped with SIGSTOP left alone (unavailable, listed unknown, nothing
   recorded, Stop refused for the unavailable host, the host and its agent still running) and adopted by the same
-  supervisor once continued. Needs the pinned tmux first on `PATH`. Linux only (the e2e suite), a minute or so; part of
-  the workspace nextest run. Run it when reload, the orderly stop, re-adoption, discovery or the host runtime's adoption
-  or encodes change. The `readoption_` tests also cover recovery after a runtime ran: timeout recovery on the ticker's
-  liveness wake, every unstable episode's full reconnect window, retry counts kept across success with no healthy-key
-  spin, final refusal reasons, the stop fence, and an exited runtime replayed without recording its exit twice; tabs
-  recovering in place with their ordering and scope, startup placeholders learning their tags, retry counts kept through
-  an agent Restart, failed closes left to the reap, gone tabs closed with their records removed and adopted process
-  kept, and cell/stop fences. The encoder's cancel itself is in the terminal emulator selection below
+  supervisor once continued. Linux only (the e2e suite), a minute or so; part of the workspace nextest run. Run it when
+  reload, the orderly stop, re-adoption, discovery or the host runtime's adoption or encodes change. The `readoption_`
+  tests also cover recovery after a runtime ran: timeout recovery on the ticker's liveness wake, every unstable
+  episode's full reconnect window, retry counts kept across success with no healthy-key spin, final refusal reasons, the
+  stop fence, and an exited runtime replayed without recording its exit twice; tabs recovering in place with their
+  ordering and scope, startup placeholders learning their tags, retry counts kept through an agent Restart, failed
+  closes left to the reap, gone tabs closed with their records removed and adopted process kept, and cell/stop fences.
+  The encoder's cancel itself is in the terminal emulator selection below
   (`an_encode_stops_once_its_cancel_fires_and_is_unchanged_until_then`).
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal tabs in terminal hosts' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(launch_file_names_round_trip_through_the_parser) | test(sweep_launch_dir_keeps_every_host_record) | test(/core::host_tabs::tests::/) | test(closing_a_tab_whose_runtime_reads_gone_confirms_its_process_first) | test(/^host_tabs::/)'`
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal tabs in terminal hosts' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(launch_file_names_round_trip_through_the_parser) | test(sweep_launch_dir_keeps_every_host_record) | test(/core::host_tabs::tests::/) | test(closing_a_tab_whose_runtime_reads_gone_confirms_its_process_first) | test(/^host_tabs::/)'`
   — terminal tabs, each of which runs in a terminal host of its own
   (`crates/farhelm-supervisor/src/service/core/host_tabs.rs`). The unit tests pin a tab host's launch record name
   (`<id>.tab-<tab id>.host`) round-tripping through the launch-directory name parser, which accepts the tab form only
@@ -421,10 +423,9 @@ that its required systemd or SSH substrate ran.
   limit) treated the same way; an exited tab, and a tab whose host was killed, reaped with a ten-minute ticker interval;
   a close whose host end fails (a seam) finished by the reap, no sooner than its one-second backoff; and an orderly
   restart keeping a tab listed, at the same socket, with its screen, attachable as a grid and typed into. Needs the
-  pinned tmux first on `PATH`. Linux only (the e2e suite), a minute or two; part of the workspace nextest run. Run it
-  when tab opening, closing, the tab strip, the tab reap, the tab records, Delete's handling of tab runtimes or the
-  reload's tab adoption change.
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'reclaiming orphaned terminal hosts' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(known_session_ids_are_every_rows_and_every_reservations) | test(/^host_reclaim::/)'`
+  Linux only (the e2e suite), a minute or two; part of the workspace nextest run. Run it when tab opening, closing, the
+  tab strip, the tab reap, the tab records, Delete's handling of tab runtimes or the reload's tab adoption change.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'reclaiming orphaned terminal hosts' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(known_session_ids_are_every_rows_and_every_reservations) | test(/^host_reclaim::/)'`
   — the startup reclaim of orphaned terminal hosts (`crates/farhelm-supervisor/src/service/core/host_reclaim.rs`). The
   store's unit test pins which sessions the database knows (every row's and every reservation's, a reservation whose row
   was rolled back included, a session deleted with its reservations not). The e2e tests
@@ -449,11 +450,11 @@ that its required systemd or SSH substrate ran.
   with its record, and one whose first stage never finishes fenced and its record cleared; and, with a ten-minute ticker
   interval, an existing session's tab whose shell was killed while no supervisor ran reaped, and a tab whose host was
   killed meanwhile leaving neither record nor socket file. The e2e harness's wait for a served supervisor's socket
-  allows the reclaim's whole budget on top of its own 20 seconds. Needs the pinned tmux first on `PATH`. Linux only (the
-  e2e suite), about a minute with four slots (stale sockets, a stopped host and a fenced first stage wait out their
-  deadlines); part of the workspace nextest run. Run it when the reclaim, discovery, the launch records' settling, a
-  host runtime's adoption, `serve`'s startup order or the store's reservations change.
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminals under a real supervisor process' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/^host_processes::/) | test(the_schema_33_marker_changes_no_table_and_keeps_every_row) | test(/^store::tests::schema_34_/)'`
+  allows the reclaim's whole budget on top of its own 20 seconds. Linux only (the e2e suite), about a minute with four
+  slots (stale sockets, a stopped host and a fenced first stage wait out their deadlines); part of the workspace nextest
+  run. Run it when the reclaim, discovery, the launch records' settling, a host runtime's adoption, `serve`'s startup
+  order or the store's reservations change.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'host terminals under a real supervisor process' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/^host_processes::/) | test(the_schema_33_marker_changes_no_table_and_keeps_every_row) | test(/^store::tests::schema_34_/)'`
   — terminal hosts the way a real supervisor process creates them: `farhelm supervisor run`. The unit tests check that
   schema 33, the marker that makes every build at 32 refuse a database a supervisor that may create host terminals
   opened, changes no table or row and is not taken by a process without the state directory's claim, and that schema 34,
@@ -471,10 +472,10 @@ that its required systemd or SSH substrate ran.
   the helm's API reaches a hand-rolled browser WebSocket as grid messages showing the agent's screen, and `text` and
   `key` messages sent up the socket reach the program; and a bare supervisor given a recording `FARHELM_TMUX` running no
   tmux at all through a host session's create, attach, tab, listing, rename, several ticker intervals, Delete and
-  SIGTERM, with no tmux socket left. Needs the pinned tmux first on `PATH`. Linux only (the e2e suite), a minute or two;
-  part of the workspace nextest run. Run it when the startup, the schema, the orderly stop, reload, the host socket's
-  path, the helm's grid relay, or when and whether the supervisor uses tmux changes.
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'ending old terminals' --concurrency '4 nextest slots; retries 0' --tmux required -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/core::old_terminals::/) | test(/^hosts::process::/) | test(the_child_gets_the_supervisors_environment_in_farhelms_terminal) | test(/^old_terminals::/) | test(a_retry_of_a_create_interrupted_in_tmux_is_refused)'`
+  SIGTERM, with no tmux socket left. Linux only (the e2e suite), a minute or two; part of the workspace nextest run. Run
+  it when the startup, the schema, the orderly stop, reload, the host socket's path, the helm's grid relay, or when and
+  whether the supervisor uses tmux changes.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'ending old terminals' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e -E 'test(/core::old_terminals::/) | test(/^hosts::process::/) | test(the_child_gets_the_supervisors_environment_in_farhelms_terminal) | test(/^old_terminals::/) | test(a_retry_of_a_create_interrupted_in_tmux_is_refused)'`
   — the startup step that ends the old terminals, the private tmux server earlier releases ran sessions in
   (`crates/farhelm-supervisor/src/service/core/old_terminals.rs`). The unit tests pin how a pane of that server is
   attributed to a session's agent or one of its tabs by its markers, the verified signal's command-line test as a
@@ -488,10 +489,11 @@ that its required systemd or SSH substrate ran.
   old agent's marked SIGHUP-immune daemon ended by the row's identity, and an old row that had exited left as it was
   with no notice; and an old tab of a session whose agent and other tab run in hosts ended (its SIGHUP-immune job too)
   while those hosts run on and the session gets no notice. The retry test shows that a create an older release left
-  interrupted in tmux is still refused once the startup interrupts its row. Needs the pinned tmux first on `PATH`. Linux
-  only (the e2e suite), a minute or so; part of the workspace nextest run. Run it when the startup's ending of the old
-  terminals, the reload's handling of old-kind rows or the verified signal changes.
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'grid streams' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/^grid_output::/) | test(/^service::grid_stream::/)'`
+  interrupted in tmux is still refused once the startup interrupts its row. Its e2e tests need a tmux on `PATH` (the
+  machine's; without one they print `SKIPPED`). Linux only (the e2e suite), a minute or so; part of the workspace
+  nextest run. Run it when the startup's ending of the old terminals, the reload's handling of old-kind rows or the
+  verified signal changes.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'grid streams' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/^grid_output::/) | test(/^service::grid_stream::/)'`
   — how a host terminal reaches a grid viewer: the encoding (`crates/farhelm-supervisor/src/grid_output.rs`: cells to
   runs with styles, redefined palette colors, wide and combining characters and links, a row with more links than a
   message holds, hostile text packing into messages a client accepts, the screen diff, its shift and a shift-only
@@ -533,7 +535,7 @@ that its required systemd or SSH substrate ran.
   it without disturbing a shared machine", shows: loop-breaking mutants spin every test thread, and the hosts their
   tests start outlive the killed tests. Every surviving mutant is killed by a test or listed with its reason in that
   file.
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal emulator' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-terminal-emulator`
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'terminal emulator' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-terminal-emulator`
   — the supervisor's terminal emulator (`crates/farhelm-terminal-emulator/`), run in-process with no pty, tmux or
   network: Farhelm's query-answer table, side effects by feed mode (live, replay of seen and of unseen output), the
   synchronized-output deadline on a hand-stepped clock (and its flush before a resize), the snapshot split candidate on
@@ -568,20 +570,20 @@ that its required systemd or SSH substrate ran.
   (`-E 'binary(memory)'`, release, Linux; its numbers print only with `--no-capture`, which the recorder's generic mode
   accepts), and `write_missing_golden_fixtures`, which writes the fixtures of a new golden script and never overwrites
   one.
-- `python3 scripts/record-test-run.py --kind development --selection 'snapshot encoder benchmark' --concurrency 'one test; fixtures sequential' --tmux none -- cargo nextest run -p farhelm-terminal-emulator --release --run-ignored only -E 'binary(encode_speed)' --no-capture`
+- `python3 scripts/record-test-run.py --kind development --selection 'snapshot encoder benchmark' --concurrency 'one test; fixtures sequential' -- cargo nextest run -p farhelm-terminal-emulator --release --run-ignored only -E 'binary(encode_speed)' --no-capture`
   — the ignored snapshot encoder benchmark (`tests/encode_speed.rs`): typical, true-color and image-like output at 200
   columns, 60 screen rows and 12,000 history lines, measured in sequence. Each reports five encodes' median and spread,
   blob size and history dropped. Fixture shape and repeated bytes are asserted; elapsed time is not. Compare on the same
   machine with load recorded. Generic recording permits `--no-capture`; the controlled nextest mode does not. Run it
   when the snapshot encoder changes, beside correctness and memory checks; minutes, no tmux or network.
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'agent screen fixtures' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/^agent_kind::screen_fixtures::/) | test(/^agent_kind::status_line_fixtures::/)'`
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'agent screen fixtures' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/^agent_kind::screen_fixtures::/) | test(/^agent_kind::status_line_fixtures::/)'`
   — status detection against the captured agent screens (`crates/farhelm-supervisor/tests/fixtures/screens/` and
   `tests/fixtures/status-lines/`, `docs/agent-screen-fixtures.md`): the fixtures' shape and privacy checks, each screen
   read as the state it was captured in by its harness's reader, the permission-mode footers, and each screen painted
   into the supervisor's terminal emulator reading back as the same text, with every row on its own row, and read by its
   reader as the captured screen is. No tmux: the captured text is the expected value. Seconds, in-process. Part of the
   workspace nextest run; run it when a status reader, the emulator crate, `vendor/` or the fixtures change.
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'grid input encoder' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/^grid_input::/)'`
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'grid input encoder' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/^grid_input::/)'`
   — the supervisor's encoder of grid viewer input (`crates/farhelm-supervisor/src/grid_input.rs`): keys against
   Farhelm's key table `crates/farhelm-supervisor/tests/fixtures/grid-keys.jsonl` (the sequence for every key code below
   256, modifier set, platform and cursor-key mode), mouse reports against its mouse table
@@ -598,10 +600,10 @@ that its required systemd or SSH substrate ran.
   fails while a checked-in table differs from what the client computes, and it also holds the client's keydown and
   Alt-click tables (`crates/farhelm-ui/js-tests/fixtures/input/`). The mouse table is edited by hand, together with the
   encoder.
-- `python3 scripts/record-test-run.py --kind development --selection 'vendored vte' --concurrency 'libtest default threads' --tmux none -- cargo test --manifest-path vendor/vte/Cargo.toml --features ansi`,
-  `python3 scripts/record-test-run.py --kind development --selection 'vendored alacritty_terminal' --concurrency 'libtest default threads' --tmux none -- cargo test --locked --lib --manifest-path vendor/alacritty_terminal/Cargo.toml`
+- `python3 scripts/record-test-run.py --kind development --selection 'vendored vte' --concurrency 'libtest default threads' -- cargo test --manifest-path vendor/vte/Cargo.toml --features ansi`,
+  `python3 scripts/record-test-run.py --kind development --selection 'vendored alacritty_terminal' --concurrency 'libtest default threads' -- cargo test --locked --lib --manifest-path vendor/alacritty_terminal/Cargo.toml`
   and
-  `python3 scripts/record-test-run.py --kind development --selection 'vendored crates paired' --concurrency 'libtest default threads' --tmux none -- cargo test --locked --manifest-path vendor/pair-tests/Cargo.toml`
+  `python3 scripts/record-test-run.py --kind development --selection 'vendored crates paired' --concurrency 'libtest default threads' -- cargo test --locked --manifest-path vendor/pair-tests/Cargo.toml`
   — the vendored, patched terminal crates (`vendor/README.md`): upstream's unit tests plus the tests of Farhelm's
   patches (the parser's ground state, the OSC payload and its overflow notice, zero-width, hyperlink and title caps,
   hyperlink reuse, the per-terminal extra storage, the history counters, XTVERSION, the pending-wrap flag only under
@@ -639,10 +641,10 @@ that its required systemd or SSH substrate ran.
   (`e2e/grid-client/BENCHMARK.md`) uses the production Rust grid encoder and shipped grid component, one fresh Chromium
   or WebKit content process per workload, to report GC-requested resident growth, lifetime highwater, attach bytes and
   time at 12,000 history lines by 200 columns. It is outside ordinary component-test discovery and has no performance
-  thresholds. Run it for grid encoding or history-storage performance changes, through the generic recorder with
-  `--tmux none`; preserve matching generated frames and assets for each compared revision and report raw samples beside
-  medians. These static-page measurements establish no helm, SSH or live terminal-host coverage.
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'helm terminal relay' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-helm --lib -E 'test(/^terminal::tests::/) | test(/^client::tests::/)'`
+  thresholds. Run it for grid encoding or history-storage performance changes, through the generic recorder; preserve
+  matching generated frames and assets for each compared revision and report raw samples beside medians. These
+  static-page measurements establish no helm, SSH or live terminal-host coverage.
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'helm terminal relay' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-helm --lib -E 'test(/^terminal::tests::/) | test(/^client::tests::/)'`
   — the helm's terminal WebSocket (`crates/farhelm-helm/src/terminal.rs`) and its supervisor client
   (`crates/farhelm-helm/src/client.rs`), in-process against stand-in supervisors: attach, takeover, refusals, data that
   beat the attach reply reaching the browser first, replay-complete ordering, heartbeat, frame and queue bounds, the
@@ -670,9 +672,9 @@ that its required systemd or SSH substrate ran.
   the handler or its tests change; CI's website job runs it beside the website build.
 - `cargo check -p farhelm-ui --features desktop` — the desktop renderer compiles nowhere else; needs the webkit2gtk/gtk
   dev packages (see the CI job for the apt list).
-- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'desktop Rust targets' --concurrency '4 nextest slots; retries 0' --tmux none -- cargo nextest run -p farhelm-ui --features desktop`
+- `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'desktop Rust targets' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-ui --features desktop`
   — exercises desktop-only persistence and IPC seams with the same system dependencies as the compile check.
-- `python3 scripts/record-test-run.py --kind development --selection 'desktop doctests' --concurrency '4 doctest threads' --tmux none -- cargo test --locked --doc -p farhelm-ui --features desktop -- --show-output --test-threads=4`
+- `python3 scripts/record-test-run.py --kind development --selection 'desktop doctests' --concurrency '4 doctest threads' -- cargo test --locked --doc -p farhelm-ui --features desktop -- --show-output --test-threads=4`
   — preserves the desktop feature's separate doctest coverage. Desktop execution remains release-only in hosted CI.
 - `cargo check -p farhelm-desktop` — the shipped desktop binary sits outside `default-members` (so ordinary builds never
   compile WebKit), which means `-p` is the only thing that ever compiles it.
@@ -680,22 +682,21 @@ that its required systemd or SSH substrate ran.
   set, in both directions. The shipped desktop-artifact builder calls `--compare` on its actual embedded bundle, so
   release validation preserves parity without a duplicate CI rebuild. `--self-test` also proves head CSS/classic JS
   remain product assets while only the body renderer module and WASM are excluded.
-- `PATH="$(scripts/build-pinned-tmux-ci.sh):$PATH" scripts/desktop-smoke.sh` — the x86_64 Linux release gate runs this
-  in the job's shared target tree with `DESKTOP_SMOKE_WEB_DIST` naming the release's own web bundle, so it embeds the
-  bundle that ships instead of building one; before any of it needs Xvfb, one pre-display process leg drives
-  `farhelm-desktop`'s own entry point directly: a bootstrap failure (an unusable state directory) exits 1 with one plain
-  `farhelm-desktop: ...` line and no panic. The non-pixel Xvfb integration gate that follows covers the embedded helm,
-  managed supervisor, desktop authentication, the supervisor outliving a hard exit and an ordinary quit (reused, then
-  replaced by a launch whose program file changed, with a session surviving the replacement), a second launch with
-  another program refusing beside the open app without stopping its supervisor, a replacement that would fail its
-  prerequisites (a program reached through a directory whose name holds `:`) stopping nothing, a frozen (SIGSTOP)
-  supervisor being replaced with a kill after the grace, a supervisor the app did not start reused rather than replaced,
-  restart persistence, that every asset the window requested went through the desktop asset handler, and that the
-  teardown's terminal-host stop ends a real host planted in the answering-supervisor leg's state directory. The app's
-  supervisor creates its sessions in terminal hosts, as every shipped one does, and the smoke requires every session it
-  creates to be a host row; a session's terminal counts as alive by its database row (`terminal_kind` and
-  `terminal_address`: a listening host socket in the kernel's socket table, or a tmux session for a tmux row, named from
-  the session's id). Which session the relaunched window holds open, and that a token rotation left that attachment
+- `scripts/desktop-smoke.sh` — the x86_64 Linux release gate runs this in the job's shared target tree with
+  `DESKTOP_SMOKE_WEB_DIST` naming the release's own web bundle, so it embeds the bundle that ships instead of building
+  one; before any of it needs Xvfb, one pre-display process leg drives `farhelm-desktop`'s own entry point directly: a
+  bootstrap failure (an unusable state directory) exits 1 with one plain `farhelm-desktop: ...` line and no panic. The
+  non-pixel Xvfb integration gate that follows covers the embedded helm, managed supervisor, desktop authentication, the
+  supervisor outliving a hard exit and an ordinary quit (reused, then replaced by a launch whose program file changed,
+  with a session surviving the replacement), a second launch with another program refusing beside the open app without
+  stopping its supervisor, a replacement that would fail its prerequisites (a program reached through a directory whose
+  name holds `:`) stopping nothing, a frozen (SIGSTOP) supervisor being replaced with a kill after the grace, a
+  supervisor the app did not start reused rather than replaced, restart persistence, that every asset the window
+  requested went through the desktop asset handler, and that the teardown's terminal-host stop ends a real host planted
+  in the answering-supervisor leg's state directory. The app's supervisor creates its sessions in terminal hosts, as
+  every shipped one does, and the smoke requires every session it creates to be a host row; a session's terminal counts
+  as alive while a process listens on the host socket its database row names (`terminal_address`), read from the
+  kernel's socket table. Which session the relaunched window holds open, and that a token rotation left that attachment
   open, are read from the embedded helm's attachment trace (the `farhelm_helm::terminal_attachments` debug events,
   turned on through the launches' `RUST_LOG`), and after the supervisor replacement the kept session is attached as a
   grid viewer through the replacement and a typed command must write its file. API checks retain host-qualified session
@@ -738,7 +739,7 @@ that its required systemd or SSH substrate ran.
   environment, never the harness process's own. Refused `/latest` cases attribute requests by their scenario's origin
   path and report unexpected request lines, so delayed requests from another fixture cannot silently become this
   install's request count.
-- `python3 scripts/record-test-run.py --kind development --selection 'installed uninstall acceptance' --concurrency 'one fixture at a time' --tmux none -- python3 scripts/test-uninstall.py --binary target/debug/farhelm --installer scripts/install.sh`
+- `python3 scripts/record-test-run.py --kind development --selection 'installed uninstall acceptance' --concurrency 'one fixture at a time' -- python3 scripts/test-uninstall.py --binary target/debug/farhelm --installer scripts/install.sh`
   — macOS-only, after building the CLI: runs the actual installer and installed uninstaller against private fixture
   homes and release archives. Covers updates, legacy upgrade-floor refusal with the old installation preserved,
   confirmation, dry-run preservation, foreign files, native bundles and uninstall through an indirect Terminal link.
@@ -748,9 +749,9 @@ that its required systemd or SSH substrate ran.
   keeper tests
   (`cargo nextest run -p farhelm-supervisor --lib -E 'test(/installation::|version_lock::|session_hold::/)'` and
   `cargo nextest run -p farhelm --test session_hold --test version_lock_forwarder`), each through the recorder with four
-  slots and `--tmux none`. The focused macOS CI job (not the release gate) also runs the desktop app's supervisor record
-  and stop tests the same way, with the stop's check that a process has finished exiting, which on macOS rests on the
-  zombie state alone:
+  slots. The focused macOS CI job (not the release gate) also runs the desktop app's supervisor record and stop tests
+  the same way, with the stop's check that a process has finished exiting, which on macOS rests on the zombie state
+  alone:
   `cargo nextest run -p farhelm-supervisor --lib -E 'test(/managed_supervisor::|procs::tests::finished_exiting/)'` (the
   uninstall stop's own tests are part of `uninstall::` above). After the uninstall acceptance, in a step of its own that
   runs whatever the steps before it did (so that a host failure cannot hide that gate), it runs the terminal host's
@@ -836,7 +837,7 @@ that its required systemd or SSH substrate ran.
   snapshot listing is read, which projects a run of the suite has, and archive configuration retaining the scoped
   prebuilt-Podman setup while removing only the local fixture build. Run them, with `deno check`, when the harness
   changes; seconds, no sandbox. Using the harness itself is described in `.agents/tensorlake.md`.
-- `python3 scripts/record-test-run.py --kind development --selection 'portable brick-test harness' --concurrency 'one unittest process' --tmux none -- python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py' -v`
+- `python3 scripts/record-test-run.py --kind development --selection 'portable brick-test harness' --concurrency 'one unittest process' -- python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py' -v`
   — validates owned Tart lifecycle, signed-input planning, Rust/Python upgrade-floor agreement and fixed-floor baseline
   selection, guest execution, fixed command operations, durable handoffs, compiled checkpoint contracts,
   fresh-versus-update installer entrypoints, fixed command-only execution and provenance, bounded pre-action provider
@@ -864,8 +865,8 @@ that its required systemd or SSH substrate ran.
 
 This inventory names the relevant local checks. The CI workflow (`ci.yml`) covers formatter, Clippy, desktop
 compilation, the JS harness, the website build and its feedback endpoint tests, installer validation, generated-workflow
-validation, and the agent-instructions check; costly Rust, pinned-tmux, desktop runtime, and CentOS gates run in the
-x86_64 Linux release artifact job. If either workflow changes, update this list in the same change.
+validation, and the agent-instructions check; costly Rust, desktop runtime, and CentOS gates run in the x86_64 Linux
+release artifact job. If either workflow changes, update this list in the same change.
 
 The CI workflow runs ONLY on demand: it has no push or pull-request trigger (removed 2026-09-12), so neither a PR, a
 `gh pr ready`, nor a merge to main starts a run. The release build gate is the validation that decides whether a build

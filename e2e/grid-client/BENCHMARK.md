@@ -13,7 +13,7 @@ Playwright version from `e2e`, so no second browser/runtime dependency is added.
 ```sh
 cargo build --release -p farhelm-supervisor --example grid_stream_bench
 target/release/examples/grid_stream_bench <new-input-directory>
-python3 scripts/record-test-run.py --kind development --tmux none \
+python3 scripts/record-test-run.py --kind development \
   --selection 'grid attach benchmark; both engines, three workloads' \
   --concurrency 'one fresh browser at a time; no retries' -- \
   node --experimental-strip-types e2e/grid-client/benchmark.mts \
@@ -26,7 +26,7 @@ Successful samples are saved after each case; on failure the same file also reco
 nonzero. Preserve that recorder run before retrying. The pure helper checks run through the recorder too:
 
 ```sh
-python3 scripts/record-test-run.py --kind development --tmux none \
+python3 scripts/record-test-run.py --kind development \
   --selection 'grid benchmark framing and attribution helpers' --concurrency 'node test runner' -- \
   node --experimental-strip-types --test e2e/grid-client/benchmark.test.mts
 ```

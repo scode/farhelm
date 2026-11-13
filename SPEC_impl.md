@@ -8157,16 +8157,16 @@ fails it.
 Linux supervisor artifacts: `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`, static, built by cargo-dist on
 a native runner per architecture with `musl-tools` for the C half of the link (audited: rusqlite-bundled static musl
 builds work for both). Cross-compiling them with cargo-zigbuild, which the retired hand-written release workflow did, is
-no longer necessary now that GitHub's arm64 Linux runners are generally available; zig remains the toolchain for the
-pinned tmux the test suites build, which is C and cross-compiles cleanly, and for devbuild's Linux cross-builds on a
-Mac. The Mac artifacts (`aarch64-apple-darwin`: `farhelm` and `farhelm-desktop`) are built on a macOS runner with the
-native toolchain. The Darwin `farhelm` is also the remote Mac supervisor payload; `farhelm-desktop` remains local to the
-desktop installation. Cross-building them from Linux was audited and rejected: zig cannot link the Apple frameworks wry
-needs (WebKit, AppKit) without a licensed macOS SDK, and cross ships no darwin images. Dropping the `.app` bundle
-removed a third reason (`dx bundle` produces bundles only on the native platform) but not those two, and it added one:
-`farhelm-desktop` is built through `dx build`, which patches the asset names into the linked binary and so has to run
-where that binary is linked. The macOS runner stays. Signing and notarization are deferred (D11) and the artifacts ship
-unsigned, so signing is not among today's reasons — it would become one if that changes.
+no longer necessary now that GitHub's arm64 Linux runners are generally available; zig remains the toolchain for
+devbuild's Linux cross-builds on a Mac. The Mac artifacts (`aarch64-apple-darwin`: `farhelm` and `farhelm-desktop`) are
+built on a macOS runner with the native toolchain. The Darwin `farhelm` is also the remote Mac supervisor payload;
+`farhelm-desktop` remains local to the desktop installation. Cross-building them from Linux was audited and rejected:
+zig cannot link the Apple frameworks wry needs (WebKit, AppKit) without a licensed macOS SDK, and cross ships no darwin
+images. Dropping the `.app` bundle removed a third reason (`dx bundle` produces bundles only on the native platform) but
+not those two, and it added one: `farhelm-desktop` is built through `dx build`, which patches the asset names into the
+linked binary and so has to run where that binary is linked. The macOS runner stays. Signing and notarization are
+deferred (D11) and the artifacts ship unsigned, so signing is not among today's reasons — it would become one if that
+changes.
 
 Motivation: musl-static sidesteps glibc version skew across Ubuntu releases, which matters because provisioning drops
 binaries on machines we do not control; "predicated on whatever cross-compiled binaries are available" in SPEC.md

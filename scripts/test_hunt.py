@@ -182,7 +182,6 @@ def run_batch(
         "command": args.command,
         "timeout_seconds": args.timeout,
         "concurrency": concurrency,
-        "tmux": "required (validation only; no build or install)",
         "attempts": attempts,
     }
     try:
@@ -200,7 +199,7 @@ def run_batch(
             index["not_started"] = args.repeat - number
             write_index(index_path, index)
             recorder_args = [
-                "--kind", "repetition", "--runner", runner_name, "--tmux", "required",
+                "--kind", "repetition", "--runner", runner_name,
                 "--selection", shlex.join(args.command),
                 "--concurrency", concurrency, "--timeout", str(args.timeout),
                 "--output-root", os.fspath(attempt_root), "--", *args.command,

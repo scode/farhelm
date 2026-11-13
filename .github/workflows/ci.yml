@@ -79,18 +79,18 @@ jobs:
         run: |
           python3 scripts/record-test-run.py \
             --runner nextest --kind development --selection 'macOS uninstall unit tests' --concurrency '4 nextest slots; retries 0' \
-            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo nextest run -p farhelm --bin farhelm -E 'test(uninstall::)'
           # Version locks, the installation lock and the session keeper rest on
           # macOS behavior Linux only approximates (flock on an APFS folder,
           # extended attributes, RENAME_EXCL, F_FULLFSYNC, kqueue NOTE_EXIT).
           python3 scripts/record-test-run.py \
             --runner nextest --kind development --selection 'macOS version and installation lock tests' --concurrency '4 nextest slots; retries 0' \
-            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/installation::|version_lock::|session_hold::/)'
           python3 scripts/record-test-run.py \
             --runner nextest --kind development --selection 'macOS version-lock process tests' --concurrency '4 nextest slots; retries 0' \
-            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo nextest run -p farhelm --test session_hold --test version_lock_forwarder
           # The desktop app's record of its detached supervisor, and the stop
           # that acts on it, rest on macOS's process identity and executable
@@ -100,11 +100,11 @@ jobs:
           # on macOS rests on the zombie state alone.
           python3 scripts/record-test-run.py \
             --runner nextest --kind development --selection 'macOS managed supervisor record tests' --concurrency '4 nextest slots; retries 0' \
-            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo nextest run -p farhelm-supervisor --lib -E 'test(/managed_supervisor::|procs::tests::finished_exiting/)'
           python3 scripts/record-test-run.py \
             --kind development --selection 'macOS installed uninstall acceptance' --concurrency 'one fixture at a time' \
-            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- python3 scripts/test-uninstall.py --binary target/debug/farhelm --installer scripts/install.sh
       # The terminal host's real-pty tests: its pty, process and socket
       # behavior is what every later release relies on (its SPEC.md), and
@@ -131,15 +131,15 @@ jobs:
         run: |
           python3 scripts/record-test-run.py \
             --runner nextest --kind development --selection 'macOS terminal host tests' --concurrency '4 nextest slots; retries 0' \
-            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo nextest run -p terminal-host || status=1
           python3 scripts/record-test-run.py \
             --runner nextest --kind development --selection 'macOS terminal host entry test' --concurrency '4 nextest slots; retries 0' \
-            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo nextest run -p farhelm --test terminal_host_entry || status=1
           python3 scripts/record-test-run.py \
             --runner nextest --kind development --selection 'macOS terminal host spawning, client, runtime, discovery and cleanup' --concurrency '4 nextest slots; retries 0' \
-            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo nextest run -p farhelm-supervisor -p farhelm-teststate -p farhelm --lib --test terminal_host_spawn --test terminal_host_client --test terminal_host_stop --test terminal_host_registry --test terminal_host_runtime -E 'test(/^hosts::/) | binary(terminal_host_spawn) | binary(terminal_host_client) | binary(terminal_host_stop) | binary(terminal_host_registry) | binary(terminal_host_runtime)' || status=1
           exit "${status:-0}"
       - name: Retain failure evidence
@@ -453,7 +453,7 @@ jobs:
         run: ~/.cargo/bin/dist generate --check
 
   # End-to-end: Playwright drives the web build against a real helm +
-  # supervisor + private tmux + fake agent, in both headless Chromium and
+  # supervisor + fake agent, in both headless Chromium and
   # WebKit. This is the agents-verify-the-GUI-without-a-human path
   # (PLAN_M1.md), so it is a first-class CI job, not an optional extra.
   # WebKit is included because it is the desktop app's actual engine
@@ -494,8 +494,6 @@ jobs:
           cache: false
           rustflags: ""
           build-warnings: ""
-      - name: Install tmux
-        run: sudo apt-get update && sudo apt-get install -y tmux
       # Same topology as the release gate's loopback-ssh setup, though this
       # disabled browser job owns its own setup because it has separate
       # dependencies. The fleet
@@ -507,6 +505,7 @@ jobs:
       # documents why the loopback key is constrained.
       - name: Provision passwordless ssh to localhost
         run: |
+          sudo apt-get update
           sudo apt-get install -y openssh-server
           sudo systemctl enable --now ssh || sudo service ssh start
           mkdir -p ~/.ssh && chmod 700 ~/.ssh

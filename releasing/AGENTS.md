@@ -141,7 +141,7 @@ new copies of its entries, even when the next attempt's version changes.
 Before merging a table edit, run the table validation with the pinned nextest setup from `docs/test-run-evidence.md`:
 
 ```
-python3 scripts/record-test-run.py --runner nextest --kind release --selection 'release announcement table' --concurrency '4 nextest slots; one selected test; retries 0' --tmux none -- cargo nextest run -p farhelm-helm --lib -E 'test(release_announcement_table_is_valid)'
+python3 scripts/record-test-run.py --runner nextest --kind release --selection 'release announcement table' --concurrency '4 nextest slots; one selected test; retries 0' -- cargo nextest run -p farhelm-helm --lib -E 'test(release_announcement_table_is_valid)'
 ```
 
 It checks unique ids, valid versions and non-empty text. Keep the procedure's existing changelog checks too. Use the

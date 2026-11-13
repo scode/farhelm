@@ -157,7 +157,7 @@ def selections(paths, packages, exists):
             omitted.append({"path": value, "reason": "prose requires applicable document checks, not a hunt"})
             continue
         if value in {"Cargo.toml", "Cargo.lock", "rust-toolchain", "rust-toolchain.toml", ".cargo/config.toml",
-                     ".config/nextest.toml", ".github/release/source-pins.env"}:
+                     ".config/nextest.toml"}:
             for name in packages:
                 add_package(name, value + " affects workspace build inputs")
             browser_reasons.append(value + " can affect the browser application")

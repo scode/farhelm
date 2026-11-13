@@ -147,14 +147,15 @@ code touched, the patch hunks that make it up, the tests that pin it, and its up
 lines, and cursor positions are (line, column) from 0. The xterm source checked is the `ThomasDickey/xterm-snapshots`
 mirror at xterm-412 (commit `5c75ead9a75d4b2e666ca06fa94503b5766ed93f`: `button.c` 1.686, `charproc.c` 1.2134,
 `cursor.c` 1.101, `main.h` 1.93, `misc.c` 1.1137, `ptydata.c` 1.173, `ptyx.h` 1.1174, `screen.c` 1.682, `util.c` 1.1032,
-and its control sequence documentation `ctlseqs.ms` 1.748); the tmux source is the 3.7c release Farhelm pins
-(`scripts/build-pinned-tmux-ci.sh`, `.github/release/source-pins.env`). xterm.js, which rendered Farhelm's terminals
-when these records were written, was checked in the copy Farhelm then vendored (6.0.0) and, where a record cites a
-source file, in the `xtermjs/xterm.js` source at tag 6.0.0 (commit `f447274f430fd22513f6adbf9862d19524471c04`). The
-alacritty application (outside the crate) was read at the master commit below. "Observed" means the bytes were run
-through the crates: the published, unpatched ones unless the record names another configuration (the patched trees, or
-Farhelm's emulator). A result read from the code, an estimate, or a figure measured on another build says so. The fixes
-that keep the emulator's screen where tmux keeps it were found by the supervisor's comparison with a live tmux 3.7c (its
+and its control sequence documentation `ctlseqs.ms` 1.748); the tmux source is the 3.7c release Farhelm pinned for its
+tests when these records were written (`tmux-3.7c.tar.gz`, SHA-256
+`7c60cae9a0e25288e2e24750aafc9e8800fc7fd4555e447e1b29ee4201cfb3bf`). xterm.js, which rendered Farhelm's terminals when
+these records were written, was checked in the copy Farhelm then vendored (6.0.0) and, where a record cites a source
+file, in the `xtermjs/xterm.js` source at tag 6.0.0 (commit `f447274f430fd22513f6adbf9862d19524471c04`). The alacritty
+application (outside the crate) was read at the master commit below. "Observed" means the bytes were run through the
+crates: the published, unpatched ones unless the record names another configuration (the patched trees, or Farhelm's
+emulator). A result read from the code, an estimate, or a figure measured on another build says so. The fixes that keep
+the emulator's screen where tmux keeps it were found by the supervisor's comparison with a live tmux 3.7c (its
 `emulator_parity` tests, removed in 2026-11 once new terminals stopped using tmux as their reference); the tests each
 record names now are the vendored crates' and the emulator's own.
 

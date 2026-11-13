@@ -187,12 +187,14 @@ async fn prerequisites() -> PathBuf {
         "aarch64" => "aarch64-unknown-linux-musl",
         arch => panic!("no real Podman payload fixture for {arch}"),
     };
-    for file in [format!("farhelm-{target}.tar.gz"), format!("tmux-{target}")] {
-        assert!(
-            payload.join(&file).is_file(),
-            "missing staged payload {file}"
-        );
-    }
+    // The farhelm archive is the only payload provisioning pushes to a Linux
+    // host, and so the only one `scripts/build-podman-test-payloads.sh` stages
+    // (provisioning no longer pushes a static tmux).
+    let archive = format!("farhelm-{target}.tar.gz");
+    assert!(
+        payload.join(&archive).is_file(),
+        "missing staged payload {archive}"
+    );
     assert!(
         exists("image", UBUNTU)
             .await

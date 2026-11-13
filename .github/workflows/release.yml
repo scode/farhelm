@@ -167,12 +167,9 @@ jobs:
             /usr/local/julia* \
             /usr/share/miniconda
           df -h /
-      - name: "Install pinned tmux build dependencies"
+      - name: "Install tmux for the tests that start a real tmux server"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
-        run: "sudo apt-get update && sudo apt-get install -y python3-venv"
-      - name: "Build pinned tmux"
-        if: "runner.os == 'Linux' && runner.arch == 'X64'"
-        run: "scripts/build-pinned-tmux-ci.sh"
+        run: "sudo apt-get update && sudo apt-get install -y tmux"
       - name: "Provision passwordless ssh to localhost"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: |
@@ -225,17 +222,17 @@ jobs:
           base=docker.io/library/ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
           podman pull "$base"
           podman run --rm "$base" true
-      - name: "Run the test suite against the pinned tmux"
+      - name: "Run the test suite"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: |
-          PATH="$PWD/.ci-tmux:$PATH" python3 scripts/record-test-run.py \
+          python3 scripts/record-test-run.py \
             --runner nextest --kind release --selection 'workspace Rust targets except farhelm-desktop' \
-            --concurrency '4 nextest slots across binaries; retries 0' --tmux required \
+            --concurrency '4 nextest slots across binaries; retries 0' \
             --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo nextest run --workspace --exclude farhelm-desktop
-          PATH="$PWD/.ci-tmux:$PATH" python3 scripts/record-test-run.py \
+          python3 scripts/record-test-run.py \
             --kind release --selection 'workspace doctests except farhelm-desktop' \
-            --concurrency '4 doctest threads' --tmux required --output-root "$RUNNER_TEMP/test-run-evidence" \
+            --concurrency '4 doctest threads' --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo test --locked --doc --workspace --exclude farhelm-desktop -- --show-output --test-threads=4
       - name: "Run the JS unit harness"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
@@ -243,21 +240,21 @@ jobs:
           cd crates/farhelm-ui/js-tests
           python3 "$GITHUB_WORKSPACE/scripts/record-test-run.py" \
             --kind release --selection 'asset JavaScript unit harness' --concurrency 'node default discovery' \
-            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" -- node --test
+            --output-root "$RUNNER_TEMP/test-run-evidence" -- node --test
       - name: "Run the OMP reporter asset scenarios"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: |
           cd crates/farhelm-supervisor/asset-js-tests
           python3 "$GITHUB_WORKSPACE/scripts/record-test-run.py" \
             --kind release --selection 'OMP reporter asset scenarios' --concurrency 'node default discovery' \
-            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" -- node --test
+            --output-root "$RUNNER_TEMP/test-run-evidence" -- node --test
       - name: "Provision a CentOS Stream 9 host over ssh"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: |
-          sudo apt-get update && sudo apt-get install -y musl-tools python3-venv
-          PATH="$PWD/.ci-tmux:$PATH" python3 scripts/record-test-run.py \
+          sudo apt-get update && sudo apt-get install -y musl-tools
+          python3 scripts/record-test-run.py \
             --kind release --selection 'CentOS provisioning fixture' --concurrency 'one selected test' \
-            --tmux required --output-root "$RUNNER_TEMP/test-run-evidence" -- scripts/test-provision-centos.sh \
+            --output-root "$RUNNER_TEMP/test-run-evidence" -- scripts/test-provision-centos.sh \
             --kind release --output-root "$RUNNER_TEMP/test-run-evidence"
       - name: "Validate standalone uninstall on macOS"
         if: "runner.os == 'macOS'"
@@ -265,35 +262,35 @@ jobs:
           shared=(-p farhelm -p farhelm-supervisor --bin farhelm --lib --test session_hold --test version_lock_forwarder)
           python3 scripts/record-test-run.py \
             --runner nextest --kind release --selection 'macOS uninstall unit tests' --concurrency '4 nextest slots; retries 0' \
-            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo nextest run --locked "${shared[@]}" -E 'package(farhelm) & kind(bin) & test(uninstall::)'
           # Version locks, the installation lock and the session keeper rest on
           # macOS behavior Linux only approximates (flock on an APFS folder,
           # extended attributes, RENAME_EXCL, F_FULLFSYNC, kqueue NOTE_EXIT).
           python3 scripts/record-test-run.py \
             --runner nextest --kind release --selection 'macOS version and installation lock tests' --concurrency '4 nextest slots; retries 0' \
-            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo nextest run --locked "${shared[@]}" \
             -E 'package(farhelm-supervisor) & kind(lib) & test(/installation::|version_lock::|session_hold::/)'
           python3 scripts/record-test-run.py \
             --runner nextest --kind release --selection 'macOS version-lock process tests' --concurrency '4 nextest slots; retries 0' \
-            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo nextest run --locked "${shared[@]}" \
             -E 'package(farhelm) & (binary(session_hold) | binary(version_lock_forwarder))'
           python3 scripts/record-test-run.py \
             --kind release --selection 'macOS installed uninstall acceptance' --concurrency 'one fixture at a time' \
-            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- python3 scripts/test-uninstall.py --binary target/debug/farhelm --installer scripts/install.sh
       - name: "Compile and test the window half of the Mac release"
         if: "runner.os == 'macOS'"
         run: |
           python3 scripts/record-test-run.py \
             --runner nextest --kind release --selection 'macOS desktop unit tests' --concurrency '4 nextest slots; retries 0' \
-            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo nextest run -p farhelm-ui --features desktop
           python3 scripts/record-test-run.py \
             --kind release --selection 'macOS desktop doctests' --concurrency '4 doctest threads' \
-            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo test --locked --doc -p farhelm-ui --features desktop -- --show-output --test-threads=4
       - name: "Install the wasm target for the web bundle"
         run: "rustup target add wasm32-unknown-unknown"
@@ -333,18 +330,18 @@ jobs:
         run: |
           python3 scripts/record-test-run.py \
             --runner nextest --kind release --selection 'Linux desktop unit tests' --concurrency '4 nextest slots; retries 0' \
-            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo nextest run -p farhelm-ui --features desktop
           python3 scripts/record-test-run.py \
             --kind release --selection 'Linux desktop doctests' --concurrency '4 doctest threads' \
-            --tmux none --output-root "$RUNNER_TEMP/test-run-evidence" \
+            --output-root "$RUNNER_TEMP/test-run-evidence" \
             -- cargo test --locked --doc -p farhelm-ui --features desktop -- --show-output --test-threads=4
       - name: "Run the native desktop smoke gate"
         if: "runner.os == 'Linux' && runner.arch == 'X64'"
         run: |
-          PATH="$PWD/.ci-tmux:$PATH" python3 scripts/record-test-run.py \
+          python3 scripts/record-test-run.py \
             --kind release --selection 'native desktop smoke legs' --concurrency 'sequential smoke legs' \
-            --tmux required --output-root "$RUNNER_TEMP/test-run-evidence" -- scripts/desktop-smoke.sh
+            --output-root "$RUNNER_TEMP/test-run-evidence" -- scripts/desktop-smoke.sh
         env:
           "CI": true
           "DESKTOP_SMOKE_DIR": "${{ runner.temp }}/desktop-smoke"

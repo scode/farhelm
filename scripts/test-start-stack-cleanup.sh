@@ -11,7 +11,7 @@
 # now watches its spawner and runs its normal TERM trap when the spawner
 # goes away. This script proves that for spawner SIGKILL and SIGTERM, plus
 # the normal trap path and the reaping of a replacement "remote"
-# supervisor, with an unrelated tmux server, process, and another stack's
+# supervisor, with an unrelated process and another stack's
 # live run dir (holding a live terminal host) standing by as the "other
 # stacks" that must survive. Every booted stack also gets a real terminal
 # host planted in each of its two state dirs, which its cleanup must end. A
@@ -76,8 +76,7 @@ curl -s -m 2 -o /dev/null "$port" && {
   exit 1
 } || true
 
-# Decoys: the "other stacks". A tmux server on its own socket (kill-server
-# scope must not escape), a plain process (no stray kills), and another
+# Decoys: the "other stacks". A plain process (no stray kills), and another
 # stack's live run dir (rm -rf scope must not escape) holding a live
 # terminal host (the terminal-host stop must not escape either; started
 # below, once the trap that ends it is in place).
@@ -117,9 +116,6 @@ if flock -n "$decoy_dir/fh-run.lock" true 8>&-; then
   echo "the decoy's lock is not held" >&2
   exit 1
 fi
-decoy_tag="decoy-${decoy_dir##*.}"
-decoy_sock="/tmp/tmux-$decoy_tag.sock"
-tmux -S "$decoy_sock" new-session -d -x 80 -y 24 8>&- || exit 1
 sleep 300 8>&- &
 decoy_pid=$!
 echo "decoy" >"$decoy_dir/marker" || exit 1
@@ -152,7 +148,6 @@ cleanup_test() {
   sleep 3
   "$fixtures" sweep-test-state 2>/dev/null 8>&- || true
   kill "$decoy_pid" 2>/dev/null
-  tmux -S "$decoy_sock" kill-server 2>/dev/null
   # The decoy's host ends the way a stack's do. When that cannot be
   # confirmed, the directory stays, since its socket is the only way left
   # to reach the host, and the host is sent SIGTERM if it is still this
@@ -210,8 +205,6 @@ read -r decoy_host_pid decoy_host_socket <<<"$decoy_host"
 
 check_decoys() {
   local phase="$1"
-  tmux -S "$decoy_sock" has-session 2>/dev/null \
-    || fail "$phase: decoy tmux server died"
   kill -0 "$decoy_pid" 2>/dev/null \
     || fail "$phase: decoy process died"
   test "$(cat "$decoy_dir/marker" 2>/dev/null)" = "decoy" \
@@ -338,8 +331,8 @@ running_stack_hosts() {
 
 # Poll until the stack is fully gone: port closed, state dir and stack
 # info removed, the planted hosts ended, and no remaining process
-# mentioning the state dir (shell, watcher, helm, supervisors, tmux
-# clients, terminal hosts).
+# mentioning the state dir (shell, watcher, helm, supervisors, terminal
+# hosts).
 await_gone() {
   local phase="$1" state="$2"
   local _

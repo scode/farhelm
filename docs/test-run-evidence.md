@@ -21,12 +21,11 @@ python3 scripts/hunt-rust-tests.py --repeat 20 --timeout 60 \
 ```
 
 `--repeat` accepts 1 through 1000 and `--timeout` is a finite positive number. The plan reports the maximum sum of child
-command time (`repeat * timeout`), four shared nextest slots, zero retries, required tmux validation, and the fact that
-metadata and cleanup time is outside that sum. The hunt does not build or install tmux; a missing or mismatched pinned
-substrate is an explicit recorder refusal. Ordinary failed attempts continue so mixed outcomes remain visible, while a
-later pass cannot make the batch pass. Cancellation stops scheduling and returns `128 + signal`; incomplete recorder or
-evidence state returns 125. The batch index is bounded and contains summaries only; manifests and reports remain the
-source of truth for command, environment, and exact test counts.
+command time (`repeat * timeout`), four shared nextest slots, zero retries, and the fact that metadata and cleanup time
+is outside that sum. Ordinary failed attempts continue so mixed outcomes remain visible, while a later pass cannot make
+the batch pass. Cancellation stops scheduling and returns `128 + signal`; incomplete recorder or evidence state
+returns 125. The batch index is bounded and contains summaries only; manifests and reports remain the source of truth
+for command, environment, and exact test counts.
 
 Only nextest's ordinary test-failure exit permits another attempt. Runner signals, build/setup failures, incomplete
 cleanup, missing stream EOF, and truncated retained output stop the batch. A complete report can still supply counts for
@@ -81,7 +80,6 @@ python3 scripts/record-test-run.py \
   --selection 'asset JavaScript unit harness' \
   --concurrency 'node default discovery' \
   --timeout 60 \
-  --tmux none \
   -- bash -c 'cd crates/farhelm-ui/js-tests && node --test'
 ```
 
@@ -89,13 +87,16 @@ The labels are recorded verbatim; coverage is never inferred from them. Generic 
 caller's current directory as the child's current directory. There is no shell joining, retry, or scheduling layer.
 
 `--kind` accepts `development`, `repetition`, or `release`. `--timeout` is an optional finite positive number of seconds
-and starts after the command is spawned; metadata probe time is separate. `--tmux` accepts `warn` (the default),
-`required`, or `none`. `--output-root` overrides evidence storage. `--keep-farhelm-env NAME` may be repeated, but each
-name must begin with `FARHELM_` and must not contain a value. `--termination-grace` sets the finite positive cleanup
-allowance after interruption or timeout, in seconds (default 2, maximum 60). A runner that forwards signals to its own
-test process groups needs an allowance longer than its internal termination grace.
+and starts after the command is spawned; metadata probe time is separate. `--output-root` overrides evidence storage.
+`--keep-farhelm-env NAME` may be repeated, but each name must begin with `FARHELM_` and must not contain a value.
+`--termination-grace` sets the finite positive cleanup allowance after interruption or timeout, in seconds (default 2,
+maximum 60). A runner that forwards signals to its own test process groups needs an allowance longer than its internal
+termination grace.
 
 `--help` and `-h` work without the required labels or a command. Help after the `--` boundary belongs to the child argv.
+Any other option the recorder does not know is refused with exit 125 before a run directory exists. That includes
+`--tmux`, which selected a check against a pinned test tmux that no longer exists; commands kept in historical records
+(older `FLAKES.md` entries, `plans/`, `lore/`) still pass it and need it removed before they are rerun.
 
 The one thing a recorded browser run keeps outside that temporary tree is its timing record: after every
 `--runner playwright` run whose report is structurally complete, the recorder writes one small JSON file to
@@ -133,7 +134,7 @@ existing root's permissions.
 
 Every invocation gets a full UUID directory. A retry always creates another directory, so a later passing run cannot
 overwrite the failure that prompted it. The path is written to stderr as `test-run evidence: PATH` once the directory
-exists, including when required tmux validation refuses the command.
+exists, including when a runner mode's pre-spawn check refuses the command.
 
 ## Recorded nextest runs
 
@@ -142,9 +143,8 @@ Use `--runner nextest` from the checkout root with Python 3.11 or newer and exac
 
 ```console
 nextest_dir=$(python3 scripts/install-pinned-nextest.py) && \
-tmux_dir=$(scripts/build-pinned-tmux-ci.sh) && \
-PATH="$nextest_dir:$tmux_dir:$PATH" python3 scripts/record-test-run.py \
-  --runner nextest --kind development --tmux required \
+PATH="$nextest_dir:$PATH" python3 scripts/record-test-run.py \
+  --runner nextest --kind development \
   --selection 'one session roundtrip' --concurrency '4 nextest slots; one selected test' \
   -- cargo nextest run -p farhelm --test e2e -E 'test(=session_lifecycle::create_attach_and_roundtrip_input)'
 ```
@@ -199,15 +199,13 @@ runner-owned test group. These are explicit lifecycle checks, not a per-edit str
 ## Recorded browser runs
 
 Use `--runner playwright` from the checkout's `e2e` directory after explicitly preparing the application builds,
-installed npm dependencies, browser binaries and pinned tmux described in AGENTS.md. Browser builds and runtime checks
-belong on a sandbox when they are expensive. The recorder neither installs prerequisites nor starts a build for you.
+installed npm dependencies and browser binaries described in AGENTS.md. Browser builds and runtime checks belong on a
+sandbox when they are expensive. The recorder neither installs prerequisites nor starts a build for you.
 
 ```sh
-# From the checkout root, after preparing the required builds and pinned tmux:
-tmux_dir=$(scripts/build-pinned-tmux-ci.sh) && \
-cd e2e && \
-PATH="$tmux_dir:$PATH" python3 ../scripts/record-test-run.py \
-  --runner playwright --kind development --tmux required --timeout 300 \
+# From the checkout's e2e directory, after preparing the required builds:
+python3 ../scripts/record-test-run.py \
+  --runner playwright --kind development --timeout 300 \
   --selection 'feed spec, both engines' --concurrency '3 browser workers, one stack each; retries 0' \
   -- npx playwright test 'feed\.spec\.ts'
 ```
@@ -245,9 +243,9 @@ python3 ../scripts/hunt-browser-tests.py --repeat 20 --timeout 60 \
 ```
 
 Add `--execute` only when the displayed selection and cost are intended. Planning does not probe tools, create evidence,
-install dependencies or build the application. Execution needs the browser recorder's prerequisites above, including the
-pinned tmux already on PATH. Each attempt uses both Chromium and WebKit, the suite's three workers, no retries and no
-internal repeat-each loop. Use generic recording for an intentionally single-engine debugging run.
+install dependencies or build the application. Execution needs the browser recorder's prerequisites above. Each attempt
+uses both Chromium and WebKit, the suite's three workers, no retries and no internal repeat-each loop. Use generic
+recording for an intentionally single-engine debugging run.
 
 The private batch index retains each attempt and its validated actual and expected outcome counts per engine. A later
 pass does not erase an earlier failure. Ordinary failed assertions and individual case timeouts may proceed to the next
@@ -267,7 +265,9 @@ The manifest's `outcome` is one of:
 - `running`: the initial durable record. Seeing this after the recorder process is gone means it could not finalize, as
   with SIGKILL or host loss.
 - `completed`: the child exited normally or was signaled without the recorder itself receiving an interrupt.
-- `refused`: a pre-spawn policy check, currently required tmux validation, rejected the run.
+- `refused`: a runner mode's pre-spawn check (its working directory, or the preparation of its pinned tools and
+  configuration) rejected the run. A request refused before its run directory exists, such as an unknown option or an
+  unsafe output root, leaves no manifest.
 - `timed_out`: the command exceeded `--timeout`.
 - `interrupted`: the recorder received SIGINT or SIGTERM and initiated command-group shutdown using the runner's signal
   policy.
@@ -298,8 +298,8 @@ group, crash-safe filesystem durability, or cleanup of descendants that escaped 
 
 Git top-level discovery runs first because the recorder needs it to reject evidence storage inside the tested checkout.
 Once that storage-safety preflight succeeds or records that Git is unavailable, `manifest.json` is written before the
-full source capture, tmux probes, or child spawn and replaced atomically as evidence changes. Consumers must check
-`schema_version` before interpreting fields and must check component `complete` flags before using fingerprints.
+full source capture or child spawn and replaced atomically as evidence changes. Consumers must check `schema_version`
+before interpreting fields and must check component `complete` flags before using fingerprints.
 
 The top-level fields are:
 
@@ -318,13 +318,15 @@ The top-level fields are:
 - `platform`: OS release, machine architecture, logical CPU count, and Python identity. Processor probing is omitted
   because it can launch an auxiliary subprocess outside the bounded probe lifecycle.
 - `source`: Git checkout evidence and its limits.
-- `tmux`: expected and actual substrate evidence, or an explicit `none` record.
 - `output`: retention policy, byte counters, and ordered files. It is null before command output storage starts.
 - `console`: observed, forwarded, rejected, and pending/dropped byte counters for best-effort console streaming, plus
   `worker_finished`. In-process repetition requires the forwarding worker to have stopped before another run starts.
 - `test_traces`: private trace-root identity and fixed-layout collection evidence, or null before command setup.
 - `child_status`: Python's raw return code plus normalized `exit_code` or `signal`.
 - `recorder`: recorder exit code, forced-cleanup flag, cleanup limitation, and error text.
+
+Records written before the recorder's tmux mode was removed also carry a `tmux` field, the evidence of a check against a
+pinned test tmux that no longer exists. Readers ignore it; the summary below treats such a record as a current one.
 
 Manifest updates use a mode-`0600` temporary file, a complete write, `fsync`, and atomic replacement. This prevents
 readers from seeing half-written JSON. It does not promise that the newest directory entry survives power loss.
@@ -360,7 +362,6 @@ environment, platform, console, and repetitive probe fields are omitted from thi
     "porcelain": { "complete": true, "bytes": 0, "sha256": "...", "probe": {} },
     "untracked_tree": { "complete": true, "entry_count": 0, "sha256": "...", "probe": {} }
   },
-  "tmux": { "mode": "none", "checked": false, "uses_tmux": false },
   "output": {
     "limit_bytes": 8388608,
     "observed_bytes": 3,
@@ -377,8 +378,8 @@ environment, platform, console, and repetitive probe fields are omitted from thi
 ## Environment evidence
 
 The child environment is copied from the recorder, then every `FARHELM_*` variable is removed except names supplied with
-`--keep-farhelm-env`. An absent requested name remains absent. The same controlled environment is used to resolve and
-run tmux. Before the command starts, the recorder sets `FARHELM_TEST_TRACE_DIR` to its new private `test-traces`
+`--keep-farhelm-env`. An absent requested name remains absent. The same controlled environment is used for the Git
+metadata probes. Before the command starts, the recorder sets `FARHELM_TEST_TRACE_DIR` to its new private `test-traces`
 directory. This name is reserved: even an explicit `--keep-farhelm-env FARHELM_TEST_TRACE_DIR` cannot redirect capture
 to an ambient location. Metadata probes run before this override.
 
@@ -529,22 +530,6 @@ between filesystem operations. Per-file limits apply as well. A kernel-blocked f
 time bound. Exit 0 means discovery completed, not that tests passed or all diagnostics were retained. Missing or invalid
 inputs and exhausted discovery budgets produce a partial JSON report and exit 125; cancellation preserves its signal
 status. Inspect `discovery` and the run coverage gaps before interpreting totals.
-
-## Tmux evidence
-
-`--tmux required` checks both identities before child spawn:
-
-1. Resolve `tmux` through the controlled child `PATH`, run that exact executable with `-V`, and compare its output with
-   the `TMUX_VERSION` value parsed as plain text from `.github/release/source-pins.env`.
-2. SHA256 the resolved executable and compare it with the repository-built `.ci-tmux/tmux` executable.
-
-The source-pin file is never executed. Its source archive checksum is not treated as a binary hash. Missing files,
-failed probes, unreadable executables, invalid pins, version drift, and binary drift all refuse required mode before the
-child starts.
-
-`--tmux warn` records the same evidence and prints every mismatch, then runs the command. `--tmux none` records
-`checked: false` and `uses_tmux: false`; use it only when the recorded check does not use tmux. The recorder never
-builds or replaces tmux.
 
 ## Output records
 

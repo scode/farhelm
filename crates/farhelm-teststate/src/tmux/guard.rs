@@ -118,7 +118,11 @@ fn ignore_diagnostic_panic(body: impl FnOnce() + std::panic::UnwindSafe) {
 /// ordinary permission/noexec shadows, but cannot prove future exec success or
 /// prevent replacement between lookups. Forced cleanup independently verifies
 /// the socket peer's executable; this path alone never authorizes a signal.
-fn resolve_executable(program: &Path, path: Option<&OsStr>, cwd: &Path) -> io::Result<PathBuf> {
+pub(super) fn resolve_executable(
+    program: &Path,
+    path: Option<&OsStr>,
+    cwd: &Path,
+) -> io::Result<PathBuf> {
     let absolute = |path: PathBuf| {
         if path.is_absolute() {
             path

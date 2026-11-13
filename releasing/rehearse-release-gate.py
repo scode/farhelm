@@ -128,7 +128,7 @@ def check_properties(workflow: str) -> list[str]:
         problems.append("a step still depends on the tag name")
     if "check-changelog.py format" not in workflow:
         problems.append("the changelog format lint is missing")
-    if "Run the test suite against the pinned tmux" not in workflow:
+    if '- name: "Run the test suite"\n' not in workflow:
         problems.append("the release test gate's steps are missing from the build job")
     return problems
 

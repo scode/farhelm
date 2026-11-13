@@ -55,7 +55,7 @@ async function pack(scratch: string, nextest: string, skipPodman: boolean) {
   await $`git clone -q --depth 1 ${"file://" + REPO} ${out}/shallow`;
   await $`tar -czf ${out}/git.tar.gz -C ${out}/shallow .git`;
   await $`rm -rf ${out}/shallow`;
-  await $`tar -czf ${out}/tools.tar.gz .ci-tmux ${nextest} target/debug/farhelm-fixtures`.cwd(REPO);
+  await $`tar -czf ${out}/tools.tar.gz ${nextest} target/debug/farhelm-fixtures`.cwd(REPO);
   if (skipPodman) {
     await $`tar -czf ${out}/payloads.tar.gz --files-from /dev/null`;
   } else {

@@ -147,7 +147,7 @@ class FakeNextest:
 
 
 class HuntTest(unittest.TestCase):
-    """Exercise the finite scheduler without Rust, tmux, or environment mutation."""
+    """Exercise the finite scheduler without Rust or environment mutation."""
 
     def command(self):
         return ["cargo", "nextest", "run", "-p", "fixture", "--lib"]
@@ -188,7 +188,8 @@ class HuntTest(unittest.TestCase):
             scripts = root / "scripts"
             scripts.mkdir()
             for name in ("hunt-rust-tests.py", "test_hunt.py", "record-test-run.py",
-                         "test_run_nextest.py", "test_run_traces.py", "test_run_playwright.py"):
+                         "test_run_nextest.py", "test_run_traces.py", "test_run_playwright.py",
+                         "test_run_timings.py"):
                 shutil.copyfile(ROOT / "scripts" / name, scripts / name)
             environment = dict(os.environ)
             environment.pop("PYTHONDONTWRITEBYTECODE", None)
@@ -405,7 +406,7 @@ class HuntTest(unittest.TestCase):
             ready = base / "child-ready"
             (base / "evidence").mkdir(mode=0o700)
             recorder_argv = [
-                "--kind", "repetition", "--selection", "fixture", "--concurrency", "none", "--tmux", "none",
+                "--kind", "repetition", "--selection", "fixture", "--concurrency", "none",
                 "--output-root", str(base / "evidence"), "--", sys.executable, "-c",
                 f"import pathlib,time; pathlib.Path({str(ready)!r}).touch(); time.sleep(30)",
             ]

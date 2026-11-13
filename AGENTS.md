@@ -120,9 +120,9 @@ and no `$` expansion of any kind: no `*`, `?` or `[...]` patterns, no variables 
 backticks, no `${...}`, no `$((...))`. Anything that needs one of those is written as a Deno TypeScript script, in a
 file, and run as that file. Put it in your scratch directory unless it belongs in the repository. Plain commands with
 literal arguments (`git status`) and pipelines of them stay fine in the shell. The exception is a command this
-repository's instructions give word for word (the pinned nextest and tmux `PATH` setup, the release procedure's version
-checks, the plans flow's ntfy send): run it as written, with only its placeholders filled in. Do not use the exception
-to compose new commands in their style.
+repository's instructions give word for word (the pinned nextest `PATH` setup, the release procedure's version checks,
+the plans flow's ntfy send): run it as written, with only its placeholders filled in. Do not use the exception to
+compose new commands in their style.
 
 ## Talking to the user
 
@@ -260,8 +260,8 @@ going out, a stable re-cut's changelog PR, an RC's announcements PR, run-all-tes
 
 - Before choosing validation, running any runtime test (Rust, browser, JS, installer, provisioning), creating or
   updating a PR, merging one, or reporting a change to the repository's files as done, read `.agents/validation.md` and
-  `.agents/test-evidence.md` in full (the inventory, the pinned nextest and tmux setup, the recorder's arguments, the
-  browser engines).
+  `.agents/test-evidence.md` in full (the inventory, the pinned nextest setup, the recorder's arguments, the browser
+  engines).
 - When changing either workflow (`ci.yml`, or the release workflow through `release.yml`, `dist-workspace.toml` or
   `.github/dist-build-setup.yml`), a check or test script, or the deflake sweep's phases, update the inventory in
   `.agents/validation.md` and the lists in `.agents/run-all-tests.md` in the same change.

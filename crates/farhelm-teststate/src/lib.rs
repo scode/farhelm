@@ -1264,22 +1264,31 @@ mod tests {
             socket.exists(),
             "a dead socket remains after its listener exits"
         );
-        let failed = std::process::Command::new("tmux")
-            .arg("-S")
-            .arg(&socket)
-            .arg("kill-server")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .expect("tmux must execute to establish the failed-exit premise");
-        assert!(
-            !failed.success(),
-            "the dead socket must produce an unsuccessful exit"
-        );
-        assert!(
-            socket.exists(),
-            "the failed command must leave a socket to retry"
-        );
+        // Only this premise needs a real tmux: it shows why a failed kill must
+        // not keep the directory. The reap itself never runs tmux for a socket
+        // nothing listens on, so it is checked with or without one.
+        if crate::tmux::machine_tmux_or_skip(
+            "reap_removes_a_directory_whose_tmux_socket_is_dead (its kill-server premise)",
+        )
+        .is_some()
+        {
+            let failed = std::process::Command::new("tmux")
+                .arg("-S")
+                .arg(&socket)
+                .arg("kill-server")
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .expect("tmux must execute to establish the failed-exit premise");
+            assert!(
+                !failed.success(),
+                "the dead socket must produce an unsuccessful exit"
+            );
+            assert!(
+                socket.exists(),
+                "the failed command must leave a socket to retry"
+            );
+        }
         let mut outcome = SweepOutcome {
             reaped: Vec::new(),
             live: 0,
@@ -1434,6 +1443,9 @@ mod tests {
             }
         }
 
+        if crate::tmux::machine_tmux_or_skip("sweep_kills_a_real_tmux_server").is_none() {
+            return;
+        }
         let root = tempfile::tempdir().unwrap();
         let dead = dead_dir(root.path(), "fh-it.tmux01");
         let sock = dead.join("tmux.sock");
@@ -1442,7 +1454,7 @@ mod tests {
             .arg(&sock)
             .args(["new-session", "-d", "-s", "teststate"])
             .status()
-            .expect("tmux must be installed for this suite");
+            .expect("start the fixture tmux server");
         assert!(started.success(), "starting the fixture tmux server");
         let _guard = KillServerOnDrop(sock.clone());
         let pid_out = std::process::Command::new("tmux")
