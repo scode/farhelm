@@ -7778,11 +7778,10 @@ Restart to update spawns a detached helper in its own process group: a short `/b
 about a minute, for the app's process to exit, then runs `/usr/bin/open` on the bundle, and gives up without opening
 anything if the app has not exited by then. The app then quits the way closing its window does, which leaves its
 supervisor running. The new main program finds the previous version's supervisor by its record, running another program
-file than its own, and replaces it in order (see "Side-by-side versions inside Farhelm.app"). Terminals in terminal
-hosts keep running: the old supervisor's orderly stop checkpoints them, and the new one adopts them from their hosts
-("Terminal host", "Across supervisor restarts"). An update from a release that still ran old terminals ends the sessions
-still in them instead ("Terminal substrate: private tmux server"). The real update handover is exercised by the release
-brick test. Opening the releases page uses the same external-link path as the Documentation item.
+file than its own, and replaces it in order (see "Side-by-side versions inside Farhelm.app"); sessions keep running.
+Terminals in terminal hosts keep running too: the old supervisor's orderly stop checkpoints them, and the new one adopts
+them from their hosts ("Terminal host", "Across supervisor restarts"). The real update handover is exercised by the
+release brick test. Opening the releases page uses the same external-link path as the Documentation item.
 
 What it trusts over TLS alone is the answer to "which release is the latest". A wrong answer cannot make it run anything
 unsigned, but it can withhold updates (by naming an old release), or, by naming one that fails verification, put up the

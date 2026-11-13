@@ -1939,7 +1939,7 @@ assert_closing_message_contract() {
   if [ "$is_update" = yes ]; then
     expected='✅ Farhelm 1.2.4 is ready.
 
-   Quit and reopen Farhelm to finish updating.'
+   Quit and reopen Farhelm to finish updating. Your sessions keep running.'
   else
     expected='✅ Farhelm 1.2.4 is installed.'
     if [ "$tmux_kind" = floor ]; then

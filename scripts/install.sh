@@ -1284,7 +1284,7 @@ EOF
     fi
     if [ "$updated_installation" -eq 1 ]; then
       printf '✅ %sFarhelm %s is ready.%s\n' "$OUT_GREEN" "$VERSION_NUM" "$OUT_RESET"
-      printf '\n   Quit and reopen Farhelm to finish updating.\n'
+      printf '\n   Quit and reopen Farhelm to finish updating. Your sessions keep running.\n'
     else
       printf '✅ %sFarhelm %s is installed.%s\n' "$OUT_GREEN" "$VERSION_NUM" "$OUT_RESET"
       if [ "$meets_floor" -eq 1 ]; then
