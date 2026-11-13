@@ -22,8 +22,8 @@ import pillarsLight from '../../../assets/intro/pillars-light.svg';
   alt="farhelm: take the helm of your agents, far away and local"
 />
 
-One window for every coding agent you run, on your Mac and on any Linux box you can ssh to. Each agent keeps running on
-its machine when you close the lid, and you pick it up where it was.
+One window for every coding agent you run, on your Mac and on any Linux box or Apple-silicon Mac you can ssh to. Each
+agent keeps running on its machine when you close the lid, and you pick it up where it was.
 
 {/* The screenshot is the README's hero capture, hosted on the readme-assets branch rather than committed on main (see
     docs/readme-hero/SPEC.md). scripts/publish-readme-hero.sh rewrites the URL between the two markers below along with
@@ -54,7 +54,7 @@ open](https://raw.githubusercontent.com/scode/farhelm/4f215446a7b4f19d839479c081
 <div><dt>Templates</dt><dd>Often start Codex in YOLO mode on a checkout of <code>acme/web</code> on <code>build-box</code>? Save that as a <a href="/docs/using/launch-templates/">launch template</a>, then in the Mac app press Cmd+N, type <code>tl:web</code>, and press Enter twice: once to apply it, once to launch.</dd></div>
 <div><dt>Change one thing</dt><dd>Want this session again, but with Codex instead of Claude? <strong>clone</strong> opens the launcher with everything already filled in, so you change just the agent and launch. <strong>replace with</strong> does the same, and swaps the new session in for this one.</dd></div>
 <div><dt>Agents start sessions</dt><dd>Tell your agent <code>$farhelm for each of the TODO items above, start a session in a new managed checkout of acme/web, named after the item</code>, and it will. Farhelm <a href="/docs/using/approve-agent-requests/">asks you</a> before each one starts, unless you have told it to trust that host.</dd></div>
-<div><dt>Version control</dt><dd>Farhelm works in any directory, whatever it uses for version control. It can also <a href="/docs/using/start-a-session/#start-from-a-managed-checkout">manage checkouts</a> of your GitHub repositories: a fresh clone for each session, moved to the trash when you are done with it.</dd></div>
+<div><dt>Version control</dt><dd>Farhelm works in any directory, whatever it uses for version control. It can also <a href="/docs/using/start-a-session/#start-from-a-managed-checkout">manage checkouts</a> of your GitHub repositories. Each session gets a fresh clone, moved to the trash when you are done with it on an ordinary host. In a disposable container or sandbox, Delete removes the clone permanently, and deleting the last session there removes the whole environment.</dd></div>
 </dl>
 
 ## How it works
@@ -67,7 +67,9 @@ open](https://raw.githubusercontent.com/scode/farhelm/4f215446a7b4f19d839479c081
 
 Farhelm has two parts. The **helm** is what you look at, usually the Farhelm app on your Mac: it keeps your list of hosts
 and shows every session. A **supervisor** runs on each machine, your Mac included, and keeps that machine's agents and
-their terminals running ([the pieces](/docs/how-it-works/the-pieces/)). The helm reaches each supervisor over SSH.
+their terminals running ([the pieces](/docs/how-it-works/the-pieces/)). The helm reaches remote hosts over SSH.
+Experimental [container sessions](/docs/agents/containerized-sessions/) run their own supervisor and checkout inside
+rootless Podman on a Linux host, reached through that host.
 Nothing listens beyond your own machine, nothing goes through a relay ([security model](/docs/how-it-works/security-model/)),
 and every box in the diagram can restart without losing a session
 ([what survives what](/docs/how-it-works/what-survives-what/)).

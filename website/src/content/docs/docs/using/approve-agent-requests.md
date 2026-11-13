@@ -15,7 +15,7 @@ your browser ([Open links from a remote session](#open-links-from-a-remote-sessi
 those changes happens by default, whoever typed the command; a command you type yourself in a session's terminal is
 asked about the same way. You can [stop asking for a host](/docs/using/approve-agent-requests/#stop-asking-for-a-host).
 Looking never asks. An agent in a [container session](/docs/agents/containerized-sessions/) or a
-[session-owned sandbox](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox) can act only within its own
+[sandbox session](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox) can act only within its own
 container or sandbox ([Agents in sandboxes and containers](#agents-in-sandboxes-and-containers)). Agents on other hosts
 cannot delete those sessions, and they start new sandboxes and containers only behind a card that always asks
 ([New sandboxes and containers](#new-sandboxes-and-containers)).
@@ -82,11 +82,11 @@ double-click cannot answer a request you have not read.
 ## Agents in sandboxes and containers
 
 An agent in a [container session](/docs/agents/containerized-sessions/) or a
-[session-owned sandbox](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox) can ask Farhelm to act on
-its own container or sandbox and nothing else. It can start more sessions there with `farhelm spawn` or
-`farhelm agent create`, and rename, stop, restart or delete the sessions there. Its lists of hosts and sessions show
-only that container or sandbox. Deleting another session there removes just that session: the container or sandbox
-stays, since the agent's own session is still in it.
+[sandbox session](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox) can ask Farhelm to act on its own
+container or sandbox and nothing else. It can start more sessions there with `farhelm spawn` or `farhelm agent create`,
+and rename, stop, restart or delete the sessions there. Its lists of hosts and sessions show only that container or
+sandbox. Deleting another session there removes just that session: the container or sandbox stays, since the agent's own
+session is still in it.
 
 It can also ask to [open links](#open-links-from-a-remote-session), under the container's or sandbox's own link
 permissions, and start a session from a launch template that sets no host and no recipe. Farhelm refuses, with "Agents
