@@ -187,3 +187,125 @@ except one, explained below.
   three low spec and comment points, and nits, all fixed. The reviewer checked every fixture signature independently.
 
 Commit messages each went through cold reads (three for #3371, two for #3373 and #3374).
+
+### Landing
+
+#### What landed with it
+
+Nothing else landed in this round. Since the stack was delivered, main gained only plan-queue changes. The stack was
+already based on the one change that came just before it, which put "Your sessions keep running." back into the
+installer's update message and two spec passages; the installer keeps that sentence. A rebase that applies cleanly can
+still drop another plan's rules, so one of two independent reviewers checked only the interactions with what is on main,
+above all the previous tmux plan (ending old terminals at startup). It found none that break anything:
+
+- the startup step that ends an earlier release's private tmux server finds it by its socket and command line and never
+  runs a tmux program, so deleting the bundled tmux cannot make it miss the server; on Update the removal runs after the
+  new supervisor has started, so that step has already run;
+- the tests that build an earlier release's tmux server still get the pinned test tmux everywhere they run;
+- containers and Tensorlake sandboxes run the removal step too, and nothing else on main still uses what the stack
+  removed.
+
+The other reviewer read the provisioning, release, desktop and setup code adversarially. Nothing needed a code change:
+the removal step deletes only the private directory's `tmux`, removes a symlink rather than what it points to, and
+counts the file as already gone only when the host says so; and nothing about release verification was loosened.
+
+#### Fixes made while landing
+
+No behavior changed: docs, spec, changelog entries, a code comment, and the explanation users see under the "Remove the
+bundled tmux" step of the plan they approve, each in the PR it corrects:
+
+- **The tmux copy that updates before 0.18.0 left beside `farhelm` is not removed** (#3373). Before 0.18.0, Update put
+  Farhelm's tmux next to `farhelm` itself, which on many hosts is a shared folder such as `~/.local/bin`, and 0.18.0
+  deliberately left that copy in place, since the file there could be the user's own. This stack rightly leaves it alone
+  too, but the spec, two docs pages, the changelog entry and the "Remove the bundled tmux" step's own explanation said
+  that afterwards `tmux` in a session is the host's own. On such a host it is still that old copy, because that folder
+  comes first on the `PATH` sessions start with. The step's explanation now says only that `tmux` in a session no longer
+  runs the removed copy; the spec, the docs and the changelog say the older copy stays. A code comment claiming every
+  earlier release put the copy in Farhelm's private folder was corrected.
+- **The changelog entry about the supervisor's service** (#3371), which covers both the helm's own machine and remote
+  Linux hosts, gained a note for the release-time editor: the supervisor finds `systemd-run`, `systemctl` and `git`
+  through the same `PATH` that loses the tmux directory. On a machine that keeps those programs outside
+  `/usr/local/bin`, `/usr/bin` and `/bin` (NixOS, say) and whose tmux lived in the same directory, the old service found
+  them only through the tmux entry; after the next setup or Update its sessions start without their systemd scope, and
+  repository discovery fails. Those programs were reachable that way only by accident, through the tmux folder (hosts
+  that used Farhelm's own tmux never had that folder on `PATH`), so I did not change the code; see below.
+
+#### What the report says that is not quite right
+
+- "On a host that had that copy, `tmux` typed in a session now runs the host's own tmux": not on a host that an update
+  before 0.18.0 gave a second copy beside `farhelm` (above).
+
+#### Things you should know that the report does not say
+
+- **Machines whose system programs live outside the standard folders** (NixOS and the like), the helm's own or a remote
+  Linux host, can lose the supervisor's scope containment and repository discovery after setup or Update, as above,
+  whenever their tmux sat in the same folder as `systemd-run`, `systemctl` and `git`, which is the usual NixOS layout.
+  Elsewhere nothing changes.
+- **On Add, the removal relies on Farhelm's check for an existing supervisor.** When you set up a host, Farhelm offers
+  Update if it finds a supervisor there and Add if it finds none. Update restarts the supervisor before the removal, so
+  no earlier supervisor can still be using the file. Add only starts the service, which leaves an already running one
+  alone, so the guarantee holds there only because that check found none. One the check misses (an earlier supervisor
+  run with an unusual state directory) would see its tmux deleted. Its old tmux server keeps running from the deleted
+  file, and its old terminals end at its next restart, as they would at that restart anyway since the first tmux plan,
+  so the deletion loses nothing extra.
+
+#### Possible follow-ups
+
+- **Decide whether Farhelm supports machines whose system programs live outside `/usr/local/bin`, `/usr/bin` and
+  `/bin`.** Options: give the service's `PATH` a deliberate rule for them (for example, the folders the machine's own
+  `PATH` names for `systemd-run` and `git` at setup), or declare them unsupported. I recommend the rule if you know of
+  users on NixOS; otherwise saying so in the supported host setup is enough.
+- The executor's open questions stand: when the "Remove the bundled tmux" step can go, rewording "the six payloads" in
+  TODO.md, re-triaging the queued finding about a user's tmux with an unusual program name, and recapturing the Add a
+  remote host screenshot.
+
+#### Checks
+
+The slow runs were on boat sandboxes at your request (2026-11-12: boats instead of Tensorlake), through the test
+recorder, as on a local machine, on reused 8-core Ubuntu 24.04 machines: the browser suite on seven, the Rust tests on
+three. Their Node is 24.22, against 24.20 on the development machine, which these tests do not depend on. Every run
+showed systemd's user manager running and working self-ssh, and the Rust runs Podman 4.9.3 with the pinned base image.
+Two things about boats that affected the first runs, both fixed in my runner before the reruns below: boat's command
+runner gives even its ordinary user the capability to read any file, which made the one test that expects an unreadable
+file to be refused fail; and with eight parallel test slots, nextest never started the real Podman test (it needs four)
+or 57 other end-to-end tests queued behind it, without reporting a failure. The runner now drops that capability and
+uses the four slots the recorder's own nextest mode uses.
+
+On the stack as delivered, restacked onto main:
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`, `dist generate --check`,
+  `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings`,
+  `cargo check -p farhelm-ui --features desktop`, `cargo check -p farhelm-ui --target wasm32-unknown-unknown`,
+  `cargo check -p farhelm-desktop`, `scripts/check-desktop-assets.sh`, `scripts/check-static-elf.sh --self-test`,
+  `sh -n scripts/install.sh`, shellcheck on the installer, its harness and the changed scripts, the installer harness
+  (548 checks, `84e595ca`) and the website build: passed. shellcheck also reports informational findings in
+  `scripts/desktop-smoke.sh` (unreachable-looking trap handlers and the like), of the same kinds as on main; that script
+  is not in the shellcheck gate.
+- The whole ordinary browser suite on both engines, from a fresh build: 3,309 passed, 3 failed, 14 skipped by the specs'
+  own conditions (`d20d38d2`, `a5ae5c0d`, `96825665`, `a87a36b4`, `35480b5a`, `794050ec`, `05d514e2`).
+  - Two failures were the boat capability above: the file-refusal test in `terminal-files` on both engines found a
+    mode-000 file readable. With the capability dropped, that spec passed on both engines, 7 and 7 (`87bd5b5d`,
+    `b7295f63`).
+  - The third, Chromium's "bulk Stop carries each target's tab precondition", is the open flake FLAKES.md records
+    (2026-11-11): the test reads the session list once, before the stopped session settles. Its two variants run five
+    times each per engine failed 5 of 10 on Chromium and passed 10 of 10 on WebKit (`08813e6b`, `77fa629d`). The stack
+    touches neither stopping sessions nor the page.
+- The whole Rust workspace except the desktop app (`cargo nextest run --workspace --exclude farhelm-desktop`, from a
+  nextest archive of the same tree): 5,718 passed in the first runs (`501b9925`, `ec108b53`, `e85dd131`). One failure
+  was the test macro's compile test, which builds a small crate offline from the development machine's Cargo download
+  cache, absent on the boats; it passed locally (`d1cc7508`). The 58 tests the first run left unstarted were all in the
+  end-to-end binary, which then ran whole again on four slots: 433 passed, the real Podman environment scenario included
+  (`fcbbe040`, `a1a43071`, `1f1a3fa4`).
+
+After the landing fixes, on the tree that merged:
+
+- The same formatting, dprint, changelog and agents-md checks, `cargo clippy -p farhelm-helm --all-targets`, the helm's
+  provisioning unit tests, which pin the changed step text (363 passed, `4a3e9338`), and the website build: passed.
+
+Reused: the executor's desktop smoke, desktop crate tests and CentOS provisioning test (`32c60e83`, `47b32a8e`,
+`f93695cf`), and its provisioning browser spec (`46cf3b03`, `88bdeade`); they ran on the delivered stack; since then
+main gained only plan-queue changes, and the landing fixes changed only text and the explanation of the "Remove the
+bundled tmux" step, so their coverage still applies.
+
+Skipped: anything macOS-only (no Mac here, as in the report).
