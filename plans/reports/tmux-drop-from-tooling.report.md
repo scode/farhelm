@@ -176,3 +176,105 @@ behaviour; the findings were in the stack's own tooling and test changes, and al
 - #3379: eight findings, all taken, including removing two more unused tmux-era fake-agent scripts, an unused method
   that rendered the guard's diagnostics as text (the separator fix stays), and the last "no tmux" contrasts in the
   validation inventory.
+
+### Landing
+
+#### What landed with it
+
+Nothing else landed in this round. Since the stack's base, main gained only plan-queue changes and a trailing-review
+record (#3380), which adds review-queue items and touches no file this stack changes. Because the stack changes the test
+recorder, the release gate and instructions that everything else on main relies on, an independent reviewer checked what
+on main still depends on what the stack removes: the recorder's `--tmux` option (now refused before any run starts), the
+pinned tmux build and its pins, the old build directory `.ci-tmux/`, and the three removed fake-agent scripts. Outside
+historical records, nothing still uses any of them. The release gate's steps run what they ran before minus the tmux
+check, with the distribution's tmux installed where the real-tmux tests need it, and the generated release workflow
+matches its source. Every test that starts a real tmux decides whether to skip by finding tmux exactly the way it then
+runs it, and the copies of rules that the instructions keep word for word changed together. That review found nothing
+that had to change before landing; its smaller points are the second and third fixes below, which I made myself and
+checked as described under the checks.
+
+#### Fixes made while landing
+
+- **The real Podman environment test could not start on a clean machine, on main already** (fixed in #3377). The
+  previous plan, `tmux-drop-from-install`, stopped Farhelm installing its own tmux build on remote hosts, so the script
+  that stages this test's inputs now stages only the Farhelm release archive the test installs into its container. The
+  test's prerequisite check still demanded the tmux build too and refused to start without it. The release gate runs
+  this test on a fresh machine, so the next release's gate would have failed there. The check now asks for the archive
+  alone; the scenario itself never used the tmux file, since provisioning no longer pushes one. The landing notes for
+  `tmux-drop-from-install` reported this scenario passing; that run's input folder still held a tmux build staged before
+  the change, so its prerequisite check passed on a stale file. The scenario's own coverage from that run stands.
+- **SPEC_impl.md still listed the removed `binary` fake-agent script** (#3379), in the testing section's description of
+  the stand-in agent the tests use, together with the raw-output coverage that script provided. This stack removed the
+  script, so the sentence became false with this stack rather than merely dated, and `tmux-drop-from-docs`' final audit,
+  which searches for "tmux", would not have found it. Both are gone from the sentence.
+- **The run-all-tests instructions (`.agents/run-all-tests.md`) gave the wrong reason to need a tmux** (#3377): they
+  said a full run without one would count the real-tmux tests as passes, but the deflake sweep that run uses now refuses
+  to start without one. The reason is corrected; the requirement to have a tmux stays.
+
+#### Things you should know that the report does not say
+
+- **The release gate now tests the shutdown of an earlier release's tmux server against Ubuntu's tmux 3.4**, not the
+  3.7c those servers actually ran. That step finds and ends the server by its socket, its command line and signals,
+  never through tmux's own protocol, so the version should not matter, and you had chosen "whatever tmux the machine
+  has".
+- **The whole Rust workspace ran here**, which the executor had skipped; that is how the Podman problem above surfaced.
+- **A landed plan still awaiting your review, `version-dblclick-flake`** (the version label's double-click flake),
+  suggests "the pinned tmux setup" in its text. It matters only if you ask for a follow-up on it; an executor would then
+  find that setup gone and use the machine's tmux.
+
+#### Possible follow-ups
+
+- The executor's open questions stand: narrowing the bonus brick-test continuity checks to baselines from v0.34.0 on,
+  the review-queue items about the old tmux terminal code, `plans/.agents/close-reset.md` still naming `.ci-tmux/`, when
+  `.ci-tmux/` can leave `.gitignore`, `scripts/test-nextest-cleanup.py` not running, the two ambiguous deflake
+  instructions, and the unused `codex-record` fake-agent script.
+
+#### Checks
+
+The slow runs were on boat sandboxes at your request (2026-11-12: boats instead of Tensorlake), on four new 8-core
+Ubuntu 24.04 machines. Each had the distribution's tmux 3.4 at its standard place, a running systemd user manager,
+working self-ssh and Podman 4.9.3 with the pinned base image, all checked before any test ran. Boat's command runner
+lets even an ordinary user read files whose permissions forbid it, which breaks tests that expect a refusal, so the runs
+dropped that capability first. They used this stack's own recorder, with no `--tmux` and no pinned tmux anywhere, the
+way the release gate runs after this change.
+
+On the stack as delivered, restacked onto main:
+
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format`, `python3 scripts/check-agents-md.py`, `dist generate --check`,
+  `cargo clippy --all-targets -- -D warnings`, and `shellcheck` on the changed shell scripts (nothing at warning level;
+  the informational notes in `scripts/desktop-smoke.sh` and `scripts/test-start-stack-cleanup.sh` are fewer than on
+  main): passed.
+- The tooling's own suites, run directly: the recorder (63 tests), run summaries, inventories, summarize, the nextest
+  and trace modules, the Rust and browser hunts, the hunt planner, the agent-screen capture scrubber and the deflake
+  driver; `python3 releasing/rehearse-release-gate.py --self-test`; the Tensorlake harness's `deno test` and
+  `deno check`: passed. The portable brick-test harness through the recorder: 258 passed (`bc22d194`).
+- The whole Rust workspace except the desktop app (`cargo nextest run --workspace --exclude farhelm-desktop`, from a
+  nextest archive of the same tree, four slots per machine): 5,776 tests run, 5,774 passed (`b1c1e2a2`, `766246cd`,
+  `3a83453e`, `cfe5fcba`). These runs did not keep a passing test's own output, so I could not read their `SKIPPED`
+  lines; that the ten tests that start a real tmux server ran is inferred from their durations: the end-to-end ones took
+  a third of a second or more and one test-state test nearly four seconds, the other test-state ones 15 to 45
+  milliseconds, against about five milliseconds for an early return, so those shortest ones are the least certain. The
+  executor's own run of the test-state crate on tmux 3.4 passed too (`ddce1477`, 87 of 87). One failure was a compile
+  test of the test-support crate's macro, which builds a small crate offline from the development machine's Cargo
+  download cache; boats lack that cache, so it fails on every boat run, and it passed locally (`1cc2fac4`). The other
+  was the real Podman scenario's prerequisite check described under the fixes.
+
+After the landing fixes, on the tree that merged:
+
+- The real Podman environment scenario on a boat, with its inputs staged afresh and a newly built archive: passed in
+  about two minutes, with no skip (`7fd7c3f6`).
+- `cargo clippy --all-targets -- -D warnings`, `cargo fmt --all -- --check`, `dprint check` and
+  `python3 scripts/check-agents-md.py`: passed.
+
+Reused: the executor's desktop smoke (`de10f32f`), browser stack cleanup test (`3c765eec`), the two browser specs that
+use the changed fake agent (grid flood and mouse modes, `87e97e82` and `f04de2ad`) and the deflake tooling evaluation.
+They ran on the delivered stack. Since then main gained only plan-queue changes and the trailing-review record, and the
+landing fixes changed only the Podman test's prerequisite check and two passages of documentation, none of which these
+checks exercise, so their coverage still applies.
+
+Skipped: the browser suite, because `e2e/` is unchanged apart from a benchmark note and the fake agent lost only scripts
+no spec uses; a hosted rehearsal of the release gate, because the workflow diff only swaps the pinned build for a
+package install and drops `--tmux` (checked by reading and by `dist generate --check`); the CentOS provisioning test,
+whose script only lost `--tmux none` and a comment, with no `--tmux` left anywhere it calls; and anything macOS-only (no
+Mac here).
