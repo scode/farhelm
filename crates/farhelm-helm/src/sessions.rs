@@ -3544,16 +3544,60 @@ pub(crate) async fn rename_session(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
     axum::Json(req): axum::Json<RenameReq>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
     // Router ownership keeps the host's rename and its cached title together
     // even when the caller stops waiting for the reply.
-    let key = match resolve_session_ref(&state, &id).await {
-        Ok(key) => key,
-        Err(error) => return http_error(error),
-    };
-    match do_rename_session(&state, &key, &req.title, None).await {
-        Ok((claim, session)) => session_reply(&claim.entry_uuid, session),
-        Err(e) => http_error(e),
+    within_host_reply_bound(async move {
+        let key = match resolve_session_ref(&state, &id).await {
+            Ok(key) => key,
+            Err(error) => return http_error(error),
+        };
+        match do_rename_session(&state, &key, &req.title, None).await {
+            Ok((claim, session)) => session_reply(&claim.entry_uuid, session),
+            Err(e) => http_error(e),
+        }
+    })
+    .await
+}
+
+/// How long the GUI's ordinary DELETE and its rename of a session wait for
+/// the host before answering that it did not answer in time.
+///
+/// The UI channel admits one command at a time, so this is also the longest
+/// any later click can wait behind a slow host; it has to stay short. Twenty
+/// seconds is several times what a responsive host takes for either action,
+/// even over SSH, and still well under the GUI's own watchdog, which treats
+/// a command left unanswered for longer as a broken channel and resets the
+/// window. The host request itself is not cancelled: it carries on, and the
+/// pushed session list shows its outcome when it lands.
+///
+/// Only the HTTP routes are bounded. Agents reach the same work through the
+/// supervisor relay (`do_delete_session`, `do_rename_session`), which keeps
+/// its own waiting behavior unchanged.
+pub(crate) const HOST_REPLY_BOUND: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Run `work` to completion, but answer once [`HOST_REPLY_BOUND`] passes.
+///
+/// The work runs on its own task, so answering early abandons only the wait,
+/// never the work: a host that answers late still has its result recorded,
+/// and the feed bump that recording makes reaches the GUI. A panic in the work
+/// is re-raised here, as it would have been inline.
+pub(crate) async fn within_host_reply_bound(
+    work: impl std::future::Future<Output = axum::response::Response> + Send + 'static,
+) -> axum::response::Response {
+    let task = tokio::spawn(work);
+    match tokio::time::timeout(HOST_REPLY_BOUND, task).await {
+        Ok(Ok(response)) => response,
+        Ok(Err(join)) if join.is_panic() => std::panic::resume_unwind(join.into_panic()),
+        Ok(Err(join)) => http_error(anyhow::anyhow!("the request's task was cancelled: {join}")),
+        Err(_elapsed) => http_error(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::Timeout,
+            format!(
+                "the host did not answer within {} seconds; the request is still being carried \
+                 out, and the session list will show its result",
+                HOST_REPLY_BOUND.as_secs()
+            ),
+        ))),
     }
 }
 
@@ -3621,7 +3665,7 @@ pub(crate) async fn delete_session(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
     Query(query): Query<DeleteQuery>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
     // The router retains this action through the local cleanup after deletion:
     // a dropped reply must not leave the session's seen state or cached row.
     let key = match resolve_session_ref(&state, &id).await {
@@ -3658,10 +3702,20 @@ pub(crate) async fn delete_session(
         Ok(None) => {}
         Err(error) => return http_error(error),
     }
-    match do_delete_session(&state, &key, guard, None).await {
-        Ok(outcome) => axum::Json(outcome).into_response(),
-        Err(e) => http_error(e),
-    }
+    // Only the ordinary session Delete is bounded like rename (see
+    // `HOST_REPLY_BOUND`), so a slow host cannot hold every later GUI command
+    // behind it. The environment and whole-sandbox Deletes above keep their
+    // own deadlines: their refusals carry meaning (a lost answer is "nothing
+    // decided", which offers the warned whole-environment Delete), and an
+    // early timeout would replace that answer. They become accepted work when
+    // the area that ports them converts them.
+    within_host_reply_bound(async move {
+        match do_delete_session(&state, &key, guard, None).await {
+            Ok(outcome) => axum::Json(outcome).into_response(),
+            Err(e) => http_error(e),
+        }
+    })
+    .await
 }
 
 /// Delete through the same approval denial, teardown and local cleanup for

@@ -30,119 +30,14 @@
 //! (`crate::ensure`) a floor rather than a probe.
 
 use crate::aggregate::host_display_name;
-use crate::manager::{ConnectionStage, HostState, RefreshHealth, UnreachableCause};
+use crate::manager::{HostState, RefreshHealth, UnreachableCause};
 use crate::store::{HostId, HostKind, HostRow, HostStoreError};
 use crate::{AppState, http_error};
 use anyhow::Context as _;
 use axum::extract::{Path as AxPath, State};
 use axum::response::IntoResponse;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
-
-/// One registered host as `GET /api/hosts` reports it.
-///
-/// Flat rather than nested under a `registry`/`connection` split: every
-/// consumer of this shape renders one row per host, and a split would only
-/// make the common case — "name it and chip its state" — reach through two
-/// objects.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub(crate) struct HostView {
-    pub(crate) id: HostId,
-    /// Agent discovery uses this captured entry identity; ordinary host JSON keeps
-    /// its existing integer IDs and display labels.
-    #[serde(skip)]
-    pub(crate) entry_uuid: String,
-    /// `"local"` for the one reserved row, `"ssh"` for a registered
-    /// destination, `"tensorlake"` for a sandbox, or `"podman"` for a
-    /// session-owned container Farhelm created. The
-    /// distinction is not cosmetic: it is what tells a client which rows
-    /// offer edit and remove at all, and what removing one does.
-    pub(crate) kind: &'static str,
-    /// Session launch ownership changes the resource's lifecycle, not its
-    /// inclusion in Hosts or its ordinary diagnostics and update eligibility.
-    #[serde(default)]
-    pub(crate) is_session_owned: bool,
-    /// The sandbox behind a `"tensorlake"` host, for its details. Left out of
-    /// the JSON for every other host, so their shape is unchanged.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) tensorlake: Option<TensorlakeHostView>,
-    /// Public ownership/placement facts, without execution coordinates.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) environment: Option<farhelm_proto::EnvironmentHostView>,
-    /// `None` for the local row, always `Some` for an ssh row.
-    pub(crate) destination: Option<String>,
-    /// The stored optional alias, kept distinct from `name` so clients can
-    /// edit it without trying to reverse the derived display label.
-    pub(crate) alias: Option<String>,
-    /// [`host_display_name`]'s rendering — the same string session rows
-    /// carry in `host_name`, so a row and its host chip never disagree.
-    pub(crate) name: String,
-    /// The identity the REGISTRY holds for this host: the one recorded at
-    /// first contact, or accepted by an adoption. `None` if the host has
-    /// never been reached, or reports none at all.
-    ///
-    /// Deliberately not "what the host is reporting". During an
-    /// identity-mismatch those are two different values, and the difference
-    /// is the whole decision the user is being asked to make — the reported
-    /// one rides `state` (as `identity-mismatch`'s `reported`), where it is
-    /// paired with the `recorded` value it contradicts. A renderer that
-    /// took this field for "what is out there" would show the dead install's
-    /// identity beside a prompt about the new one.
-    pub(crate) identity: Option<String>,
-    pub(crate) remote_farhelm: Option<String>,
-    pub(crate) remote_state_dir: Option<String>,
-    /// Whether the host starts YOLO sessions without asking; `false` (ask first) until the
-    /// user changes it. A row missing from the registry read reports that confirmation is
-    /// required.
-    pub(crate) yolo_without_asking: bool,
-    /// Whether the helm carries out acting `farhelm` commands from this host's sessions
-    /// without asking the user; `false` (ask first) until the user changes it. A row missing
-    /// from the registry read reports that asking is required, like the YOLO setting.
-    pub(crate) commands_without_asking: bool,
-    /// Default-off authority for session actions confined to the requesting host.
-    pub(crate) own_sessions_without_asking: bool,
-    /// Browser permissions are independent of command authority and each other.
-    pub(crate) links_without_asking: bool,
-    pub(crate) local_links_without_asking: bool,
-    /// Helm-owned identity choices, independent of the actor's connection.
-    pub(crate) icon: farhelm_proto::host_appearance::HostIcon,
-    /// Identity tint only; connection and permission colors stay separate.
-    pub(crate) color: farhelm_proto::host_appearance::HostColor,
-    pub(crate) state: HostStateView,
-    /// Which CONNECTION this host is on — an opaque, monotonic token that
-    /// changes whenever the host's client does, including when it goes away
-    /// (see `manager::ActorStatus::incarnation`).
-    ///
-    /// Served so a client can tell one connection to a host from the next
-    /// without interpreting the state payload — the UI's provisioning panel
-    /// binds a displayed plan to it, so a plan prepared against one
-    /// connection is not left actionable on another. Opaque as a USAGE
-    /// convention: compare it, never interpret it — the number is a counter
-    /// over this helm's own connections and means nothing across a restart,
-    /// which is exactly why a client must not persist one.
-    ///
-    /// `0` is "never connected".
-    pub(crate) incarnation: u64,
-    /// This helm's last observed Trash change, independent of session status.
-    pub(crate) trash_epoch: u64,
-}
-
-/// A Tensorlake host's sandbox as `GET /api/hosts` reports it: its name in
-/// Tensorlake, the recipe it was made from, and the size it was created
-/// with (`None` when the stored size cannot be read).
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub(crate) struct TensorlakeHostView {
-    pub(crate) sandbox: String,
-    pub(crate) recipe: String,
-    pub(crate) size: Option<farhelm_proto::tensorlake::recipes::RecipeSize>,
-    /// The connected phase's forwards, absent without a lease. Their
-    /// failure never claims the supervisor itself is disconnected.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) tunnels: Option<farhelm_proto::tensorlake::TunnelView>,
-    /// Delivery is independent of connectivity and can fail during setup too.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) credential_warning: Option<String>,
-}
 
 impl From<&crate::store::TensorlakeBinding> for TensorlakeHostView {
     fn from(binding: &crate::store::TensorlakeBinding) -> Self {
@@ -156,181 +51,9 @@ impl From<&crate::store::TensorlakeBinding> for TensorlakeHostView {
     }
 }
 
-/// How one host's [`HostState`] crosses the REST boundary.
-///
-/// Internally tagged by `phase`, whose values are exactly
-/// [`HostState::phase`]'s stable labels — the same strings the diagnostic
-/// trail logs. That equality is deliberate and load-bearing: a UI chip, a
-/// log line, and this JSON must key off ONE vocabulary, or a state that
-/// gains a payload field starts reading as a different phase somewhere.
-///
-/// Every variant carries its own evidence rather than a shared error
-/// string, because SPEC.md requires errors to be actionable: "unreachable"
-/// and "the host runs an older farhelm" call for opposite responses, and a
-/// renderer cannot invent the difference from prose.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[serde(tag = "phase")]
-pub(crate) enum HostStateView {
-    /// Inside the active-retry window, including the wait between attempts.
-    #[serde(rename = "connecting")]
-    Connecting {
-        attempt: u32,
-        /// Closed vocabulary for the currently observed boundary; no live SSH output.
-        stage: ConnectionStage,
-        last_error: Option<String>,
-    },
-    /// The active window is spent; background re-probing continues
-    /// forever, so no user action is required for the host to come back.
-    #[serde(rename = "unreachable-reprobing")]
-    Unreachable {
-        /// `"local-supervisor-not-running"` is the one cause the user can
-        /// fix with a command on the machine they are already at, and the
-        /// UI's manual-start hint keys off it. Everything else is
-        /// `"transport-failure"` with the transport's own text beside it.
-        cause: &'static str,
-        last_error: String,
-    },
-    #[serde(rename = "connected")]
-    Connected {
-        identity: Option<String>,
-        build_version: String,
-        /// Whether the peer's parseable build is older than this helm's
-        /// build. `false` also represents an unknown age when either side
-        /// does not publish a valid semantic version.
-        old_version: bool,
-        /// Whether the peer's parseable build is NEWER than this helm's: the
-        /// host list labels such a host "too new" (SPEC.md, host version
-        /// advisories) and Update refuses it, since an Update would install
-        /// this helm's older build over it. `false` also represents an
-        /// unknown age, as for `old_version`.
-        newer_version: bool,
-        refresh: RefreshView,
-    },
-    /// Refused at the hello: both versions are named so the user can see
-    /// WHICH side is behind, and `remediation` is the sentence to act on.
-    #[serde(rename = "version-skew")]
-    VersionSkew {
-        peer_protocol: u32,
-        peer_build: String,
-        our_protocol: u32,
-        our_build: String,
-        remediation: String,
-    },
-    /// Frozen awaiting a user decision: adopt the reported identity
-    /// (`POST /api/hosts/{id}/adopt`) or fix the destination. Nothing is
-    /// connected and nothing is written while this holds.
-    #[serde(rename = "identity-mismatch")]
-    IdentityMismatch { recorded: String, reported: String },
-    /// Frozen because the destination answered without an identity at all
-    /// while this entry has one on record — so there is nothing to compare
-    /// and, deliberately, nothing to adopt.
-    ///
-    /// A renderer must NOT offer the adopt verb here (it would be refused,
-    /// and the offer itself would be a lie about what is on the table): the
-    /// remedies are fixing the host so it reports its identity, retargeting
-    /// the entry, or removing it. Re-probed automatically, so a host that
-    /// starts identifying itself again recovers unaided.
-    #[serde(rename = "identity-unverified")]
-    IdentityUnverified { recorded: String },
-    /// This ENTRY reaches a machine another entry already holds. Nothing is
-    /// connected through it; the user removes the other entry or changes
-    /// this one's destination, then presses Retry.
-    #[serde(rename = "duplicate")]
-    Duplicate { twin: HostId, identity: String },
-    /// Farhelm is handling an explicit lifecycle request under a hold. The
-    /// direction records intent, not a confirmed suspension. The unix-ms
-    /// request time is display metadata; reconnection after Resume uses the
-    /// ordinary Connecting phase.
-    #[serde(rename = "tensorlake-changing")]
-    TensorlakeChanging {
-        starting: bool,
-        direction: farhelm_proto::tensorlake::LifecycleDirection,
-        requested_at: i64,
-    },
-    /// A Tensorlake host whose sandbox Tensorlake reports suspended (or
-    /// failed to resume); nothing is dialed until it runs again. Times are
-    /// unix ms: `observed_at` is when this helm first saw the suspension,
-    /// `suspended_by_farhelm_at` when Farhelm's own Suspend finished (carried
-    /// by the confirmed state and persisted on the host row for recovery;
-    /// `None` when Farhelm did not suspend it, which is how the UI tells
-    /// "suspended from Farhelm"
-    /// from an idle timeout). `resume_failed` is Tensorlake's diagnosis of a
-    /// failed resume.
-    #[serde(rename = "suspended")]
-    Suspended {
-        observed_at: i64,
-        suspended_by_farhelm_at: Option<i64>,
-        resume_failed: Option<String>,
-    },
-    /// Stopped retains files without pretending paused processes survive.
-    #[serde(rename = "stopped")]
-    Stopped {
-        start_failed: Option<String>,
-        waiting_for_place: bool,
-    },
-    /// No actor is running for this row — it retired with its registry row,
-    /// or its task panicked. Reported rather than hidden so an operation
-    /// refused against it has something honest to name.
-    #[serde(rename = "retired")]
-    Retired { reason: String },
-    /// The host's sandbox or container is being destroyed; `failure` is the
-    /// provider's reason when that failed and waits for Retry.
-    #[serde(rename = "deleting")]
-    Deleting { failure: Option<String> },
-}
-
-impl HostStateView {
-    /// This state's stable phase label — the same strings
-    /// [`HostState::phase`] produces and the same strings the `#[serde(
-    /// rename)]`s above put on the wire.
-    ///
-    /// A third spelling of one vocabulary, which this type's own docs warn
-    /// against, and it earns the exception by being the only way a
-    /// non-serializing consumer can reach the word. The agent relay needs
-    /// the label as a Rust string (`crate::agent_requests`), and the
-    /// alternatives were worse: re-deriving it from the manager's snapshot
-    /// would bypass the view every other surface renders from, and
-    /// round-tripping through `serde_json` to read a tag back out is a
-    /// vocabulary coupling expressed as an allocation. What keeps the copy
-    /// honest is `phase_matches_the_serialized_tag`, which compares this
-    /// function's answer to the encoder's for every variant.
-    pub(crate) fn phase(&self) -> &'static str {
-        match self {
-            HostStateView::Connecting { .. } => "connecting",
-            HostStateView::Unreachable { .. } => "unreachable-reprobing",
-            HostStateView::Connected { .. } => "connected",
-            HostStateView::VersionSkew { .. } => "version-skew",
-            HostStateView::IdentityMismatch { .. } => "identity-mismatch",
-            HostStateView::IdentityUnverified { .. } => "identity-unverified",
-            HostStateView::Duplicate { .. } => "duplicate",
-            HostStateView::TensorlakeChanging { .. } => "tensorlake-changing",
-            HostStateView::Suspended { .. } => "suspended",
-            HostStateView::Stopped { .. } => "stopped",
-            HostStateView::Retired { .. } => "retired",
-            HostStateView::Deleting { .. } => "deleting",
-        }
-    }
-}
-
-/// How a connected host's most recent cache refresh went.
-///
-/// Beside the connection rather than inside it, mirroring
-/// [`RefreshHealth`]: a failed refresh does not disconnect a host, and
-/// collapsing the two would make a host that is answering perfectly well
-/// read as unreachable.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[serde(tag = "status")]
-pub(crate) enum RefreshView {
-    /// Connected, first refresh still in flight.
-    #[serde(rename = "pending")]
-    Pending,
-    #[serde(rename = "ok")]
-    Ok { sessions: usize },
-    /// The last refresh failed; the PREVIOUS cache is still in place, so
-    /// this host's rows are still listed.
-    #[serde(rename = "failed")]
-    Failed { error: String },
-}
+pub(crate) use farhelm_proto::ui_channel::{
+    HostStateView, HostView, RefreshView, TensorlakeHostView,
+};
 
 impl From<&RefreshHealth> for RefreshView {
     fn from(health: &RefreshHealth) -> RefreshView {
@@ -366,7 +89,8 @@ impl From<&HostState> for HostStateView {
                     // Not shared through proto: the UI never branches on this
                     // label, only on the one above (see `farhelm_proto::http`).
                     UnreachableCause::TransportFailure => "transport-failure",
-                },
+                }
+                .to_string(),
                 last_error: last_error.clone(),
             },
             HostState::Connected {
@@ -540,7 +264,8 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
                     HostKind::Ssh => "ssh",
                     HostKind::Tensorlake => "tensorlake",
                     HostKind::Podman => "podman",
-                },
+                }
+                .to_string(),
                 is_session_owned: snapshot.is_session_owned,
                 environment: registry.and_then(|row| row.kind.environment_view(row)).map(
                     |mut view| {
@@ -1822,7 +1547,7 @@ mod tests {
                 last_error: None,
             },
             HostStateView::Unreachable {
-                cause: "transport-failure",
+                cause: "transport-failure".to_string(),
                 last_error: "no route".to_string(),
             },
             HostStateView::Connected {

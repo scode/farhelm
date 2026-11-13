@@ -5412,7 +5412,7 @@ mod tests {
         HostView {
             id,
             entry_uuid: format!("{id:08x}-0000-4000-8000-000000000000"),
-            kind,
+            kind: kind.to_string(),
             tensorlake: None,
             environment: None,
             name: name.to_string(),
@@ -5780,7 +5780,7 @@ mod tests {
             "builder",
             "ssh",
             HostStateView::Unreachable {
-                cause: "transport-failure",
+                cause: "transport-failure".to_string(),
                 last_error: "no route".to_string(),
             },
         );
@@ -6817,7 +6817,7 @@ mod tests {
                 .unwrap();
             // A window to ask in, so the untrusted case would otherwise put
             // up a card instead of failing with the no-window refusal.
-            let _gui = h.manager.events().admit(1).unwrap();
+            let _gui = h.manager.ui_seat().hold();
             assert!(
                 h.state.approvals.list().is_empty(),
                 "premise: no card before the request"
@@ -6869,7 +6869,7 @@ mod tests {
                 .set_commands_without_asking(local, false)
                 .await
                 .unwrap();
-            let _gui = h.manager.events().admit(1).unwrap();
+            let _gui = h.manager.ui_seat().hold();
             let handler = HelmAgentRequests::with_prompts_enabled(&h.state);
             let origin = origin_of(&h, local);
             let target_id = full_id(&h, local, "target");
@@ -6961,7 +6961,7 @@ mod tests {
                 .await
                 .unwrap();
             h.store.set_yolo_without_asking(local, false).await.unwrap();
-            assert_eq!(h.manager.events().subscriber_count(), 0, "premise: no GUI");
+            assert!(!h.manager.ui_seat().is_held(), "premise: no GUI");
             let outcome = HelmAgentRequests::with_prompts_enabled(&h.state)
                 .handle(
                     origin_of(&h, local),
@@ -7122,7 +7122,7 @@ mod tests {
             .set_commands_without_asking(local, false)
             .await
             .unwrap();
-        let _gui = h.manager.events().admit(1).unwrap();
+        let _gui = h.manager.ui_seat().hold();
         let handler = HelmAgentRequests::with_prompts_enabled(&h.state);
         let origin = origin_of(&h, local);
         let target_id = full_id(&h, remote, "target");
@@ -7197,7 +7197,7 @@ mod tests {
             .set_commands_without_asking(local, false)
             .await
             .unwrap();
-        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = h.state.manager.ui_seat().hold();
         let changed = h
             .store
             .connection_for_test()
@@ -7762,7 +7762,7 @@ mod tests {
             .set_pinned(&crate::store::SessionKey::new(local, "target"), true)
             .await
             .unwrap();
-        let _gui = h.state.manager.events().admit(1).unwrap();
+        let _gui = h.state.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         let target_id = full_id(&h, local, "target");
@@ -7945,7 +7945,7 @@ mod tests {
             .set_commands_without_asking(local, false)
             .await
             .unwrap();
-        let _gui = h.manager.events().admit(1).unwrap();
+        let _gui = h.manager.ui_seat().hold();
         let before = h.manager.status(remote).unwrap();
         let previous_connection = before.client.unwrap().connection_id();
         let handler = HelmAgentRequests::for_state(&h.state);
@@ -9505,7 +9505,7 @@ mod tests {
             asking_host.commands_without_asking,
             "premise: an ordinary card would be skipped"
         );
-        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = h.state.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         let target_id = full_id(&h, local, "source");
@@ -9698,7 +9698,7 @@ mod tests {
             .set_commands_without_asking(local, false)
             .await
             .unwrap();
-        let _gui = h.manager.events().admit(1).unwrap();
+        let _gui = h.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         let target_id = full_id(&h, local, "source");
@@ -10237,7 +10237,7 @@ mod tests {
         h.await_refreshed(local).await;
         h.await_refreshed(remote).await;
         let target = full_id(&h, remote, "target");
-        let _gui = h.manager.events().admit(1).unwrap();
+        let _gui = h.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         let selected = target.clone();
@@ -10973,7 +10973,7 @@ mod tests {
                         ..Default::default()
                     }),
                 };
-                let _gui = h.manager.events().admit(1).unwrap();
+                let _gui = h.manager.ui_seat().hold();
                 let handler = HelmAgentRequests::for_state(&h.state);
                 let origin = origin_of(&h, origin_host);
                 let task =
@@ -11334,7 +11334,7 @@ mod tests {
                     spawn: None,
                 }
             };
-            let _gui = h.manager.events().admit(1).unwrap();
+            let _gui = h.manager.ui_seat().hold();
             let handler = HelmAgentRequests::for_state(&h.state);
             let origin = origin_of(&h, local);
             let task = tokio::spawn(async move { handler.handle(origin, "asker", request).await });
@@ -11397,7 +11397,7 @@ mod tests {
             .set_commands_without_asking(local, false)
             .await
             .unwrap();
-        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = h.state.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         let create = || command_create("user@builder", "/srv/w", "echo hi", Some("t"), None);
@@ -11470,7 +11470,7 @@ mod tests {
             .set_commands_without_asking(local, false)
             .await
             .unwrap();
-        let _gui = h.manager.events().admit(1).unwrap();
+        let _gui = h.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         const MESSAGE: &str = "--literal\n{farhelm_args}\n\tlast line";
@@ -11641,7 +11641,7 @@ mod tests {
             asking_host.commands_without_asking,
             "premise: normal cards are skipped"
         );
-        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = h.state.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let request = AgentVerb::Create {
             host: Some("user@builder".into()),
@@ -11824,7 +11824,7 @@ mod tests {
             .await
             .unwrap();
         h.store.set_checkout_root(None, "/checkouts").await.unwrap();
-        let _gui = h.manager.events().admit(1).expect("a GUI seat");
+        let _gui = h.manager.ui_seat().hold();
         let fields = TemplateFields {
             name: Some("review".into()),
             destination: Some(TemplateDestination::Github("owner/project".into())),
@@ -12042,7 +12042,7 @@ mod tests {
                 .unwrap();
         }
         h.store.set_checkout_root(None, "/checkouts").await.unwrap();
-        let _gui = h.manager.events().admit(1).expect("a GUI seat");
+        let _gui = h.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let create = || {
             let mut request = command_create(
@@ -12179,7 +12179,7 @@ mod tests {
             .set_yolo_without_asking(remote, false)
             .await
             .unwrap();
-        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = h.state.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
 
@@ -12245,7 +12245,7 @@ mod tests {
             .set_commands_without_asking(local, false)
             .await
             .unwrap();
-        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = h.state.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         match handler
@@ -12352,7 +12352,7 @@ mod tests {
                 );
                 assert!(seen.lock().unwrap().is_empty());
                 assert!(browsed.lock().unwrap().is_empty());
-                let _gui = h.manager.events().admit(1).unwrap();
+                let _gui = h.manager.ui_seat().hold();
                 let handler = HelmAgentRequests::for_state(&h.state);
                 let origin = origin_of(&h, remote);
                 let task = tokio::spawn(async move {
@@ -12651,7 +12651,7 @@ mod tests {
             asking_host.commands_without_asking,
             "premise: an ordinary card would be skipped"
         );
-        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = h.state.manager.ui_seat().hold();
         let launch = copied_wrapped_claude_launch();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, remote);
@@ -12731,7 +12731,7 @@ mod tests {
             .set_commands_without_asking(local, false)
             .await
             .unwrap();
-        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = h.state.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         let asking = Arc::clone(&handler);
@@ -12779,7 +12779,7 @@ mod tests {
             .set_commands_without_asking(remote, false)
             .await
             .unwrap();
-        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = h.state.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, remote);
         let spawn = || AgentVerb::Create {
@@ -13755,7 +13755,7 @@ mod tests {
             .set_commands_without_asking(local, false)
             .await
             .unwrap();
-        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = h.state.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         let task = tokio::spawn(async move {
@@ -13855,7 +13855,7 @@ mod tests {
             .set_commands_without_asking(local, false)
             .await
             .unwrap();
-        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = h.state.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         let asking = Arc::clone(&handler);
@@ -13944,7 +13944,7 @@ mod tests {
             .set_commands_without_asking(local, false)
             .await
             .unwrap();
-        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = h.state.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         let ask = |verb: AgentVerb| {
@@ -14497,7 +14497,7 @@ mod tests {
                 vec![session("asker", 50), session("sibling", 51)],
             )
             .await;
-            let _gui = h.manager.events().admit(1).unwrap();
+            let _gui = h.manager.ui_seat().hold();
             let handler = HelmAgentRequests::for_state(&h.state);
             let origin = origin_of(&h, owned);
             let own_name = listed_name(&h, owned).await;
@@ -14727,7 +14727,7 @@ mod tests {
                 vec![session("asker", 50), session("sibling", 51)],
             )
             .await;
-            let _gui = h.manager.events().admit(1).unwrap();
+            let _gui = h.manager.ui_seat().hold();
             let handler = HelmAgentRequests::with_prompts_enabled(&h.state);
             let origin = origin_of(&h, owned);
             let prompt = |target: String| AgentVerb::Prompt {
@@ -14808,7 +14808,7 @@ mod tests {
                 host_row(&h, owned).await.unwrap().yolo_without_asking,
                 "{provider:?}: premise: environment hosts start allowing YOLO launches"
             );
-            let _gui = h.manager.events().admit(1).unwrap();
+            let _gui = h.manager.ui_seat().hold();
             let handler = HelmAgentRequests::for_state(&h.state);
             let origin = origin_of(&h, owned);
             let mut spawn = command_create("unused", "/spawned", "true", None, None);
@@ -14864,7 +14864,7 @@ mod tests {
                 vec![session("owned-session", 50)],
             )
             .await;
-            let _gui = h.manager.events().admit(1).unwrap();
+            let _gui = h.manager.ui_seat().hold();
             let handler = HelmAgentRequests::for_state(&h.state);
             let ordinary = origin_of(&h, local);
             let own_name = listed_name(&h, owned).await;
@@ -15044,7 +15044,7 @@ mod tests {
         )
         .await;
         let before = owned_rows(&h).await;
-        let _gui = h.manager.events().admit(1).unwrap();
+        let _gui = h.manager.ui_seat().hold();
         let local_name = listed_name(&h, local).await;
         let mut from_template = command_create("unused", "~", "true", None, None);
         if let AgentVerb::Create {
@@ -15136,7 +15136,7 @@ mod tests {
         let (h, local, _, containers) = container_fleet().await;
         put_recipe(&h, "dev").await;
         let before = owned_rows(&h).await;
-        let _gui = h.manager.events().admit(1).unwrap();
+        let _gui = h.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         let local_name = listed_name(&h, local).await;
@@ -15208,7 +15208,7 @@ mod tests {
             vec![session("contained", 50)],
         )
         .await;
-        let _gui = h.manager.events().admit(1).unwrap();
+        let _gui = h.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         let remote_name = listed_name(&h, remote).await;
@@ -15339,7 +15339,7 @@ mod tests {
                 .is_ok(),
             "premise: a recipe whose base only Tensorlake can run"
         );
-        let _gui = h.manager.events().admit(1).unwrap();
+        let _gui = h.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let local_name = listed_name(&h, local).await;
         let (_, message) = refused(
@@ -15463,7 +15463,7 @@ mod tests {
             vec![source.clone()],
         )
         .await;
-        let _gui = h.manager.events().admit(1).unwrap();
+        let _gui = h.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         let source_ref = full_id(&h, owned, "contained");
@@ -15542,7 +15542,7 @@ mod tests {
         )
         .await;
         let before = owned_rows(&h).await;
-        let _gui = h.manager.events().admit(1).unwrap();
+        let _gui = h.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         let source = full_id(&h, owned, "contained");
@@ -15669,7 +15669,7 @@ mod tests {
         let (h, local, _) = host_fleet().await;
         assert!(host_row(&h, local).await.unwrap().commands_without_asking);
         let before = h.store.list_hosts().await.unwrap().len();
-        let _gui = h.state.manager.events().admit(1).unwrap();
+        let _gui = h.state.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         let task = tokio::spawn(async move {
@@ -15755,7 +15755,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn host_add_origin_loss_before_receipt_refuses_both_sides() {
         let (h, local, _) = host_fleet().await;
-        let _gui = h.state.manager.events().admit(1).unwrap();
+        let _gui = h.state.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         let gate = h.state.approvals.install_host_write_gate(local);
@@ -15829,7 +15829,7 @@ mod tests {
         );
         assert_eq!(before.alias, None, "premise: no alias yet");
         assert_eq!(before.icon, HostIcon::Cloud, "premise: the default icon");
-        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = h.state.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         let task = tokio::spawn(async move {
@@ -15910,7 +15910,7 @@ mod tests {
             .set_commands_without_asking(local, false)
             .await
             .unwrap();
-        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = h.state.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         for verb in [
@@ -15978,9 +15978,8 @@ mod tests {
             host_row(&h, local).await.unwrap().commands_without_asking,
             "premise: the asking host runs commands without asking"
         );
-        assert_eq!(
-            h.state.manager.events().subscriber_count(),
-            0,
+        assert!(
+            !h.state.manager.ui_seat().is_held(),
             "premise: no GUI is connected"
         );
         let handler = HelmAgentRequests::for_state(&h.state);
@@ -16054,7 +16053,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn host_remove_refuses_this_machine_and_the_asking_host_without_a_card() {
         let (h, local, remote) = host_fleet().await;
-        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = h.state.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let bounded = |outcome| async move {
             tokio::time::timeout(std::time::Duration::from_secs(20), outcome)
@@ -16113,7 +16112,7 @@ mod tests {
         )
         .await;
         h.state.manager.sync_registry().await.unwrap();
-        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = h.state.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let (kind, message) = refused(
             tokio::time::timeout(
@@ -16153,7 +16152,7 @@ mod tests {
             "premise: the host has cached sessions to forget"
         );
         assert!(h.manager.status(remote).is_some(), "premise: an actor runs");
-        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = h.state.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         let task = tokio::spawn(async move {
@@ -16233,7 +16232,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn a_host_remove_racing_a_gui_retarget_is_refused() {
         let (h, local, remote) = host_fleet().await;
-        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = h.state.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         let task = tokio::spawn(async move {
@@ -16289,7 +16288,7 @@ mod tests {
         let before = host_row(&h, remote).await.expect("premise: the ssh host");
         assert_eq!(before.icon, HostIcon::Cloud, "premise: the default icon");
         assert_ne!(before.color, HostColor::Teal, "premise: not yet teal");
-        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = h.state.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         let task = tokio::spawn(async move {
@@ -16348,7 +16347,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn a_host_edit_whose_shown_field_changed_while_waiting_is_refused() {
         let (h, local, remote) = host_fleet().await;
-        let _gui = h.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = h.state.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         let task = tokio::spawn(async move {
@@ -16726,7 +16725,7 @@ mod tests {
                                 stop_if_running: false,
                             },
                         };
-                        let _gui = h.manager.events().admit(1).unwrap();
+                        let _gui = h.manager.ui_seat().hold();
                         let handler = HelmAgentRequests::for_state(&h.state);
                         let origin = origin_of(&h, asking_host);
                         let task =
@@ -16993,7 +16992,7 @@ mod tests {
         assert!(!origin_row.commands_without_asking);
         assert!(before_remote.alias.is_none());
         assert_eq!(before_remote.icon, HostIcon::Cloud);
-        let _gui = h.manager.events().admit(1).unwrap();
+        let _gui = h.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         for (label, request) in [
@@ -17148,7 +17147,7 @@ mod tests {
                 received.try_recv().is_err(),
                 "premise: no target contact yet"
             );
-            let _gui = h.manager.events().admit(1).unwrap();
+            let _gui = h.manager.ui_seat().hold();
             let handler = if enabled {
                 HelmAgentRequests::with_prompts_enabled(&h.state)
             } else {
@@ -17244,7 +17243,7 @@ mod tests {
                 && !row.commands_without_asking
                 && !row.yolo_without_asking
         );
-        let _gui = h.manager.events().admit(1).unwrap();
+        let _gui = h.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, host);
         let source_id = full_id(&h, host, "source");
@@ -17367,7 +17366,7 @@ mod tests {
                 && !row.commands_without_asking
                 && !row.yolo_without_asking
         );
-        let _gui = h.manager.events().admit(1).unwrap();
+        let _gui = h.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, host);
         let source_id = full_id(&h, host, "source");

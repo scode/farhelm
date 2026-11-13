@@ -117,7 +117,7 @@ fn host_list_body() -> serde_json::Value {
         environment: None,
         id,
         entry_uuid: "11111111-1111-4111-8111-111111111111".to_string(),
-        kind,
+        kind: kind.to_string(),
         tensorlake: None,
         destination: (kind != "local").then(|| format!("user@host{id}")),
         alias: (kind != "local").then(|| format!("alias{id}")),
@@ -162,7 +162,7 @@ fn host_list_body() -> serde_json::Value {
             3,
             "ssh",
             HostStateView::Unreachable {
-                cause: "transport-failure",
+                cause: "transport-failure".to_string(),
                 last_error: "timed out".to_string(),
             },
         ),

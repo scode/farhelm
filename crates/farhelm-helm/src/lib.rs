@@ -163,6 +163,10 @@ mod tensorlake;
 /// The changed-only fleet invalidation feed shared by the manager and REST edge.
 mod feed;
 
+/// `/api/ui` — the GUI's one ordered channel: commands, replies and pushed
+/// state, and the seat that makes the helm serve one GUI at a time.
+mod ui_channel;
+
 /// `/api/hosts` — the registry's REST surface, and the JSON shape a UI
 /// renders a host chip from.
 mod hosts;
@@ -925,6 +929,13 @@ fn api_router(state: Arc<AppState>) -> Router {
         // with nothing else in common: it names no session, carries no data,
         // and holds no attachment.
         .route("/api/events", get(events::events_ws))
+        // The GUI's channel (see `ui_channel`). A WebSocket upgrade, so a GET
+        // that `own_state_change` runs inline; the commands it carries go
+        // back through this same router, owned or cancellable per route.
+        .route(
+            farhelm_proto::ui_channel::UI_CHANNEL_PATH,
+            get(ui_channel::ui_ws),
+        )
         .route(
             "/api/ntfy-alerts",
             axum::routing::get(ntfy::get)

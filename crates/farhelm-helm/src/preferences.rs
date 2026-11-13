@@ -266,7 +266,16 @@ pub(crate) async fn put_preferences(
         })
         .await
     } else {
-        state.store.update_preferences(patch).await
+        // Every other field still has to reach a connected GUI, which learns
+        // of changes only through the feed. The store cannot say whether the
+        // patch changed anything, so this bumps on every successful write: a
+        // user's own save is rare, never periodic, and the UI channel's diff
+        // pushes nothing when the preferences read back unchanged.
+        let result = state.store.update_preferences(patch).await;
+        if result.is_ok() {
+            state.manager.events().bump();
+        }
+        result
     };
     match result {
         Ok(()) => axum::http::StatusCode::NO_CONTENT.into_response(),

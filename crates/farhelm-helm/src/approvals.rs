@@ -348,17 +348,16 @@ impl Drop for PendingGuard<'_> {
     }
 }
 
-/// Whether the GUI that would show a card is connected: at least one
-/// subscriber to the fleet invalidation feed.
+/// Whether a GUI that would show the card is connected: a UI channel holds
+/// the helm's seat (SPEC.md, "One GUI at a time").
 ///
-/// That feed is what every GUI holds open for its whole life, and what the
-/// card relies on to appear without a reload. The desktop app's window
-/// closing ends its process (dioxus-desktop's default, which Farhelm keeps),
-/// so an app with no window holds no subscription. A browser whose feed
-/// socket failed and fell back to polling does not count; that GUI is told
-/// nothing and its request is refused as having no window to ask in.
-fn gui_connected(state: &AppState) -> bool {
-    state.manager.events().subscriber_count() > 0
+/// The seat is what a GUI holds for its whole life, and the channel is what
+/// pushes the card to it. A displaced or disconnected window gives the seat
+/// up, so its requests are refused as having no window to ask in rather than
+/// left waiting on a card nobody can see. The helm's own subscriptions to the
+/// fleet feed (approval waits, automatic updates) never count.
+pub(crate) fn gui_connected(state: &AppState) -> bool {
+    state.manager.ui_seat().is_held()
 }
 
 /// Ask the user to approve `action`, requested by `asking_session` over the
@@ -903,7 +902,7 @@ fn gone(id: &str) -> axum::response::Response {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::rest_harness;
     use std::sync::Arc;
@@ -956,7 +955,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn foreign_host_add_payload_preserves_other_cards() {
         let harness = rest_harness::idle_helm().await;
-        let _gui = harness.state.manager.events().admit(1).unwrap();
+        let _gui = harness.state.manager.ui_seat().hold();
         let origin = local_origin(&harness).await;
         let (task, id) = waiting(&harness, origin, "asker").await;
         let (status, _) = request(
@@ -983,7 +982,7 @@ mod tests {
     async fn host_add_failed_send_and_dropped_receipt_are_gone() {
         for failed_send in [false, true] {
             let harness = rest_harness::idle_helm().await;
-            let _gui = harness.state.manager.events().admit(1).unwrap();
+            let _gui = harness.state.manager.ui_seat().hold();
             let origin = local_origin(&harness).await;
             let (task, id) = waiting_for_action(
                 &harness,
@@ -1044,7 +1043,7 @@ mod tests {
             .await;
         let local = rest_harness::local_id(&harness.store).await;
         harness.await_refreshed(local).await;
-        let _gui = harness.state.manager.events().admit(1).unwrap();
+        let _gui = harness.state.manager.ui_seat().hold();
         let origin = live_origin(&harness, local);
         let (task, id) = waiting_for_action(
             &harness,
@@ -1096,7 +1095,7 @@ mod tests {
         origin
     }
 
-    async fn local_origin(harness: &rest_harness::Harness) -> AgentOrigin {
+    pub(crate) async fn local_origin(harness: &rest_harness::Harness) -> AgentOrigin {
         let host = rest_harness::local_id(&harness.store).await;
         live_origin(harness, host)
     }
@@ -1129,7 +1128,7 @@ mod tests {
     /// (bounded) until a card from `asking` is listed. Returns the task and
     /// the card's id. A request refused before it put up a card fails here
     /// with that refusal, rather than as a timeout with no cause.
-    async fn waiting(
+    pub(crate) async fn waiting(
         harness: &rest_harness::Harness,
         origin: AgentOrigin,
         asking: &str,
@@ -1195,8 +1194,8 @@ mod tests {
                 task.await.unwrap().map_err(|error| format!("{error:#}"))
             ),
             Err(_) => panic!(
-                "no card within {STEP:?}; GUI seats: {}",
-                harness.state.manager.events().subscriber_count()
+                "no card within {STEP:?}; a GUI holds the seat: {}",
+                harness.state.manager.ui_seat().is_held()
             ),
         }
     }
@@ -1273,7 +1272,7 @@ mod tests {
         harness.await_refreshed(remote).await;
         let local = rest_harness::local_id(&harness.store).await;
         harness.await_refreshed(local).await;
-        let _gui = harness.state.manager.events().admit(1).unwrap();
+        let _gui = harness.state.manager.ui_seat().hold();
         let origin = live_origin(&harness, remote);
         assert!(
             crate::browser::tunnel_origin_matches(
@@ -1445,7 +1444,7 @@ mod tests {
             .await;
         let harness = builder.start().await;
         harness.await_refreshed(remote).await;
-        let _gui = harness.state.manager.events().admit(1).unwrap();
+        let _gui = harness.state.manager.ui_seat().hold();
         let origin = live_origin(&harness, remote);
         assert_eq!(
             request(
@@ -1507,7 +1506,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn standalone_tunnel_answer_keeps_the_browser_card_waiting() {
         let harness = rest_harness::idle_helm().await;
-        let _gui = harness.state.manager.events().admit(1).unwrap();
+        let _gui = harness.state.manager.ui_seat().hold();
         let origin = local_origin(&harness).await;
         let (task, id) = waiting_for_action(
             &harness,
@@ -1577,7 +1576,7 @@ mod tests {
             .unwrap()
     }
 
-    /// Spec: with no GUI subscribed to the event feed, a request that needs
+    /// Spec: with no GUI holding the helm's seat, a request that needs
     /// approval is refused at once as Unavailable, saying there is no Farhelm
     /// window to ask in, and no card is created.
     ///
@@ -1587,7 +1586,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn with_no_gui_a_request_is_refused_at_once() {
         let harness = rest_harness::idle_helm().await;
-        assert_eq!(harness.state.manager.events().subscriber_count(), 0);
+        assert!(!harness.state.manager.ui_seat().is_held());
         let origin = local_origin(&harness).await;
         let refused = refusal_of(ask(&harness.state, origin, "asker", false, stop_action()).await);
         assert_eq!(refused.kind, ErrorKind::Unavailable);
@@ -1608,9 +1607,8 @@ mod tests {
         }))
         .await;
         let origin = local_origin(&harness).await;
-        assert_eq!(
-            harness.state.manager.events().subscriber_count(),
-            0,
+        assert!(
+            !harness.state.manager.ui_seat().is_held(),
             "premise: no GUI is connected"
         );
         harness
@@ -1697,7 +1695,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn browser_web_cards_keep_category_grants_independent_and_wait_for_a_click() {
         let harness = rest_harness::idle_helm().await;
-        let _gui = harness.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = harness.state.manager.ui_seat().hold();
         let origin = local_origin(&harness).await;
         let action = |local_network| ApprovalAction::OpenUrl {
             url: if local_network {
@@ -1773,7 +1771,7 @@ mod tests {
     async fn browser_always_allow_refuses_a_changed_identity_for_either_category() {
         for local_network in [false, true] {
             let harness = rest_harness::idle_helm().await;
-            let _gui = harness.state.manager.events().admit(1).expect("a GUI seat");
+            let _gui = harness.state.manager.ui_seat().hold();
             let origin = local_origin(&harness).await;
             let row = local_row(&harness).await;
             let (task, id) = waiting_for_action(
@@ -1905,7 +1903,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn own_host_answer_grants_only_local_session_authority() {
         let harness = rest_harness::idle_helm().await;
-        let _gui = harness.state.manager.events().admit(1).unwrap();
+        let _gui = harness.state.manager.ui_seat().hold();
         let origin = local_origin(&harness).await;
         let before = local_row(&harness).await;
         assert!(!before.own_sessions_without_asking && !before.commands_without_asking);
@@ -1968,7 +1966,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn own_host_answer_refuses_a_replaced_install_without_spending_the_card() {
         let harness = rest_harness::idle_helm().await;
-        let _gui = harness.state.manager.events().admit(1).unwrap();
+        let _gui = harness.state.manager.ui_seat().hold();
         let origin = local_origin(&harness).await;
         let before = local_row(&harness).await;
         assert!(!before.own_sessions_without_asking && !before.commands_without_asking);
@@ -2018,7 +2016,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn own_host_answers_leave_ineligible_cards_pending() {
         let harness = rest_harness::idle_helm().await;
-        let _gui = harness.state.manager.events().admit(1).unwrap();
+        let _gui = harness.state.manager.ui_seat().hold();
         let origin = local_origin(&harness).await;
         for (own_action, action) in [
             (false, stop_action()),
@@ -2168,7 +2166,7 @@ mod tests {
             "the shortcut did not approve it"
         );
 
-        let _gui = harness.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = harness.state.manager.ui_seat().hold();
         let (task, id) = waiting_for_action(&harness, origin, "asker", action()).await;
         assert!(
             harness.state.approvals.list()[0]
@@ -2202,7 +2200,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn an_allowed_card_lets_the_request_through_and_disappears() {
         let harness = rest_harness::idle_helm().await;
-        let _gui = harness.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = harness.state.manager.ui_seat().hold();
         let origin = local_origin(&harness).await;
         let (task, id) = waiting(&harness, origin, "sess-1").await;
         let (status, body) = request(&harness, "GET", "/api/approvals", None).await;
@@ -2242,7 +2240,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn a_card_does_not_borrow_another_hosts_session_title() {
         let harness = rest_harness::idle_helm().await;
-        let _gui = harness.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = harness.state.manager.ui_seat().hold();
         let origin = local_origin(&harness).await;
         let elsewhere = AgentOrigin {
             host: origin.host + 1_000,
@@ -2269,7 +2267,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn a_denied_card_refuses_the_request() {
         let harness = rest_harness::idle_helm().await;
-        let _gui = harness.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = harness.state.manager.ui_seat().hold();
         let origin = local_origin(&harness).await;
         let (task, id) = waiting(&harness, origin, "asker").await;
         let (status, _) = answer(&harness, &id, "deny").await;
@@ -2290,7 +2288,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn always_allow_turns_the_host_setting_on_and_approves() {
         let harness = rest_harness::idle_helm().await;
-        let _gui = harness.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = harness.state.manager.ui_seat().hold();
         let origin = local_origin(&harness).await;
         let (task, id) = waiting(&harness, origin, "asker").await;
         let (status, body) = answer(&harness, &id, "always_allow").await;
@@ -2311,7 +2309,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn a_card_goes_with_its_connection_and_grants_nothing() {
         let harness = rest_harness::idle_helm().await;
-        let _gui = harness.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = harness.state.manager.ui_seat().hold();
         let origin = local_origin(&harness).await;
         let (task, id) = waiting(&harness, origin, "asker").await;
         harness.fleet.take_down(origin.host);
@@ -2350,7 +2348,7 @@ mod tests {
             .await;
         let local = rest_harness::local_id(&harness.store).await;
         harness.await_refreshed(local).await;
-        let _gui = harness.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = harness.state.manager.ui_seat().hold();
         let origin = live_origin(&harness, local);
         let refused = refusal_of(ask(&harness.state, origin, "asker", false, stop_action()).await);
         assert_eq!(refused.kind, ErrorKind::Unavailable);
@@ -2375,7 +2373,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn a_delete_in_flight_denies_and_refuses_the_sessions_requests() {
         let harness = rest_harness::idle_helm().await;
-        let _gui = harness.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = harness.state.manager.ui_seat().hold();
         let origin = local_origin(&harness).await;
         let (doomed, _) = waiting(&harness, origin, "doomed").await;
         let (other, _) = waiting(&harness, origin, "other").await;
@@ -2425,7 +2423,7 @@ mod tests {
         let local = rest_harness::local_id(&harness.store).await;
         harness.await_refreshed(local).await;
         harness.await_refreshed(remote).await;
-        let _gui = harness.manager.events().admit(1).unwrap();
+        let _gui = harness.manager.ui_seat().hold();
         let local_origin = live_origin(&harness, local);
         let remote_origin = live_origin(&harness, remote);
         let (local_wait, _) = waiting(&harness, local_origin, "shared").await;
@@ -2472,7 +2470,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn card_ids_are_not_a_process_local_count() {
         let harness = rest_harness::idle_helm().await;
-        let _gui = harness.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = harness.state.manager.ui_seat().hold();
         let origin = local_origin(&harness).await;
         let (task, id) = waiting(&harness, origin, "asker").await;
         assert!(uuid::Uuid::parse_str(&id).is_ok(), "{id}");
@@ -2491,7 +2489,7 @@ mod tests {
     #[farhelm_testtrace::test]
     async fn a_dropped_wait_removes_its_card() {
         let harness = rest_harness::idle_helm().await;
-        let _gui = harness.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = harness.state.manager.ui_seat().hold();
         let origin = local_origin(&harness).await;
         let (task, _) = waiting(&harness, origin, "asker").await;
         let before = harness.state.manager.events().revision();
@@ -2538,7 +2536,7 @@ mod tests {
                 .unwrap();
         });
         let harness = rest_harness::spliced_helm(client_side).await;
-        let _gui = harness.state.manager.events().admit(1).expect("a GUI seat");
+        let _gui = harness.state.manager.ui_seat().hold();
         let origin = local_origin(&harness).await;
         let (task, _) = waiting(&harness, origin, "sess-1").await;
         let target_uri = format!("/api/sessions/{}", full_id(&harness, origin.host, "sess-1"));

@@ -68,6 +68,7 @@ pub use crate::transport::{
     HostTransport, LocalSupervisorNotRunning, SystemTransport, TransportConnection, TransportPair,
 };
 use crate::transport::{ProcessRoute, SshDiagnostics, SshExit, SshObservation, SshSnapshot};
+pub use crate::ui_channel::{SeatClaim, UiSeat};
 
 use crate::client::{SessionListing, SupervisorClient, SupervisorError, SupervisorTransportError};
 use crate::environment::{ConnectedResources, EnvironmentStatus, Providers, StatusUnanswered};
@@ -368,43 +369,26 @@ pub enum RefreshHealth {
     Failed { error: String },
 }
 
-/// The last connection boundary actually observed during one attempt.
-///
-/// These are stable REST vocabulary, not inferred diagnoses: opening SSH's
-/// pipes alone cannot establish that a remote supervisor is listening.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ConnectionStage {
-    /// No attempt is running yet, or the retry's backoff has not elapsed.
-    WaitingToConnect,
-    /// SSH has started, but no evidence yet establishes a remote supervisor connection.
-    ConnectingToHost,
-    /// The local supervisor socket has not accepted the connection yet.
-    ConnectingToSupervisor,
-    /// A supervisor socket accepted the connection; its hello is still outstanding.
-    WaitingForHello,
-    /// Hello succeeded; identity recording and browser-link setup share this final stage.
-    SettingUp,
-}
+pub use farhelm_proto::ui_channel::ConnectionStage;
 
-impl ConnectionStage {
-    /// Name the evidence available when an attempt stops, without guessing what SSH did.
-    ///
-    /// Spawning SSH does not establish a login or a remote socket connection. Older
-    /// remotes cannot report that boundary, so that stage deliberately remains hedged.
-    fn failure_context(self) -> &'static str {
-        match self {
-            Self::WaitingToConnect => "waiting to start a connection attempt",
-            Self::ConnectingToHost => {
-                "connecting or logging in to the host, or Farhelm there is too old to report its progress"
-            }
-            Self::ConnectingToSupervisor => "connecting to the local supervisor",
-            Self::WaitingForHello => {
-                "the supervisor accepted the connection but did not finish answering the hello"
-            }
-            Self::SettingUp => {
-                "the supervisor answered, but the connection did not finish setting up (recording its identity or setting up browser links)"
-            }
+/// Name the evidence available when an attempt stops, without guessing what SSH did.
+///
+/// Spawning SSH does not establish a login or a remote socket connection. Older
+/// remotes cannot report that boundary, so that stage deliberately remains hedged.
+/// A free function because [`ConnectionStage`] is a wire type now defined in
+/// `farhelm_proto`, and this wording is the manager's, not the wire's.
+fn stage_failure_context(stage: ConnectionStage) -> &'static str {
+    match stage {
+        ConnectionStage::WaitingToConnect => "waiting to start a connection attempt",
+        ConnectionStage::ConnectingToHost => {
+            "connecting or logging in to the host, or Farhelm there is too old to report its progress"
+        }
+        ConnectionStage::ConnectingToSupervisor => "connecting to the local supervisor",
+        ConnectionStage::WaitingForHello => {
+            "the supervisor accepted the connection but did not finish answering the hello"
+        }
+        ConnectionStage::SettingUp => {
+            "the supervisor answered, but the connection did not finish setting up (recording its identity or setting up browser links)"
         }
     }
 }
@@ -1236,6 +1220,10 @@ pub struct ConnectionManager {
     /// actors could not reach would need a second path back out to whoever
     /// held it.
     events: Arc<FleetEvents>,
+    /// Which GUI holds this helm, if any (see [`UiSeat`]). Beside the feed
+    /// because both answer "who is watching": agent approvals ask the seat
+    /// whether a window is open, where they used to count feed subscribers.
+    ui_seat: Arc<UiSeat>,
     /// Per-host lock serializing a provisioning run against edits of that
     /// host's registry row (retarget, alias, removal); see
     /// [`Self::host_provision_lock`].
@@ -1600,6 +1588,7 @@ impl ConnectionManager {
             #[cfg(test)]
             refusal_gate: DuplicateGateSlot::default(),
             events: Arc::new(FleetEvents::new()),
+            ui_seat: Arc::default(),
             reconcile: tokio::sync::Mutex::new(()),
             actors: Mutex::new(ActorMap::default()),
             provision_locks: Arc::new(Mutex::new(HashMap::new())),
@@ -1740,6 +1729,11 @@ impl ConnectionManager {
     /// as long as a browser stays connected.
     pub fn events(&self) -> &Arc<FleetEvents> {
         &self.events
+    }
+
+    /// The seat a GUI's UI channel holds; see [`UiSeat`].
+    pub fn ui_seat(&self) -> &Arc<UiSeat> {
+        &self.ui_seat
     }
 
     /// Reconcile the running actors against the registry: start one for
@@ -4275,7 +4269,7 @@ impl HostActor {
                         true,
                         None,
                     ),
-                    None => progress.stage.failure_context().to_string(),
+                    None => stage_failure_context(progress.stage).to_string(),
                 };
                 failure(
                     row,
@@ -4463,7 +4457,9 @@ impl HostActor {
             ssh,
         } = match self.transport.connect(row).await {
             Ok(connection) => connection,
-            Err(error) => return failure(row, error.context(progress.stage.failure_context())),
+            Err(error) => {
+                return failure(row, error.context(stage_failure_context(progress.stage)));
+            }
         };
         // Install ownership before the client can fail and drop its reader.
         // Historical memory receives only the non-owning observation.
@@ -4556,7 +4552,7 @@ impl HostActor {
                 // Without process evidence, an empty hello cannot distinguish a
                 // missing supervisor from a failed transport. Keep the original
                 // failure rather than guessing a remote start remedy.
-                return failure(row, error.context(progress.stage.failure_context()));
+                return failure(row, error.context(stage_failure_context(progress.stage)));
             }
         };
 
@@ -5623,7 +5619,7 @@ fn ssh_failure_detail(
         (ProcessRoute::LocalPodman, true, Some(code)) => {
             format!("container execution failed (exit status {code})")
         }
-        (ProcessRoute::LocalPodman, _, _) => stage.failure_context().to_string(),
+        (ProcessRoute::LocalPodman, _, _) => stage_failure_context(stage).to_string(),
         (ProcessRoute::NestedSsh { destination }, true, Some(255))
             if snapshot.session_refusal.is_some()
                 || snapshot
@@ -5670,7 +5666,7 @@ fn ssh_failure_detail(
             "SSH had not reached Farhelm on the host: still connecting or logging in".to_string()
         }
         (ProcessRoute::DirectSsh | ProcessRoute::NestedSsh { .. }, _, _) => {
-            stage.failure_context().to_string()
+            stage_failure_context(stage).to_string()
         }
     };
     let process = match &snapshot.process_route {
@@ -5757,7 +5753,7 @@ fn attempt_failure(
                 Some(&error),
             )),
         ),
-        None => failure(row, error.context(progress.stage.failure_context())),
+        None => failure(row, error.context(stage_failure_context(progress.stage))),
     }
 }
 
@@ -12297,6 +12293,7 @@ mod tests {
             connect_gate: DuplicateGateSlot::default(),
             refusal_gate: DuplicateGateSlot::default(),
             events: Arc::new(FleetEvents::new()),
+            ui_seat: Arc::default(),
             reconcile: tokio::sync::Mutex::new(()),
             actors: Mutex::new(ActorMap::default()),
             provision_locks: Arc::new(Mutex::new(HashMap::new())),
