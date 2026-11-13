@@ -15,11 +15,13 @@ use crate::terminal_tabs::{listed_tabs, wait_for_shell};
 ///
 /// This is the dogfooding hole positive marking exists to close. A
 /// supervisor started inside a tab inherits that tab's `FARHELM_TAB_ID`,
-/// its tmux server inherits it, and every inner agent inherits it too;
+/// and every inner agent inherits it from the supervisor's environment,
+/// which a host child's environment is built on;
 /// under the exclusion-based design that came first, every one of those
 /// inner agents looked like a tab process and escaped stop entirely.
-/// `launch_env` reproduces exactly that inheritance — it injects into
-/// tmux, which is the same route the real ambient value would take.
+/// `launch_env` reproduces exactly that inheritance — it is layered over
+/// the supervisor's environment in the child's, which is the same route
+/// the real ambient value would take.
 ///
 /// Both process kinds must be handled despite the inherited outer marker;
 /// neither the agent nor its own tab can be mistaken for the outer tab.

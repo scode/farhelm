@@ -1,5 +1,5 @@
-//! The supervisor's terminal emulator: for each new terminal (one that runs
-//! in a terminal host), the one place its output is interpreted.
+//! The supervisor's terminal emulator: for each terminal (every one runs in
+//! a terminal host), the one place its output is interpreted.
 //!
 //! The terminal host keeps the pty and journals raw output; the supervisor
 //! feeds that output to one [`Emulator`] per terminal, which answers the

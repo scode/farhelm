@@ -30,8 +30,8 @@
 //!
 //! The missing-socket half of the local row's story (nothing listening →
 //! unreachable with the manual-start hint) is pinned in `farhelm-helm`'s
-//! own tests, where it needs no supervisor at all and therefore no slot,
-//! no tmux, and no skip.
+//! own tests, where it needs no supervisor at all and therefore no slot
+//! and no skip.
 
 use crate::harness::*;
 use farhelm_helm::manager::{

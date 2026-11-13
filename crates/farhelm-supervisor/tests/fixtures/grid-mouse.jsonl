@@ -1,7 +1,7 @@
-# The bytes a new terminal's program reads for each grid mouse event: Farhelm's mouse report contract, which the
+# The bytes a terminal's program reads for each grid mouse event: Farhelm's mouse report contract, which the
 # supervisor's encoder (grid_input.rs) is held to. First generated from the vendored xterm.js 6.0.0's mouse service,
-# so when it was frozen every row matched what an old terminal sends; it is edited by hand now, only on purpose and
-# with the encoder.
+# so that programs kept reading the same clicks when the grid replaced it; it is edited by hand now, only on purpose
+# and with the encoder.
 # [kind, button, x, y, cols, rows, protocol, encoding, sent]: sent is the hex bytes sent, the same
 # for every modifier set, or sent[mods] for mods 0 to 7 (1 Shift, 2 Alt, 4 Ctrl).
 ["down",0,0,0,80,24,"NONE","DEFAULT",""]

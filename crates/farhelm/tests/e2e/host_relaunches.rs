@@ -1,5 +1,5 @@
 //! Restart of an agent that runs in a terminal host: the new launch starts
-//! in a new host seeded with the old terminal's history, the old host is
+//! in a new host seeded with the previous terminal's history, the old host is
 //! ended once the new launch is confirmed, a replacement that fails is
 //! unwound, a restart interrupted by a crash converges at the next start
 //! (the superseded-host rule), and a restart that loses to Delete, or a
@@ -189,7 +189,7 @@ pub(crate) fn record_path(state: &Path, session_id: &str, generation: i64) -> Pa
         .join(format!("{session_id}.{generation}.host"))
 }
 
-/// A socket's name, for comparing with a row's `pane`.
+/// A socket's name, for comparing with a row's `terminal_address`.
 pub(crate) fn socket_name(socket: &Path) -> String {
     socket
         .file_name()
@@ -488,7 +488,7 @@ async fn a_stop_during_a_failed_restart_closes_its_host_tab() {
 }
 
 /// A Restart of a host agent starts the new launch in a new host that keeps
-/// the old terminal's history above a blank screen in default modes, and
+/// the previous terminal's history above a blank screen in default modes, and
 /// ends the old host.
 ///
 /// Why: a host runs one child, so a Restart cannot reuse it; SPEC.md's
@@ -580,7 +580,7 @@ async fn a_restart_starts_a_new_host_that_keeps_the_history_on_a_blank_screen() 
 /// its history), clean up everything of the replacement, and not strand the
 /// session: and since the generation has moved on while the old host's tag
 /// names the earlier one, a restarted supervisor must still find that host
-/// through the row's `pane` rather than call it another terminal's. Spec:
+/// through the row's `terminal_address` rather than call it another terminal's. Spec:
 /// with the host program refusing (exit 3 after reading its spec), a
 /// consented Restart fails naming the terminal host; the row is a host row
 /// at generation 1 still naming the old socket and not launching, listing
@@ -864,12 +864,12 @@ async fn assert_converged(interrupted: Interrupted) {
 /// and the old one is ended.
 ///
 /// Why: the plan's interruption at replacement. A crash there leaves both
-/// hosts running, the row launching with no `pane`, and nothing in memory;
+/// hosts running, the row launching with no `terminal_address`, and nothing in memory;
 /// the next supervisor must adopt the new host by its tag rather than
 /// relaunch or call the session gone, and then end the old host, which is
 /// no orphan (its session exists) and would otherwise run for good (D-25).
 /// Spec: with the crash seam firing at `ReplacementStarted`, the restart
-/// fails; the row is launching at generation 1 with no `pane`, both hosts
+/// fails; the row is launching at generation 1 with no `terminal_address`, both hosts
 /// run and both launch records exist, also once the supervisor is dropped.
 /// The next supervisor's row is running at generation 1 naming the new
 /// socket; its agent terminal is that host, whose history holds the first
@@ -959,8 +959,8 @@ async fn the_superseded_rule_leaves_an_earlier_host_it_cannot_read_alone() {
 /// a teardown that swept only the new agent would leave the new host and
 /// the old one (with its final screen) running for good. A real Delete
 /// queues behind the restart's lifecycle claim, so the row is removed
-/// through the store, as the tmux twin of this test does: the only way to
-/// reach the confirmation that finds no row. Spec: with the fault seam
+/// through the store: the only way to reach the confirmation that finds no
+/// row. Spec: with the fault seam
 /// deleting the session's row (through the store) at `ReplacementStarted` and
 /// letting the restart go on, the restart fails as a conflict saying the
 /// session was deleted while it was being relaunched and the new agent was
@@ -1336,14 +1336,14 @@ async fn claim_window_crash_recovers_the_old_terminal(stage: HostRestartStage, r
 /// terminal and history at the next start.
 ///
 /// Why: both reviews' claim-window finding. Claiming the generation empties
-/// the row's `pane` before the replacement has a record, so a supervisor that
+/// the row's `terminal_address` before the replacement has a record, so a supervisor that
 /// dies there (a crash, or an update's stop) left a session with no terminal
 /// while the old host, holding the whole history, ran unclaimed, and the next
 /// Restart started empty. Spec: with the fault seam crashing at
-/// `GenerationClaimed`, the row is launching at generation 1 with no `pane`
+/// `GenerationClaimed`, the row is launching at generation 1 with no `terminal_address`
 /// and no generation-1 record; the next supervisor publishes the old host
 /// (no placeholder) as the session's terminal with the first run's history
-/// and records its socket in the row's `pane`; a Restart there keeps that
+/// and records its socket in the row's `terminal_address`; a Restart there keeps that
 /// history in its new host and ends the old host and its record.
 #[farhelm_testtrace::test]
 async fn a_crash_right_after_the_generation_claim_keeps_the_old_terminal() {
@@ -1371,7 +1371,7 @@ async fn a_crash_after_a_failed_replacement_was_cleaned_up_keeps_the_old_termina
 /// it running for good if the new host ended first. Spec: with the fault
 /// seam failing the confirmation, the restart fails saying the confirmation
 /// in the database failed; the session's terminal is the new host, showing
-/// `RESUMED RUN`; the row is launching at generation 1 with no `pane`; the
+/// `RESUMED RUN`; the row is launching at generation 1 with no `terminal_address`; the
 /// old host's process and socket file are gone and its record removed.
 #[farhelm_testtrace::test]
 async fn a_failed_confirmation_write_still_ends_the_old_host() {
@@ -1535,7 +1535,7 @@ async fn grid_until_caught_up(stream: &mut TermStream) -> (String, String) {
 /// attach streams the new host with the kept history.
 ///
 /// Why: the restart replaces the terminal under the viewer; the brief's
-/// decision is that the viewer is detached as for tmux and attaches again,
+/// decision is that the viewer is detached and attaches again,
 /// and nothing streams the old host afterwards. Spec: a grid attach of the
 /// history agent's terminal catches up; after a consented Restart that
 /// attachment is detached with the reason `session restarted`; a new grid
@@ -1701,7 +1701,7 @@ struct ClaimWindow {
 /// interrupted after its publication (the generation-0 host left running
 /// beside the generation-1 one) and whose second restart crashes right after
 /// it claimed generation 2; the supervisor is then dropped. The row is left
-/// a launching host row at generation 2 with no `pane`, and both earlier
+/// a launching host row at generation 2 with no `terminal_address`, and both earlier
 /// hosts run with their launch records: what the claim-window fallback of
 /// the next start has to choose from.
 async fn claim_window_crash(stack: &Stack) -> ClaimWindow {

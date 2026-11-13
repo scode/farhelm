@@ -12,14 +12,13 @@
 //! need a feature the emulator lacks, it declines: no answer rather than a
 //! claim it cannot keep.
 //!
-//! The table started as the answers old terminals gave (tmux's, and those of
-//! the browser's xterm.js for the color queries tmux passed through to it)
-//! and keeps them wherever they are true here, because the agents people run
-//! were tested against those. The rows that depart say why: among them DECID,
-//! which old terminals ignored and vte cannot tell from DA1, and color
-//! answers ending the way their query did, where xterm.js always ended them
-//! with ST. The table is the contract; `tests/queries.rs` pins every row
-//! through the public API.
+//! The table started as the answers Farhelm's terminals gave before this
+//! emulator interpreted their output, and keeps them wherever they are true
+//! here, because the agents people run were tested against those. The rows
+//! that depart say why: among them DECID, which went unanswered before and vte
+//! cannot tell from DA1, and color answers ending the way their query did
+//! rather than always with ST. The table is the contract; `tests/queries.rs`
+//! pins every row through the public API.
 //!
 //! | Query | Answer | Why |
 //! | --- | --- | --- |
@@ -73,8 +72,7 @@
 //!
 //! Every color answer is in xterm's format (16 bits per channel) and ends the
 //! way the query ended, with BEL or ST, so a program that matches its answer
-//! by the terminator it sent finds it. (Old terminals ended the answers to
-//! OSC 4 and OSC 12, which xterm.js gave, with ST whatever the query used.)
+//! by the terminator it sent finds it.
 //!
 //! `CSI 14 t` assumes a cell of 16 by 32 pixels ([`ASSUMED_CELL_PIXELS`]).
 //! The emulator does not know the viewer's real cell size (the grid client
@@ -171,10 +169,9 @@ pub(crate) const PRIMARY_DEVICE_ATTRIBUTES: &str = "\x1b[?1;2c";
 ///
 /// The emulator cannot know the viewer's real cell size: the grid client
 /// does not report one, and it changes with the viewer's text size and
-/// screen. 16 by 32 is the size Farhelm's terminals have always assumed
-/// (old terminals answer the same from tmux's defaults), so a program that
-/// sizes images or layout from the answer sees the same terminal in either
-/// kind.
+/// screen. 16 by 32 is the size Farhelm's terminals have always assumed, so
+/// a program that sizes images or layout from the answer saw no change when
+/// this emulator began answering it.
 pub(crate) const ASSUMED_CELL_PIXELS: (usize, usize) = (16, 32);
 
 /// The parser's view of the terminal for the length of one call into vte:

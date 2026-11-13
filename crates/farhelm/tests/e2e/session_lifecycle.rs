@@ -104,7 +104,7 @@ async fn assert_geometry_stays(h: &Harness, session: &str, expected: &str, why: 
 /// Attach an expected `status` to a cloned `SessionInfo` before an
 /// equality assertion.
 ///
-/// `list_sessions` computes `status` fresh from tmux on every call
+/// `list_sessions` computes `status` fresh from the agent's terminal on every call
 /// (`service.rs`'s `ListSessions` handler) rather than trusting whatever a
 /// caller last saw — so a listing assertion built from a `SessionInfo`
 /// returned by `create_session` (always `Unknown`, a create-time
@@ -1086,7 +1086,7 @@ async fn unknown_control_message_tears_down_the_connection() {
 /// The in-memory check alone only proves this process's own map stayed
 /// empty; it says nothing about whether a row still landed in SQLite
 /// despite the rejection (this validation runs before `create_session`
-/// ever touches tmux or the store, so today it cannot, but a future
+/// ever touches a terminal host or the store, so today it cannot, but a future
 /// reordering could reintroduce exactly that gap silently). Constructing
 /// a second, independent `Supervisor` on the same state dir and listing
 /// through IT is what actually proves nothing was persisted — a row
@@ -1123,14 +1123,16 @@ async fn create_in_missing_directory_errors() {
 /// A relative cwd must be refused at create time, not merely mis-resolved
 /// later.
 ///
-/// tmux resolves a relative working directory against the SUPERVISOR
-/// DAEMON's own cwd, not the client's — so accepting one here would store
-/// a path whose meaning depends on wherever the daemon happened to be
-/// started, and would shift again on every daemon restart (manually
-/// reproduced: a session created this way either fails to restart with
+/// A relative working directory has no meaning on the supervisor's side:
+/// resolved there, it depends on the SUPERVISOR DAEMON's own cwd, not the
+/// client's — so accepting one here would store a path whose meaning
+/// depends on wherever the daemon happened to be started, and would shift
+/// again on every daemon restart (manually reproduced while one was still
+/// accepted: a session created this way either failed to restart with
 /// "working directory does not exist", or — if a same-named directory
-/// happens to exist relative to the daemon's new cwd — silently
-/// relaunches the agent in the wrong directory). Refusing it up front in
+/// happened to exist relative to the daemon's new cwd — silently
+/// relaunched the agent in the wrong directory). A terminal host's child
+/// spec takes only an absolute directory in any case. Refusing it up front in
 /// `ensure_cwd_usable`, shared by create and restart, closes the create
 /// path and also makes a pre-existing stored relative cwd refuse to
 /// restart with a clear error instead of mis-resolving.
@@ -1202,7 +1204,7 @@ async fn create_with_tilde_cwd_expands_against_the_supervisors_home() {
 
     // The invocation writes its own $PWD: metadata alone cannot prove the
     // LAUNCH happened in the expanded directory (the row could be right
-    // while tmux was handed something else), but a marker file appearing
+    // while the terminal host was handed something else), but a marker file appearing
     // inside the expanded path can.
     let subdir = h
         .client
@@ -1452,10 +1454,9 @@ async fn reattach_replays_content_scrolled_off_screen() {
 ///
 /// The payload fits on one 80-column row but reflows across rows at 40
 /// columns. The old capture-before-resize ordering replayed the whole
-/// payload contiguously even though tmux itself already reported the new
-/// geometry. A fresh agent echo is the replay-completion barrier: unlike
-/// bracketed-paste restoration, it is available on every supported tmux
-/// version, and it cannot arrive before the replay queued ahead of it.
+/// payload contiguously even though the terminal itself already had the new
+/// geometry. A fresh agent echo is the replay-completion barrier: it cannot
+/// arrive before the replay queued ahead of it.
 /// Before detaching, wait for the agent's colored echo rather than the
 /// terminal's input echo, so delayed live output cannot masquerade as bad replay.
 #[farhelm_testtrace::test]
@@ -1745,18 +1746,17 @@ async fn exited_agent_lists_as_exited_with_its_exit_code() {
 /// A nonzero exit is reported precisely, not just "not alive" — the whole
 /// point of carrying `exit_code` through instead of a boolean liveness
 /// flag. A plain shell exit needs no fake-agent script at all: its code
-/// is exactly what the terminal records for its exited child (tmux's
-/// `#{pane_dead_status}` on an old terminal).
+/// is exactly what the terminal host records for its exited child.
 ///
-/// The half-second sleep before the exit dates from old terminals and is
-/// load-bearing there, not padding: a
-/// pane whose process dies while tmux is still setting the pane up can
-/// lose the recorded exit status entirely (observed on loaded CI runners
-/// as a permanent `Exited { exit_code: None }`; never reproduced locally,
-/// where `exit 3` alone always raced in tmux's favor). An agent that
-/// exits before its terminal even finishes materializing is not the
-/// behavior this test pins, so the fixture deliberately outlives pane
-/// setup instead.
+/// The half-second sleep before the exit dates from the tmux terminals of
+/// earlier releases, where it was load-bearing, not padding: a pane whose
+/// process died while tmux was still setting the pane up could lose the
+/// recorded exit status entirely (observed on loaded CI runners as a
+/// permanent `Exited { exit_code: None }`; never reproduced locally). No
+/// one has checked whether a terminal host needs it. An agent that exits
+/// before its terminal even finishes materializing is not the behavior
+/// this test pins, so the fixture deliberately outlives terminal setup
+/// instead.
 #[farhelm_testtrace::test]
 async fn nonzero_exit_lists_with_its_precise_code() {
     let h = harness().await;
@@ -1840,7 +1840,7 @@ async fn unparseable_invocations_error_without_creating_a_session() {
 /// nothing else removes it before the next supervisor restart's sweep.
 ///
 /// A plain `#[test]`: everything here is synchronous process spawning,
-/// and it needs no tmux, no supervisor, and no runtime.
+/// and it needs no terminal host, no supervisor, and no runtime.
 #[farhelm_testtrace::test]
 fn launch_shim_records_exec_failure_only_on_failure() {
     let dir = farhelm_teststate::tempdir().unwrap();
@@ -2274,8 +2274,8 @@ async fn stdio_proxy_carries_a_real_session() {
     )
     .await
     .expect("supervisor");
-    // No tmux guard: this supervisor creates new terminals, whose hosts the
-    // state directory's `TestDir` ends at drop, panic or not.
+    // The state directory's `TestDir` ends this supervisor's hosts at drop,
+    // panic or not.
 
     // An orphaned launch spec from a "previous run": serve() must sweep
     // it once — and only once — it owns the socket. It holds an agent
@@ -2620,10 +2620,9 @@ async fn detach_from_a_kicked_connection_does_not_kill_the_winner() {
 }
 
 /// Creating a session with degenerate dimensions must clamp, exactly
-/// like the resize path. On an old terminal `new-session -x 0` is a hard
-/// tmux error, so without the clamp the create fails outright — and every
-/// other test creates at sane sizes, so deleting the clamp used to fail
-/// nothing.
+/// like the resize path: a terminal host refuses a spec outside its size
+/// range, so without the clamp the create fails outright — and every other
+/// test creates at sane sizes, so deleting the clamp used to fail nothing.
 #[farhelm_testtrace::test]
 async fn create_with_degenerate_size_clamps_to_1x1() {
     let h = harness().await;
@@ -2691,7 +2690,7 @@ async fn persisted_sessions_survive_a_supervisor_restart() {
     };
     assert!(
         row.status.is_live() || row.status == SessionStatus::Unknown,
-        "a session whose tmux server survived the restart must not list as exited: {row:?}"
+        "a session whose terminal host survived the restart must not list as exited: {row:?}"
     );
     assert_eq!(
         *row,
@@ -2702,7 +2701,7 @@ async fn persisted_sessions_survive_a_supervisor_restart() {
     let (chan, rx_replay, mut rx) = client2
         .attach_live(&session.id, 80, 24)
         .await
-        .expect("attach must succeed: the tmux session is still alive");
+        .expect("attach must succeed: the terminal host is still running");
     let mut seen = rx_replay;
     wait_for(&mut rx, &mut seen, "FAKE-AGENT READY", 20).await;
     client2.send_keys(chan, b"still-alive\r".to_vec()).await;
@@ -2732,7 +2731,7 @@ async fn restart_gap_lists_sessions_without_a_terminal_and_attach_fails() {
         .restart_supervisor(|state| async move {
             supervisor_on(&state)
                 .await
-                .expect("second supervisor construction after the tmux server died")
+                .expect("second supervisor construction after the terminals were ended")
         })
         .await;
     let client2 = Arc::clone(&h.client);
@@ -2746,7 +2745,7 @@ async fn restart_gap_lists_sessions_without_a_terminal_and_attach_fails() {
     assert_eq!(
         listed.sessions,
         vec![expected],
-        "a session must stay listed even once its tmux server is gone — vanishing is \
+        "a session must stay listed even once its terminal is gone — vanishing is \
          exactly what this PR exists to prevent — and the restart-gap entry (no terminal \
          at all) must list as exited with no exit code to fabricate, PLAN_M2.md's \
          restart-gap status contract"
@@ -2797,7 +2796,7 @@ async fn restart_gap_is_decided_per_session() {
                 SupervisorSeams::default(),
             )
             .await
-            .expect("second supervisor construction after one session's tmux died")
+            .expect("second supervisor construction after one session's terminal was ended")
         })
         .await;
     let (sup2, client2) = (Arc::clone(&h.sup), Arc::clone(&h.client));
@@ -2825,7 +2824,7 @@ async fn restart_gap_is_decided_per_session() {
     let survivor = find(&alive_session.id);
     assert!(
         survivor.status.is_live() || survivor.status == SessionStatus::Unknown,
-        "the session whose tmux survived must not list as exited: {survivor:?}"
+        "the session whose terminal host survived must not list as exited: {survivor:?}"
     );
     assert_eq!(
         *survivor,
@@ -2840,7 +2839,7 @@ async fn restart_gap_is_decided_per_session() {
     assert_eq!(
         *find(&dead_session.id),
         expected_dead,
-        "only the one whose tmux session actually died must list as exited"
+        "only the one whose terminal was actually ended must list as exited"
     );
     assert_eq!(
         listed.len(),
@@ -2876,12 +2875,12 @@ async fn restart_gap_is_decided_per_session() {
 }
 
 // Not tested here: a DB write failure during `create_session` (the
-// kill-the-just-created-tmux-session unwind path). Reproducing it needs
+// unwind path that ends the just-started terminal host). Reproducing it needs
 // fault injection into the SQLite connection or the filesystem beneath
 // it, which M3 is expected to bring a seam for (PLAN.md's milestone
 // ladder). A filesystem hack (a read-only database file, say) would buy
 // little signal this far ahead of that seam existing, so it is skipped
-// rather than improvised. The unwind logic itself — kill tmux, still
+// rather than improvised. The unwind logic itself — end the host, still
 // return the DB error — is covered by code review and the ordinary
 // create-path tests exercising the happy side of the same call.
 
@@ -2944,9 +2943,7 @@ async fn stop_kills_the_whole_process_tree() {
     // What is under test is only that the session ends up classified
     // `Exited`, not which exact code it carries: PLAN_M2.md's status test
     // list, item (e), says "assert exited, don't over-pin the code" —
-    // a SIGKILL death's recorded status is not pinned to one value (tmux's
-    // `pane_dead_status` varies across versions), so the code is
-    // deliberately left unasserted.
+    // so a SIGKILL death's recorded code is deliberately left unasserted.
     let found = wait_for_non_live_status(&h.client, &session.id, 15).await;
     assert_eq!(found.id, session.id);
     assert_eq!(found.title, session.title);
@@ -3071,9 +3068,9 @@ async fn stop_kills_a_child_that_ignores_sigterm() {
 /// EVERY signalled process is gone, and this child never is until the
 /// SIGKILL.
 /// An unknown-session `attach` is about as cheap as a request gets: one
-/// lock-guarded map lookup, no tmux call at all.
+/// lock-guarded map lookup, nothing that reaches a terminal host.
 ///
-/// The observable that teardown has BEGUN is the pane process's own death:
+/// The observable that teardown has BEGUN is the agent process's own death:
 /// the fake agent itself dies to the SIGTERM within milliseconds, while
 /// the stubborn child keeps the stop in flight for the rest of the grace.
 /// A plain `spawner` child would not do: it dies to SIGTERM too, which
@@ -3261,7 +3258,7 @@ async fn stop_is_idempotent() {
         .restart_supervisor(|state| async move {
             supervisor_on(&state)
                 .await
-                .expect("second supervisor construction after one session's tmux died")
+                .expect("second supervisor construction after one session's terminal was ended")
         })
         .await;
     let client2 = Arc::clone(&h.client);
@@ -3525,7 +3522,7 @@ async fn delete_works_on_a_terminal_less_session() {
         .restart_supervisor(|state| async move {
             supervisor_on(&state)
                 .await
-                .expect("second supervisor construction after the tmux server died")
+                .expect("second supervisor construction after the terminals were ended")
         })
         .await;
     let client2 = Arc::clone(&h.client);
@@ -3651,9 +3648,9 @@ async fn stop_does_not_disturb_the_existing_attachment() {
 }
 
 /// Stop followed by delete on the same live session must both succeed:
-/// delete's own pane query must see the (by-then-dead) pane and skip
-/// straight to tmux teardown rather than erroring on an already-stopped
-/// agent.
+/// delete's own query of the agent's terminal must see the by-then-exited
+/// agent and go straight to ending its host rather than erroring on an
+/// already-stopped agent.
 #[farhelm_testtrace::test]
 async fn stop_then_delete_both_succeed() {
     let h = harness().await;
@@ -3673,16 +3670,16 @@ async fn stop_then_delete_both_succeed() {
 /// SPEC.md, Terminal experience: a full-screen program's last frame "is
 /// not retained after it exits, and no snapshot of it is taken or
 /// stored". This is the negative regression for the removed stop-time
-/// alt-screen snapshot: it fails if stop ever again captures the pane,
-/// stores a frame under the state dir, or appends anything to a dead
-/// pane's replay.
+/// alt-screen snapshot: it fails if stop ever again captures the screen,
+/// stores a frame under the state dir, or appends anything to an exited
+/// terminal's replay.
 ///
 /// The `altscreen` fixture restores the primary screen on SIGTERM (like
-/// claude), so after a stop the dead pane holds only its primary grid —
-/// the alt-screen frame is gone from tmux entirely, and only a capture
-/// taken before the kill could bring its marker back. The replay is
-/// drained to its replay-complete marker, not to any needle or tmux
-/// placeholder text, so the absence assertions cannot race an
+/// claude), so after a stop the exited terminal holds only its primary
+/// grid — the alt-screen frame is gone from the terminal's emulator
+/// entirely, and only a capture taken before the kill could bring its
+/// marker back. The replay is drained to its replay-complete marker, not to
+/// any needle or placeholder text, so the absence assertions cannot race a
 /// still-arriving replay.
 #[farhelm_testtrace::test]
 async fn stop_takes_no_screen_capture_and_replays_none() {
@@ -3803,12 +3800,9 @@ async fn wait_for_supervisor_connections_to_drain(sup: &Arc<Supervisor>) {
 /// Delete must tolerate a terminal that disappeared out from under a LIVE
 /// `SessionEntry` — someone (or something) else ended it directly, distinct
 /// from the restart-gap case (`delete_works_on_a_terminal_less_session`)
-/// where every terminal, not just this session's, failed to survive. On a
-/// new terminal the session's host is ended through its own protocol and
-/// Delete finds it gone; on an old one its tmux session is killed and
-/// `pane_process`'s tolerated-absence path (the same tmux diagnostics
-/// `has_session`/`kill_session` treat as "not there") is what lets it
-/// succeed rather than fail closed.
+/// where every terminal, not just this session's, failed to survive. The
+/// session's host is ended through its own protocol, and Delete must find
+/// it gone and succeed rather than fail closed.
 #[farhelm_testtrace::test]
 async fn delete_after_its_terminal_was_ended_externally_succeeds() {
     let h = harness().await;
@@ -3823,7 +3817,7 @@ async fn delete_after_its_terminal_was_ended_externally_succeeds() {
     h.client
         .delete_session(&session.id)
         .await
-        .expect("delete must tolerate an externally killed tmux session");
+        .expect("delete must tolerate an externally ended terminal host");
     assert!(
         h.client.list_sessions().await.unwrap().sessions.is_empty(),
         "a deleted session must not stay listed"
@@ -3897,7 +3891,7 @@ async fn stop_kills_a_reparented_marked_daemon() {
 /// stop first, which would already reap the daemon via the live-agent path
 /// and prove nothing about the dead-agent path specifically). Its terminal
 /// stays to report the exit (a terminal host keeps its exited child's
-/// status, as `remain-on-exit` keeps a tmux pane), exactly like
+/// status), exactly like
 /// `exited_agent_leaves_a_viewable_terminal` relies on elsewhere.
 #[farhelm_testtrace::test]
 async fn stop_kills_a_reparented_daemon_with_no_live_pane_to_walk_from() {
@@ -4412,8 +4406,7 @@ async fn a_recorded_scope_survives_a_supervisor_restart_and_still_kills() {
     // and reconciles nothing, so a test that skipped this would exercise a
     // path production never takes — and, worse here, would prove nothing
     // about the restart at all: a read-only supervisor's stop is not the
-    // stop under test. `_tmux` is bound AFTER `state` on purpose; see
-    // `TmuxServerGuard`'s docs.
+    // stop under test.
     let Harness {
         client,
         sup,
@@ -4550,7 +4543,7 @@ async fn a_multithreaded_sigterm_ignoring_agent_can_still_be_deleted_through_the
 }
 
 /// Standalone reproduction of the systemd 255 quirk the delete tests above
-/// document — with no supervisor and no tmux anywhere in the
+/// document — with no supervisor and no terminal host anywhere in the
 /// loop, so it isolates the quirk to systemd's own behavior rather than to
 /// anything farhelm's launch or teardown path does.
 ///
@@ -4616,7 +4609,7 @@ async fn a_systemd_255_sigkill_of_a_multithreaded_scope_member_still_tears_it_do
     // `systemd-run --scope` execs in place (see `scope.rs`'s module docs),
     // so the child handle's own pid must still name the same process the
     // fixture reported — the same tree-shape audit the cgroup stop test
-    // above performs against tmux, adapted to a plain child handle here.
+    // above performs on a session's terminal, adapted to a plain child handle here.
     assert_eq!(
         child.id(),
         Some(pid),
@@ -4664,7 +4657,7 @@ async fn a_systemd_255_sigkill_of_a_multithreaded_scope_member_still_tears_it_do
 ///
 /// A dedicated reader rather than routing through the harness's
 /// `TermStream`-based [`wait_for`]: the systemd-255 probe test this
-/// serves deliberately runs with no tmux and no supervisor anywhere in
+/// serves deliberately runs with no terminal host and no supervisor anywhere in
 /// the loop, so its fixture's only output surface is an ordinary pipe.
 async fn wait_for_ready_on_stdout(stdout: tokio::process::ChildStdout, secs: u64) -> Vec<u8> {
     use tokio::io::AsyncBufReadExt as _;
@@ -5203,7 +5196,7 @@ async fn delete_fails_closed_when_a_launch_artifact_cannot_be_removed() {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => panic!("remove the fixture's completed wrapper waypoint: {error}"),
     }
-    // A new terminal's launch record (`<id>.0.host`) sits beside the spec,
+    // The terminal host's launch record (`<id>.0.host`) sits beside the spec,
     // and the same artifact removal unlinks it, in the directory's own
     // order. Removed here so that the spec is the one blocked file and the
     // exact-path assertion below pins the spec's fail-closed unlink on every
@@ -5392,13 +5385,12 @@ async fn attach_during_delete_race_ends_in_a_consistent_state() {
             }
             Err(e) => {
                 // `NotFound` is delete's row/map removal having already
-                // landed. `Internal` is the OTHER legitimate shape of
-                // this exact race: the entry is still in the map (not
-                // removed yet) but delete's teardown already killed the
-                // tmux session underneath it, so Attach's own tmux calls
-                // fail with an ordinary (unclassified) tmux error. Both
-                // are consistent outcomes of "delete got there first";
-                // anything else is retried, bounded by the outer
+                // landed: a consistent outcome of "delete got there
+                // first". `Internal` was the other shape of this race when
+                // Attach called tmux (the entry still in the map, its
+                // terminal already ended underneath it); whether an attach
+                // to a just-ended host can still produce it has not been
+                // checked. Anything else is retried, bounded by the outer
                 // deadline, since it may just be a transient blip rather
                 // than the race settling.
                 let expected_race_outcome = e.downcast_ref::<SupervisorError>().is_some_and(|se| {

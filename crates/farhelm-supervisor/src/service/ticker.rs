@@ -192,8 +192,7 @@ pub(crate) const TICKER_INTERVAL: Duration = Duration::from_secs(2);
 ///
 /// Each tail renders a host's screen to text and runs the agent's screen
 /// reader over it, so an unbounded pass would make the ticker's per-tick
-/// work scale with the number of live sessions. (The budget dates from
-/// when each tail was a tmux `capture-pane` subprocess.) Sessions past the budget are not skipped,
+/// work scale with the number of live sessions. Sessions past the budget are not skipped,
 /// they are DEFERRED: the pass resumes where the previous one stopped, so
 /// a live session is sampled once every `ceil(live / budget)` ticks rather
 /// than every tick. That is the real guarantee, and it is weaker than
@@ -544,8 +543,7 @@ impl ActivitySample {
     /// Fold one freshly captured screen into this sample.
     ///
     /// Change is detected by comparing screens rather than by an activity
-    /// timestamp of output (what tmux's window activity was, when terminals
-    /// ran there), because output activity counts any write to the pty — a redraw of an unchanged screen, a
+    /// timestamp of output, because output activity counts any write to the pty — a redraw of an unchanged screen, a
     /// cursor blink from a TUI's own timer — which for status purposes is
     /// exactly the noise that would report an idle agent as working. What
     /// this can miss in exchange is output that lands and is overwritten
@@ -1177,7 +1175,7 @@ pub(super) async fn observe_entries(sup: &Supervisor, entries: &[Arc<SessionEntr
                 // `transition_many` returns the current durable value when
                 // a restart beat this snapshot. Mirroring that
                 // value, rather than the proposed transition, prevents an
-                // old terminal's death from overwriting a fresh launch in RAM.
+                // stale terminal's death from overwriting a fresh launch in RAM.
                 for entry in entries {
                     if let Some(outcome) = committed.get(&entry.info.id) {
                         sup.mirror_committed_outcome(entry, outcome);
@@ -5279,6 +5277,4 @@ mod tests {
             "the immediate durable write leaves no retry behind"
         );
     }
-
-    // ---- The old-terminal notification ---------------------------------------------
 }

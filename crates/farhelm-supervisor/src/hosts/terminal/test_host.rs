@@ -1,5 +1,5 @@
-//! A stand-in terminal host for the supervisor's own tests of its terminal
-//! switch points and grid streams: a listener in the test process that
+//! A stand-in terminal host for the supervisor's own tests of its lifecycle
+//! verbs and grid streams: a listener in the test process that
 //! speaks just enough of the protocol for a [`HostTerminal`] to adopt it,
 //! applies resizes as a host does (a resize record in the stream), accepts
 //! every checkpoint, and that a test drives through a [`TestHost`] (output,

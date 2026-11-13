@@ -1,15 +1,14 @@
-//! The supervisor's terminal switch points with a host terminal behind a
-//! session, against a stand-in host in this test process
+//! The supervisor's lifecycle verbs with a host terminal behind a session,
+//! against a stand-in host in this test process
 //! (`hosts::terminal::test_host`): status and exit recording, the
 //! never-started excerpt, an unreadable host, the ticker's wake on a host
-//! exit, the hook anchor, the hold wait, prompt delivery, Stop of a
-//! child whose host has not yet reported its exit, and grid viewers
-//! attached over the supervisor's own connection handling (takeover,
-//! pause and stall, and which attachment a pause or a detach may act on
-//! once a takeover replaced it). Re-adoption tests keep
-//! retry timing separate from the action: they assert the real due time,
-//! then force only the test-owned schedule due, so the reconnect window
-//! needs no minute-long test sleep.
+//! exit, the hook anchor, the hold wait, prompt delivery, Stop of a child
+//! whose host has not yet reported its exit, and grid viewers attached over
+//! the supervisor's own connection handling (takeover, pause and stall, and
+//! which attachment a pause or a detach may act on once a takeover replaced
+//! it). Re-adoption tests keep retry timing separate from the action: they
+//! assert the real due time, then force only the test-owned schedule due,
+//! so the reconnect window needs no minute-long test sleep.
 //!
 //! The stand-in's child is a `sleep` the stand-in owns, so a verb that
 //! kills from the terminal's root reaches only that. The full lifecycle
@@ -90,7 +89,7 @@ pub(crate) async fn wait_for(
 }
 
 /// The row of a session whose agent terminal is the host at `socket`, as
-/// the store keeps it: kind `host`, and the socket's name in `pane`.
+/// the store keeps it: kind `host`, and the socket's name in `terminal_address`.
 pub(crate) fn host_row(id: &str, socket: &Path) -> StoredSession {
     let now = now_unix();
     StoredSession {
@@ -896,7 +895,7 @@ async fn a_stop_before_the_exit_record_still_records_the_shims_report() {
 /// no socket left), under a supervisor whose host starts
 /// are refused from then on, a consented Restart fails starting the
 /// session's terminal host definitively: the row is still a host
-/// row with `pane` `ABCDEFGH` and its earlier outcome, at the next
+/// row with `terminal_address` `ABCDEFGH` and its earlier outcome, at the next
 /// generation, and the failed launch left no launch spec or host record
 /// behind.
 #[farhelm_testtrace::test]
@@ -977,11 +976,11 @@ async fn a_terminal_less_host_row_restarts_in_a_host_never_in_tmux() {
 ///
 /// Why: both reviews' finding. A create whose confirmation failed and
 /// whose host could not be confirmed ended keeps its launching row (with no
-/// `pane`) and publishes that host; nothing else may show the launch (no
+/// `terminal_address`) and publishes that host; nothing else may show the launch (no
 /// scope on a machine without a user manager, no sentinel, no report). A
 /// retry that looked only at hosts it does not drive would find nothing
 /// and relaunch beside the running agent. Spec: with a pending reservation
-/// for `s1`, its launching host row with an empty `pane`, a published entry
+/// for `s1`, its launching host row with an empty `terminal_address`, a published entry
 /// holding a stand-in host, no user manager and no sentinel, a create with
 /// the same key answers with `s1`; the reservation is settled as created;
 /// the entry still holds the same host, and the host was sent nothing.
@@ -1828,7 +1827,7 @@ async fn a_stop_request_over_a_live_host_child_is_cleared_by_reload() {
 /// must not read as having no terminal: no terminal reads as gone, and an
 /// observation would then record the sentinel's launch error and clean the
 /// launch's artifacts up, the very inference reload refused to draw.
-/// Spec: a launching host row `s1` with an empty `pane`, a launch record
+/// Spec: a launching host row `s1` with an empty `terminal_address`, a launch record
 /// that is not one, a launch sentinel, and a stand-in host in the socket
 /// directory with a tag no build reads: after a reload the session holds a
 /// host terminal that is unavailable; after an observation pass the row is
@@ -3546,8 +3545,7 @@ async fn a_grid_attach_to_a_placeholder_is_refused_until_a_runtime_replaces_it()
 
 /// A takeover displaces a host agent's grid attachment like any other.
 ///
-/// Why: SPEC.md's one-attached-client rule holds per session, whatever
-/// kind of terminal the session has; a second viewer of a host agent must
+/// Why: SPEC.md's one-attached-client rule holds per session; a second viewer of a host agent must
 /// take it from the first, which is told so. Spec: a grid attach under
 /// lease `a` and then one under lease `b` ends the first channel with a
 /// takeover detach, while the second catches up as usual. (A session whose
@@ -3583,10 +3581,9 @@ async fn a_takeover_displaces_a_host_agents_grid_attachment() {
 /// stalled.
 ///
 /// Why: the helm relies on the stall detach to end the attachment of a
-/// browser that stops reading without closing its socket, for grid streams
-/// as for byte streams. Spec: with a 300 ms stall timeout, a grid viewer
-/// that pauses its channel after the catch-up is sent a `Detached` with the
-/// stalled code.
+/// browser that stops reading without closing its socket. Spec: with a
+/// 300 ms stall timeout, a grid viewer that pauses its channel after the
+/// catch-up is sent a `Detached` with the stalled code.
 #[farhelm_testtrace::test]
 async fn a_stalled_grid_viewer_is_detached() {
     let (_state, sup, _host, test_host) = grid_fixture(SupervisorTimeouts {
@@ -3615,9 +3612,7 @@ async fn a_stalled_grid_viewer_is_detached() {
 // same key while the loser's output task may still be on its way out. These
 // tests pin that a pause, a stall teardown and a natural detach each act only
 // on the attachment that issued them, and that the stall bound applies to one
-// continuous pause rather than to their sum. They were ported from end-to-end
-// tests that ran on the removed tmux driver; the code they cover serves every
-// grid viewer.
+// continuous pause rather than to their sum.
 
 /// The key of `s1`'s agent attachment, the one these tests attach.
 fn s1_agent() -> AttachmentKey {

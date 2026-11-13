@@ -12,7 +12,9 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 /// Shared helpers outlive the invoking helm or SSH login. Strip only valid
-/// Farhelm variable names, plus private tmux coordinates, before they start.
+/// Farhelm variable names, plus the coordinates of any tmux the caller runs
+/// in (`TMUX`, `TMUX_PANE`) and the caller's `TMUX_TMPDIR`, before they
+/// start.
 pub(crate) const CLEAN_PLACE_EXEC: &str = "for name in $(env | sed -n 's/^\\(FARHELM_[A-Za-z0-9_]*\\)=.*/\\1/p'); do unset \"$name\"; done; unset TMUX TMUX_PANE TMUX_TMPDIR; exec \"$@\"";
 
 /// The local supervisor uses its socket. Every other machine runs a child

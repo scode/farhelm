@@ -1,7 +1,7 @@
 //! Custom command text crosses Bash once; filled placeholders remain data.
 //!
 //! These cases use a private login-shell environment and the real shim, in a
-//! terminal host, as every new terminal is. Literal argv unit tests cannot
+//! terminal host, as every terminal is. Literal argv unit tests cannot
 //! distinguish preserved shell source from a reconstructed command, or prove
 //! that a filled value stays inert.
 

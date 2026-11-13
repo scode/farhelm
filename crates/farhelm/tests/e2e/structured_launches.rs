@@ -305,7 +305,7 @@ pub(crate) fn fake_agent_launch(
     }
 }
 
-/// Launch one frozen structured bundle through the real private tmux server.
+/// Launch one frozen structured bundle in a real terminal host.
 async fn launch(
     h: &Harness,
     fixture: &FakeHarness,
@@ -457,7 +457,7 @@ pub(crate) async fn assert_live_exchange(
 }
 
 /// Fail unless the session's agent lists as live: the supervisor's own
-/// reading of its terminal, whichever kind it is, bounded by the listing
+/// reading of its terminal, bounded by the listing
 /// request's own timeout.
 async fn assert_live_before(client: &SupervisorClient, session: &str, phase: &str) {
     let listing = tokio::time::timeout(Duration::from_secs(30), client.list_sessions())

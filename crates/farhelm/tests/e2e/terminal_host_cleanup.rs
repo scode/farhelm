@@ -155,8 +155,8 @@ async fn plant_host(state_dir: &Path) -> HostGuard {
 /// then removes the directory.
 ///
 /// Why: the in-process harness is what almost every supervisor test stands
-/// on, and once supervisors start hosts, a harness that only killed its
-/// tmux server and removed its directory would leave every host its test
+/// on, and since supervisors start hosts, a harness that only removed its
+/// directory would leave every host its test
 /// started running for good, unreachable. Spec: with a host started in the
 /// harness's state directory, dropping the harness makes the host's
 /// process go within the cleanup's bound, and the state directory is gone.

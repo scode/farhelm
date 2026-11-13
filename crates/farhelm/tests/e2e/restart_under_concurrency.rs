@@ -146,8 +146,8 @@ async fn a_second_restart_cannot_reap_the_agent_the_first_one_just_launched() {
 /// getting an honest error — never a session torn half-down.
 ///
 /// The delete is issued while the restart is inside its kill sweep, which
-/// is precisely where an unserialized delete would kill the tmux session
-/// the relaunch is about to respawn into. Whichever order the claim
+/// is precisely where an unserialized delete would tear down the session
+/// the relaunch is about to start its new terminal for. Whichever order the claim
 /// imposes, the invariants below hold: the session is gone afterwards, and
 /// nothing carrying its marker is still running.
 #[farhelm_testtrace::test]
@@ -399,7 +399,7 @@ async fn a_stale_generation_zero_sentinel_cannot_taint_generation_one() {
 
     // Kill generation 1's own process directly, bypassing `stop_session`,
     // so its terminal holds an exited agent (a host keeps running with the
-    // final screen, as tmux keeps a dead pane) with no annotation: the only
+    // final screen) with no annotation: the only
     // shape that would ever even attempt a sentinel read. Ending the
     // terminal itself would leave no terminal at all instead, which is not
     // the state under test here.

@@ -36,11 +36,10 @@
 //! - `test_program` (unit tests only): this crate's test binary as a host
 //!   program, so that its unit tests run their sessions in real hosts.
 //!
-//! The service's terminal switch points handle a session whose terminal is
-//! a [`terminal::HostTerminal`]. Every
-//! create starts its agent in a host, and every new tab opens in one. A
-//! restarted supervisor finds
-//! the hosts of its host rows again with [`registry`] and adopts them
+//! The service's lifecycle verbs drive every session's terminal as a
+//! [`terminal::HostTerminal`]: every create starts its agent in a host, and
+//! every new tab opens in one. A restarted supervisor finds the hosts of its
+//! host rows again with [`registry`] and adopts them
 //! ([`terminal::HostTerminal::adopt_found`]), in
 //! `service::core::host_handover`, and its sessions' tab hosts in
 //! `service::core::host_tabs`.

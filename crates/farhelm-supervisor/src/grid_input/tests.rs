@@ -1,7 +1,7 @@
 //! Tests of the grid input encoder: keys and mouse reports against
 //! Farhelm's checked-in key and mouse tables, and pastes, the cases the
 //! mouse table leaves out, focus reports and `Input` framing against the
-//! bytes the module docs specify (the same bytes xterm.js sends).
+//! bytes the module docs specify.
 
 use super::*;
 use farhelm_proto::grid::{GRID_MAX_PASTE_PART_BYTES, GRID_MAX_TEXT_INPUT_BYTES};
@@ -189,9 +189,8 @@ fn arrows_follow_the_programs_cursor_key_mode() {
     assert_eq!(encode(&shift_up, &application, SIZE), b"\x1b[1;2A");
 }
 
-/// The keypad's keys type their characters whatever DECKPAM says (old
-/// terminals' xterm.js has no application keypad), so the encoder ignores that
-/// mode.
+/// The keypad's keys type their characters whatever DECKPAM says, as they
+/// always have in Farhelm's terminals, so the encoder ignores that mode.
 #[test]
 fn the_keypad_types_its_characters_in_either_keypad_mode() {
     let keypad = Modes {
@@ -516,11 +515,12 @@ fn an_empty_paste_writes_nothing() {
 /// event sends under every Shift, Alt and Ctrl combination, each reporting
 /// mode the emulator tracks, the default and SGR encodings, and coordinates
 /// at the screen's edge and the default encoding's limit. A difference is a
-/// click or scroll a program reads differently, and differently from an old
-/// terminal: the table was first computed by the vendored xterm.js's own
-/// mouse service (its protocols' filters, event codes, encodings and
-/// `triggerMouseEvent`'s checks). UTF-8 coordinates and the alternate
-/// screen's arrow keys, which are not in the table, are tested below.
+/// click or scroll a program reads differently, and differently from how
+/// Farhelm's terminals always reported it: the table was first computed by
+/// the vendored xterm.js's own mouse service (its protocols' filters, event
+/// codes, encodings and `triggerMouseEvent`'s checks). UTF-8 coordinates and
+/// the alternate screen's arrow keys, which are not in the table, are tested
+/// below.
 #[test]
 fn every_mouse_event_encodes_as_the_mouse_table_says() {
     let table = include_str!("../../tests/fixtures/grid-mouse.jsonl");
@@ -662,7 +662,7 @@ fn the_default_encoding_writes_three_bytes() {
 }
 
 /// The default encoding cannot express a column or row past 223 (a byte past
-/// 255), so nothing is sent rather than a wrong cell (as in old terminals). SGR
+/// 255), so nothing is sent rather than a wrong cell. SGR
 /// and UTF-8 coordinates have no such limit within the largest grid.
 #[test]
 fn the_default_encoding_drops_events_past_its_byte_limit() {
@@ -702,10 +702,10 @@ fn sgr_reports_say_which_button_was_released() {
     );
 }
 
-/// UTF-8 coordinates (1005), which the emulator tracks though old terminals do
-/// not: the default encoding's values, each a UTF-8 character, so a value past
-/// 127 takes two bytes where the default encoding would write one byte the
-/// program reads as broken UTF-8.
+/// UTF-8 coordinates (1005), which the emulator tracks: the default
+/// encoding's values, each a UTF-8 character, so a value past 127 takes two
+/// bytes where the default encoding would write one byte the program reads
+/// as broken UTF-8.
 #[test]
 fn utf8_reports_encode_large_values_as_characters() {
     let modes = reporting(MouseReporting::Clicks, MouseEncoding::Utf8);
@@ -717,7 +717,7 @@ fn utf8_reports_encode_large_values_as_characters() {
 }
 
 /// A program that asks for SGR (1006) and also for UTF-8 coordinates (1005)
-/// gets SGR reports, whichever it set first, as from tmux;
+/// gets SGR reports, whichever it set first, as Farhelm's terminals always gave;
 /// resetting 1006 leaves UTF-8. The modes are read from a real emulator fed the
 /// program's output, since the order is what the emulator used to get wrong (it
 /// kept only the mode set last).
@@ -755,7 +755,7 @@ fn sgr_wins_over_utf8_whichever_was_set_first() {
 }
 
 /// The screen may have shrunk since the client sent an event; one past the
-/// current screen is dropped, as old terminals drop one outside their grid.
+/// current screen is dropped rather than reported at a cell that is not there.
 #[test]
 fn events_past_the_current_screen_are_dropped() {
     let modes = reporting(MouseReporting::Clicks, MouseEncoding::Sgr);

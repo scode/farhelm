@@ -348,10 +348,10 @@ pub(crate) fn write_daemon_script(
 /// appears in that session's authoritative tab list (PLAN_M4.md
 /// acceptance 1).
 ///
-/// The working directory is checked by asking the shell rather than by
-/// inspecting tmux: what SPEC.md promises is that a command typed in the
-/// tab shows the session's cwd, and only running one proves the `-c` was
-/// applied to the process rather than merely to the window's metadata.
+/// The working directory is checked by asking the shell: what SPEC.md
+/// promises is that a command typed in the tab shows the session's cwd,
+/// and only running one proves the directory was applied to the process
+/// rather than merely recorded.
 #[farhelm_testtrace::test]
 async fn a_tab_runs_a_shell_in_the_sessions_working_directory() {
     let h = harness().await;
@@ -1169,8 +1169,8 @@ async fn restarting_the_agent_leaves_a_tab_attached_running_and_unswept() {
 /// The other side of the marker split: delete sweeps the session marker
 /// INCLUSIVELY, so the exclusion that protects tabs from the agent reap must not
 /// leak into this path. A daemonized child of the tab is what proves it
-/// reached past the tmux teardown, which would have killed the shell
-/// regardless.
+/// reached past ending the tab's terminal host, whose hangup would have
+/// killed the shell regardless.
 #[farhelm_testtrace::test]
 async fn deleting_a_session_takes_its_tabs_and_their_daemonized_descendants() {
     let h = harness().await;
@@ -1223,15 +1223,15 @@ async fn deleting_a_session_takes_its_tabs_and_their_daemonized_descendants() {
 ///
 /// Why: the agent and each tab are separate terminals of one session, and
 /// a viewer sizes the one it shows. A resize that reached a sibling would
-/// reflow a terminal nobody is looking at, at a size nobody asked for: the
-/// bug this test was written for in tmux days, when resizes were aimed at
-/// the tmux session and so landed on whichever window tmux had last made
-/// current. Spec: with the agent and a tab, made at 80x24, both attached at
-/// 81x25 by one client (premise: both hosts reach 81x25), a resize of the
-/// tab's channel to 111x33 brings the tab's host to 111x33 while the
-/// agent's stays at 81x25, and a resize of the agent's channel to 90x30
-/// brings the agent's host to 90x30 while the tab's stays at 111x33. Sizes are read from each terminal host's runtime, which
-/// reports a size once the host's own resize record has arrived.
+/// reflow a terminal nobody is looking at, at a size nobody asked for,
+/// which is the bug this test was first written for. Spec: with the agent
+/// and a tab, made at 80x24, both attached at 81x25 by one client (premise:
+/// both hosts reach 81x25), a resize of the tab's channel to 111x33 brings
+/// the tab's host to 111x33 while the agent's stays at 81x25, and a resize
+/// of the agent's channel to 90x30 brings the agent's host to 90x30 while
+/// the tab's stays at 111x33. Sizes are read from each terminal host's
+/// runtime, which reports a size once the host's own resize record has
+/// arrived.
 #[farhelm_testtrace::test]
 async fn a_resize_reflows_only_the_named_terminal() {
     let h = harness().await;
@@ -1396,7 +1396,7 @@ async fn input_reaches_only_the_terminal_it_was_sent_to() {
 /// A stalled viewer on one TAB pauses only that tab's stream: the agent
 /// terminal keeps flowing throughout (PLAN_M4.md acceptance 5).
 ///
-/// On new terminals every terminal is its own host with its own stream, so
+/// Every terminal is its own host with its own stream, so
 /// the claim is that the supervisor's per-attachment flow control and stall
 /// handling stay per terminal: a wedged tab viewer must not hold up the
 /// agent's stream, the terminal the user is actually looking at. The agent

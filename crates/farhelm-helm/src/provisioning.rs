@@ -13277,8 +13277,8 @@ mod tests {
         // removal runs for real over ssh.
         if use_ssh {
             // An ENDED session keeps its terminal alive: a terminal host
-            // keeps its process and final screen after its program exits (a
-            // provisioned supervisor creates new terminals in hosts).
+            // keeps its process and final screen after its program exits (every
+            // terminal of a provisioned supervisor is a host).
             // Uninstall accepts ended sessions, and its stop must end that
             // process as well. Removing the unit and reloading restores
             // control-group termination; the ended terminal distinguishes

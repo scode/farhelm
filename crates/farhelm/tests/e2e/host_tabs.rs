@@ -259,14 +259,12 @@ fn carries_markers(pid: u32) -> bool {
 /// size, lists, attaches as a grid, and closes leaving nothing; a takeover
 /// displaces the previous client's agent and tab attachments together.
 ///
-/// Why: this is the switch's whole effect on tabs (the plan's PR 18), and a
-/// host agent's session has no tmux session at all, so its only tabs are
-/// hosts. The size keeps a tab's first attach from repainting a torn frame
-/// (BUGS_BURNDOWN.md issue 4, which the tmux tab's sizing exists for); the
-/// record is how Delete and a restarted supervisor find the host; and
-/// SPEC.md's one attached client per session must hold across terminals of
-/// every kind. Spec: with the switch on, opening a tab of a created host
-/// agent's session succeeds and the session lists that one tab; its runtime
+/// Why: every tab runs in a host of its own (the plan's PR 18). The size
+/// keeps a tab's first attach from repainting a torn frame (BUGS_BURNDOWN.md
+/// issue 4); the record is how Delete and a restarted supervisor find the
+/// host; and SPEC.md's one attached client per session must hold across all
+/// of a session's terminals. Spec: opening a tab of a created host agent's
+/// session succeeds and the session lists that one tab; its runtime
 /// is not the agent's, its host is at the agent's size, and the tab's
 /// launch record names its socket; a line typed into it is echoed. A grid
 /// client "a" attaches the agent and the tab; a grid client "b" attaching
@@ -374,11 +372,11 @@ async fn a_host_tab_beside_a_host_agent_opens_attaches_and_closes() {
 /// A tab whose shell is dead by the time the open would reply is refused
 /// with the shell's last words from the emulator, and leaves nothing.
 ///
-/// Why: SPEC.md's every-failed-operation rule, as for a tmux tab: a broken
+/// Why: SPEC.md's every-failed-operation rule: a broken
 /// login shell must read as a refused open with its own complaint, never a
 /// "successful" tab holding a corpse, and the refusal must not leave a host
 /// (which outlives its program) or a record behind. The settle gate makes
-/// the death certain before the open looks, as the tmux test's does. Spec:
+/// the death certain before the open looks. Spec:
 /// with a launch shell that, for a tab (no `-c`), records its pid, prints
 /// `SHELL-REFUSED-TO-START` and exits 9: the open, released once that
 /// shell's pid is gone, fails saying the shell was already dead and quoting
@@ -513,9 +511,9 @@ async fn an_open_that_fails_after_its_shell_started_leaves_nothing() {
 /// A host tab whose shell exits is reaped promptly, driven by its host's
 /// exit, with the ticker's own interval far away.
 ///
-/// Why: SPEC.md reaps a tab whose process exits; for a tmux tab tmux's
-/// `pane-died` hook wakes the reap, and a host tab must not wait for a tick
-/// either (the goal: the exit event drives the reap, no polling). Spec: on
+/// Why: SPEC.md reaps a tab whose process exits, and a host tab must not
+/// wait for a tick to be reaped (the goal: the exit event drives the reap,
+/// no polling). Spec: on
 /// a served supervisor whose ticker interval is ten minutes, a host tab whose
 /// shell is told to exit disappears from the listing, its host process ends
 /// and its socket and record are removed, all well within the wait bound.

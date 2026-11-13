@@ -112,10 +112,10 @@ pub(crate) use enum_with_all;
 /// Acting `farhelm` commands waiting for the user's approval, as the helm
 /// serves them to the GUI (see the module's own docs).
 pub mod approvals;
-// The grid stream a host terminal's attachment carries instead of terminal
-// bytes, and the input its viewer sends back. Its docs are all its own: an
-// outer doc comment here would make rustdoc resolve the module's links from
-// this file, where its items are not in scope.
+// The grid stream a terminal's attachment carries, and the input its viewer
+// sends back. Its docs are all its own: an outer doc comment here would make
+// rustdoc resolve the module's links from this file, where its items are not
+// in scope.
 pub mod grid;
 /// Stable remote-host identity choices shared with the browser UI.
 pub mod host_appearance;
@@ -757,8 +757,8 @@ pub enum SessionStatus {
     /// can already be dead by the time that reply reaches the caller, so
     /// claiming a live status there would itself be a fabricated liveness
     /// claim. List and rename replies ask the agent's terminal afresh whether
-    /// its program still runs (an old terminal's tmux pane, a new terminal's
-    /// terminal host) and read the supervisor's cached classification. Create
+    /// its program still runs (its terminal host) and read the supervisor's
+    /// cached classification. Create
     /// and restart replies instead use this placeholder: "not yet known", not
     /// "known to be running".
     ///
@@ -797,9 +797,9 @@ pub enum SessionStatus {
     /// status, and the one a session gets whenever nothing more specific
     /// has been established, including before it has ever been sampled.
     ///
-    /// Alive-ness is the agent's terminal reporting its program not ended (an
-    /// old terminal's tmux pane not dead, a terminal host's child not
-    /// exited), exactly as `Alive` was before version 10; what is NEW is the
+    /// Alive-ness is the agent's terminal reporting its program not ended (a
+    /// terminal host's child not exited), exactly as `Alive` was before
+    /// version 10; what is NEW is the
     /// claim about activity, which is sampled rather than observed and
     /// therefore heuristic. A consumer that needs "is this session live" must
     /// ask that question directly (its own liveness predicate over all three
@@ -828,10 +828,8 @@ pub enum SessionStatus {
     /// is still there, and typing into it still works.
     Idle,
     /// The agent's process has ended. `exit_code` is the status it exited
-    /// with, as its terminal reports it: a new terminal's terminal host
-    /// records the child's exit, an old terminal's tmux pane gives
-    /// `#{pane_dead_status}` when parseable. `None` covers a death by
-    /// signal, which neither reduces to a plain code, and the restart-gap
+    /// with, as its terminal host records the child's exit. `None` covers a
+    /// death by signal, which does not reduce to a plain code, and the restart-gap
     /// and stale-lookup cases where there is no terminal to ask at all
     /// (see the supervisor's `ListSessions` handler). As of PLAN_M3.md
     /// item 2 a code the supervisor witnessed EARLIER is retained once the
@@ -848,11 +846,11 @@ pub enum SessionStatus {
     /// exists — there is no "error, but no detail" case the way there is
     /// an "exited, but its terminal could not reduce it to a code" case.
     Error { detail: String },
-    /// The host rebooted (or, for an agent in an old terminal, an update ended
-    /// that terminal at startup) while this session's durable last-known
-    /// outcome was launching or running, and the agent's terminal (its terminal host, or
-    /// for an old terminal the private tmux server) — the only liveness truth
-    /// this system keeps — did not survive that reboot (PLAN_M3.md item 2,
+    /// The host rebooted (or, for an agent an earlier release left in its
+    /// private tmux server, the supervisor ended that server at startup) while
+    /// this session's durable last-known outcome was launching or running, and
+    /// the agent's terminal — the only liveness truth this system keeps — did
+    /// not survive that (PLAN_M3.md item 2,
     /// SPEC.md's Durability section). Distinct from `Unknown`: `Unknown`
     /// means "not yet asked"; `Interrupted` means "asked, via the one reboot
     /// detector this system has (a changed stored boot id), and the answer is
@@ -1078,8 +1076,8 @@ pub struct SessionInfo {
     /// `Unknown`, the live statuses (`Running`/`Waiting`/`Idle`), and
     /// `Exited` are computed fresh by the supervisor on
     /// every `ListSessions` reply from the LIVE state of the agent's
-    /// terminal (a terminal host's report of its child, an old terminal's
-    /// tmux pane) — that half of this field is never persisted, because
+    /// terminal (its terminal host's report of its child) — that half of
+    /// this field is never persisted, because
     /// the terminal's own state is the only truth for a currently-reachable
     /// session, and it does not survive a supervisor restart on its own
     /// terms either. `Interrupted` and `Error` (PLAN_M3.md items 2 and 3)
@@ -1656,12 +1654,8 @@ pub const STOP_BEFORE_START_ANNOTATION: &str = "stopped before the agent finishe
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TerminalSelector {
     /// The agent's own terminal, the one the supervisor holds for the
-    /// session's agent: for a new terminal, the terminal host the
-    /// session's row names. For an old terminal it is the AGENT-MARKED
-    /// tmux window, resolved by its marker and never by position
-    /// (PLAN_M4.md item 2), because anything that reaches the private tmux
-    /// server can conjure windows the supervisor never made. The only
-    /// terminal that existed before M4.
+    /// session's agent: the terminal host the session's row names. The
+    /// only terminal that existed before M4.
     #[default]
     Agent,
     /// A terminal tab by id. The id is the one `TabInfo::id` carries;
@@ -2362,8 +2356,7 @@ pub enum AgentReply {
     /// know synchronously.
     Stopped {},
     /// Both the prompt paste and submit were confirmed delivered by the
-    /// agent's terminal (its terminal host, or tmux for an old terminal).
-    /// This does not acknowledge vendor processing or completion; retrying
+    /// agent's terminal host. This does not acknowledge vendor processing or completion; retrying
     /// sends another prompt.
     Prompted {},
     /// A completed session deletion. A checkout notice is part of the
@@ -3363,8 +3356,8 @@ pub enum ControlMsg {
     /// Kill the agent's entire process tree (MCP servers, dev servers, every
     /// descendant), leaving the session and its terminal in place — SPEC.md's
     /// "stop" (as distinct from "delete", below). The terminal survives the
-    /// program (a terminal host keeps running with the final screen; an old
-    /// terminal's pane is kept by `remain-on-exit`), so it stays viewable,
+    /// program (a terminal host keeps running with the final screen), so it
+    /// stays viewable,
     /// including replaying to a client that was attached when the agent died.
     /// Stop also closes the session's terminal tabs and their process trees.
     /// A tab that cannot be closed is left in place and named in the reply's
@@ -3424,8 +3417,7 @@ pub enum ControlMsg {
     },
     /// Remove a session and all its stored state — the DB row, the
     /// in-memory entry, and (if the terminal is still live) the agent's
-    /// process tree and its terminals (terminal hosts, and an old
-    /// session's tmux session) — regardless of whether the
+    /// process tree and its terminal hosts — regardless of whether the
     /// agent is running, stopped, or was never live this process
     /// (SPEC.md's delete works "in any state"). Unlike `StopSession`, this
     /// ends the session's existence outright; a subsequent `ListSessions`
@@ -3661,7 +3653,7 @@ pub enum ControlMsg {
         prompt: String,
     },
     /// Both paste and submit were confirmed delivered by the agent's
-    /// terminal (its terminal host, or tmux for an old terminal); this says
+    /// terminal host; this says
     /// nothing about whether the agent has started or completed the
     /// requested work.
     SessionPrompted { req_id: u64 },
@@ -3742,8 +3734,8 @@ pub enum ControlMsg {
     TabOpened { req_id: u64, tab: TabInfo },
     /// Close a terminal tab: kill its shell and every process it left
     /// behind (SPEC.md: close "kills that shell and its processes" —
-    /// daemonized children included), then end its terminal (its terminal
-    /// host, or an old tab's tmux window). The reap runs in M2's stop
+    /// daemonized children included), then end its terminal host. The reap
+    /// runs in M2's stop
     /// ordering, scoped to the one tab (PLAN_M4.md item 2); the agent
     /// terminal and other tabs are untouched. An unknown `tab_id` is
     /// `NotFound`; closing a tab whose shell already exited still succeeds
@@ -7640,7 +7632,7 @@ mod tests {
     /// above), an unrecognized `TerminalSelector` `kind` tag is decode-
     /// fatal — the internally-tagged-enum analogue of
     /// `unknown_control_message_tag_fails_decode`. This is what would
-    /// catch a future terminal kind (a shared or observer selector, say)
+    /// catch a future selector kind (a shared or observer terminal, say)
     /// shipping without its own protocol bump: today's decoder must
     /// refuse an unrecognized `kind` outright, never silently default to
     /// `Agent`, or a real version skew would attach the wrong terminal

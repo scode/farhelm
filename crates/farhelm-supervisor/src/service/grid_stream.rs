@@ -2,14 +2,14 @@
 //! to one viewer, and the path that viewer's input takes back to the
 //! program.
 //!
-//! A terminal in a terminal host has no byte stream a viewer could render:
-//! its screen lives in the supervisor's emulator (`crate::hosts::terminal`),
-//! and reaches a viewer as grid messages (`farhelm_proto::grid`). An attach
-//! that asks for a grid gets one [`GridSender`] task, which fills the
-//! attachment's `ActiveAttach::forwarder` slot, and one [`HostAttach`], the
-//! attachment's `ActiveAttach::input`, which takes its input. Everything
-//! around them (takeover, detach, the pause watch, the stall detach, the
-//! detach verdicts) is the attachment machinery in `super::terminals` and
+//! A terminal has no byte stream a viewer could render: its screen lives in
+//! the supervisor's emulator (`crate::hosts::terminal`), and reaches a
+//! viewer as grid messages (`farhelm_proto::grid`). Every attach gets one
+//! [`GridSender`] task, which fills the attachment's
+//! `ActiveAttach::forwarder` slot, and one [`HostAttach`], the attachment's
+//! `ActiveAttach::input`, which takes its input. Everything around them
+//! (takeover, detach, the pause watch, the stall detach, the detach
+//! verdicts) is the attachment machinery in `super::terminals` and
 //! `super::connection`.
 //!
 //! # The stream

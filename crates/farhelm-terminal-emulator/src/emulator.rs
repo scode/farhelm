@@ -284,11 +284,11 @@ impl Emulator {
     /// valid UTF-8 dropped, at most 4096 bytes (the vendored cap), and
     /// nothing before the program sets one.
     ///
-    /// An old terminal's title (tmux's `#{pane_title}`) differs in ways none
-    /// of those prefixes can see, so the readers need no rule per kind: it
-    /// is the host name before a title is set, keeps surrounding whitespace,
-    /// turns `#(` into `_(`, ignores a title with invalid UTF-8 whole, and
-    /// survives RIS.
+    /// The titles captured beside the agent screens from before November 2026
+    /// are tmux's `#{pane_title}`, which differs in ways none of those
+    /// prefixes can see, so the readers need no rule for them: it is the host
+    /// name before a title is set, keeps surrounding whitespace, turns `#(`
+    /// into `_(`, ignores a title with invalid UTF-8 whole, and survives RIS.
     pub fn title(&self) -> &str {
         self.term.title().unwrap_or("")
     }

@@ -221,15 +221,14 @@ pub(crate) async fn end_runtime(host: &HostTerminal, pid: u32) {
 
 // ---- Creates --------------------------------------------------------------------
 
-/// A create under the switch starts its agent in a host and records it as a
+/// A create starts its agent in a host and records it as a
 /// host row, and Stop's sweep ends the agent but never the host.
 ///
-/// Why: this is the switch's whole effect on a create (the plan's PR 16):
-/// the row's kind and its `pane` holding the socket's name are what a
+/// Why: the row's kind and its `terminal_address` holding the socket's name are what a
 /// restarted supervisor will read the session by (D-14), and a
 /// host that Stop's marker sweep could reach would take the final screen
 /// with it (D-17). Spec: a create of the fake agent returns; its row is a
-/// host row whose `pane` names the one socket in `<state>/hosts`, which the
+/// host row whose `terminal_address` names the one socket in `<state>/hosts`, which the
 /// published runtime serves; the host's screen shows the agent's ready marker and the session
 /// lists as live. After Stop, the agent's process is gone, the host's
 /// process still runs, the runtime reports the child's exit (not the
@@ -588,12 +587,12 @@ async fn the_agent_in_a_host_keeps_its_launch_scope() {
 /// version, and no `TMUX` at any point, so a startup file's tmux autostart
 /// runs as it would in any terminal outside tmux.
 ///
-/// Why: a new terminal must not claim to be tmux (no `TERM_PROGRAM=tmux`,
+/// Why: a terminal must not claim to be tmux (no `TERM_PROGRAM=tmux`,
 /// no tmux version, no stand-in `TMUX`), since agents adapt to what these
 /// variables say, and SPEC.md's "as if the user had SSHed in" contract
 /// needs the supervisor's own environment to reach the login shell. The
 /// autostart is the accepted cost of not faking `TMUX` (SPEC.md, "Session
-/// view"). Spec: a supervisor creating in hosts runs a command through a
+/// view"). Spec: a supervisor runs a command through a
 /// login shell stand-in that records its environment and then runs Bash
 /// with a fixture home whose `.bash_profile` records `TMUX` and marks an
 /// autostart when `TMUX` is unset. Every recording is written to a
@@ -794,7 +793,7 @@ pub(crate) fn counted_agent(runs: &Path) -> String {
 /// read the launch as never started and relaunch beside a running agent,
 /// the duplicate SPEC.md forbids. Spec: with the create-lifecycle seam
 /// failing the first attempt at `DuringLaunch` (after the host started),
-/// the create fails; the row is a launching host row with no `pane`, one
+/// the create fails; the row is a launching host row with no `terminal_address`, one
 /// host runs and its agent has started once. A retry with the same key
 /// returns the same session; the reservation is settled as created; still
 /// one host socket and one host process, the same one, and the agent has
@@ -1345,7 +1344,7 @@ pub(crate) fn interrupted_seams(
 /// The launch's host record is what fences that first stage. Spec: with the
 /// first start interrupted after its first stage took the spec (and held
 /// there), the create fails; the row is a launching host row with no
-/// `pane`, its host record names a first stage that runs, and no socket
+/// `terminal_address`, its host record names a first stage that runs, and no socket
 /// exists. A retry with the same key waits for that first stage (the test
 /// releases it from the wait's own hook) and then returns the same session;
 /// the reservation is created; exactly one host socket and one host
@@ -1719,7 +1718,7 @@ fn unexecutable_agent(program: &Path) -> farhelm_proto::SessionLaunch {
 /// supervisor runs, while the host still runs.
 ///
 /// Why: the sol review's round-2 P1. The host of a failed agent stays up
-/// with the final screen, and while the row's `pane` is empty the launch's
+/// with the final screen, and while the row's `terminal_address` is empty the launch's
 /// host record is the only thing naming its socket; an error cleanup that
 /// removed it would leave a live host nothing can attribute. Spec: a create
 /// interrupted at `DuringLaunch` (its host started, its launch not
@@ -2076,7 +2075,7 @@ async fn ending_a_host_whose_runtime_is_encoding_falls_back_in_bounded_time() {
 /// whatever answers there (the renamed-over host, someone else's terminal)
 /// and report the session's own host ended while it still runs. The
 /// fallback goes by the process the runtime adopted, which a rename cannot
-/// change. Spec: with the switch on, every encode of a new host's runtime
+/// change. Spec: with every encode of a new host's runtime
 /// held at an encode gate and a checkpoint due after any output, a created
 /// session whose runtime has an encode at the gate (premise), and another
 /// session's host started and its socket renamed over the agent host's

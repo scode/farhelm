@@ -197,7 +197,7 @@ fn printed_number(terminal: &HostTerminal, prefix: &str) -> u32 {
 /// A fresh host's output and title reach the runtime's screen, and its
 /// child is the running root.
 ///
-/// Why: this is the path every new terminal's screen, its status detection
+/// Why: this is the path every terminal's screen, its status detection
 /// and its kill root take. Spec: a child that sets its title, prints its
 /// own pid and execs a sleep shows that line and that title; the terminal
 /// is running, its root is the printed pid (the exec keeps the pid), and
@@ -344,7 +344,7 @@ async fn an_update_never_ended_is_drawn_at_its_deadline() {
 
 /// A host spawned with an initial snapshot starts its terminal from it.
 ///
-/// Why: Restart starts a new host seeded with the old terminal's history, and
+/// Why: Restart starts a new host seeded with the previous terminal's history, and
 /// the runtime must show that history above what the new program prints.
 /// Spec: a host seeded with a snapshot of an emulator that printed
 /// `from the seed`, whose child prints `after the seed`, shows both, in that
