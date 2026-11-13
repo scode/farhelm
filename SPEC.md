@@ -75,8 +75,7 @@ absolutely catastrophically major mistake with huge user impact."
 One control plane, two ways to face it:
 
 1. **Native Mac app**: `farhelm-desktop`, a bare binary that opens the UI in a native window and starts the helm and a
-   local supervisor beside it, so the Mac itself is a host. This is the setup when the Mac is your main machine. It
-   neither needs nor looks for tmux.
+   local supervisor beside it, so the Mac itself is a host. This is the setup when the Mac is your main machine.
 2. **Web interface**: a standalone helm — wherever it runs — serves a browser UI with the same capabilities, so a helm
    running on a Linux host is fully usable with nothing installed on the client machine. The native app's embedded helm
    is an internal part of the app: it serves only its own window, on a loopback port chosen for that launch, and serves
@@ -189,13 +188,12 @@ that fails ends the step with a warning that says the file may have been left in
 completes, since the new supervisor already runs.
 
 A remote Mac's setup installs `farhelm` in `~/.local/lib/farhelm`, keeps its state in `~/.local/state/farhelm`, and
-writes `~/Library/LaunchAgents/io.farhelm.supervisor.plist` for the SSH user's launchd domain. Setup, Update and
-uninstall do not check for, install, run or mention tmux on this path; old tmux terminals on remote Macs are
-unsupported. There is no macOS version floor: inspection refuses a Mac missing a command the path needs, naming that
-command. Setup, Update (manual, Update all and automatic) and uninstall are unsupported when the Farhelm desktop app is
-installed in `~/Applications/Farhelm.app` or `/Applications/Farhelm.app`, and the refusal says so without suggesting
-starting a supervisor by hand. Discovery still adopts a supervisor already running there, including the app's, without
-restarting or replacing it. The desktop app's own local supervisor is unchanged.
+writes `~/Library/LaunchAgents/io.farhelm.supervisor.plist` for the SSH user's launchd domain. There is no macOS version
+floor: inspection refuses a Mac missing a command the path needs, naming that command. Setup, Update (manual, Update all
+and automatic) and uninstall are unsupported when the Farhelm desktop app is installed in `~/Applications/Farhelm.app`
+or `/Applications/Farhelm.app`, and the refusal says so without suggesting starting a supervisor by hand. Discovery
+still adopts a supervisor already running there, including the app's, without restarting or replacing it. The desktop
+app's own local supervisor is unchanged.
 
 Tensorlake's prepared snapshots include the login-manager and lingering preparation: Farhelm uses passwordless sudo to
 start the login manager and enable lingering for the sandbox user before installing its supervisor in the snapshot.
@@ -513,8 +511,7 @@ replaces one private token file in that host's supervisor state directory. The m
 every host-terminal agent spawn, terminal-tab spawn and Restart relaunch, injecting `GH_TOKEN` before the login shell so
 managed checkout clones see it too. It is never persisted in a session launch or passed on a command line. None removes
 only this owned file; ordinary host environment and manually configured Git authentication remain untouched. Existing
-processes keep their environment. Older supervisors ignore the file and need setup or Update; old terminals do not
-receive this injection.
+processes keep their environment. Older supervisors ignore the file and need setup or Update.
 
 Farhelm-built snapshots include Ubuntu's `gh` package. First GitHub-token delivery configures gh's own global Git
 credential helper for github.com without supplying a token to that command. Hosts created from reused images before
@@ -1950,8 +1947,7 @@ submission and focus-return behavior.
   its previous terminal, its agent stopped, and Restart can be tried again; when Farhelm cannot confirm that, the
   session is left with no terminal and its next Restart starts an empty one. The new terminal starts empty instead, with
   a log entry, when the old one's scrollback cannot be read or copied. When the terminal no longer exists (the process
-  that kept it ended, after a reboot, or an old terminal this release ended, see
-  [Terminal experience](#terminal-experience)), Restart starts with an empty one. Restart does NOT preserve the previous
+  that kept it ended, or the host rebooted), Restart starts with an empty one. Restart does NOT preserve the previous
   run's last visible screen: the terminal is blank until the new agent draws, and a full-screen program's final frame
   (which was never in scrollback to begin with) is gone. Losing it is accepted. Farhelm must never capture a terminal's
   screen and paint it back into a relaunched terminal ahead of the new process — a frame with no process behind it looks
@@ -2088,9 +2084,10 @@ manager, every named scope is observed live then confirmed gone, and no explicit
 afterwards. Confirmed 2026-11-10: jobs a user-run tmux moves outside those groups may survive Stop, Restart, Replace,
 Delete or tab close; this is accepted as the intent of running them under tmux. Its server inside the scope still ends.
 Cleanup does not inspect scopes for tmux or retain the sweep because of it. Delete also keeps the sweep when tab
-discovery is incomplete, including a session with no terminal or an old tmux session whose listing can no longer show
-its tabs. Unscoped or uncertain containment, a scope failure or a surviving explicit process likewise keeps the full
-sweep, as does a scope already gone before cleanup.
+discovery is incomplete, including a session with no terminal, and one that has been restarted at least once (an earlier
+release's Restart could have moved it from an old tmux terminal, leaving tabs nothing lists any more). Unscoped or
+uncertain containment, a scope failure or a surviving explicit process likewise keeps the full sweep, as does a scope
+already gone before cleanup.
 
 For a launch or tab without a scope (including macOS and a Linux launch made while no usable systemd user manager
 answered), there is no cgroup to contain a detached descendant, and the guarantee narrows to the processes Farhelm can
@@ -2159,20 +2156,16 @@ belongs to that tab and dies when the tab is closed, reaped, or ended by Stop or
 limits on hosts without a usable systemd user manager; see above). This is deliberately unlike the agent launch, which
 leaves detached services started by shell initialization before the agent outside its cleanup guarantee (see above),
 though cleanup may still reach one that stays in the agent's process tree. The agent's launch has normally already run
-the same startup files, so a tab usually finds such a service running and only reuses it. A tmux autostart guarded by
-`TMUX` being unset is where the two kinds of terminal differ. In an old terminal the launch runs those files while
-`TMUX` still names Farhelm's private tmux server and removes it only afterwards (see
-[Ownership during cleanup and provisioning](#ownership-during-cleanup-and-provisioning)), so such an autostart does not
-fire there; when the user's tmux server is not already running, the first tab's startup files therefore routinely start
-it, and the tab owns it, and when they `exec tmux`, detaching from it ends the tab and the server with it. A new
-terminal (see [Terminal experience](#terminal-experience)) is not tmux and does not pretend to be: no `TMUX` is set at
-any point, so the autostart runs during the agent's launch as it would in any terminal outside tmux. One that execs tmux
-replaces the launch, so the agent does not start and the session's terminal shows the user's tmux instead; keeping a
-login shell's startup files from doing that is the user's to arrange. A tab whose process exits on its own is reaped
-automatically and silently: the tab disappears as if closed, its dead pane's scrollback is discarded, and no notice or
-exit code is shown. This is deliberately NOT the agent terminal's contract — an exited agent stays viewable with its
-scrollback — because a tab's shell exiting is the user being done with the tab. A shell that dies before the tab's open
-completes still refuses the open loudly, with the shell's last words as the error.
+the same startup files, so a tab usually finds such a service running and only reuses it. That includes a tmux autostart
+guarded by `TMUX` being unset: a session's terminal (see [Terminal experience](#terminal-experience)) is not tmux and
+does not pretend to be: no `TMUX` is set at any point, so the autostart runs during the agent's launch as it would in
+any terminal outside tmux. One that execs tmux replaces the launch, so the agent does not start and the session's
+terminal shows the user's tmux instead; keeping a login shell's startup files from doing that is the user's to arrange.
+A tab whose process exits on its own is reaped automatically and silently: the tab disappears as if closed, its
+scrollback is discarded, and no notice or exit code is shown. This is deliberately NOT the agent terminal's contract —
+an exited agent stays viewable with its scrollback — because a tab's shell exiting is the user being done with the tab.
+A shell that dies before the tab's open completes still refuses the open loudly, with the shell's last words as the
+error.
 
 When a session's terminal contents no longer exist on a reachable host after a reboot, opening it shows the session's
 metadata and says why there is no terminal, rather than an empty pane.
@@ -2680,11 +2673,11 @@ before the agent finished starting"; otherwise it reads "stopped by user". While
 alone never becomes a launch error: direct evidence from the launch shim can still report a real failure until an
 annotated exit commits. Host unreachability is per-host connection state, not a session status.
 
-After a supervisor restart, a live pane keeps its last cached status while the supervisor gathers new screen evidence.
-The first new screen alone does not turn an idle or waiting session into running. A witnessed exit, launch error,
-changed screen, recognized wait, or enough unchanged samples replaces the old answer as soon as observed. A session with
-no cached status remains unclassified during that gap. An unclassified session restarts without asking, like any agent
-that does not read working (see Lifecycle operations), even though its pane may be live.
+After a supervisor restart, a live terminal keeps its last cached status while the supervisor gathers new screen
+evidence. The first new screen alone does not turn an idle or waiting session into running. A witnessed exit, launch
+error, changed screen, recognized wait, or enough unchanged samples replaces the old answer as soon as observed. A
+session with no cached status remains unclassified during that gap. An unclassified session restarts without asking,
+like any agent that does not read working (see Lifecycle operations), even though its terminal may be live.
 
 An interrupted session stays interrupted until the user acts: opening it and declining resume leaves it interrupted;
 restart or delete are the ways out.
@@ -2810,14 +2803,14 @@ not repeat it.
 
 The other notifications are about old terminals (see Terminal experience). Earlier releases gave a session in which
 something still ran in an old terminal the old-terminal warning: it asked for the session to be restarted, replaced,
-stopped or deleted as soon as possible, because an upcoming release would forcibly terminate its old terminals. That
-release is this one, so no warning is recorded any more, and every supervisor start marks any unresolved one resolved.
-Each session whose agent was still launching, running or being stopped in an old terminal when this release ended it
-gets one notice instead, at that start, saying that its old terminal was ended by this release, so its agent is no
-longer running and its last screen is gone, and that Restart starts the agent again in a new terminal (resuming its
-conversation), or Replace when Restart is unavailable; it ends with a link to the docs page on new terminals. Nothing
-resolves the notice: it stays unresolved, and unread until the user reads it, across later supervisor starts, until it
-is cleared. A session whose agent had already ended, or that lost only old tabs, gets none.
+stopped or deleted as soon as possible, because an upcoming release would forcibly terminate its old terminals. That has
+happened (see Terminal experience), so no warning is recorded any more, and every supervisor start marks any unresolved
+one resolved. Each session whose agent was still launching, running or being stopped in an old terminal when a
+supervisor's start ended it gets one notice instead, at that start, saying that its old terminal was ended by the
+update, so its agent is no longer running and its last screen is gone, and that Restart starts the agent again in a new
+terminal (resuming its conversation), or Replace when Restart is unavailable; it ends with a link to the docs page on
+new terminals. Nothing resolves the notice: it stays unresolved, and unread until the user reads it, across later
+supervisor starts, until it is cleared. A session whose agent had already ended, or that lost only old tabs, gets none.
 
 A session with notifications shows a bell on its sidebar row (see Session list); a row without notifications shows none.
 The bell is grey when everything in it has been read and unmistakable when something is unread, and its accessible name
@@ -2896,23 +2889,19 @@ whatever the agent renders is what you see. There is no composer, no message abs
   a day later, and the buffer is still there. Farhelm avoids storing terminal output except where it directly helps the
   user, such as error reporting. When an agent never starts, its durable error may include the failed launch's last five
   nonblank lines, bounded to 500 UTF-8 bytes after unsafe characters are escaped. Farhelm omits the excerpt when it
-  cannot safely attribute the text to that launch. In rare cases an old terminal's excerpt can still include text from
-  the previous run in the same terminal (a new terminal never shows a previous run's screen, since each run gets a
-  terminal of its own), for example when the terminal was narrowed while a full-screen program from that run was showing
-  and the session was restarted before it exited; accepted 2026-10-21. This is an error detail, not a separate
-  conversation history: a host reboot loses the terminal's contents, and recovering the conversation is the agent's job
-  (resume). A stopped or exited session's terminal stays viewable while its host is up, since the terminal outlives the
-  process. Viewable means what the terminal itself holds. A full-screen program that leaves its full-screen display as
-  it exits leaves nothing of its last frame; one that does not (because it was killed, say) leaves that frame showing in
-  a new terminal, which keeps it across supervisor restarts like the rest of the terminal. No picture of a screen is
-  ever taken to be painted into another terminal (see Restart under [Lifecycle operations](#lifecycle-operations)).
-- A new terminal runs in a **terminal host**: a small process of its own on the host, instead of the host's private tmux
-  server, that keeps the terminal and its program running across supervisor restarts and updates (the two kinds of
-  terminal are described below). Programs in a new terminal are told it is Farhelm's own: `TERM_PROGRAM=farhelm` with
-  Farhelm's version as `TERM_PROGRAM_VERSION` (the version the terminal also reports when a program asks it), with
-  `TERM=xterm-256color` and `COLORTERM=truecolor`, all four set whatever the supervisor's own environment holds, and
-  nothing that names tmux: no `TMUX` or `TMUX_PANE`. Container sessions use this same terminal environment inside their
-  container. A new terminal keeps its scrollback to the same floor as an old one (below), and keeps it across supervisor
+  cannot safely attribute the text to that launch. This is an error detail, not a separate conversation history: a host
+  reboot loses the terminal's contents, and recovering the conversation is the agent's job (resume). A stopped or exited
+  session's terminal stays viewable while its host is up, since the terminal outlives the process. Viewable means what
+  the terminal itself holds. A full-screen program that leaves its full-screen display as it exits leaves nothing of its
+  last frame; one that does not (because it was killed, say) leaves that frame showing, and the terminal keeps it across
+  supervisor restarts like the rest of its contents. No picture of a screen is ever taken to be painted into another
+  terminal (see Restart under [Lifecycle operations](#lifecycle-operations)).
+- Every terminal runs in a **terminal host**: a small process of its own on the host that keeps the terminal and its
+  program running across supervisor restarts and updates. Programs in a terminal are told it is Farhelm's own:
+  `TERM_PROGRAM=farhelm` with Farhelm's version as `TERM_PROGRAM_VERSION` (the version the terminal also reports when a
+  program asks it), with `TERM=xterm-256color` and `COLORTERM=truecolor`, all four set whatever the supervisor's own
+  environment holds, and nothing that names tmux: no `TMUX` or `TMUX_PANE`. Container sessions use this same terminal
+  environment inside their container. A terminal keeps its scrollback to the floor below, and keeps it across supervisor
   restarts and updates as well as client disconnects: its terminal host holds the program's output while no supervisor
   reads it (up to a bound, next), and the next supervisor rebuilds the terminal from it. That output is held in memory
   only, never on disk. A viewer that attaches or reconnects is sent the current screen and then the whole scrollback
@@ -3006,23 +2995,19 @@ whatever the agent renders is what you see. There is no composer, no message abs
   focused enabled choice has the highlight fill. Leaving the menu keeps that focus; Escape or Tab closes the menu and
   returns focus to its caret. Cancelling Restart with returns to that persistent caret. An unavailable plain Restart
   does not hide an independently available Restart with; the menu remains available to inspect reasons.
-- Every terminal is new: it runs in a terminal host of its own (above). Releases from before terminal hosts ran each
-  terminal (the agent's and each tab's) in the host's private tmux server instead, and later ones kept those old
-  terminals running beside new ones, with a loud band on such a session and the old-terminal warning (see Status) asking
-  the user to move them. This release ends them: the first time a host's supervisor of this release starts, it ends that
-  tmux server, and with it everything that still ran in an old terminal, without needing a tmux program. A session whose
-  agent was still launching, running or being stopped in one becomes interrupted, as after a reboot, and gets the notice
-  Status describes; one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in
-  the server, is gone; old tabs are closed. Programs the old agents and tabs left running are stopped, for an agent by
-  the session's own record (its launch scope and process markers, as a Stop of an agent that already exited finds them)
-  and for a tab wherever its id can be found; what cannot be attributed to an old tab is left for the session's Delete,
-  which stops everything of the session. A session whose agent or tabs already run in terminal hosts keeps them. A
-  failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those
-  sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still
-  running. After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.
-  Nothing in Farhelm needs tmux: not the Mac app, not a Linux machine set up with `farhelm helm setup`, and not a remote
-  host. Setting up or updating a remote Linux host removes the tmux build earlier releases installed there (see
-  Topology).
+- Old terminals: releases from before terminal hosts ran each terminal (the agent's and each tab's) in the host's
+  private tmux server instead, and later ones kept those old terminals running beside terminal hosts, with a loud band
+  on such a session and the old-terminal warning (see Status) asking the user to move them. A supervisor that finds that
+  tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux
+  program. A session whose agent was still launching, running or being stopped in one becomes interrupted, as after a
+  reboot, and gets the notice Status describes; one whose agent had already ended keeps its outcome, but its terminal's
+  last screen, which lived in the server, is gone; old tabs are closed. Programs the old agents and tabs left running
+  are stopped, for an agent by the session's own record (its launch scope and process markers, as a Stop of an agent
+  that already exited finds them) and for a tab wherever its id can be found; what cannot be attributed to an old tab is
+  left for the session's Delete, which stops everything of the session. A session whose agent or tabs already run in
+  terminal hosts keeps them. A failure to end the server or to stop what ran there is logged and never stops the
+  supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start
+  a second agent beside one still running. Restart, Clone and Replace start such a session in a new, empty terminal.
 - One attached client per session, enforced by the supervisor: attaching from a second client visibly detaches the
   first, which keeps a non-live snapshot and an explicit take-control action. No shared-input mirroring in v1.
 - A viewer that is slow is served slowly, down to a floor below which it is detached as stalled. No viewer can stop a
@@ -3475,7 +3460,7 @@ Topology); nothing starts it at login or restarts it after a crash before the ap
 over SSH has its supervisor restarted by launchd after a crash, and an Update replaces only that supervisor: its
 terminal hosts, agents and terminal-tab shells keep running. After a reboot, choose Update in the host menu to start the
 job; automatic loading at screen login is unverified. Per the rule above, sessions keep running while the supervisor is
-down and reattach when it returns. While no supervisor runs, a new terminal keeps only a bounded amount of its program's
+down and reattach when it returns. While no supervisor runs, a terminal keeps only a bounded amount of its program's
 output; past that bound the oldest of it is lost, as [Terminal experience](#terminal-experience) describes under gaps.
 Sessions persist across app restarts.
 
@@ -3569,28 +3554,28 @@ symlinks and requires its session ID to match. A failed check withdraws the dura
 unavailable, and rejects the stale Resume request so the user can refresh; it never silently launches fresh under that
 request.
 
-Codex's first admitted selecting report pins the native Codex process that emitted it, under the session's owned pane.
-Later reports must come from that process, not a Codex process below it that inherited its credential. Resident
-launchers and other processes above it are accepted. If a recorded Codex ancestor later reports a verified conversation,
-Farhelm corrects the pin and resume target to that ancestor and posts a notification once per launch, explaining what a
-Restart before correction would have resumed. An ancestor's source-less `Stop` can make this correction too; an
-unverified record changes nothing, and a not-yet-resumable ancestor `Stop` is acknowledged without effect. A dead pin is
-released for a new Codex whose ancestry does not include the pinned process, after considering ancestor correction; a
-descendant whose report still contains the pinned process stays refused even after that process exits. The pin survives
-a supervisor restart but clears on every relaunch and is not restored by an aborted relaunch. Farhelm also verifies the
-exact reported transcript's root-session metadata; process ancestry alone cannot distinguish threads sharing a process.
-The durable locator keeps runtime session identity separate from persistent thread identity, and resume uses the latter.
-Custom Codex homes work through the exact reported path; Farhelm does not search another home or choose a newer file. A
-legitimate reported `/clear` switches the current identity even when its transcript is not yet persisted: the old
-conversation stops being offered, and only the new conversation's exact file may make it resumable. A later attributed
-`Stop` for that same runtime confirms a pending clear once the file exists; unless it is correcting a pin from a
-recorded ancestor, it cannot select another conversation or recheck an already resumable binding. Selection and
-confirmation both survive a supervisor outage and are applied in that order. Codex sessions launched before this
-subscription was added must be relaunched before conversations begun with `/clear` can become resumable. An unrelated
-rejected report leaves the foreground identity untouched. Compaction preserves the conversation, and a verified new
-conversation replaces it. Unverifiable historical bare IDs remain stored but are not offered as exact resume targets.
-Missing or changed transcript evidence refuses Resume rather than silently launching fresh or selecting a different
-historical conversation.
+Codex's first admitted selecting report pins the native Codex process that emitted it, under the session's agent
+terminal. Later reports must come from that process, not a Codex process below it that inherited its credential.
+Resident launchers and other processes above it are accepted. If a recorded Codex ancestor later reports a verified
+conversation, Farhelm corrects the pin and resume target to that ancestor and posts a notification once per launch,
+explaining what a Restart before correction would have resumed. An ancestor's source-less `Stop` can make this
+correction too; an unverified record changes nothing, and a not-yet-resumable ancestor `Stop` is acknowledged without
+effect. A dead pin is released for a new Codex whose ancestry does not include the pinned process, after considering
+ancestor correction; a descendant whose report still contains the pinned process stays refused even after that process
+exits. The pin survives a supervisor restart but clears on every relaunch and is not restored by an aborted relaunch.
+Farhelm also verifies the exact reported transcript's root-session metadata; process ancestry alone cannot distinguish
+threads sharing a process. The durable locator keeps runtime session identity separate from persistent thread identity,
+and resume uses the latter. Custom Codex homes work through the exact reported path; Farhelm does not search another
+home or choose a newer file. A legitimate reported `/clear` switches the current identity even when its transcript is
+not yet persisted: the old conversation stops being offered, and only the new conversation's exact file may make it
+resumable. A later attributed `Stop` for that same runtime confirms a pending clear once the file exists; unless it is
+correcting a pin from a recorded ancestor, it cannot select another conversation or recheck an already resumable
+binding. Selection and confirmation both survive a supervisor outage and are applied in that order. Codex sessions
+launched before this subscription was added must be relaunched before conversations begun with `/clear` can become
+resumable. An unrelated rejected report leaves the foreground identity untouched. Compaction preserves the conversation,
+and a verified new conversation replaces it. Unverifiable historical bare IDs remain stored but are not offered as exact
+resume targets. Missing or changed transcript evidence refuses Resume rather than silently launching fresh or selecting
+a different historical conversation.
 
 Agent files on an execution host are trusted host state. Farhelm reads them only when a decision needs information the
 report does not provide: report admission, confirmation of a pending conversation, or Restart's exact-target check.
@@ -3600,25 +3585,25 @@ withdraws Resume and records its notification then; a different conversation wit
 refuses that Restart with a retry message and preserves Resume. None of these refusals launches an agent.
 
 Claude and Muse attribution is positional: the first process above the hook's narrow shell trampolines is its emitter,
-at any depth below the session's owned pane. Farhelm does not recognize either agent by executable, command line, or
-environment; those are vendor details that change independently of Farhelm. Resident wrapper chains therefore keep
-reporting. The first admitted selecting report pins its emitter by pid and start token and records every ancestor
-through the pane. Later reports from that process may change the conversation; a nested Claude that inherited the
-credential cannot replace or withdraw it. Reports from the same emitter preserve the original recorded ancestry. A
-recorded ancestor's report corrects both the pin and conversation and posts a notification once per launch explaining
-what Restart before the correction would have resumed. If a nested Claude reports first, it may be followed until the
-parent next reports at start, resume, `/clear`, compact, or the end of a turn. Claude's injected `Stop` hook reports the
-current conversation and is an ordinary selecting report under the same pin: it can establish the first pin, update the
-pinned process's conversation, or correct a child-first selection when a recorded ancestor reports. A `Stop` refused by
-the pin is acknowledged silently, with no warning or mutation. A proven gone, reused, or non-running pin releases only
-for an emitter whose report chain does not contain it; unavailable process evidence never releases it. The pin survives
-a supervisor restart but clears on relaunch and is not restored by an aborted relaunch. Sessions running across the
-upgrade start unpinned, so their first selecting report may come from a nested child until an ancestor reports. Running
-launches retain their old command line without `Stop` until relaunch; no upgrade machinery compensates for that gap.
-Farhelm subscribes to Claude's `SessionStart` and `Stop`, not `SubagentStop`. In the observed Claude Code 2.1.310, a
-native sub-agent completed through `SubagentStop`, while `Stop` carried the parent's conversation. Any report naming a
-sub-agent is refused for every agent type. Claude requires no transcript check and takes no versioned ownership proof,
-so its existing captures stay resumable across the change.
+at any depth below the session's agent terminal's root process. Farhelm does not recognize either agent by executable,
+command line, or environment; those are vendor details that change independently of Farhelm. Resident wrapper chains
+therefore keep reporting. The first admitted selecting report pins its emitter by pid and start token and records every
+ancestor through the terminal's root process. Later reports from that process may change the conversation; a nested
+Claude that inherited the credential cannot replace or withdraw it. Reports from the same emitter preserve the original
+recorded ancestry. A recorded ancestor's report corrects both the pin and conversation and posts a notification once per
+launch explaining what Restart before the correction would have resumed. If a nested Claude reports first, it may be
+followed until the parent next reports at start, resume, `/clear`, compact, or the end of a turn. Claude's injected
+`Stop` hook reports the current conversation and is an ordinary selecting report under the same pin: it can establish
+the first pin, update the pinned process's conversation, or correct a child-first selection when a recorded ancestor
+reports. A `Stop` refused by the pin is acknowledged silently, with no warning or mutation. A proven gone, reused, or
+non-running pin releases only for an emitter whose report chain does not contain it; unavailable process evidence never
+releases it. The pin survives a supervisor restart but clears on relaunch and is not restored by an aborted relaunch.
+Sessions running across the upgrade start unpinned, so their first selecting report may come from a nested child until
+an ancestor reports. Running launches retain their old command line without `Stop` until relaunch; no upgrade machinery
+compensates for that gap. Farhelm subscribes to Claude's `SessionStart` and `Stop`, not `SubagentStop`. In the observed
+Claude Code 2.1.310, a native sub-agent completed through `SubagentStop`, while `Stop` carried the parent's
+conversation. Any report naming a sub-agent is refused for every agent type. Claude requires no transcript check and
+takes no versioned ownership proof, so its existing captures stay resumable across the change.
 
 Muse uses the same process pin, ancestor correction, dead-pin release and relaunch rules, with a Muse notification once
 per launch when a recorded ancestor corrects the followed conversation. Its `SessionStart` and `Stop` both select the
@@ -3631,8 +3616,8 @@ cover every possible Muse child. Muse reports carrying `agent_id`, `subagent_id`
 refused. Muse requires no transcript check or versioned ownership proof; its pinned captures use ownership version 0.
 Farhelm never discovers a Muse conversation from its session files or index.
 
-Grok reports must come from one native `grok` process under the owned pane, launched with `--no-leader` before any real
-end-of-options boundary. The only admitted descendants are the documented reporter command and its narrow shell
+Grok reports must come from one native `grok` process under the agent's terminal, launched with `--no-leader` before any
+real end-of-options boundary. The only admitted descendants are the documented reporter command and its narrow shell
 trampoline; a nested Grok or another session-hosting runtime cannot replace the parent selection. `SessionStart` with
 source `new` or `load` selects a UUID. `UserPromptSubmit` and `Stop` may add saved-record evidence only for that
 selected UUID, and child-marked callbacks never select a top-level conversation. A selection stores the callback's
@@ -3649,7 +3634,7 @@ subscribed event supplies its path. If Grok exits or crashes before the replacem
 previous UUID can remain Farhelm's last known selection; this accepted delivery race does not weaken validation of
 callbacks that do arrive.
 
-OMP reports must come from the foreground OMP runtime under the session's owned pane — the Bun-executed bundle or
+OMP reports must come from the foreground OMP runtime under the session's agent terminal — the Bun-executed bundle or
 source-tree entry, or the compiled target — reached through the launch's own launcher and trampoline shapes and nothing
 else: not a nested OMP process that inherited its credential, not a Node-executed entry, not an unknown wrapper. Farhelm
 also requires the session's durable launch record to show the current gated reporter asset was installed for that
@@ -4916,13 +4901,13 @@ explanation and cannot create another old-style session. The old launcher switch
 ### Local authority and trust between hosts
 
 The local security boundary is the Unix account on a particular host. Processes the user runs on the target host,
-including same-account processes that can reach Farhelm's private tmux server or its terminal hosts (the processes that
-keep its new terminals), are trusted by this threat model. Farhelm does not provide strong same-account isolation
-against deliberate interference with agents, that private session or those terminal hosts, and session credentials do
-not provide same-account containment. Running agents without permission checks in disposable remote environments is an
-intended use. Farhelm still keeps simple local guards against accidental interference where their identity is available,
-such as excluding a session's recorded agent pane from tab discovery and destructive tab cleanup. Container sessions
-have their own rootless Podman containment contract above.
+including same-account processes that can reach Farhelm's terminal hosts (the processes that keep its terminals), are
+trusted by this threat model. Farhelm does not provide strong same-account isolation against deliberate interference
+with agents or those terminal hosts, and session credentials do not provide same-account containment. Running agents
+without permission checks in disposable remote environments is an intended use. Farhelm still keeps simple local guards
+against accidental interference where their identity is available, such as telling a session's agent terminal and its
+tabs apart by their hosts' tags in tab discovery and destructive tab cleanup. Container sessions have their own rootless
+Podman containment contract above.
 
 Farhelm defends against what an attached host or an agent's output can do, and against mistakes a user plausibly makes
 in ordinary use of Farhelm or their machine. The test is whether a reasonable user would hit the trigger by accident.
@@ -5178,20 +5163,18 @@ secrets, or changing what Farhelm does on other hosts.
 
 ### Ownership during cleanup and provisioning
 
-Confirmed 2026-09-28: Farhelm's private tmux server is an implementation detail, not an interface, and the product
-should keep it out of the user's way as far as practical. Interacting with it directly is unsupported, whether the user
-does it by hand or a program running in a session does it (for example by pointing tmux at its socket). The same holds
-for each terminal host, the process that keeps a new terminal (see [Terminal experience](#terminal-experience)), and its
-socket: talking to one, signalling it or removing its socket is outside every Farhelm guarantee in the same way. Farhelm
-keeps the accidental path out of reach: agents and terminal tabs run without the `TMUX` and `TMUX_PANE` variables tmux
-sets in its panes, so a plain `tmux new-window` or `tmux split-window` typed in a session behaves as it would over SSH,
-reaching the user's own tmux server or none, not the private one. A tab's shell starts without them, so a startup file
-that launches tmux when `TMUX` is unset does so in a tab as it would in an SSH login. Shells an agent starts for its own
-work also run without them, as they would if the agent ran in a terminal outside tmux. Windows, panes, processes and
-configuration changes made through the private server anyway are outside every Farhelm guarantee, including cleanup on
-Stop, Restart, Delete and tab close. Do not add code or complexity to detect, track, clean up after, or recover from
-them. Farhelm's own operations must still handle their own objects going missing without crashing, and the helm and GUI
-must still handle the resulting remote failures safely.
+Each terminal host, the process that keeps a terminal (see [Terminal experience](#terminal-experience)), and its socket
+are an implementation detail, not an interface (the rule confirmed 2026-09-28 for the private tmux server earlier
+releases used), and the product should keep them out of the user's way as far as practical. Interacting with one
+directly is unsupported, whether the user does it by hand or a program running in a session does it: talking to one,
+signalling it or removing its socket is outside every Farhelm guarantee, including cleanup on Stop, Restart, Delete and
+tab close. Do not add code or complexity to detect, track, clean up after, or recover from that. Agents and terminal
+tabs run without the `TMUX` and `TMUX_PANE` variables tmux sets in its panes, so a plain `tmux new-window` or
+`tmux split-window` typed in a session behaves as it would over SSH, reaching the user's own tmux server or none. A
+tab's shell starts without them, so a startup file that launches tmux when `TMUX` is unset does so in a tab as it would
+in an SSH login. Shells an agent starts for its own work also run without them, as they would if the agent ran in a
+terminal outside tmux. Farhelm's own operations must still handle their own objects going missing without crashing, and
+the helm and GUI must still handle the resulting remote failures safely.
 
 Session teardown covers ordinary agent descendants, including background servers. Detached services started by shell
 initialization before the agent launches are outside that guarantee. Scope-only cleanup does not chase programs that
@@ -5271,8 +5254,8 @@ is zsh, and inside containers that run wrapped agents.
 An agent harness version is supported until a newer release of that harness has been out for two weeks. Things move fast
 in this space; Farhelm adds no code or complexity to support older versions.
 
-No supported environment needs tmux: Farhelm neither requires nor looks for one on any machine. A tmux the user runs in
-a session is one of their own programs, like any other they run there.
+A tmux the user runs in a session is one of their own programs, like any other they run there; Farhelm neither requires
+nor looks for one on any machine.
 
 Usernames of up to 20 characters must work on Linux and macOS with Farhelm's default state directory locations, on the
 helm's machine and on every host, including wherever Farhelm places sockets or other files whose paths the system limits
