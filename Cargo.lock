@@ -2819,6 +2819,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "farhelm-grid-model"
+version = "0.0.0-unreleased"
+dependencies = [
+ "farhelm-proto",
+ "regex",
+ "serde_json",
+ "url",
+]
+
+[[package]]
 name = "farhelm-gui"
 version = "0.0.0-unreleased"
 dependencies = [
@@ -2876,6 +2886,17 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+]
+
+[[package]]
+name = "farhelm-input-mapping"
+version = "0.0.0-unreleased"
+dependencies = [
+ "farhelm-grid-model",
+ "farhelm-proto",
+ "farhelm-supervisor",
+ "farhelm-terminal-emulator",
+ "serde_json",
 ]
 
 [[package]]

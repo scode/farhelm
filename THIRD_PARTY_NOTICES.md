@@ -36,6 +36,12 @@ each key sends and the cell a click lands on, so they were carried over rather t
   separators, and the web-links add-on's URL pattern, line window and URL check.
 - `crates/farhelm-supervisor/src/grid_input.rs`: key encoding (`evaluateKeyboardEvent`), mouse report encoding
   (`CoreMouseService`, and the wheel on the alternate screen), and paste line endings (`prepareTextForTerminal`).
+- `crates/gui/farhelm-grid-model/src/selection.rs` and `src/links.rs`: the GPUI app's Rust ports of the `grid-buffer.js`
+  rules above (selection text, word selection, the URL pattern and line window). Their complete notices are in that
+  crate's `LICENSE-PORTED`.
+- `crates/gui/farhelm-input-mapping/src/keys.rs`, `src/pointer.rs` and `src/cursor.rs`: the GPUI app's Rust ports of the
+  `grid-input.js` rules above (the keydown decision, mouse cell rounding, move de-duplication, wheel accumulation and
+  the Alt-click cursor move). Their complete notices are in that crate's `LICENSE-PORTED`.
 
 Each ported function names its origin in a source comment. The code is MIT-licensed: copyright the xterm.js authors,
 SourceLair Private Company and Christopher Jeffrey for xterm.js, the xterm.js authors for the add-ons, and Microsoft

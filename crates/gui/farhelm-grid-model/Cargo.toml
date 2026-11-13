@@ -1,0 +1,27 @@
+[package]
+name = "farhelm-grid-model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "One terminal attachment's grid screen, history, selection and links, from the supervisor's grid stream"
+
+# A library; see `farhelm-helm/Cargo.toml` for why every non-shipping member
+# says so explicitly instead of relying on having no binary target.
+[package.metadata.dist]
+dist = false
+
+# Framework-free on purpose (SPEC_impl.md, "GUI architecture"): no gpui here, so the model is tested without a window.
+[dependencies]
+farhelm-proto.workspace = true
+regex.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+# Code outside tests returns errors instead of panicking (SPEC_impl.md, "GUI architecture"); crates/gui/clippy.toml
+# allows both in tests.
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"

@@ -116,21 +116,35 @@ def sources(root, budget):
     return found
 
 
+def crate_depth(parts):
+    """Count the path components that name a crate directory: `crates/<name>`, or `crates/gui/<name>`.
+
+    The GUI crates live one level deeper, under `crates/gui/`, so that their own `clippy.toml` scopes the GUI lint
+    bans to them (SPEC_impl.md, "GUI architecture"). Every other crate sits directly under `crates/`.
+    """
+    return 3 if tuple(parts[:2]) == ('crates', 'gui') else 2
+
+
 def integration_source(path):
     """Recognize a crate's integration-test tree, not an arbitrary module directory named tests."""
-    return pathlib.PurePosixPath(path).parts[:1] == ('crates',) and pathlib.PurePosixPath(path).parts[2:3] == ('tests',)
+    parts = pathlib.PurePosixPath(path).parts
+    depth = crate_depth(parts)
+    return parts[:1] == ('crates',) and parts[depth:depth + 1] == ('tests',)
 
 
 def standard_crate_root(path):
     """Identify standard Cargo target entrypoints while preserving nested module-relative paths."""
     parts = pathlib.PurePosixPath(path).parts
-    return (len(parts) == 4 and integration_source(path)
-            or len(parts) == 5 and integration_source(path) and parts[-1] == 'main.rs'
-            or len(parts) == 4 and parts[0] == 'crates' and parts[2] == 'src'
-            and parts[3] in {'lib.rs', 'main.rs'}
-            or len(parts) == 5 and parts[0] == 'crates' and parts[2:4] == ('src', 'bin')
-            or len(parts) == 6 and parts[0] == 'crates' and parts[2:4] == ('src', 'bin')
-            and parts[-1] == 'main.rs')
+    # Shift the fixed positions below by the extra component a `crates/gui/<name>` crate has.
+    extra = crate_depth(parts) - 2
+    inner = parts[extra:]
+    return (len(inner) == 4 and integration_source(path)
+            or len(inner) == 5 and integration_source(path) and inner[-1] == 'main.rs'
+            or len(inner) == 4 and parts[0] == 'crates' and inner[2] == 'src'
+            and inner[3] in {'lib.rs', 'main.rs'}
+            or len(inner) == 5 and parts[0] == 'crates' and inner[2:4] == ('src', 'bin')
+            or len(inner) == 6 and parts[0] == 'crates' and inner[2:4] == ('src', 'bin')
+            and inner[-1] == 'main.rs')
 
 
 def inventory(source_files, budget):

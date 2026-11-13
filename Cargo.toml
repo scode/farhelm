@@ -12,7 +12,9 @@ members = [
   "crates/farhelm-testtrace",
   "crates/farhelm-testtrace-macros",
   "crates/farhelm-ui",
+  "crates/gui/farhelm-grid-model",
   "crates/gui/farhelm-gui",
+  "crates/gui/farhelm-input-mapping",
   "crates/gui/lint-demo",
   "crates/terminal-host",
 ]
@@ -62,7 +64,9 @@ default-members = [
   "crates/farhelm-fixtures",
   "crates/farhelm-teststate",
   "crates/farhelm-ui",
+  "crates/gui/farhelm-grid-model",
   "crates/gui/farhelm-gui",
+  "crates/gui/farhelm-input-mapping",
   "crates/terminal-host",
 ]
 
@@ -170,6 +174,9 @@ minisign-verify = "0.3"
 # paths. Already in `Cargo.lock` transitively, but a transitive crate cannot
 # be imported directly.
 percent-encoding = "2"
+# The terminal grid model's link detection, which must match the old web
+# client's patterns exactly (crates/gui/farhelm-grid-model).
+regex = "1"
 # reqwest's upstream defaults, deliberately: rustls with its default crypto
 # provider (aws-lc-rs) and the operating system's certificate store (through
 # rustls-platform-verifier), plus HTTP/2 and system proxy settings. Farhelm only
@@ -265,6 +272,7 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 web-sys = { version = "0.3", features = ["Window", "Location"] }
 
+farhelm-grid-model = { path = "crates/gui/farhelm-grid-model" }
 farhelm-helm = { path = "crates/farhelm-helm" }
 farhelm-proto = { path = "crates/farhelm-proto" }
 farhelm-supervisor = { path = "crates/farhelm-supervisor" }

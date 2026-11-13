@@ -1,0 +1,29 @@
+[package]
+name = "farhelm-input-mapping"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Native key, text and pointer events mapped to the supervisor's grid input messages"
+
+[package.metadata.dist]
+dist = false
+
+# Framework-free on purpose (SPEC_impl.md, "GUI architecture"): the GUI copies its native event fields into this
+# crate's types, so the mapping is tested against the real encoder without a window.
+[dependencies]
+farhelm-grid-model.workspace = true
+farhelm-proto.workspace = true
+
+# The tests check mapped events against the supervisor's real byte encoder and the emulator's mode types, so a
+# mapping that diverges from what the supervisor sends fails here rather than in a terminal.
+[dev-dependencies]
+farhelm-supervisor.workspace = true
+farhelm-terminal-emulator.workspace = true
+serde_json.workspace = true
+
+# Code outside tests returns errors instead of panicking (SPEC_impl.md, "GUI architecture"); crates/gui/clippy.toml
+# allows both in tests.
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
