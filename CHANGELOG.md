@@ -2,6 +2,39 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.39.0 - 2026-11-13
+
+**DRAFT release notes - not yet finalized**
+
+### 💥 Breaking
+
+- This release *requires* you to update your remote hosts. (#3348, #3359, #3369)
+- Updating ends the [old terminals](https://farhelm.io/docs/using/new-terminals/) that still ran in tmux, as earlier releases warned; remote hosts do this when you update them. A session whose agent was still running in one shows as interrupted, with a notification: Restart starts the agent again in a new, empty terminal and resumes its conversation, and Replace starts it anew where Restart is unavailable. Old shell tabs are closed, and a session whose agent had already exited no longer shows its last screen. (#3362)
+- Farhelm no longer needs tmux on any machine, and `farhelm helm setup --tmux` and `farhelm supervisor run --tmux` are removed: a script or service unit of your own that passes either has to drop it, or setup refuses to run and the supervisor will not start. The services Farhelm writes never pass them. Once `farhelm helm setup` or Update rewrites a Linux machine's Farhelm service, sessions there no longer find programs in your tmux's folder (Linuxbrew's, say) unless your login shell's `PATH` includes it. (#3368, #3371)
+- Updating a remote Linux host removes the tmux that Farhelm installed there, so `tmux` typed in a session on that host runs the host's own tmux, or is not found if it has none. (#3373)
+- A browser tab of Farhelm that stayed open across the update needs reloading; until then its terminals can show garbled output. (#3369)
+
+### 🚀 Added
+
+- EXPERIMENTAL: Agents in sandbox and container sessions can now use `farhelm agent` commands and `farhelm spawn` within their own sandbox or container, to open links, start more sessions there, and rename, stop, restart or delete its other sessions; anything reaching beyond it is still refused. Agents on other hosts can now start a session in a new sandbox or container from one of your recipes, once you allow it on an approval card that always asks. (#3338, #3348)
+
+### 🔄 Changed
+
+- In the desktop app, Cmd-click on a file path in a terminal now also opens PNG, JPEG, GIF, WebP, BMP and AVIF images by default. A **File types to open with Cmd-click** list you have saved, even unchanged or empty, stays as it is. (#3351)
+- EXPERIMENTAL: Delete of a session in a sandbox or container now removes only that session, and its checkout, while other sessions remain, and removes the sandbox or container with its last session. When Farhelm cannot reach the sandbox or container (suspended, paused, unreachable or needing an update), Delete offers to delete the whole thing instead, warning that every session in it is destroyed. While one is being deleted, Hosts and the sidebar show it as **Deleting…** instead of unreachable. (#3361, #3364)
+- EXPERIMENTAL: Suspending or resuming a Tensorlake sandbox no longer holds up launching sessions or changing hosts elsewhere in the same window. A launch that wakes a suspended sandbox or paused container now waits for another Suspend or Resume of it to finish instead of failing with "This host is busy", and fails at once if the host is suspended again while it waits. (#3339, #3341)
+
+### 🩹 Misc fixes
+
+*Fixes that would normally be summed up as a single "various bug fixes" line. In the interest of transparency, the complete list is included.*
+
+- Creating a container session no longer sometimes fails with a missing setup-script error while its container is starting. (#3388)
+- In the desktop app, text over 256 KiB copied to the clipboard, by a program in a terminal or from a mouse selection, now reaches the clipboard, up to 8 MiB. Before, it was silently dropped, while the same copy worked in a browser. (#3369)
+- Opening a session after its host rebooted now shows it as interrupted, with its Restart button, even when an earlier Restart of that session finished while you were looking at another session. Before, the app could try to show a terminal the reboot had destroyed. (#3345)
+- "Stop and suspend" on a sandbox or container session no longer closes a terminal tab or stops an agent that was opened or started after you clicked. (#3337)
+- A quick launch that woke a suspended Tensorlake sandbox and was then refused without an error message now shows the session launcher again, instead of leaving it invisible and catching every click and key until Escape. (#3356)
+- A launch that woke a suspended Tensorlake sandbox for a GitHub checkout now gives up after 60 seconds, with an error in the session launcher, if the window never sees the sandbox connect. Before, it could wait forever, with New, quick launches and host changes in that window unavailable. (#3357)
+
 ## v0.38.0 - 2026-11-11
 
 ### 💥 Breaking
