@@ -593,13 +593,13 @@ systemd or SSH substrate ran.
   mouse coordinates, focus reports, the wheel on the alternate screen, and `Input` framing. Seconds, in-process. Part of
   the workspace nextest run. Which keydowns become key messages at all (third-level shift, lone capitals, the key after
   a dead key) and mouse motion de-duplication are the grid client's, pinned by its own tests, not this selection. Both
-  tables are checked-in contract data, first computed by the xterm.js Farhelm then vendored. The key table is rendered
-  from the grid client's keyboard rules: after a deliberate change to them (`grid-input.js`), run
-  `node crates/farhelm-ui/js-tests/grid-input-tables.js --write` from the repository root, review the diff (a changed
-  row is a key a program will read differently), and run this selection; the JS harness's `grid-input-tables.test.js`
-  fails while a checked-in table differs from what the client computes, and it also holds the client's keydown and
-  Alt-click tables (`crates/farhelm-ui/js-tests/fixtures/input/`). The mouse table is edited by hand, together with the
-  encoder.
+  tables are checked-in contract data, first computed from the xterm.js code Farhelm's terminals used before the grid.
+  The key table is rendered from the grid client's keyboard rules: after a deliberate change to them (`grid-input.js`),
+  run `node crates/farhelm-ui/js-tests/grid-input-tables.js --write` from the repository root, review the diff (a
+  changed row is a key a program will read differently), and run this selection; the JS harness's
+  `grid-input-tables.test.js` fails while a checked-in table differs from what the client computes, and it also holds
+  the client's keydown and Alt-click tables (`crates/farhelm-ui/js-tests/fixtures/input/`). The mouse table is edited by
+  hand, together with the encoder.
 - `python3 scripts/record-test-run.py --kind development --selection 'vendored vte' --concurrency 'libtest default threads' -- cargo test --manifest-path vendor/vte/Cargo.toml --features ansi`,
   `python3 scripts/record-test-run.py --kind development --selection 'vendored alacritty_terminal' --concurrency 'libtest default threads' -- cargo test --locked --lib --manifest-path vendor/alacritty_terminal/Cargo.toml`
   and

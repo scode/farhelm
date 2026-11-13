@@ -22,8 +22,8 @@
 //!   protocol stays off), with Option on a Mac not acting as Meta, plus
 //!   Shift+Enter as ESC CR in one write. Farhelm's key table
 //!   (`tests/fixtures/grid-keys.jsonl`, rendered by
-//!   `crates/farhelm-ui/js-tests/grid-input-tables.js`, and first computed by
-//!   the xterm.js Farhelm then vendored) holds this encoder and the page's
+//!   `crates/farhelm-ui/js-tests/grid-input-tables.js`, and first computed
+//!   from the xterm.js code Farhelm's terminals used before the grid) holds this encoder and the page's
 //!   keyboard rules to the same bytes for every key code, modifier set,
 //!   platform and cursor-key mode. The application keypad mode (DECKPAM) is
 //!   ignored: the keypad's keys send their digits, as they always have in
@@ -290,11 +290,10 @@ const ESC: &str = "\x1b";
 /// code units or slices `code`, so does this, and a lone surrogate it would
 /// produce becomes U+FFFD as the page's `TextEncoder` makes it.
 ///
-/// Shift+Enter is recognized as `shiftEnterKeyAction` does, by `key` and
-/// exactly the Shift modifier. That function also refuses the chord under
-/// AltGraph and during composition; neither reaches the supervisor (the
-/// grid client sends no composing keys, and `mods` has no AltGraph bit), so
-/// this assumes neither.
+/// Shift+Enter is recognized by `key` and exactly the Shift modifier.
+/// AltGraph and composition never reach the supervisor (the grid client
+/// sends no composing keys, and `mods` has no AltGraph bit), so this
+/// assumes neither.
 pub fn encode_key(
     key: &str,
     code: &str,

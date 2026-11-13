@@ -1447,9 +1447,12 @@ fn scrub_preparation_authority(command: &mut std::process::Command) {
         .env_remove(OMP_REPORTER_EXE_ENV_VAR);
 }
 
-/// Start the background guard without inherited session authority. Preserve
-/// ambient TMUX through rc files for the same reason visible login startup does;
-/// the post-login Git constructor removes it. PATH projection also waits for rc.
+/// Start the background guard without inherited session authority. An
+/// ambient `TMUX` and `TMUX_PANE` (a supervisor started inside the user's
+/// tmux) are left for rc files to see, unlike a visible launch's, whose
+/// terminal host child never gets them; the post-login Git constructor
+/// removes them. PATH
+/// projection also waits for rc.
 pub(crate) fn background_guard_command(program: &Path) -> std::process::Command {
     let mut command = std::process::Command::new(program);
     scrub_preparation_authority(&mut command);

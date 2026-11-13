@@ -225,7 +225,7 @@ Added 2026-11-04; accepted by the maintainer.
 
 A finding matches when all of these hold:
 
-- A new terminal has little output since its last snapshot, below the supervisor's output-only checkpoint and stop
+- A terminal has little output since its last snapshot, below the supervisor's output-only checkpoint and stop
   thresholds.
 - Enough distinct size changes are actually applied to consume the host's journal cap at 64 bytes each; coalesced or
   unchanged requests do not count. With the default 32 MiB cap this takes about 524,288 applied resizes.

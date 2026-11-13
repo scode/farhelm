@@ -847,23 +847,14 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   — Container Replace text promises a ready replacement container before deleting the source, while code waits only for
   the new session/terminal boundary.
 
-- [`creator-fence-ends-before-podman-allocation.md`](creator-fence-ends-before-podman-allocation.md) — A terminal
-  interrupt can release the creation fence while Podman still registers a container, leaving late storage after Stop.
-
 - [`rootless-pause-inherits-session-marker.md`](rootless-pause-inherits-session-marker.md) — The rootless container
   infrastructure process can inherit a session marker and be selected for unnecessary termination or recreation.
-
-- [`early-retry-refusal-orphans-container-storage.md`](early-retry-refusal-orphans-container-storage.md) — A refused
-  pending-create retry can discard its session handle while an earlier container's storage remains.
 
 - [`anonymous-container-volumes-survive-removal.md`](anonymous-container-volumes-survive-removal.md) — Removing a
   container can leave its anonymous image volumes behind; whether Farhelm promises to remove them is unresolved.
 
 - [`negated-isolation-probes-cannot-fail-test.md`](negated-isolation-probes-cannot-fail-test.md) — The negative loopback
   probes can pass through a failed denial assertion and still report the test successful.
-
-- [`pending-retry-generation-rationale-is-inaccurate.md`](pending-retry-generation-rationale-is-inaccurate.md) — The
-  retry rationale and regression model a generation change that real pending-create retries do not make.
 
 - [`checkout-root-reopen-lacks-identity-comparison.md`](checkout-root-reopen-lacks-identity-comparison.md) — A file
   download reopens the checkout pathname after verifying it; a complete uncancelled delivery through replacement remains
@@ -886,10 +877,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`inspector-workdir-hides-missing-home.md`](inspector-workdir-hides-missing-home.md) — Image inspection can create the
   selected home path as its WORKDIR and then incorrectly decide that normal home preparation is unnecessary.
-
-- [`container-test-panic-cleanup-precedes-late-creator.md`](container-test-panic-cleanup-precedes-late-creator.md) — A
-  failed test's cleanup can run before its pending creator finishes, but the complete directory/allocation schedule
-  remains unverified.
 
 - [`account-assertion-chain-can-reach-false-readiness.md`](account-assertion-chain-can-reach-false-readiness.md) — A
   shell helper can continue after a failed intermediate account/home assertion and still publish its ready marker.
@@ -967,10 +954,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   — The narrowest expanded sidebar leaves less room than its header and Hosts-row controls require; actual clipping and
   keyboard recovery remain unverified.
 
-- [`newline-initial-login-directory-transformation.md`](newline-initial-login-directory-transformation.md) — A
-  newline-bearing folder can be transformed before the initial login shell starts; a harmful supported startup operation
-  remains unestablished.
-
 - [`late-rail-restoration-retains-menu-coordinates.md`](late-rail-restoration-retains-menu-coordinates.md) — A host menu
   opened before saved expansion finishes restoring may remain at the host's former position.
 
@@ -995,9 +978,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`brace-literal-command-display-is-bash-inexact.md`](brace-literal-command-display-is-bash-inexact.md) — The displayed
   command can give a brace-bearing literal suffix a different apparent Bash meaning from the actual argument.
 
-- [`wrapper-test-setup-bypasses-container-cleanup-guard.md`](wrapper-test-setup-bypasses-container-cleanup-guard.md) — A
-  failed wrapper-container setup can leave its real keeper outside the test's cleanup guard.
-
 - [`unscoped-tab-log-says-scoped.md`](unscoped-tab-log-says-scoped.md) — A tab running without a system scope can still
   be logged as scoped merely because a candidate unit name exists.
 
@@ -1010,9 +990,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`typed-name-matching-repeats-quadratic-prefix-work.md`](typed-name-matching-repeats-quadratic-prefix-work.md) — Typed
   template matching performs quadratic duplicate checks before applying the five-row display cap; practical
   supported-scale latency remains unmeasured.
-
-- [`podman-test-owner-death-leaves-keeper.md`](podman-test-owner-death-leaves-keeper.md) — Abrupt death of a real-Podman
-  test owner can leave its detached keeper outside cleanup.
 
 - [`unapproved-ssh-help-copy-receiver-contract-unresolved.md`](unapproved-ssh-help-copy-receiver-contract-unresolved.md)
   — An unapproved agent Add-host draft can copy raw SSH help text; the required warning and harmful downstream paste
@@ -1113,10 +1090,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`staged-start-test-lacks-reader-drain-witness.md`](staged-start-test-lacks-reader-drain-witness.md) — The new
   regression test can pass without protecting the boundary that prevents a terminal from starting before its owner is
   recorded.
-
-- [`container-host-test-lacks-execution-location-witness.md`](container-host-test-lacks-execution-location-witness.md) —
-  The terminal-host container regression can pass when its fake agent runs outside the container, provided the separate
-  keeper still starts and stops. No production isolation failure is established.
 
 - [`mac-process-lookup-truncates-live-host-command.md`](mac-process-lookup-truncates-live-host-command.md) — On a Mac
   with an oversized process listing, test cleanup can erase a stopped host's live socket and state directory, leaving
@@ -1395,10 +1368,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 
 - [`agent-text-helper-removes-wrap-boundary-spaces.md`](agent-text-helper-removes-wrap-boundary-spaces.md) — Browser
   agent checks can fail to recognize text that is present when a space lands at a soft-wrap boundary.
-
-- [`growing-final-output-omits-trimming-notice.md`](growing-final-output-omits-trimming-notice.md) — Final buffered
-  output can grow the old terminal's history between Restart's count and capture, making the replacement omit older
-  lines without the promised trimming notice. This does not allege loss beyond the accepted history capacity.
 
 - [`mixed-input-acknowledgements-misattribute-written-bytes.md`](mixed-input-acknowledgements-misattribute-written-bytes.md)
   — After a transient Linux terminal-write allocation failure, input discarded by the terminal host can be reported as
@@ -1954,8 +1923,8 @@ review also had known coverage gaps. An entry records an open finding, not a cle
   remaining generic concern. Other priority; unverified after investigation.
 
 - [`notification-read-failure-leaves-stale-cell.md`](notification-read-failure-leaves-stale-cell.md) — After a
-  notification read fails just after an old-terminal warning changes, the bell can remain missing or urgently unresolved
-  after storage recovers. Normal reconciliation does not retry that publication.
+  notification read fails just after a session notification is recorded or resolved, the bell can stay missing or
+  urgently unresolved after storage recovers; normal capture passes do not retry that publication.
 
 - [`tunnel-dns-outlives-dial-admission.md`](tunnel-dns-outlives-dial-admission.md) — Unverified after investigation:
   stalled hostname resolution can outlive recipe tunnel timeouts and admission limits, potentially accumulating work or
@@ -2033,10 +2002,6 @@ review also had known coverage gaps. An entry records an open finding, not a cle
 - [`switch-geometry-capped-readiness.md`](switch-geometry-capped-readiness.md) — The session-switch test can keep
   waiting on frozen historical geometry after a trace fills, even if the terminal later paints correctly. This is a
   conditional source-level test defect; no actual failing run was observed.
-
-- [`tmux-image-role-recognition-unresolved.md`](tmux-image-role-recognition-unresolved.md) — Cleanup might miss a
-  session-started tmux server under a nonstandard executable name. A supported installation producing the required name
-  and truncated role has not been established, so this is an investigated uncertainty.
 
 - [`stopped-host-update-floor-unresolved.md`](stopped-host-update-floor-unresolved.md) — A stopped host running Farhelm
   below the minimum update version can still be updated without checking its installed version. Whether the

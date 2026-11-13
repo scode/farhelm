@@ -169,8 +169,8 @@ test("a paste of more than one megabyte into a grid terminal arrives whole and k
 // as a genuine 0x1b byte or as the bug's literal caret text. The pane's
 // rendered output is identical either way, so `basic`'s canonical pty gives
 // no browser-observable signal for ESC at all; that gap is exactly what
-// `hexecho`'s raw mode (no ECHOCTL, no canonical processing) exists to
-// close. The Rust e2e test that covered it end to end is gone, so that
+// `hexecho`'s raw mode (no ECHOCTL, no canonical processing) existed
+// to close. The Rust e2e test that covered it end to end is gone, so that
 // end-to-end check is not covered any more; the grid input encoder's key
 // table still pins the bytes each key sends.
 //
