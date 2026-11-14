@@ -60,7 +60,6 @@ use gpui::{
     SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
 
-use crate::assets;
 use crate::components::{Checkbox, HoverHelp, StatusMark};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::operations::{Failure, OpKey};
@@ -69,7 +68,7 @@ use crate::session;
 use crate::session_list::host_rail::{display_name, host_mark};
 use crate::theme::{self, Palette, Token, metrics};
 use offers::{HostKind, Locality};
-use phase::{Kind, Part, Tone};
+use phase::{Kind, Tone};
 
 /// `.hosts-heading`'s padding (vertical then horizontal) and the gap between its parts.
 const HEADING_PAD: (f32, f32) = (4., 10.);
@@ -339,10 +338,7 @@ impl HostsPanel {
         let lines: Vec<AnyElement> = if open {
             phase::detail_lines(host, twin)
                 .into_iter()
-                .enumerate()
-                .map(|(n, (kind, line))| {
-                    detail_line(format!("host-detail-{id}-{n}"), kind, &line, palette)
-                })
+                .map(|(kind, line)| detail_line(kind, line, palette))
                 .collect()
         } else {
             Vec::new()
@@ -489,38 +485,23 @@ fn tone_ink(tone: Tone, palette: &Palette) -> Token {
 }
 
 /// One detail line (`.host-detail`, `.host-destination-detail`, `.host-remedy`): 12-pixel text, the remedy in the
-/// ordinary ink and the rest in the quiet one, each host value its own text element (build, identity and destination
-/// in the monospace font), and the whole line one labelled node for assistive technology.
+/// ordinary ink and the rest in the quiet one. The sentence is the line's one labelled node for assistive technology;
+/// this wrapper adds only the line's spacing and ink, which the sentence's parts inherit.
 ///
 /// NOTE: The parts wrap as whole pieces, as every sentence mixing the app's words with host text does
 /// ([`HostSentence`]): a long value starts on a line of its own and wraps inside itself, where the old page broke it
 /// mid-run after the words before it.
-fn detail_line(id: String, kind: Kind, line: &phase::Line, palette: &Palette) -> AnyElement {
+fn detail_line(kind: Kind, line: HostSentence, palette: &Palette) -> AnyElement {
     let ink = match kind {
         Kind::Evidence => palette.fg_1,
         Kind::Remedy => palette.fg_0,
     };
     div()
-        .id(SharedString::from(id))
-        .role(Role::Label)
-        .aria_label(line.accessible_name())
-        .flex()
-        .flex_row()
-        .flex_wrap()
         .pt(px(DETAIL_PAD_TOP))
         .px(px(DETAIL_PAD_X))
         .text_size(metrics::TEXT_SM)
         .line_height(px(DETAIL_LINE))
         .text_color(theme::color(ink))
-        .children(line.0.iter().map(|part| -> AnyElement {
-            match part {
-                Part::Text(words) => div().min_w_0().child(words.clone()).into_any_element(),
-                Part::Host(value) => host_text::element(value).min_w_0().into_any_element(),
-                Part::Mono(value) => host_text::element(value)
-                    .min_w_0()
-                    .font_family(assets::TERMINAL_FONT)
-                    .into_any_element(),
-            }
-        }))
+        .child(line)
         .into_any_element()
 }
