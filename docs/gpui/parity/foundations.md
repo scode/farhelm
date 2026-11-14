@@ -11,8 +11,8 @@ session menus anchored below it (SPEC.md, "Session list"); that case belongs to 
 [Settings and hosts](settings-and-hosts.md).
 
 The screenshot batch (`docs/gpui/screenshot-batch.md`) so far captures only the app's empty main window and the
-foundation goldens. F6, the first slice (session list, row menu, delete confirmation, terminal attach), adds the app
-scenes that show it and marks their reference scenes ported in `docs/gpui/screenshot-scenes.json`.
+foundation goldens. The first slice (session list, row menu, delete confirmation, terminal attach), adds the app scenes
+that show it and marks their reference scenes ported in `docs/gpui/screenshot-scenes.json`.
 
 | Old spec                                       | Tests | Covers                                                                              | Status                                                                                                                                                                                                                             |
 | ---------------------------------------------- | ----- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

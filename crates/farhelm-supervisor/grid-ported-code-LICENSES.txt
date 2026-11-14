@@ -14,8 +14,8 @@ The code was ported from @xterm/xterm 6.0.0. Where it lives:
 The old Dioxus UI's grid terminal also carried ports from xterm.js, its
 @xterm/addon-fit 0.11.0 and @xterm/addon-web-links 0.12.0 add-ons, and the
 part of Visual Studio Code's vs/base that xterm.js 6.0.0 compiles in. Those
-JavaScript ports were deleted with that UI (GPUI migration, F1); their
-notices below are kept unchanged.
+JavaScript ports were deleted with that UI; their notices below are kept
+unchanged.
 
 This file is embedded in every farhelm binary, which compiles the encoder,
 and `farhelm licenses` prints it. (It used to ship inside the web bundle

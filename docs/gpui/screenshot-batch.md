@@ -52,7 +52,7 @@ non-zero when any capture failed or any app run did not start or did not stop cl
 - The commit the capture ran on: the jj working-copy commit in a jj checkout, or git's HEAD (marked when the tree had
   uncommitted changes).
 
-So far the app scenes show only the app's empty main window: the first slice (F6: session list, row menu, delete
+So far the app scenes show only the app's empty main window: the first slice (session list, row menu, delete
 confirmation, terminal attach) adds the app scenes that show it and marks their reference scenes ported.
 
 ## The scene list

@@ -86,8 +86,8 @@ use tracing::{error, info};
 /// of this module's debug output. It shows which session a window attached
 /// and whether that attachment stayed open, which nothing outside the
 /// process shows, since a terminal host serves only its supervisor. The old
-/// desktop smoke test read these events; it went with the Dioxus app (GPUI
-/// migration, F1), so nothing parses them today.
+/// desktop smoke test read these events; it went when the Dioxus app was
+/// deleted, so nothing parses them today.
 const ATTACHMENT_TRACE: &str = "farhelm_helm::terminal_attachments";
 
 /// One admitted attachment's trace: `terminal attached` when made, and

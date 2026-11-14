@@ -17,8 +17,9 @@
 //! Appearance follows SPEC.md: the user chooses System, Dark or Light, and System follows the operating system live.
 //! A change goes through [`set_preference`] or [`follow_system`], which re-project GPUI Kit's theme from the same
 //! tokens (Kit's text inputs read Kit's theme) and refresh every window. A refresh redraws cached views too, so no view
-//! needs a theme setter. Persisting the choice is the local preference store's job, which is not built yet; until then
-//! the choice lives for one run.
+//! needs a theme setter. The choice belongs in the helm's preferences, not on the device (the maintainer decided on
+//! 2026-11-13 that appearance is a helm preference like every other setting); until it moves there, the choice lives
+//! for one run.
 
 use std::rc::Rc;
 

@@ -4,8 +4,8 @@
 //! tests here prove that the helm serializes exactly those bytes' JSON value,
 //! so a field added or renamed on the helm side fails here first. The old
 //! Dioxus UI kept its own decoders for [`SessionListBody`] and [`HostView`]
-//! and decoded the same files with them; that half went with that UI (GPUI
-//! migration, F1). The desktop app's startup check still decodes
+//! and decoded the same files with them; that half went when that UI was
+//! deleted. The desktop app's startup check still decodes
 //! `host-list.json` (`crates/farhelm-desktop/src/local_host.rs`), so a helm
 //! change that breaks its read of the local row fails there too.
 //!

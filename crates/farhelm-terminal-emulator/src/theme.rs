@@ -5,9 +5,9 @@
 //! decide whether to draw for a light or a dark background. The answers must
 //! be the colors the user actually sees, which are Farhelm's terminal theme:
 //! Ghostty's default palette. The old browser UI kept a second copy of it in
-//! JavaScript, checked against this one by a test; that copy went with the
-//! old UI (GPUI migration, F1), so whatever draws the terminal now must agree
-//! with these answers.
+//! JavaScript, checked against this one by a test; that copy went when the
+//! old UI was deleted, so whatever draws the terminal now must agree with
+//! these answers.
 //!
 //! The theme names only the 16 ANSI colors. Entries 16 to 255 are the
 //! standard xterm 256-color extension (a 6x6x6 color cube, then a 24-step gray

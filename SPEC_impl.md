@@ -185,10 +185,10 @@ it is built.
 This is a rulebook in the style of SPEC.md's "Keyboard focus": each app-wide concern has one owner, a rule, and the
 mechanism that enforces it. The old GUI decided these concerns one feature at a time (focus, popover placement, late
 replies, escaping, drafts), and an audit of its fix history found most bugs were a rule one path followed and a sibling
-path missed. GPUI adds a class of its own: it tracks no reads, so a view that copies shared state, or a change made
-without a notification, goes stale silently. The answer in both cases is the same. Build each mechanism once, route
-every feature through it, and make going around it fail a lint, a type check or a test rather than a reviewer's
-attention.
+path missed. GPUI adds a class of its own: it redraws a window when an entity it read while drawing notifies, but it
+cannot see a value a view copied out of shared state, nor a change made without a notification, so either goes stale
+silently. The answer in both cases is the same. Build each mechanism once, route every feature through it, and make
+going around it fail a lint, a type check or a test rather than a reviewer's attention.
 
 Here's the short version: the GUI talks to the helm only through one ordered UI channel, plus terminal streams and plain
 HTTP for transfers. The store holds what the helm pushed, and views draw from it. One owner each moves focus, draws

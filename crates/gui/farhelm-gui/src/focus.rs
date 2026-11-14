@@ -29,7 +29,8 @@
 //!   own focus-on-press (GPUI focuses any tracked element on mouse-down, a move no lint could see) and applies the
 //!   coordinator's rule instead: on Linux a click focuses the control it lands on; on macOS it does not, as in WebKit
 //!   there. `track_focus` itself is banned outside this module. The macOS half is ported from the old app, which ran in
-//!   WebKit; on Linux, where the app is new, a click follows the platform.
+//!   WebKit. On Linux the old desktop app built against WebKitGTK but was released only for the Mac, so there is no
+//!   shipped behavior to keep, and a click follows the platform.
 //! - **Which controls Tab reaches** ([`TabReach`]). On macOS, Tab follows the system's Keyboard navigation setting
 //!   exactly as the old app did: with it off, Tab reaches text fields and pop-ups only and skips buttons, and
 //!   Option-Tab reaches every control; with it on, Tab reaches every control. Linux has no such setting, and Tab
@@ -57,7 +58,8 @@ use crate::actions::{
 use crate::layers;
 
 /// Whether a click focuses the control it lands on, on this platform. WebKit on macOS does not focus a button on click,
-/// and the old app behaved accordingly there; on Linux, where the app is new and follows its platform, a click does.
+/// and the old app behaved accordingly there; on Linux, where the old app was never released and the new one follows
+/// its platform, a click does.
 pub const CLICK_FOCUSES_CONTROLS: bool = !cfg!(target_os = "macos");
 
 /// Which controls a plain Tab reaches. Option-Tab always reaches every control.

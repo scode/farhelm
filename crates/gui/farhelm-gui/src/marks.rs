@@ -14,7 +14,7 @@
 //! font-size 9 came out roughly three quarters the height of the drawn marks beside it.
 //!
 //! Nothing here depends on GPUI. The geometry moved unchanged from the old Dioxus UI's inline SVG when that UI was
-//! deleted (GPUI migration, F1); the GPUI views draw it, and own the color, sizing slot and hover text.
+//! deleted; the GPUI views draw it, and own the color, sizing slot and hover text.
 
 /// The harness identity a mark can establish without trusting a display label. `Terminal` is deliberately the
 /// fallback: it says that the stored command exists without pretending Farhelm knows what runs it.

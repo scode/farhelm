@@ -1,9 +1,10 @@
 //! An app-level count of how often each view rendered, compiled into test builds only.
 //!
-//! GPUI tracks no reads, so a view that copies shared state, or a change made without a notification, goes stale
-//! silently, and an uncached whole-window repaint hides it (SPEC_impl.md, "The store, and how views redraw"). Counting
-//! renders per view is how tests see what actually redrew: a change must redraw the views that read it, and must not
-//! redraw the ones that do not. No GPUI patch is involved; views call [`record`] at the top of `render`.
+//! GPUI redraws a window when an entity it read while drawing notifies, but it cannot see a value a view copied out of
+//! shared state, nor a change made without a notification. Either goes stale silently, and an uncached whole-window
+//! repaint hides it (SPEC_impl.md, "The store, and how views redraw"). Counting renders per view is how tests see what
+//! actually redrew: a change must redraw the views that read it, and must not redraw the ones that do not. No GPUI patch
+//! is involved; views call [`record`] at the top of `render`.
 //!
 //! In a shipped build [`record`] compiles to nothing.
 

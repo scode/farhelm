@@ -4,8 +4,9 @@
 //! NOTE: Only agent builds (the `agent` feature, which optimized builds refuse) read these values; test builds compile
 //! the rest of this module so ordinary test runs check the parsing and the bootstrap's use of it, but nothing installs
 //! overrides there unless a test does. These are test hooks, not settings: the real appearance choice is the user's
-//! preference, which arrives with the local preference store, and the window's real size is its saved frame or the
-//! first-launch default. Nothing here is persisted, and the app never offers it.
+//! preference, which the helm's preferences will hold (the maintainer decided on 2026-11-13 that appearance is a helm
+//! preference, not a per-device one), and the window's real size is its saved frame or the first-launch default.
+//! Nothing here is persisted, and the app never offers it.
 //!
 //! The harness (`scripts/gui-agent.py start --window-size WxH --appearance light|dark`) passes the values through the
 //! app's environment, the same way it passes the desktop app's other agent-build variables

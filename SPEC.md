@@ -4997,9 +4997,10 @@ answering), nothing tries to recover individual actions. The whole window resets
 - One generic notice covers the gap: "The connection to the helm was lost; something you did just before may or may not
   have happened." No action tracks its own fate across a reset, and there is no per-action report that an outcome is
   unknown. Work the helm already accepted carries on, since it is the helm's, and the session list shows its result.
-- What survives a reset: this device's local preferences (sidebar width, theme, window size and the like) and the
-  selected session, by id, if it still exists. Everything else starts over: open dialogs and menus, unsaved edits and
-  half-typed launcher drafts included. Nothing is replayed, restored or merged back, and the user redoes what was lost.
+- What survives a reset: the selected session, by id, if it still exists. The window itself, its size included, is not
+  part of the reset, and settings come back with the rest of what the helm reports. Everything else starts over: open
+  dialogs and menus, unsaved edits and half-typed launcher drafts included. Nothing is replayed, restored or merged
+  back, and the user redoes what was lost.
 - Duplicates around a reset are accepted. A launch sent just before the drop may or may not have happened; after the
   reset the user sees the real list, and launching again without looking can start a second session. The GUI keeps no
   launch request keys or retry rules to prevent that. Idempotency keys the command line and agents use are unaffected
