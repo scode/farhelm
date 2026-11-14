@@ -49,6 +49,19 @@ Where the port does not match the old app, and why. Each stays until the work na
 - The old app replaced the whole list with "Failed to load sessions: ..." when a read failed. The port keeps the rows it
   has (a failed read is no evidence that anything went) and shows that line above them, in the style of the old app's
   full-width failure lines (`.restart-error`).
+- The old page put every row in the document, so a screen reader could list all of them. The port draws only the rows in
+  view and a few beyond (building every row on every redraw cost about 12% of a core at 200 sessions), so assistive
+  technology and the test bridge see only those; the rest are reached by scrolling. This one is meant to stay.
+- Tab from a row's control that a wheel scroll has moved out of view leaves the list (focus goes to the next painted
+  stop, the terminal), where the old page scrolled the next row into view. The list keeps the row drawn so its control
+  keeps focus. From its menu button Shift+Tab, Space and Enter bring the row back; Space or Enter on the row's open
+  control opens the session without scrolling, and Tab's next stop is not in the painted order. Fixing it needs the
+  focus coordinator to scroll before it steps (watch list).
+- A click on a row's empty space (the gap beside its menu button, its border, a refusal line under it) keeps focus on
+  whatever control holds it, where the old page sent focus to the body and so home to the terminal. The row's item
+  tracks a focus handle so the row stays drawn while one of its controls holds focus, and the coordinator's press rule
+  for such a container keeps focus in place. Harmless: it only matters when a control other than the terminal holds
+  focus. A contain-only press kind would remove it (watch list).
 - While the window was not focused, the old app paused the running pulse (`animation-play-state: paused`), so a dot
   could stay frozen mid-dip at a level nobody chose. The port draws it at full opacity there instead. That is still,
   which is all SPEC.md asks ("stand still while the Farhelm window is not focused"), and it is the one still state that

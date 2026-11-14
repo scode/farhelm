@@ -24,23 +24,21 @@
 //! NOTE: Only Rename and Delete are ported. Clone, Replace, Replace with, Stop, Restart, Mark read, Pin and the
 //! environment commands come with their areas. Also not ported: the button staying visible while the
 //! row's open control has keyboard focus (the old `:focus-within`; here only the button's own focus shows it), opening
-//! the menu with the arrow keys from the closed button, placing the menu beside the sidebar with a pointer notch (the
-//! layer manager places it below its anchor), and centering the Delete shortcut's question when the selected row is
-//! scrolled out of the list's view. Every listed row's button is drawn inside the scroll area, so its anchor exists
-//! even when it is scrolled away, and the layer manager then clamps the question into the window beside no visible
-//! row; telling that apart needs the anchor's drawn bounds against the list's visible area, which `layers::Anchor`
-//! does not expose.
+//! the menu with the arrow keys from the closed button, and placing the menu beside the sidebar with a pointer notch
+//! (the layer manager places it below its anchor).
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement,
-    IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled,
-    WeakEntity, Window, div, px,
+    AnyElement, App, AppContext as _, Context, FocusHandle, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled, WeakEntity,
+    Window, div, px,
 };
 
-use super::{SessionList, delete, selection, status};
+use super::{SessionList, delete, status};
 use crate::actions::RENAME_SESSION_SHORTCUT_NAME;
 use crate::assets::Icon;
 use crate::components::{HoverHelp, IconButton, MenuItem, Role, Tier};
@@ -48,7 +46,6 @@ use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId, Popover};
 use crate::operations::OpKey;
-use crate::store::HelmStore;
 use crate::theme::{self, metrics};
 use crate::{local_state, session};
 
@@ -76,14 +73,23 @@ pub(super) enum Opened {
 ///
 /// The layers are kept by id and checked with the layer manager whenever they are read, so a layer closed some other
 /// way (Escape, a press outside, its row gone) needs no bookkeeping here.
+///
+/// Shared ([`SharedRows`]) because the rows are drawn by the virtualized list's item callback, after the list's own
+/// render has returned: the callback records each drawn row's anchor here, and only the rows the list draws (those in
+/// view, and a few beyond its edges) have one. A row scrolled further away has none, so its open menu closes as one
+/// whose row went (the old app closed a row's menu on any move of the row), and the Delete shortcut asks its question
+/// centered rather than beside a row nobody can see.
 #[derive(Default)]
 pub(super) struct RowLayers {
     anchors: HashMap<String, Anchor>,
     open: HashMap<String, (LayerId, Opened)>,
 }
 
+/// [`RowLayers`] as the list and its item callback share it.
+pub(super) type SharedRows = Rc<RefCell<RowLayers>>;
+
 impl RowLayers {
-    /// Forget the buttons drawn last frame; the list records this frame's as it draws them.
+    /// Forget the buttons drawn last frame; the list's item callback records this frame's as it draws them.
     pub(super) fn start_frame(&mut self) {
         self.anchors.clear();
     }
@@ -110,78 +116,74 @@ impl RowLayers {
     }
 }
 
-impl SessionList {
-    /// This frame's menu button for every row `store` lists, by session key, each with its anchor recorded for the
-    /// commands and the shortcut. Made before the rows are drawn, because an anchor is element state that needs the
-    /// window while the rows only read the store.
-    pub(super) fn menu_buttons(
-        &mut self,
-        store: &Entity<HelmStore>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> HashMap<String, AnyElement> {
-        let selected = local_state::selected(cx);
-        let rows: Vec<(String, String)> = selection::listed(store.read(cx).collections())
-            .iter()
-            .map(|session| (session.key.to_owned(), session.row.info.title.clone()))
-            .collect();
-        self.current.current(cx).rows.start_frame();
-        let list = cx.weak_entity();
-        let mut buttons = HashMap::new();
-        for (key, title) in rows {
-            let anchor = Anchor::for_element(
-                SharedString::from(format!("session-menu-anchor-{key}")),
-                window,
-                cx,
-            );
-            let rows = &mut self.current.current(cx).rows;
-            rows.anchors.insert(key.clone(), anchor.clone());
-            // Its menu, or the question that took the menu's place.
-            let open = rows.still_open(&key, window, cx).is_some();
-            let selected = selected.as_deref() == Some(key.as_str());
-            let id: SharedString = format!("{BUTTON_ID_PREFIX}{key}").into();
-            let focus =
-                focus::control_handle(SharedString::from(format!("{id}-focus-handle")), window, cx);
-            // Like the old `.session-row-menu`, invisible on a row that is neither hovered, selected nor holding the
-            // button's focus and has nothing open, though still there to click and to reach with Tab.
-            let visible = selected || open || focus.is_focused(window);
-            let list = list.clone();
-            let toggled = key.clone();
-            let toggle = IconButton::new(
-                id,
-                Icon::More,
-                actions_label(&title),
-                HoverHelp::tooltip("Open this session's actions"),
-                Role::Button,
-            )
-            .tier(Tier::RowMenu { on_fill: selected })
-            .expanded(open)
-            .focus(&focus)
-            .on_click(move |_, window, cx| {
-                // The list may be gone with its window; then there is no menu to open.
-                let _ = list.update(cx, |list, cx| list.toggle_menu(&toggled, window, cx));
-            });
-            // `margin: 4px 2px 0 0` and `align-self: flex-start`: beside the title line, not centered on the row.
-            let button = div()
-                .relative()
-                .flex_none()
-                .mt(px(4.))
-                .mr(px(2.))
-                .opacity(if visible { 1. } else { 0. })
-                .group_hover(super::row::ROW_GROUP, |style| style.opacity(1.))
-                .child(toggle)
-                .child(anchor.track())
-                .into_any_element();
-            buttons.insert(key, button);
-        }
-        buttons
-    }
+/// The menu button of the row of `key`, a session titled `title` (as the host wrote it), with its anchor recorded in
+/// `rows` for the commands and the shortcut. Called from the virtualized list's item callback, once per drawn row and
+/// frame: an anchor is element state, so it is made while the row's elements are.
+pub(super) fn menu_button(
+    rows: &RefCell<RowLayers>,
+    list: &WeakEntity<SessionList>,
+    key: &str,
+    title: &str,
+    selected: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let anchor = Anchor::for_element(
+        SharedString::from(format!("session-menu-anchor-{key}")),
+        window,
+        cx,
+    );
+    let open = {
+        let mut rows = rows.borrow_mut();
+        rows.anchors.insert(key.to_owned(), anchor.clone());
+        // Its menu, or the question that took the menu's place.
+        rows.still_open(key, window, cx).is_some()
+    };
+    let id: SharedString = format!("{BUTTON_ID_PREFIX}{key}").into();
+    let focus = focus::control_handle(SharedString::from(format!("{id}-focus-handle")), window, cx);
+    // Like the old `.session-row-menu`, invisible on a row that is neither hovered, selected nor holding the button's
+    // focus and has nothing open, though still there to click and to reach with Tab.
+    let visible = selected || open || focus.is_focused(window);
+    let list = list.clone();
+    let toggled = key.to_owned();
+    let toggle = IconButton::new(
+        id,
+        Icon::More,
+        actions_label(title),
+        HoverHelp::tooltip("Open this session's actions"),
+        Role::Button,
+    )
+    .tier(Tier::RowMenu { on_fill: selected })
+    .expanded(open)
+    .focus(&focus)
+    .on_click(move |_, window, cx| {
+        // The list may be gone with its window; then there is no menu to open.
+        let _ = list.update(cx, |list, cx| list.toggle_menu(&toggled, window, cx));
+    });
+    // `margin: 4px 2px 0 0` and `align-self: flex-start`: beside the title line, not centered on the row.
+    div()
+        .relative()
+        .flex_none()
+        .mt(px(4.))
+        .mr(px(2.))
+        .opacity(if visible { 1. } else { 0. })
+        .group_hover(super::row::ROW_GROUP, |style| style.opacity(1.))
+        .child(toggle)
+        .child(anchor.track())
+        .into_any_element()
+}
 
+impl SessionList {
     /// The menu button of `key`'s row was activated: open its menu, close the menu if it is open, and do nothing while
-    /// a question it asked is open. Visible to the crate for the screenshot goldens, which open a menu without a click.
+    /// a question it asked is open. A row scrolled out of view is scrolled back first, so the menu opens beside a row
+    /// the user can see. Visible to the crate for the screenshot goldens, which open a menu without a click.
     pub(crate) fn toggle_menu(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let rows = &mut self.current.current(cx).rows;
-        match rows.still_open(key, window, cx) {
+        self.reveal_row(key, cx);
+        let (open, anchor) = {
+            let mut rows = self.current.current(cx).rows.borrow_mut();
+            (rows.still_open(key, window, cx), rows.anchor(key))
+        };
+        match open {
             Some((_, Opened::Question)) => return,
             Some((menu, Opened::Menu)) => {
                 layers::close(menu, window, cx);
@@ -189,7 +191,7 @@ impl SessionList {
             }
             None => {}
         }
-        let Some(anchor) = rows.anchor(key) else {
+        let Some(anchor) = anchor else {
             return;
         };
         let mark = Mark::take(cx);
@@ -216,6 +218,7 @@ impl SessionList {
             self.current
                 .current(cx)
                 .rows
+                .borrow_mut()
                 .opened(key, menu, Opened::Menu);
         }
     }
@@ -229,9 +232,13 @@ impl SessionList {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some((menu, Opened::Menu)) =
-            self.current.current(cx).rows.still_open(key, window, cx)
-        {
+        let open = self
+            .current
+            .current(cx)
+            .rows
+            .borrow_mut()
+            .still_open(key, window, cx);
+        if let Some((menu, Opened::Menu)) = open {
             layers::close(menu, window, cx);
         }
         let _ = super::rename::open(key, mark, window, cx);
@@ -246,9 +253,13 @@ impl SessionList {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some((menu, Opened::Menu)) =
-            self.current.current(cx).rows.still_open(key, window, cx)
-        {
+        let open = self
+            .current
+            .current(cx)
+            .rows
+            .borrow_mut()
+            .still_open(key, window, cx);
+        if let Some((menu, Opened::Menu)) = open {
             layers::close(menu, window, cx);
         }
         self.delete(key, mark, window, cx);

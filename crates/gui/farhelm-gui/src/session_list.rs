@@ -15,8 +15,39 @@
 //! state as it is then. A settle that changes the selection notifies the selection's observers, the list among them,
 //! and that second settle finds nothing to do.
 //!
-//! The list is drawn uncached (the maintainer's foundations decision of 2026-11-14): SPEC's fleet is tens of sessions,
-//! so a whole-list redraw per change is cheap, and caching is settled when profiling at the listing cap asks for it.
+//! The rows are virtualized: they are drawn by GPUI's variable-height `list`, which builds only the rows in view and a
+//! few beyond its edges, so a redraw costs the rows on screen, not the fleet. The list is drawn uncached (the
+//! foundations decision of 2026-11-14), and GPUI redraws every uncached view of a window whenever anything in it
+//! animates (the running pulse, the terminal's cursor blink). Measured on the test Mac on 2026-11-14 with every row
+//! built on every frame, 200 sessions idled at about 12% of a core and 500 at about 20%, against about 2% for five, and
+//! typing latency grew from about 31 ms to 50 and 64; the migration's orchestrator then made virtualizing the list the
+//! first sidebar change. Rows differ in height (an ended row's status line wraps, a refusal adds a line), so this is
+//! `list` with a [`ListState`], not `uniform_list`, which measures only its first row.
+//!
+//! NOTE: SPEC.md says the list is "served and rendered WHOLE". That rules out paging, cursors and incremental
+//! listing: the helm still serves the whole capped fleet, the store holds all of it, and every row is in the list,
+//! reachable by scrolling. Drawing only the rows in view is not a partial list, so it is no breach. What it does change:
+//! the accessibility tree and the test bridge see only the rows drawn, so a test reading rows from a frame scrolls them
+//! into view or uses a fleet that fits.
+//!
+//! The list state is kept in step with the store at the top of every frame ([`SessionList::sync_rows`]): rebuilt
+//! whenever the listed sessions or their order change, keeping the scroll position where it was (as the old page kept
+//! its scroll offset), with every row not yet drawn counted at an estimated height so the list knows how far it can
+//! scroll. Rows in view are laid out afresh on every frame, so a pushed change that changes a row's height shows at
+//! once.
+//!
+//! Keyboard focus needs two things the virtualization would otherwise take away:
+//!
+//! - **A focused row stays drawn.** Each row's item carries a focus handle the list owns, one that never takes focus
+//!   itself but contains whichever of the row's controls holds it, and every row's handle is registered with the list
+//!   state, which keeps drawing the row that contains focus when it scrolls out of view (the cookbook's trap: a
+//!   control's handle kept in its element state ends with the row's last frame, and focus with it).
+//! - **Tab walks the whole list.** GPUI's Tab order holds only what was painted, so when the keyboard moves focus into
+//!   a row the list scrolls its neighbors into view ([`SessionList::reveal_focused`]); the next Tab or Shift+Tab then
+//!   finds the next row painted. SPEC.md, "Reaching everything by keyboard". Only the keyboard: a click that focuses a
+//!   row's control must not scroll the list under the pointer, or the release lands elsewhere and the click is lost.
+//!   A Space or Enter on a row scrolled out of view (its menu button still focused after a wheel scroll) scrolls the
+//!   row back before it acts; a Tab from there leaves the list (the parity file records it).
 //!
 //! The running pulse is the one thing that redraws the list on its own, and its cost is bounded by the list, not by its
 //! rows. The list holds one [`ticker::Pulsing`] handle while the window is active and any listed row pulses (running,
@@ -29,9 +60,10 @@
 //!
 //! Each row has an actions menu ([`menu`]) whose commands so far are Rename ([`rename`]) and Delete ([`delete`]); the
 //! Rename and Delete shortcuts reach them for the open session ([`rename::open_for_selected`],
-//! [`SessionList::delete_selected`]). While any Delete is in flight, the selection
-//! rules hold back their automatic choice, so a list that loses its open session to that Delete opens the next one only
-//! once every Delete has settled. A pending Delete's spinner turns from one handle the list holds, the way the pulse
+//! [`SessionList::delete_selected`]). A row's menu button and its anchor exist only while the row is drawn, so a menu
+//! whose row scrolls well out of view closes, and the Delete shortcut asks about a row out of view in a centered
+//! question. While any Delete is in flight, the selection rules hold back their automatic choice, so a list that loses
+//! its open session to that Delete opens the next one only once every Delete has settled. A pending Delete's spinner turns from one handle the list holds, the way the pulse
 //! does ([`delete::Spinner`]).
 //!
 //! The Rename editor the list owns is a dialog rather than part of a row, so a listing that changes under it never
@@ -48,16 +80,25 @@ mod selection;
 mod status;
 
 #[cfg(test)]
+mod list_tests;
+
+#[cfg(test)]
 mod menu_tests;
 
 #[cfg(test)]
 pub(crate) mod tests;
 
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
+
 use farhelm_helm_client::Collections;
-use farhelm_proto::ui_channel::{Availability, Collection, CollectionMeta, Preferences};
+use farhelm_proto::ui_channel::{
+    Availability, Collection, CollectionMeta, Preferences, SessionRow,
+};
 use gpui::{
-    AnyElement, Context, FontWeight, InteractiveElement, IntoElement, ParentElement, Render, Role,
-    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px,
+    AnyElement, App, Context, FocusHandle, FontWeight, InteractiveElement, IntoElement,
+    ListAlignment, ListState, ParentElement, Pixels, Render, Role, SharedString,
+    StatefulInteractiveElement, Styled, Subscription, WeakEntity, WeakFocusHandle, Window, div, px,
 };
 
 use crate::host_text::{HostSentence, HostText};
@@ -67,7 +108,17 @@ use crate::render_count;
 use crate::session::{self, PerSession};
 use crate::theme::{self, metrics};
 use crate::ticker;
-use selection::{Change, Stamped};
+use selection::{Change, Listed, Stamped};
+
+/// How far past each edge of its view the list draws rows: about two noncompact rows, so a row scrolling in is already
+/// laid out and a short scroll draws nothing new. Every pixel of it is rows drawn on every frame, which is the cost the
+/// virtualization exists to bound.
+const ROW_OVERDRAW: f32 = 100.;
+
+/// The height a row the list has not drawn yet is taken to have: about a noncompact row with its status and folder
+/// lines. The list needs an estimate for every row to know how far it can scroll; a row's real height replaces it once
+/// the row is drawn, so the estimate only has to be close.
+const ROW_HEIGHT_HINT: f32 = 50.;
 
 /// The session list view. The main view holds one for the window's life.
 ///
@@ -86,6 +137,22 @@ pub struct SessionList {
     /// The pending Deletes' spinner, held exactly while the window is active and some listed row has a Delete in
     /// flight, and worked out at the top of each frame like `pulse`.
     spinner: Option<delete::Spinner>,
+    /// The virtualized rows' state: their count, measured heights, scroll position and focus handles. Kept in step
+    /// with the store by [`SessionList::sync_rows`] at the top of every frame; it holds no session data of its own.
+    rows: ListState,
+    /// The listed sessions' keys in the order the list state was last rebuilt to, each with its row's focus handle:
+    /// how a frame tells whether the rows or their order changed, and what the item callback draws by index.
+    entries: Rc<[(String, FocusHandle)]>,
+    /// Each listed session's row focus handle (see the module docs), owned here so it outlives a frame in which the
+    /// row is not drawn and stays the same across rebuilds; dropped once the session is no longer listed.
+    row_focus: HashMap<String, FocusHandle>,
+    /// The list's width when its rows were last given their height estimate; see [`SessionList::sync_rows`].
+    hinted_width: Option<Pixels>,
+    /// What held the window's focus when [`SessionList::reveal_focused`] last looked, so it acts once per focus move.
+    ///
+    /// NOTE: Weak on purpose. A strong handle here would keep whatever held focus alive after it went away (a terminal
+    /// dropped by a reset, say), and the window would go on reporting it as focused, so focus would never go home.
+    focus_seen: Option<WeakFocusHandle>,
 }
 
 /// What the list keeps for one UI session.
@@ -100,8 +167,8 @@ struct Current {
     /// Settles whenever the session's operation store changes, so the selection held back for a Delete moves on once
     /// the Delete settles. Made and dropped like `store`.
     operations: Option<Subscription>,
-    /// The rows' menu buttons and the layers they opened.
-    rows: menu::RowLayers,
+    /// The rows' menu buttons and the layers they opened, shared with the item callback that draws the rows.
+    rows: menu::SharedRows,
 }
 
 impl SessionList {
@@ -119,6 +186,11 @@ impl SessionList {
             _observing: observing,
             pulse: None,
             spinner: None,
+            rows: ListState::new(0, ListAlignment::Top, px(ROW_OVERDRAW)),
+            entries: Rc::from([]),
+            row_focus: HashMap::new(),
+            hinted_width: None,
+            focus_seen: None,
         };
         list.settle(cx);
         list
@@ -182,6 +254,139 @@ impl SessionList {
             }
         }
     }
+
+    /// Bring the list state into step with `keys`, the listed sessions in order, at the top of a frame.
+    ///
+    /// When the sessions or their order changed, the state is rebuilt with every row's focus handle registered and the
+    /// scroll position kept (the same row index and offset, as the old page kept its scroll offset; the order hold is
+    /// what keeps rows still under the pointer). Rows not yet drawn are then given an estimated height,
+    /// [`ROW_HEIGHT_HINT`]; a row's real height replaces its estimate once it is drawn. On a frame that did not give
+    /// estimates, focus moving into a row then scrolls its neighbors into view ([`Self::reveal_focused`]).
+    ///
+    /// NOTE: The list drops every row's estimate itself the first time it lays out and whenever its width changes (its
+    /// cached heights are for the old width), and a row without an estimate counts as zero pixels, which would leave the
+    /// scroll range covering only the rows drawn so far. So a width other than the one the estimates were last given at
+    /// gives them again: the frame that changed the width is laid out without them, and the next restores them.
+    ///
+    /// `keys` is `None` when the listing has the same sessions in the same order as `entries` (the caller compares, so
+    /// an unchanged frame allocates nothing). Returns whether it gave the estimates, which the caller follows with one
+    /// more frame: the first layout drops them right after this frame's sync, and nothing else may draw again soon.
+    fn sync_rows(&mut self, keys: Option<Vec<String>>, window: &Window, cx: &App) -> bool {
+        if let Some(keys) = keys {
+            let listed: HashSet<&str> = keys.iter().map(String::as_str).collect();
+            self.row_focus
+                .retain(|key, _| listed.contains(key.as_str()));
+            let row_focus = &mut self.row_focus;
+            // Not a tab stop: the row's handle only contains its controls' focus, and never takes focus itself.
+            self.entries = keys
+                .into_iter()
+                .map(|key| {
+                    let handle = row_focus
+                        .entry(key.clone())
+                        .or_insert_with(|| cx.focus_handle())
+                        .clone();
+                    (key, handle)
+                })
+                .collect();
+            let top = self.rows.logical_scroll_top();
+            self.rows.splice_focusable(
+                0..self.rows.item_count(),
+                self.entries.iter().map(|(_, handle)| Some(handle.clone())),
+            );
+            self.rows.scroll_to(top);
+            self.hinted_width = None;
+        }
+        let width = self.rows.viewport_bounds().size.width;
+        if self.hinted_width != Some(width) {
+            // The list state is shared, so the clone's builder sets the estimate on this list's rows. It fills in only
+            // rows without a measured height or an estimate, keeps every row's focus handle, and turns measured rows
+            // into estimated ones at their measured height, which the next layout measures again where it draws.
+            let _ = self
+                .rows
+                .clone()
+                .with_uniform_item_height(px(ROW_HEIGHT_HINT));
+            self.hinted_width = Some(width);
+            // No reveal on this frame: no row has a measured height yet, so every row would count as out of view and a
+            // focus move would scroll rows that are fully visible. The frame the caller asks for judges it instead.
+            return true;
+        }
+        self.reveal_focused(window, cx);
+        false
+    }
+
+    /// Once per focus move the keyboard made, if focus is now inside a row: scroll a neighbor that is not fully in view
+    /// into view (the one below first, else the one above), or failing both the row itself if it is not, so the next Tab or
+    /// Shift+Tab finds a painted neighbor to move to (GPUI's Tab order holds only what was painted). Rows already fully
+    /// in view never move: GPUI's reveal would scroll even those.
+    ///
+    /// Only for the keyboard (`last_input_was_keyboard`, which GPUI sets to false on a mouse press before dispatching
+    /// it): a click that focuses a row's control must not scroll the list before the click's release, which would then
+    /// land on another element and be lost. The once-per-move check also keeps a wheel scroll after a Tab from being
+    /// fought, since a wheel does not change the input mode. Accepted edge cases: a pointer move between a key and the
+    /// next frame can skip a reveal, and Escape out of a menu opened at an edge row may scroll the list by up to a row.
+    fn reveal_focused(&mut self, window: &Window, cx: &App) {
+        let focused = window.focused(cx);
+        let seen = self.focus_seen.as_ref().and_then(WeakFocusHandle::upgrade);
+        if focused == seen {
+            return;
+        }
+        self.focus_seen = focused.as_ref().map(FocusHandle::downgrade);
+        if !window.last_input_was_keyboard() {
+            return;
+        }
+        let Some(ix) = self
+            .entries
+            .iter()
+            .position(|(_, handle)| handle.contains_focused(window, cx))
+        else {
+            return;
+        };
+        // Judged from the last layout, before any reveal in this pass moves the scroll position.
+        let below = ix + 1 < self.entries.len() && !self.row_fully_in_view(ix + 1);
+        let above = ix > 0 && !self.row_fully_in_view(ix - 1);
+        let itself = !self.row_fully_in_view(ix);
+        if below {
+            self.rows.scroll_to_reveal_item(ix + 1);
+        } else if above {
+            self.rows.scroll_to_reveal_item(ix - 1);
+        } else if itself {
+            // Only when no neighbor moved: revealing the row after its neighbor can scroll back and undo the neighbor's
+            // reveal when the rows differ in height.
+            self.rows.scroll_to_reveal_item(ix);
+        }
+    }
+
+    /// Whether row `ix` lies wholly inside the list's view as last laid out. A row the last layout did not measure (far
+    /// from the view) is not.
+    fn row_fully_in_view(&self, ix: usize) -> bool {
+        let view = self.rows.viewport_bounds();
+        self.rows
+            .bounds_for_item(ix)
+            .is_some_and(|row| row.top() >= view.top() && row.bottom() <= view.bottom())
+    }
+
+    /// Scroll `key`'s row into view if it is listed and out of view: a press on a control of a row scrolled away
+    /// (its menu button kept focus through a wheel scroll) acts on a row the user can see, and an overlay it opens has
+    /// a drawn anchor to sit beside.
+    pub(super) fn reveal_row(&mut self, key: &str, cx: &mut Context<Self>) {
+        if self.row_in_view(key) {
+            return;
+        }
+        if let Some(ix) = self.entries.iter().position(|(listed, _)| listed == key) {
+            self.rows.scroll_to_reveal_item(ix);
+            cx.notify();
+        }
+    }
+
+    /// Whether `key`'s row is at least partly inside the list's view as last drawn. A row past the view's edges, or one
+    /// the list does not show at all, is not.
+    pub(super) fn row_in_view(&self, key: &str) -> bool {
+        let Some(ix) = self.entries.iter().position(|(listed, _)| listed == key) else {
+            return false;
+        };
+        self.rows.item_is_above_viewport(ix) == Some(false)
+            && self.rows.item_is_below_viewport(ix) == Some(false)
+    }
 }
 
 impl Render for SessionList {
@@ -199,19 +404,37 @@ impl Render for SessionList {
         let Some(store) = session::current_store(cx) else {
             self.pulse = None;
             self.spinner = None;
+            if !self.entries.is_empty() {
+                self.sync_rows(Some(Vec::new()), window, cx);
+            }
             return list;
         };
-        let pulses = ticker::is_active(window, cx)
-            && selection::listed(store.read(cx).collections())
+        // One pass over the listing for what the frame needs from all of it: the keys, and whether any row pulses or
+        // shows a pending Delete. Everything else is read row by row, for the rows drawn.
+        let (keys, any_pulse, any_delete) = {
+            let listed = selection::listed(store.read(cx).collections());
+            let unchanged = listed.len() == self.entries.len()
+                && listed
+                    .iter()
+                    .zip(self.entries.iter())
+                    .all(|(session, (key, _))| session.key == key);
+            let keys = (!unchanged).then(|| {
+                listed
+                    .iter()
+                    .map(|session| session.key.to_owned())
+                    .collect::<Vec<String>>()
+            });
+            let any_pulse = listed.iter().any(|session| status::pulses(session.row));
+            let any_delete = listed
                 .iter()
-                .any(|session| status::pulses(session.row));
+                .any(|session| delete::in_flight(session.key, cx).is_some());
+            (keys, any_pulse, any_delete)
+        };
+        let pulses = ticker::is_active(window, cx) && any_pulse;
         if pulses != self.pulse.is_some() {
             self.pulse = pulses.then(|| ticker::pulse(window, cx));
         }
-        let deleting = ticker::is_active(window, cx)
-            && selection::listed(store.read(cx).collections())
-                .iter()
-                .any(|session| delete::in_flight(session.key, cx).is_some());
+        let deleting = ticker::is_active(window, cx) && any_delete;
         if deleting != self.spinner.is_some() {
             self.spinner = deleting.then(|| delete::Spinner::start(window, cx));
         }
@@ -219,16 +442,19 @@ impl Render for SessionList {
             pulse: self.pulse.as_ref().map_or(0, |pulse| pulse.step(cx)),
             delete: self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx)),
         };
-        let mut menus = self.menu_buttons(&store, window, cx);
+        if self.sync_rows(keys, window, cx) {
+            cx.notify();
+        }
+        let shared = self.current.current(cx).rows.clone();
+        shared.borrow_mut().start_frame();
         let collections = store.read(cx).collections();
-        let listed = selection::listed(collections);
         let Some(meta) = collections.meta(Collection::Sessions) else {
             return list.child(status_line("Loading sessions…"));
         };
         let selected = local_state::selected(cx);
         let palette = theme::palette(cx);
 
-        let count = count_line(meta, listed.len());
+        let count = count_line(meta, self.entries.len());
         let heading = div()
             .flex()
             .flex_row()
@@ -277,26 +503,26 @@ impl Render for SessionList {
         let body: AnyElement = if empty_fleet(collections) {
             status_line("No sessions").into_any_element()
         } else {
+            // What the item callback needs, by value: it runs while the list lays out, after this render returns, and
+            // builds only the rows it draws.
+            let entries = self.entries.clone();
+            let weak = cx.weak_entity();
             div()
                 .id("session-rows")
+                // Tests scroll the list over this; it records nothing outside test builds.
+                .debug_selector(|| "session-rows".into())
                 .flex_1()
                 .min_h_0()
-                .overflow_y_scroll()
-                .children(listed.iter().map(|session| {
-                    let key = session.key.to_owned();
-                    let menu = menus
-                        .remove(session.key)
-                        .unwrap_or_else(|| div().into_any_element());
-                    row::row(
-                        *session,
-                        collections,
-                        selected.as_deref() == Some(session.key),
-                        steps,
-                        menu,
-                        move |_, cx| selection::choose(&key, cx),
-                        cx,
-                    )
-                }))
+                .child(
+                    gpui::list(self.rows.clone(), move |ix, window, cx| {
+                        let Some((key, focus)) = entries.get(ix) else {
+                            return div().into_any_element();
+                        };
+                        let selected = selected.as_deref() == Some(key.as_str());
+                        draw_row(&shared, &weak, key, focus, selected, steps, window, cx)
+                    })
+                    .size_full(),
+                )
                 .into_any_element()
         };
         list.child(heading)
@@ -304,6 +530,52 @@ impl Render for SessionList {
             .children(unavailable)
             .child(body)
     }
+}
+
+/// Draw the row of `key` for the virtualized list's item callback: its menu button first (its anchor is element state,
+/// so it is made while the row's elements are), then the row from the store as it is now. A session missing from the
+/// store draws nothing; the callback runs in the frame whose listing named it, so that does not happen.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the item callback's captures, passed through once"
+)]
+fn draw_row(
+    shared: &menu::SharedRows,
+    weak: &WeakEntity<SessionList>,
+    key: &str,
+    focus: &FocusHandle,
+    selected: bool,
+    steps: row::Steps,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let Some(store) = session::current_store(cx) else {
+        return div().into_any_element();
+    };
+    let Some(title) = store
+        .read(cx)
+        .collections()
+        .get::<SessionRow>(key)
+        .map(|row| row.info.title.clone())
+    else {
+        return div().into_any_element();
+    };
+    let menu = menu::menu_button(shared, weak, key, &title, selected, window, cx);
+    let collections = store.read(cx).collections();
+    let Some(row) = collections.get::<SessionRow>(key) else {
+        return div().into_any_element();
+    };
+    let open = key.to_owned();
+    row::row(
+        Listed { key, row },
+        collections,
+        selected,
+        steps,
+        menu,
+        focus,
+        move |_, cx| selection::choose(&open, cx),
+        cx,
+    )
 }
 
 /// What the list says about its count: the count beside the title, or, for a listing the helm's cap cut, a warning on

@@ -20,14 +20,16 @@
 use farhelm_helm_client::Collections;
 use farhelm_proto::ui_channel::{HostView, SessionRow};
 use gpui::{
-    AnyElement, App, FontWeight, InteractiveElement, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder as _, px, relative,
+    AnyElement, App, FocusHandle, FontWeight, InteractiveElement, IntoElement, ParentElement,
+    SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder as _, px,
+    relative,
 };
 
 use super::delete;
 use super::selection::Listed;
 use super::status::{self, Badge};
 use crate::components::{HoverHelp, ListRow, Role};
+use crate::focus;
 use crate::host_text::{self, HostSentence, HostText};
 use crate::theme::{self, Palette, metrics};
 
@@ -54,14 +56,21 @@ pub(super) struct Steps {
     pub(super) delete: u8,
 }
 
-/// Draw `session`'s row, its animations at the list's `steps`, and `menu`, its actions menu button, at its end.
-/// `on_open` runs when the user activates it.
+/// Draw `session`'s row, its animations at the list's `steps`, and `menu`, its actions menu button, at its end. `focus`
+/// is the row's own focus handle, which the list owns and registers with its list state: the row's item tracks it so it
+/// contains whichever of the row's controls holds focus, and never takes focus itself. `on_open` runs when the user
+/// activates the row.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "one row's inputs, all drawn from by one function"
+)]
 pub(crate) fn row(
     session: Listed,
     collections: &Collections,
     selected: bool,
     steps: Steps,
     menu: AnyElement,
+    focus: &FocusHandle,
     on_open: impl Fn(&mut Window, &mut App) + 'static,
     cx: &App,
 ) -> AnyElement {
@@ -139,11 +148,13 @@ pub(crate) fn row(
     // reports selection only on item-like roles (a list item, an option), not on a button. The old app marked its open
     // button `aria-current` instead, which GPUI cannot express. The item is named like its button, by the title, so
     // nothing reads out its element id instead.
-    div()
-        .id(SharedString::from(format!(
-            "{ITEM_ID_PREFIX}{}",
-            session.key
-        )))
+    let item = div().id(SharedString::from(format!(
+        "{ITEM_ID_PREFIX}{}",
+        session.key
+    )));
+    // A press on the item's own space leaves focus where it is (`OnPress::Keep`): the controls inside take their
+    // presses first, and the handle is no tab stop.
+    focus::track(item, focus, focus::OnPress::Keep)
         .role(Role::ListItem)
         .aria_label(item_label)
         .aria_selected(selected)
