@@ -260,8 +260,8 @@ pub struct Attachment {
     _lost: Subscription,
 }
 
-/// Attach the coordinator to the root view's window. Every root view calls this once, from its constructor, and draws
-/// through [`root`].
+/// Attach the coordinator to the root view's window. Every root view does this once, from its constructor, through
+/// [`crate::root::attach`], and draws through [`crate::root::wrap`], which applies [`root`].
 pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachment {
     // Not a tab stop: Tab moves from the root to the first control and never back to the root.
     let root = cx.focus_handle().tab_stop(false);

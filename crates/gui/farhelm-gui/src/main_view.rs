@@ -16,16 +16,15 @@ use gpui::{
 use crate::components::{Banner, Button, HoverHelp, Role, Tier};
 use crate::notices::{self, Notice};
 use crate::theme::metrics;
-use crate::{focus, layers, render_count, session, theme};
+use crate::{render_count, root, session, theme};
 
 /// The window's root view.
 pub struct MainView {
     /// Keeps the theme following the operating system's appearance for this window's lifetime.
     _appearance: Subscription,
-    /// This window's layer stack; redraws this view, and so the overlay it draws, when an overlay changes.
-    _layers: layers::Attachment,
-    /// This window's focus state and the coordinator's focus recovery.
-    focus: focus::Attachment,
+    /// This window's layer stack (which redraws this view, and so the overlay it draws, when an overlay changes), its
+    /// focus state and the coordinator's focus recovery.
+    root: root::Attachment,
     /// Redraws on a change of the connection's state and of the notice center.
     _observed: Vec<Subscription>,
 }
@@ -43,8 +42,7 @@ impl MainView {
         }
         MainView {
             _appearance: theme::observe_window(window),
-            _layers: layers::attach(window, cx),
-            focus: focus::attach(window, cx),
+            root: root::attach(window, cx),
             _observed: observed,
         }
     }
@@ -67,13 +65,13 @@ impl Render for MainView {
         } else {
             inert(&state, cx)
         };
-        focus::root(div(), &self.focus)
+        let ground = div()
             .size_full()
             .bg(theme::color(palette.bg_0))
             .text_color(theme::color(palette.fg_0))
             .font_family(crate::assets::UI_FONT)
-            .child(body)
-            .children(layers::overlay(window, cx))
+            .child(body);
+        root::wrap(ground, &self.root, window, cx)
     }
 }
 

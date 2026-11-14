@@ -22,6 +22,7 @@
 //! - [`notices`]: the notice center, the one place that decides what notice shows.
 //! - [`cache`]: the one way to cache a view.
 //! - [`render_count`]: per-view render counts in test builds.
+//! - [`root`]: a window's root view wiring, which attaches the layer manager and the focus coordinator together.
 //! - [`assets`]: the bundled fonts and icons.
 //! - [`terminal`]: a session terminal's renderer, an uncached view that owns its grid model.
 //! - [`marks`]: the agent harnesses' marks as plain geometry, kept from the old Dioxus UI.
@@ -62,6 +63,7 @@ pub mod marks;
 pub mod notices;
 pub mod prompt;
 pub mod render_count;
+pub mod root;
 pub mod session;
 pub mod store;
 pub mod terminal;

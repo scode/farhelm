@@ -27,11 +27,12 @@ use crate::components::{
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::focus::{self, Mark};
+use crate::focus::Mark;
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, Popover, TooltipOwner};
 use crate::notices::Notice;
 use crate::prompt::{self, Answer, Question};
+use crate::root;
 use crate::session;
 use crate::terminal::attached::{AttachedTerminal, OpenStream, TerminalTarget};
 use crate::terminal::{CellMetrics, CursorPhase, TerminalView, TextSize};
@@ -76,14 +77,13 @@ struct SceneState {
 struct SceneView {
     scene: &'static Scene,
     state: SceneState,
-    _layers: layers::Attachment,
-    focus: focus::Attachment,
+    root: root::Attachment,
 }
 
 impl Render for SceneView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::palette(cx);
-        focus::root(div(), &self.focus)
+        let ground = div()
             .size_full()
             .flex()
             .items_center()
@@ -91,8 +91,8 @@ impl Render for SceneView {
             .p(px(12.))
             .bg(theme::color(palette.bg_0))
             .font_family(crate::assets::UI_FONT)
-            .child((self.scene.draw)(&self.state, window, cx))
-            .children(layers::overlay(window, cx))
+            .child((self.scene.draw)(&self.state, window, cx));
+        root::wrap(ground, &self.root, window, cx)
     }
 }
 
@@ -814,8 +814,7 @@ fn component_goldens() -> anyhow::Result<()> {
                     let scene_view = cx.new(|cx| SceneView {
                         scene,
                         state,
-                        _layers: layers::attach(window, cx),
-                        focus: focus::attach(window, cx),
+                        root: root::attach(window, cx),
                     });
                     view = Some(scene_view.clone());
                     cx.new(|cx| Root::new(scene_view, window, cx))
