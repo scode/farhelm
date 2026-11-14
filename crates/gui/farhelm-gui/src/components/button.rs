@@ -1,5 +1,10 @@
 //! Buttons, drawn as the old stylesheet's `.btn` tiers: ghost (the default), neutral, primary and danger, plus the
-//! compact control that sits on the red banner.
+//! compact control that sits on the red banner and the ⋯ that opens a list row's menu.
+//!
+//! A button that opens something (a menu, a question) can say so with [`Button::expanded`]: assistive technology hears
+//! whether what it opens is open, and while it is the button wears the old pressed look, the accent fill with the
+//! inverse ink. A plain hover fill left behind after the pointer moves away would read as stale hover, not as "open";
+//! the old header triggers and the row menu's ⋯ followed the same rule.
 //!
 //! A button activates on click, and on Enter or Space while it has keyboard focus (a held key does not repeat it:
 //! SPEC.md, "Repeated or composing Enter cannot answer the new question"). Focus is the focus coordinator's: an enabled
@@ -40,7 +45,17 @@ pub enum Tier {
     /// pale red outline and white text so it reads against the banner's fill, a darker red hover, and a white focus
     /// ring because the accent ring is not calibrated for a red background. Use it only on a red banner.
     OnBanner,
+    /// `.session-row-menu`: the ghost ⋯ at the end of a list row, in the old toggle's box (`padding: 0 5px` around the
+    /// glyph, at the row's 14-pixel text and `line-height: 1.4`, so 19.6 pixels high). `on_fill` is for the selected
+    /// row's solid accent fill, where it draws in the inverse ink with an accent-family hover and an inverse focus ring
+    /// (`.session-row.selected .session-row-menu` and `.session-row.selected :focus-visible`).
+    RowMenu { on_fill: bool },
 }
+
+/// The [`Tier::RowMenu`] box's height: 14-pixel text at `line-height: 1.4`.
+const ROW_MENU_HEIGHT: f32 = 19.6;
+/// The [`Tier::RowMenu`] box's horizontal padding.
+const ROW_MENU_PAD_X: f32 = 5.;
 
 /// A button with a visible text label (and optionally a leading icon).
 #[derive(IntoElement)]
@@ -53,6 +68,8 @@ pub struct Button {
     icon: Option<Icon>,
     show_label: bool,
     disabled: bool,
+    /// Whether what the button opens is open; `None` for a button that opens nothing.
+    expanded: Option<bool>,
     on_click: Option<Handler>,
     focus: Option<FocusHandle>,
 }
@@ -77,6 +94,7 @@ impl Button {
             icon: None,
             show_label: true,
             disabled: false,
+            expanded: None,
             on_click: None,
             focus: None,
         }
@@ -100,6 +118,13 @@ impl Button {
         self
     }
 
+    /// The button opens something, and `expanded` says whether it is open now: `aria-expanded`, and the pressed look
+    /// while it is (see the module docs).
+    pub fn expanded(mut self, expanded: bool) -> Self {
+        self.expanded = Some(expanded);
+        self
+    }
+
     /// What activating the button does.
     pub fn on_click(
         mut self,
@@ -116,8 +141,16 @@ impl Button {
         self
     }
 
-    /// Colors for this tier: (fill, hover fill, edge, text). Ghost buttons have no fill or edge at rest.
+    /// Colors for this tier and state: (fill, hover fill, edge, text). Ghost buttons have no fill or edge at rest.
     fn colors(&self, palette: &Palette) -> (Option<Token>, Token, Option<Token>, Token) {
+        if self.expanded == Some(true) {
+            return (
+                Some(palette.accent_fill_hover),
+                palette.accent_fill_hover,
+                None,
+                palette.on_fill,
+            );
+        }
         let retired = (
             Some(palette.bg_2),
             palette.bg_2,
@@ -125,7 +158,12 @@ impl Button {
             palette.fg_2,
         );
         match self.tier {
-            Tier::Ghost => (None, palette.control_hover, None, palette.fg_1),
+            Tier::Ghost | Tier::RowMenu { on_fill: false } => {
+                (None, palette.control_hover, None, palette.fg_1)
+            }
+            Tier::RowMenu { on_fill: true } => {
+                (None, palette.accent_fill_hover, None, palette.on_fill)
+            }
             Tier::OnBanner => (
                 None,
                 palette.danger_fill_hover,
@@ -171,11 +209,23 @@ impl RenderOnce for Button {
         // `.banner-reclaim` overrides `.btn`'s padding to fit inside the banner's 4-pixel band.
         let (pad_y, pad_x) = match self.tier {
             Tier::OnBanner => metrics::BANNER_BUTTON_PAD,
+            Tier::RowMenu { .. } => (px(0.), px(ROW_MENU_PAD_X)),
             Tier::Ghost | Tier::Neutral | Tier::Primary | Tier::Danger => metrics::BUTTON_PAD,
         };
         let ring_color = match self.tier {
-            Tier::OnBanner => palette.on_fill,
-            Tier::Ghost | Tier::Neutral | Tier::Primary | Tier::Danger => palette.accent,
+            Tier::OnBanner | Tier::RowMenu { on_fill: true } => palette.on_fill,
+            Tier::Ghost
+            | Tier::Neutral
+            | Tier::Primary
+            | Tier::Danger
+            | Tier::RowMenu { on_fill: false } => palette.accent,
+        };
+        // An icon-only button is otherwise as high as its icon plus its padding and square; the row menu's box is the
+        // old toggle's, set by its text line and its own side padding.
+        let (pad_x, height) = match self.tier {
+            Tier::RowMenu { .. } => (pad_x, Some(px(ROW_MENU_HEIGHT))),
+            _ if self.show_label => (pad_x, None),
+            _ => (pad_y, None),
         };
         let enabled = !self.disabled;
         let handler = self.on_click.clone().filter(|_| enabled);
@@ -193,7 +243,11 @@ impl RenderOnce for Button {
             .justify_center()
             .gap(px(6.))
             .py(pad_y)
-            .px(if self.show_label { pad_x } else { pad_y })
+            .px(pad_x)
+            .when_some(height, |button, height| button.h(height))
+            .when_some(self.expanded, |button, expanded| {
+                button.aria_expanded(expanded)
+            })
             .rounded(metrics::RADIUS_SM)
             .border_1()
             .text_size(metrics::TEXT_SM)
@@ -224,7 +278,10 @@ impl RenderOnce for Button {
             button = button
                 .cursor_pointer()
                 .hover(|style| style.bg(theme::color(hover_fill)));
-        } else if matches!(self.tier, Tier::Ghost | Tier::Neutral | Tier::OnBanner) {
+        } else if matches!(
+            self.tier,
+            Tier::Ghost | Tier::Neutral | Tier::OnBanner | Tier::RowMenu { .. }
+        ) {
             button = button.opacity(0.5);
         }
         if let Some(icon) = self.icon {
@@ -280,6 +337,11 @@ impl IconButton {
     /// See [`Button::disabled`].
     pub fn disabled(self, disabled: bool) -> Self {
         IconButton(self.0.disabled(disabled))
+    }
+
+    /// See [`Button::expanded`].
+    pub fn expanded(self, expanded: bool) -> Self {
+        IconButton(self.0.expanded(expanded))
     }
 
     /// See [`Button::on_click`].

@@ -9,6 +9,11 @@
 //! Everything a host wrote (the title, the host's name, the directory, a stop annotation) is host text: escaped, and
 //! each value its own text element, so a direction override in one cannot reorder anything around it.
 //!
+//! The row's actions menu button sits at its end, outside the open control, so opening the menu never opens the
+//! session ([`super::menu`]). A pending Delete shows its spinner and words in place of the title, which stays the row's
+//! accessible name, and a refusal of the row's last request shows under the row until the next one starts
+//! ([`super::delete`]).
+//!
 //! NOTE: The locality column is kept empty, at its width, so titles start where they did in the old app; the locality,
 //! agent and permission marks, the activity age, the stale cause, the pin and the notification bell are not ported yet.
 
@@ -19,6 +24,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder as _, px, relative,
 };
 
+use super::delete;
 use super::selection::Listed;
 use super::status::{self, Badge};
 use crate::components::{HoverHelp, ListRow, Role};
@@ -32,18 +38,30 @@ pub(crate) const ROW_ID_PREFIX: &str = "session-row-";
 /// The id prefix of a session's list item, the row around the open control; the rest is the session's key.
 pub(crate) const ITEM_ID_PREFIX: &str = "session-item-";
 
+/// The hover group every row's list item forms, so its menu button shows while the pointer is anywhere on the row.
+pub(super) const ROW_GROUP: &str = "session-row";
+
 /// The indent of the lines under the first: the status and locality columns and their gaps (`.session-row-meta`).
 fn under_title() -> gpui::Pixels {
     (metrics::ROW_SLOT + metrics::ROW_SLOT_GAP) * 2.
 }
 
-/// Draw `session`'s row, its status mark at the list's pulse step `pulse_step` (which only a pulsing mark uses).
+/// The steps of the list's two animations, one for every row: the running pulse's, which only a pulsing status mark
+/// uses, and the pending Delete spinner's.
+#[derive(Clone, Copy)]
+pub(super) struct Steps {
+    pub(super) pulse: u64,
+    pub(super) delete: u8,
+}
+
+/// Draw `session`'s row, its animations at the list's `steps`, and `menu`, its actions menu button, at its end.
 /// `on_open` runs when the user activates it.
 pub(crate) fn row(
     session: Listed,
     collections: &Collections,
     selected: bool,
-    pulse_step: u64,
+    steps: Steps,
+    menu: AnyElement,
     on_open: impl Fn(&mut Window, &mut App) + 'static,
     cx: &App,
 ) -> AnyElement {
@@ -84,18 +102,24 @@ pub(crate) fn row(
                 .flex()
                 .items_center()
                 .justify_center()
-                .children(live.map(|live| live.mark(palette, selected, row.stale, pulse_step))),
+                .children(live.map(|live| live.mark(palette, selected, row.stale, steps.pulse))),
         )
         .child(div().w(metrics::ROW_SLOT).flex_none())
-        .child(
-            host_text::element(&title)
+        // A pending Delete takes the title's place on screen, as the old row's did; the open control and the list item
+        // keep the title as their accessible names.
+        .child(match delete::in_flight(session.key, cx) {
+            Some(guard) => {
+                delete::progress(session.key, guard, steps.delete, selected, cx).into_any_element()
+            }
+            None => host_text::element(&title)
                 .flex_1()
                 .min_w_0()
                 .truncate()
                 .text_size(metrics::TEXT_ROW_TITLE)
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::color(title_color)),
-        );
+                .text_color(theme::color(title_color))
+                .into_any_element(),
+        });
 
     let mut control = ListRow::new(id, label, HoverHelp::tooltip(help), Role::Button)
         .selected(selected)
@@ -123,11 +147,20 @@ pub(crate) fn row(
         .role(Role::ListItem)
         .aria_label(item_label)
         .aria_selected(selected)
+        .group(ROW_GROUP)
         .w_full()
         .border_b_1()
         .border_color(theme::color(palette.border_row))
         .when(selected, |row| row.bg(theme::color(palette.accent_fill)))
-        .child(control)
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .gap(px(6.))
+                .child(div().flex_1().min_w_0().child(control))
+                .child(menu),
+        )
+        .children(delete::failure_line(session.key, selected, cx))
         .into_any_element()
 }
 
