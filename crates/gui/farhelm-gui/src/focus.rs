@@ -47,6 +47,21 @@
 //!   can flip it from the keyboard (Control-F7 by default) without leaving the app. The migration's orchestrator
 //!   decided this on 2026-11-13, under the rule that the GPUI app ports the old one rather than redesigning it: the Mac
 //!   keeps the old app's behavior, and Linux follows the GTK and Qt convention.
+//! - **Scrolling the focused control into view.** When the keyboard (Tab, Shift+Tab, a menu's arrows) or the app (a
+//!   layer returning focus, [`focus_control`], the recovery when a focused control vanishes) moves focus onto a control
+//!   inside a scrolling container, the container scrolls the least distance that shows the whole control, as a
+//!   browser's scroll-into-view does: SPEC.md's "Reaching everything by keyboard" means little if Tab reaches a control
+//!   the user cannot see. A container opts in by drawing through [`scroll_region`]; every one around the control
+//!   scrolls as far as needed, innermost first, and only vertically. A pointer press that focuses a control does not
+//!   scroll (browsers do not either, and it would move what the user is clicking), and neither does pointer hover in a
+//!   menu; but when the pressed control then goes away, the recovery that moves focus to the closest remaining one
+//!   scrolls that one into view, as any recovery does. Virtualized lists keep their own reveal: their rows are not all
+//!   drawn, so a row Tab has not reached may have no position to scroll to.
+//!
+//!   A control focused before it is first drawn is not scrolled to: a layer's start, or a control shown in the same
+//!   update that focuses it, has no position yet. Its owner scrolls it. SPEC.md has two such cases to come: Settings'
+//!   trust hints, which open agent trust and scroll its block into view, and the archive's global confirmation, whose
+//!   actions are brought into view when it opens.
 //!
 //! NOTE: Agent approval cards, which keep focus while a dialog is open, do not exist yet, so [`invariant_violation`]
 //! knows only the topmost dialog.
@@ -56,9 +71,11 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use gpui::{
-    App, AppContext as _, Bounds, Context, Div, ElementId, Entity, FocusHandle, Global,
-    InteractiveElement, Keystroke, KeystrokeEvent, MouseButton, MouseDownEvent, ParentElement,
-    Pixels, Point, Styled, Subscription, WeakEntity, WeakFocusHandle, Window, WindowId, canvas,
+    AnyElement, App, AppContext as _, Bounds, Context, Div, Element, ElementId, Entity,
+    FocusHandle, Global, GlobalElementId, InspectorElementId, InteractiveElement, IntoElement,
+    Keystroke, KeystrokeEvent, LayoutId, MouseButton, MouseDownEvent, ParentElement, Pixels, Point,
+    ScrollHandle, StatefulInteractiveElement, Styled, Subscription, WeakEntity, WeakFocusHandle,
+    Window, WindowId, canvas, px,
 };
 
 use crate::actions::{
@@ -226,13 +243,26 @@ pub struct WindowFocus {
     /// Kept with its handle: the position is used only when that control is the one that vanished, never as a stand-in
     /// for some other element that held focus without recording a position.
     last_focused: Option<(WeakFocusHandle, Bounds<Pixels>)>,
+    /// The [`scroll_region`]s around the element being prepared, innermost last. Filled and emptied within each region's
+    /// own prepaint, so it is empty between frames; a control recorded while it is not empty sits in its last entry.
+    regions_open: Vec<ScrollHandle>,
 }
 
-/// One recorded control: its handle, where it was last drawn, and its kind.
+/// One recorded control: its handle, where it was last drawn, its kind, and the scroll regions around it then.
 struct Recorded {
     control: WeakFocusHandle,
     bounds: Bounds<Pixels>,
     kind: ControlKind,
+    /// Outermost first, innermost last, as [`WindowFocus::regions_open`] held them; empty outside every region.
+    regions: Vec<Enclosing>,
+}
+
+/// A [`scroll_region`] around a recorded control, with its vertical scroll offset when the control was recorded. The
+/// difference from its offset now is how far the control has moved since the frame on screen: a reveal scrolls without
+/// drawing, so a second focus move before the next frame would otherwise measure the control where it no longer is.
+struct Enclosing {
+    handle: ScrollHandle,
+    offset_y: Pixels,
 }
 
 /// What kind of tab stop a control is, for [`TabReach`]: a plain Tab skips buttons where only text fields and pop-ups
@@ -283,6 +313,7 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
         controls: Vec::new(),
         prune_at: 64,
         last_focused: None,
+        regions_open: Vec::new(),
     });
     let id = window.window_handle().window_id();
     if let Some(windows) = installed_mut::<Windows>(cx) {
@@ -291,11 +322,12 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
     }
     let lost = cx.on_focus_lost(window, |_, window, cx| {
         recover(window, cx);
+        reveal_focused(window, cx);
         // GPUI calls this listener while it finishes a frame, when a redraw request is ignored and a focus move made
         // here schedules no frame of its own. The move takes effect for keys at once, but the drawn frame keeps saying
         // nothing is focused (no focus events, no ring, the test bridge reporting no focus) until something else
         // redraws, which in an idle window can be never: dismissing the connection-lost banner left it that way. So
-        // ask for one more frame once this one is done.
+        // ask for one more frame once this one is done; it also draws the scroll the reveal above may have made.
         window.defer(cx, |window, _| window.refresh());
     });
     // After the window's first frame exists, not inside its construction (a cookbook trap).
@@ -322,6 +354,7 @@ pub fn set_home(home: Option<&FocusHandle>, window: &mut Window, cx: &mut App) {
     state.update(cx, |state, _| state.home = home.map(FocusHandle::downgrade));
     if holds_nothing(window, cx) && !layers::focus_layer_open(window, cx) {
         recover(window, cx);
+        reveal_focused(window, cx);
     }
 }
 
@@ -344,7 +377,7 @@ pub fn choose_terminal(terminal: &FocusHandle, chosen: &Mark, window: &mut Windo
         return;
     }
     state.update(cx, |state, _| state.home = Some(terminal.downgrade()));
-    apply(Move::To(terminal), window, cx);
+    apply_and_reveal(Move::To(terminal), window, cx);
 }
 
 /// Move focus to the control `target` as the result of something the user did: the host rail's All taking focus after a
@@ -359,7 +392,7 @@ pub fn focus_control(target: &FocusHandle, chosen: &Mark, window: &mut Window, c
     {
         return;
     }
-    apply(Move::To(target), window, cx);
+    apply_and_reveal(Move::To(target), window, cx);
 }
 
 /// Carry focus from `from` to `to`, two parts of one control, because the key being handled on `from` moved the
@@ -569,6 +602,15 @@ fn record(
         if focused {
             state.last_focused = Some((control.clone(), bounds));
         }
+        let regions: Vec<Enclosing> = state
+            .regions_open
+            .iter()
+            .map(|handle| Enclosing {
+                // Each region around the control has already applied this frame's (clamped) offset to its content.
+                offset_y: handle.offset().y,
+                handle: handle.clone(),
+            })
+            .collect();
         if let Some(entry) = state
             .controls
             .iter_mut()
@@ -576,6 +618,7 @@ fn record(
         {
             entry.bounds = bounds;
             entry.kind = kind;
+            entry.regions = regions;
             return;
         }
         if state.controls.len() >= state.prune_at {
@@ -588,6 +631,7 @@ fn record(
             control: control.clone(),
             bounds,
             kind,
+            regions,
         });
     });
 }
@@ -623,6 +667,194 @@ fn distance_squared(a: gpui::Point<Pixels>, b: gpui::Point<Pixels>) -> f32 {
     dx * dx + dy * dy
 }
 
+// ---- Scrolling the focused control into view -------------------------------------------------------------------------
+
+/// Opt the scrolling `container` in to ensure-visible: when the keyboard or the app moves focus onto a control drawn
+/// inside it, it scrolls so the whole control shows (see the module docs for which moves count). `handle` becomes the
+/// container's scroll state (`track_scroll`); keep it across frames (in the view, or in keyed element state), or the
+/// scroll position resets on every draw.
+///
+/// For a container that scrolls vertically and draws all its content, such as a dialog's body, or the sidebar's host
+/// list once the sidebar draws it through this. Not for a virtualized list: it draws only the rows in view, so the row
+/// focus lands on next may have no position yet, and it keeps its own reveal. Regions may nest (a dialog's body inside its card):
+/// each one around the control scrolls as needed, innermost first. Style the container before wrapping it; the region
+/// adds no box of its own.
+pub fn scroll_region<E>(container: E, handle: &ScrollHandle) -> ScrollRegion
+where
+    E: StatefulInteractiveElement + IntoElement,
+{
+    ScrollRegion {
+        handle: handle.clone(),
+        child: container.track_scroll(handle).into_any_element(),
+    }
+}
+
+/// A container drawn through [`scroll_region`]. Its only work is during prepaint: while its content is prepared, it is
+/// the innermost open region, so every control recorded inside it (by [`track`] or [`record_position`]) notes it, and
+/// every region outside it, as the containers to scroll. That is the element tree's own nesting, which a comparison of
+/// drawn bounds could not give: a control scrolled out of view lies outside its container's bounds, and a dialog's
+/// controls lie over the page's.
+pub struct ScrollRegion {
+    handle: ScrollHandle,
+    child: AnyElement,
+}
+
+impl IntoElement for ScrollRegion {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl Element for ScrollRegion {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        // The container's own layout node: the region is laid out exactly as the container would be without it.
+        (self.child.request_layout(window, cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let state = state(window, cx);
+        if let Some(state) = &state {
+            let handle = self.handle.clone();
+            state.update(cx, |state, _| state.regions_open.push(handle));
+        }
+        self.child.prepaint(window, cx);
+        if let Some(state) = &state {
+            state.update(cx, |state, _| state.regions_open.pop());
+        }
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.child.paint(window, cx);
+    }
+}
+
+/// Scroll every [`scroll_region`] around the focused control, innermost first, so the whole control shows, after a focus
+/// move the keyboard or the app made; a pointer press itself never calls this. An outer region scrolls only for what
+/// the inner ones could not show: a dialog's body scrolled to its field can itself lie partly outside the card, when
+/// the card scrolls in a short window.
+///
+/// Measured against the frame on screen: the control's bounds and each region's as last drawn, moved by whatever the
+/// regions have scrolled since ([`Enclosing`]). A control not drawn in that frame (the start of a layer that has just
+/// opened, a control shown in the same update that focuses it) is left alone rather than scrolled to where it once was.
+///
+/// Asks for a frame when it scrolls, since nothing else may: a focus move already on the focused control redraws
+/// nothing. From the focus-lost listener that request is ignored, and the listener asks for its own frame.
+fn reveal_focused(window: &mut Window, cx: &mut App) {
+    let (Some(focused), Some(state)) = (window.focused(cx), state(window, cx)) else {
+        return;
+    };
+    let state = state.read(cx);
+    // The root contains every element drawn in the frame on screen, overlays included, and nothing else.
+    if !state
+        .root
+        .upgrade()
+        .is_some_and(|root| root.contains(&focused, window))
+    {
+        return;
+    }
+    let Some(entry) = state
+        .controls
+        .iter()
+        .find(|entry| entry.control.upgrade().as_ref() == Some(&focused))
+    else {
+        return;
+    };
+    // How far whatever lies inside all of `regions` has moved since the frame on screen.
+    let moved = |regions: &[Enclosing]| {
+        regions.iter().fold(px(0.), |sum, region| {
+            sum + (region.handle.offset().y - region.offset_y)
+        })
+    };
+    let mut control = entry.bounds;
+    control.origin.y += moved(&entry.regions);
+    let mut scrolled = false;
+    for level in (0..entry.regions.len()).rev() {
+        let region = &entry.regions[level].handle;
+        // A region moves with the regions outside it, not with its own scroll.
+        let mut view = region.bounds();
+        view.origin.y += moved(&entry.regions[..level]);
+        let shift = scroll_into_view(region, view, control);
+        control.origin.y += shift;
+        scrolled |= shift != px(0.);
+        // Only what this region shows is for the regions outside it to bring into view: a part it still clips (a
+        // control taller than it, or one it could not scroll far enough) would make them scroll further than needed.
+        if control.intersects(&view) {
+            control = control.intersect(&view);
+        }
+    }
+    if scrolled {
+        window.refresh();
+    }
+}
+
+/// How far beyond a control's recorded bounds a reveal also brings into view. Those bounds are the control's padding
+/// box, because the element that records them is drawn inside the control and cannot see its border, and a button's
+/// keyboard focus ring sits three pixels outside that box. Without the margin, a control revealed at the region's
+/// edge shows with its border and ring cut off.
+const REVEAL_MARGIN: Pixels = px(3.);
+
+/// Scroll `region`, whose visible box is `view`, vertically by the least distance that puts `control` and
+/// [`REVEAL_MARGIN`] around it inside that box, as far as the region can scroll, and return how far the content moved
+/// (down is positive; zero when nothing changed). Both boxes are in the window's coordinates as they are now. A control
+/// taller than the region shows from its top, as in a browser. Every region opted in today scrolls vertically only, and
+/// the handle does not say which axes its container scrolls, so the horizontal offset is left alone.
+fn scroll_into_view(
+    region: &ScrollHandle,
+    view: Bounds<Pixels>,
+    control: Bounds<Pixels>,
+) -> Pixels {
+    let control = control.dilate(REVEAL_MARGIN);
+    let shift = if control.top() < view.top() || control.size.height > view.size.height {
+        view.top() - control.top()
+    } else if control.bottom() > view.bottom() {
+        view.bottom() - control.bottom()
+    } else {
+        return px(0.);
+    };
+    let mut offset = region.offset();
+    let scrolled = (offset.y + shift).clamp(-region.max_offset().y, px(0.));
+    let applied = scrolled - offset.y;
+    offset.y = scrolled;
+    region.set_offset(offset);
+    applied
+}
+
 // ---- Moving focus ----------------------------------------------------------------------------------------------------
 
 /// The one focus move the coordinator makes, in one of three forms.
@@ -645,6 +877,13 @@ fn apply(target: Move, window: &mut Window, cx: &mut App) {
     }
 }
 
+/// [`apply`] for a move the keyboard or the app makes, which then scrolls the newly focused control into view
+/// ([`reveal_focused`]). Moves made by a pointer press or by hover use [`apply`] alone.
+fn apply_and_reveal(target: Move, window: &mut Window, cx: &mut App) {
+    apply(target, window, cx);
+    reveal_focused(window, cx);
+}
+
 /// Tab or Shift+Tab, and Option-Tab: the next or previous tab stop, staying inside the topmost layer when one is open
 /// (SPEC.md: every modal dialog keeps Tab within its controls, and inside a dialog or menu focus stays inside). With
 /// `every` false, buttons are skipped ([`TabReach::TextFieldsAndPopups`]); Option-Tab and [`TabReach::EveryControl`]
@@ -653,7 +892,15 @@ fn apply(target: Move, window: &mut Window, cx: &mut App) {
 /// When no stop qualifies (a dialog of buttons only, with Tab reaching text fields only), focus stays where it was:
 /// moving it to the dialog itself would let a following Enter press the dialog's main action from a Cancel the user
 /// had chosen. Only focus that started outside the trap is taken to the trap's container.
+///
+/// Wherever focus ends up is then scrolled into view; the stops passed over on the way are not.
 fn step(forward: bool, every: bool, window: &mut Window, cx: &mut App) {
+    walk(forward, every, window, cx);
+    reveal_focused(window, cx);
+}
+
+/// [`step`]'s focus move, without the scroll into view.
+fn walk(forward: bool, every: bool, window: &mut Window, cx: &mut App) {
     let trap = layers::trap(window, cx);
     let start = window.focused(cx);
     let started_inside = trap
@@ -770,6 +1017,8 @@ pub fn highlight(item: &FocusHandle, window: &mut Window, cx: &mut App) {
 }
 
 /// Focus `handle` because a layer just opened and it is where that layer starts (the layer manager calls this).
+///
+/// Nothing is scrolled into view: the layer has not been drawn yet, so its start has no position to scroll to.
 pub(crate) fn enter_layer(handle: &FocusHandle, window: &mut Window, cx: &mut App) {
     apply(Move::To(handle), window, cx);
 }
@@ -815,12 +1064,16 @@ pub(crate) fn return_to(
         Some(place) => apply(Move::To(&place), window, cx),
         None => recover(window, cx),
     }
+    reveal_focused(window, cx);
 }
 
 /// Nothing holds focus (its holder disappeared, or a layer closed and its opener is gone): focus stays inside the
 /// topmost layer if one is open, and otherwise goes home. Inside a layer it moves to the closest remaining control
 /// (SPEC.md, "Opening and closing"), and to the layer itself only when no control is left; never to the page or a
 /// terminal behind it.
+///
+/// It scrolls nothing into view itself, because a press on the page's empty space recovers too and a pointer press
+/// never scrolls; the keyboard and app paths that recover call [`reveal_focused`] afterwards.
 fn recover(window: &mut Window, cx: &mut App) {
     if let Some(container) = layers::top_container(window, cx) {
         let target = closest_control(&container, window, cx).unwrap_or(container);
