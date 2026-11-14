@@ -250,8 +250,9 @@ fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
 /// SPEC.md: "Escape and either close control return focus to the gear", and the old app returned it there on every
 /// platform, also on macOS, where a click leaves a button unfocused, so focus would otherwise go back to whatever held it
 /// before (the terminal). Run under macOS's click rule for that reason. Specified: with a click that focuses no button,
-/// the gear's click leaves the gear unfocused only until Settings opens; Escape, the header's "Close settings" and the
-/// footer's Close each close the dialog and leave focus on the gear.
+/// the gear's click leaves the gear unfocused, and nothing focuses it before Settings opens: Settings names it as where
+/// closing returns focus. Escape, the header's "Close settings" and the footer's Close each close the dialog and leave
+/// focus on the gear.
 #[gpui::test]
 fn escape_and_both_close_controls_return_focus_to_the_gear(cx: &mut TestAppContext) {
     let (_helm, cx, gear) = open_rail(cx, &Preferences::default());
@@ -278,7 +279,10 @@ fn escape_and_both_close_controls_return_focus_to_the_gear(cx: &mut TestAppConte
             click(cx, close);
         }
         assert!(!any_open(cx), "{close} closed Settings");
-        assert!(focused(cx, &gear), "{close} returned focus to the gear");
+        assert!(
+            focused(cx, &gear),
+            "{close} returned focus to the gear, which the click never focused"
+        );
     }
 }
 
@@ -1387,11 +1391,17 @@ fn the_hint_switches_are_the_shared_dismissals_inverted(cx: &mut TestAppContext)
 /// agent trust at the relevant switch"), but the switch cannot hold focus until its read answers. Pi's read is
 /// answered last, so a handover keyed on the wrong agent would focus an earlier switch and take focus off the dialog,
 /// and Pi's switch would never get it. The switch is not scrolled into view yet (a recorded deviation), so this checks
-/// focus only. Specified: opened for Pi, Settings shows Agent trust with the dialog itself holding focus;
-/// once the reads answer, Pi's switch holds focus.
+/// focus only. Closing returns focus to the hint's button, which Settings names as its return target, as the gear's
+/// entry point does. Specified: opened for Pi from a button that does not hold focus, Settings shows Agent trust with
+/// the dialog itself holding focus; once the reads answer, Pi's switch holds focus; Escape then closes Settings and
+/// focus goes to the button.
 #[gpui::test]
 fn the_trust_hint_entry_point_focuses_its_agents_switch_once_known(cx: &mut TestAppContext) {
     let (mut helm, cx, gear) = open_rail(cx, &Preferences::default());
+    assert!(
+        !focused(cx, &gear),
+        "the premise: the opening button does not hold focus"
+    );
     cx.update(|window, cx| {
         let mark = Mark::take(cx);
         super::open_at_agent_trust(TrustAgent::Pi, &gear, &mark, window, cx);
@@ -1405,6 +1415,12 @@ fn the_trust_hint_entry_point_focuses_its_agents_switch_once_known(cx: &mut Test
     let reads = trust_reads(&mut helm);
     answer_trust(&mut helm, &reads, [false; 4], cx);
     assert_eq!(focused_id(cx).as_deref(), Some(TrustAgent::Pi.id()));
+    keys(cx, "escape");
+    assert!(!any_open(cx), "the premise: Escape closed Settings");
+    assert!(
+        focused(cx, &gear),
+        "closing returned focus to the opening button, which nothing focused before Settings opened"
+    );
 }
 
 /// Whether the switch drawn under `id` is available, which a disabled switch shows by taking no focus; `None` when it

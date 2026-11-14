@@ -16,10 +16,10 @@ use gpui::{
     AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
     KeyDownEvent, Keystroke, Modifiers, MouseButton, ParentElement, Render,
     StatefulInteractiveElement as _, Styled, TestAppContext, VisualTestContext, Window, div, point,
-    px,
+    px, size,
 };
 
-use crate::components::{Button, HoverHelp, Role, Tier};
+use crate::components::{Button, DialogFrame, HoverHelp, Role, Tier};
 use crate::focus::{self, Mark, OnPress};
 use crate::host_text::tests::SPOOFING_CORPUS;
 use crate::host_text::{HostSentence, HostText, Line};
@@ -1509,6 +1509,102 @@ fn an_inline_question_that_arrives_after_the_user_moved_on_waits(cx: &mut TestAp
     assert!(
         focused(cx, &launcher.reset),
         "focus stayed on Reset, where the user had put it"
+    );
+}
+
+/// A dialog standing in for the launcher whose inline question lands below its body's fold: Launch at the top of a
+/// tall dialog frame body, then the question, drawn while the test's cell holds it.
+struct TallLauncher {
+    launch: FocusHandle,
+    question: InlineCell,
+}
+
+impl Render for TallLauncher {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        DialogFrame::new(
+            "tall",
+            "A tall launcher",
+            div()
+                .child(div().w(px(80.)).child(button("launch", &self.launch)))
+                .child(div().h(px(600.)))
+                .children(self.question.borrow().clone()),
+            Vec::new(),
+        )
+    }
+}
+
+/// Why this matters: the launcher's body scrolls, and SPEC.md's YOLO question drawn there can land below its fold.
+/// Focus moving onto an answer the user cannot see breaks SPEC.md's "Reaching everything by keyboard", and the
+/// question's owner used to have to scroll it into view itself. The prompt now moves focus through the coordinator's
+/// move inside the layer, which waits for the frame that draws the starting answer and scrolls it into view.
+///
+/// Specified: asked inline right after the user acted, in a dialog whose body draws the question below its fold in a
+/// 400-pixel window, the question takes focus on Cancel and the body scrolls to show Cancel whole.
+#[gpui::test]
+fn an_inline_question_below_the_fold_is_scrolled_into_view_as_it_takes_focus(
+    cx: &mut TestAppContext,
+) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    cx.simulate_resize(size(px(720.), px(400.)));
+    settle(cx);
+    let (launch, container) = (handle(cx), handle(cx));
+    let question: InlineCell = Rc::default();
+    let (start, drawn) = (launch.clone(), question.clone());
+    let layer = cx.update(move |window, cx| {
+        let view = cx.new(|_| TallLauncher {
+            launch: start.clone(),
+            question: drawn,
+        });
+        let mark = Mark::take(cx);
+        layers::open_dialog(
+            Dialog {
+                view: view.into(),
+                container,
+                start,
+                subject: None,
+                main_action: None,
+                keeps_focus_on_empty_click: true,
+                returns_to: focus::ReturnTo::Opener,
+                on_dismiss: None,
+                placement: layers::DialogPlacement::Centered,
+                dismiss_on_outside_press: false,
+            },
+            &mark,
+            window,
+            cx,
+        )
+    });
+    settle(cx);
+    assert!(
+        layer.is_some() && focused(cx, &launch),
+        "the premise: the dialog opened with focus on Launch"
+    );
+    let (launch_at, body_at) = (bounds(cx, "launch"), bounds(cx, "tall-body"));
+    assert!(
+        launch_at.bottom() + px(600.) > body_at.bottom(),
+        "the premise: what follows Launch's 600-pixel spacer, the question, starts below the body's fold"
+    );
+    let (ran, attempts): (Ran, Attempts) = Default::default();
+    let (cell, asked) = (question.clone(), yolo(&ran, &attempts));
+    cx.update(move |window, cx| {
+        let mark = Mark::take(cx);
+        let inline = prompt::ask_inline(asked, &mark, |_, _, _| {}, window, cx);
+        cell.replace(Some(inline));
+    });
+    redraw(cx);
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("prompt-cancel"),
+        "focus moved to the question's starting answer"
+    );
+    let (answer, body) = (bounds(cx, "prompt-cancel"), bounds(cx, "tall-body"));
+    assert!(
+        answer.top() >= body.top() && answer.bottom() <= body.bottom(),
+        "the body scrolled the whole answer into view: {answer:?} in {body:?}"
+    );
+    assert!(
+        bounds(cx, "launch").top() < body.top(),
+        "and the body really scrolled: Launch, at its top, left the view"
     );
 }
 
