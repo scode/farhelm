@@ -293,6 +293,33 @@ fn stream_ordering_is_enforced_before_model_mutation() {
     assert_eq!(model.revision(), None);
 }
 
+/// The GPUI app's helm client hands the model messages it already decoded, so `apply_output` is the path the app uses.
+/// It must refuse exactly what `apply` refuses: skipping the ordering checker because decoding happened elsewhere would
+/// let a misordered stream mutate the screen. Spec: a frame before the hello, and a second hello, are refused without
+/// mutation; in-order decoded messages build the same screen as encoded ones.
+#[test]
+fn already_decoded_output_gets_the_same_ordering_checks() {
+    let hello = || GridOutput::Hello {
+        cols: 4,
+        rows: 2,
+        history_cap: 10,
+    };
+    let mut model = GridModel::new();
+    assert!(model.apply_output(frame(1, 4, 2, 0)).is_err());
+    let _ = model.apply_output(hello()).unwrap();
+    assert!(model.apply_output(hello()).is_err());
+
+    let mut decoded = opened(4, 2, 10);
+    let mut encoded = opened(4, 2, 10);
+    let update = || rows(vec![(0, row(false, &[(0, 3, "new")]))]);
+    let _ = decoded.apply_output(update()).unwrap();
+    let _ = decoded.apply_output(frame(1, 4, 2, 0)).unwrap();
+    send(&mut encoded, update());
+    send(&mut encoded, frame(1, 4, 2, 0));
+    assert_eq!(decoded.screen(), encoded.screen());
+    assert_eq!(decoded.revision(), Some(1));
+}
+
 /// A refused frame cannot expose buffered rows or change the committed size,
 /// cursor, revision, or repaint record. The upstream checker also retains its
 /// pending bounds until a valid committing frame arrives.

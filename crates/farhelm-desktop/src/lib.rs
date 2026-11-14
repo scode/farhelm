@@ -90,9 +90,9 @@ fn open_saved_file(path: &Path) -> Result<(), String> {
 }
 
 /// The license notices of every third-party crate compiled into Farhelm's shipped binaries, generated from `Cargo.lock`
-/// by `scripts/dependency-notices.py` and kept current by its `--check` in the ordinary checks (the maintainer decided
-/// on 2026-11-13 that every shipped binary carries them). `farhelm` embeds the same file; one file covers both
-/// binaries, so each over-covers rather than under-covers.
+/// by `scripts/dependency-notices.py` and kept current by its `--check` in the ordinary checks (the maintainer decided on
+/// 2026-11-13 that every shipped binary carries them). `farhelm` embeds the same file; one file covers both binaries,
+/// so each over-covers rather than under-covers.
 const DEPENDENCY_NOTICES: &str = include_str!("../../farhelm/notices/dependencies.txt");
 
 /// The Unicode License V3 notice for the Unicode-derived property tables in the vendored terminal emulator
@@ -106,18 +106,19 @@ const UNICODE_NOTICE: &str = include_str!("../../../vendor/UNICODE-LICENSE.txt")
 const INTER_FONT_NOTICE: &str = include_str!("../../gui/farhelm-gui/assets/fonts/OFL-Inter.txt");
 
 /// What `farhelm-desktop --licenses` prints: every notice that must travel with this binary. That is the notices of the
-/// code Farhelm ported from other projects that this binary links (the xterm.js-derived input encoding and the
-/// emulator's Unicode tables, both reached through the embedded supervisor), its crates.io and vendored dependencies'
-/// notices, and the license of the fonts it embeds. Code ported later and linked into this binary (the GUI's terminal
-/// ports, for instance) adds its notice here in the change that first links it (SPEC_impl.md, "Dependencies and
+/// code Farhelm ported from other projects that this binary links (the GUI terminal crates' ports from xterm.js and VS
+/// Code, and, through the embedded supervisor, its xterm.js-derived input encoding and the emulator's Unicode tables),
+/// its crates.io and vendored dependencies' notices, and the license of the fonts it embeds. Code ported later and
+/// linked into this binary adds its notice here in the change that first links it (SPEC_impl.md, "Dependencies and
 /// licenses").
 ///
-/// `--licenses` is the interim surface, allowed on 2026-11-13 until the app's "Open-Source Notices" window exists (an
-/// app-menu item the maintainer chose the same day); that window shows the same text and replaces this flag as the
-/// user-facing surface.
+/// `--licenses` is an interim surface, allowed on 2026-11-13 (by the migration's orchestrator) until the app's
+/// "Open-Source Notices" window exists; the maintainer decided the same day that the notices live in that window,
+/// opened from the app menu, which shows the same text and replaces this flag as the user-facing surface.
 pub fn licenses_text() -> String {
     format!(
-        "{}\n{UNICODE_NOTICE}\n{DEPENDENCY_NOTICES}\n{RULE}\nInter font (SIL Open Font License 1.1)\n\n{INTER_FONT_NOTICE}",
+        "{}\n{}\n{UNICODE_NOTICE}\n{DEPENDENCY_NOTICES}\n{RULE}\nInter font (SIL Open Font License 1.1)\n\n{INTER_FONT_NOTICE}",
+        farhelm_gui::PORTED_CODE_NOTICES,
         farhelm_supervisor::grid_input::PORTED_CODE_NOTICES,
     )
 }
@@ -1481,8 +1482,8 @@ mod tests {
     use std::time::Instant;
 
     /// The desktop binary ships on its own (its archive holds no `farhelm`), so it must carry the dependency notices
-    /// itself (the maintainer decided on 2026-11-13 that every shipped binary does); losing them would ship crates
-    /// without their required attribution.
+    /// itself (the maintainer decided on 2026-11-13 that every shipped binary carries them); losing them would ship
+    /// crates without their required attribution.
     ///
     /// Spec: `licenses_text` holds the embedded supervisor's ported-code notices (xterm.js and the Unicode License), the
     /// generated notices' header, a dependency only the desktop app links (taffy, through GPUI) with its own copyright
@@ -1523,6 +1524,30 @@ mod tests {
         assert!(
             !text.contains("<copyright holders>") && !text.contains("<owner>"),
             "an SPDX template placeholder reached the notices"
+        );
+    }
+
+    /// The desktop binary links the GUI terminal crates' ports of xterm.js and VS Code code, so MIT requires their
+    /// notices to travel with it; `--licenses` is how it carries them until the "Open-Source Notices" window exists.
+    /// Spec: the printed text names both crates and holds the xterm.js copyright line and the MIT permission text.
+    #[farhelm_testtrace::test]
+    fn licenses_carry_both_terminal_crates_ported_code_notices() {
+        let text = licenses_text();
+        assert!(
+            text.contains("=== farhelm-grid-model ==="),
+            "grid-model's notice is missing"
+        );
+        assert!(
+            text.contains("=== farhelm-input-mapping ==="),
+            "input-mapping's notice is missing"
+        );
+        assert!(
+            text.contains("The xterm.js authors"),
+            "the xterm.js copyright line is missing"
+        );
+        assert!(
+            text.contains("Permission is hereby granted, free of charge"),
+            "the MIT permission text is missing"
         );
     }
 

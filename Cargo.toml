@@ -231,6 +231,7 @@ farhelm-grid-model = { path = "crates/gui/farhelm-grid-model" }
 farhelm-gui = { path = "crates/gui/farhelm-gui" }
 farhelm-helm = { path = "crates/farhelm-helm" }
 farhelm-helm-client = { path = "crates/farhelm-helm-client" }
+farhelm-input-mapping = { path = "crates/gui/farhelm-input-mapping" }
 farhelm-proto = { path = "crates/farhelm-proto" }
 farhelm-supervisor = { path = "crates/farhelm-supervisor" }
 farhelm-terminal-emulator = { path = "crates/farhelm-terminal-emulator" }

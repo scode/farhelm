@@ -21,11 +21,17 @@ agent = ["dep:gpui-agent", "gpui/test-support", "gpui_platform/test-support"]
 # GPUI and GPUI Kit at their exact pins (root Cargo.toml), routed through the vendored, patched GPUI trees.
 [dependencies]
 anyhow.workspace = true
-# The GUI's connection to its helm (the UI channel), and the protocol crate, for two things: the shared wire types,
-# and the one escape table and notation for host-supplied text, which the command line uses too
-# (`farhelm_proto::text`). Neither depends on the helm crate (scripts/check-crate-layering.py), and the helm client is
-# the one place the GUI's async runtime lives.
+# The terminal's grid protocol model, one of its two framework-free halves (key and pointer encoding,
+# `farhelm-input-mapping`, is the other). Both carry code ported from xterm.js and VS Code, so linking them obliges the
+# app to carry their notices (`PORTED_CODE_NOTICES` in `src/lib.rs`).
+farhelm-grid-model.workspace = true
+# The GUI's connection to its helm (the UI channel). Like `farhelm-proto`, it does not depend on the helm crate
+# (scripts/check-crate-layering.py), and it is the one place the GUI's async runtime lives.
 farhelm-helm-client.workspace = true
+# The terminal's key and pointer encoding; ported code, like `farhelm-grid-model` above.
+farhelm-input-mapping.workspace = true
+# The protocol crate, for two things: the shared wire types, and the one escape table and notation for host-supplied
+# text, which the command line uses too (`farhelm_proto::text`).
 farhelm-proto.workspace = true
 gpui.workspace = true
 gpui-agent = { workspace = true, optional = true }

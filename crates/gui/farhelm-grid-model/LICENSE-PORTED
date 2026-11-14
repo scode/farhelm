@@ -8,10 +8,10 @@ in src/link_disclosure.rs follows the same old client. The upstream notices
 and MIT license texts below are unchanged.
 
 The "ships inside the distributed bundles" paragraph below describes the
-old web client: that asset and bundle are gone. No shipped binary links
-this crate yet; the change that first links it into the desktop app
-embeds this notice and shows it to the user (SPEC_impl.md, "Dependencies
-and licenses").
+old web client: that asset and bundle are gone. The desktop app links this
+crate through farhelm-gui, which embeds this file (PORTED_CODE_NOTICES);
+`farhelm-desktop --licenses` prints it, and the app's "Open-Source Notices"
+window will show it (SPEC_impl.md, "Dependencies and licenses").
 
 --------------------------------------------------------------------------------
 

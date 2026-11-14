@@ -259,7 +259,17 @@ impl GridModel {
     /// clipboard text is returned directly so unconsumed writes cannot build
     /// an unbounded queue inside the model.
     pub fn apply(&mut self, payload: &[u8]) -> Result<ApplyEffects, GridError> {
-        let message = GridOutput::decode(payload)?;
+        self.apply_output(GridOutput::decode(payload)?)
+    }
+
+    /// Check and apply one message that was already decoded.
+    ///
+    /// The GPUI app's helm client decodes each binary frame on its own runtime
+    /// and hands the GUI a `GridOutput`, so decoding twice on the GUI thread
+    /// would only cost time. The ordering checker still sees every message
+    /// before the model changes, exactly as for [`GridModel::apply`]: decoding
+    /// elsewhere never skips the protocol's sequencing rules.
+    pub fn apply_output(&mut self, message: GridOutput) -> Result<ApplyEffects, GridError> {
         self.check.accept(&message)?;
         let mut effects = ApplyEffects::default();
         match message {
