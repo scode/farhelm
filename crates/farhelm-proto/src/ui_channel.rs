@@ -79,12 +79,44 @@ pub enum ClientMessage {
 pub struct Command {
     /// Chosen by the GUI, echoed in the reply. Unique within one channel.
     pub id: u64,
-    /// `GET`, `POST`, `PUT`, `DELETE` or `PATCH`.
-    pub method: String,
+    pub method: Method,
     pub path: ApiPath,
     /// The JSON request body, if the route takes one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<serde_json::Value>,
+}
+
+/// A command's HTTP method: the closed set of methods the helm's routes
+/// take, so a typo in the GUI cannot reach the wire.
+///
+/// On the wire it is the method's usual uppercase spelling (`"GET"`,
+/// `"POST"`, ...), the same strings the field carried when it was a plain
+/// string. Decoding is exact: `"get"` or `"OPTIONS"` is not a method, so a
+/// command carrying one does not decode as a [`ClientMessage`], and the helm
+/// closes the channel as for any message it cannot read, the same as for a
+/// non-canonical [`ApiPath`]. No GUI built from this tree can send one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum Method {
+    Get,
+    Post,
+    Put,
+    Delete,
+    Patch,
+}
+
+impl Method {
+    /// The wire spelling, for messages and logs. Always equal to what serde
+    /// writes for this method.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Method::Get => "GET",
+            Method::Post => "POST",
+            Method::Put => "PUT",
+            Method::Delete => "DELETE",
+            Method::Patch => "PATCH",
+        }
+    }
 }
 
 /// A message from the helm to the GUI.
@@ -834,4 +866,38 @@ pub enum ConnectionStage {
     WaitingForHello,
     /// Hello succeeded; identity recording and browser-link setup share this final stage.
     SettingUp,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The method's JSON spelling is wire format: the helm shipped before it
+    /// was an enum and decoded these exact strings, so a renamed variant or a
+    /// different `rename_all` would silently break every command. Pins each
+    /// method's spelling both ways, that `as_str` agrees with serde, and that
+    /// decoding is case-sensitive and closed: anything else must fail to
+    /// decode, which is what makes the helm close the channel on it.
+    #[test]
+    fn each_method_round_trips_through_its_uppercase_spelling() {
+        for (method, spelling) in [
+            (Method::Get, "GET"),
+            (Method::Post, "POST"),
+            (Method::Put, "PUT"),
+            (Method::Delete, "DELETE"),
+            (Method::Patch, "PATCH"),
+        ] {
+            let json = serde_json::Value::String(spelling.to_string());
+            assert_eq!(serde_json::to_value(method).unwrap(), json);
+            assert_eq!(serde_json::from_value::<Method>(json).unwrap(), method);
+            assert_eq!(method.as_str(), spelling);
+        }
+        for foreign in ["get", "Put", "OPTIONS", ""] {
+            assert!(
+                serde_json::from_value::<Method>(serde_json::Value::String(foreign.into()))
+                    .is_err(),
+                "{foreign:?} is not a method"
+            );
+        }
+    }
 }

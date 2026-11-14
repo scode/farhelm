@@ -51,6 +51,8 @@ use farhelm_proto::ui_channel::{
     CollectionState, Command, KeyedEntry, ListCounts, PREFERENCES_KEY, Reply, SESSION_QUERY_PATH,
     ServerMessage, SessionQuery,
 };
+// `Method` alone is axum's, the router's method; this is the command's.
+use farhelm_proto::ui_channel::Method as WireMethod;
 use serde_json::Value;
 use std::collections::{BTreeMap, VecDeque};
 use std::future::Future;
@@ -414,6 +416,19 @@ pub(crate) struct Channel {
 /// answers those itself.
 type InFlight = Pin<Box<dyn Future<Output = Reply> + Send>>;
 
+/// The router's method for a command's method. The one place the wire's
+/// closed set becomes HTTP, so a method added to the wire type does not
+/// compile until the helm routes it here.
+fn http_method(method: WireMethod) -> Method {
+    match method {
+        WireMethod::Get => Method::GET,
+        WireMethod::Post => Method::POST,
+        WireMethod::Put => Method::PUT,
+        WireMethod::Delete => Method::DELETE,
+        WireMethod::Patch => Method::PATCH,
+    }
+}
+
 impl Channel {
     pub(crate) fn new(
         router: axum::Router,
@@ -538,14 +553,7 @@ impl Channel {
                 }
             })
         };
-        let method = match command.method.as_str() {
-            "GET" => Method::GET,
-            "POST" => Method::POST,
-            "PUT" => Method::PUT,
-            "DELETE" => Method::DELETE,
-            "PATCH" => Method::PATCH,
-            other => return refused(format!("a command may not use the method {other:?}")),
-        };
+        let method = http_method(command.method);
         // The path is canonical by its type: a command whose path is not did
         // not decode, so it never got this far (`farhelm_proto::ui_channel::ApiPath`).
         // A canonical path can still encode a separator inside one segment (an id
@@ -578,7 +586,7 @@ impl Channel {
             status: status.as_u16(),
             body,
         };
-        if command.method != "PUT" {
+        if command.method != WireMethod::Put {
             let body = Value::String(format!("{SESSION_QUERY_PATH} takes PUT"));
             return (
                 Vec::new(),

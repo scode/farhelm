@@ -114,27 +114,9 @@ pub enum CommandError {
     Reset,
 }
 
-/// A command's HTTP method. A closed set so a typo cannot reach the wire.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Method {
-    Get,
-    Post,
-    Put,
-    Delete,
-    Patch,
-}
-
-impl Method {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Method::Get => "GET",
-            Method::Post => "POST",
-            Method::Put => "PUT",
-            Method::Delete => "DELETE",
-            Method::Patch => "PATCH",
-        }
-    }
-}
+/// A command's HTTP method. The wire type itself, re-exported so the GUI names one type and the helm decodes the
+/// same one.
+pub use farhelm_proto::ui_channel::Method;
 
 /// How a command's completion travels. It rides the event queue, so it is delivered in order with the events.
 pub(crate) type Completion = oneshot::Sender<Result<Reply, CommandError>>;
@@ -515,7 +497,7 @@ impl Task {
                         in_flight.push_back(InFlight { id, done });
                         // No local queue or cap: the helm closes a channel whose queue overflows, and that is the
                         // same break as any other.
-                        let command = Command { id, method: method.as_str().into(), path, body };
+                        let command = Command { id, method, path, body };
                         if link.tx.send(ClientMessage::Command(command)).is_err() {
                             break Ended::Broken { proven };
                         }
