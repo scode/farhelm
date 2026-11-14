@@ -188,25 +188,44 @@ impl ProgressViews for ProvisioningView {
 
 /// `POST /api/hosts/probe` — discover and register as-is, or return the
 /// exact plan a later confirmation may consume.
+///
+/// Answers within the host reply bound (`crate::sessions::HOST_REPLY_BOUND`):
+/// an SSH probe and the inspection after it can take far longer than the GUI's
+/// channel lets one command wait (15 seconds per connection attempt, then
+/// inspection commands of up to 30 seconds each, behind any other probes
+/// holding the planning slots). The probe itself carries on after the timeout
+/// reply, so a supervisor that answers late is still registered and appears in
+/// the pushed hosts list; a plan found late is retained but never shown, and
+/// the user probes again.
 pub(crate) async fn probe_host(
     State(state): State<Arc<AppState>>,
     axum::Json(request): axum::Json<ProbeRequest>,
 ) -> Response {
-    let result = if matches!(
-        request.target,
-        ProbeDestination::Tensorlake { .. } | ProbeDestination::TensorlakeHost { .. }
-    ) {
-        state
-            .provisioning
-            .probe_tensorlake(request, state.tensorlake.clone())
-            .await
-    } else {
-        state.provisioning.probe(request).await
-    };
-    match result {
-        Ok(response) => axum::Json(response).into_response(),
-        Err(error) => provisioning_error(error),
-    }
+    crate::sessions::within_host_reply_bound_saying(
+        async move {
+            let result = if matches!(
+                request.target,
+                ProbeDestination::Tensorlake { .. } | ProbeDestination::TensorlakeHost { .. }
+            ) {
+                state
+                    .provisioning
+                    .probe_tensorlake(request, state.tensorlake.clone())
+                    .await
+            } else {
+                state.provisioning.probe(request).await
+            };
+            match result {
+                Ok(response) => axum::Json(response).into_response(),
+                Err(error) => provisioning_error(error),
+            }
+        },
+        format!(
+            "the check did not finish within {} seconds; it carries on, and if it finds a running \
+             Farhelm supervisor the host is added to the hosts list, otherwise try again",
+            crate::sessions::HOST_REPLY_BOUND.as_secs()
+        ),
+    )
+    .await
 }
 
 /// `POST /api/hosts/provision` — consume one confirmed ADD plan, register
@@ -223,6 +242,18 @@ pub(crate) async fn provision_host(
 
 /// `POST /api/hosts/{id}/update` — plan without a body, then consume the
 /// returned opaque plan when the same route receives its confirmation body.
+///
+/// Only planning answers within the host reply bound
+/// (`crate::sessions::HOST_REPLY_BOUND`): it probes the host the way
+/// [`probe_host`] does and can wait as long. A plan found after the timeout
+/// reply is retained but never confirmed, and the user asks for Update again.
+/// The confirmation consumes the plan, claims the host and starts the run on
+/// its own task. Before starting it waits for the host's provisioning lock,
+/// which on an SSH host is held only briefly (a destination or alias change;
+/// a running setup or update makes the claim refuse as busy first), so it is
+/// not bounded. A Tensorlake host's Suspend, Resume or removal can hold that
+/// lock for longer; bounding the confirmation against those belongs with
+/// porting them to the GPUI app.
 pub(crate) async fn update_host(
     State(state): State<Arc<AppState>>,
     AxPath(host): AxPath<HostId>,
@@ -233,10 +264,22 @@ pub(crate) async fn update_host(
             Ok(run) => (StatusCode::ACCEPTED, axum::Json(run)).into_response(),
             Err(error) => provisioning_error(error),
         },
-        None => match state.provisioning.plan_update(host).await {
-            Ok(plan) => axum::Json(plan).into_response(),
-            Err(error) => provisioning_error(error),
-        },
+        None => {
+            crate::sessions::within_host_reply_bound_saying(
+                async move {
+                    match state.provisioning.plan_update(host).await {
+                        Ok(plan) => axum::Json(plan).into_response(),
+                        Err(error) => provisioning_error(error),
+                    }
+                },
+                format!(
+                    "the host did not answer within {} seconds while Farhelm prepared the \
+                     update; nothing was changed, so try again",
+                    crate::sessions::HOST_REPLY_BOUND.as_secs()
+                ),
+            )
+            .await
+        }
     }
 }
 

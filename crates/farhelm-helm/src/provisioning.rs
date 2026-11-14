@@ -5247,6 +5247,147 @@ mod tests {
         assert_eq!(progress["status"], "completed");
     }
 
+    // -----------------------------------------------------------------------------------------------------------------
+    // The host reply bound on the routes that probe
+    // -----------------------------------------------------------------------------------------------------------------
+
+    /// Send one request through `router` and return its status and body text,
+    /// failing the test if no answer comes within a little more than the host
+    /// reply bound, so a route that lost its bound fails rather than hangs.
+    async fn send(
+        router: &axum::Router,
+        request: axum::http::Request<Body>,
+    ) -> (StatusCode, String) {
+        let response = tokio::time::timeout(
+            crate::sessions::HOST_REPLY_BOUND + Duration::from_secs(5),
+            router.clone().oneshot(request),
+        )
+        .await
+        .expect("the route answered within the host reply bound")
+        .unwrap();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        (status, String::from_utf8_lossy(&body).into_owned())
+    }
+
+    /// Spec: `POST /api/hosts/probe` answers within the host reply bound when
+    /// the host stalls (504, saying a late supervisor still gets added), and
+    /// the probe carries on: once the host answers with a running supervisor,
+    /// that host is registered although nobody is waiting for the reply.
+    ///
+    /// Why: the GUI's channel admits one command at a time and resets the
+    /// window when one stays unanswered for 30 seconds, while an SSH probe
+    /// can take far longer. Without the bound a slow host would reset the
+    /// window; without the probe carrying on, a supervisor that answered just
+    /// after the timeout would be lost. The paused clock makes the bound exact.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn probe_route_answers_a_stalled_host_within_the_bound_and_still_registers_it_later() {
+        let mut harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::supervisor(root.path().to_path_buf());
+        backend
+            .block_probe
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let service = service(&harness, backend.clone(), root.path());
+        harness.state = Arc::new(AppState::with_provisioning(
+            Arc::clone(&harness.manager),
+            harness.store.clone(),
+            Arc::clone(&service),
+        ));
+        let router = harness.router();
+        let registered = |hosts: &[HostRow]| {
+            hosts
+                .iter()
+                .any(|row| row.destination.as_deref() == Some("late.example"))
+        };
+
+        let (status, text) = send(
+            &router,
+            axum::http::Request::builder()
+                .method("POST")
+                .uri("/api/hosts/probe")
+                .header("host", "127.0.0.1:7433")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"target":{"kind":"ssh","destination":"late.example"}}"#,
+                ))
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{text}");
+        assert!(
+            text.contains("carries on") && text.contains("added to the hosts list"),
+            "{text}"
+        );
+        assert_eq!(
+            backend.probes.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "premise: the timeout came from the stalled probe, not before it"
+        );
+        assert!(
+            !registered(&harness.store.list_hosts().await.unwrap()),
+            "premise: nothing is registered while the probe is held"
+        );
+
+        backend.release.notify_one();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !registered(&harness.store.list_hosts().await.unwrap()) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the probe carried on after its reply and registered the late supervisor");
+    }
+
+    /// Spec: Update's plan request (`POST /api/hosts/{id}/update` without a
+    /// body) answers within the host reply bound when the host stalls, saying
+    /// nothing changed so the user can try again.
+    ///
+    /// Why: planning probes the host exactly as the add probe does, so it can
+    /// keep the GUI's channel waiting just as long; see the probe route's test
+    /// above for the watchdog it protects.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn update_planning_answers_a_stalled_host_within_the_bound() {
+        let mut harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+        harness.state = Arc::new(AppState::with_provisioning(
+            Arc::clone(&harness.manager),
+            harness.store.clone(),
+            Arc::clone(&service),
+        ));
+        let router = harness.router();
+        let host = harness
+            .store
+            .add_ssh_host("stalled-update.example", None, None)
+            .await
+            .unwrap();
+        harness.manager.sync_registry().await.unwrap();
+        backend
+            .block_probe
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+
+        let (status, text) = send(
+            &router,
+            axum::http::Request::builder()
+                .method("POST")
+                .uri(format!("/api/hosts/{host}/update"))
+                .header("host", "127.0.0.1:7433")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{text}");
+        assert!(text.contains("nothing was changed"), "{text}");
+        assert_eq!(
+            backend.probes.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "premise: the timeout came from the stalled planning probe"
+        );
+        backend.release.notify_one();
+    }
+
     /// A valid host with no retained operation has a stable, explicit idle
     /// JSON shape rather than masquerading as missing progress.
     #[farhelm_testtrace::test]

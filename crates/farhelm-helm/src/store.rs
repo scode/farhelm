@@ -7260,6 +7260,35 @@ impl HelmStore {
         host: HostId,
         destination: &str,
     ) -> anyhow::Result<()> {
+        self.change_ssh_destination(host, destination, true).await
+    }
+
+    /// Refuse exactly what [`Self::update_ssh_destination`] would refuse
+    /// now, writing nothing: the same checks in the same transaction, rolled
+    /// back instead of committed.
+    ///
+    /// For a caller that answers before the write can run, such as the GUI's
+    /// destination route while a setup or update holds the host (see
+    /// `crate::hosts::set_destination`): checking first lets it refuse at once
+    /// rather than promise a change that would then be refused with nobody
+    /// waiting. The answer holds only for the registry as it is now; the write
+    /// checks again.
+    pub async fn check_ssh_destination(
+        &self,
+        host: HostId,
+        destination: &str,
+    ) -> anyhow::Result<()> {
+        self.change_ssh_destination(host, destination, false).await
+    }
+
+    /// The body of [`Self::update_ssh_destination`], committing only when
+    /// `commit` is set.
+    async fn change_ssh_destination(
+        &self,
+        host: HostId,
+        destination: &str,
+        commit: bool,
+    ) -> anyhow::Result<()> {
         let conn = self.conn.clone();
         let destination = destination.to_string();
         if !destination_is_usable(&destination) {
@@ -7335,7 +7364,10 @@ impl HelmStore {
                             destination,
                         )));
                     }
-                    tx.commit().context("committing destination update")?;
+                    // A check rolls the update back by dropping the transaction.
+                    if commit {
+                        tx.commit().context("committing destination update")?;
+                    }
                     Ok(())
                 }
             }
@@ -7654,6 +7686,24 @@ impl HelmStore {
     }
 
     pub async fn update_alias(&self, host: HostId, alias: Option<&str>) -> anyhow::Result<bool> {
+        self.change_alias(host, alias, true).await
+    }
+
+    /// Refuse exactly what [`Self::update_alias`] would refuse now, writing
+    /// nothing; the alias counterpart of [`Self::check_ssh_destination`],
+    /// for the same reason.
+    pub async fn check_alias(&self, host: HostId, alias: Option<&str>) -> anyhow::Result<()> {
+        self.change_alias(host, alias, false).await.map(|_| ())
+    }
+
+    /// The body of [`Self::update_alias`], committing only when `commit` is
+    /// set.
+    async fn change_alias(
+        &self,
+        host: HostId,
+        alias: Option<&str>,
+        commit: bool,
+    ) -> anyhow::Result<bool> {
         let alias = validate_alias(alias).map_err(anyhow::Error::new)?;
         self.conn
             .call(
@@ -7728,7 +7778,10 @@ impl HelmStore {
                         rusqlite::params![host, alias],
                     )
                     .context("updating host alias")?;
-                    tx.commit().context("committing alias update")?;
+                    // A check rolls the update back by dropping the transaction.
+                    if commit {
+                        tx.commit().context("committing alias update")?;
+                    }
                     Ok(true)
                 },
             )
