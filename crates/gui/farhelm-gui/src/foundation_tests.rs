@@ -165,6 +165,7 @@ fn open_dialog(
                 start,
                 subject: None,
                 main_action: None,
+                keeps_focus_on_empty_click: true,
             },
             &mark,
             window,
@@ -264,6 +265,7 @@ fn open_placed_dialog(
                 start,
                 subject: None,
                 main_action: None,
+                keeps_focus_on_empty_click: true,
             },
             &mark,
             window,
@@ -629,8 +631,9 @@ fn focus_goes_home_when_nothing_holds_it_and_never_takes_it_from_a_control(
     );
 }
 
-/// A dialog is modal: a click on the page behind it does nothing, because the veil takes it. And a click on the
-/// dialog's empty space keeps focus on the control in use (SPEC.md, "Opening and closing").
+/// A dialog is modal: a click on the page behind it does nothing, because the veil takes it. And in a dialog SPEC.md
+/// lists as keeping focus (the launcher, the Stop, Restart, Replace and Delete questions), a click on its empty space
+/// keeps focus on the control in use (SPEC.md, "Opening and closing").
 #[gpui::test]
 fn the_page_behind_a_dialog_takes_no_clicks_and_empty_space_keeps_focus(cx: &mut TestAppContext) {
     let clicks = Rc::new(Cell::new(0));
@@ -670,6 +673,199 @@ fn the_page_behind_a_dialog_takes_no_clicks_and_empty_space_keeps_focus(cx: &mut
     assert!(
         focused(cx, &only),
         "a click on the dialog's empty space kept focus on its control"
+    );
+}
+
+/// A dialog SPEC.md does not list as keeping focus on an empty-space click (Rename, say) moves focus to the dialog
+/// itself on such a click, as a click on a web dialog's background did, and Enter then presses its main action
+/// (SPEC.md, "Opening and closing"; D-15 makes label text count as empty space). The rule is per dialog: the test above
+/// covers a dialog that keeps focus, this one a dialog that does not.
+#[gpui::test]
+fn a_dialog_without_the_rule_takes_focus_on_an_empty_space_click(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    let only = handle(cx);
+    let container = handle(cx);
+    let pressed = Rc::new(Cell::new(0));
+    let (start, kept, record) = (only.clone(), container.clone(), pressed.clone());
+    let opened = cx.update(move |window, cx| {
+        let view = cx.new(|_| Panel {
+            controls: vec![("only", start.clone())],
+            shown: Rc::new(Cell::new(true)),
+        });
+        let mark = Mark::take(cx);
+        layers::open_dialog(
+            Dialog {
+                view: view.into(),
+                container: kept,
+                start,
+                subject: None,
+                main_action: Some(Rc::new(move |_, _| record.set(record.get() + 1))),
+                keeps_focus_on_empty_click: false,
+            },
+            &mark,
+            window,
+            cx,
+        )
+    });
+    cx.run_until_parked();
+    check(cx);
+    assert!(opened.is_some(), "the premise: the dialog opened");
+    assert!(focused(cx, &only), "the premise: its control has focus");
+
+    let panel = match cx.debug_bounds("panel") {
+        Some(bounds) => bounds,
+        None => panic!("the dialog's panel was not drawn"),
+    };
+    cx.simulate_click(
+        point(panel.left() + px(4.), panel.top() + px(4.)),
+        Modifiers::none(),
+    );
+    check(cx);
+    assert!(
+        focused(cx, &container),
+        "a click on the empty space of a dialog without the rule focused the dialog itself"
+    );
+    keys(cx, "enter");
+    assert_eq!(
+        pressed.get(),
+        1,
+        "Enter on the focused dialog pressed its main action"
+    );
+}
+
+// ---- Which controls Tab reaches (D-2) --------------------------------------------------------------------------------
+
+/// Make the coordinator follow `reach` for which controls Tab reaches, as the bootstrap does with the host's answer.
+fn follow(cx: &mut VisualTestContext, reach: &Rc<Cell<focus::TabReach>>) {
+    let reach = reach.clone();
+    cx.update(move |_, cx| focus::follow_tab_reach(Rc::new(move || reach.get()), cx));
+}
+
+/// What the placed dialog's text field holds: typing after a focus step shows whether the field (and not the dialog
+/// itself, the other place focus can land) took the step.
+fn field_text(cx: &mut VisualTestContext, field: &FieldState) -> Option<String> {
+    let state = field.borrow().clone();
+    cx.update(|_, cx| state.map(|state| state.text(cx).to_string()))
+}
+
+/// Decision D-2: on macOS with Keyboard navigation off (the system default), Tab reaches text fields and pop-ups only,
+/// skipping buttons, and Option-Tab reaches every control; with it on, and on Linux, Tab reaches every control. A
+/// keyboard-only Mac user who never turned the setting on must still get through a form with Tab, and one who turned it
+/// on must reach the buttons; getting either wrong is what this guards.
+#[gpui::test]
+fn tab_skips_buttons_unless_every_control_is_reached_and_option_tab_reaches_them(
+    cx: &mut TestAppContext,
+) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    let reach = Rc::new(Cell::new(focus::TabReach::TextFieldsAndPopups));
+    follow(cx, &reach);
+    let (first, last) = (handle(cx), handle(cx));
+    let (_, _, field) = open_placed_dialog(
+        cx,
+        vec![
+            ("first", 10., PlacedKind::Button(first.clone())),
+            ("field", 200., PlacedKind::Field),
+            ("last", 400., PlacedKind::Button(last.clone())),
+        ],
+        &first,
+    );
+    assert!(
+        focused(cx, &first),
+        "the premise: the first button has focus"
+    );
+
+    keys(cx, "tab");
+    keys(cx, "q");
+    assert_eq!(
+        field_text(cx, &field).as_deref(),
+        Some("q"),
+        "Tab left the button for the field: typing landed in it"
+    );
+
+    keys(cx, "tab");
+    keys(cx, "r");
+    assert_eq!(
+        field_text(cx, &field).as_deref(),
+        Some("qr"),
+        "with only one field to reach, Tab stayed on it and skipped both buttons"
+    );
+
+    keys(cx, "alt-tab");
+    assert!(focused(cx, &last), "Option-Tab reached the next button");
+    keys(cx, "alt-shift-tab");
+    keys(cx, "s");
+    assert_eq!(
+        field_text(cx, &field).as_deref(),
+        Some("qrs"),
+        "Option-Shift-Tab went back to the field"
+    );
+    keys(cx, "alt-shift-tab");
+    assert!(
+        focused(cx, &first),
+        "Option-Shift-Tab from the field reached the button before it"
+    );
+
+    keys(cx, "alt-tab");
+    reach.set(focus::TabReach::EveryControl);
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &last),
+        "with every control reached, Tab reached the button after the field"
+    );
+}
+
+/// In a dialog of buttons only, with Tab reaching text fields only, Tab finds nothing to move to and focus stays where
+/// it was. Moving it to the dialog itself instead would let a following Enter press the dialog's main action from a
+/// Cancel the user had chosen.
+#[gpui::test]
+fn tab_in_a_dialog_of_buttons_stays_put_where_tab_skips_buttons(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    let reach = Rc::new(Cell::new(focus::TabReach::TextFieldsAndPopups));
+    follow(cx, &reach);
+    let (cancel, confirm) = (handle(cx), handle(cx));
+    open_dialog(
+        cx,
+        vec![("cancel", cancel.clone()), ("confirm", confirm.clone())],
+        &cancel,
+    );
+    assert!(focused(cx, &cancel), "the premise: Cancel has focus");
+
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &cancel),
+        "Tab found no field and left focus on Cancel"
+    );
+    keys(cx, "shift-tab");
+    assert!(focused(cx, &cancel), "Shift+Tab too");
+    keys(cx, "alt-tab");
+    assert!(focused(cx, &confirm), "Option-Tab reached the other button");
+}
+
+/// The Keyboard navigation setting can change while the app runs, without the app ever losing focus (macOS flips it
+/// with Control-F7), and the old app's WebKit followed it at once. The coordinator reads the setting on every Tab
+/// press, so the next press after a change follows it, with no reread step in between.
+#[gpui::test]
+fn the_tab_setting_is_read_on_every_press(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    let reach = Rc::new(Cell::new(focus::TabReach::TextFieldsAndPopups));
+    follow(cx, &reach);
+    let (cancel, confirm) = (handle(cx), handle(cx));
+    open_dialog(
+        cx,
+        vec![("cancel", cancel.clone()), ("confirm", confirm.clone())],
+        &cancel,
+    );
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &cancel),
+        "the premise: with Tab skipping buttons, Tab found nothing to move to"
+    );
+
+    reach.set(focus::TabReach::EveryControl);
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &confirm),
+        "the next press after the setting changed reached the button"
     );
 }
 
@@ -912,6 +1108,7 @@ fn a_layer_does_not_open_once_the_user_moved_on(cx: &mut TestAppContext) {
                 start,
                 subject: None,
                 main_action: None,
+                keeps_focus_on_empty_click: true,
             },
             &mark,
             window,
@@ -954,6 +1151,7 @@ fn a_dialog_closes_when_its_subject_is_gone(cx: &mut TestAppContext) {
                 start,
                 subject: Some(subject),
                 main_action: None,
+                keeps_focus_on_empty_click: true,
             },
             &mark,
             window,
@@ -1250,6 +1448,7 @@ fn opening_and_closing_a_layer_redraws_only_the_root(cx: &mut TestAppContext) {
                 start,
                 subject: None,
                 main_action: None,
+                keeps_focus_on_empty_click: true,
             },
             &mark,
             window,
@@ -1410,6 +1609,59 @@ fn a_question_starts_on_the_answer_the_rules_pick(cx: &mut TestAppContext) {
     }
 }
 
+/// Which questions keep focus on the answer in use when their empty space is clicked is each question's own rule
+/// ([`Question::keeps_focus_on_empty_click`]): SPEC.md gives it to the Stop, Restart, Replace and Delete questions.
+/// Without it a click on the question's text focuses the question itself, and a following Enter presses Confirm; with
+/// it, focus stays on Cancel (where a risky question starts) and Enter cancels. The opt-in's plumbing through the
+/// question to its dialog is what this guards: lose it and those four questions confirm on a stray click and Enter.
+#[gpui::test]
+fn a_question_that_opts_in_keeps_focus_on_an_empty_space_click(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    for (case, keeps, sent_after_enter) in [("opted in", true, 0), ("not opted in", false, 1)] {
+        let sent = Rc::new(Cell::new(0));
+        let record = sent.clone();
+        let asked = cx.update(|window, cx| {
+            let mark = Mark::take(cx);
+            let question = question("alpha").starts_on_cancel();
+            let question = if keeps {
+                question.keeps_focus_on_empty_click()
+            } else {
+                question
+            };
+            prompt::ask_for_test(
+                question,
+                None,
+                &mark,
+                move |_, _, _| record.set(record.get() + 1),
+                window,
+                cx,
+            )
+        });
+        cx.run_until_parked();
+        check(cx);
+        let asked = asked.expect("the question opened");
+        let body = match cx.debug_bounds("prompt-body") {
+            Some(bounds) => bounds,
+            None => panic!("{case}: the question's body was not drawn"),
+        };
+        cx.simulate_click(
+            point(body.left() + px(4.), body.top() + px(4.)),
+            Modifiers::none(),
+        );
+        check(cx);
+        assert!(
+            is_open(cx, asked.layer),
+            "{case}: the click on its empty space left the question open"
+        );
+        keys(cx, "enter");
+        assert_eq!(
+            sent.get(),
+            sent_after_enter,
+            "{case}: Enter after the click answered what kept focus"
+        );
+    }
+}
+
 /// Escape cancels a question and returns focus to where it was; nothing is sent.
 #[gpui::test]
 fn escape_cancels_a_question_and_returns_focus(cx: &mut TestAppContext) {
@@ -1475,6 +1727,7 @@ fn enter_on_the_dialog_itself_presses_its_main_action(cx: &mut TestAppContext) {
                 start: kept,
                 subject: None,
                 main_action: Some(Rc::new(move |_, _| record.set(record.get() + 1))),
+                keeps_focus_on_empty_click: true,
             },
             &mark,
             window,

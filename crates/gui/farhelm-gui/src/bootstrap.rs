@@ -8,7 +8,8 @@
 //! [`install`]: Kit's own init first (it installs its theme and the text input's actions), then the bundled fonts, then
 //! Farhelm's theme, which re-projects Kit's theme from Farhelm's tokens, then Farhelm's key bindings (after Kit's, so a
 //! deeper Farhelm context wins where both bind a key), the focus coordinator's and the layer manager's registries and,
-//! in test builds, the render counter. Only then does a window open.
+//! in test builds, the render counter. Then the coordinator starts following the host's answer for which controls Tab
+//! reaches. Only then does a window open.
 //!
 //! Nothing here may panic: on macOS this runs inside an AppKit callback, where a panic aborts the process. Failures are
 //! returned, and [`run`] hands them to the host's [`Host::on_startup_failure`], which owns how the process reports them.
@@ -118,6 +119,10 @@ pub struct Host {
     /// how a windowless failure reaches the user (the desktop binary shows its native refusal and exits); if it
     /// returns, the app quits.
     pub on_startup_failure: Box<dyn FnOnce(String)>,
+    /// Which controls a plain Tab reaches on this platform (decision D-2): the system's Keyboard navigation setting on
+    /// macOS, every control elsewhere. Asked on every Tab and Shift+Tab press, on the main thread; it must answer
+    /// quickly and never fail (a setting it cannot read answers the platform's default).
+    pub tab_reach: Box<dyn Fn() -> focus::TabReach>,
 }
 
 /// What keeps the app's quit wiring alive for the life of the app: the task waiting on [`Host::quit_requested`] and the
@@ -138,7 +143,9 @@ pub fn run(host: Host) {
         quit_requested,
         on_quit,
         on_startup_failure,
+        tab_reach,
     } = host;
+    let tab_reach: focus::TabReachSource = std::rc::Rc::from(tab_reach);
     gpui_platform::application()
         .with_assets(Assets)
         .run(move |cx: &mut App| {
@@ -161,7 +168,11 @@ pub fn run(host: Host) {
                 _requested: requested,
                 _on_quit: on_quit,
             });
-            if let Err(error) = install(cx).and_then(|()| open_main_window(cx).map(|_| ())) {
+            let started = install(cx).and_then(|()| {
+                focus::follow_tab_reach(tab_reach, cx);
+                open_main_window(cx).map(|_| ())
+            });
+            if let Err(error) = started {
                 tracing::error!("the window could not open: {error:#}");
                 on_startup_failure(format!("{error:#}"));
                 cx.quit();
