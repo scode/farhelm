@@ -148,6 +148,18 @@ pub(crate) const RENAME_SESSION_SHORTCUT_NAME: &str = if cfg!(target_os = "macos
     "Ctrl+Shift+L"
 };
 
+/// The quick switcher's chords (SPEC.md, "Desktop window chrome"): Cmd+K on a Mac, Ctrl+Shift+K on Linux. Spelled once
+/// here, for its binding, its row in [`TERMINAL_KEYS`] and the tests.
+const QUICK_SWITCHER_MAC: &str = "cmd-k";
+const QUICK_SWITCHER_LINUX: &str = "ctrl-shift-k";
+
+/// The quick switcher's chord on this platform.
+pub(crate) const QUICK_SWITCHER_CHORD: &str = if cfg!(target_os = "macos") {
+    QUICK_SWITCHER_MAC
+} else {
+    QUICK_SWITCHER_LINUX
+};
+
 /// The chords a focused text field keeps for itself although Farhelm binds them elsewhere. [`install`] binds each to
 /// `NoAction` in [`TEXT_INPUT_CONTEXT`], which hides every binding further out for the same chord, so the key goes on
 /// to the field's own handling (here, nothing: Kit binds none of them). Bound on every platform: on macOS the Delete
@@ -178,6 +190,10 @@ actions!(
         /// Open Rename for the open session (SPEC.md: Cmd+L on a Mac, Ctrl+Shift+L on Linux). Runs once per press
         /// (`ONCE_PER_PRESS`).
         RenameSession,
+        /// Open the quick switcher, to find and open any session by typing part of its title, host or folder
+        /// (SPEC.md: Cmd+K on a Mac, Ctrl+Shift+K on Linux, also from a focused terminal). Runs once per press
+        /// (`ONCE_PER_PRESS`).
+        QuickSwitcher,
         /// Paste the clipboard's text into the focused terminal, as a paste its program can tell from typing. The
         /// terminal handles it; its keys are in [`TERMINAL_BINDINGS`], and a menu item that dispatches it reaches the
         /// focused terminal the same way.
@@ -266,6 +282,9 @@ pub fn install(cx: &mut App) {
         // SPEC.md, "Desktop window chrome". The main view hands it to the session list's Rename editor for the open
         // session; it works from a focused terminal because its `TERMINAL_KEYS` row is an app shortcut.
         KeyBinding::new(RENAME_SESSION_CHORD, RenameSession, Some(CONTEXT)),
+        // SPEC.md, "Desktop window chrome". The main view hands it to the session list's quick switcher; it works from
+        // a focused terminal because its `TERMINAL_KEYS` row is an app shortcut.
+        KeyBinding::new(QUICK_SWITCHER_CHORD, QuickSwitcher, Some(CONTEXT)),
     ]);
     cx.bind_keys(
         TEXT_FIELD_KEYS
@@ -339,6 +358,10 @@ const ONCE_PER_PRESS: &[&dyn Action] = &[
     &RenameSession,
     &TemplateNumberKey { digit: 0 },
     &ShowKeyboardShortcuts,
+    // Not one SPEC.md names (it says "ignore repeat" of Delete and Rename only): the migration's orchestrator decided
+    // that a held chord opens the switcher once. A repeat would only reach the ground's handler, which refuses while
+    // the switcher is open; listed, it never runs the opener again.
+    &QuickSwitcher,
 ];
 
 /// Whether `action` is one a held key runs only once: its name is listed in [`ONCE_PER_PRESS`].
@@ -426,7 +449,11 @@ impl TerminalKey {
 /// sees them, so they never reach the program either.
 pub const TERMINAL_KEYS: &[TerminalKey] = &[
     // Farhelm's shortcuts that work from a focused terminal.
-    app("cmd-k", "ctrl-shift-k", "open the quick switcher"),
+    app(
+        QUICK_SWITCHER_MAC,
+        QUICK_SWITCHER_LINUX,
+        "open the quick switcher",
+    ),
     app("cmd-j", "ctrl-shift-j", "open the template list"),
     app("cmd-p", "ctrl-shift-p", "quick launch the marked template"),
     app("cmd-x", "ctrl-shift-x", "begin a quick-launch sequence"),

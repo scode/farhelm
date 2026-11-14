@@ -178,6 +178,37 @@
       ]
     },
     {
+      "id": "app-quick-switcher",
+      "title": "The quick switcher (after Escape on the rename dialog), opened with its shortcut over the fleet, listing every session in recent activity order",
+      "reference": "quick-switcher",
+      "mockup": false,
+      "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Rename session"
+        ],
+        [
+          "action",
+          "farhelm::QuickSwitcher"
+        ],
+        [
+          "wait",
+          "--text",
+          "Recent sessions"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Loading sessions…"
+        ]
+      ]
+    },
+    {
       "id": "app-empty-fleet",
       "title": "The main window over an empty fleet",
       "reference": "empty-fleet",
@@ -443,7 +474,7 @@
     },
     {
       "id": "quick-switcher",
-      "ported": false
+      "ported": true
     },
     {
       "id": "template-launcher",

@@ -575,10 +575,13 @@ Owner: the component layer, over GPUI Kit.
 Component constructors require a label, hover help and an accessibility role, so the old rule that every control has a
 tooltip becomes something the compiler checks; the test bridge also reads roles and labels to find controls. Where the
 old coverage rule exempted items that carry a visible description, a constructor's description counts as its hover help.
-Colors come only from theme tokens, which are copied from the old stylesheet (`crates/farhelm-ui/assets/app.css` at the
-reference commit). One dialog frame keeps the answer buttons pinned and scrolls the body, and when even those do not
-fit, the whole frame scrolls, as today's dialogs do. The window's minimum size is in SPEC.md ("Desktop window chrome";
-`MIN_WINDOW_SIZE` in the app's bootstrap holds it).
+One exception to keyboard reach per control, decided by the migration's orchestrator on 2026-11-14: a list's options
+driven by the field that owns them (`OptionRow`; Up and Down move the selection, Enter picks, focus stays in the field)
+are reached through that field and never take focus, as the old quick switcher's rows did. The next such list reuses
+`OptionRow`. Colors come only from theme tokens, which are copied from the old stylesheet
+(`crates/farhelm-ui/assets/app.css` at the reference commit). One dialog frame keeps the answer buttons pinned and
+scrolls the body, and when even those do not fit, the whole frame scrolls, as today's dialogs do. The window's minimum
+size is in SPEC.md ("Desktop window chrome"; `MIN_WINDOW_SIZE` in the app's bootstrap holds it).
 
 GPUI Kit is used for `Root`, text inputs and named primitives, as the prototype did. Kit's own overlays (dialogs,
 sheets, popovers, menus, notifications, tooltips) are not used, not even inside the component layer: Kit moves focus

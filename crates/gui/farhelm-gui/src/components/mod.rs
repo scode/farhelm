@@ -18,6 +18,7 @@ mod button;
 mod dialog;
 mod list_row;
 mod menu_item;
+mod option_row;
 mod text_input;
 
 #[cfg(test)]
@@ -26,10 +27,12 @@ mod tests;
 pub use banner::Banner;
 pub use button::{Button, IconButton, Tier};
 pub use dialog::DialogFrame;
+pub(crate) use dialog::dialog_shadow;
 pub use gpui::Role;
 pub use list_row::ListRow;
 pub use menu_item::MenuItem;
-pub use text_input::{TextInput, TextInputEvent, TextInputState};
+pub use option_row::OptionRow;
+pub use text_input::{TextInput, TextInputEvent, TextInputState, Vertical};
 
 use std::rc::Rc;
 

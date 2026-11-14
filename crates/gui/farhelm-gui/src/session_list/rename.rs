@@ -160,9 +160,8 @@ fn open_returning(
 /// view calls it for the action wherever focus is, the terminal included, and the action is taken either way, as
 /// `ONCE_PER_PRESS` requires.
 pub(crate) fn open_for_selected(window: &mut Window, cx: &mut App) {
-    // Today a key pressed inside a layer never reaches the main view's handler, since focus is trapped in the layer
-    // and layers dispatch from the overlay. A layer that leaves focus on the page (the NOTE on `layers::trap`'s
-    // suggestion lists) would let it through, and this keeps the modal rule then.
+    // A key pressed inside a layer reaches the main view's handler too, since `root::wrap` draws the overlay inside the
+    // main view's ground; this is what keeps the modal rule there.
     if layers::any_open(window, cx) {
         return;
     }

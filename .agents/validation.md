@@ -725,14 +725,16 @@ systemd or SSH substrate ran.
   megabyte that the receiving program put on the clipboard (an OSC 52 write) reaches it whole between one pair of
   bracketed-paste markers, with an end marker embedded in it removed rather than ending the paste early (on a Mac only:
   the step is skipped on Linux, where headless Mutter never lets the app own the clipboard, so a Linux run is no
-  evidence for paste); and on another session of its own, text the bridge commits the way an input method does
-  (non-ASCII) reaches the program and comes back echoed. A failed run keeps its run directory under `/tmp` for its logs.
-  An interrupted one (Ctrl-C, or SIGTERM from the recorder) still stops its app run, for which the recorder's
-  `--termination-grace` leaves it time. Under 20 seconds on a build worker with the app already built (4 and 18 s
-  measured); it builds the app first unless given `--no-build`. Needs what `gui-agent.py start` needs (`mutter`,
-  `dbus-run-session` and lavapipe on Linux, or a logged-in GUI session of the same user on a Mac). CI does not run it.
-  Run it when the app's session list, row menu, Delete, Rename, terminal attach, paste or text input, the bridge's
-  wiring, the app's startup or `scripts/gui-agent.py` change.
+  evidence for paste); on another session of its own, text the bridge commits the way an input method does (non-ASCII)
+  reaches the program and comes back echoed; and on two sessions of its own, the quick switcher's chord from one's
+  focused terminal opens the switcher, and part of the other's title and Enter make the helm record the other as last
+  selected and focus its terminal. A failed run keeps its run directory under `/tmp` for its logs. An interrupted one
+  (Ctrl-C, or SIGTERM from the recorder) still stops its app run, for which the recorder's `--termination-grace` leaves
+  it time. Under 20 seconds on a build worker with the app already built (4 and 18 s measured); it builds the app first
+  unless given `--no-build`. Needs what `gui-agent.py start` needs (`mutter`, `dbus-run-session` and lavapipe on Linux,
+  or a logged-in GUI session of the same user on a Mac). CI does not run it. Run it when the app's session list, row
+  menu, Delete, Rename, quick switcher, terminal attach, paste or text input, the bridge's wiring, the app's startup or
+  `scripts/gui-agent.py` change.
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh` — the curl-installer is POSIX
   `sh` run unread on a fresh machine (`curl | sh`), so a syntax slip or a shellcheck-catchable bug in it gets caught
   before the slower Rust-side asset-table parity test in `assets.rs` would notice. `test-install-sh.sh` is bash, not

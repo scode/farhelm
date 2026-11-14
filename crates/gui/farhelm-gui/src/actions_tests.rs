@@ -24,9 +24,9 @@ use gpui::{
 
 use crate::actions::{
     CONTEXT, DecreaseTerminalTextSize, DeleteSession, IncreaseTerminalTextSize, KeyOwner,
-    PHYSICAL_KEYS, PhysicalKey, RenameSession, ShowKeyboardShortcuts, TERMINAL_BINDINGS,
-    TERMINAL_CONTEXT, TERMINAL_KEYS, TEXT_INPUT_CONTEXT, THIS_PLATFORM, TemplateNumberKey,
-    owner_on, physical_key_at, physical_on, terminal_key_owner,
+    PHYSICAL_KEYS, PhysicalKey, QuickSwitcher, RenameSession, ShowKeyboardShortcuts,
+    TERMINAL_BINDINGS, TERMINAL_CONTEXT, TERMINAL_KEYS, TEXT_INPUT_CONTEXT, THIS_PLATFORM,
+    TemplateNumberKey, owner_on, physical_key_at, physical_on, terminal_key_owner,
 };
 use crate::components::{Button, HoverHelp, Role, TextInput, TextInputState};
 use crate::focus::{self, OnPress};
@@ -60,7 +60,7 @@ impl Render for Scene {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let received = self.received.clone();
         let probes = self.probes.clone();
-        let (deletes, renames) = (self.ran.clone(), self.ran.clone());
+        let (deletes, renames, switchers) = (self.ran.clone(), self.ran.clone(), self.ran.clone());
         let (shortcuts, bigger, smaller, numbers) = (
             self.ran.clone(),
             self.ran.clone(),
@@ -75,6 +75,9 @@ impl Render for Scene {
             .on_action(move |_: &Probe, _, _| probes.set(probes.get() + 1))
             .on_action(move |action: &DeleteSession, _, _| deletes.borrow_mut().push(action.name()))
             .on_action(move |action: &RenameSession, _, _| renames.borrow_mut().push(action.name()))
+            .on_action(move |action: &QuickSwitcher, _, _| {
+                switchers.borrow_mut().push(action.name())
+            })
             .on_action(move |action: &ShowKeyboardShortcuts, _, _| {
                 shortcuts.borrow_mut().push(action.name())
             })
@@ -226,28 +229,31 @@ impl Opened<'_> {
 
     /// Bind the session shortcuts in Farhelm's context on this platform's chords, as the session list will, and return
     /// each chord with the name of the action it runs.
-    fn bind_session_shortcuts(&mut self) -> [(&'static str, &'static str); 2] {
+    fn bind_session_shortcuts(&mut self) -> [(&'static str, &'static str); 3] {
         let shortcuts = session_shortcuts();
         self.cx.update(|_, cx| {
             cx.bind_keys([
                 KeyBinding::new(shortcuts[0].0, DeleteSession, Some(CONTEXT)),
                 KeyBinding::new(shortcuts[1].0, RenameSession, Some(CONTEXT)),
+                KeyBinding::new(shortcuts[2].0, QuickSwitcher, Some(CONTEXT)),
             ])
         });
         shortcuts
     }
 }
 
-/// The session Delete and Rename chords on this platform (SPEC.md: Cmd+W and Cmd+L on a Mac, Ctrl+Shift+Backspace and
-/// Ctrl+Shift+L on Linux), each with the name of its action.
-fn session_shortcuts() -> [(&'static str, &'static str); 2] {
-    let (delete, rename) = match THIS_PLATFORM {
-        Platform::Mac => ("cmd-w", "cmd-l"),
-        Platform::Linux => ("ctrl-shift-backspace", "ctrl-shift-l"),
+/// The session Delete and Rename chords and the quick switcher's on this platform (SPEC.md: Cmd+W, Cmd+L and Cmd+K on a
+/// Mac, Ctrl+Shift+Backspace, Ctrl+Shift+L and Ctrl+Shift+K on Linux), each with the name of its action. Spelled out
+/// here rather than read from `actions.rs`, so a chord changed there by mistake fails these tests.
+fn session_shortcuts() -> [(&'static str, &'static str); 3] {
+    let (delete, rename, switcher) = match THIS_PLATFORM {
+        Platform::Mac => ("cmd-w", "cmd-l", "cmd-k"),
+        Platform::Linux => ("ctrl-shift-backspace", "ctrl-shift-l", "ctrl-shift-k"),
     };
     [
         (delete, DeleteSession.name()),
         (rename, RenameSession.name()),
+        (switcher, QuickSwitcher.name()),
     ]
 }
 
@@ -629,10 +635,11 @@ fn a_chord_prefix_holds_keys_back_only_in_a_context_that_contains_the_terminal(
 
 // ---- Shortcuts that act once per press -------------------------------------------------------------------------------
 
-/// SPEC.md: the session Delete and Rename shortcuts "ignore repeat". A GPUI binding runs its action on every
-/// auto-repeat, so without the repeat guard holding Cmd+W (or Ctrl+Shift+Backspace) would ask to delete the session
-/// once per repeat. Holding either shortcut runs its action once, for the press; a fresh press after the key is
-/// released runs it again, so the guard is not a lockout that outlives the hold.
+/// SPEC.md: the session Delete and Rename shortcuts "ignore repeat", and the quick switcher's "does nothing" while its
+/// own dialog is open. A GPUI binding runs its action on every auto-repeat, so without the repeat guard holding Cmd+W
+/// (or Ctrl+Shift+Backspace) would ask to delete the session once per repeat. Holding any of the three runs its action
+/// once, for the press; a fresh press after the key is released runs it again, so the guard is not a lockout that
+/// outlives the hold.
 #[gpui::test]
 fn a_held_session_shortcut_runs_once_and_again_after_a_release(cx: &mut TestAppContext) {
     let mut opened = open(cx);
@@ -654,9 +661,10 @@ fn a_held_session_shortcut_runs_once_and_again_after_a_release(cx: &mut TestAppC
     }
 }
 
-/// The same from a focused terminal, where it matters most: SPEC.md has both shortcuts work from terminal focus
-/// "without sending their chord to the program". A held repeat must neither run the action again nor fall through to
-/// the terminal, which would otherwise see a key no binding took and could pass it to the program.
+/// The same from a focused terminal, where it matters most: SPEC.md has the session shortcuts work from terminal focus
+/// "without sending their chord to the program", and the quick switcher open "including from a focused terminal". A
+/// held repeat must neither run the action again nor fall through to the terminal, which would otherwise see a key no
+/// binding took and could pass it to the program.
 #[gpui::test]
 fn a_held_session_shortcut_in_a_terminal_runs_once_and_never_reaches_it(cx: &mut TestAppContext) {
     let mut opened = open(cx);
@@ -717,7 +725,7 @@ fn a_repeat_of_a_key_not_bound_to_a_listed_action_is_untouched(cx: &mut TestAppC
 #[gpui::test]
 fn a_listed_chord_that_a_deeper_binding_takes_keeps_its_repeats(cx: &mut TestAppContext) {
     let mut opened = open(cx);
-    let [(delete, name), _] = opened.bind_session_shortcuts();
+    let [(delete, name), ..] = opened.bind_session_shortcuts();
     opened
         .cx
         .update(|_, cx| cx.bind_keys([KeyBinding::new(delete, Probe, Some(TERMINAL_CONTEXT))]));

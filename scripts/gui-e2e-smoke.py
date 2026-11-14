@@ -4,10 +4,10 @@ driven through the test-automation bridge (`scripts/gui-agent.py`, `docs/gui-age
 
 NOTE: This is a smoke test, not the end-to-end suite. It covers the first slice's path through the app once each
 (the session list, a row's menu, Delete, Rename, and typing into the open session's terminal), so a break in the wiring
-between the app, the helm and the supervisor shows up somewhere, plus the area steps added since (from 30, the
-terminal's: a large paste, on a Mac only, and text an input method commits). The behavior itself is specified and
-tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `terminal/attached/tests.rs`);
-nothing here checks layout or wording beyond the names it clicks.
+between the app, the helm and the supervisor shows up somewhere, plus the area steps added since (30 and 31, the
+terminal's: a large paste, on a Mac only, and text an input method commits; 32, the sidebar's quick switcher). The
+behavior itself is specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`,
+`terminal/attached/tests.rs`); nothing here checks layout or wording beyond the names it clicks.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -79,6 +79,9 @@ EFFECT_TIMEOUT_SECONDS = 60
 # tells the menu's state apart from the list's.
 MENU_DESCRIPTION = "Removes the session and its state"
 
+# The quick switcher's footer: visible text only the open switcher draws, so its going tells that the switcher closed.
+SWITCHER_FOOTER = "↑↓ choose · Enter pick · Escape close"
+
 # What every step's name must look like (the module docs say why); `main` checks it before starting the app.
 STEP_NAME = re.compile(r"test_\d\d_")
 
@@ -98,6 +101,18 @@ def listed_titles() -> dict[str, str]:
     """Every session the helm lists, by id, with its title: what the helm holds, whatever the window shows."""
     assert RUN is not None
     return {row["id"]: row["title"] for row in gui_agent.helm_request(RUN, "GET", "/api/sessions")["sessions"]}
+
+
+def listed_id(title: str) -> str | None:
+    """The id the helm lists the session titled `title` under, if it lists exactly one."""
+    ids = [id for id, listed in listed_titles().items() if listed == title]
+    return ids[0] if len(ids) == 1 else None
+
+
+def last_selected() -> str | None:
+    """The session the helm remembers as last selected: what the app writes when the user opens a session."""
+    assert RUN is not None
+    return gui_agent.helm_request(RUN, "GET", "/api/preferences").get("last_selected")
 
 
 def eventually(check, what: str, timeout: float = EFFECT_TIMEOUT_SECONDS):
@@ -195,7 +210,7 @@ class Smoke(unittest.TestCase):
         eventually(lambda: listed_titles().get(ids[0]) == title, "the helm listing Fixture 1 under its new title")
         self.ok("wait", "--text", title)
 
-    # ---- The terminal area's steps (30 onward), on sessions of their own ----------------------------------------------
+    # ---- The terminal area's steps (30), on sessions of their own ----------------------------------------------------
 
     # NOTE: Wayland lets a client own the clipboard only while one of its windows has keyboard or pointer focus, from a
     # press serial the compositor gave it. Headless Mutter never focuses the app's window that way (the bridge injects
@@ -273,6 +288,47 @@ class Smoke(unittest.TestCase):
         self.ok("type", "id:terminal-grid", "日本語 é")
         self.ok("press", "enter")
         self.ok("terminal-text", "--wait", "echo:日本語 é")
+
+    # ---- The sidebar area's quick switcher (32), on sessions of its own ----------------------------------------------
+
+    def test_32_the_quick_switcher_opens_a_session_found_by_typing(self) -> None:
+        """The quick switcher is the keyboard's way to any session, and it crosses the app, the helm and back: the
+        chord reaches the app from a focused terminal, the switcher reads the helm's listing over the UI channel, and a
+        pick goes through the ordinary selection, which the helm remembers. Specified: with this step's own origin
+        session open, its terminal focused and showing the echo of a stamped line typed into it, the platform's chord
+        opens the switcher ("Recent sessions"); filling its search field with part of this step's target title and
+        pressing Enter closes it, the helm records the target as the last selected session, and the focused terminal
+        is the target's: the fake agent's ready line without the origin's echo. Both sessions are this step's own,
+        titled with a per-run stamp so no other step's session can match."""
+        stamp = uuid.uuid4().hex[:8]
+        fixtures = json.loads((RUN / "run.json").read_text())["binaries"]["fixtures"]
+        titles = {role: f"Switcher {role} {stamp}" for role in ("origin", "target")}
+        for title in titles.values():
+            body = gui_agent.seed_body(0, gui_agent.SESSION_CWD, fixtures)
+            body["title"] = title
+            gui_agent.helm_request(RUN, "POST", "/api/sessions", body)
+        self.ok("wait", "--text", titles["target"])
+        ids = {
+            role: eventually(lambda t=title: listed_id(t), f"{title} in the helm's listing")
+            for role, title in titles.items()
+        }
+        self.ok("click", f"text:{titles['origin']}")
+        self.ok("terminal-text", "--wait", "FAKE-AGENT READY")
+        # Marks the origin's screen, so the terminal focused after the pick can be told apart from it: both sessions
+        # run the same script and show the same ready line.
+        line = f"origin-{stamp}"
+        self.ok("type", "--keys", line)
+        self.ok("press", "enter")
+        self.ok("terminal-text", "--wait", f"echo:{line}")
+        eventually(lambda: last_selected() == ids["origin"], "premise: the helm remembering the origin as selected")
+        self.ok("press", "cmd-k" if sys.platform == "darwin" else "ctrl-shift-k")
+        self.ok("wait", "--text", "Recent sessions")
+        self.ok("fill", "text:Search sessions", f"target {stamp}")
+        self.ok("press", "enter")
+        self.ok("wait", "--gone", SWITCHER_FOOTER)
+        eventually(lambda: last_selected() == ids["target"], "the helm remembering the picked target as selected")
+        screen = self.ok("terminal-text", "--wait", "FAKE-AGENT READY")
+        self.assertNotIn(f"echo:{line}", screen, "the focused terminal is the target's, not the origin's")
 
 
 # The receiver for the large-paste step: once the step types `copy`, it writes its payload file to the clipboard with

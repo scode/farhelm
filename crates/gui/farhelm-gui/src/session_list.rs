@@ -69,11 +69,15 @@
 //! The Rename editor the list owns is a dialog rather than part of a row, so a listing that changes under it never
 //! moves its field.
 //!
+//! The quick switcher ([`quick_switcher`]) belongs to the list too: a dialog, opened with its shortcut, that searches
+//! a listing of its own and opens the session the user picks through the same selection rules as a click on a row.
+//!
 //! NOTE: Not ported yet, each with the area that brings it: the order menu (the title is the stored order's name, not a
 //! control), filters and their counts, compact rows, marking, pins, the row menu's other commands, and the host rail.
 
 pub(crate) mod delete;
 mod menu;
+pub(crate) mod quick_switcher;
 pub(crate) mod rename;
 mod row;
 mod selection;
