@@ -9,7 +9,7 @@
 //!   then Cancel, Reset choices (Agent tab) and the main action, with what a press of it has to say pinned above them.
 //! - **The body**, in reading and Tab order: the destination rows (Folder, Name), the Agent and Command tabs, and the
 //!   chosen tab's fields. The other tab's fields are not drawn, but its draft is kept (SPEC.md: "switching tabs keeps
-//!   each tab's draft").
+//!   each tab's draft"). The Agent tab's harness, effort and permission choices are drawn by [`choices`].
 //! - **Input to edits.** Every field's change becomes one of the draft's edit methods; nothing here decides a launch
 //!   rule. A field the draft changes on its own (Reset choices clearing the wrapper prefix) is put back in step after
 //!   the edit.
@@ -17,35 +17,33 @@
 //!   names a reason, and the reason is its hover text; a press, or Enter on the dialog, a single-line field or a
 //!   choice, shows the reason beside it in the bordered alert, "Not launched." first ("Restart error." in Restart
 //!   with). Its accessible name keeps the operation and its target, as the old one did.
-//! - **Reads.** The model catalog is read once when the launcher opens (`GET /api/launch-catalog`); hosts, sessions and
-//!   the remembered permission are read from the store while drawing.
+//! - **Reads.** The model catalog is read when the launcher opens (`GET /api/launch-catalog`), and again on Retry
+//!   after a failed read. Hosts, sessions and the remembered permission are read from the store while drawing, and the
+//!   remembered wrapper prefixes when an agent type is chosen.
 //!
 //! NOTE: Not built yet, each with the piece that brings it: the host picker and the model field (its list on the
-//! non-focusing popover), with the host's phase in the footer; the agent type, effort and permission choices, with
-//! custom flags; the Command tab's declared agent type; sending the launch (until then a press of a complete draft does
-//! nothing); the composer search; recent setups, Browse and the folder check, with its warning on the folder field;
-//! managed checkouts, with their folder and name placeholders; the escaped read-only display of a prompt or wrapper
-//! prefix holding invisible characters, with its Clear wrapper prefix; and keyboard scrolling of an overflowing notice
-//! (the old region took focus once it overflowed; today's refusals are one or two lines).
+//! non-focusing popover), with the host's phase in the footer; the Command tab's declared agent type; sending the
+//! launch (until then a press of a complete draft does nothing); the composer search; recent setups, Browse and the
+//! folder check, with its warning on the folder field; managed checkouts, with their folder and name placeholders; the
+//! escaped read-only display of a prompt, wrapper prefix or Custom flags holding invisible characters, with its Clear
+//! wrapper prefix; and keyboard scrolling of an overflowing notice (the old region took focus once it overflowed;
+//! today's refusals are one or two lines).
 
 use std::rc::Rc;
 
 use farhelm_helm_client::ApiPath;
 use farhelm_proto::launcher::LaunchCatalogModel;
 use farhelm_proto::ui_channel::{HostView, PREFERENCES_KEY, Preferences, SessionRow};
-use farhelm_proto::{
-    LaunchEffort, LaunchHarness, LaunchPermission, SessionLaunch, split_wrapper_prefix,
-};
+use farhelm_proto::{LaunchHarness, LaunchPermission, SessionLaunch, split_wrapper_prefix};
 use gpui::{
-    AnyElement, App, AppContext as _, ClickEvent, Context, Div, Entity, FontWeight,
-    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
+    AnyElement, App, AppContext as _, ClickEvent, Context, Div, ElementId, Entity, FontWeight,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString, Stateful,
     StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, px, svg,
 };
 
-use super::draft::{
-    Field, LaunchDraft, Mode, Tab, harness_label, permission_name, remembered_permission,
-};
+use super::draft::{Field, LaunchDraft, Mode, Tab, harness_label, remembered_permission};
 use super::request::{Target, capitalized};
+use super::words::{agent_note, effort_label, permission_display};
 use crate::assets::Icon;
 use crate::components::{
     self, Button, Checkbox, DialogFrame, HoverHelp, RadioGroup, RadioOption, Role, TabOption,
@@ -58,6 +56,8 @@ use crate::session_list::host_rail::display_name;
 use crate::store::HelmStore;
 use crate::theme::{self, metrics};
 use crate::{operations, session};
+
+mod choices;
 
 /// `.launch-composer-backdrop .create-session-form`: `width: min(960px, 100%)`.
 const WIDTH: f32 = 960.;
@@ -116,8 +116,9 @@ pub fn open(draft: LaunchDraft, mark: &Mark, window: &mut Window, cx: &mut App) 
     Some(layer)
 }
 
-/// Read the release's model catalog for `launcher`, once. A failed read leaves it unread, which refuses no choice
-/// (the draft's rule for an unread catalog).
+/// Read the release's model catalog for `launcher`. A failed read leaves it unread, which refuses no choice (the
+/// draft's rule for an unread catalog), and says why beside a Retry, which reads it again (the old launcher's
+/// "Model catalog unavailable", so a failed read never makes the user reopen the launcher and lose its draft).
 fn read_catalog(launcher: WeakEntity<Launcher>, cx: &mut App) {
     let Ok(path) = ApiPath::api(&["launch-catalog"]) else {
         return;
@@ -127,11 +128,11 @@ fn read_catalog(launcher: WeakEntity<Launcher>, cx: &mut App) {
         "GET /api/launch-catalog",
         cx,
         move |answer, cx| {
-            let Ok(catalog) = answer else {
-                return;
-            };
             let _ = launcher.update(cx, |launcher, cx| {
-                launcher.catalog = Some(catalog);
+                match answer {
+                    Ok(catalog) => launcher.catalog = Some(catalog),
+                    Err(error) => launcher.catalog_error = Some(error),
+                }
                 cx.notify();
             });
         },
@@ -145,6 +146,10 @@ pub(crate) struct Launcher {
     store: Entity<HelmStore>,
     /// The model catalog once read; `None` until then, or after a failed read.
     catalog: Option<Vec<LaunchCatalogModel>>,
+    /// Why the last catalog read failed, until a retry starts.
+    catalog_error: Option<HostText>,
+    /// What the last agent-choice edit cleared or refused, said under the agent choices until the next one.
+    notice: Option<String>,
     /// Whether the main action was pressed since the draft last changed, which shows its reason beside it.
     pressed: bool,
     pub(super) folder: TextInputState,
@@ -152,6 +157,8 @@ pub(crate) struct Launcher {
     conversation: TextInputState,
     pub(super) wrapper: TextInputState,
     pub(super) prompt: TextInputState,
+    /// The Custom permission flags, as typed.
+    pub(super) flags: TextInputState,
     command: TextInputState,
     resume: TextInputState,
     /// Cancel's focus handle, where Restart with starts.
@@ -168,6 +175,7 @@ enum Input {
     Conversation,
     Wrapper,
     Prompt,
+    Flags,
     Command,
     Resume,
 }
@@ -203,6 +211,7 @@ impl Launcher {
         wrapper.set_placeholder("with-endpoint --profile work --", window, cx);
         let prompt = TextInputState::new_growing(PROMPT_ROWS, window, cx);
         prompt.set_text(draft.prompt.clone(), window, cx);
+        let flags = field(&draft.agent.permission_flags, window, cx);
         let command = field(&draft.command.command, window, cx);
         let resume = field(&draft.command.resume, window, cx);
         let fields =
@@ -212,6 +221,7 @@ impl Launcher {
                 (&conversation, Input::Conversation),
                 (&wrapper, Input::Wrapper),
                 (&prompt, Input::Prompt),
+                (&flags, Input::Flags),
                 (&command, Input::Command),
                 (&resume, Input::Resume),
             ]
@@ -232,12 +242,15 @@ impl Launcher {
             draft,
             store: store.clone(),
             catalog: None,
+            catalog_error: None,
+            notice: None,
             pressed: false,
             folder,
             name,
             conversation,
             wrapper,
             prompt,
+            flags,
             command,
             resume,
             cancel_focus: cx.focus_handle(),
@@ -263,6 +276,7 @@ impl Launcher {
             Input::Conversation => self.draft.edit_conversation(text),
             Input::Wrapper => self.draft.edit_wrapper(text),
             Input::Prompt => self.draft.edit_prompt(text),
+            Input::Flags => self.draft.edit_permission_flags(text),
             Input::Command => self.draft.edit_command(text),
             Input::Resume => self.draft.edit_command_resume(text),
         }
@@ -284,6 +298,7 @@ impl Launcher {
             (&self.conversation, self.draft.conversation.clone()),
             (&self.folder, self.draft.folder.value().clone()),
             (&self.prompt, self.draft.prompt.clone()),
+            (&self.flags, self.draft.agent.permission_flags.clone()),
         ];
         for (state, value) in pairs {
             if state.text(cx).as_ref() != value {
@@ -349,8 +364,17 @@ impl Launcher {
                 remembered_permission(preferences.remembered_permissions.as_deref())
             });
         self.draft.reset_choices(remembered);
+        self.notice = None;
         self.sync_fields(window, cx);
         self.changed(cx);
+    }
+
+    /// Retry: read the catalog again, its failure cleared first so the line goes while the read is out and comes back
+    /// only if it fails again.
+    fn retry_catalog(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        self.catalog_error = None;
+        read_catalog(cx.weak_entity(), cx);
+        cx.notify();
     }
 
     /// Clear initial prompt: the prompt emptied, as the user could by selecting it all and deleting.
@@ -410,12 +434,19 @@ fn row(
 }
 
 /// A quiet line of help under a control, in the control's column.
-fn help_line(text: impl Into<SharedString>, palette: &theme::Palette) -> Div {
+///
+/// It is a labelled node named by its words, since plain text is not in the accessibility tree and a screen reader
+/// would otherwise never hear it. Its id is its words: no two help lines of one launcher say the same thing.
+fn help_line(text: impl Into<SharedString>, palette: &theme::Palette) -> Stateful<Div> {
+    let text: SharedString = text.into();
     div()
+        .id(ElementId::Name(text.clone()))
+        .role(Role::Label)
+        .aria_label(text.clone())
         .pl(px(LABEL_COLUMN + LABEL_GAP))
         .text_size(metrics::TEXT_SM)
         .text_color(theme::color(palette.fg_1))
-        .child(text.into())
+        .child(text)
 }
 
 /// A section's heading (`.launch-composer-section-label`). Elsewhere the old app drew a rule after it, but the
@@ -426,31 +457,6 @@ fn section_label(text: &'static str, palette: &theme::Palette) -> Div {
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(theme::color(palette.fg_0))
         .child(text)
-}
-
-/// An effort's name as the launcher shows it (old `effort_label`); `None` is the model's default.
-const fn effort_label(effort: Option<LaunchEffort>) -> &'static str {
-    match effort {
-        Some(LaunchEffort::Off) => "Off",
-        Some(LaunchEffort::Minimal) => "Minimal",
-        Some(LaunchEffort::Low) => "Low",
-        Some(LaunchEffort::Medium) => "Medium",
-        Some(LaunchEffort::High) => "High",
-        Some(LaunchEffort::Xhigh) => "xhigh",
-        Some(LaunchEffort::Max) => "Max",
-        Some(LaunchEffort::Ultra) => "Ultra",
-        None => "Default",
-    }
-}
-
-/// A permission's name in the footer (old `permission_display_value`). It differs from the escalation banner's
-/// [`permission_name`] in two words, as the old app's did: no choice is "Default", and custom flags are "Custom".
-const fn permission_display(permission: Option<LaunchPermission>) -> &'static str {
-    match permission {
-        None => "Default",
-        Some(LaunchPermission::Custom) => "Custom",
-        Some(_) => permission_name(permission),
-    }
 }
 
 /// What Launch would start, in words, as the footer and the main action's name share them.
@@ -676,11 +682,21 @@ impl Launcher {
         format!("{} {}", self.verb(), sentence.accessible_name()).into()
     }
 
-    /// The Agent tab's fields that exist so far: the conversation selector and the initial prompt once an agent that
-    /// offers them is chosen (the prompt not in Restart with, which holds it), and the wrapper prefix.
+    /// The Agent tab's fields that exist so far, in the old order: the harness, effort and permission choices (with a
+    /// failed catalog read said under the harness row), the conversation selector and the initial prompt once an agent
+    /// that offers them is chosen (the prompt not in Restart with, which holds it), the Custom flags while Custom is
+    /// chosen, the wrapper prefix, what the last choice changed, and a note for an agent type that lacks something.
     fn agent_fields(&self, palette: &theme::Palette, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let mut fields = Vec::new();
         let harness = self.draft.agent.harness;
+        let mut choices = self.choice_rows(palette, cx);
+        if let Some(error) = &self.catalog_error {
+            // Under the harness row, where the old launcher said it, or first when Restart with holds the agent type
+            // and draws no harness row.
+            let at = usize::from(!self.draft.holds(Field::AgentType));
+            choices.insert(at, self.catalog_error_line(error, palette, cx));
+        }
+        fields.extend(choices);
         if let Some(harness) = harness.filter(|harness| harness.offers_named_conversation()) {
             let required = matches!(&self.draft.mode, Mode::RestartWith(restart) if restart.conversation_required);
             let label = conversation_label(harness);
@@ -768,6 +784,9 @@ impl Launcher {
                 );
             }
         }
+        if self.draft.agent.permissions == Some(LaunchPermission::Custom) {
+            fields.push(self.flags_editor(harness, palette));
+        }
         fields.push(
             row(
                 "launcher-wrapper-row",
@@ -813,7 +832,58 @@ impl Launcher {
                     .into_any_element(),
             );
         }
+        if let Some(notice) = &self.notice {
+            fields.push(
+                choices::status_line("launcher-choice-notice", notice.clone(), palette)
+                    .into_any_element(),
+            );
+        }
+        if let Some(note) = harness.and_then(agent_note) {
+            fields.push(help_line(note, palette).into_any_element());
+        }
         fields
+    }
+
+    /// "Model catalog unavailable", with the read's own words, beside Retry. The words are a live region of their
+    /// own and the button beside it, so a screen reader announces the failure rather than the control.
+    fn catalog_error_line(
+        &self,
+        error: &HostText,
+        palette: &theme::Palette,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let name = HostSentence::new("launcher-catalog-error-name")
+            .text("Model catalog unavailable: ")
+            .host(error)
+            .accessible_name();
+        div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(8.))
+            .text_size(metrics::TEXT_SM)
+            .text_color(theme::color(palette.warn))
+            .child(
+                div()
+                    .id("launcher-catalog-error")
+                    .role(Role::Status)
+                    .aria_label(name)
+                    .flex()
+                    .min_w_0()
+                    .child("Model catalog unavailable: ")
+                    .child(host_text::element(error)),
+            )
+            .child(
+                Button::new(
+                    "launcher-catalog-retry",
+                    "Retry",
+                    HoverHelp::tooltip("Retry: ask the host for its model list again"),
+                    Role::Button,
+                )
+                .tier(Tier::Neutral)
+                .on_click(on_launcher(cx.weak_entity(), Launcher::retry_catalog)),
+            )
+            .into_any_element()
     }
 
     /// The Command tab's fields: the command line, the YOLO assertion, and Resume with its command when an agent type

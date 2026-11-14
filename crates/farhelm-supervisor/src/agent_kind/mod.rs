@@ -75,11 +75,13 @@
 //!   geometry in `crates/gui/farhelm-gui/src/marks.rs`, with provenance in
 //!   `docs/harness-marks.md`. The launcher's harness names and permission
 //!   names are `harness_label` and `permission_name` in
-//!   `crates/gui/farhelm-gui/src/launcher/draft.rs`. The rest of the GUI's
-//!   per-harness vocabulary is not ported yet: display orders checked against
-//!   `LaunchHarness::ALL`, help text, the harness-to-mark mapping and the
-//!   marks' identity colors, the new-session form's Cursor support notice, and
-//!   the per-agent-KIND facts that also cover command and legacy launches
+//!   `crates/gui/farhelm-gui/src/launcher/draft.rs`; its harness chip order
+//!   (checked against `LaunchHarness::ALL`), its permission help and the
+//!   Cursor support notice are in `crates/gui/farhelm-gui/src/launcher/words.rs`,
+//!   and its conversation selector's label is `conversation_label` in
+//!   `launcher/view.rs`. The rest of the GUI's per-harness vocabulary is not
+//!   ported yet: the harness-to-mark mapping and the marks' identity colors,
+//!   and the per-agent-KIND facts that also cover command and legacy launches
 //!   (today the copy instruction the terminal's "this drag did not copy"
 //!   notice offers). Each comes back as an exhaustive per-harness or per-kind
 //!   function in the GUI crates. The Dioxus versions are readable at the GPUI
