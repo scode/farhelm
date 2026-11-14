@@ -14,7 +14,8 @@ dist = false
 [features]
 # The test-automation bridge (`gpui-agent`), which lets an agent drive the running app through an unauthenticated
 # socket. Never in a shipped build or a devbuild: any process running as the same user could click Allow on its own
-# approval card. `src/lib.rs` refuses to compile it into an optimized build, which is what releases and devbuilds are.
+# approval card. `src/agent_startup.rs` refuses to compile it into an optimized build, which is what releases and
+# devbuilds are.
 # It turns on GPUI's test support because the bridge's screenshots render through GPUI's test-only capture.
 agent = ["dep:gpui-agent", "gpui/test-support", "gpui_platform/test-support"]
 

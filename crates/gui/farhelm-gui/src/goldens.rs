@@ -1008,10 +1008,10 @@ fn session_lists(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement
         .into_any_element()
 }
 
-/// Every golden scene. A slice, one scene per entry, so that a new scene only adds lines (the append-only extension
-/// point in `docs/gpui/foundation-ownership.md`). A length in the type changed with every addition, and during two
-/// rebases jj's automatic merge left that length wrong without a conflict marker; both were caught and fixed by hand
-/// before building.
+/// Every golden scene. A slice, one scene per entry, so that a new scene only adds lines (the shape
+/// `docs/gpui/foundation-ownership.md` asks of the lists areas append to). A length in the type changed with every
+/// addition, and during two rebases jj's automatic merge left that length wrong without a conflict marker; both were
+/// caught and fixed by hand before building.
 static SCENES: &[Scene] = &[
     Scene {
         name: "buttons",

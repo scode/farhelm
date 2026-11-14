@@ -94,8 +94,8 @@ pub enum Icon {
 impl Icon {
     /// Every icon, for the asset listing and the test that each one is bundled.
     ///
-    /// A slice, one entry per line, so that a new icon only adds a line: the extension point in
-    /// `docs/gpui/foundation-ownership.md` is append-only, and a length in the type would change with every addition.
+    /// A slice, one entry per line, so that a new icon only adds a line and leaves every existing one alone: a length
+    /// in the type would change with every addition (`docs/gpui/foundation-ownership.md` says why that matters).
     pub const ALL: &[Icon] = &[
         Icon::Close,
         Icon::More,
