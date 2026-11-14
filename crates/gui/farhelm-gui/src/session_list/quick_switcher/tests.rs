@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use super::{CAP_NOTICE, QuickSwitcher, Read, matching_positions, ranked};
+use super::{CAP_NOTICE, QuickSwitcher, Read, mark_positions, matching_positions, ranked};
 use crate::actions::{QUICK_SWITCHER_CHORD, TERMINAL_CONTEXT};
 use crate::layers;
 use crate::local_state;
@@ -110,6 +110,54 @@ fn matching_reads_raw_values_not_their_escaped_spelling() {
     )];
     assert_eq!(ranked(&sessions, "\u{200B}"), [0]);
     assert_eq!(ranked(&sessions, "<U+200B>"), Vec::<usize>::new());
+}
+
+/// The marks show the user which characters matched, so they are found on what the user sees, the escaped spelling,
+/// and only in a value that matched: marking raw positions would land beside or inside an escape, and marking any value
+/// whose shown spelling happens to contain the query would mark a value that took no part in the match. Specified: a
+/// title found only through an invisible character, shown as its escape, marks nothing; a title that did not match
+/// marks nothing even when its escape spells the query (`xd` in `x` followed by U+200D, shown `x<U+200D>`); a matched
+/// value marks the query's positions in its shown spelling; an empty query marks nothing.
+#[test]
+fn marks_are_found_on_the_shown_spelling_of_a_matched_value() {
+    // The spelling the host-text element shows, made the way it makes it.
+    let hidden = "left\u{200B}right";
+    let shown = farhelm_proto::text::escaped(hidden);
+    assert_eq!(
+        shown, "left<U+200B>right",
+        "the premise: the character shows as its escape"
+    );
+    assert!(
+        matching_positions(hidden, "\u{200B}").is_some(),
+        "the premise: the raw title matches"
+    );
+    assert_eq!(
+        mark_positions(hidden, &shown, "\u{200B}"),
+        Vec::<usize>::new()
+    );
+
+    let joined = "x\u{200D}";
+    let shown = farhelm_proto::text::escaped(joined);
+    assert_eq!(
+        shown, "x<U+200D>",
+        "the premise: the joiner shows as its escape"
+    );
+    assert!(
+        matching_positions(joined, "xd").is_none(),
+        "the premise: the raw title does not match"
+    );
+    assert!(
+        matching_positions(&shown, "xd").is_some(),
+        "the premise: its shown spelling would"
+    );
+    assert_eq!(mark_positions(joined, &shown, "xd"), Vec::<usize>::new());
+
+    let shown = farhelm_proto::text::escaped("left\u{200B}right");
+    assert_eq!(mark_positions("left\u{200B}right", &shown, "lr"), [0, 12]);
+    assert_eq!(
+        mark_positions("anything", "anything", ""),
+        Vec::<usize>::new()
+    );
 }
 
 // ---- The window ----------------------------------------------------------------------------------------------------
