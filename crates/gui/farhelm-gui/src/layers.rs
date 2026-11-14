@@ -35,6 +35,9 @@
 //!   opener named home instead ([`Dialog::returns_to`]). A press reaches a dialog's empty-space rule only after the
 //!   controls under it have handled it, and one that gave focus to a control (a click into a text field) is not a
 //!   press on empty space (the focus coordinator's [`focus::OnPress::Focus`]).
+//! - **A popover's card takes the pointer from what it covers.** It has no veil, so the page around it stays live, but
+//!   a press, click, wheel, hover or move on the card itself never reaches the element under it: a click on a
+//!   question's answer over a terminal must not also focus the terminal or click a control there.
 //! - **One tooltip at a time**, owned by the control that showed it (see [`TooltipOwner`]).
 //!
 //! State is kept per window: multi-window support is a watch-list item, and the one thing it asks of the foundations
@@ -1035,6 +1038,13 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
             }
             Kind::Popover(anchor, placement) => {
                 let pressed = anchor.clone();
+                // The card takes the pointer from whatever it covers, as the old app's cards did (a web page hands a press
+                // to the topmost element only). A popover has no veil, and GPUI hands a press, a click and a wheel to
+                // every element under the pointer up to the first that blocks them, so without this a click on a menu
+                // item or a question's answer also reached the page below: it clicked a control there, and a terminal
+                // there took focus before the answer ran, so the question closed with focus outside it. The card's own
+                // scrolling content still takes the wheel; nothing behind it does.
+                let content = content.occlude();
                 let content = content.on_mouse_down_out(move |event, window, cx| {
                     // A press on the anchor itself is left to the anchor, which toggles its popover: closing here first
                     // would let the same click reopen it.
