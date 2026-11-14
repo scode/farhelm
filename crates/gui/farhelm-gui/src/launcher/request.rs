@@ -143,7 +143,7 @@ impl LaunchDraft {
     /// The target host's reason, if it has one: it must be in the store and connected (SPEC.md: the host picker lists
     /// unavailable hosts with their phase, and a create against one cannot go anywhere). Restart with holds the
     /// source's host, so its wording names that host rather than asking for another (the old app's words).
-    fn host_refusal(&self, hosts: &[HostView]) -> Option<String> {
+    pub(super) fn host_refusal(&self, hosts: &[HostView]) -> Option<String> {
         let view = self
             .host
             .and_then(|id| hosts.iter().find(|host| host.id == id));
