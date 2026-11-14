@@ -2029,6 +2029,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "farhelm-helm-client"
+version = "0.0.0-unreleased"
+dependencies = [
+ "anyhow",
+ "farhelm-helm",
+ "farhelm-proto",
+ "futures-util",
+ "percent-encoding",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "farhelm-input-mapping"
 version = "0.0.0-unreleased"
 dependencies = [

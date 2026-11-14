@@ -1,0 +1,34 @@
+[package]
+name = "farhelm-helm-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The GPUI desktop app's connection to its helm: the UI channel and terminal streams"
+
+# A library; see `farhelm-helm/Cargo.toml` for why every non-shipping member
+# says so explicitly instead of relying on having no binary target.
+[package.metadata.dist]
+dist = false
+
+# This crate lives outside `crates/gui/` on purpose: it owns the async runtime and its threads, which the GUI crates'
+# bans (crates/gui/clippy.toml) forbid everywhere else. SPEC_impl.md, "Where the GUI meets the helm", names it the
+# GUI's one exemption from that ban. It must never depend on the helm crate (dev-dependencies excepted, for tests
+# against a real helm); `scripts/check-crate-layering.py` keeps the GUI crates from reaching the helm through it.
+[dependencies]
+farhelm-proto.workspace = true
+futures-util = { workspace = true, features = ["sink", "std"] }
+percent-encoding.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
+farhelm-helm.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
