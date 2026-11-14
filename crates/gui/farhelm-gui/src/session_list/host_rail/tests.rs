@@ -25,7 +25,7 @@ use gpui::{
 use gpui_component::Root;
 use serde_json::{Value, json};
 
-use super::{Choice, LOCAL_NAME, empty_host, identity, tint};
+use super::{Choice, LOCAL_NAME, empty_host, identity, refusal_words, tint};
 use crate::host_text::HostText;
 use crate::host_text::tests::SPOOFING_CORPUS;
 use crate::main_view::MainView;
@@ -475,6 +475,31 @@ fn a_refused_query_keeps_the_previous_choice_and_shows_the_helms_words(cx: &mut 
 
     test_support::click(cx, "host-rail-all");
     assert!(node(&frame(cx), "host-filter-refusal").is_none());
+}
+
+/// The rail holds its own copy of the app's refusal wording (its query is a PUT the shared helpers do not send), so the
+/// copy is pinned here against the rule it copies: a user who meets a refused host choice reads the same words as for
+/// any refused command. Specified: the helm's plain-text words are shown trimmed, other JSON as sent, and a refusal
+/// without words names the query and its status.
+#[test]
+fn a_refused_query_is_worded_as_any_refused_command() {
+    let shown = "PUT /ui/session-query";
+    assert_eq!(
+        refusal_words(400, Some(serde_json::json!("  unknown host  ")), shown),
+        HostText::from_host("unknown host")
+    );
+    assert_eq!(
+        refusal_words(400, Some(serde_json::json!({"error": "no"})), shown),
+        HostText::from_host(r#"{"error":"no"}"#)
+    );
+    assert_eq!(
+        refusal_words(500, None, shown),
+        HostText::from_host("PUT /ui/session-query: 500")
+    );
+    assert_eq!(
+        refusal_words(500, Some(serde_json::json!("")), shown),
+        HostText::from_host("PUT /ui/session-query: 500")
+    );
 }
 
 /// Replies come in the order queries were sent, and the helm serves the last query it accepted; a refusal of a query

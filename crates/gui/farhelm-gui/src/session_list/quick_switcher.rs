@@ -51,13 +51,12 @@
 #[cfg(test)]
 mod tests;
 
-use farhelm_helm_client::{ApiPath, CommandError, Method};
-use farhelm_proto::ui_channel::{Reply, SessionList, SessionRow};
+use farhelm_helm_client::ApiPath;
+use farhelm_proto::ui_channel::{SessionList, SessionRow};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, FontWeight, HighlightStyle,
-    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, ScrollHandle,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window,
-    div, px,
+    AnyElement, App, AppContext as _, Context, FontWeight, HighlightStyle, InteractiveElement as _,
+    IntoElement, ParentElement as _, Pixels, Render, ScrollHandle, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, px,
 };
 
 use super::menu::{self, AgentName};
@@ -70,9 +69,9 @@ use crate::components::{
 use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Dialog, DialogPlacement, LayerId};
-use crate::session::{self, UiSession};
+use crate::session;
 use crate::theme::{self, Palette, metrics};
-use crate::{assets, ticker};
+use crate::{assets, operations, ticker};
 
 // ---- Layout: the old `.quick-switcher-*` rules ------------------------------------------------------------------------
 
@@ -206,14 +205,17 @@ pub(crate) fn open(window: &mut Window, cx: &mut App) {
     switcher.update(cx, |switcher, _| switcher.layer = Some(layer));
     #[cfg(test)]
     cx.set_global(tests::Opened(switcher.downgrade()));
-    read_sessions(&current, switcher.downgrade(), cx);
+    read_sessions(switcher.downgrade(), cx);
 }
 
-/// Send the switcher's one read, `GET /api/sessions?sort=activity`, through the UI session `current`, and hand the
-/// answer to `switcher` if it is still open. The reply holds the switcher weakly and each opening makes a switcher of
-/// its own, so a reply after its switcher closed reaches nobody, and never a switcher opened since. A reset retires the
-/// UI session, which drops the wait, and closes every dialog, the switcher included.
-fn read_sessions(current: &Entity<UiSession>, switcher: WeakEntity<QuickSwitcher>, cx: &mut App) {
+/// Send the switcher's one read, `GET /api/sessions?sort=activity`, through the shared read helper
+/// ([`operations::read`]), and hand the answer to `switcher` if it is still open. It is fetched although sessions are
+/// pushed state, because the switcher searches every session in the helm's activity order up to the helm's listing
+/// cap, which the pushed listing (filtered and sorted as the sidebar asks) does not hold. Failures use the helper's
+/// wording. The reply holds the switcher weakly and
+/// each opening makes a switcher of its own, so a reply after its switcher closed reaches nobody, and never a switcher
+/// opened since. A reset retires the UI session, which drops the wait, and closes every dialog, the switcher included.
+fn read_sessions(switcher: WeakEntity<QuickSwitcher>, cx: &mut App) {
     let path =
         ApiPath::api(&["sessions"]).and_then(|path| path.with_query(&[("sort", "activity")]));
     let path = match path {
@@ -226,12 +228,15 @@ fn read_sessions(current: &Entity<UiSession>, switcher: WeakEntity<QuickSwitcher
             return;
         }
     };
-    current.update(cx, |current, cx| {
-        current.command(Method::Get, path, None, cx, move |_, result, cx| {
-            let read = Read::from_reply(result);
-            // A switcher that closed is gone, so the update fails and the reply is dropped.
-            let _ = switcher.update(cx, |switcher, cx| switcher.answered(read, cx));
-        });
+    // The helper sends nothing without a UI session, and then never answers; `open` returned already in that case, in
+    // this same update, so a switcher that exists always has its read on the way.
+    operations::read::<SessionList>(path, "GET /api/sessions", cx, move |answer, cx| {
+        let read = match answer {
+            Ok(list) => Read::Loaded(list),
+            Err(reason) => Read::Failed(reason),
+        };
+        // A switcher that closed is gone, so the update fails and the reply is dropped.
+        let _ = switcher.update(cx, |switcher, cx| switcher.answered(read, cx));
     });
 }
 
@@ -245,31 +250,6 @@ enum Read {
     Failed(HostText),
     /// The listing the switcher searches until it closes.
     Loaded(SessionList),
-}
-
-impl Read {
-    /// What the reply to the read says. A refusal's words are the helm's, or the status when it sent none
-    /// ([`super::refusal_words`]).
-    fn from_reply(result: Result<Reply, CommandError>) -> Read {
-        let reply = match result {
-            Ok(reply) => reply,
-            Err(error) => return Read::Failed(HostText::from_host(error.to_string())),
-        };
-        if !(200..300).contains(&reply.status) {
-            return Read::Failed(super::refusal_words(
-                reply.status,
-                reply.body,
-                "GET /api/sessions",
-            ));
-        }
-        match reply.body.map(serde_json::from_value::<SessionList>) {
-            Some(Ok(list)) => Read::Loaded(list),
-            Some(Err(error)) => Read::Failed(HostText::from_host(format!(
-                "the helm's listing could not be read: {error}"
-            ))),
-            None => Read::Failed(HostText::from_host("the helm sent no listing")),
-        }
-    }
 }
 
 /// The open switcher: its field, its read, which row is selected, and its layer.
