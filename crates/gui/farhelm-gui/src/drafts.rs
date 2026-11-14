@@ -74,8 +74,9 @@ impl<T: Clone + PartialEq> Draft<T> {
         self.touched
     }
 
-    /// Whether a save is in flight. The editor draws its field read-only and its Save busy meanwhile, so the value
-    /// on screen stays the one sent.
+    /// Whether a save is in flight. The editor draws its field read-only meanwhile, so the value on screen stays the
+    /// one sent, and ignores its Save. (The Rename editor leaves Save looking enabled, because a disabled button gives
+    /// up focus and the button component has no busy look yet.)
     pub fn is_saving(&self) -> bool {
         self.saving
     }

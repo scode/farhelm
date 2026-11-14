@@ -2,8 +2,9 @@
 //! over its veil, once more with a summary that names a host value, and the prompt anchored to a row's menu button),
 //! the keyboard focus ring, host-supplied text over its spoofing corpus, the notice banner, the terminal's styles and
 //! cursor shapes, an attached terminal's exit line and status line, the scrim a pending Delete puts over the open
-//! session's terminal, and the session list (a fleet of every status a row draws, an empty fleet, a row's open menu, a
-//! row's Delete question, and a pending and a refused Delete), in both appearances, compared pixel for pixel.
+//! session's terminal, the session list (a fleet of every status a row draws, an empty fleet, a row's open menu, a
+//! row's Delete question, and a pending and a refused Delete), and the Rename editor, in both appearances, compared
+//! pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
@@ -890,7 +891,8 @@ fn session_lists_then(state: &SceneState, window: &mut Window, cx: &mut App) -> 
     session_lists(state, window, cx)
 }
 
-/// The waiting row's actions menu, open below its button with Delete highlighted (reference `session-row-menu`).
+/// The waiting row's actions menu, open below its button with Rename, its first command, highlighted (reference
+/// `session-row-menu`).
 fn session_row_menu_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     session_list_then(
         state,
@@ -964,6 +966,36 @@ fn session_list_empty_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     session_list_scene(state, &[], cx);
 }
 
+/// The Rename editor over a session the fake helm lists, as the shortcut or a row's menu opens it (reference
+/// `rename-dialog`): the current title, the field holding it with focus, and Cancel and Save. The fake and the
+/// connection are kept for the scene's life, like the session list's.
+fn rename_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    helm.connect(vec![
+        listing(&["a"], &[session("a").title("bench tokenizer")]),
+        preferences(&["a"], None),
+    ]);
+    // The snapshot reaches the store from the connection's pump, on the executor, after this setup returns; the
+    // editor needs it to seed its draft, so it opens once the connection has a UI session, and only once.
+    let handle = window.window_handle();
+    let opened = std::cell::Cell::new(false);
+    let watch = cx.observe(&connection, move |connection, cx| {
+        if opened.get() || connection.read(cx).session().is_none() {
+            return;
+        }
+        opened.set(true);
+        let _ = handle.update(cx, |_, window, cx| {
+            let mark = Mark::take(cx);
+            crate::session_list::rename::open("a", &mark, window, cx);
+        });
+    });
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    keep.push(Box::new(watch));
+}
+
 /// The session list a scene's setup made, in a column of the sidebar's width and surface.
 fn session_lists(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
     let palette = theme::palette(cx);
@@ -976,7 +1008,7 @@ fn session_lists(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement
         .into_any_element()
 }
 
-static SCENES: [Scene; 21] = [
+static SCENES: [Scene; 22] = [
     Scene {
         name: "buttons",
         size: (560., 64.),
@@ -1102,6 +1134,12 @@ static SCENES: [Scene; 21] = [
         size: (420., 418.),
         draw: session_lists_then,
         setup: session_list_deleting_setup,
+    },
+    Scene {
+        name: "rename-dialog",
+        size: (560., 320.),
+        draw: empty,
+        setup: rename_dialog_setup,
     },
 ];
 
