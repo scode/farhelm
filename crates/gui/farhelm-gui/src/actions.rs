@@ -216,7 +216,12 @@ pub fn install(cx: &mut App) {
 /// A listed action's handler must take every key that reaches it, even when it does nothing (Delete with no session
 /// open). The guard judges a repeat by the first binding GPUI tries for the key; a handler that declined would send
 /// the press on to the next binding or to the key listeners, and its repeats would not follow it there.
-const ONCE_PER_PRESS: &[&dyn Action] = &[&DeleteSession, &RenameSession];
+const ONCE_PER_PRESS: &[&dyn Action] = &[
+    // One entry per line, so that a new shortcut only adds a line (the append-only extension point in
+    // `docs/gpui/foundation-ownership.md`); this comment is also what keeps rustfmt from joining the entries.
+    &DeleteSession,
+    &RenameSession,
+];
 
 /// Keeps the repeat guard's keystroke interceptor subscribed for the app's lifetime.
 struct RepeatGuard {
