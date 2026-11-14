@@ -7,7 +7,8 @@ The literal variation-base exceptions, formatting ranges and Hangul attachment p
 `auxiliary/GraphemeBreakProperty.txt` and `DerivedCoreProperties.txt`, as bundled by Ghostty's pinned uucode dependency
 `ea62149739404a73c202b48a33bf6dd2af4bd9b0`. Copyright © 1991–2026 Unicode, Inc. The
 [Unicode License V3](https://www.unicode.org/license.txt) copyright and permission notice is reproduced in
-[`vendor/UNICODE-LICENSE.txt`](vendor/UNICODE-LICENSE.txt). No Ghostty implementation is copied.
+[`vendor/UNICODE-LICENSE.txt`](vendor/UNICODE-LICENSE.txt), which every `farhelm` binary embeds and `farhelm licenses`
+prints. No Ghostty implementation is copied.
 
 ## Inter interface font
 
@@ -32,8 +33,8 @@ wheel accumulation and the Alt-click cursor move). Their complete notices are in
 
 Each ported function names its origin in a source comment. The code is MIT-licensed: copyright the xterm.js authors,
 SourceLair Private Company and Christopher Jeffrey. The complete notices are in
-`crates/farhelm-supervisor/grid-ported-code-LICENSES.txt`. They used to ship inside the web bundle that release builds
-of `farhelm` embedded; that bundle is gone, so no binary carries them at the moment.
+`crates/farhelm-supervisor/grid-ported-code-LICENSES.txt`, which every `farhelm` binary embeds and `farhelm licenses`
+prints. (They used to ship inside the web bundle that `farhelm` embedded; that bundle is gone.)
 
 ## Harness marks
 

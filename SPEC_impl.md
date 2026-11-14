@@ -566,6 +566,12 @@ research agent that reports back general approaches and no source details. Zed's
 `gpui_macros`, `gpui_platform`, `gpui_util`, `gpui_tokio` and `scheduler` are assumed GPL unless checked, and so are
 Zed's keymap and settings JSON. Code adapted from a permissive source carries a comment linking to it.
 
+Every binary that contains (links) code ported or derived from another project carries that project's license notice,
+however small the part. `farhelm` embeds the notices for the supervisor's xterm.js port and the vendored terminal
+emulator's Unicode-derived tables and prints them with `farhelm licenses`. When the desktop app first links the GUI
+crates' ports (`crates/gui/farhelm-grid-model` and `crates/gui/farhelm-input-mapping`, each with its `LICENSE-PORTED`),
+the same change embeds their notices and makes the app show them to the user.
+
 Enforced by cargo-deny: a license allowlist (no GPL, AGPL or LGPL) and a sources section that denies every git source,
 because cargo-deny cannot check a git repository's license. Copying cannot be caught by a tool, so the review gate asks.
 
