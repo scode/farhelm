@@ -1,0 +1,338 @@
+//! Host-supplied text: the one owner of how text a host wrote reaches the screen.
+//!
+//! SPEC.md (confirmed 2026-10-10): text a host supplied that the GUI shows outside a terminal is escaped so invisible
+//! and direction-changing characters are visible, including in accessible names, wherever it appears and however it
+//! reached the helm. SPEC_impl.md, "Host-supplied text", makes that a type: a [`HostText`] is made from a host's value
+//! where the GUI first reads it, and the only strings that ever come out of it are its escaped presentation (for display
+//! and accessible names, produced inside this module and drawn only by this module's elements) and its raw value (for
+//! editing and operations, through [`HostText::raw`]). There is no `Display`, `Deref` or `AsRef<str>`, and `Debug`
+//! prints the escaped form, so a host's bytes cannot slip into a label, a log line or a tooltip by accident.
+//!
+//! Escaping uses the one table and notation shared with the rest of Farhelm (`farhelm_proto::text::escaped`): every
+//! presentation-unsafe character becomes `<U+XXXX>`, and a literal `<U+` the host typed has its `<` escaped so it cannot
+//! pose as one.
+//!
+//! Direction isolation is structural: every piece of host text is laid out as its own text element, never concatenated
+//! into a string with the app's own words. GPUI shapes each text element on its own, so right-to-left letters in a
+//! session title reorder only within that title, the way HTML's `<bdi>` isolated them in the old app; the explicit
+//! direction controls that could reach further are escaped by the shared table. A sentence that mixes the app's words
+//! with host text is built with [`HostSentence`], which keeps every part its own element and exposes the whole to
+//! assistive technology as one label whose name is made of the same escaped parts.
+//!
+//! Terminal output is not host text in this sense: it is the remote program's own display (SPEC.md), drawn by the
+//! terminal.
+//!
+//! Extension points (docs/gpui/foundation-ownership.md): a view that shows a new host-supplied field wraps it with
+//! [`HostText::from_host`] where it reads the field and draws it with [`element`] or a [`HostSentence`]; a component
+//! that takes host text takes `&HostText` and draws it the same way. Identity labels the user compares (installation
+//! ids, which SPEC.md also wants with their spaces visible) are not built yet; they arrive with the first view that
+//! shows one, as a second presentation here.
+
+use std::fmt;
+use std::sync::Arc;
+
+use gpui::{
+    AnyElement, App, Div, ElementId, InteractiveElement as _, IntoElement, ParentElement,
+    RenderOnce, Role, SharedString, StatefulInteractiveElement as _, Styled, Window, div,
+};
+
+/// Text a host supplied, as the GUI holds it from the moment it reads it.
+///
+/// Holds the raw value and its escaped presentation, computed once. Equality and hashing are defined on the raw value:
+/// two different host values are different values even when they look alike on screen (a homoglyph, say), and a later
+/// presentation that drops information (truncation, say) must not make two values equal.
+#[derive(Clone)]
+pub struct HostText {
+    raw: Arc<str>,
+    presentation: SharedString,
+}
+
+impl HostText {
+    /// Take a host-supplied value. Call this where the GUI first reads a host-authored field (a session title, a host
+    /// name, a model name, an error message relayed from a supervisor), not later at drawing time.
+    pub fn from_host(raw: impl Into<Arc<str>>) -> Self {
+        let raw = raw.into();
+        let presentation = SharedString::from(farhelm_proto::text::escaped(&raw));
+        HostText { raw, presentation }
+    }
+
+    /// The value exactly as the host wrote it, for editing (a rename draft starts from it) and for operations (it goes
+    /// back to the helm byte for byte). Never for display: an escaped presentation never becomes a saved value, and a
+    /// raw value never becomes a label.
+    pub fn raw(&self) -> &str {
+        &self.raw
+    }
+
+    /// The escaped presentation, for this module's elements only.
+    fn presentation(&self) -> SharedString {
+        self.presentation.clone()
+    }
+}
+
+impl PartialEq for HostText {
+    fn eq(&self, other: &Self) -> bool {
+        self.raw == other.raw
+    }
+}
+
+impl Eq for HostText {}
+
+impl std::hash::Hash for HostText {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.raw.hash(state);
+    }
+}
+
+/// Prints the escaped presentation, so a host value in a log or test message is as visible as on screen.
+impl fmt::Debug for HostText {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("HostText")
+            .field(&self.presentation.as_ref())
+            .finish()
+    }
+}
+
+/// Draw `text` on its own: its escaped presentation in a text element of its own, so its direction stays inside it.
+/// It inherits the surrounding text style (font, size, color), as any label does.
+pub fn element(text: &HostText) -> Div {
+    div().child(text.presentation())
+}
+
+/// One part of a [`HostSentence`].
+enum Part {
+    /// The app's own words.
+    App(SharedString),
+    /// A host's value.
+    Host(HostText),
+}
+
+/// A line that mixes the app's own words with host-supplied text ("Delete «api-refactor» on «build-box»?"), drawn as a
+/// row of parts in which every host part is its own text element, and exposed to assistive technology (and to the
+/// agent bridge's element list) as one label node under its id, named by [`HostSentence::accessible_name`].
+///
+/// The parts are never concatenated for display, which is what keeps a right-to-left host value from reordering the
+/// app's words around it. The parts themselves carry no id, so they are not nodes of their own: a screen reader reads
+/// the sentence once, by its name, rather than as a run of fragments.
+#[derive(IntoElement)]
+pub struct HostSentence {
+    id: ElementId,
+    parts: Vec<Part>,
+}
+
+impl HostSentence {
+    /// An empty sentence drawn under `id`.
+    pub fn new(id: impl Into<ElementId>) -> Self {
+        HostSentence {
+            id: id.into(),
+            parts: Vec::new(),
+        }
+    }
+
+    /// Append the app's own words.
+    pub fn text(mut self, words: impl Into<SharedString>) -> Self {
+        self.parts.push(Part::App(words.into()));
+        self
+    }
+
+    /// Append a host's value.
+    pub fn host(mut self, text: &HostText) -> Self {
+        self.parts.push(Part::Host(text.clone()));
+        self
+    }
+
+    /// The sentence as assistive technology reads it: the app's words as they are and each host value escaped, so an
+    /// accessible name shows a hidden character exactly as the screen does (SPEC.md: "including in accessible names").
+    pub fn accessible_name(&self) -> SharedString {
+        let mut name = String::new();
+        for part in &self.parts {
+            match part {
+                Part::App(words) => name.push_str(words),
+                Part::Host(text) => name.push_str(&text.presentation()),
+            }
+        }
+        name.into()
+    }
+}
+
+impl RenderOnce for HostSentence {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        let name = self.accessible_name();
+        // GPUI puts an element in the accessibility tree (and the bridge's record) only when it declares a role; a
+        // div's label alone is dropped. `Label` is the role GPUI gives its own id-bearing text.
+        div()
+            .id(self.id)
+            .role(Role::Label)
+            .aria_label(name)
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .children(self.parts.into_iter().map(|part| -> AnyElement {
+                match part {
+                    Part::App(words) => div().child(words).into_any_element(),
+                    Part::Host(text) => element(&text).into_any_element(),
+                }
+            }))
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+
+    /// Spoofing strings a host could put in a session title or host name, each paired with what the GUI must show.
+    /// Kept beside the type so every view that renders host text can push the same corpus through itself.
+    pub(crate) const SPOOFING_CORPUS: &[(&str, &str)] = &[
+        // A right-to-left override that would reverse the text after it.
+        ("invoice\u{202E}fdp.exe", "invoice<U+202E>fdp.exe"),
+        // An isolate and a mark that would reorder the surrounding sentence.
+        ("\u{2067}admin\u{2069}", "<U+2067>admin<U+2069>"),
+        ("a\u{200F}b", "a<U+200F>b"),
+        // Zero-width characters that make two names look identical.
+        ("pay\u{200B}pal", "pay<U+200B>pal"),
+        ("bu\u{00AD}ild", "bu<U+00AD>ild"),
+        ("x\u{FEFF}y", "x<U+FEFF>y"),
+        // A newline that would forge a second line, and a terminal escape.
+        ("one\ntwo", "one<U+000A>two"),
+        ("\u{1b}[31mred", "<U+001B>[31mred"),
+        // A format character outside the classic invisible set (a musical symbol format control).
+        ("beat\u{1D173}", "beat<U+1D173>"),
+        // Literal escape notation that would pose as an escape the app made.
+        ("<U+202E>", "<U+003C>U+202E>"),
+        // Ordinary text a host may legitimately write is kept as it is.
+        ("api-refactor", "api-refactor"),
+        (
+            "caf\u{e9} \u{65e5}\u{672c} \u{2764}\u{FE0F}",
+            "caf\u{e9} \u{65e5}\u{672c} \u{2764}\u{FE0F}",
+        ),
+        ("  spaced  out  ", "  spaced  out  "),
+        (
+            "\u{5e9}\u{5dc}\u{5d5}\u{5dd}",
+            "\u{5e9}\u{5dc}\u{5d5}\u{5dd}",
+        ),
+    ];
+
+    /// Why this matters: SPEC.md requires every host value the GUI shows outside a terminal to have its hidden and
+    /// direction-changing characters visible, and the old app's bugs here were values reaching a label without going
+    /// through the escape. The presentation is the only displayable form a `HostText` has, so it carries the whole
+    /// guarantee.
+    ///
+    /// Specification: for every string in the spoofing corpus, the presentation is exactly the expected escaped
+    /// text, the raw value is the host's bytes unchanged, and `Debug` shows the escaped form, never the raw one.
+    #[test]
+    fn every_spoofing_string_is_shown_escaped_and_kept_raw_for_editing() {
+        for (raw, shown) in SPOOFING_CORPUS {
+            let text = HostText::from_host(*raw);
+            assert_eq!(
+                text.presentation().as_ref(),
+                *shown,
+                "presentation of {raw:?}"
+            );
+            assert_eq!(
+                text.raw(),
+                *raw,
+                "raw value of {shown:?} must keep the host's bytes"
+            );
+            assert_eq!(format!("{text:?}"), format!("HostText({shown:?})"));
+        }
+    }
+
+    /// Why this matters: an accessible name is a display surface too (SPEC.md: "including in accessible names"), and a
+    /// sentence that named its host parts raw would hand a screen reader the override the screen hides.
+    ///
+    /// Specification: a sentence's accessible name is its parts in order, the app's words as written and each host
+    /// value in its escaped presentation; it never contains a presentation-unsafe character.
+    #[test]
+    fn a_sentence_is_named_with_its_host_parts_escaped() {
+        let title = HostText::from_host("invoice\u{202E}fdp.exe");
+        let host = HostText::from_host("build\u{200B}box");
+        let sentence = HostSentence::new("delete-question")
+            .text("Delete ")
+            .host(&title)
+            .text(" on ")
+            .host(&host)
+            .text("?");
+        let name = sentence.accessible_name();
+        assert_eq!(
+            name.as_ref(),
+            "Delete invoice<U+202E>fdp.exe on build<U+200B>box?"
+        );
+        assert!(
+            !name
+                .chars()
+                .any(farhelm_proto::text::is_presentation_unsafe)
+        );
+    }
+
+    /// Draws one delete question as a view would, so the test below can read what the drawn frame recorded.
+    struct SentenceView;
+
+    impl gpui::Render for SentenceView {
+        fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+            div().child(
+                HostSentence::new("delete-question")
+                    .text("Delete ")
+                    .host(&HostText::from_host("invoice\u{202E}fdp.exe"))
+                    .text("?"),
+            )
+        }
+    }
+
+    /// Why this matters: GPUI keeps an element out of the accessibility tree unless it declares a role, and drops its
+    /// label with it, so a sentence could compute the right name and still reach a screen reader with none (the first
+    /// draft of this type did exactly that). The agent bridge reads the same per-frame record, so the sentence is also
+    /// what an automated check of a view finds.
+    ///
+    /// Specification: with GPUI's driver record on, a drawn sentence is a node under its own id with the `Label` role
+    /// and its escaped accessible name as the label, and none of its parts is a node with a role of its own.
+    #[gpui::test]
+    fn a_drawn_sentence_is_one_labelled_node_with_its_escaped_name(cx: &mut gpui::TestAppContext) {
+        crate::test_support::install(cx);
+        let (_, cx) = cx.add_window_view(|_, _| SentenceView);
+        cx.update(|window, _| window.set_driver_enabled(true));
+        cx.run_until_parked();
+        let nodes = cx.update(|window, _| window.driver_nodes().to_vec());
+        let Some(sentence) = nodes
+            .iter()
+            .position(|node| node.element_id.as_deref() == Some("delete-question"))
+        else {
+            let ids: Vec<_> = nodes.iter().map(|node| &node.element_id).collect();
+            panic!("the sentence was not recorded; recorded ids: {ids:?}");
+        };
+        assert_eq!(nodes[sentence].role, Some(Role::Label));
+        assert_eq!(
+            nodes[sentence].label.as_deref(),
+            Some("Delete invoice<U+202E>fdp.exe?")
+        );
+        // Every node recorded below the sentence, at any depth: the part wrappers and their text.
+        let inside = |mut index: usize| loop {
+            match nodes[index].parent {
+                Some(parent) if parent == sentence => return true,
+                Some(parent) => index = parent,
+                None => return false,
+            }
+        };
+        let parts: Vec<_> = (0..nodes.len()).filter(|&index| inside(index)).collect();
+        assert!(!parts.is_empty(), "the sentence's parts were not recorded");
+        assert!(
+            parts.iter().all(|&index| nodes[index].role.is_none()),
+            "a part of the sentence has a role of its own"
+        );
+    }
+
+    /// Why this matters: equality decides whether a pushed change touched a value (a draft, a selection), and two host
+    /// values that differ only by a hidden character are exactly the ones that must not be treated as the same.
+    ///
+    /// Specification: a value and its look-alike with a zero-width space are different values, and a value equals
+    /// itself. Equality is on the raw bytes by definition (the `PartialEq` impl), and this test cannot tell that apart
+    /// from comparing presentations: escaping is injective (every `<U+` in a presentation is an escape, so it decodes
+    /// back to one raw value), so no pair of inputs differs in one and not the other. It pins the outcome, not the
+    /// mechanism.
+    #[test]
+    fn look_alike_values_are_different_values() {
+        assert_ne!(
+            HostText::from_host("paypal"),
+            HostText::from_host("pay\u{200B}pal")
+        );
+        assert_eq!(HostText::from_host("paypal"), HostText::from_host("paypal"));
+    }
+}

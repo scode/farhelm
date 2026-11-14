@@ -23,11 +23,6 @@ static LEADING_BLANKS: LazyLock<Regex> = LazyLock::new(|| {
             .replace("%s", JS_SPACE),
     )
 });
-static UNSAFE: LazyLock<Regex> = LazyLock::new(|| {
-    constant_regex(
-        r"[\p{Cc}\p{Cf}\u{034F}\u{115F}\u{1160}\u{17B4}-\u{17B5}\u{2028}\u{2029}\u{3164}\u{FFA0}\u{E0000}-\u{E007F}]",
-    )
-});
 
 /// Fully rendered text for one web target. The actual host is never shortened
 /// or replaced with userinfo. A claimed address appears only with the mismatch
@@ -123,18 +118,13 @@ fn mismatch(text: &str, uri: &str) -> bool {
 
 /// Reveal invisible controls and escape literal notation so output cannot pose
 /// as our escape syntax. Variation selectors remain readable, as in the pin.
+///
+/// This is the app's one escape (`farhelm_proto::text::escaped`), the table the
+/// command line shares. The pinned JavaScript escaped Unicode's whole format
+/// category through a regular expression; the shared table lists that category
+/// in full, so the oracle below still pins the same output.
 fn visible(text: &str) -> String {
-    let mut result = String::new();
-    for (index, ch) in text.char_indices() {
-        if (ch == '<' && text[index..].starts_with("<U+"))
-            || UNSAFE.is_match(ch.encode_utf8(&mut [0; 4]))
-        {
-            result.push_str(&format!("<U+{:04X}>", ch as u32));
-        } else {
-            result.push(ch);
-        }
-    }
-    result
+    farhelm_proto::text::escaped(text)
 }
 
 /// The pin budgets 300 UTF-16 units and names the omitted middle. A boundary
