@@ -172,15 +172,21 @@ impl RenderOnce for DialogFrame {
             .border_1()
             .border_color(theme::color(palette.border_dialog))
             .rounded(metrics::RADIUS_MD)
-            .shadow(vec![BoxShadow {
-                color: theme::color(palette.shadow_dialog),
-                offset: point(px(0.), px(10.)),
-                blur_radius: px(24.),
-                spread_radius: px(0.),
-                inset: false,
-            }])
+            .shadow(dialog_shadow(palette))
             .child(header)
             .child(body)
             .child(footer)
     }
+}
+
+/// `--shadow-dialog`: `0 10px 24px` in the token's color, under the dialog frame and under the one modal panel the old
+/// app drew without that frame (the quick switcher's card), so the two cannot drift apart.
+pub(crate) fn dialog_shadow(palette: &theme::Palette) -> Vec<BoxShadow> {
+    vec![BoxShadow {
+        color: theme::color(palette.shadow_dialog),
+        offset: point(px(0.), px(10.)),
+        blur_radius: px(24.),
+        spread_radius: px(0.),
+        inset: false,
+    }]
 }

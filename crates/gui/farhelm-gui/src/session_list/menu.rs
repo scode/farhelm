@@ -389,9 +389,9 @@ impl Render for RowMenu {
 fn header(key: &str, row: &SessionRow, title: &HostText, cx: &App) -> impl IntoElement {
     let palette = theme::palette(cx);
     let mut summary = HostSentence::new(SharedString::from(format!("session-menu-summary-{key}")));
-    summary = match row.info.agent_kind.display_name() {
-        Some(agent) => summary.text(agent),
-        None => summary.host(&HostText::from_host(program_name(&row.info.invocation))),
+    summary = match agent_name(row) {
+        AgentName::Known(agent) => summary.text(agent),
+        AgentName::Program(program) => summary.host(&program),
     };
     if let Some(word) = status::Badge::word(
         status::badge(
@@ -427,6 +427,23 @@ fn header(key: &str, row: &SessionRow, title: &HostText, cx: &App) -> impl IntoE
                 .line_clamp(4)
                 .child(summary),
         )
+}
+
+/// What a session runs, by the name the user knows it by: the one rule for the menu's header and the quick switcher's
+/// agent column, so the two never name the same session differently.
+pub(super) enum AgentName {
+    /// An agent Farhelm knows, by its display name (the app's own words).
+    Known(&'static str),
+    /// Anything else, by the program its command line runs ([`program_name`]), which the host supplied.
+    Program(HostText),
+}
+
+/// The name `row` runs under ([`AgentName`]).
+pub(super) fn agent_name(row: &SessionRow) -> AgentName {
+    match row.info.agent_kind.display_name() {
+        Some(agent) => AgentName::Known(agent),
+        None => AgentName::Program(HostText::from_host(program_name(&row.info.invocation))),
+    }
 }
 
 /// The program a command line runs, by its file name: its first word with any directory dropped (`/usr/bin/claude

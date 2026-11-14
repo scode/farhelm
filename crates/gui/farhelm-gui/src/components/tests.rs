@@ -2,9 +2,10 @@
 //!
 //! These cover what a component promises beyond its looks (the goldens pin those): activation, the disabled state,
 //! hover help reaching the layer manager and leaving with its control, the dialog frame keeping its answers reachable,
-//! and the text input's events, with the line breaks only the field that keeps them keeps. Each test opens its window
-//! through the shared harness ([`crate::test_support::open`]), and each step ends with its invariant checks (the focus
-//! coordinator's and the layer manager's rules).
+//! the text input's events, with the line breaks only the field that keeps them keeps, the arrows a field hands to its
+//! owner, and the option row that never takes focus. Each test opens its window through the shared harness
+//! ([`crate::test_support::open`]), and each step ends with its invariant checks (the focus coordinator's and the layer
+//! manager's rules).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -18,7 +19,8 @@ use gpui::{
 use gpui::prelude::FluentBuilder as _;
 
 use super::{
-    Button, DialogFrame, HoverHelp, Role, TextInput, TextInputEvent, TextInputState, Tier,
+    Button, DialogFrame, HoverHelp, OptionRow, Role, TextInput, TextInputEvent, TextInputState,
+    Tier, Vertical,
 };
 use crate::layers;
 use crate::test_support::{advance, bounds, center, check, click, keys, open, redraw};
@@ -793,5 +795,138 @@ fn typing_enter_in_the_field_that_keeps_line_breaks_submits_and_inserts_nothing(
         take(cx, &fields[1]).0,
         "x",
         "Tab moved focus on to the next field"
+    );
+}
+
+// ---- Fields that drive a list: the arrows handed over, and the rows that never take focus --------------------------
+
+/// Why this matters: GPUI Kit's single-line field takes Up and Down for caret moves it then does nothing with, so
+/// without the hand-over a search field could never move a selection in the list beside it (the quick switcher's
+/// arrows). Taking the keys must not cost the field its text or its focus.
+///
+/// Specification: in a field drawn with `on_vertical`, after typing `ab`, Down, Up and Down reach the handler once
+/// each, in order, and the field still holds `ab` and focus.
+#[gpui::test]
+fn up_and_down_reach_the_fields_owner_and_leave_the_field_alone(cx: &mut TestAppContext) {
+    let arrows = Rc::new(RefCell::new(Vec::new()));
+    let made: Rc<RefCell<Option<TextInputState>>> = Rc::new(RefCell::new(None));
+    let (recorded, kept) = (arrows.clone(), made.clone());
+    let cx = open(cx, move |window, cx| {
+        let state = kept
+            .borrow_mut()
+            .get_or_insert_with(|| TextInputState::new(window, cx))
+            .clone();
+        let recorded = recorded.clone();
+        div()
+            .debug_selector(|| "field-box".into())
+            .w(px(200.))
+            .child(
+                TextInput::new(
+                    "field",
+                    &state,
+                    "Search",
+                    HoverHelp::tooltip("A test field"),
+                )
+                .on_vertical(move |direction, _, _| recorded.borrow_mut().push(direction)),
+            )
+            .into_any_element()
+    });
+    click(cx, "field-box");
+    keys(cx, "a b down up down");
+    assert_eq!(
+        *arrows.borrow(),
+        [Vertical::Down, Vertical::Up, Vertical::Down]
+    );
+    let state = made.borrow().clone().expect("the field was drawn");
+    assert_eq!(cx.update(|_, cx| state.text(cx)).as_ref(), "ab");
+    assert!(
+        cx.update(|window, cx| state.focus_handle(cx).is_focused(window)),
+        "the field kept focus"
+    );
+}
+
+/// Why this matters: the quick switcher keeps focus in its search field while the user picks a row, as the old one
+/// did with `tabindex="-1"` rows, so typing never stops going to the field. A row that took focus on a click, or that
+/// Tab could reach, would pull the keyboard out of the field.
+///
+/// Specification: with a focused field, an option row and a button, a click on the row runs its handler once and
+/// leaves focus in the field; Tab from the field goes to the button, past the row; the row reports its role and label.
+#[gpui::test]
+fn an_option_row_activates_on_a_click_and_never_takes_focus(cx: &mut TestAppContext) {
+    let clicks = Rc::new(Cell::new(0));
+    let made: Rc<RefCell<Option<TextInputState>>> = Rc::new(RefCell::new(None));
+    let button = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let (counted, kept, focus) = (clicks.clone(), made.clone(), button.clone());
+    let cx = open(cx, move |window, cx| {
+        let state = kept
+            .borrow_mut()
+            .get_or_insert_with(|| TextInputState::new(window, cx))
+            .clone();
+        let counted = counted.clone();
+        div()
+            .flex()
+            .flex_col()
+            .w(px(240.))
+            .child(
+                div()
+                    .debug_selector(|| "field-box".into())
+                    .child(TextInput::new(
+                        "field",
+                        &state,
+                        "Search",
+                        HoverHelp::tooltip("A test field"),
+                    )),
+            )
+            .child(
+                OptionRow::new(
+                    "option",
+                    "First result",
+                    HoverHelp::tooltip("Open it"),
+                    Role::ListBoxOption,
+                )
+                .selected(true)
+                .child(div().child("First result"))
+                .on_click(move |_, _, _| counted.set(counted.get() + 1)),
+            )
+            .child(
+                Button::new(
+                    "after",
+                    "After",
+                    HoverHelp::tooltip("A test control"),
+                    Role::Button,
+                )
+                .focus(&focus),
+            )
+            .into_any_element()
+    });
+    let state = made.borrow().clone().expect("the field was drawn");
+    let field_focused = |cx: &mut VisualTestContext| {
+        cx.update(|window, cx| state.focus_handle(cx).is_focused(window))
+    };
+    click(cx, "field-box");
+    assert!(field_focused(cx), "the premise: the field has focus");
+
+    click(cx, "option");
+    assert_eq!(clicks.get(), 1, "the click activated the row");
+    assert!(field_focused(cx), "and focus stayed in the field");
+
+    keys(cx, "tab");
+    assert!(
+        cx.update(|window, _| button.is_focused(window)),
+        "Tab went past the row to the button"
+    );
+
+    cx.update(|window, _| window.set_driver_enabled(true));
+    redraw(cx);
+    let row = cx.update(|window, _| {
+        window
+            .driver_nodes()
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some("option"))
+            .map(|node| (node.role, node.label.clone()))
+    });
+    assert_eq!(
+        row,
+        Some((Some(Role::ListBoxOption), Some("First result".into())))
     );
 }
