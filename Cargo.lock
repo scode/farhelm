@@ -1953,6 +1953,8 @@ name = "farhelm-desktop"
 version = "0.0.0-unreleased"
 dependencies = [
  "anyhow",
+ "core-foundation 0.10.1",
+ "core-foundation-sys",
  "dirs 6.0.0",
  "farhelm-gui",
  "farhelm-helm",

@@ -53,6 +53,7 @@ pub struct Question<T> {
     cancel: Answer,
     confirm_enabled: bool,
     starts_on_cancel: bool,
+    keeps_focus_on_empty_click: bool,
     frozen: T,
 }
 
@@ -71,6 +72,7 @@ impl<T: Clone + 'static> Question<T> {
             },
             confirm_enabled: true,
             starts_on_cancel: false,
+            keeps_focus_on_empty_click: false,
             frozen,
         }
     }
@@ -99,6 +101,16 @@ impl<T: Clone + 'static> Question<T> {
     /// started earlier finished, rather than in direct answer to what they just did.
     pub fn starts_on_cancel(mut self) -> Self {
         self.starts_on_cancel = true;
+        self
+    }
+
+    /// A click on the question's empty space (or its text, decision D-15) keeps focus on the answer in use, instead of
+    /// moving it to the question itself. SPEC.md, "Opening and closing", gives this rule to the session row and header
+    /// Stop, Restart, Replace and Delete questions, which must call this when they are ported: without it a click on
+    /// their empty space focuses the question, and a following Enter presses Confirm. Rename, tab close, the interrupted
+    /// card's Replace question and the host update confirmation do not have the rule yet; those leave it off.
+    pub fn keeps_focus_on_empty_click(mut self) -> Self {
+        self.keeps_focus_on_empty_click = true;
         self
     }
 
@@ -253,6 +265,7 @@ fn ask_inner<T: Clone + 'static>(
         confirm_focus.clone()
     };
     let enabled = question.confirm_enabled;
+    let keeps_focus_on_empty_click = question.keeps_focus_on_empty_click;
     let prompt = cx.new(|_| Prompt {
         question,
         on_confirm: Some(Box::new(on_confirm)),
@@ -274,6 +287,7 @@ fn ask_inner<T: Clone + 'static>(
             start,
             subject,
             main_action,
+            keeps_focus_on_empty_click,
         },
         mark,
         window,

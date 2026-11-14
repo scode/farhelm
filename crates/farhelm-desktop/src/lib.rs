@@ -40,6 +40,7 @@ mod agent;
 pub mod bundle;
 mod local_host;
 pub mod state;
+mod tab_reach;
 pub mod update_readout;
 pub mod updater;
 pub mod window_state;
@@ -124,6 +125,7 @@ pub fn run() -> anyhow::Result<()> {
                 "farhelm-desktop: the window could not open: {error}"
             ))
         }),
+        tab_reach: Box::new(tab_reach::current),
     });
     // Linux only: GPUI's event loop has returned. Dropping the bootstrap waits for the helm the quit asked to stop.
     tracing::info!("the app quit; waiting for the embedded helm to stop");

@@ -28,12 +28,18 @@
 //!   own focus-on-press (GPUI focuses any tracked element on mouse-down, a move no lint could see) and applies the
 //!   coordinator's rule instead: on Linux a click focuses the control it lands on; on macOS it does not, as in WebKit
 //!   there (maintainer decision D-2). `track_focus` itself is banned outside this module.
+//! - **Which controls Tab reaches** ([`TabReach`], decision D-2). On macOS, Tab follows the system's Keyboard navigation
+//!   setting exactly as the old app did: with it off, Tab reaches text fields and pop-ups only and skips buttons, and
+//!   Option-Tab reaches every control; with it on, Tab reaches every control. Linux has no such setting, and Tab reaches
+//!   every control there. The desktop binary supplies how to read the setting ([`follow_tab_reach`]), and the
+//!   coordinator reads it on every Tab and Shift+Tab press, as WebKit follows the setting's change at once: the user can
+//!   flip it from the keyboard (Control-F7 by default) without leaving the app.
 //!
-//! NOTE: A few SPEC rules wait for what they act on. On macOS, Tab reaches buttons only with the system's Keyboard
-//! navigation setting; until that setting is read, Tab stops at buttons on every platform. Agent approval cards, which
-//! keep focus while a dialog is open, do not exist yet, so [`invariant_violation`] knows only the topmost dialog.
+//! NOTE: Agent approval cards, which keep focus while a dialog is open, do not exist yet, so [`invariant_violation`]
+//! knows only the topmost dialog.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use gpui::{
     App, AppContext as _, Bounds, Context, Div, ElementId, Entity, FocusHandle, Global,
@@ -41,33 +47,74 @@ use gpui::{
     Pixels, Styled, Subscription, WeakEntity, WeakFocusHandle, Window, WindowId, canvas,
 };
 
-use crate::actions::{self, Dismiss, FocusNext, FocusPrevious};
+use crate::actions::{
+    self, Dismiss, FocusNext, FocusNextControl, FocusPrevious, FocusPreviousControl,
+};
 use crate::layers;
 
 /// Whether a click focuses the control it lands on, on this platform. WebKit on macOS does not focus a button on click,
 /// and the old app behaved accordingly there; on Linux a click focuses it (maintainer decision D-2).
 pub const CLICK_FOCUSES_CONTROLS: bool = !cfg!(target_os = "macos");
 
+/// Which controls a plain Tab reaches (decision D-2). Option-Tab always reaches every control.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabReach {
+    /// Every focusable control, buttons included: Linux, and macOS with the system's Keyboard navigation setting on.
+    EveryControl,
+    /// Text fields and pop-ups only, skipping buttons: macOS with Keyboard navigation off, the system default there.
+    /// SPEC.md: "keyboard-only users reach buttons with Keyboard navigation or Option-Tab".
+    TextFieldsAndPopups,
+}
+
+/// Where the coordinator asks which controls Tab reaches. The desktop binary supplies it, because reading a platform
+/// setting needs platform code the GUI crates do not carry.
+pub type TabReachSource = Rc<dyn Fn() -> TabReach>;
+
 /// The platform rules the coordinator applies, kept as app state so a test can apply another platform's rule: the Mac
-/// rule would otherwise be untestable on Linux, where the suite runs most.
+/// rules would otherwise be untestable on Linux, where the suite runs most.
 struct Rules {
     click_focuses_controls: bool,
+    /// Asked on every Tab and Shift+Tab press; without one, Tab reaches every control.
+    tab_reach_source: Option<TabReachSource>,
 }
 
 impl Global for Rules {}
 
 /// Apply the click rule of the platform that does `focuses` (a test seam: the suite runs on Linux, and the macOS rule
-/// needs a test too).
+/// needs a test too). Requires [`install`]: a test that forgot it fails here rather than silently keeping the default.
 #[cfg(test)]
 pub(crate) fn set_click_focuses_controls(focuses: bool, cx: &mut App) {
-    cx.set_global(Rules {
-        click_focuses_controls: focuses,
-    });
+    cx.global_mut::<Rules>().click_focuses_controls = focuses;
 }
 
 fn click_focuses_controls(cx: &App) -> bool {
     cx.try_global::<Rules>()
         .map_or(CLICK_FOCUSES_CONTROLS, |rules| rules.click_focuses_controls)
+}
+
+/// Follow `source` for which controls Tab reaches: it is asked on every Tab and Shift+Tab press, so a change to the
+/// setting applies to the next press. The bootstrap calls this with what the host supplies, after [`install`]; called
+/// before it, it installs the default rules first rather than dropping the source.
+pub fn follow_tab_reach(source: TabReachSource, cx: &mut App) {
+    if !cx.has_global::<Rules>() {
+        cx.set_global(default_rules());
+    }
+    cx.global_mut::<Rules>().tab_reach_source = Some(source);
+}
+
+/// Which controls a plain Tab reaches right now: the source's answer, or every control without one.
+fn tab_reach(cx: &App) -> TabReach {
+    cx.try_global::<Rules>()
+        .and_then(|rules| rules.tab_reach_source.as_ref())
+        .map_or(TabReach::EveryControl, |source| source())
+}
+
+/// This platform's click rule, and Tab reaching every control until a host supplies the setting to follow.
+fn default_rules() -> Rules {
+    Rules {
+        click_focuses_controls: CLICK_FOCUSES_CONTROLS,
+        tab_reach_source: None,
+    }
 }
 
 // ---- "The user moved on" ---------------------------------------------------------------------------------------------
@@ -151,16 +198,33 @@ pub struct WindowFocus {
     /// element up, and with nothing focused it starts at the window's root element, above Farhelm's key context, so
     /// without this Tab and Escape would reach GPUI Kit's bindings instead of Farhelm's.
     root: WeakFocusHandle,
-    /// Where each focusable control was last drawn, recorded as frames are prepared: what "the closest remaining
-    /// control" is measured against when the focused one disappears. Entries for controls no longer drawn stay until
-    /// pruned; only controls drawn in the current frame are ever chosen.
-    controls: Vec<(WeakFocusHandle, Bounds<Pixels>)>,
+    /// Where each focusable control was last drawn and what kind it is, recorded as frames are prepared: what "the
+    /// closest remaining control" is measured against when the focused one disappears, and how Tab knows a button.
+    /// Entries for controls no longer drawn stay until pruned; only controls drawn in the current frame are ever chosen.
+    controls: Vec<Recorded>,
     /// When to next drop the entries of released controls, so the list stays near the number drawn.
     prune_at: usize,
     /// The focused control and where it was when last drawn, so the closest one to it can take over if it disappears.
     /// Kept with its handle: the position is used only when that control is the one that vanished, never as a stand-in
     /// for some other element that held focus without recording a position.
     last_focused: Option<(WeakFocusHandle, Bounds<Pixels>)>,
+}
+
+/// One recorded control: its handle, where it was last drawn, and its kind.
+struct Recorded {
+    control: WeakFocusHandle,
+    bounds: Bounds<Pixels>,
+    kind: ControlKind,
+}
+
+/// What kind of tab stop a control is, for [`TabReach`]: a plain Tab skips buttons where only text fields and pop-ups
+/// are reached.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ControlKind {
+    /// A text field or pop-up: always in Tab's order.
+    Field,
+    /// A button or menu item: in Tab's order only where Tab reaches every control.
+    Button,
 }
 
 /// Where each window's focus state lives, by window. Weak, so a closed window's state goes with its root view.
@@ -174,9 +238,8 @@ impl Global for Windows {}
 pub fn install(cx: &mut App) {
     cx.set_global(MovedOn::default());
     cx.set_global(Windows::default());
-    cx.set_global(Rules {
-        click_focuses_controls: CLICK_FOCUSES_CONTROLS,
-    });
+    // Until the host says otherwise, Tab reaches every control: the rule wherever there is no setting to follow.
+    cx.set_global(default_rules());
     let watch = cx.intercept_keystrokes(|event, window, cx| note_key(event, window, cx));
     cx.set_global(KeyWatch {
         _interceptor: watch,
@@ -274,8 +337,16 @@ pub fn root(element: Div, attachment: &Attachment) -> Div {
                 recover(window, cx);
             }
         })
-        .on_action(|_: &FocusNext, window, cx| step(true, window, cx))
-        .on_action(|_: &FocusPrevious, window, cx| step(false, window, cx))
+        .on_action(|_: &FocusNext, window, cx| {
+            let every = tab_reach(cx) == TabReach::EveryControl;
+            step(true, every, window, cx);
+        })
+        .on_action(|_: &FocusPrevious, window, cx| {
+            let every = tab_reach(cx) == TabReach::EveryControl;
+            step(false, every, window, cx);
+        })
+        .on_action(|_: &FocusNextControl, window, cx| step(true, true, window, cx))
+        .on_action(|_: &FocusPreviousControl, window, cx| step(false, true, window, cx))
         .on_action(|_: &Dismiss, window, cx| {
             if !layers::dismiss_top(window, cx) {
                 cx.propagate();
@@ -302,9 +373,13 @@ pub fn root(element: Div, attachment: &Attachment) -> Div {
 /// What a press with the pointer does to focus on a tracked element.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OnPress {
-    /// A control (a button, a menu item): it takes focus where the platform's click rule says so ([`pressed`]).
+    /// A control (a button, a menu item): it takes focus where the platform's click rule says so ([`pressed`]). It also
+    /// counts as a button for [`TabReach`]: where Tab reaches text fields and pop-ups only, a plain Tab skips it. A
+    /// pop-up control (a select or combo box) must therefore not use this kind, or it drops out of Tab's order there.
     Control,
-    /// An element that takes focus whenever it is pressed, on every platform: a terminal, which a click types into.
+    /// An element that takes focus whenever it is pressed, on every platform: a terminal, which a click types into, a
+    /// pop-up control, or a dialog whose empty space takes focus (the dialogs SPEC.md does not list as keeping it on the
+    /// control in use). A tab stop of this kind counts as a text field or pop-up for [`TabReach`]: Tab always reaches it.
     Focus,
     /// A press leaves focus where it is: a layer's container, whose empty space keeps focus on the control in use.
     Keep,
@@ -332,7 +407,11 @@ pub fn track<E: InteractiveElement + ParentElement>(
                 OnPress::Keep => {}
             }
         });
-    record_position(element, handle)
+    let kind = match on_press {
+        OnPress::Control => ControlKind::Button,
+        OnPress::Focus | OnPress::Keep => ControlKind::Field,
+    };
+    record_as(element, handle, kind)
 }
 
 /// Record where the tab stop `handle` focuses is drawn, for "the closest remaining control", without tracking its focus.
@@ -340,15 +419,21 @@ pub fn track<E: InteractiveElement + ParentElement>(
 /// For a control whose focus something else tracks: GPUI Kit's text input tracks its own focus handle (its focus moves
 /// on a click are the accepted exception in SPEC_impl.md), so [`track`] cannot wrap it, yet a text field is as much a
 /// candidate for taking focus over as a button. `element` must draw where the control is (its wrapper). A handle that
-/// is not a tab stop records nothing.
+/// is not a tab stop records nothing. The control counts as a text field for [`TabReach`]: it is in Tab's order on every
+/// platform.
 pub fn record_position<E: ParentElement>(element: E, handle: &FocusHandle) -> E {
+    record_as(element, handle, ControlKind::Field)
+}
+
+/// [`record_position`] for a control of `kind`.
+fn record_as<E: ParentElement>(element: E, handle: &FocusHandle, kind: ControlKind) -> E {
     if !handle.tab_stop {
         return element;
     }
     let control = handle.downgrade();
     element.child(
         canvas(
-            move |bounds, window, cx| record(&control, bounds, window, cx),
+            move |bounds, window, cx| record(&control, bounds, kind, window, cx),
             |_, _, _, _| {},
         )
         .absolute()
@@ -367,8 +452,14 @@ fn track_raw<E: InteractiveElement>(element: E, handle: &FocusHandle) -> E {
     element.track_focus(handle)
 }
 
-/// Record where `control` was drawn this frame, and whether it held focus there.
-fn record(control: &WeakFocusHandle, bounds: Bounds<Pixels>, window: &Window, cx: &mut App) {
+/// Record where `control` (of `kind`) was drawn this frame, and whether it held focus there.
+fn record(
+    control: &WeakFocusHandle,
+    bounds: Bounds<Pixels>,
+    kind: ControlKind,
+    window: &Window,
+    cx: &mut App,
+) {
     let Some(state) = state(window, cx) else {
         return;
     };
@@ -379,15 +470,26 @@ fn record(control: &WeakFocusHandle, bounds: Bounds<Pixels>, window: &Window, cx
         if focused {
             state.last_focused = Some((control.clone(), bounds));
         }
-        if let Some(entry) = state.controls.iter_mut().find(|(seen, _)| seen == control) {
-            entry.1 = bounds;
+        if let Some(entry) = state
+            .controls
+            .iter_mut()
+            .find(|entry| &entry.control == control)
+        {
+            entry.bounds = bounds;
+            entry.kind = kind;
             return;
         }
         if state.controls.len() >= state.prune_at {
-            state.controls.retain(|(seen, _)| seen.upgrade().is_some());
+            state
+                .controls
+                .retain(|entry| entry.control.upgrade().is_some());
             state.prune_at = (state.controls.len() * 2).max(64);
         }
-        state.controls.push((control.clone(), bounds));
+        state.controls.push(Recorded {
+            control: control.clone(),
+            bounds,
+            kind,
+        });
     });
 }
 
@@ -409,7 +511,7 @@ fn closest_control(container: &FocusHandle, window: &Window, cx: &App) -> Option
     state
         .controls
         .iter()
-        .filter_map(|(control, bounds)| Some((control.upgrade()?, bounds.center())))
+        .filter_map(|entry| Some((entry.control.upgrade()?, entry.bounds.center())))
         // `contains` reads the frame just drawn, so a control not drawn in it is never chosen.
         .filter(|(control, _)| control.tab_stop && container.contains(control, window))
         .min_by(|(_, a), (_, b)| distance_squared(*a, lost).total_cmp(&distance_squared(*b, lost)))
@@ -444,28 +546,57 @@ fn apply(target: Move, window: &mut Window, cx: &mut App) {
     }
 }
 
-/// Tab or Shift+Tab: the next or previous tab stop, staying inside the topmost layer when one is open (SPEC.md: every
-/// modal dialog keeps Tab within its controls, and inside a dialog or menu focus stays inside).
-fn step(forward: bool, window: &mut Window, cx: &mut App) {
-    let advance = if forward { Move::Next } else { Move::Previous };
-    let Some(trap) = layers::trap(window, cx) else {
-        apply(advance, window, cx);
-        return;
-    };
-    apply(advance, window, cx);
-    // GPUI's tab order is window-wide, so walk it until focus lands inside the trap. The walk ends at the first stop
-    // seen twice: a dialog with no tab stop of its own keeps its container focused instead of cycling forever.
-    let mut seen = Vec::new();
-    while !trap.contains_focused(window, cx) {
+/// Tab or Shift+Tab, and Option-Tab: the next or previous tab stop, staying inside the topmost layer when one is open
+/// (SPEC.md: every modal dialog keeps Tab within its controls, and inside a dialog or menu focus stays inside). With
+/// `every` false, buttons are skipped ([`TabReach::TextFieldsAndPopups`]); Option-Tab and [`TabReach::EveryControl`]
+/// pass `true`.
+///
+/// When no stop qualifies (a dialog of buttons only, with Tab reaching text fields only), focus stays where it was:
+/// moving it to the dialog itself would let a following Enter press the dialog's main action from a Cancel the user
+/// had chosen. Only focus that started outside the trap is taken to the trap's container.
+fn step(forward: bool, every: bool, window: &mut Window, cx: &mut App) {
+    let trap = layers::trap(window, cx);
+    let start = window.focused(cx);
+    let started_inside = trap
+        .as_ref()
+        .is_some_and(|trap| trap.contains_focused(window, cx));
+    // GPUI's tab order is window-wide and knows nothing of buttons, so walk it until focus lands on a stop that
+    // qualifies. The walk ends at the first stop seen twice, so it never cycles forever.
+    let mut seen = vec![start.clone()];
+    loop {
+        apply(
+            if forward { Move::Next } else { Move::Previous },
+            window,
+            cx,
+        );
         let focused = window.focused(cx);
-        if seen.contains(&focused) {
-            apply(Move::To(&trap), window, cx);
+        let inside = trap
+            .as_ref()
+            .is_none_or(|trap| trap.contains_focused(window, cx));
+        if inside && (every || !is_button(focused.as_ref(), window, cx)) {
             return;
         }
+        if seen.contains(&focused) {
+            break;
+        }
         seen.push(focused);
-        let again = if forward { Move::Next } else { Move::Previous };
-        apply(again, window, cx);
     }
+    match (&trap, &start) {
+        (Some(trap), _) if !started_inside => apply(Move::To(trap), window, cx),
+        (_, Some(start)) => apply(Move::To(start), window, cx),
+        (Some(trap), None) => apply(Move::To(trap), window, cx),
+        (None, None) => recover(window, cx),
+    }
+}
+
+/// Whether `focused` is a control recorded as a button. A handle never recorded (the root, a layer's container) is not.
+fn is_button(focused: Option<&FocusHandle>, window: &Window, cx: &App) -> bool {
+    let (Some(focused), Some(state)) = (focused, state(window, cx)) else {
+        return false;
+    };
+    state.read(cx).controls.iter().any(|entry| {
+        entry.kind == ControlKind::Button && entry.control.upgrade().as_ref() == Some(focused)
+    })
 }
 
 /// A control was pressed with the pointer: focus it where a click focuses controls (Linux), leave focus alone where it
