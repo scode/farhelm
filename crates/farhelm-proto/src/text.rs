@@ -1,15 +1,21 @@
 //! Which characters are unsafe to show verbatim when text from another host
-//! or an agent reaches a human.
+//! or an agent reaches a human, and the one way the GUI spells them.
 //!
 //! Session titles, host identities, conversation ids, and refusal messages all
 //! arrive from peers Farhelm does not control, and they are printed in CLI
-//! tables, written to audit and hook logs, and rendered in the browser. Every
+//! tables, written to audit and hook logs, and drawn in the desktop app. Every
 //! one of those surfaces has the same failure: a character that changes what
 //! the reader SEES without looking like anything. This module is the single
 //! answer to "which characters", so a spoofing defense that one surface
-//! tightens is tightened everywhere. Each surface still chooses its own way of
-//! showing an escaped character (`\u{202e}`, `<U+202E>`, `_`), because a log
-//! line and a table cell have different readers.
+//! tightens is tightened everywhere.
+//!
+//! The notation is shared too where the readers are the same: everything the
+//! desktop app shows (labels, link disclosures, startup alerts) writes an
+//! escaped character as `<U+XXXX>` through [`notation`] and [`escaped`]. Other
+//! surfaces keep a notation their own readers expect: the command line writes
+//! `\u{202e}` and `\x1b` inside fields whose backslashes it escapes first, so an
+//! agent parsing `farhelm agent sessions` reads one unambiguous form, and logs
+//! replace with `_`.
 
 /// Whether `ch` must never be shown as itself in peer-supplied text.
 ///
@@ -42,25 +48,38 @@
 /// emoji use it, because those are rare in titles and tags are otherwise
 /// pure hidden payload. Where two values must never look alike whatever they
 /// contain (host identities, which are UUIDs), the surface escapes all
-/// non-ASCII itself rather than relying on this list; see the UI's
-/// `peer::display_identity`.
+/// non-ASCII itself rather than relying on this list; see the desktop app's
+/// `local_host::display_identity`.
+///
+/// Unicode's whole format category (`Cf`) is in, spelled out by code point as
+/// of Unicode 17: besides the families above, the Arabic and Syriac
+/// prepended concatenation marks (U+0600–U+0605, U+06DD, U+070F, U+0890,
+/// U+0891, U+08E2, U+110BD, U+110CD), the Egyptian hieroglyph format
+/// controls U+13430–U+1343F, the shorthand format controls U+1BCA0–U+1BCA3
+/// and the musical symbol format controls U+1D173–U+1D17A. The old browser
+/// GUI's terminal-link disclosure escaped the entire category through a
+/// regular expression (its policy is pinned in the grid model's link oracle);
+/// listing it here lets that disclosure use this table without showing less
+/// than it did.
 ///
 /// This is a KNOWN-BAD list, not a Unicode general-category test: the standard
 /// library has no category tables, and escaping everything non-ASCII would
-/// mangle every legitimately non-English title. A future format character
-/// outside the list renders as itself, which is why surfaces with a second,
-/// category-free defense (direction-isolated elements) keep it. The old
-/// browser GUI's terminal disclosure helper (`visibleFormatCharacters`, read
-/// it at the GPUI port's reference commit `24bc0580`) mirrored this list and
-/// also escaped Unicode's entire format category; the GPUI app's host-text
-/// element uses this table itself (SPEC_impl.md, "Host-supplied text").
+/// mangle every legitimately non-English title. A format character added by a
+/// later Unicode version renders as itself until it is listed, which is why
+/// the desktop app also draws host text in its own direction-isolated element
+/// (SPEC_impl.md, "Host-supplied text").
 pub fn is_presentation_unsafe(ch: char) -> bool {
     ch.is_control()
         || matches!(
             ch,
             '\u{00AD}'
                 | '\u{034F}'
+                | '\u{0600}'..='\u{0605}'
                 | '\u{061C}'
+                | '\u{06DD}'
+                | '\u{070F}'
+                | '\u{0890}'..='\u{0891}'
+                | '\u{08E2}'
                 | '\u{115F}'
                 | '\u{1160}'
                 | '\u{17B4}'..='\u{17B5}'
@@ -75,8 +94,41 @@ pub fn is_presentation_unsafe(ch: char) -> bool {
                 | '\u{FEFF}'
                 | '\u{FFA0}'
                 | '\u{FFF9}'..='\u{FFFB}'
+                | '\u{110BD}'
+                | '\u{110CD}'
+                | '\u{13430}'..='\u{1343F}'
+                | '\u{1BCA0}'..='\u{1BCA3}'
+                | '\u{1D173}'..='\u{1D17A}'
                 | '\u{E0000}'..='\u{E007F}'
         )
+}
+
+/// How the desktop app writes one escaped character: `<U+202E>`, at least four
+/// upper-case hex digits. The one spelling every GUI surface uses, so a reader
+/// learns it once.
+pub fn notation(ch: char) -> String {
+    format!("<U+{:04X}>", ch as u32)
+}
+
+/// `text` with every presentation-unsafe character written in [`notation`],
+/// and every literal `<U+` that a peer wrote escaped as well (its `<` becomes
+/// `<U+003C>`), so text can never pose as an escape this function produced.
+/// Everything else, spaces included, is kept as it is.
+///
+/// The literal-notation rule is SPEC.md's for terminal-link disclosures ("make
+/// presentation-unsafe characters visible, distinguish literal escape notation
+/// from escaped characters"); the desktop app applies it to all host-supplied
+/// text it shows, which is never weaker.
+pub fn escaped(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for (index, ch) in text.char_indices() {
+        if is_presentation_unsafe(ch) || (ch == '<' && text[index..].starts_with("<U+")) {
+            out.push_str(&notation(ch));
+        } else {
+            out.push(ch);
+        }
+    }
+    out
 }
 
 /// Quote one word so a POSIX-family shell reads it back byte for byte, with
@@ -100,7 +152,7 @@ pub fn shell_quote(word: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::is_presentation_unsafe;
+    use super::{escaped, is_presentation_unsafe, notation};
 
     /// Why this matters: four surfaces used to keep their own copies of this
     /// set and had drifted apart, so a zero-width character escaped in the
@@ -157,6 +209,21 @@ mod tests {
             '\u{FFA0}',
             '\u{FFF9}',
             '\u{FFFB}',
+            '\u{0600}',
+            '\u{0605}',
+            '\u{06DD}',
+            '\u{070F}',
+            '\u{0890}',
+            '\u{0891}',
+            '\u{08E2}',
+            '\u{110BD}',
+            '\u{110CD}',
+            '\u{13430}',
+            '\u{1343F}',
+            '\u{1BCA0}',
+            '\u{1BCA3}',
+            '\u{1D173}',
+            '\u{1D17A}',
             '\u{E0000}',
             '\u{E0041}',
             '\u{E007F}',
@@ -194,6 +261,17 @@ mod tests {
             '\u{FFF8}',
             '\u{FFFC}',
             '\u{E0080}',
+            // Just outside the format characters added with the whole category.
+            '\u{0606}',
+            '\u{06DE}',
+            '\u{0710}',
+            '\u{08E3}',
+            '\u{1342F}',
+            '\u{13440}',
+            '\u{1BC9F}',
+            '\u{1BCA4}',
+            '\u{1D172}',
+            '\u{1D17B}',
             // Variation selectors stay unescaped so emoji keep rendering.
             '\u{FE0F}',
             '\u{FE00}',
@@ -206,6 +284,32 @@ mod tests {
                 ch as u32
             );
         }
+    }
+
+    /// Why this matters: the desktop app shows host-supplied text in several
+    /// places (labels, link disclosures, startup alerts) that used to spell
+    /// escapes on their own; one function means one spelling and one rule for
+    /// literal notation a host might type to impersonate an escape.
+    ///
+    /// Specification: unsafe characters become `<U+XXXX>` with at least four
+    /// upper-case hex digits, a literal `<U+` opener has its `<` escaped so it
+    /// can never read as an escape, a `<` that does not open `U+` is kept, and
+    /// ordinary text (spaces, letters, emoji with variation selectors) is kept
+    /// byte for byte.
+    #[farhelm_testtrace::test]
+    fn escaped_text_spells_every_unsafe_character_and_literal_notation_visibly() {
+        assert_eq!(notation('\u{202E}'), "<U+202E>");
+        assert_eq!(notation('\u{1D173}'), "<U+1D173>");
+        assert_eq!(notation('\u{7}'), "<U+0007>");
+        assert_eq!(escaped("v1\u{202E}2"), "v1<U+202E>2");
+        assert_eq!(escaped("a\nb"), "a<U+000A>b");
+        assert_eq!(escaped("<U+202E> fake"), "<U+003C>U+202E> fake");
+        assert_eq!(escaped("a < b <U"), "a < b <U");
+        assert_eq!(escaped("  two  spaces  "), "  two  spaces  ");
+        assert_eq!(
+            escaped("caf\u{e9} \u{2764}\u{FE0F} \u{65e5}"),
+            "caf\u{e9} \u{2764}\u{FE0F} \u{65e5}"
+        );
     }
 
     /// Why this matters: Farhelm hands command lines to the user's login
