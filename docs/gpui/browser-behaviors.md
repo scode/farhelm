@@ -591,8 +591,8 @@ too-narrow window** — **keep**
 
 - SPEC, "Session list": "appearance, sidebar width, host rail expansion, terminal text size and sound switches, by
   contrast, are deliberately per device" and (Appearance) "The desktop app remembers the choice locally, independently
-  of the helm". SPEC, "Losing the connection to the helm": "What survives a reset: this device's local preferences
-  (sidebar width, theme, window size and the like)".
+  of the helm". SPEC, "Losing the connection to the helm", until the decision below: "What survives a reset: this
+  device's local preferences (sidebar width, theme, window size and the like)".
 - Code: `localStorage` in `ui/assets/sidebar-width.js:53, 59, 89, 109` (width, rail), `ui/assets/terminal.js:384, 2710`
   (terminal text size), `ui/assets/appearance.js:31` (appearance), `ui/assets/sounds.js:13, 108` (sound switches).
 - Tests: `sidebar-resize.spec.ts`, `appearance.spec.ts`, `terminal-font.spec.ts`, `sounds.spec.ts`.

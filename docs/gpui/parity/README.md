@@ -1,6 +1,6 @@
 # Parity checklists
 
-One file per area maps the old browser UI's Playwright specs (deleted in F1; reference commit `24bc0580`) and the
+One file per area maps the old browser UI's Playwright specs (deleted with that UI; reference commit `24bc0580`) and the
 SPEC.md behavior they covered to their replacements in the GPUI app. Each area's port updates its own file; the
 orchestrator owns this index after M1. Every one of the 145 spec files at the reference commit is assigned to exactly
 one area.

@@ -2,11 +2,11 @@
 //! frame is restored. A saved frame is reused only when it still fits a connected display, and the maximized state
 //! never overwrites the last ordinary frame.
 //!
-//! This is the framework-free half of the old Dioxus window's frame tracking, moved when that UI was deleted (GPUI
-//! migration, F1). The half that read and set a live window (Tao's monitor list, outer and inner sizes, the X11 versus
-//! Wayland handle check, and the event hook that saved at close) went with it; the GPUI window supplies those facts as
-//! plain values: the connected monitors as [`WindowRect`]s with the primary first, the current outer frame size and
-//! position, and whether the backend can report global positions at all.
+//! This is the framework-free half of the old Dioxus window's frame tracking, moved when that UI was deleted. The half
+//! that read and set a live window (Tao's monitor list, outer and inner sizes, the X11 versus Wayland handle check, and
+//! the event hook that saved at close) went with it; the GPUI window supplies those facts as plain values: the
+//! connected monitors as [`WindowRect`]s with the primary first, the current outer frame size and position, and whether
+//! the backend can report global positions at all.
 
 use std::fs::File;
 use std::path::Path;

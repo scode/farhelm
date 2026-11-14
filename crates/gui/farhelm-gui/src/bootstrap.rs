@@ -10,9 +10,10 @@
 //! bundled fonts, then Farhelm's theme, which re-projects Kit's theme from Farhelm's tokens, then Farhelm's key bindings
 //! (after Kit's, so a deeper Farhelm context wins where both bind a key), the focus coordinator's and the layer
 //! manager's registries, the ticker, the notice center and the local state that survives resets, and, in test builds,
-//! the render counter. Then the coordinator starts following the host's answer for which controls Tab reaches, and the
-//! UI channel to the helm opens, so the window's first frame already reflects where the connection stands. Only then
-//! does a window open.
+//! the render counter. Then the coordinator starts following the host's answer for which controls Tab reaches, the
+//! ticker takes the host's reduced-motion setting (and, in an agent build, counts every window as active, so a run under
+//! headless Mutter, which reports every window inactive, still animates), and the UI channel to the helm opens, so the
+//! window's first frame already reflects where the connection stands. Only then does a window open.
 //!
 //! Nothing here may panic: on macOS this runs inside an AppKit callback, where a panic aborts the process. Failures are
 //! returned, and [`run`] hands them to the host's [`Host::on_startup_failure`], which owns how the process reports them.
