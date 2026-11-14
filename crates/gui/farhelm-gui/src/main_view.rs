@@ -6,10 +6,11 @@
 //! helm, which is what makes it inert (SPEC.md, "Losing the connection to the helm" and "One GUI at a time"): the
 //! session that held helm state was retired, so there is nothing stale to draw or act on.
 //!
-//! The open session's Delete and Rename shortcuts ([`DeleteSession`], [`RenameSession`]) are handled on the window's
-//! ground, so they reach the session list from wherever focus is on the page (a row, the terminal), and the list
-//! decides what they do; from inside a dialog or menu they reach nothing, which is SPEC.md's "A visible modal keeps
-//! keyboard ownership".
+//! The open session's Delete and Rename shortcuts ([`DeleteSession`], [`RenameSession`]) and the quick switcher's
+//! ([`QuickSwitcher`]) are handled on the window's ground, so they reach the session list from wherever focus is on
+//! the page (a row, the terminal), and the list decides what they do. From inside a dialog or menu they reach these
+//! handlers too, because `root::wrap` draws the overlay inside the ground, and each refuses while a layer is open
+//! (`layers::any_open`), which is SPEC.md's "A visible modal keeps keyboard ownership".
 //!
 //! The live ground is a column: the posted notices' banners across the whole window, then the sidebar and the pane
 //! side by side below them, so a banner pushes both down rather than covering the list's first row. The sidebar is the
@@ -22,7 +23,7 @@ use gpui::{
     ParentElement, Render, SharedString, Styled, Subscription, Window, div,
 };
 
-use crate::actions::{DeleteSession, RenameSession};
+use crate::actions::{DeleteSession, QuickSwitcher, RenameSession};
 use crate::components::{Banner, Button, HoverHelp, Role, Tier};
 use crate::notices::{self, Notice};
 use crate::session_list::{self, SessionList};
@@ -126,6 +127,10 @@ impl Render for MainView {
             // Taken whatever the editor does with it, as a once-per-press shortcut's handler must be (`actions.rs`).
             .on_action(|_: &RenameSession, window, cx| {
                 session_list::rename::open_for_selected(window, cx)
+            })
+            // Taken whatever the switcher does with it, as a once-per-press shortcut's handler must be (`actions.rs`).
+            .on_action(|_: &QuickSwitcher, window, cx| {
+                session_list::quick_switcher::open(window, cx)
             })
             .size_full()
             .bg(theme::color(palette.bg_0))

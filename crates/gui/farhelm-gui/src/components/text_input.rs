@@ -52,6 +52,15 @@
 //! NOTE: Enter's event comes from Kit's binding, which runs on every auto-repeat, so a held Enter submits again on each
 //! repeat. An editor that saves through the operation store is refused while its save is in flight, which covers the
 //! Rename editor; SPEC.md's "Repeated or composing Enter cannot answer" a question is the prompt's, not this field's.
+//!
+//! ## Up and Down
+//!
+//! Kit binds Up and Down in its input context to its own caret moves, and its single-line field then does nothing with
+//! them, so the keys stop at the field and never reach its ancestors (SPEC_impl.md, "GPUI cookbook: traps", "Kit
+//! details"). A field that drives a list beside it (the quick switcher's search, whose arrows choose a result while
+//! typing stays in the field) takes them with [`TextInput::on_vertical`], which catches Kit's two actions on their way
+//! down to the field, before Kit's own handler runs, and hands them to the field's owner instead. Kit's action types
+//! stay inside this module, as its event type does.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -61,7 +70,9 @@ use gpui::{
     InteractiveElement, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Subscription,
     Window, div,
 };
-use gpui_component::input::{Enter, Input, InputEvent, InputState, Textarea, TextareaState};
+use gpui_component::input::{
+    Enter, Input, InputEvent, InputState, MoveDown, MoveUp, Textarea, TextareaState,
+};
 
 use super::HoverHelp;
 use crate::theme::{self, metrics};
@@ -214,6 +225,25 @@ impl TextInputState {
         self.1.replace(self.text(cx));
     }
 
+    /// Show `text` in the field while it is empty, as a hint of what goes there (the quick switcher's "Jump to a
+    /// session"). It is the app's own wording, never a value: it raises no event, and [`Self::text`] never returns it.
+    pub fn set_placeholder(
+        &self,
+        text: impl Into<SharedString>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let text: SharedString = text.into();
+        match &self.0 {
+            Field::Line(input) => {
+                input.update(cx, |state, cx| state.set_placeholder(text, window, cx))
+            }
+            Field::Row(area) | Field::Area(area) => {
+                area.update(cx, |state, cx| state.set_placeholder(text, window, cx))
+            }
+        }
+    }
+
     /// Call `on_event` for what happens in this input, for as long as the returned subscription is kept: the view that
     /// owns the state keeps it beside the state. Focus changes are not reported; the focus coordinator owns focus.
     ///
@@ -285,6 +315,18 @@ pub struct TextInput {
     state: TextInputState,
     label: SharedString,
     help: HoverHelp,
+    /// Who takes Up and Down instead of Kit, if anyone ([`TextInput::on_vertical`]).
+    on_vertical: Option<VerticalHandler>,
+}
+
+/// What a field hands Up and Down to ([`TextInput::on_vertical`]).
+type VerticalHandler = Rc<dyn Fn(Vertical, &mut Window, &mut App)>;
+
+/// Which arrow a field handed to its owner ([`TextInput::on_vertical`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Vertical {
+    Up,
+    Down,
 }
 
 impl TextInput {
@@ -300,7 +342,22 @@ impl TextInput {
             state: state.clone(),
             label: label.into(),
             help,
+            on_vertical: None,
         }
+    }
+
+    /// Hand Up and Down to `handler` instead of letting Kit take them (the module docs, "Up and Down"). Every press and
+    /// held repeat reaches it, and none moves the caret or reaches anything else, so the field keeps its text, caret
+    /// and focus while its owner moves a selection beside it.
+    ///
+    /// For single-line fields ([`TextInputState::new`]) only: on a field that keeps line breaks it would take Up and
+    /// Down away from moving between its lines.
+    pub fn on_vertical(
+        mut self,
+        handler: impl Fn(Vertical, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_vertical = Some(Rc::new(handler));
+        self
     }
 }
 
@@ -314,6 +371,23 @@ impl RenderOnce for TextInput {
         let handle = self.state.focus_handle(cx);
         let wrapper = crate::focus::record_position(wrapper, &handle);
         let wrapper = super::with_hover_help(wrapper, &self.id, &self.help, false, window, cx);
+        // Caught on the way down, in the capture phase, because Kit's own handler on the field consumes both actions
+        // and stops them there (the module docs, "Up and Down").
+        let wrapper = match self.on_vertical {
+            Some(up) => {
+                let down = up.clone();
+                wrapper
+                    .capture_action(move |_: &MoveUp, window, cx| {
+                        cx.stop_propagation();
+                        up(Vertical::Up, window, cx);
+                    })
+                    .capture_action(move |_: &MoveDown, window, cx| {
+                        cx.stop_propagation();
+                        down(Vertical::Down, window, cx);
+                    })
+            }
+            None => wrapper,
+        };
         // Kit fills a dark-mode input with its border color at 30%, not the old stylesheet's recessed `--well`, and
         // rounds it at its general radius; these override that with the old input's fill, corner and type size. Kit's
         // padding and height stay (a few pixels taller than the old 4-by-8 padding). Kit sizes its text area from its
