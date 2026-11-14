@@ -26,6 +26,13 @@ you have unpushed changes. The target must contain `scripts/devbuild-mac.sh`; an
 script refuses a PR whose branch is not in `scode/farhelm`, and it takes no commit hashes. The line is the same every
 time, and rerunning it is always safe, so after another push the maintainer reruns the same line.
 
+The build is the GPUI desktop app, run as a bare binary from the Mac checkout's `target/devbuild/` rather than as an
+installed `Farhelm.app`. A target from before the old Dioxus app was deleted builds that app instead, and its preflight
+asks for that app's tools (`dx` and the wasm target) before it builds anything. A target based on a main from that
+deletion up to the change that taught `scripts/devbuild-mac.sh` to build the GPUI app fails at its first build step,
+because its script still runs `dx` in the deleted `crates/farhelm-ui`; rebase such a target onto a main that has that
+change before handing out the line.
+
 The build runs as a separate desktop app with its own state in `~/.local/state/farhelm-devbuild`: its own helm, host
 list, databases and local supervisor, never the installed app's. It can run beside the installed app, and remote hosts
 have to be added to it once. Remote hosts are still shared: Update from the devbuild puts the target's build on that
