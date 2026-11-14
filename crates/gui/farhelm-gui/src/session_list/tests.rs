@@ -30,6 +30,12 @@ use crate::{local_state, render_count, session_pane, test_support, theme, ticker
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
 
+/// The wall clock's reading, in seconds since the epoch, when a test's app starts: GPUI's test clock starts at
+/// `2025-07-01T23:59:58Z` and moves only as a test advances it, and [`ticker::wall_now`] reads it. A row whose age a
+/// test or golden shows is stamped relative to this, so its age is the same on every run;
+/// `row_tests::the_test_clock_starts_where_the_fixtures_expect` fails first if a GPUI upgrade moves the start.
+pub(crate) const TEST_NOW: i64 = 1_751_414_398;
+
 /// One session as the helm would push it: the helm's pinned list fixture with the fields these tests are about
 /// replaced. Defaults: titled by its key, running, created and last active at 100, seen at 100 (so nothing is new), in
 /// `/home/user/src/<key>`, with no annotation, on a connected host the fixture names `buildbox`. The screenshot
@@ -45,6 +51,10 @@ pub(crate) struct Fixture {
     stale: bool,
     cwd: String,
     annotation: Option<String>,
+    /// The registry id of the row's host, when the test names one; else the helm fixture's (2).
+    host: Option<i64>,
+    /// The helm's own name for the row's host, when the test names one; else the helm fixture's (`buildbox`).
+    host_name: Option<String>,
 }
 
 pub(crate) fn session(key: &'static str) -> Fixture {
@@ -58,6 +68,8 @@ pub(crate) fn session(key: &'static str) -> Fixture {
         stale: false,
         cwd: format!("/home/user/src/{key}"),
         annotation: None,
+        host: None,
+        host_name: None,
     }
 }
 
@@ -94,6 +106,16 @@ impl Fixture {
         self.annotation = Some(annotation.to_owned());
         self
     }
+    /// The row on the host with registry id `host`.
+    pub(crate) fn host(mut self, host: i64) -> Self {
+        self.host = Some(host);
+        self
+    }
+    /// The helm's own name for the row's host (empty for a legacy row that has none).
+    pub(crate) fn host_name(mut self, name: &str) -> Self {
+        self.host_name = Some(name.to_owned());
+        self
+    }
 
     pub(crate) fn entry(&self) -> KeyedEntry {
         let mut entry = session_entry(self.key);
@@ -107,10 +129,16 @@ impl Fixture {
         value["stale"] = json!(self.stale);
         value["cwd"] = json!(self.cwd);
         value["annotation"] = json!(self.annotation);
+        if let Some(host) = self.host {
+            value["host"] = json!(host);
+        }
+        if let Some(name) = &self.host_name {
+            value["host_name"] = json!(name);
+        }
         entry
     }
 
-    fn row(&self) -> SessionRow {
+    pub(super) fn row(&self) -> SessionRow {
         serde_json::from_value(self.entry().value).unwrap()
     }
 }
@@ -163,7 +191,7 @@ pub(crate) fn listing_meta(order: &[&str], total: u64, truncated: bool) -> Colle
 }
 
 /// The collections a store would hold after this snapshot.
-fn collections(snapshot: Vec<CollectionState>) -> Collections {
+pub(super) fn collections(snapshot: Vec<CollectionState>) -> Collections {
     let mut collections = Collections::default();
     let decoded: Vec<_> = snapshot
         .into_iter()

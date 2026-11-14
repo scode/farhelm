@@ -3,8 +3,9 @@
 //! and a footer note, and the prompt anchored to a row's menu button),
 //! the keyboard focus ring, host-supplied text over its spoofing corpus, the notice banner, the terminal's styles and
 //! cursor shapes, an attached terminal's exit line and status line, the scrim a pending Delete puts over the open
-//! session's terminal, the session list (a fleet of every status a row draws, an empty fleet, a row's open menu, a
-//! row's Delete question, and a pending and a refused Delete), the Rename editor, the select closed and open, the
+//! session's terminal, the session list (a fleet of every status a row draws, the open row on a host the helm cannot
+//! reach, an empty fleet, a row's open menu, a row's Delete question, and a pending and a refused Delete), the Rename
+//! editor, the select closed and open, the
 //! YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer, the Settings dialog at
 //! Sessions, at Appearance, at Hosts and at Terminal, the Hosts panel (closed, with Details, and with a host failing to
 //! connect), and the Add host dialog, in both appearances, compared pixel for pixel.
@@ -53,7 +54,7 @@ use crate::session;
 use crate::session_list::SessionList;
 use crate::session_list::host_rail::host_mark;
 use crate::session_list::host_rail::tests::{hosts, local, remote};
-use crate::session_list::tests::{Fixture, listing, preferences, session};
+use crate::session_list::tests::{Fixture, TEST_NOW, listing, preferences, session};
 use crate::terminal::attached::{AttachedTerminal, OpenStream, TerminalTarget};
 use crate::terminal::{CellMetrics, CursorPhase, TerminalView, TextSize};
 use crate::test_support;
@@ -1487,18 +1488,41 @@ fn terminals(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
 }
 
 /// Connect a fake helm with the sessions `rows` in that order (and a visit history that opens the first one) and make
-/// the session list over it, with a registry of the local host and the remote one the rows run on, so the host rail
-/// beside the list draws All and two avatars. The fake, the connection and the list are kept for the scene's life; the
+/// the session list over it, with a registry of the local host, the remote one the rows run on and a remote the helm
+/// cannot reach (which the fleet's stale row runs on, so its cause reads `Waiting for supervisor`), so the host rail
+/// beside the list draws All and three avatars. The fake, the connection and the list are kept for the scene's life; the
 /// list's own commands (remembering the selection, marking it seen) go to the fake unanswered, so the pictures show the
 /// snapshot as the helm sent it.
 fn session_list_scene(state: &SceneState, rows: &[Fixture], cx: &mut App) {
+    let first = rows.first().map(|row| row.key);
+    session_list_scene_opening(state, rows, first, cx);
+}
+
+/// [`session_list_scene`], with the visit history opening `open` instead of the first row (none for `None`).
+fn session_list_scene_opening(
+    state: &SceneState,
+    rows: &[Fixture],
+    open: Option<&str>,
+    cx: &mut App,
+) {
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
     let order: Vec<&str> = rows.iter().map(|row| row.key).collect();
+    let history: Vec<&str> = open.into_iter().collect();
+    let mut registry = hosts(&[
+        local(),
+        remote(2, "deploy@buildbox.example.invalid"),
+        remote(3, "bench@bench.example.invalid"),
+    ]);
+    registry.entries[2].value["state"] = serde_json::json!({
+        "phase": "unreachable-reprobing",
+        "cause": "transport-failure",
+        "last_error": "timed out",
+    });
     helm.connect(vec![
         listing(&order, rows),
-        preferences(&order[..order.len().min(1)], None),
-        hosts(&[local(), remote(2, "deploy@buildbox.example.invalid")]),
+        preferences(&history, None),
+        registry,
     ]);
     state.lists.borrow_mut().push(cx.new(SessionList::new));
     let mut keep = state.keep.borrow_mut();
@@ -1507,35 +1531,66 @@ fn session_list_scene(state: &SceneState, rows: &[Fixture], cx: &mut App) {
 }
 
 /// A fleet with every mark and line a row draws differently: running (selected, so its inverse colors are pinned),
-/// waiting, idle with new output, idle with nothing new, running on a host that is not connected (the grey mark), and
-/// exited with a stop annotation on a line of its own.
+/// waiting, idle with new output, idle with nothing new, running on a host that is not connected (the grey mark, the
+/// dimmed title and the cause), and exited with no code and a stop annotation on a line of its own. Their ages run from
+/// `now` to weeks, counted from the test clock's start, so every bucket's width is in the picture.
 fn session_list_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     session_list_scene(state, &fleet(), cx);
+}
+
+/// Rows on a host the helm cannot reach, the open one among them, so the selected row's inverse inks are pinned for a
+/// stale row too: its title in `--on-accent-dim` rather than `--on-fill`, and its cause in the selected row's secondary
+/// ink. Beside it, a stale exited row shows its ended words and its cause on one line, and an ordinary row on a
+/// connected host stays as it is.
+fn session_list_selected_stale_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    let row = |key, title, ago: i64| {
+        session(key)
+            .title(title)
+            .activity(TEST_NOW - ago)
+            .seen(Some(TEST_NOW - ago))
+    };
+    let rows = [
+        row("g", "Refactor the API client", 2 * 60).cwd("/home/user/src/api"),
+        row("f", "Benchmark on the build box", 3 * 3_600)
+            .host(3)
+            .stale()
+            .cwd("/home/user/bench"),
+        row("h", "Profile the release build", 2 * 86_400)
+            .host(3)
+            .stale()
+            .status(serde_json::json!({ "state": "exited", "exit_code": 1 }))
+            .cwd("/home/user/bench"),
+    ];
+    session_list_scene_opening(state, &rows, Some("f"), cx);
 }
 
 /// The fleet of [`session_list_setup`], which the row menu and Delete scenes draw too. Each row lists the helm
 /// fixture's one terminal tab and managed checkout.
 fn fleet() -> [Fixture; 6] {
     let status = |state: &str| serde_json::json!({ "state": state });
-    let row = |key, title, state| {
+    let row = |key, title, state, ago: i64| {
         session(key)
             .title(title)
             .status(status(state))
-            .activity(300)
-            .seen(Some(300))
+            .activity(TEST_NOW - ago)
+            .seen(Some(TEST_NOW - ago))
     };
+    const MINUTE: i64 = 60;
+    const HOUR: i64 = 60 * MINUTE;
+    const DAY: i64 = 24 * HOUR;
     [
-        row("a", "Refactor the API client", "running").cwd("/home/user/src/api"),
-        row("b", "Review the install docs", "waiting").cwd("/home/user/src/docs"),
-        row("c", "Fix the flaky upload test", "idle")
-            .seen(Some(100))
+        row("a", "Refactor the API client", "running", 5).cwd("/home/user/src/api"),
+        row("b", "Review the install docs", "waiting", 2 * MINUTE).cwd("/home/user/src/docs"),
+        row("c", "Fix the flaky upload test", "idle", 14 * MINUTE)
+            .seen(Some(TEST_NOW - DAY))
             .cwd("/srv/ci/uploads"),
-        row("d", "Update dependencies", "idle").cwd("/home/user/src/farhelm"),
-        row("f", "Benchmark on the build box", "running")
+        row("d", "Update dependencies", "idle", 3 * HOUR).cwd("/home/user/src/farhelm"),
+        row("f", "Benchmark on the build box", "running", DAY)
+            .host(3)
             .stale()
             .cwd("/home/user/bench"),
-        row("e", "Release notes for 0.40", "exited")
-            .status(serde_json::json!({ "state": "exited", "exit_code": 0 }))
+        row("e", "Release notes for 0.40", "exited", 26 * DAY)
+            .status(serde_json::json!({ "state": "exited", "exit_code": null }))
             .annotation("stopped by user")
             .cwd("/home/user/src/farhelm"),
     ]
@@ -2068,6 +2123,12 @@ static SCENES: &[Scene] = &[
         size: (420., 418.),
         draw: session_lists,
         setup: session_list_setup,
+    },
+    Scene {
+        name: "session-list-selected-stale",
+        size: (420., 418.),
+        draw: session_lists,
+        setup: session_list_selected_stale_setup,
     },
     Scene {
         name: "session-list-empty",

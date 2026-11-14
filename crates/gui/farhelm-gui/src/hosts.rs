@@ -53,6 +53,9 @@ pub mod add;
 pub(crate) mod offers;
 mod phase;
 
+/// The app's one timestamp format, shared with the session row's age ([`crate::session_list`]).
+pub(crate) use phase::utc_stamp;
+
 #[cfg(test)]
 pub(crate) mod tests;
 
