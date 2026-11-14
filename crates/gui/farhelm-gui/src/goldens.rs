@@ -39,7 +39,7 @@ use crate::focus::Mark;
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, Popover, TooltipOwner};
 use crate::notices::Notice;
-use crate::operations::Command;
+use crate::operations::OpKey;
 use crate::prompt::{self, Answer, Question};
 use crate::root;
 use crate::session;
@@ -929,9 +929,9 @@ fn session_list_deleting_setup(state: &SceneState, _: &mut Window, cx: &mut App)
                 return;
             };
             let start = |key: &str, guard, cx: &mut App| {
-                if let Ok(command) = Command::delete(key, guard) {
+                if let Ok(command) = crate::session_list::delete::command(key, guard) {
                     let _ = operations.update(cx, |operations, cx| {
-                        operations.start(key, command, cx, |_, _| {})
+                        operations.start(&OpKey::session(key), command, cx, |_, _| {})
                     });
                 }
             };

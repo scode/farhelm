@@ -19,7 +19,7 @@ use super::RenameEditor;
 use crate::actions::{RENAME_SESSION_CHORD, TERMINAL_CONTEXT};
 use crate::layers;
 use crate::main_view::MainView;
-use crate::operations::Command;
+use crate::operations::OpKey;
 use crate::session;
 use crate::session_list::tests::{Fixture, listing, preferences, session};
 use crate::test_support::started;
@@ -235,9 +235,10 @@ fn a_rename_is_refused_while_a_delete_of_that_session_is_in_flight(cx: &mut Test
     let start_delete = |cx: &mut VisualTestContext| {
         cx.update(|_, cx| {
             let operations = session::current_operations(cx).expect("a UI session is live");
-            let delete = Command::delete("a", DeleteGuard::Unconditional).unwrap();
+            let delete =
+                crate::session_list::delete::command("a", DeleteGuard::Unconditional).unwrap();
             operations.update(cx, |operations, cx| {
-                operations.start("a", delete, cx, |_, _| {})
+                operations.start(&OpKey::session("a"), delete, cx, |_, _| {})
             })
         })
         .expect("the premise: the Delete started");
