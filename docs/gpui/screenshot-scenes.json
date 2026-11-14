@@ -638,8 +638,13 @@
     },
     {
       "golden": "settings-sessions",
-      "title": "Settings as the gear opens it, at Sessions (only Sessions, Hosts and Terminal are listed so far)",
+      "title": "Settings as the gear opens it, at Sessions (only Sessions, Appearance, Hosts and Terminal are listed so far)",
       "reference": "settings-sessions"
+    },
+    {
+      "golden": "settings-appearance",
+      "title": "Settings at Appearance, System chosen",
+      "reference": "settings-appearance"
     },
     {
       "golden": "settings-hosts",

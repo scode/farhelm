@@ -41,6 +41,9 @@
 //! drawn as an image, which keeps them, not through `svg()`, which tints a drawing with one color.
 //!
 //! The Terminal section glyph is the old app's too (`ActionGlyph::Terminal`), in the same 14-unit action box and stroke.
+//!
+//! So is the Appearance section glyph (`ActionGlyph::Appearance`), in the same box and stroke; its filled half has no
+//! stroke, as the old one's did not.
 
 use std::borrow::Cow;
 
@@ -147,6 +150,8 @@ pub enum Icon {
     Sessions,
     /// Three boxes joined as a tree: the Settings dialog's Hosts section (the old app's Hosts glyph).
     Hosts,
+    /// A circle with its right half filled: the Settings dialog's Appearance section (the old app's Appearance glyph).
+    Appearance,
     /// A prompt in a window: the Settings dialog's Terminal section (the old app's Terminal glyph).
     Terminal,
     /// Two curved arrows chasing each other round: restart the agent and resume its conversation (the old app's Restart
@@ -194,6 +199,7 @@ impl Icon {
         Icon::Settings,
         Icon::Sessions,
         Icon::Hosts,
+        Icon::Appearance,
         Icon::Terminal,
         Icon::Restart,
     ];
@@ -237,6 +243,7 @@ impl Icon {
             Icon::Settings => "icons/settings.svg",
             Icon::Sessions => "icons/sessions.svg",
             Icon::Hosts => "icons/hosts.svg",
+            Icon::Appearance => "icons/appearance.svg",
             Icon::Terminal => "icons/terminal.svg",
             Icon::Restart => "icons/restart.svg",
         }
@@ -295,6 +302,7 @@ impl Assets {
             "icons/settings.svg" => Some(include_bytes!("../assets/icons/settings.svg")),
             "icons/sessions.svg" => Some(include_bytes!("../assets/icons/sessions.svg")),
             "icons/hosts.svg" => Some(include_bytes!("../assets/icons/hosts.svg")),
+            "icons/appearance.svg" => Some(include_bytes!("../assets/icons/appearance.svg")),
             "icons/terminal.svg" => Some(include_bytes!("../assets/icons/terminal.svg")),
             WORDMARK_DARK => Some(include_bytes!(
                 "../../../../packaging/farhelm-desktop/wordmark-dark.svg"

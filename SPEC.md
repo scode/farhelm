@@ -2311,23 +2311,25 @@ in Tensorlake the key form shows its own warning, worded for that one key. A sav
 saved-key metadata immediately; each keeps its own unsaved replacement draft. Credentials does not rename or duplicate
 the stored Tensorlake key.
 
-**Appearance** chooses **System**, **Dark** or **Light** for this device, with System as the default. System follows the
-device's current appearance, including changes while Farhelm stays open; an explicit choice overrides it. The desktop
-app remembers the choice locally, independently of the helm. The resolved palette applies before application content
-appears, and changes live. The terminal keeps its dark colors in both palettes. Sessions has an off-by-default **Skip
-session confirmations** switch. Its help names Stop, Delete, Replace, Restart and tab Close and excludes YOLO, host and
-trash questions (see Lifecycle operations). Beside it, **Name sessions on quick launch** is on by default, including
-when the helm has never stored a choice. Turning it off disables the naming prompt for quick launches. Beside it,
-**Color terminal frames by host** starts off and colors every session's thin terminal frame to match its host icon when
-turned on. The **Hosts** section has the switches `Set up new hosts without asking` and `Remove hosts without asking`,
-on when the respective confirmation is skipped. Turning one off restores that confirmation; turning one on makes the
-same choice as the host dialog's permanent answer. Changes take effect immediately in the current client. Each switch
-explains the current behavior, and each host dialog's permanent answer points to the gear as the place to undo it. Hosts
-also has **Update remote hosts automatically**, off unless explicitly enabled, with help explaining that the helm
-updates remote hosts as soon as updates are available, with no window open, and never updates its own machine this way.
-This shared choice survives helm restarts, and the helm acts on a committed change immediately. A failed save restores
-the last known value and shows an adjacent error. The **Tensorlake** section holds the helm's Tensorlake account, for
-hosts and sessions that are Tensorlake sandboxes. It opens, above the API key, with a large red warning that begins
+**Appearance** chooses **System**, **Dark** or **Light**, with System as the default. System follows each device's
+current appearance, including changes while Farhelm stays open; an explicit choice overrides it. The choice is a helm
+preference shared by every client of the helm, and a change reaches every open client live (the maintainer decided on
+2026-11-13 that appearance is a helm preference rather than a per-device one; the old app's per-device choice is not
+carried over, so everyone starts at System). The resolved palette applies before application content appears, and
+changes live. The terminal keeps its dark colors in both palettes. Sessions has an off-by-default **Skip session
+confirmations** switch. Its help names Stop, Delete, Replace, Restart and tab Close and excludes YOLO, host and trash
+questions (see Lifecycle operations). Beside it, **Name sessions on quick launch** is on by default, including when the
+helm has never stored a choice. Turning it off disables the naming prompt for quick launches. Beside it, **Color
+terminal frames by host** starts off and colors every session's thin terminal frame to match its host icon when turned
+on. The **Hosts** section has the switches `Set up new hosts without asking` and `Remove hosts without asking`, on when
+the respective confirmation is skipped. Turning one off restores that confirmation; turning one on makes the same choice
+as the host dialog's permanent answer. Changes take effect immediately in the current client. Each switch explains the
+current behavior, and each host dialog's permanent answer points to the gear as the place to undo it. Hosts also has
+**Update remote hosts automatically**, off unless explicitly enabled, with help explaining that the helm updates remote
+hosts as soon as updates are available, with no window open, and never updates its own machine this way. This shared
+choice survives helm restarts, and the helm acts on a committed change immediately. A failed save restores the last
+known value and shows an adjacent error. The **Tensorlake** section holds the helm's Tensorlake account, for hosts and
+sessions that are Tensorlake sandboxes. It opens, above the API key, with a large red warning that begins
 "EXPERIMENTAL:", says Tensorlake support is early and experimental and will change between releases, and makes the user
 responsible for sandboxes not running and billing when they do not want them to; it shows whether or not the section's
 settings load. Its API key is explicitly saved helm configuration, shared by every client and kept outside the
@@ -2380,10 +2382,10 @@ client of this helm; existing controls with a natural place in the main UI stay 
 every client reads the helm's preference once after connecting and writes it on change, so a window opens in the same
 order and on the same session after a reconnect as before it. Per-client persistence — a desktop state file, anything
 that lets two clients remember different answers — is not wanted for these shared preferences, including welcome-card
-and announcement dismissal (appearance, host rail expansion, terminal text size and sound switches, by contrast, are
-deliberately per device; see Session list, Terminal experience and Status). A client that asks the helm for no
-particular order gets creation time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by
-the API, but parentage does not nest the list and implies nothing about VCS state. Parent tracking is not comprehensive:
+and announcement dismissal (host rail expansion, terminal text size and sound switches, by contrast, are deliberately
+per device; see Session list, Terminal experience and Status). A client that asks the helm for no particular order gets
+creation time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage
+does not nest the list and implies nothing about VCS state. Parent tracking is not comprehensive:
 `farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the asking session.
 
 The sidebar can be resized by dragging its right edge, between 296px and 656px, with 396px as the default. Its 56px host

@@ -30,7 +30,7 @@ for the attention list. The other ten, the attention list itself and its Always 
 | `tests/provisioning.spec.ts`         | 73    | rail ${action} modal stays visible over Sessions and returns to its avatar       | partly (the Hosts panel's rows and the derivation of a host's menu): crates/gui/farhelm-gui/src/hosts/offers/tests.rs `the_local_hosts_update_is_greyed_and_points_at_the_installer` ("the local row's update is greyed out, points at the installer"; sending nothing waits for the menu), `work_in_flight_withdraws_update_and_rerun_and_holds_settings_and_remove` ("Update planning keeps only its own Settings unavailable"), `a_running_run_holds_the_host_until_it_ends` ("accepted ADD ... while running": no Update or Re-run and Settings unavailable during the run, Update after it), `a_too_new_host_is_not_offered_update`, `a_suspended_host_is_not_offered_update_or_rerun`, `a_failed_run_is_offered_again_as_what_it_was`, `a_failed_update_on_the_local_host_is_offered_again_greyed`, `the_local_host_without_a_supervisor_offers_no_install`, `each_kind_decides_its_own_offers`; crates/gui/farhelm-gui/src/hosts/tests.rs `details_open_and_close_every_row` and `a_failed_run_opens_only_its_own_row` ("global details alone control disclosure", without the update progress), `the_local_host_without_a_supervisor_opens_its_row_to_say_what_to_do` ("local setup answers an absent supervisor", without the probe and its handoff, which are not ported), `a_refusal_shows_under_its_row_and_opens_it`; crates/gui/farhelm-gui/src/hosts/phase/tests.rs (phase words, Too new hover, details); and Add host's dialog and probe (below). Waiting: the host menu, setup and its confirmation, progress, Update and Update all, Remove, host settings and the rail's entry points |
 | `tests/ssh-help.spec.ts`             | 4     | ssh help displays and copies both registered-host commands                       | not yet ported                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `tests/workspace-trust.spec.ts`      | 3     | managed-checkout trust switches persist independently of Claude's legacy route   | not yet ported                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `tests/appearance.spec.ts`           | 4     | ${initial.name} before application mount                                         | not yet ported                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `tests/appearance.spec.ts`           | 4     | ${initial.name} before application mount                                         | partly (below)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 ## `tests/settings.spec.ts`, partly
 
@@ -79,7 +79,7 @@ Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs` unless named 
   `a_refused_link_choice_shows_the_stored_choice_and_a_failure_line`,
   `an_unset_or_unknown_link_choice_reads_as_intercept`. The arrows, Space and the description lines as accessible
   descriptions are the radio group's own, which its tests in `components/tests.rs` cover.
-- The look: the goldens `settings-sessions`, `settings-hosts` and `settings-terminal`
+- The look: the goldens `settings-sessions`, `settings-appearance`, `settings-hosts` and `settings-terminal`
   (`crates/gui/farhelm-gui/src/goldens.rs`).
 
 Not ported here, and why: the persistence across a second client and reload belongs to the helm's preference route and
@@ -126,12 +126,58 @@ A reply that arrives after the user moved on (a key or click since Add) still sh
 the old app: it opens nothing and moves no focus, which is all SPEC.md's "Keyboard focus" withholds from a late result.
 A dialog the user closed shows nothing, and a refusal has no row to show on, since no host exists for it.
 
+## `tests/appearance.spec.ts`, partly
+
+The old spec tested a choice kept in the web view's own storage. Appearance is a helm preference in this app (the
+maintainer's decision of 2026-11-13), so its cases map onto the preference row's save and push, and onto the main view,
+which hands the stored choice to the theme. Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs`:
+
+- The choice, its save and the palette following it ("all appearance choices update live while the mounted terminal
+  stays dark"): `an_appearance_choice_saves_only_its_preference_field`,
+  `a_refused_appearance_save_shows_the_stored_choice_and_a_failure_line`,
+  `an_unset_or_unknown_appearance_reads_as_system`, `the_stored_appearance_paints_the_window_from_the_first_snapshot_on`
+  (the stored choice applied at the first snapshot, on every push and after a reset) and
+  `system_follows_the_operating_system_and_an_explicit_choice_does_not`. The arrows and Space on the radios are the
+  radio group's own keyboard, which its tests in `components/tests.rs` cover. The terminal staying dark needs no test of
+  its own here: the theme holds one terminal palette for both (`theme::TERMINAL`).
+- Another client's choice ("another same-origin page updates appearance and clearing restores System", which is now
+  another client of the same helm, and clearing is a row with no appearance):
+  `an_open_appearance_section_follows_a_choice_made_elsewhere`, and the window's palette in
+  `the_stored_appearance_paints_the_window_from_the_first_snapshot_on`.
+- Surviving a remount and a reload ("appearance choices survive Settings remounts and reloads"): the section draws the
+  stored row each time it opens (the refused-save test opens it over a stored Dark), and a reload is a new UI session's
+  snapshot, which the main view applies like any push (the reset and reconnect in
+  `the_stored_appearance_paints_the_window_from_the_first_snapshot_on`); the helm's preference route and the UI
+  channel's tests cover the persistence itself.
+- The agent build's `--appearance` start hook, which has no old counterpart: it keeps its palette for the run
+  (`the_agent_builds_start_hook_wins_over_the_stored_appearance`).
+- The order of the sections: `the_dialog_lists_only_the_sections_this_build_has`.
+- The look: the golden `settings-appearance`.
+
+Superseded: the four "... before application mount" cases. They held the browser's renderer module back to prove that a
+script in the page's head colored the canvas before the app existed. This app has no page, head or renderer module to
+hold; what the window draws before the first snapshot is a deviation, below.
+
 ## Deviations
 
 Where the port does not match the old app, and why. Each stays until the work named in it lands.
 
 ### The Settings dialog
 
+- **Appearance starts at System on the switch to this app.** The old app kept the choice in each device's web view
+  storage, and nothing reads it: the maintainer decided on 2026-11-13 that the moved settings reset to their defaults,
+  as a breaking change named where it ships.
+- **The connecting screen is in the operating system's palette.** The theme starts every launch at System, and the
+  stored choice arrives with the channel's first snapshot, so with Dark or Light stored against an operating system in
+  the other appearance, a window shown before the snapshot ("Connecting to the helm…") is in the system's palette and
+  switches when the snapshot arrives. Measured in-process, not in the running app:
+  `the_stored_appearance_paints_the_window_from_the_first_snapshot_on` opens the main window before the first snapshot
+  on a light system and reads its palette as light, then dark once the snapshot storing Dark arrives. How long the
+  connecting screen stays up with the embedded helm, and so whether a user sees the switch, has not been measured. The
+  old app colored its page from device storage before anything drew. Accepted by the migration's orchestrator on
+  2026-11-14, with no device-local cache of the choice.
+- **The Appearance help is reworded.** The old line said "for this device"; this one says the choice applies to the helm
+  and that other open clients pick it up right away, and that System follows each device's own appearance.
 - **Terminal has no tunnel consent switch yet.** It waits for the terminal area's consent question (see the NOTE under
   `tests/settings.spec.ts` above).
 - **No one-pane layout at 620 pixels and below.** The old dialog showed either the section list or the section below
@@ -145,10 +191,11 @@ Where the port does not match the old app, and why. Each stays until the work na
   newest click per field and sent it after the earlier one ("the latest click wins"). Here the operation store admits
   one request on the preference row at a time, so the second click is refused; a second click on the same switch leaves
   it showing the value in flight, and one on another switch leaves that switch as it was; the user clicks again after
-  the reply, which the embedded helm sends within milliseconds. In a radio group (Terminal's link choice) the arrows
-  move focus and the choice together, so a second arrow press while the first choice's save is in flight moves focus to
-  the next option while the choice stays where the first press put it. Accepted by the migration's orchestrator on
-  2026-11-14, since preference saves are helm-local and take milliseconds; revisit only if a user meets it.
+  the reply, which the embedded helm sends within milliseconds. In a radio group (Appearance, Terminal's link choice)
+  the arrows move focus and the choice together, so a second arrow press while the first choice's save is in flight
+  moves focus to the next option while the choice stays where the first press put it. Accepted by the migration's
+  orchestrator on 2026-11-14, since preference saves are helm-local and take milliseconds; revisit only if a user meets
+  it.
 - **Every switch reports its refused save.** The old app showed no failure for the two host switches, nor for turning
   Skip session confirmations on, which SPEC.md's best-effort list in "Errors and diagnostics" kept silent because the
   old choice had already taken effect in an optimistic copy. With no optimistic copy a failed save never took effect, so

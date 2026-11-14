@@ -6,7 +6,7 @@
 //! session's terminal, the session list (a fleet of every status a row draws, an empty fleet, a row's open menu, a
 //! row's Delete question, and a pending and a refused Delete), the Rename editor, the select closed and open, the
 //! YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer, the Settings dialog at
-//! Sessions, at Hosts and at Terminal, the Hosts panel (closed, with Details, and with a host failing to
+//! Sessions, at Appearance, at Hosts and at Terminal, the Hosts panel (closed, with Details, and with a host failing to
 //! connect), and the Add host dialog, in both appearances, compared pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
@@ -1694,10 +1694,11 @@ fn rename_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
 }
 
 /// The Settings dialog over the fake helm's preference row, opened at `section` as the gear opens it (references
-/// `settings-sessions`, `settings-hosts` and `settings-terminal`): focus on the section's first switch (on the dialog
-/// itself at Terminal), naming on because the row stores no choice for it, and automatic remote-host updates turned on
-/// so the Hosts picture shows a switch in each state. The opener is the scene's ring handle, which stands in for the
-/// gear. The fake and the connection are kept for the scene's life, like the Rename editor's.
+/// `settings-sessions`, `settings-appearance`, `settings-hosts` and `settings-terminal`): focus on the section's first
+/// switch (on the dialog itself at Appearance and Terminal), naming on because the row stores no choice for it, and
+/// automatic remote-host updates turned on so the Hosts picture shows a switch in each state. The opener is the scene's
+/// ring handle, which stands in for the gear. The fake and the connection are kept for the scene's life, like the
+/// Rename editor's.
 fn settings_scene(
     state: &SceneState,
     section: crate::settings::Section,
@@ -1738,6 +1739,12 @@ fn settings_scene(
 /// Settings as the gear opens it, at Sessions.
 fn settings_sessions_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene(state, crate::settings::Section::Sessions, window, cx);
+}
+
+/// Settings at Appearance, System chosen because the row stores no appearance. Focus starts on the dialog itself
+/// (`Section::first`), so no ring shows, as in the reference, where the section was reached by a click.
+fn settings_appearance_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    settings_scene(state, crate::settings::Section::Appearance, window, cx);
 }
 
 /// Settings at Hosts.
@@ -2076,6 +2083,12 @@ static SCENES: &[Scene] = &[
         size: (800., 830.),
         draw: empty,
         setup: settings_sessions_setup,
+    },
+    Scene {
+        name: "settings-appearance",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_appearance_setup,
     },
     Scene {
         name: "settings-hosts",
