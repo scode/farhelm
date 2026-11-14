@@ -20,7 +20,7 @@ use crate::host_text::HostText;
 use crate::main_view::MainView;
 use crate::operations::{Command, NotStarted, Outcome, SessionOperations, Settled, Work};
 use crate::session::{self, Connection};
-use crate::session_tests::{meta, session_entry, sessions, started};
+use crate::test_support::{meta, session_entry, sessions, started};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
