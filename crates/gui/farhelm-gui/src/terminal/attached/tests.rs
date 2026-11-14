@@ -19,8 +19,8 @@ use farhelm_input_mapping::Modifiers as KeyModifiers;
 use farhelm_proto::DetachCode;
 use gpui::{
     AppContext as _, Context, Entity, KeyBinding, KeyUpEvent, Keystroke, Modifiers, MouseButton,
-    ParentElement, Render, ScrollDelta, ScrollEvent, Styled, TestAppContext, VisualTestContext,
-    Window, div, point, px,
+    MouseMoveEvent, MouseUpEvent, ParentElement, PlatformInput, Render, ScrollDelta, ScrollEvent,
+    Styled, TestAppContext, VisualTestContext, Window, div, point, px,
 };
 
 use super::*;
@@ -1369,6 +1369,493 @@ fn the_terminals_scrollbar_moves_the_view_and_sends_nothing(cx: &mut TestAppCont
         "dragged past the bottom, the view follows the screen"
     );
     assert_eq!(h.sent(), [], "the program hears nothing of the bar");
+}
+
+// ---- Selection -----------------------------------------------------------------------------------------------------
+
+impl Harness<'_> {
+    /// The window point a little inside the left edge of screen cell (`col`, `row`), vertically centred: a press there
+    /// lands on the boundary before the cell, a drag's end there selects up to that boundary.
+    fn at_cell(&mut self, col: u16, row: u16) -> Point<Pixels> {
+        self.read(|owner, cx| {
+            let view = owner.committed.as_ref().unwrap().read(cx);
+            let placement = owner.placement(view, cx).unwrap();
+            let width = owner.cell(cx).unwrap().width;
+            owner.grid_origin.unwrap()
+                + point(
+                    px(f32::from(col) * width + 1.),
+                    px((f32::from(row) + 0.5) * placement.cell_height - placement.lift),
+                )
+        })
+    }
+
+    /// Drag with the primary button from `from` to `to`, with `modifiers` held, and release there.
+    fn drag(&mut self, from: Point<Pixels>, to: Point<Pixels>, modifiers: Modifiers) {
+        self.cx
+            .simulate_mouse_down(from, MouseButton::Left, modifiers);
+        settle(self.cx);
+        self.cx
+            .simulate_mouse_move(to, MouseButton::Left, modifiers);
+        settle(self.cx);
+        self.cx.simulate_mouse_up(to, MouseButton::Left, modifiers);
+        settle(self.cx);
+    }
+
+    /// The clipboard's text, if it holds text.
+    fn clipboard(&mut self) -> Option<String> {
+        self.cx.read_from_clipboard().and_then(|item| item.text())
+    }
+
+    /// Put `text` on the clipboard, as another program would.
+    fn set_clipboard(&mut self, text: &str) {
+        self.cx
+            .write_to_clipboard(ClipboardItem::new_string(text.into()));
+    }
+}
+
+/// A state message turning the program's mouse reporting `mode` on (or `"off"`).
+fn mouse_mode(mode: &str) -> GridOutput {
+    serde_json::from_value(
+        serde_json::json!({"t":"state","mouse":mode,"focus":false,"alt_screen":false,
+        "default_fg":null,"default_bg":null,"history_trimmed":false,"exit":null}),
+    )
+    .unwrap()
+}
+
+/// With no mouse reporting a plain drag selects and copies, and every completed selection copies again, even the same
+/// text, because something else may have replaced the clipboard meanwhile (SPEC.md's selection paragraph). A plain
+/// click selects nothing and leaves the clipboard to whoever filled it. Input sent to the program clears the
+/// selection. None of it reaches the program.
+#[gpui::test]
+fn a_drag_selects_and_copies_and_a_click_does_not(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("hello world");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    h.set_clipboard("someone else's");
+    let (from, to) = (h.at_cell(0, 0), h.at_cell(5, 0));
+    h.drag(from, to, Modifiers::none());
+    assert_eq!(h.clipboard().as_deref(), Some("hello"));
+
+    h.set_clipboard("someone else's");
+    h.drag(from, to, Modifiers::none());
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some("hello"),
+        "the same selection copies again"
+    );
+
+    h.set_clipboard("someone else's");
+    let middle = h.at_cell(2, 0);
+    h.cx.simulate_click(middle, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some("someone else's"),
+        "a click copies nothing"
+    );
+    assert_eq!(h.sent(), [], "the program hears nothing of selecting");
+
+    h.drag(from, to, Modifiers::none());
+    assert!(
+        h.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).selection())
+            .is_some()
+    );
+    keys(h.cx, "a");
+    assert_eq!(
+        h.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).selection()),
+        None,
+        "typing clears the selection"
+    );
+}
+
+/// A press, its moves and its release can all arrive before the app draws another frame (a fast drag; the test bridge
+/// sends a whole drag at once). The drag must still follow the pointer and copy at the release: listeners that only
+/// came into being in a frame drawn after the press missed all of it, and selected nothing.
+#[gpui::test]
+fn a_drag_delivered_between_frames_still_selects(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("hello world");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let (from, to) = (h.at_cell(0, 0), h.at_cell(5, 0));
+    h.cx.update(|window, cx| {
+        window.dispatch_event(
+            PlatformInput::MouseDown(MouseDownEvent {
+                position: from,
+                modifiers: Modifiers::none(),
+                button: MouseButton::Left,
+                click_count: 1,
+                first_mouse: false,
+            }),
+            cx,
+        );
+        window.dispatch_event(
+            PlatformInput::MouseMove(MouseMoveEvent {
+                position: to,
+                modifiers: Modifiers::none(),
+                pressed_button: Some(MouseButton::Left),
+            }),
+            cx,
+        );
+        window.dispatch_event(
+            PlatformInput::MouseUp(MouseUpEvent {
+                position: to,
+                modifiers: Modifiers::none(),
+                button: MouseButton::Left,
+                click_count: 1,
+            }),
+            cx,
+        );
+    });
+    settle(h.cx);
+    assert_eq!(h.clipboard().as_deref(), Some("hello"));
+}
+
+/// A drag ends when what it selects stops existing under it: the alternate screen switching mid-drag (a full-screen
+/// program starting) clears the selection, and the drag must not rebuild one from its old anchor, which named the
+/// primary screen's text, nor copy anything at the release. A reconnect that replaces the view ends the drag too.
+#[gpui::test]
+fn a_drag_ends_when_its_selection_is_reset_or_its_view_replaced(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("hello world");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    h.set_clipboard("someone else's");
+    let selection = |h: &mut Harness| {
+        h.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).selection())
+    };
+    let (from, to, further) = (h.at_cell(0, 0), h.at_cell(5, 0), h.at_cell(8, 0));
+    h.cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_move(to, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert!(
+        selection(&mut h).is_some(),
+        "the premise: the drag selected"
+    );
+    let alternate: GridOutput =
+        serde_json::from_value(serde_json::json!({"t":"state","mouse":"off","focus":false,
+        "alt_screen":true,"default_fg":null,"default_bg":null,"history_trimmed":false,"exit":null}))
+        .unwrap();
+    h.fake().output(alternate);
+    settle(h.cx);
+    assert!(
+        selection(&mut h).is_none(),
+        "the premise: the switch cleared it"
+    );
+    h.cx.simulate_mouse_move(further, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_up(further, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(
+        selection(&mut h),
+        None,
+        "no selection rebuilt from the old anchor"
+    );
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some("someone else's"),
+        "and nothing copied"
+    );
+
+    // A reconnect mid-drag: the old drag does not reach the new view. Everything on the new view is selected first
+    // (through the view, not the Select all action, which ends a drag itself), so a drag still alive would visibly
+    // replace that selection at its next move.
+    h.cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_move(to, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert!(
+        selection(&mut h).is_some(),
+        "the premise: a second drag is under way"
+    );
+    h.fake().drop_link();
+    let asked = h.fake().attach();
+    for message in screen(
+        asked.cols,
+        asked.rows,
+        "again and again",
+        serde_json::Value::Null,
+    ) {
+        h.fake().output(message);
+    }
+    h.fake().replay_complete();
+    settle(h.cx);
+    assert!(
+        h.read(|owner, _| owner.is_live()),
+        "the premise: live on the new attachment"
+    );
+    assert_eq!(
+        selection(&mut h),
+        None,
+        "the premise: the new view starts with nothing selected"
+    );
+    let owner = h.owner.clone();
+    h.cx.update(|_, cx| {
+        let view = owner.read(cx).committed.clone().unwrap();
+        view.update(cx, |view, cx| view.select_all(cx));
+    });
+    let all = selection(&mut h);
+    assert!(
+        all.is_some(),
+        "the premise: everything on the new view is selected"
+    );
+    h.cx.simulate_mouse_move(further, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_up(further, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(
+        selection(&mut h),
+        all,
+        "the old drag did not reach the new view"
+    );
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some("someone else's"),
+        "and copied nothing"
+    );
+}
+
+/// A double click selects the word and a triple click the line, and the release copies them, as in the old app.
+#[gpui::test]
+fn a_double_click_copies_the_word_and_a_triple_click_the_line(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("hello world");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let at = h.at_cell(8, 0);
+    for (count, expected) in [(2, "world"), (3, "hello world")] {
+        h.cx.simulate_event(MouseDownEvent {
+            position: at,
+            modifiers: Modifiers::none(),
+            button: MouseButton::Left,
+            click_count: count,
+            first_mouse: false,
+        });
+        h.cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+        settle(h.cx);
+        assert_eq!(h.clipboard().as_deref(), Some(expected), "{count} clicks");
+    }
+}
+
+/// Shift-click extends the selection to where it lands, from the selection's start, and copies the result; a word drag
+/// (a double click held and dragged) grows by whole words and keeps the word it started on; a drag whose release the
+/// window never saw (the button let go outside it) ends at the next move with the button up, and copies then. These
+/// are the old app's gestures; each, lost, would leave the user selecting something other than what they pointed at.
+#[gpui::test]
+fn shift_click_extends_a_word_drag_grows_and_a_lost_release_ends(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("hello world again");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let (start, three) = (h.at_cell(0, 0), h.at_cell(3, 0));
+    h.drag(start, three, Modifiers::none());
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some("hel"),
+        "the premise: a selection to extend"
+    );
+    let eight = h.at_cell(8, 0);
+    h.cx.simulate_mouse_down(eight, MouseButton::Left, Modifiers::shift());
+    h.cx.simulate_mouse_up(eight, MouseButton::Left, Modifiers::shift());
+    settle(h.cx);
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some("hello wo"),
+        "Shift-click extends from the start"
+    );
+
+    let (in_hello, in_world) = (h.at_cell(1, 0), h.at_cell(8, 0));
+    h.cx.simulate_event(MouseDownEvent {
+        position: in_hello,
+        modifiers: Modifiers::none(),
+        button: MouseButton::Left,
+        click_count: 2,
+        first_mouse: false,
+    });
+    h.cx.simulate_mouse_move(in_world, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_up(in_world, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some("hello world"),
+        "whole words, from the first"
+    );
+
+    h.set_clipboard("someone else's");
+    h.cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_move(three, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    let away = h.at_cell(10, 0);
+    h.cx.simulate_mouse_move(away, None, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some("hel"),
+        "a move with the button up ends the drag and copies"
+    );
+    let end = h.at_cell(15, 0);
+    h.cx.simulate_mouse_move(end, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(
+        h.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).selected_text()),
+        Some("hel".into()),
+        "a later move with the button held drags nothing"
+    );
+}
+
+/// Off a Mac, Alt-drag selects a rectangle: the same columns on every row, each row copied apart (the old app's column
+/// selection). On a Mac Option is the forcing modifier instead, so the same drag there selects ordinary text.
+#[gpui::test]
+fn alt_drag_selects_a_rectangle_off_a_mac(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_with_history(40);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    h.wheel(10.);
+    let text = h.text().unwrap();
+    let rows: Vec<&str> = text.lines().take(3).collect();
+    assert!(
+        rows.iter()
+            .all(|row| row.len() >= 3 && row.starts_with('h')),
+        "the premise: three history rows on top: {rows:?}"
+    );
+    let (from, to) = (h.at_cell(1, 0), h.at_cell(2, 2));
+    h.drag(from, to, Modifiers::alt());
+    let expected = match THIS_PLATFORM {
+        Platform::Linux => rows
+            .iter()
+            .map(|row| &row[1..2])
+            .collect::<Vec<_>>()
+            .join("\n"),
+        // On a Mac it is an ordinary selection from the press's boundary to the release's.
+        Platform::Mac => format!("{}\n{}\n{}", &rows[0][1..], rows[1], &rows[2][..2]),
+    };
+    assert_eq!(h.clipboard(), Some(expected));
+}
+
+/// Under mouse reporting a plain drag is the program's and selects nothing here, and neither does a drag with the
+/// other platform's modifier; the forcing modifier (Option on a Mac, Shift elsewhere) wins a local selection back,
+/// and it copies (SPEC.md's selection paragraph).
+#[gpui::test]
+fn under_mouse_reporting_only_the_forcing_modifier_selects(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("hello world");
+    h.fake().output(mouse_mode("drag"));
+    settle(h.cx);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    h.set_clipboard("someone else's");
+    let (from, to) = (h.at_cell(0, 0), h.at_cell(5, 0));
+    h.drag(from, to, Modifiers::none());
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some("someone else's"),
+        "a plain drag is the program's"
+    );
+    assert_eq!(
+        h.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).selection()),
+        None,
+        "nor does it select"
+    );
+    let (forcing, other) = match THIS_PLATFORM {
+        Platform::Mac => (Modifiers::alt(), Modifiers::shift()),
+        Platform::Linux => (Modifiers::shift(), Modifiers::alt()),
+    };
+    h.drag(from, to, other);
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some("someone else's"),
+        "the other platform's modifier forces nothing here"
+    );
+    h.drag(from, to, forcing);
+    assert_eq!(h.clipboard().as_deref(), Some("hello"));
+}
+
+/// A drag held above the screen scrolls back through the history while it stays there, extending the selection with
+/// it, at the old app's speed: 50 pixels or more past the edge moves 15 lines a step, a step every 50 milliseconds
+/// (20 a second). Releasing stops it, and what was selected, history included, is copied.
+#[gpui::test]
+fn a_drag_held_past_the_top_scrolls_and_selects_history(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_with_history(60);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let top_line = |h: &mut Harness| {
+        h.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).line_at_row(0))
+            .unwrap()
+    };
+    let start = top_line(&mut h);
+    let from = h.at_cell(3, 0);
+    h.cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    let above = from - point(px(0.), px(100.));
+    h.cx.simulate_mouse_move(above, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(
+        top_line(&mut h),
+        start,
+        "the premise: nothing has scrolled before the first step"
+    );
+    advance(h.cx, Duration::from_millis(50));
+    assert_eq!(top_line(&mut h), start - 15, "one step of 15 lines");
+    advance(h.cx, Duration::from_millis(50));
+    assert_eq!(top_line(&mut h), start - 30, "and another while held");
+    h.cx.simulate_mouse_move(from, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    advance(h.cx, Duration::from_millis(200));
+    assert_eq!(
+        top_line(&mut h),
+        start - 30,
+        "back over the screen, the scrolling stops"
+    );
+    h.cx.simulate_mouse_move(above, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    advance(h.cx, Duration::from_millis(50));
+    assert_eq!(
+        top_line(&mut h),
+        start - 45,
+        "and starts again past the edge"
+    );
+    h.cx.simulate_mouse_up(above, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    advance(h.cx, Duration::from_millis(200));
+    assert_eq!(top_line(&mut h), start - 45, "the release stops it");
+    let copied = h.clipboard().unwrap();
+    // From the top row's column 3 (the end of a history line `hNN`) down to where the press was.
+    assert!(
+        copied.contains("\nh31\nh32\n"),
+        "history is selected: {copied:?}"
+    );
+}
+
+/// Select all and Copy, the terminal's own commands (Cmd+A and Cmd+C on a Mac), select everything the terminal can
+/// show and copy it; Copy with nothing selected leaves the clipboard alone. Selecting all does not copy by itself.
+#[gpui::test]
+fn select_all_and_copy_copy_the_whole_terminal(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_with_history(5);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    h.set_clipboard("someone else's");
+    h.cx.dispatch_action(actions::CopyTerminalSelection);
+    settle(h.cx);
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some("someone else's"),
+        "nothing selected, nothing copied"
+    );
+    h.cx.dispatch_action(actions::SelectAllInTerminal);
+    settle(h.cx);
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some("someone else's"),
+        "selecting is not copying"
+    );
+    h.cx.dispatch_action(actions::CopyTerminalSelection);
+    settle(h.cx);
+    let copied = h.clipboard().unwrap();
+    assert!(
+        copied.starts_with("h0\nh1\nh2\nh3\nh4\nscreen"),
+        "{copied:?}"
+    );
 }
 
 // ---- Paste ---------------------------------------------------------------------------------------------------------
