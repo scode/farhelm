@@ -2,7 +2,7 @@
 
 Old Playwright specs (reference commit `24bc0580`; read one with `git show 24bc0580:e2e/<path>`) and what replaces them
 in the GPUI app. Port behavior from SPEC.md and these specs' acceptance cases, not one spec file at a time. SPEC.md
-sections: Feedback, Welcome card, Announcements, Partial deletion.
+sections: Feedback, Welcome card, Announcements, Partial deletion, Status (session notifications).
 
 | Old spec                           | Tests | Covers                                                                       | Status         |
 | ---------------------------------- | ----- | ---------------------------------------------------------------------------- | -------------- |
@@ -12,3 +12,4 @@ sections: Feedback, Welcome card, Announcements, Partial deletion.
 | `tests/announcements.spec.ts`      | 10    | announcement dismissal by ${dismissal} survives reload                       | not yet ported |
 | `tests/keyboard-shortcuts.spec.ts` | 5     | the ${mac ? "Mac" : "non-Mac"} overview chord owns terminal input and labels | not yet ported |
 | `tests/sounds.spec.ts`             | 6     | device sounds                                                                | not yet ported |
+| `tests/notifications.spec.ts`      | 12    | session notifications                                                        | not yet ported |
