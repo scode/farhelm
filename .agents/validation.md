@@ -668,6 +668,12 @@ systemd or SSH substrate ran.
   Kit, or when the manifest of a GUI crate, `farhelm-desktop` or `farhelm-helm-client` does not deny clippy's
   `unwrap_used` and `expect_used`. Seconds, nothing compiled. Run it when a manifest under `crates/gui/`, either of
   those two crates' manifests, or `Cargo.lock` changes. CI's `deny` job runs both.
+- `git show <base>:scripts/check-foundation-paths.py | python3 -I - --repo <checkout> --base <base> --head <PR commit>`
+  and `python3 -B scripts/test-check-foundation-paths.py` — refuses a GPUI area PR, rebased onto `<base>`, that changes
+  a foundation's owned path in a way no extension point admits, by the rules in the base revision's
+  `docs/gpui/foundation-ownership.md`; the base's copy of the script runs, so the PR cannot change the check that judges
+  it. `--owner` reports without refusing. It runs in the GPUI migration's landing step from milestone M1 on, not in CI.
+  The tests build temporary git repositories. Seconds, no network. Run them when the script or the table changes.
 - `python3 scripts/record-test-run.py --kind development --selection 'GPUI app goldens' --concurrency 'libtest default threads' -- python3 scripts/check-gui-goldens.py`
   — the GPUI app's screenshot goldens (`crates/gui/farhelm-gui/src/goldens.rs`): every component, the dialog frame and
   the layer manager's overlays (a tooltip, a popover, the prompt over its veil), the keyboard focus ring, host-supplied

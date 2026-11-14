@@ -36,7 +36,10 @@ pub enum HarnessGlyph {
 
 impl HarnessGlyph {
     /// Every harness glyph, for callers and tests that must cover them all.
-    pub const ALL: [HarnessGlyph; 10] = [
+    ///
+    /// A slice, one entry per line, so that a new harness's mark only adds a line (the append-only extension point in
+    /// `docs/gpui/foundation-ownership.md`).
+    pub const ALL: &[HarnessGlyph] = &[
         HarnessGlyph::Cursor,
         HarnessGlyph::Codex,
         HarnessGlyph::Claude,
