@@ -19,12 +19,10 @@ use gpui::{
 };
 use serde_json::{Value, json};
 
-use super::tests::{
-    Fixture, change, frame, listing_meta, open_main, painted, selected, sent, session,
-};
+use super::tests::{Fixture, change, listing_meta, open_main, painted, selected, sent, session};
 use crate::actions::{DELETE_SESSION_CHORD as DELETE_CHORD, RENAME_SESSION_SHORTCUT_NAME};
 use crate::operations::OpKey;
-use crate::test_support::meta;
+use crate::test_support::{focused_id, frame, meta};
 use crate::{layers, session, test_support};
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
@@ -114,14 +112,6 @@ fn paths(deletes: &[(u64, String)]) -> Vec<&str> {
     deletes.iter().map(|(_, path)| path.as_str()).collect()
 }
 
-/// The id of the element that holds focus, from a fresh frame's driver record.
-fn focused(cx: &mut VisualTestContext) -> Option<String> {
-    frame(cx)
-        .into_iter()
-        .find(|node| node.flags.focused && node.element_id.is_some())
-        .and_then(|node| node.element_id.map(|id| id.to_string()))
-}
-
 /// Whether anything was drawn under `selector` in the last frame.
 fn drawn(cx: &mut VisualTestContext, selector: &'static str) -> bool {
     cx.debug_bounds(selector).is_some()
@@ -188,7 +178,7 @@ fn the_menu_opens_below_its_button_holds_focus_and_leaves_the_selection(cx: &mut
         menu.top() >= button.bottom(),
         "the menu is below its button: {menu:?} under {button:?}"
     );
-    assert_eq!(focused(cx).as_deref(), Some("session-menu-rename"));
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-rename"));
     assert_eq!(
         label_of(cx, "session-menu-summary-b").as_deref(),
         Some("Codex · Running")
@@ -198,12 +188,12 @@ fn the_menu_opens_below_its_button_holds_focus_and_leaves_the_selection(cx: &mut
     assert_eq!(sent(&mut fake), []);
 
     test_support::keys(cx, "tab");
-    assert_eq!(focused(cx).as_deref(), Some("session-menu-delete"));
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-delete"));
     test_support::keys(cx, "tab");
-    assert_eq!(focused(cx).as_deref(), Some("session-menu-rename"));
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-rename"));
     test_support::keys(cx, "escape");
     assert!(!any_layer(cx));
-    assert_eq!(focused(cx).as_deref(), Some("session-menu-b"));
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-b"));
 }
 
 /// SPEC.md: a menu goes away "when the thing it is about is gone (a deleted session's open menu, say)", and focus
@@ -237,7 +227,7 @@ fn the_menus_rename_opens_the_editor_for_its_row(cx: &mut TestAppContext) {
 
     test_support::click(cx, "session-menu-b");
     assert_eq!(
-        focused(cx).as_deref(),
+        focused_id(cx).as_deref(),
         Some("session-menu-rename"),
         "the premise: the menu starts on Rename"
     );
@@ -246,7 +236,7 @@ fn the_menus_rename_opens_the_editor_for_its_row(cx: &mut TestAppContext) {
     assert!(!drawn(cx, "session-menu"), "and the menu closed");
     test_support::keys(cx, "escape");
     assert!(!any_layer(cx));
-    assert_eq!(focused(cx).as_deref(), Some("session-menu-b"));
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-b"));
 
     test_support::click(cx, "session-menu-b");
     test_support::keys(cx, "enter enter");
@@ -321,7 +311,7 @@ fn delete_then_enter_asks_about_a_live_session_and_enter_deletes_it(cx: &mut Tes
     deletes(&mut fake);
     test_support::click(cx, "session-menu-a");
     test_support::keys(cx, "down enter");
-    assert_eq!(focused(cx).as_deref(), Some("prompt-confirm"));
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
     let texts = painted(&frame(cx));
     for line in [
         "Still running — deleting kills the agent:",
@@ -343,7 +333,7 @@ fn delete_then_enter_asks_about_a_live_session_and_enter_deletes_it(cx: &mut Tes
         Modifiers::none(),
     );
     test_support::check(cx);
-    assert_eq!(focused(cx).as_deref(), Some("prompt-confirm"));
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
     test_support::keys(cx, "enter");
     assert_eq!(paths(&deletes(&mut fake)), ["/api/sessions/a"]);
     assert!(!any_layer(cx));
@@ -639,7 +629,7 @@ fn the_shortcut_asks_about_the_open_session_and_waits_while_a_question_is_open(
     let button = test_support::bounds(cx, "session-menu-a");
     let question = test_support::bounds(cx, "prompt");
     assert!(question.top() >= button.bottom(), "asked below a's button");
-    assert_eq!(focused(cx).as_deref(), Some("prompt-confirm"));
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
     assert_eq!(deletes(&mut fake), []);
 
     test_support::keys(cx, DELETE_CHORD);
