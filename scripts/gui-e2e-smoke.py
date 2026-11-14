@@ -7,12 +7,13 @@ NOTE: This is a smoke test, not the end-to-end suite. It covers the first slice'
 between the app, the helm and the supervisor shows up somewhere, plus the area steps added since (30, 31 and 33, the
 terminal's: a large paste, on a Mac only, text an input method commits, and scrollback; 32, the sidebar's quick
 switcher; 34, the session list's Stop and Replace from a row's menu; 35, the sidebar's host rail; 36, the row menu's
-Mark read and Mark unread; 37, the sidebar's resize divider; 38, Restart from the open session's header; 40, the
-settings-and-hosts area's scripted host setup). The behavior itself is specified and tested in process
-(`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`); nothing
-here checks layout or wording beyond the names it clicks. A menu's commands are clicked by their ids
-(`id:session-menu-delete`), not their labels: the open session's header has buttons with the same names (Stop, Replace,
-Delete), and a `text:` target picks the first match in drawing order, which is the header's.
+Mark read and Mark unread; 37, the sidebar's resize divider; 38, Restart from the open session's header; 39, the
+host rail's foot, Hosts and the Settings gear; 40, the settings-and-hosts area's scripted host setup). The behavior
+itself is specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`,
+`session_pane/`, `terminal/attached/tests.rs`); nothing here checks layout or wording beyond the names it clicks. A
+menu's commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open session's header has
+buttons with the same names (Stop, Replace, Delete), and a `text:` target picks the first match in drawing order, which
+is the header's.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -95,6 +96,13 @@ LOCAL_CHIP = "Filtered to host Local; remove filter"
 # The sidebar's divider holding focus, as `snapshot -i` lists it: its role (AccessKit's focusable separator), its name
 # and its state.
 DIVIDER_FOCUSED = re.compile(r'splitter "Sidebar width".*\[focused\]')
+
+# The Settings dialog's header summary: text only the open dialog draws, so waiting for it (or for it to go) tells
+# whether Settings is open.
+SETTINGS_SUMMARY = "For every host on this helm, and for this device"
+
+# The Hosts panel's accessible name, quoted as the snapshot prints it: only the shown panel draws it.
+HOSTS_PANEL = '"Host management"'
 
 # What every step's name must look like (the module docs say why); `main` checks it before starting the app.
 STEP_NAME = re.compile(r"test_\d\d_")
@@ -582,6 +590,37 @@ class Smoke(unittest.TestCase):
         self.ok("terminal-text", "--wait", marker)
         live = {"running", "waiting", "idle"}
         eventually(lambda: (listed().get("status") or {}).get("state") in live, f"{title} listed live again")
+
+    # ---- The sidebar area's rail foot (39): Hosts and the Settings gear ----------------------------------------------
+
+    def test_39_the_rail_foot_toggles_hosts_and_opens_settings(self) -> None:
+        """The host rail's foot holds the app's ways into host management and Settings, and both hand focus back the way
+        SPEC.md says: Hosts "keeps focus" as it swaps the session list for host management, and "Escape and either close
+        control return focus to the gear", which "always opens sessions and focuses its first switch". The step seeds
+        and touches no session: both are the helm's, not a session's. Specified: a click on Hosts shows the panel named
+        "Host management" with Hosts focused, and a second click hides it with Hosts still focused; then, with Settings
+        not open, a click on the gear opens it with its first switch, Skip session confirmations, focused, and Escape
+        closes it with focus on the gear. The panel's name and the dialog's summary are the oracles for shown and gone,
+        since only the shown panel and the open dialog draw them."""
+        self.assertNotIn(HOSTS_PANEL, self.ok("snapshot"), "premise: Sessions shows")
+        self.ok("click", "id:hosts-panel-toggle")
+        eventually(lambda: HOSTS_PANEL in self.ok("snapshot"), "the Hosts panel showing")
+        self.assertRegex(self.ok("snapshot", "-i"), r'button "Hosts" \[focused\]', "focus stays on Hosts")
+        self.ok("click", "id:hosts-panel-toggle")
+        eventually(lambda: HOSTS_PANEL not in self.ok("snapshot"), "the Hosts panel going")
+        self.assertRegex(self.ok("snapshot", "-i"), r'button "Hosts" \[focused\]', "focus is still on Hosts")
+
+        self.assertNotIn(SETTINGS_SUMMARY, self.ok("snapshot"), "premise: Settings is not open")
+        self.ok("click", "id:app-settings-toggle")
+        self.ok("wait", "--text", SETTINGS_SUMMARY)
+        self.assertRegex(
+            self.ok("snapshot", "-i"),
+            r'switch "Skip session confirmations" \[focused\]',
+            "focus is on Settings' first switch",
+        )
+        self.ok("press", "escape")
+        self.ok("wait", "--gone", SETTINGS_SUMMARY)
+        self.assertRegex(self.ok("snapshot", "-i"), r'button "Settings" \[focused\]', "focus is back on the gear")
 
     # ---- The settings-and-hosts area's scripted host setup (40), on a host of its own --------------------------------
 

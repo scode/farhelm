@@ -163,7 +163,8 @@ fn switches(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
 }
 
 /// Every button tier but the outlined danger one, a disabled main action and an icon button, in a first row; in a
-/// second, the host rail's entries (All pressed, a host's mark not pressed, on the rail's ground), the filter chip with
+/// second, the host rail's entries (All pressed, a host's mark not pressed, and a host's mark pressed in the quieter
+/// look the rail's choice wears while Hosts management is shown, on the rail's ground), the filter chip with
 /// a mark, a name and its ✕, and the link tier. The outlined danger tier is pinned at rest by `inline-prompt`; its
 /// unavailable and busy looks are not pinned yet.
 fn buttons(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
@@ -187,6 +188,18 @@ fn buttons(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
                 .content(host_mark(
                     HostIcon::Database,
                     HostColor::Teal,
+                    px(24.),
+                    palette,
+                )),
+        )
+        .child(
+            Button::new("rail-quiet", "render-box", help(), Role::Button)
+                .tier(Tier::Rail)
+                .pressed(true)
+                .quiet(true)
+                .content(host_mark(
+                    HostIcon::Cloud,
+                    HostColor::Default,
                     px(24.),
                     palette,
                 )),
@@ -1658,6 +1671,32 @@ fn host_filter_empty_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     );
 }
 
+/// Host management shown over the fleet with `buildbox` chosen (the old `hosts-panel` reference with a host chosen, as
+/// in `host-rail-host-selected`): the Hosts panel in place of the list's column, Hosts pressed at the rail's foot, and
+/// the chosen avatar in the quieter look the rail's choice wears while the panel shows. The fake answers the host query
+/// and the list's other commands in order before the panel is shown, so the rail draws the accepted choice.
+fn hosts_shown_with_a_host_chosen_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    session_list_then(
+        state,
+        |list, state, _, cx| {
+            list.update(cx, |list, cx| list.choose_host(Some(2), cx));
+            {
+                let mut keep = state.keep.borrow_mut();
+                if let Some(helm) = keep
+                    .iter_mut()
+                    .find_map(|kept| kept.downcast_mut::<FakeHelm>())
+                {
+                    for command in helm.commands() {
+                        helm.reply(command.id, 204, None);
+                    }
+                }
+            }
+            list.update(cx, |list, cx| list.show_hosts(cx));
+        },
+        cx,
+    );
+}
+
 /// No sessions at all: the list says so.
 fn session_list_empty_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     session_list_scene(state, &[], cx);
@@ -2137,6 +2176,12 @@ static SCENES: &[Scene] = &[
         size: (600., 600.),
         draw: empty,
         setup: host_add_dialog_setup,
+    },
+    Scene {
+        name: "hosts-shown-with-a-host-chosen",
+        size: (420., 418.),
+        draw: session_lists_then,
+        setup: hosts_shown_with_a_host_chosen_setup,
     },
 ];
 

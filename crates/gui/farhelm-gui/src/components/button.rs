@@ -135,6 +135,8 @@ pub struct Button {
     expanded: Option<bool>,
     /// Whether the button's choice is the one in force; `None` for a button that is not a choice.
     pressed: Option<bool>,
+    /// Whether a pressed button wears the quieter look ([`Button::quiet`]).
+    quiet: bool,
     /// What the button shows in place of its label's text, when it shows more than words.
     content: Option<AnyElement>,
     on_click: Option<Handler>,
@@ -167,6 +169,7 @@ impl Button {
             compact: false,
             expanded: None,
             pressed: None,
+            quiet: false,
             content: None,
             on_click: None,
             focus: None,
@@ -238,7 +241,7 @@ impl Button {
     }
 
     /// The button opens something, and `expanded` says whether it is open now: `aria-expanded`, and the pressed look
-    /// while it is (see the module docs).
+    /// while it is (see the module docs). On a button that is also [`Button::pressed`], the pressed look wins.
     pub fn expanded(mut self, expanded: bool) -> Self {
         self.expanded = Some(expanded);
         self
@@ -252,6 +255,18 @@ impl Button {
     /// pressed `Tier::Nav` entry keeps its fill unchanged under the pointer, as the old section list did.
     pub fn pressed(mut self, pressed: bool) -> Self {
         self.pressed = Some(pressed);
+        self
+    }
+
+    /// While `quiet`, a pressed button wears a quieter look than the accent fill: the control hover fill, the primary
+    /// ink and an accent edge, with its keyboard ring in the accent inside the edge, and the same fill under the
+    /// pointer. The host rail's chosen entry wears it while Hosts management is shown, so that the filled Hosts control
+    /// stays the one that marks the view on screen, as the old sheet drew it (the
+    /// `.host-rail .btn[aria-pressed="true"]` rule under `.app-sidebar:has(.hosts-panel-toggle[aria-pressed="true"])`).
+    /// It changes only the look: the button still reports itself pressed. It does nothing on a button that is not
+    /// pressed.
+    pub fn quiet(mut self, quiet: bool) -> Self {
+        self.quiet = quiet;
         self
     }
 
@@ -281,12 +296,12 @@ impl Button {
 
     /// Colors for this tier and state: (fill, hover fill, edge, text). Ghost buttons have no fill or edge at rest.
     pub(super) fn colors(&self, palette: &Palette) -> (Option<Token>, Token, Option<Token>, Token) {
-        if self.expanded == Some(true) {
+        if self.pressed == Some(true) && self.quiet {
             return (
-                Some(palette.accent_fill_hover),
-                palette.accent_fill_hover,
-                None,
-                palette.on_fill,
+                Some(palette.control_hover),
+                palette.control_hover,
+                Some(palette.accent),
+                palette.fg_0,
             );
         }
         if self.pressed == Some(true) && self.tier == Tier::Nav {
@@ -300,6 +315,16 @@ impl Button {
         if self.pressed == Some(true) {
             return (
                 Some(palette.accent_fill),
+                palette.accent_fill_hover,
+                None,
+                palette.on_fill,
+            );
+        }
+        // After the pressed looks: a button that is both a choice in force and open (the host rail's Hosts while host
+        // management shows) keeps its pressed look, as the old sheet drew it.
+        if self.expanded == Some(true) {
+            return (
+                Some(palette.accent_fill_hover),
                 palette.accent_fill_hover,
                 None,
                 palette.on_fill,
@@ -387,6 +412,8 @@ impl RenderOnce for Button {
         };
         let pressed = self.pressed == Some(true);
         let ring_color = match self.tier {
+            // The quiet look's fill is light in the light palette, where the inverse ring would not show.
+            _ if pressed && self.quiet => palette.accent,
             _ if pressed => palette.on_fill,
             Tier::OnBanner | Tier::RowMenu { on_fill: true } => palette.on_fill,
             Tier::Ghost
@@ -595,6 +622,11 @@ impl IconButton {
     /// See [`Button::disabled`].
     pub fn disabled(self, disabled: bool) -> Self {
         IconButton(self.0.disabled(disabled))
+    }
+
+    /// See [`Button::pressed`].
+    pub fn pressed(self, pressed: bool) -> Self {
+        IconButton(self.0.pressed(pressed))
     }
 
     /// See [`Button::expanded`].
