@@ -51,10 +51,10 @@ pub fn install(cx: &mut App) {
     cx.set_global(NoticesGlobal(notices));
 }
 
-/// The notice center's entity, for a surface to observe.
+/// The notice center's entity, for a surface to observe. `None` only without [`install`], a bootstrap bug (see
+/// [`crate::bootstrap::installed`]); posting and withdrawing then do nothing.
 pub fn entity(cx: &App) -> Option<Entity<Notices>> {
-    cx.try_global::<NoticesGlobal>()
-        .map(|global| global.0.clone())
+    crate::bootstrap::installed::<NoticesGlobal>(cx).map(|global| global.0.clone())
 }
 
 /// Post `notice`. Posting one that is already showing changes nothing.

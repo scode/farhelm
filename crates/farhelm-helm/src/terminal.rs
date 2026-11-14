@@ -371,13 +371,15 @@ fn control_frame(message: &TerminalServerMessage) -> ws::Message {
 /// [`TerminalClientMessage`] (the server → client ones as
 /// [`TerminalServerMessage`]), one definition both ends share:
 /// - `{"type":"resize","cols":N,"rows":N}` — the terminal's new size.
-/// - `{"type":"ping"}` — the browser's idle-gated liveness probe
-///   (PLAN_M6.md item 7), answered with `{"type":"pong"}` and forwarded to
-///   nobody.
+/// - `{"type":"ping"}` — the client's liveness probe, answered with
+///   `{"type":"pong"}` and forwarded to nobody. The desktop app's helm client
+///   (`farhelm-helm-client`'s terminal stream) sends one on a timer, never
+///   more than one unanswered, and reconnects when one goes unanswered too
+///   long.
 ///
 /// The ping is the one client message this helm ANSWERS itself rather than
 /// relaying, and that is the whole design rather than an optimization. What
-/// the browser needs to know is whether ITS socket is still carrying
+/// the client needs to know is whether ITS socket is still carrying
 /// anything — the laptop-wake case, where a NAT or sleep timeout killed the
 /// connection and left both ends believing it is open — and that question
 /// is answered entirely by this end replying. Round-tripping it to the

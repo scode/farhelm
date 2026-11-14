@@ -13,20 +13,22 @@
 //! which the rules give wherever SPEC.md requires it.
 //!
 //! For behavior tests, [`open`] is the harness: a window built the way the app builds its own, and step helpers
-//! ([`keys`], [`click`], [`redraw`], [`advance`]) that each end with [`check`], so a test written with them runs the
-//! invariant checks after every step without having to remember to. A test that drives the window some other way (a
-//! mouse move, a scroll, a resize) calls [`check`] itself after its step. A test that needs a root view this harness
-//! cannot give (one with state of its own) should build it through [`root::attach`] and [`root::wrap`], put it inside
-//! GPUI Kit's `Root`, activate the window and call [`check`], so that its window and its checks are the same as
-//! everyone else's. The self-tests at the end of this file make every step helper prove that it checks.
+//! ([`keys`], [`click`], [`redraw`], [`advance`], [`settle`]) that each end with [`check`], so a test written with them
+//! runs the invariant checks after every step without having to remember to. A test that drives the window some other
+//! way (a raw key event, a mouse move, a scroll, a resize) calls [`settle`] or [`check`] itself after its step. A test
+//! that needs a root view [`open`]'s scene cannot give (one with state of its own, or action handlers on the root
+//! element, where an action dispatched with nothing else focused still reaches them) builds that view through
+//! [`root::attach`] and [`root::wrap`] and opens it with [`open_view`], or [`another_window`] for a second window, so
+//! that its window and its checks are the same as everyone else's. The self-tests at the end of this file make every
+//! step helper prove that it checks.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, Context, HeadlessAppContext, IntoElement, Modifiers,
-    ParentElement as _, Pixels, Point, Render, Styled as _, TestAppContext, VisualTestContext,
-    Window, div, px,
+    AnyElement, App, AppContext as _, Bounds, Context, Entity, HeadlessAppContext, IntoElement,
+    Modifiers, ParentElement as _, Pixels, Point, Render, Styled as _, TestAppContext,
+    VisualTestContext, Window, div, px,
 };
 use gpui_component::Root;
 
@@ -102,26 +104,77 @@ impl Render for Scene {
 /// Open a bootstrapped, active window drawing `draw` in a [`Scene`] inside GPUI Kit's `Root`, as the app does, and
 /// check it once its first frame has settled.
 ///
-/// The window is activated because simulated windows start inactive, and an inactive window has no focus path for keys
-/// to follow: without it a key test would pass or fail for reasons that have nothing to do with the app. `draw` is
-/// called again on every render, so it may read state the test changes later; after a change that notifies nothing (a
-/// plain cell), call [`redraw`].
+/// `draw` is called again on every render, so it may read state the test changes later; after a change that notifies
+/// nothing (a plain cell), call [`redraw`].
 pub fn open(
     cx: &mut TestAppContext,
     draw: impl Fn(&mut Window, &mut App) -> AnyElement + 'static,
 ) -> &mut VisualTestContext {
     install(cx);
-    let (_, cx) = cx.add_window_view(|window, cx| {
-        let scene = cx.new(|cx| Scene {
-            draw: Box::new(draw),
-            root: root::attach(window, cx),
-        });
-        Root::new(scene, window, cx)
+    let (_, cx) = open_view(cx, |window, cx| Scene {
+        draw: Box::new(draw),
+        root: root::attach(window, cx),
     });
-    cx.update(|window, _| window.activate_window());
-    cx.run_until_parked();
-    check(cx);
     cx
+}
+
+/// [`open`] for a root view of the test's own, which `build` makes and which must wire itself through
+/// [`root::attach`] and [`root::wrap`] as every root view does: the view goes inside GPUI Kit's `Root`, and the window
+/// is activated and checked once its first frame has settled, exactly as [`open`] does. Returns the view, for a test
+/// that reads or changes its state, with the window's context.
+///
+/// Unlike [`open`], this does not bootstrap the app: call [`install`] first, which leaves room for a test that needs
+/// app state before its window exists (a UI session its view is made for).
+pub fn open_view<V: Render>(
+    cx: &mut TestAppContext,
+    build: impl FnOnce(&mut Window, &mut Context<V>) -> V,
+) -> (Entity<V>, &mut VisualTestContext) {
+    let mut view = None;
+    let (_, cx) = cx.add_window_view(|window, cx| {
+        let made = cx.new(|cx| build(window, cx));
+        view = Some(made.clone());
+        Root::new(made, window, cx)
+    });
+    activate_and_check(cx);
+    (built(view), cx)
+}
+
+/// A second window in an app [`open`] or [`open_view`] already bootstrapped, for a test about more than one window:
+/// `build` makes its root view as for [`open_view`], and the window is activated (so it becomes the active window, and
+/// the one before it inactive) and checked the same way. Owned rather than borrowed from `cx`, so the test can keep
+/// driving its first window's context beside it.
+pub fn another_window<V: Render>(
+    cx: &VisualTestContext,
+    build: impl FnOnce(&mut Window, &mut Context<V>) -> V,
+) -> (Entity<V>, VisualTestContext) {
+    let mut app = cx.cx.clone();
+    let mut view = None;
+    let window = app.add_window(|window, cx| {
+        let made = cx.new(|cx| build(window, cx));
+        view = Some(made.clone());
+        Root::new(made, window, cx)
+    });
+    let mut other = VisualTestContext::from_window(window.into(), &cx.cx);
+    activate_and_check(&mut other);
+    (built(view), other)
+}
+
+/// The root view a window builder made. GPUI runs the builder before `add_window` returns, so a missing view is a
+/// broken harness.
+fn built<V>(view: Option<Entity<V>>) -> Entity<V> {
+    match view {
+        Some(view) => view,
+        None => panic!("the window builder did not run"),
+    }
+}
+
+/// Activate a newly opened window, let its first frame settle, and check it.
+///
+/// The window is activated because simulated windows start inactive, and an inactive window has no focus path for keys
+/// to follow: without it a key test would pass or fail for reasons that have nothing to do with the app.
+fn activate_and_check(cx: &mut VisualTestContext) {
+    cx.update(|window, _| window.activate_window());
+    settle(cx);
 }
 
 /// Run the per-step checks ([`check_invariants`]) against the test's window.
@@ -129,11 +182,18 @@ pub fn check(cx: &mut VisualTestContext) {
     cx.update(check_invariants);
 }
 
+/// Run whatever is queued until the app is idle (output a fake stream delivered, a raw event's handlers, a deferred
+/// focus move), and check. Unlike [`redraw`], this asks for no frame of its own, so a test that counts renders sees only
+/// the ones its step caused.
+pub fn settle(cx: &mut VisualTestContext) {
+    cx.run_until_parked();
+    check(cx);
+}
+
 /// Redraw after a change the scene's draw function reads from a plain cell, which notifies nothing, and check.
 pub fn redraw(cx: &mut VisualTestContext) {
     cx.update(|window, _| window.refresh());
-    cx.run_until_parked();
-    check(cx);
+    settle(cx);
 }
 
 /// Press keys, as the platform would deliver them (GPUI's keystroke syntax, space-separated: `"tab shift-tab"`), and
@@ -186,14 +246,15 @@ mod self_tests {
     use std::time::Duration;
 
     use gpui::{
-        App, AppContext as _, Context, IntoElement, Render, TestAppContext, VisualTestContext,
-        Window, div,
+        AnyElement, App, AppContext as _, Context, IntoElement, Render, TestAppContext,
+        VisualTestContext, Window, div,
     };
 
-    use super::{advance, click, keys, open, redraw};
+    use super::{Scene, advance, another_window, click, keys, open, redraw, settle};
     use crate::components::{Button, HoverHelp, Role};
     use crate::focus::Mark;
     use crate::layers::{self, Anchor, Popover};
+    use crate::root;
 
     /// The anchor the scene drew last, shared with the test and the scene's button.
     type Shared = Rc<RefCell<Option<Anchor>>>;
@@ -207,13 +268,24 @@ mod self_tests {
         }
     }
 
-    /// Open the harness on a scene holding an anchor whose tracker it never draws, and a button, `opener`, that opens a
-    /// popover on that anchor when clicked. With `at_first_draw`, the first frame also opens one (deferred, as no view
-    /// may open a layer while it draws), so the window is already broken when [`open`] checks it.
+    /// Open the harness on a scene drawn by [`breaking_draw`].
     fn scene(cx: &mut TestAppContext, at_first_draw: bool) -> (&mut VisualTestContext, Shared) {
+        let (draw, anchor) = breaking_draw(at_first_draw);
+        (open(cx, draw), anchor)
+    }
+
+    /// A scene's draw function holding an anchor whose tracker it never draws, and a button, `opener`, that opens a
+    /// popover on that anchor when clicked. With `at_first_draw`, the first frame also opens one (deferred, as no view
+    /// may open a layer while it draws), so the window is already broken when it is first checked.
+    fn breaking_draw(
+        at_first_draw: bool,
+    ) -> (
+        impl Fn(&mut Window, &mut App) -> AnyElement + 'static,
+        Shared,
+    ) {
         let anchor: Shared = Rc::new(RefCell::new(None));
         let (drawn, first) = (anchor.clone(), Cell::new(at_first_draw));
-        let cx = open(cx, move |window, cx| {
+        let draw = move |window: &mut Window, cx: &mut App| {
             drawn.replace(Some(Anchor::for_element("untracked-anchor", window, cx)));
             if first.replace(false) {
                 let deferred = drawn.clone();
@@ -228,8 +300,8 @@ mod self_tests {
             )
             .on_click(move |_, window, cx| open_popover_on(&clicked, window, cx))
             .into_any_element()
-        });
-        (cx, anchor)
+        };
+        (draw, anchor)
     }
 
     /// Open a popover on the scene's untracked anchor. Its premises panic with their own messages, which never match a
@@ -297,5 +369,27 @@ mod self_tests {
         let (cx, anchor) = scene(cx, false);
         break_unchecked(cx, &anchor);
         advance(cx, Duration::from_millis(1));
+    }
+
+    /// [`settle`] checks once what was queued has run.
+    #[gpui::test]
+    #[should_panic(expected = "invariant broken")]
+    fn settle_checks(cx: &mut TestAppContext) {
+        let (cx, anchor) = scene(cx, false);
+        break_unchecked(cx, &anchor);
+        settle(cx);
+    }
+
+    /// [`another_window`] checks the window it opens once its first frame has settled, as [`open`] does for the first:
+    /// here the second window is the broken one, and the first is clean.
+    #[gpui::test]
+    #[should_panic(expected = "invariant broken")]
+    fn another_window_checks_its_first_frame(cx: &mut TestAppContext) {
+        let (cx, _) = scene(cx, false);
+        let (draw, _) = breaking_draw(true);
+        another_window(cx, |window, cx| Scene {
+            draw: Box::new(draw),
+            root: root::attach(window, cx),
+        });
     }
 }

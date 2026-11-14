@@ -746,3 +746,91 @@ async fn a_successful_attachment_resets_the_backoff() {
     .await
     .expect("the stream test finished in time");
 }
+
+/// What the stream read from a socket before it ended is the caller's, even when the caller was behind at the time: a
+/// replay's tail, say, that the stream had taken off the socket and was holding until the caller's queue had room. It
+/// reaches the caller, in order and before `Reconnecting`, and handing it over does not end the stream, which goes on
+/// to reconnect as after any other drop. Losing it would leave the caller drawing a screen with its last update
+/// missing; ending the stream there would leave a terminal that never comes back after a network blip.
+///
+/// Only a socket that ends while the caller is behind has anything to hand over, and while the caller is behind the
+/// stream reads nothing from the socket, so the end has to be found by a write. Here the helm floods one event more
+/// than the caller's queue holds and then stops reading, and the caller types far more than the socket's buffers take:
+/// the write stalls until the watchdog gives up on the socket, and while it stalls the stream cannot hand the held
+/// event over by the ordinary route, however fast the caller reads. Two premises are checked before the caller reads
+/// anything: the queue is full (so one event is held), and the typing has reached the helm's side (so the stream took
+/// the input while it still held the event, and is in the write). Without the second, the caller could drain the queue
+/// before the stream ran, the stream would deliver the held event the ordinary way first, and the test would pass
+/// whatever the hand-over did.
+#[tokio::test]
+async fn events_read_before_a_drop_reach_a_caller_that_was_behind_and_the_stream_reconnects() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        // No pings, so nothing but the flood and the input crosses the socket; a short watchdog, which also bounds
+        // each write, and a short reconnect wait.
+        let config = ChannelConfig {
+            ping_interval: Duration::from_secs(3600),
+            watchdog: Duration::from_millis(300),
+            reconnect_initial: Duration::from_millis(10),
+            reconnect_max: Duration::from_millis(10),
+        };
+        let (handle, mut events, mut accepted, mut first) = attached(config).await;
+        // Numbered, so the events show their order and that none is missing or repeated.
+        let output = |n: usize| GridOutput::Hello {
+            cols: 80,
+            rows: 24,
+            history_cap: u32::try_from(n).unwrap(),
+        };
+        let flood = EVENT_QUEUE + 1;
+        for n in 0..flood {
+            let frame = output(n).encode().unwrap();
+            first.socket.send(Message::binary(frame)).await.unwrap();
+        }
+        // The readiness oracle: the caller's queue is full. The stream read one more frame than that before it stopped
+        // reading, and holds it for the caller.
+        while events.events.len() < EVENT_QUEUE {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            events.events.len(),
+            EVENT_QUEUE,
+            "the premise: the queue is full"
+        );
+
+        // About 24 MiB of typing, which no loopback socket buffers while its reader is stopped (Linux's default
+        // ceilings are 4 MiB to send and 6 MiB to receive). The helm side keeps its socket open and never reads it.
+        let part = GridInput::Text {
+            data: "x".repeat(16_000),
+        };
+        handle.input(Attachment(1), vec![part; 1_500]);
+        // The stream writes a whole group before it looks at its queue again, so once the helm's side holds some of the
+        // typing (peeked, never read: reading would let the write go on) the stream is in that write, holding the
+        // event, and stays there until the watchdog ends the socket.
+        let mut arrived = vec![0; 16 * 1024];
+        while first.socket.get_ref().peek(&mut arrived).await.unwrap() < arrived.len() {
+            tokio::task::yield_now().await;
+        }
+
+        for n in 0..flood {
+            assert_eq!(
+                next_event(&mut events).await,
+                TerminalEvent::Output(output(n)),
+                "event {n} of {flood}"
+            );
+        }
+        // The end comes only from the stalled write. On a host whose socket buffer ceilings were raised far enough to
+        // take all the typing, the write never stalls and nothing ends the socket, so say that rather than letting the
+        // outer timeout report a bare hang.
+        let state = tokio::time::timeout(Duration::from_secs(20), next_event(&mut events))
+            .await
+            .expect(
+                "the premise: the socket ends because the typing stalls its write; it did not, so this host's \
+                 socket buffers took all the typing",
+            );
+        assert_eq!(state, TerminalEvent::State(StreamState::Reconnecting));
+        let again = accepted.recv().await.unwrap();
+        assert!(again.uri.contains("/term/unowned?"), "{}", again.uri);
+        drop(first);
+    })
+    .await
+    .expect("the stream test finished in time");
+}

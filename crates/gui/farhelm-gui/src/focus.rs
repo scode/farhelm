@@ -16,10 +16,11 @@
 //!   what they are doing" is kept.
 //! - **Home.** When nothing holds focus and no layer is open, focus goes home, which SPEC.md's "Where focus rests"
 //!   defines: the selected session's terminal, New when there are no sessions, a stopped session's card when the
-//!   selected session has stopped. The views that own those set it: [`set_home`] in general, [`choose_terminal`] when
-//!   the user chooses a session (its terminal becomes home and takes focus), and [`replace_home`] when home itself goes
-//!   away (a shell tab exits, and the agent tab takes its place). Only when none of them is on screen does focus rest
-//!   on the window's root view, which is not a tab stop, so a key press still starts inside Farhelm's key context.
+//!   selected session has stopped. The views that own those set it: [`set_home`] in general, and [`choose_terminal`]
+//!   when the user chooses a session (its terminal becomes home and takes focus). Only when none of them is on screen
+//!   does focus rest on the window's root view, which is not a tab stop, so a key press still starts inside Farhelm's
+//!   key context. SPEC.md's rule for a shell tab that exits (the agent tab takes focus at once) needs a move of its own,
+//!   which the terminal tabs add here when they arrive.
 //! - **The dialog stack's trap and restore**, together with the layer manager, which records who opened each layer and
 //!   what was focused at the time. Tab and Shift+Tab stay inside the topmost layer; closing a layer returns focus to
 //!   where it was before it opened; when the focused control disappears inside a dialog or menu, focus moves to the
@@ -55,6 +56,7 @@ use gpui::{
 use crate::actions::{
     self, Dismiss, FocusNext, FocusNextControl, FocusPrevious, FocusPreviousControl,
 };
+use crate::bootstrap::{installed, installed_mut};
 use crate::layers;
 
 /// Whether a click focuses the control it lands on, on this platform. WebKit on macOS does not focus a button on click,
@@ -94,23 +96,21 @@ pub(crate) fn set_click_focuses_controls(focuses: bool, cx: &mut App) {
 }
 
 fn click_focuses_controls(cx: &App) -> bool {
-    cx.try_global::<Rules>()
-        .map_or(CLICK_FOCUSES_CONTROLS, |rules| rules.click_focuses_controls)
+    installed::<Rules>(cx).map_or(CLICK_FOCUSES_CONTROLS, |rules| rules.click_focuses_controls)
 }
 
 /// Follow `source` for which controls Tab reaches: it is asked on every Tab and Shift+Tab press, so a change to the
-/// setting applies to the next press. The bootstrap calls this with what the host supplies, after [`install`]; called
-/// before it, it installs the default rules first rather than dropping the source.
+/// setting applies to the next press. The bootstrap calls this with what the host supplies, after [`install`], which
+/// it requires.
 pub fn follow_tab_reach(source: TabReachSource, cx: &mut App) {
-    if !cx.has_global::<Rules>() {
-        cx.set_global(default_rules());
+    if let Some(rules) = installed_mut::<Rules>(cx) {
+        rules.tab_reach_source = Some(source);
     }
-    cx.global_mut::<Rules>().tab_reach_source = Some(source);
 }
 
 /// Which controls a plain Tab reaches right now: the source's answer, or every control without one.
 fn tab_reach(cx: &App) -> TabReach {
-    cx.try_global::<Rules>()
+    installed::<Rules>(cx)
         .and_then(|rules| rules.tab_reach_source.as_ref())
         .map_or(TabReach::EveryControl, |source| source())
 }
@@ -144,7 +144,7 @@ impl Mark {
     /// The user's input as of now. Take it when the user starts the work, not when the work finishes: a mark taken late
     /// says the user has not moved on, which is exactly the lie the rule exists to prevent.
     pub fn take(cx: &App) -> Self {
-        Mark(cx.try_global::<MovedOn>().map_or(0, |moved| moved.count))
+        Mark(installed::<MovedOn>(cx).map_or(0, |moved| moved.count))
     }
 }
 
@@ -167,11 +167,13 @@ fn note_key(event: &KeystrokeEvent, window: &Window, cx: &mut App) {
     let Some(down) = &event.key_down else {
         return;
     };
-    if down.is_held || !cx.has_global::<MovedOn>() {
+    if down.is_held {
         return;
     }
     let focused = window.focused(cx);
-    let moved = cx.global_mut::<MovedOn>();
+    let Some(moved) = installed_mut::<MovedOn>(cx) else {
+        return;
+    };
     let repeat = moved.last_key.as_ref().is_some_and(|(key, on)| {
         *key == down.keystroke && on.as_ref().and_then(WeakFocusHandle::upgrade) == focused
     });
@@ -186,10 +188,12 @@ fn note_key(event: &KeystrokeEvent, window: &Window, cx: &mut App) {
 
 /// Count a click, unless it is the second or later click of a double click.
 fn note_click(event: &MouseDownEvent, cx: &mut App) {
-    if event.click_count > 1 || !cx.has_global::<MovedOn>() {
+    if event.click_count > 1 {
         return;
     }
-    let moved = cx.global_mut::<MovedOn>();
+    let Some(moved) = installed_mut::<MovedOn>(cx) else {
+        return;
+    };
     moved.count += 1;
     moved.last_key = None;
 }
@@ -273,9 +277,7 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
         last_focused: None,
     });
     let id = window.window_handle().window_id();
-    // Checked first: `global_mut` panics on a missing global, and a bare test fixture may not have installed it.
-    if cx.has_global::<Windows>() {
-        let windows = cx.global_mut::<Windows>();
+    if let Some(windows) = installed_mut::<Windows>(cx) {
         windows.0.retain(|_, state| state.upgrade().is_some());
         windows.0.insert(id, state.downgrade());
     }
@@ -299,7 +301,7 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
 
 fn state(window: &Window, cx: &App) -> Option<Entity<WindowFocus>> {
     let id = window.window_handle().window_id();
-    cx.try_global::<Windows>()?.0.get(&id)?.upgrade()
+    installed::<Windows>(cx)?.0.get(&id)?.upgrade()
 }
 
 /// Set the window's home: where focus goes whenever nothing holds it and no layer is open. The selected session's
@@ -335,24 +337,6 @@ pub fn choose_terminal(terminal: &FocusHandle, chosen: &Mark, window: &mut Windo
     }
     state.update(cx, |state, _| state.home = Some(terminal.downgrade()));
     apply(Move::To(terminal), window, cx);
-}
-
-/// Home is going away and `next` takes its place: a shell tab exited, and the session's agent tab is home now (SPEC.md,
-/// "Cases that settled disputed points": "A shell tab exits on its own while the user types in it. The session's agent
-/// tab takes focus.").
-///
-/// If the old home held focus, `next` takes it at once (the window's root if `next` is `None`), so typing goes on in
-/// the agent tab whether or not the exited tab is still drawn: focus moves on its own only once its holder is gone from
-/// a drawn frame, and nothing says when the exited tab's view takes it out. Otherwise this is [`set_home`]: a
-/// control that holds focus, such as the session filter, keeps it, and `next` takes focus only once nothing does. Call
-/// it while the old home's focus handle is still alive, or "held focus" cannot be told and only the second rule
-/// applies.
-pub fn replace_home(next: Option<&FocusHandle>, window: &mut Window, cx: &mut App) {
-    let held = home(window, cx).is_some_and(|old| old.contains_focused(window, cx));
-    set_home(next, window, cx);
-    if held && !layers::any_open(window, cx) {
-        recover(window, cx);
-    }
 }
 
 /// Whether nothing holds focus in SPEC.md's sense: no element at all, or only the root view, which stands in for
