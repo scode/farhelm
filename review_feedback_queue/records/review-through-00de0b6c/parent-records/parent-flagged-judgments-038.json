@@ -1,5 +1,23 @@
 [
- {"key":"g060/c3","proposal":"claim-checks/claims-038/result.json","parent_proposal":"source-refuted-Tensorlake-precheck-narrowing-loses-Podman-ownership","final_independent_gate":"required-before-highest-ownership-drop","reason":"Parent read full038. Tensorlake-only precheck avoids an unnecessary provider key but final aggregate needs_cleanup includes every Podman image, prepared image, helper/start/retired resource and Tensorlake state. Shared delete admission/provider cleanup precedes immediate store deletion, which refuses any remaining aggregate cleanup. Refute narrowing this precheck only, not individual provider destruction algorithms or implicit pruning. Preserve forgotten owned-resource/cleanup authority hypothesis for fresh check."},
- {"key":"g060/c4","proposal":"claim-checks/claims-038/result.json","parent_proposal":"source-refuted-three-named-literal-argument-positions-only","final_independent_gate":"required-before-highest-command-injection-drop","reason":"Full038 editable fields remain literal NUL-free values; getent uses quoted user after-- and pull/inspect pass reference as one argument after--. The record expressly excludes exists, helper/run, exec and common executor, so the original broad immediate-consumer refutation must stay narrowed.058l1/059l1 independently check more actual consumers, but that is not an automatic whole-record alias. Preserve original host command-execution/security concern and exact scope for fresh gate. Consumer evidence repeats known058 synthesis; no new interface premise."},
- {"key":"g060/c6","proposal":"claim-checks/claims-038/result.json","parent_proposal":"source-refuted-older-production-prepared-login-record","final_independent_gate":"required-by-conservative-owned-state-schema-flag","reason":"Full038 exact predecessor only declaration/member and range history shows first production PreparedImage constructor appears with required observed login. Optional/defaulted Podman absence keeps older Tensorlake rows valid. No fabricated/external fork record is a supported predecessor premise, and decode failure alone does not establish artifact deletion. Preserve original high catalog inaccessibility and conservative ownership context for fresh gate; same059c4 premise, no general upgrade acceptance or rarity filter."}
+  {
+    "key": "g060/c3",
+    "proposal": "claim-checks/claims-038/result.json",
+    "parent_proposal": "source-refuted-Tensorlake-precheck-narrowing-loses-Podman-ownership",
+    "final_independent_gate": "required-before-highest-ownership-drop",
+    "reason": "Parent read full038. Tensorlake-only precheck avoids an unnecessary provider key but final aggregate needs_cleanup includes every Podman image, prepared image, helper/start/retired resource and Tensorlake state. Shared delete admission/provider cleanup precedes immediate store deletion, which refuses any remaining aggregate cleanup. Refute narrowing this precheck only, not individual provider destruction algorithms or implicit pruning. Preserve forgotten owned-resource/cleanup authority hypothesis for fresh check."
+  },
+  {
+    "key": "g060/c4",
+    "proposal": "claim-checks/claims-038/result.json",
+    "parent_proposal": "source-refuted-three-named-literal-argument-positions-only",
+    "final_independent_gate": "required-before-highest-command-injection-drop",
+    "reason": "Full038 editable fields remain literal NUL-free values; getent uses quoted user after-- and pull/inspect pass reference as one argument after--. The record expressly excludes exists, helper/run, exec and common executor, so the original broad immediate-consumer refutation must stay narrowed.058l1/059l1 independently check more actual consumers, but that is not an automatic whole-record alias. Preserve original host command-execution/security concern and exact scope for fresh gate. Consumer evidence repeats known058 synthesis; no new interface premise."
+  },
+  {
+    "key": "g060/c6",
+    "proposal": "claim-checks/claims-038/result.json",
+    "parent_proposal": "source-refuted-older-production-prepared-login-record",
+    "final_independent_gate": "required-by-conservative-owned-state-schema-flag",
+    "reason": "Full038 exact predecessor only declaration/member and range history shows first production PreparedImage constructor appears with required observed login. Optional/defaulted Podman absence keeps older Tensorlake rows valid. No fabricated/external fork record is a supported predecessor premise, and decode failure alone does not establish artifact deletion. Preserve original high catalog inaccessibility and conservative ownership context for fresh gate; same059c4 premise, no general upgrade acceptance or rarity filter."
+  }
 ]

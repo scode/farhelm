@@ -1,4 +1,16 @@
 [
- {"key":"g039/c2","proposal":"claim-checks/claims-024/result.json","parent_proposal":"spec-retired-old-container-positive-tests-and-source-refuted-silent-template-fallback","final_independent_gate":"required-before-original-isolation-concern-drop","reason":"Parent read full024. Earlierhost-supervisor/bindmountcontainerexperimentalmodel explicitlyretired; positiveoldlaunchtestnotrequirednewPodmanisolation. Replacementretainsobject/refusalunchangeddraft/storedfieldremoval; launcher rejectsnonnulloldcontainerbeforeclone/mutation, ordinaryinterceptedpayloadomitsoldfield. Narrowexactretirementcoverandsilenttemplatefallbackrefutation, notallhistoricalmigration/isolation/runtimecleanup. Originalpossiblehostexecutiondespiteisolationrequestpreservedfreshgate; existingoldpositiveconfigoracledifferentnotcover."},
- {"key":"g040/c3","proposal":"claim-checks/claims-024/result.json","parent_proposal":"source-refuted-wrap-and-notification-comment-contract-mismatch","final_independent_gate":"required-by-conservative-link-trust-flag","reason":"Full024 previousrowwrappedflagmatchesgridbuffer, terminologyonlydoesnotchangecontrolflow; endednoticenamecurrentSPEC, notificationstillonealloweddocshrefbesideforeignURL/exactexternalopenerassertion. Conservativefreshlinkboundarychecknarrowcommentaccuracyonly, notcertifyallinputframesorlosslessreconstruction. Existingagent-text-helper-removes-wrap-boundary-spacesretainstrimmingdefectindependently, notrefutedorcoveredbyrightflagterminology."}
+  {
+    "key": "g039/c2",
+    "proposal": "claim-checks/claims-024/result.json",
+    "parent_proposal": "spec-retired-old-container-positive-tests-and-source-refuted-silent-template-fallback",
+    "final_independent_gate": "required-before-original-isolation-concern-drop",
+    "reason": "Parent read full024. Earlierhost-supervisor/bindmountcontainerexperimentalmodel explicitlyretired; positiveoldlaunchtestnotrequirednewPodmanisolation. Replacementretainsobject/refusalunchangeddraft/storedfieldremoval; launcher rejectsnonnulloldcontainerbeforeclone/mutation, ordinaryinterceptedpayloadomitsoldfield. Narrowexactretirementcoverandsilenttemplatefallbackrefutation, notallhistoricalmigration/isolation/runtimecleanup. Originalpossiblehostexecutiondespiteisolationrequestpreservedfreshgate; existingoldpositiveconfigoracledifferentnotcover."
+  },
+  {
+    "key": "g040/c3",
+    "proposal": "claim-checks/claims-024/result.json",
+    "parent_proposal": "source-refuted-wrap-and-notification-comment-contract-mismatch",
+    "final_independent_gate": "required-by-conservative-link-trust-flag",
+    "reason": "Full024 previousrowwrappedflagmatchesgridbuffer, terminologyonlydoesnotchangecontrolflow; endednoticenamecurrentSPEC, notificationstillonealloweddocshrefbesideforeignURL/exactexternalopenerassertion. Conservativefreshlinkboundarychecknarrowcommentaccuracyonly, notcertifyallinputframesorlosslessreconstruction. Existingagent-text-helper-removes-wrap-boundary-spacesretainstrimmingdefectindependently, notrefutedorcoveredbyrightflagterminology."
+  }
 ]

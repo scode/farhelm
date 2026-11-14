@@ -4,13 +4,31 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Unverified collection: a power failure on the helm can lose its most recent ownership/pending records while a remotely created container survives; explicit leftover cleanup may then be needed. This is reachable in production, unlike the initial storage-only revision in interface g064/c3. Exact source: provisioning/tensorlake_add.rs:388-398 registers the pending environment via ProviderHandle::register_session; store/podman.rs:355-394 commits that row with ordinary conn.call. podman.rs:1103-1125 writes selected facts/login/pending marker through set_podman_prepared_create (store/podman.rs:256-278, ordinary conn.call) before sending run. Canonical ID is saved through ordinary conn.call at store/podman.rs:415-432. Db::call (farhelm-supervisor/src/db.rs:230-245) does not invoke with_full_sync; configure_durability at 94-117 selects NORMAL in WAL. Process crashes preserve these commits, but power loss can roll them back. Source checks also bound the consequence: create refuses adoption of a name collision without saved ID/pending marker (podman.rs:1073-1077); destroy with neither record returns never_created without a name lookup or rm (1294-1302). A recorded pending lookup pins canonical ID before removal (1306-1319), otherwise a saved ID authorizes only that immutable container. This does not establish accidental deletion of surviving user work. An unregistered surviving container retains helm/role labels and is eligible for explicit leftover discovery/removal at its place; l2 separately obstructs global discovery when an enumerated place fails. Original potential highest consequence retained: a sur
+Unverified collection: a power failure on the helm can lose its most recent ownership/pending records while a remotely
+created container survives; explicit leftover cleanup may then be needed. This is reachable in production, unlike the
+initial storage-only revision in interface g064/c3. Exact source: provisioning/tensorlake_add.rs:388-398 registers the
+pending environment via ProviderHandle::register_session; store/podman.rs:355-394 commits that row with ordinary
+conn.call. podman.rs:1103-1125 writes selected facts/login/pending marker through set_podman_prepared_create
+(store/podman.rs:256-278, ordinary conn.call) before sending run. Canonical ID is saved through ordinary conn.call at
+store/podman.rs:415-432. Db::call (farhelm-supervisor/src/db.rs:230-245) does not invoke with_full_sync;
+configure_durability at 94-117 selects NORMAL in WAL. Process crashes preserve these commits, but power loss can roll
+them back. Source checks also bound the consequence: create refuses adoption of a name collision without saved
+ID/pending marker (podman.rs:1073-1077); destroy with neither record returns never_created without a name lookup or rm
+(1294-1302). A recorded pending lookup pins canonical ID before removal (1306-1319), otherwise a saved ID authorizes
+only that immutable container. This does not establish accidental deletion of surviving user work. An unregistered
+surviving container retains helm/role labels and is eligible for explicit leftover discovery/removal at its place; l2
+separately obstructs global discovery when an enumerated place fails. Original potential highest consequence retained: a
+sur
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **high**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **high**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g065/l3`.
 
@@ -20,25 +38,96 @@ Confidence: Unverified collection; recording proposals and any disagreement rema
 
 Latest reviewer record, event 16 (finding, open):
 
-Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: a power failure on the helm can lose its most recent ownership/pending records while a remotely created container survives; explicit leftover cleanup may then be needed. This is reachable in production, unlike the initial storage-only revision in interface g064/c3. Exact source: provisioning/tensorlake_add.rs:388-398 registers the pending environment via ProviderHandle::register_session; store/podman.rs:355-394 commits that row with ordinary conn.call. podman.rs:1103-1125 writes selected facts/login/pending marker through set_podman_prepared_create (store/podman.rs:256-278, ordinary conn.call) before sending run. Canonical ID is saved through ordinary conn.call at store/podman.rs:415-432. Db::call (farhelm-supervisor/src/db.rs:230-245) does not invoke with_full_sync; configure_durability at 94-117 selects NORMAL in WAL. Process crashes preserve these commits, but power loss can roll them back. Source checks also bound the consequence: create refuses adoption of a name collision without saved ID/pending marker (podman.rs:1073-1077); destroy with neither record returns never_created without a name lookup or rm (1294-1302). A recorded pending lookup pins canonical ID before removal (1306-1319), otherwise a saved ID authorizes only that immutable container. This does not establish accidental deletion of surviving user work. An unregistered surviving container retains helm/role labels and is eligible for explicit leftover discovery/removal at its place; l2 separately obstructs global discovery when an enumerated place fails. Original potential highest consequence retained: a surviving user container could become untracked or unavailable through normal host/session views after its ownership records roll back; direct data deletion is not shown. Suggested bucket: unresolved for the parent's decision; could-be-highest: potentially for loss of access to user-owned processes/work, not an established destructive route. Confidence: confirmed source behavior, not runtime observation. proposed_drop: specification acceptance, requiring independent consideration because of the original possible-highest consequence. Exact cited text in SPEC_impl.md Helm internals, 5668-5672: 'every ordinary read-write connection selects `synchronous=NORMAL` only after reading an actual WAL mode and otherwise retains FULL. This accepts losing the last commits on an OS crash or power loss without weakening database consistency; process crashes preserve commits.' The same section enumerates the trust-revocation writes requiring FULL; these creation ownership writes are not among them. SPEC_impl.md:6682-6685 additionally says for the shared sandbox ownership model, 'A row with neither a saved ID nor an outstanding create is removed without looking up its name or deleting any sandbox or snapshots' and 'A legacy row or a power loss that lost both records cannot recover by name: remove that host entry, then handle the leftover explicitly.' The Container sessions contract reuses sandbox ownership/cleanup rules. SPEC_impl.md:6840-6842 says 'Ordinary write durability is retained: a legacy row or power loss that loses both the ID and pending marker requires explicit cleanup.' Those texts support a proposed accepted tail-loss outcome rather than silently demanding a new FULL barrier. possible_cover: none beyond these cited specifications; prohibited coverage sources were not searched. No tests, builds or reproductions ran.
+Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: a power failure on the helm can lose its most recent
+ownership/pending records while a remotely created container survives; explicit leftover cleanup may then be needed.
+This is reachable in production, unlike the initial storage-only revision in interface g064/c3. Exact source:
+provisioning/tensorlake_add.rs:388-398 registers the pending environment via ProviderHandle::register_session;
+store/podman.rs:355-394 commits that row with ordinary conn.call. podman.rs:1103-1125 writes selected
+facts/login/pending marker through set_podman_prepared_create (store/podman.rs:256-278, ordinary conn.call) before
+sending run. Canonical ID is saved through ordinary conn.call at store/podman.rs:415-432. Db::call
+(farhelm-supervisor/src/db.rs:230-245) does not invoke with_full_sync; configure_durability at 94-117 selects NORMAL in
+WAL. Process crashes preserve these commits, but power loss can roll them back. Source checks also bound the
+consequence: create refuses adoption of a name collision without saved ID/pending marker (podman.rs:1073-1077); destroy
+with neither record returns never_created without a name lookup or rm (1294-1302). A recorded pending lookup pins
+canonical ID before removal (1306-1319), otherwise a saved ID authorizes only that immutable container. This does not
+establish accidental deletion of surviving user work. An unregistered surviving container retains helm/role labels and
+is eligible for explicit leftover discovery/removal at its place; l2 separately obstructs global discovery when an
+enumerated place fails. Original potential highest consequence retained: a surviving user container could become
+untracked or unavailable through normal host/session views after its ownership records roll back; direct data deletion
+is not shown. Suggested bucket: unresolved for the parent's decision; could-be-highest: potentially for loss of access
+to user-owned processes/work, not an established destructive route. Confidence: confirmed source behavior, not runtime
+observation. proposed_drop: specification acceptance, requiring independent consideration because of the original
+possible-highest consequence. Exact cited text in SPEC_impl.md Helm internals, 5668-5672: 'every ordinary read-write
+connection selects `synchronous=NORMAL` only after reading an actual WAL mode and otherwise retains FULL. This accepts
+losing the last commits on an OS crash or power loss without weakening database consistency; process crashes preserve
+commits.' The same section enumerates the trust-revocation writes requiring FULL; these creation ownership writes are
+not among them. SPEC_impl.md:6682-6685 additionally says for the shared sandbox ownership model, 'A row with neither a
+saved ID nor an outstanding create is removed without looking up its name or deleting any sandbox or snapshots' and 'A
+legacy row or a power loss that lost both records cannot recover by name: remove that host entry, then handle the
+leftover explicitly.' The Container sessions contract reuses sandbox ownership/cleanup rules. SPEC_impl.md:6840-6842
+says 'Ordinary write durability is retained: a legacy row or power loss that loses both the ID and pending marker
+requires explicit cleanup.' Those texts support a proposed accepted tail-loss outcome rather than silently demanding a
+new FULL barrier. possible_cover: none beyond these cited specifications; prohibited coverage sources were not searched.
+No tests, builds or reproductions ran.
 
-Synthesis interface boundary check: g068/l1 correctly concerns FIRST BUILD HELPER publication, not a pending approval. build.rs:538-565 calls edit_at with the HostRow paired with the current probe; tensorlake/build.rs:330-364 checks kind/entry_uuid/destination and publishes the helper in one immediate transaction. Once that ownership wins, refuse_referenced_place blocks removal/retarget; a destination change that wins first causes the ownership write to refuse. SESSION create has another boundary: start_session_environment registers the environment row before ensure_prepared; that row itself then fences place retarget, and podman.rs:1107 records exact prepared facts/login/pending send before run. PodmanInstallGuard binds the newly registered environment entry/binding, not a historical snapshot of its place. place() at podman.rs:150-164 only compares a CURRENT probe route to a CURRENT store row. At g020 reviewed revision 190d844e58c96cf197aa838d0b0eea8062f48435, agent_requests.rs:4485-4515 asks the card before start_session_environment at 4541-4549; registration at provisioning/tensorlake_add.rs:391-398 occurs only after Allow. Its lock at 452 is for the NEW environment host, not the earlier displayed place. A cold place has no prior row/helper references while that card waits. Thus neither the helper transaction nor session create/pending/resource-proof boundaries refute the earlier-approval retarget/credential consequence already recorded in supplied g020/l1. No duplicate local finding or drop is proposed for g020; that interface record retains its original highest security consequence. This l3 power-loss proposal and g068 helper-race source refutation do not decide approval authority. No unresolved source premise remains in these phase distinctions; no execution performed.
+Synthesis interface boundary check: g068/l1 correctly concerns FIRST BUILD HELPER publication, not a pending approval.
+build.rs:538-565 calls edit_at with the HostRow paired with the current probe; tensorlake/build.rs:330-364 checks
+kind/entry_uuid/destination and publishes the helper in one immediate transaction. Once that ownership wins,
+refuse_referenced_place blocks removal/retarget; a destination change that wins first causes the ownership write to
+refuse. SESSION create has another boundary: start_session_environment registers the environment row before
+ensure_prepared; that row itself then fences place retarget, and podman.rs:1107 records exact prepared
+facts/login/pending send before run. PodmanInstallGuard binds the newly registered environment entry/binding, not a
+historical snapshot of its place. place() at podman.rs:150-164 only compares a CURRENT probe route to a CURRENT store
+row. At g020 reviewed revision 190d844e58c96cf197aa838d0b0eea8062f48435, agent_requests.rs:4485-4515 asks the card
+before start_session_environment at 4541-4549; registration at provisioning/tensorlake_add.rs:391-398 occurs only after
+Allow. Its lock at 452 is for the NEW environment host, not the earlier displayed place. A cold place has no prior
+row/helper references while that card waits. Thus neither the helper transaction nor session
+create/pending/resource-proof boundaries refute the earlier-approval retarget/credential consequence already recorded in
+supplied g020/l1. No duplicate local finding or drop is proposed for g020; that interface record retains its original
+highest security consequence. This l3 power-loss proposal and g068 helper-race source refutation do not decide approval
+authority. No unresolved source premise remains in these phase distinctions; no execution performed.
 
-Discovery-turn interface synthesis, before new search: supplied latest g064/c3 now establishes the integrated production route, ordinary WAL/NORMAL writes, process-crash safety and accepted OS/power-loss tail rollback, matching l3. Its potential highest original consequence and exact SPEC_impl.md:5670-5672 proposed-drop basis are retained as in l3; neither record represents an accepted parent drop or lowering. The earlier storage-only missing-caller rationale is superseded for the integrated 566 commit. No additional local defect or unresolved source premise emerges from this input, and no duplicate finding is claimed.
+Discovery-turn interface synthesis, before new search: supplied latest g064/c3 now establishes the integrated production
+route, ordinary WAL/NORMAL writes, process-crash safety and accepted OS/power-loss tail rollback, matching l3. Its
+potential highest original consequence and exact SPEC_impl.md:5670-5672 proposed-drop basis are retained as in l3;
+neither record represents an accepted parent drop or lowering. The earlier storage-only missing-caller rationale is
+superseded for the integrated 566 commit. No additional local defect or unresolved source premise emerges from this
+input, and no duplicate finding is claimed.
 
 Returned proposal (claims-042, event 16): **covered**, suggested bucket **high**.
 
-The production ownership writes use ordinary WAL/NORMAL durability, so OS/power loss can lose ownership records while a remote container survives. The specification expressly accepts ordinary tail loss and explicit leftover handling when both identity records are lost. This is a proposed narrow coverage disposition, not an accepted drop or highest-consequence lowering.
+The production ownership writes use ordinary WAL/NORMAL durability, so OS/power loss can lose ownership records while a
+remote container survives. The specification expressly accepts ordinary tail loss and explicit leftover handling when
+both identity records are lost. This is a proposed narrow coverage disposition, not an accepted drop or
+highest-consequence lowering.
 
-Original stronger consequence: A surviving container containing user processes/work could become untracked or unavailable through ordinary host/session views; the first lead also considered erroneous deletion, which subsequent source checks did not establish. The integrated caller supersedes the earlier storage-only missing-caller rationale. This durability proposal does not refute the separately mentioned earlier-approval/retarget credential claim or recursive image pruning.
+Original stronger consequence: A surviving container containing user processes/work could become untracked or
+unavailable through ordinary host/session views; the first lead also considered erroneous deletion, which subsequent
+source checks did not establish. The integrated caller supersedes the earlier storage-only missing-caller rationale.
+This durability proposal does not refute the separately mentioned earlier-approval/retarget credential claim or
+recursive image pruning.
 
-Unresolved premise or limitation: No missing premise for accepted ownership tail rollback. Permanent loss of user work or erroneous deletion remains unestablished; loss of registry access may require manual recovery. The parent must independently check coverage and any lowering from potential highest.
+Unresolved premise or limitation: No missing premise for accepted ownership tail rollback. Permanent loss of user work
+or erroneous deletion remains unestablished; loss of registry access may require manual recovery. The parent must
+independently check coverage and any lowering from potential highest.
 
-Proposed basis: Accepted ordinary WAL/NORMAL power-loss tail rollback plus the explicitly documented no-ID/no-pending-marker leftover procedure, applied through the shared container ownership contract. High reflects established manual control/recovery disruption; a highest route is not silently discarded. Supplied history reports the same root in g064/c3; parent reconciliation is needed, with no independent alias verdict here.
+Proposed basis: Accepted ordinary WAL/NORMAL power-loss tail rollback plus the explicitly documented
+no-ID/no-pending-marker leftover procedure, applied through the shared container ownership contract. High reflects
+established manual control/recovery disruption; a highest route is not silently discarded. Supplied history reports the
+same root in g064/c3; parent reconciliation is needed, with no independent alias verdict here.
 
-Existing parent disposition (event 16): under-investigation. Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it.
+Existing parent disposition (event 16): under-investigation. Record durably acknowledged; parent source/contract
+validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This
+preserves the claim and uncertainty without accepting, dropping or lowering it.
 
-Unapplied parent proposal: ordinary-WAL-power-loss-ownership-policy-cover-with-original-harm-preserved. Parent read complete042 in separate065/066 outputs. Integrated create awaits ordinary pending record before run but WAL/NORMAL may lose recent registration/identity commits on OS/power loss while external work survives. Exact ordinary durability acceptance plus explicitly inherited sandbox no-ID/no-pending leftover procedure supplies proposed cover, not foundation no-caller refutation. Process crashes preserve commits; no premature send or arbitrary ownership-loss permission. Same064c3 root needs consolidation. Established manual control/recovery disruption is high if retained, permanent work loss/erroneous deletion unestablished; keep those original possibilities for fresh gate, separate prior-place approval and image pruning.
+Unapplied parent proposal: ordinary-WAL-power-loss-ownership-policy-cover-with-original-harm-preserved. Parent read
+complete042 in separate065/066 outputs. Integrated create awaits ordinary pending record before run but WAL/NORMAL may
+lose recent registration/identity commits on OS/power loss while external work survives. Exact ordinary durability
+acceptance plus explicitly inherited sandbox no-ID/no-pending leftover procedure supplies proposed cover, not foundation
+no-caller refutation. Process crashes preserve commits; no premature send or arbitrary ownership-loss permission.
+Same064c3 root needs consolidation. Established manual control/recovery disruption is high if retained, permanent work
+loss/erroneous deletion unestablished; keep those original possibilities for fresh gate, separate prior-place approval
+and image pruning.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g065 record](records/review-through-00de0b6c/groups/g065.json). Record ID: `l3`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g065 record](records/review-through-00de0b6c/groups/g065.json). Record ID: `l3`.

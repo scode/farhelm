@@ -4,13 +4,30 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Unverified collection: after a successful Restart of an interrupted session, an old sidebar response can leave the open view on its interrupted card without a terminal until a live detail read completes. Synthesis verdict: duplicate of caller-supplied g037/f3 latest line 10 and g038/l1 latest line 11; revise my earlier candidate rather than retain its blanket refutation. Original consequence preserved and bounded: temporary wrong recovery surface/blocked terminal access; no permanent failure or destructive consequence established. Direct rechecks: session_ops.rs:79–80 accepts stale=true regardless of Interrupted; :91–107 allows retirement once pending is empty, and :215–225 clears restart_succeeded. list/view.rs:3416–3419 publishes successful completion, requests a refresh and releases the pending row operation without a listing fence. Its request_listing at :2473–2474 goes through reader::request_read, whose :644–660 single-flight path can leave the earlier read in progress. commit_listing at :1945–1953 applies normal ReadGate admission then :1985 retires success. ops.rs:182–187 rejects only generations older than the last applied result, not ones older than Restart. aggregate.rs:547 captures host state before awaited cached_slice at :578; row_of at :357 derives stale from that snapshot, so a captured outage response may arrive after reconnection and successful Restart. A mounted SessionView retains independent current (:605); selection following updates title and requests detail (:1243–1262), not its status. If retirement happens before the deferred observer at :549–564, restart_revision still 
+Unverified collection: after a successful Restart of an interrupted session, an old sidebar response can leave the open
+view on its interrupted card without a terminal until a live detail read completes. Synthesis verdict: duplicate of
+caller-supplied g037/f3 latest line 10 and g038/l1 latest line 11; revise my earlier candidate rather than retain its
+blanket refutation. Original consequence preserved and bounded: temporary wrong recovery surface/blocked terminal
+access; no permanent failure or destructive consequence established. Direct rechecks: session_ops.rs:79–80 accepts
+stale=true regardless of Interrupted; :91–107 allows retirement once pending is empty, and :215–225 clears
+restart_succeeded. list/view.rs:3416–3419 publishes successful completion, requests a refresh and releases the pending
+row operation without a listing fence. Its request_listing at :2473–2474 goes through reader::request_read, whose
+:644–660 single-flight path can leave the earlier read in progress. commit_listing at :1945–1953 applies normal ReadGate
+admission then :1985 retires success. ops.rs:182–187 rejects only generations older than the last applied result, not
+ones older than Restart. aggregate.rs:547 captures host state before awaited cached_slice at :578; row_of at :357
+derives stale from that snapshot, so a captured outage response may arrive after reconnection and successful Restart. A
+mounted SessionView retains independent current (:605); selection following updates title and requests detail
+(:1243–1262), not its status. If retirement happens before the deferred observer at :549–564, restart_revision still
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **high**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **high**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g032/c4`, `g037/f3`, `g038/l1`, `g089/l1`.
 
@@ -20,21 +37,98 @@ Confidence: Unverified collection; recording proposals and any disagreement rema
 
 Latest reviewer record, event 12 (finding, open):
 
-Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: after a successful Restart of an interrupted session, an old sidebar response can leave the open view on its interrupted card without a terminal until a live detail read completes. Synthesis verdict: duplicate of caller-supplied g037/f3 latest line 10 and g038/l1 latest line 11; revise my earlier candidate rather than retain its blanket refutation. Original consequence preserved and bounded: temporary wrong recovery surface/blocked terminal access; no permanent failure or destructive consequence established. Direct rechecks: session_ops.rs:79–80 accepts stale=true regardless of Interrupted; :91–107 allows retirement once pending is empty, and :215–225 clears restart_succeeded. list/view.rs:3416–3419 publishes successful completion, requests a refresh and releases the pending row operation without a listing fence. Its request_listing at :2473–2474 goes through reader::request_read, whose :644–660 single-flight path can leave the earlier read in progress. commit_listing at :1945–1953 applies normal ReadGate admission then :1985 retires success. ops.rs:182–187 rejects only generations older than the last applied result, not ones older than Restart. aggregate.rs:547 captures host state before awaited cached_slice at :578; row_of at :357 derives stale from that snapshot, so a captured outage response may arrive after reconnection and successful Restart. A mounted SessionView retains independent current (:605); selection following updates title and requests detail (:1243–1262), not its status. If retirement happens before the deferred observer at :549–564, restart_revision still increments mount_generation, but erased success cannot set relaunched=true. terminal_absence (:3701–3707) then remains Interrupted for the old mounted nonstale current, keep_terminal_surface (:3714–3722) is false, and terminal_specs (:1709–1710) emits an empty set. A generation increment alone is not a terminal. Connected detail normally heals this; this finding does not claim that fresh connected detail serves cached Interrupted, nor that the numerical completion revision is lost. Supplied records independently source-check pinned Dioxus 0.7.10 task-before-effect scheduling; my direct checks confirm there is no source ordering/fence in these caller paths that requires observation or fresh detail before retirement. This is a conditional source interleaving, never observed execution. Contract: SPEC_impl.md GUI: Dioxus :1134–1140 requires Restart completion reattachment and observation by a mounted view. Narrow surviving part of my old refutation: a NONSTALE Interrupted row fails read_confirms_run and cannot by itself retire this success. That fact does not apply to stale=true. Cross-batch boundary: g036/l1 latest line 7 at b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe uses a NEWER eligible listing above the old restart_listing_floor and can lose the then-existing terminal-kind override too. Restoring the floor addresses the pre-completion stale-evidence trigger here but not that eligible-listing/deferred-observer route; do not collapse their fixes solely because both can show the interrupted card. Suggested bucket: other, matching the established temporary surface consequence. Could-be-highest: no established security or work-loss route. Confidence: likely, with the precise timing premise that stale pre-Restart sidebar evidence is admitted after pending clears and before the mounted observer or live detail supplies the new run. proposed_drop: false for the defect; parent should mark this record duplicate of g037/f3/g038/l1. possible_cover: those caller-supplied records only, plus related but distinct g036/l1 as above; no queue coverage search. No unresolved source premise for the conditional mechanism, incidence unmeasured. No tests, builds or reproductions run. Lead revision c4 is closed to this finding.
+Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: after a successful Restart of an interrupted session,
+an old sidebar response can leave the open view on its interrupted card without a terminal until a live detail read
+completes. Synthesis verdict: duplicate of caller-supplied g037/f3 latest line 10 and g038/l1 latest line 11; revise my
+earlier candidate rather than retain its blanket refutation. Original consequence preserved and bounded: temporary wrong
+recovery surface/blocked terminal access; no permanent failure or destructive consequence established. Direct rechecks:
+session_ops.rs:79–80 accepts stale=true regardless of Interrupted; :91–107 allows retirement once pending is empty, and
+:215–225 clears restart_succeeded. list/view.rs:3416–3419 publishes successful completion, requests a refresh and
+releases the pending row operation without a listing fence. Its request_listing at :2473–2474 goes through
+reader::request_read, whose :644–660 single-flight path can leave the earlier read in progress. commit_listing at
+:1945–1953 applies normal ReadGate admission then :1985 retires success. ops.rs:182–187 rejects only generations older
+than the last applied result, not ones older than Restart. aggregate.rs:547 captures host state before awaited
+cached_slice at :578; row_of at :357 derives stale from that snapshot, so a captured outage response may arrive after
+reconnection and successful Restart. A mounted SessionView retains independent current (:605); selection following
+updates title and requests detail (:1243–1262), not its status. If retirement happens before the deferred observer at
+:549–564, restart_revision still increments mount_generation, but erased success cannot set relaunched=true.
+terminal_absence (:3701–3707) then remains Interrupted for the old mounted nonstale current, keep_terminal_surface
+(:3714–3722) is false, and terminal_specs (:1709–1710) emits an empty set. A generation increment alone is not a
+terminal. Connected detail normally heals this; this finding does not claim that fresh connected detail serves cached
+Interrupted, nor that the numerical completion revision is lost. Supplied records independently source-check pinned
+Dioxus 0.7.10 task-before-effect scheduling; my direct checks confirm there is no source ordering/fence in these caller
+paths that requires observation or fresh detail before retirement. This is a conditional source interleaving, never
+observed execution. Contract: SPEC_impl.md GUI: Dioxus :1134–1140 requires Restart completion reattachment and
+observation by a mounted view. Narrow surviving part of my old refutation: a NONSTALE Interrupted row fails
+read_confirms_run and cannot by itself retire this success. That fact does not apply to stale=true. Cross-batch
+boundary: g036/l1 latest line 7 at b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe uses a NEWER eligible listing above the old
+restart_listing_floor and can lose the then-existing terminal-kind override too. Restoring the floor addresses the
+pre-completion stale-evidence trigger here but not that eligible-listing/deferred-observer route; do not collapse their
+fixes solely because both can show the interrupted card. Suggested bucket: other, matching the established temporary
+surface consequence. Could-be-highest: no established security or work-loss route. Confidence: likely, with the precise
+timing premise that stale pre-Restart sidebar evidence is admitted after pending clears and before the mounted observer
+or live detail supplies the new run. proposed_drop: false for the defect; parent should mark this record duplicate of
+g037/f3/g038/l1. possible_cover: those caller-supplied records only, plus related but distinct g036/l1 as above; no
+queue coverage search. No unresolved source premise for the conditional mechanism, incidence unmeasured. No tests,
+builds or reproductions run. Lead revision c4 is closed to this finding.
 
 Returned proposal (claims-019, event 12): **filtered**, suggested bucket **other**.
 
-The revised conditional mechanism is supported; the original blanket refutation was wrong for stale Interrupted rows. The surviving consequence is a temporary interrupted card and absent terminal until fresh detail, within the rare self-correcting display filter. Cross-batch duplicate claims are reported in the history but were not independently compared here.
+The revised conditional mechanism is supported; the original blanket refutation was wrong for stale Interrupted rows.
+The surviving consequence is a temporary interrupted card and absent terminal until fresh detail, within the rare
+self-correcting display filter. Cross-batch duplicate claims are reported in the history but were not independently
+compared here.
 
-Original stronger consequence: Initially suspected high impact: an old listing could retire successful Restart too early and leave the session unavailable. The latest record bounds this to temporary blocked terminal access until fresh detail; no process or work-loss consequence was claimed.
+Original stronger consequence: Initially suspected high impact: an old listing could retire successful Restart too early
+and leave the session unavailable. The latest record bounds this to temporary blocked terminal access until fresh
+detail; no process or work-loss consequence was claimed.
 
-Unresolved premise or limitation: Incidence and exact task/effect ordering were not observed. The supplied histories name g037/f3 and g038/l1 as aliases, but those records are outside this batch and were not opened. g036/l1 is explicitly a distinct newer-eligible-listing route.
+Unresolved premise or limitation: Incidence and exact task/effect ordering were not observed. The supplied histories
+name g037/f3 and g038/l1 as aliases, but those records are outside this batch and were not opened. g036/l1 is explicitly
+a distinct newer-eligible-listing route.
 
-Proposed basis: Proposed filter only for the bounded temporary presentation consequence. If another batch establishes a lasting or destructive consequence, this basis no longer covers it. Reconcile the underlying key with the supplied cross-batch owners without merging the separate eligible-listing route.
+Proposed basis: Proposed filter only for the bounded temporary presentation consequence. If another batch establishes a
+lasting or destructive consequence, this basis no longer covers it. Reconcile the underlying key with the supplied
+cross-batch owners without merging the separate eligible-listing route.
 
-Existing parent disposition (event 12): rejected. Parent explicitly accepted named filtered proposal from claims-019 after inspecting it. The revised conditional mechanism is supported; the original blanket refutation was wrong for stale Interrupted rows. The surviving consequence is a temporary interrupted card and absent terminal until fresh detail, within the rare self-correcting display filter. Cross-batch duplicate claims are reported in the history but were not independently compared here. Proposed filter only for the bounded temporary presentation consequence. If another batch establishes a lasting or destructive consequence, this basis no longer covers it. Reconcile the underlying key with the supplied cross-batch owners without merging the separate eligible-listing route. Checked source/results: ["At f560058da19e02716e6f943883a9508b447aff4e, session_ops.rs:79-80 accepts session.stale regardless of Interrupted; :91-107 allows retirement once pending clears; :215-225 clears restart_succeeded.","At that revision list/view.rs:3416-3419 publishes Restart completion, requests refresh and releases pending. commit_listing:1945-1953 applies normal admission then :1985 retires success. ops.rs:182-187 checks last-applied generation, with no Restart-completion floor. aggregate.rs:547 captures host snapshots before awaited cached_slice at :578.","session_view.rs:549-564 increments mount generation but sets relaunched only while restart_succeeded remains true. terminal_absence:3701-3707 and keep_terminal_surface:3714-3722 can therefore keep the prior mounted nonstale Interrupted view on its card. The conditional ordering is before its completion observer or a live detail read; no runtime schedule was observed.","The history's earlier nonstale-Interrupted argument remains valid only for that narrower input. A stale Interrupted row bypasses it. No permanent failure, lost Resume offer, process termination or user-work loss was established."] Current coverage/results: {"specifications":"Searched both specifications for Restart completion, reattachment and listings; SPEC_impl.md:1134-1140 requires mounted completion observation and reattachment, rather than accepting premature retirement.","TODO_Planned":"Empty at TODO.md:23-25.","plans_queue":"Read session-action-leftovers.md's goal, criteria, decisions and proposals: its listing-retirement work is landed (plans/REPORTS.md:24). It does not supply unlanded repair coverage. Its accepted second-reboot residual differs from this stale pre-completion reply.","BUGS":"Read BUGS.md; no matching item.","queue":"Read review_feedback_queue/retained-restart-hides-reboot-card.md in full. It concerns retaining optimism through a second reboot without any eligible observation, the opposite retirement direction; not an exact alias or extension. No other matching INDEX entry.","active_triage":"Searched TRIAGE_OUTCOMES.md for Restart outcomes, stale listings and retirement; no exact decision.","filter":"FILTER.md:25-43, Rare, self-correcting glitches and imprecise diagnostics: narrow asynchronous ordering; whole established consequence is briefly wrong recovery presentation healed by the next fresh detail. None of that filter's exclusions is established."} Exact cited cover: ["FILTER.md, Rare, self-correcting glitches and imprecise diagnostics: 'a display that is briefly wrong and corrects itself on the next refresh, retry or reconnect, or when the user leaves the view'"] Original stronger consequence and missing premise remain preserved: "Initially suspected high impact: an old listing could retire successful Restart too early and leave the session unavailable. The latest record bounds this to temporary blocked terminal access until fresh detail; no process or work-loss consequence was claimed."; "Incidence and exact task/effect ordering were not observed. The supplied histories name g037/f3 and g038/l1 as aliases, but those records are outside this batch and were not opened. g036/l1 is explicitly a distinct newer-eligible-listing route.".
+Existing parent disposition (event 12): rejected. Parent explicitly accepted named filtered proposal from claims-019
+after inspecting it. The revised conditional mechanism is supported; the original blanket refutation was wrong for stale
+Interrupted rows. The surviving consequence is a temporary interrupted card and absent terminal until fresh detail,
+within the rare self-correcting display filter. Cross-batch duplicate claims are reported in the history but were not
+independently compared here. Proposed filter only for the bounded temporary presentation consequence. If another batch
+establishes a lasting or destructive consequence, this basis no longer covers it. Reconcile the underlying key with the
+supplied cross-batch owners without merging the separate eligible-listing route. Checked source/results: ["At
+f560058da19e02716e6f943883a9508b447aff4e, session_ops.rs:79-80 accepts session.stale regardless of Interrupted; :91-107
+allows retirement once pending clears; :215-225 clears restart_succeeded.","At that revision list/view.rs:3416-3419
+publishes Restart completion, requests refresh and releases pending. commit_listing:1945-1953 applies normal admission
+then :1985 retires success. ops.rs:182-187 checks last-applied generation, with no Restart-completion floor.
+aggregate.rs:547 captures host snapshots before awaited cached_slice at :578.","session_view.rs:549-564 increments mount
+generation but sets relaunched only while restart_succeeded remains true. terminal_absence:3701-3707 and
+keep_terminal_surface:3714-3722 can therefore keep the prior mounted nonstale Interrupted view on its card. The
+conditional ordering is before its completion observer or a live detail read; no runtime schedule was observed.","The
+history's earlier nonstale-Interrupted argument remains valid only for that narrower input. A stale Interrupted row
+bypasses it. No permanent failure, lost Resume offer, process termination or user-work loss was established."] Current
+coverage/results: {"specifications":"Searched both specifications for Restart completion, reattachment and listings;
+SPEC_impl.md:1134-1140 requires mounted completion observation and reattachment, rather than accepting premature
+retirement.","TODO_Planned":"Empty at TODO.md:23-25.","plans_queue":"Read session-action-leftovers.md's goal, criteria,
+decisions and proposals: its listing-retirement work is landed (plans/REPORTS.md:24). It does not supply unlanded repair
+coverage. Its accepted second-reboot residual differs from this stale pre-completion reply.","BUGS":"Read BUGS.md; no
+matching item.","queue":"Read review_feedback_queue/retained-restart-hides-reboot-card.md in full. It concerns retaining
+optimism through a second reboot without any eligible observation, the opposite retirement direction; not an exact alias
+or extension. No other matching INDEX entry.","active_triage":"Searched TRIAGE_OUTCOMES.md for Restart outcomes, stale
+listings and retirement; no exact decision.","filter":"FILTER.md:25-43, Rare, self-correcting glitches and imprecise
+diagnostics: narrow asynchronous ordering; whole established consequence is briefly wrong recovery presentation healed
+by the next fresh detail. None of that filter's exclusions is established."} Exact cited cover: ["FILTER.md, Rare,
+self-correcting glitches and imprecise diagnostics: 'a display that is briefly wrong and corrects itself on the next
+refresh, retry or reconnect, or when the user leaves the view'"] Original stronger consequence and missing premise
+remain preserved: "Initially suspected high impact: an old listing could retire successful Restart too early and leave
+the session unavailable. The latest record bounds this to temporary blocked terminal access until fresh detail; no
+process or work-loss consequence was claimed."; "Incidence and exact task/effect ordering were not observed. The
+supplied histories name g037/f3 and g038/l1 as aliases, but those records are outside this batch and were not opened.
+g036/l1 is explicitly a distinct newer-eligible-listing route.".
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g032 record](records/review-through-00de0b6c/groups/g032.json). Record ID: `c4`.
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g032 record](records/review-through-00de0b6c/groups/g032.json). Record ID: `c4`.
 
 ### g037/f3
 
@@ -44,35 +138,96 @@ Latest reviewer record, event 10 (finding, open):
 
 Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e
 
-TLDR: After a successful Restart, a delayed sidebar response from the earlier host outage can leave the session showing its interrupted recovery card until live detail arrives. Opening the session again can also miss the retained success during this window. No lasting failure or destructive consequence is established.
+TLDR: After a successful Restart, a delayed sidebar response from the earlier host outage can leave the session showing
+its interrupted recovery card until live detail arrives. Opening the session again can also miss the retained success
+during this window. No lasting failure or destructive consequence is established.
 
-Details: Synthesis verdict: retain the stale-list mechanism; classify its user-visible timing as likely, not observed execution. aggregate.rs:547 snapshots host state before awaiting cached_slice at :578, and row_of at :357 derives stale from that captured host. The response may thus say stale=true after reconnection. list/view.rs:1935-1953 admits an older in-flight response when newer than the last applied read; ops.rs:182-187 compares applied generation, not Restart age. session_ops.rs:79-80 treats even stale Interrupted as confirming; :91-107 and :215-226 clear restart_succeeded once pending is empty. Restart completion at list/view.rs:3416-3419 records success, requests a refresh and releases pending without fencing older listings. request_listing at :2473-2474 uses reader::request_read; reader.rs:644-660 coalesces that refresh behind an existing read. These are the exact read-age premises removed by this patch's deletion of restart_listing_floor.
+Details: Synthesis verdict: retain the stale-list mechanism; classify its user-visible timing as likely, not observed
+execution. aggregate.rs:547 snapshots host state before awaiting cached_slice at :578, and row_of at :357 derives stale
+from that captured host. The response may thus say stale=true after reconnection. list/view.rs:1935-1953 admits an older
+in-flight response when newer than the last applied read; ops.rs:182-187 compares applied generation, not Restart age.
+session_ops.rs:79-80 treats even stale Interrupted as confirming; :91-107 and :215-226 clear restart_succeeded once
+pending is empty. Restart completion at list/view.rs:3416-3419 records success, requests a refresh and releases pending
+without fencing older listings. request_listing at :2473-2474 uses reader::request_read; reader.rs:644-660 coalesces
+that refresh behind an existing read. These are the exact read-age premises removed by this patch's deletion of
+restart_listing_floor.
 
-The mounted-view route does NOT require fresh detail to remain Interrupted: the already mounted view can still hold its pre-Restart reachable Interrupted detail. Sidebar commit retires the shared success but does not replace that independent current detail (session_view.rs:1243-1262 follows only the selection title and requests detail). If retirement happens before use_restart_observation at :549-564, that observer sees the durable changed revision and increments mount_generation but cannot set relaunched=true. terminal_absence at :3701-3707 still chooses Interrupted; keep_terminal_surface at :3714-3722 returns false, and terminal_specs at :1709-1710 emits an empty set. A generation increment does not mount a terminal through that guard. If the observer runs before retirement, this particular mounted-view consequence does not occur.
+The mounted-view route does NOT require fresh detail to remain Interrupted: the already mounted view can still hold its
+pre-Restart reachable Interrupted detail. Sidebar commit retires the shared success but does not replace that
+independent current detail (session_view.rs:1243-1262 follows only the selection title and requests detail). If
+retirement happens before use_restart_observation at :549-564, that observer sees the durable changed revision and
+increments mount_generation but cannot set relaunched=true. terminal_absence at :3701-3707 still chooses Interrupted;
+keep_terminal_surface at :3714-3722 returns false, and terminal_specs at :1709-1710 emits an empty set. A generation
+increment does not mount a terminal through that guard. If the observer runs before retirement, this particular
+mounted-view consequence does not occur.
 
-The scheduling premise is source-permitted, not a timing observation: pinned Cargo.lock uses Dioxus core/hooks/desktop 0.7.10. Its installed use_effect.rs:15-47 queues callbacks that later read current state; core virtual_dom.rs:507-537 polls ready tasks before effects, and scheduler.rs:61-78 assigns effects lowest priority. Desktop webview.rs:537-590 returns while mutation delivery is pending before polling the virtual DOM again. Thus a ready old-list response task can run before the completion observer, while the independent post-Restart detail has not completed. No source ordering requires the live detail or observer to win. This supports the conditional race; it does not establish how often a real response lands in that window.
+The scheduling premise is source-permitted, not a timing observation: pinned Cargo.lock uses Dioxus core/hooks/desktop
+0.7.10. Its installed use_effect.rs:15-47 queues callbacks that later read current state; core virtual_dom.rs:507-537
+polls ready tasks before effects, and scheduler.rs:61-78 assigns effects lowest priority. Desktop webview.rs:537-590
+returns while mutation delivery is pending before polling the virtual DOM again. Thus a ready old-list response task can
+run before the completion observer, while the independent post-Restart detail has not completed. No source ordering
+requires the live detail or observer to win. This supports the conditional race; it does not establish how often a real
+response lands in that window.
 
-The original reopened-view consequence is preserved with a corrected premise: the next connected SIDEBAR row can still be Interrupted before the host refresh. sessions.rs:3472-3483 records the successful reply before answering; session_cache.rs:143-147 preserves definite Interrupted when that reply is Unknown. manager.rs:2447-2464 calls refresh_now without awaiting its drain. A view opened from such a row after success retirement seeds relaunched=false at session_view.rs:633 until its live detail arrives. Connected DETAIL is different: sessions.rs:3195-3222 drains the supervisor directly; only the no-client branch :3162-3187 reads cache. The earlier f3 statement that the helm status cache could keep a successful connected fresh detail Interrupted is retracted. A post-Restart live detail corrects the gap; no failure after it commits is asserted.
+The original reopened-view consequence is preserved with a corrected premise: the next connected SIDEBAR row can still
+be Interrupted before the host refresh. sessions.rs:3472-3483 records the successful reply before answering;
+session_cache.rs:143-147 preserves definite Interrupted when that reply is Unknown. manager.rs:2447-2464 calls
+refresh_now without awaiting its drain. A view opened from such a row after success retirement seeds relaunched=false at
+session_view.rs:633 until its live detail arrives. Connected DETAIL is different: sessions.rs:3195-3222 drains the
+supervisor directly; only the no-client branch :3162-3187 reads cache. The earlier f3 statement that the helm status
+cache could keep a successful connected fresh detail Interrupted is retracted. A post-Restart live detail corrects the
+gap; no failure after it commits is asserted.
 
-Contract: SPEC.md Lifecycle operations (1897-1900) preserves action outcomes across navigation; SPEC_impl.md:1134-1139 requires completion reattachment and retained successful knowledge before listing catches up. Suggested correction: restore an age fence for pre-Restart stale evidence (or fence those reads at completion); independently durable observer success would also protect mounted consumers.
+Contract: SPEC.md Lifecycle operations (1897-1900) preserves action outcomes across navigation; SPEC_impl.md:1134-1139
+requires completion reattachment and retained successful knowledge before listing catches up. Suggested correction:
+restore an age fence for pre-Restart stale evidence (or fence those reads at completion); independently durable observer
+success would also protect mounted consumers.
 
-Duplicate boundaries: g038/l1 and g089/l1 are the same f560058 stale-evidence retirement defect, the latter using the mounted-view route above. g036/l1 at b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe has the same shared-consumer weakness but its listing is post-reply age-eligible under generation > floor and may lose terminal-kind payload as well. Restoring the old age floor fixes f3's specific pre-reply evidence trigger but does not fix g036's eligible-listing/observer trigger. Do not collapse those trigger/fix boundaries merely because the interrupted-card outcome overlaps. g088/l1's preserved-revision argument refutes lost mount-generation increments, not the empty terminal set when relaunched remains false.
+Duplicate boundaries: g038/l1 and g089/l1 are the same f560058 stale-evidence retirement defect, the latter using the
+mounted-view route above. g036/l1 at b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe has the same shared-consumer weakness but
+its listing is post-reply age-eligible under generation > floor and may lose terminal-kind payload as well. Restoring
+the old age floor fixes f3's specific pre-reply evidence trigger but does not fix g036's eligible-listing/observer
+trigger. Do not collapse those trigger/fix boundaries merely because the interrupted-card outcome overlaps. g088/l1's
+preserved-revision argument refutes lost mount-generation increments, not the empty terminal set when relaunched remains
+false.
 
-Suggested bucket: other, preserving the original temporary wrong recovery surface/blocked terminal access consequence. Confidence: likely, with the precise premise that a stale pre-Restart sidebar response is admitted after pending clears and before either the mounted observer or fresh detail supplies the new run (or before reopening from a still-Interrupted connected sidebar row). Every required code path and absence of an ordering fence was source-checked; timing was not executed. Could-be-highest: no established security or loss-of-work route. proposed_drop: false. possible_cover: g038/l1 and g089/l1, explicitly supplied by caller; no queue coverage search. No reproductions, tests or builds run. No unresolved source premise remains for the conditional route; actual incidence would require observing response/effect order, which was not requested.
+Suggested bucket: other, preserving the original temporary wrong recovery surface/blocked terminal access consequence.
+Confidence: likely, with the precise premise that a stale pre-Restart sidebar response is admitted after pending clears
+and before either the mounted observer or fresh detail supplies the new run (or before reopening from a
+still-Interrupted connected sidebar row). Every required code path and absence of an ordering fence was source-checked;
+timing was not executed. Could-be-highest: no established security or loss-of-work route. proposed_drop: false.
+possible_cover: g038/l1 and g089/l1, explicitly supplied by caller; no queue coverage search. No reproductions, tests or
+builds run. No unresolved source premise remains for the conditional route; actual incidence would require observing
+response/effect order, which was not requested.
 
 Returned proposal (claims-022, event 10): **filtered**, suggested bucket **other**.
 
-The conditional stale-sidebar retirement route is supported, but its whole asserted effect is a temporary interrupted card/attachment gap repaired by the next successful live detail.
+The conditional stale-sidebar retirement route is supported, but its whole asserted effect is a temporary interrupted
+card/attachment gap repaired by the next successful live detail.
 
-Original stronger consequence: Earlier record asserted a newly opened view and its connected detail could retain cached Interrupted. That detail-cache premise was explicitly retracted; a mounted pre-Restart Interrupted signal and a reopened still-Interrupted sidebar seed retain the temporary gap. No destructive second-Restart consequence was asserted.
+Original stronger consequence: Earlier record asserted a newly opened view and its connected detail could retain cached
+Interrupted. That detail-cache premise was explicitly retracted; a mounted pre-Restart Interrupted signal and a reopened
+still-Interrupted sidebar seed retain the temporary gap. No destructive second-Restart consequence was asserted.
 
-Unresolved premise or limitation: Actual scheduling incidence and duration are unmeasured. No route to a persistent failure, wrong-target operation, loss of work or false successful Restart was established.
+Unresolved premise or limitation: Actual scheduling incidence and duration are unmeasured. No route to a persistent
+failure, wrong-target operation, loss of work or false successful Restart was established.
 
-Proposed basis: Propose filtering the complete stated transient display/attachment gap under the rare self-correcting filter. Source establishes a real conditional mechanism; filtering is not refutation or product acceptance. g038/l1 is an exact alias. Do not collapse the distinct post-floor/terminal-kind mechanism named g036/l1 outside this batch.
+Proposed basis: Propose filtering the complete stated transient display/attachment gap under the rare self-correcting
+filter. Source establishes a real conditional mechanism; filtering is not refutation or product acceptance. g038/l1 is
+an exact alias. Do not collapse the distinct post-floor/terminal-kind mechanism named g036/l1 outside this batch.
 
-Existing parent disposition (event 10): duplicate. Parent read complete claims-022 f3 and claims-019 g032/c4. Both describe the same precompletion stale listing accepted after Restart finishes, with no completion-age floor, removing success before the mounted observer can admit its terminal. Exact f560058 aggregate.rs:547-580,session_ops.rs:77-107,215-226,list/view.rs:1935-1953,1985,3416-3419 and session_view.rs:549-564,3701-3722 support the conditional route. Live connected detail at sessions.rs:3194-3231 corrects the display; cached detail is confined to no-client branch:3162-3192. Earlier connected-detail/cache and broad numerical-generation premises remain explicitly retracted. g032/c4's accepted rare self-correcting-display filter applies only to this temporary card/attachment gap and does not accept the implementation or a stronger lasting/destructive effect. The distinct newer eligible listing/observer race g036/l1 remains separately identified.
+Existing parent disposition (event 10): duplicate. Parent read complete claims-022 f3 and claims-019 g032/c4. Both
+describe the same precompletion stale listing accepted after Restart finishes, with no completion-age floor, removing
+success before the mounted observer can admit its terminal. Exact f560058
+aggregate.rs:547-580,session_ops.rs:77-107,215-226,list/view.rs:1935-1953,1985,3416-3419 and
+session_view.rs:549-564,3701-3722 support the conditional route. Live connected detail at sessions.rs:3194-3231 corrects
+the display; cached detail is confined to no-client branch:3162-3192. Earlier connected-detail/cache and broad
+numerical-generation premises remain explicitly retracted. g032/c4's accepted rare self-correcting-display filter
+applies only to this temporary card/attachment gap and does not accept the implementation or a stronger
+lasting/destructive effect. The distinct newer eligible listing/observer race g036/l1 remains separately identified.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g037 record](records/review-through-00de0b6c/groups/g037.json). Record ID: `f3`.
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g037 record](records/review-through-00de0b6c/groups/g037.json). Record ID: `f3`.
 
 ### g038/l1
 
@@ -83,36 +238,93 @@ Latest reviewer record, event 11 (finding, open):
 Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e
 
 ## TLDR
-After successfully restarting an interrupted session, its open view can keep showing the interrupted-session card until its next detail read succeeds. An earlier sidebar response can erase the successful completion before the view consumes it.
+
+After successfully restarting an interrupted session, its open view can keep showing the interrupted-session card until
+its next detail read succeeds. An earlier sidebar response can erase the successful completion before the view consumes
+it.
 
 ## Details
-Complete source route: a host reboot/disconnect leaves a stale sidebar request in flight. Its captured status can be Running, Interrupted or any other state; staleness alone suffices, so no extra outage is needed to make an old stale Interrupted cache. aggregate.rs:547-580 captures the host snapshot before awaited cache reads, and :357 derives stale from that snapshot. Meanwhile the host reconnects. The mounted session views independent live detail now reports nonstale Interrupted for the rebooted session and enables Restart. The user restarts it successfully while the old sidebar reply remains pending.
 
-The view owns current, initialized from its selected Session at session_view.rs:603-607 and then replaced by accepted detail at :1032. Its reader is independent of the sidebar (:913-920). Parent selection updates follow title and request detail (:1250-1273), rather than replacing this current status. list/view.rs:3416-3419 records successful Restart, requests sidebar refresh, then releases pending. It does not fence listing_reads. reader.rs:644-670 coalesces that refresh behind an existing read. An old sidebar response arriving after pending release can pass ReadGate because accept_success compares generation only against the last applied read (ops.rs:183-190). view.rs:1985 then calls retirement; session_ops.rs:77-80 accepts stale=true regardless of status, and :215-226 clears restart_succeeded. The removed parent restart_listing_floor would have excluded this pre-completion read.
+Complete source route: a host reboot/disconnect leaves a stale sidebar request in flight. Its captured status can be
+Running, Interrupted or any other state; staleness alone suffices, so no extra outage is needed to make an old stale
+Interrupted cache. aggregate.rs:547-580 captures the host snapshot before awaited cache reads, and :357 derives stale
+from that snapshot. Meanwhile the host reconnects. The mounted session views independent live detail now reports
+nonstale Interrupted for the rebooted session and enables Restart. The user restarts it successfully while the old
+sidebar reply remains pending.
 
-Pinned scheduling establishes an allowed completion-before-retirement-before-observer interleaving: Cargo.lock pins dioxus core/hooks/desktop 0.7.10; use_effect.rs:15-47 queues an effect that reads shared state on execution; virtual_dom.rs:507-537 polls ready tasks before effects and yields to dirty scopes; scheduler.rs:61-78 ranks effects last. desktop webview.rs:537-590 waits for mutations to flush before polling again, during which the old HTTP task can become ready. No guarantee orders the Restart observer before that task. This is source ordering evidence, never an observed schedule.
+The view owns current, initialized from its selected Session at session_view.rs:603-607 and then replaced by accepted
+detail at :1032. Its reader is independent of the sidebar (:913-920). Parent selection updates follow title and request
+detail (:1250-1273), rather than replacing this current status. list/view.rs:3416-3419 records successful Restart,
+requests sidebar refresh, then releases pending. It does not fence listing_reads. reader.rs:644-670 coalesces that
+refresh behind an existing read. An old sidebar response arriving after pending release can pass ReadGate because
+accept_success compares generation only against the last applied read (ops.rs:183-190). view.rs:1985 then calls
+retirement; session_ops.rs:77-80 accepts stale=true regardless of status, and :215-226 clears restart_succeeded. The
+removed parent restart_listing_floor would have excluded this pre-completion read.
 
-The mounted observer at session_view.rs:549-564 still sees changed restart_revision and increments mount_generation, but with success erased it does not set relaunched. Current remains its pre-Restart nonstale Interrupted state until a post-completion detail commits. keep_terminal_surface at :3714-3722 returns false for that state when relaunched=false, so the generation increment has no terminal island to remount. The lifecycle effect at :1470-1490 requests detail; detail begun before or during Restart is fenced by lifecycle revision (:927-1000). A later successful live detail changes current and repairs the surface.
+Pinned scheduling establishes an allowed completion-before-retirement-before-observer interleaving: Cargo.lock pins
+dioxus core/hooks/desktop 0.7.10; use_effect.rs:15-47 queues an effect that reads shared state on execution;
+virtual_dom.rs:507-537 polls ready tasks before effects and yields to dirty scopes; scheduler.rs:61-78 ranks effects
+last. desktop webview.rs:537-590 waits for mutations to flush before polling again, during which the old HTTP task can
+become ready. No guarantee orders the Restart observer before that task. This is source ordering evidence, never an
+observed schedule.
 
-Correction to the initial record: connected GET session detail never serves the helm cache. sessions.rs:3052-3091 and :3194-3231 use live manager::drain_sessions; only the no-client branch at :3160-3192 serves cached metadata. Therefore session_cache::merged_status cannot make a newly issued connected detail inherit cached Interrupted, and this finding does not depend on that claim. The relevant Interrupted state is the mounted views existing accepted detail. Fresh detail normally repairs it. Likewise no claim is made that the durable numerical remount revision is lost. The original consequence remains temporary interrupted-card presentation instead of terminal access; no persistent failure is inferred.
+The mounted observer at session_view.rs:549-564 still sees changed restart_revision and increments mount_generation, but
+with success erased it does not set relaunched. Current remains its pre-Restart nonstale Interrupted state until a
+post-completion detail commits. keep_terminal_surface at :3714-3722 returns false for that state when relaunched=false,
+so the generation increment has no terminal island to remount. The lifecycle effect at :1470-1490 requests detail;
+detail begun before or during Restart is fenced by lifecycle revision (:927-1000). A later successful live detail
+changes current and repairs the surface.
 
-Contract: SPEC_impl.md:1134-1143 requires completion reattachment and mounted observation of Restart. Relevant SPEC.md Errors and diagnostics, Keyboard focus input-race clauses and One GUI at a time were read: their brief input delivery/focus exceptions do not establish acceptance of erasing a successful single-GUI completion before its mounted consumer. No new input, multiple GUIs, lost reply or additional error is required after completion. Detail errors can lengthen recovery but are not the trigger. Restore ordering against pre-Restart sidebar replies or retain durable successful-completion knowledge separately from a retireable new-view seed.
+Correction to the initial record: connected GET session detail never serves the helm cache. sessions.rs:3052-3091 and
+:3194-3231 use live manager::drain_sessions; only the no-client branch at :3160-3192 serves cached metadata. Therefore
+session_cache::merged_status cannot make a newly issued connected detail inherit cached Interrupted, and this finding
+does not depend on that claim. The relevant Interrupted state is the mounted views existing accepted detail. Fresh
+detail normally repairs it. Likewise no claim is made that the durable numerical remount revision is lost. The original
+consequence remains temporary interrupted-card presentation instead of terminal access; no persistent failure is
+inferred.
 
-Suggested bucket: other, unchanged. Confidence: confirmed source/contract interleaving for this narrowed mounted-view route, not observed execution. proposed_drop: false. possible_cover: duplicate known interface claims g037/f3 and g089/l1 at this revision; g037s fresh-detail cache premise needs the correction above. Earlier g036/l1 at b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe instead uses an eligible post-floor listing and optional terminal-kind payload, so its trigger and renderer consequence differ. g088/l1 correctly preserves generation increment; it does not establish a mounted surface when current is Interrupted and relaunched is false. Could-be-highest: no established security or work-loss route. Caveats: frequency is unmeasured; a later live detail normally heals it. No destructive second-Restart consequence is asserted. No remaining missing source premise for the narrowed route. No tests or reproductions run.
+Contract: SPEC_impl.md:1134-1143 requires completion reattachment and mounted observation of Restart. Relevant SPEC.md
+Errors and diagnostics, Keyboard focus input-race clauses and One GUI at a time were read: their brief input
+delivery/focus exceptions do not establish acceptance of erasing a successful single-GUI completion before its mounted
+consumer. No new input, multiple GUIs, lost reply or additional error is required after completion. Detail errors can
+lengthen recovery but are not the trigger. Restore ordering against pre-Restart sidebar replies or retain durable
+successful-completion knowledge separately from a retireable new-view seed.
+
+Suggested bucket: other, unchanged. Confidence: confirmed source/contract interleaving for this narrowed mounted-view
+route, not observed execution. proposed_drop: false. possible_cover: duplicate known interface claims g037/f3 and
+g089/l1 at this revision; g037s fresh-detail cache premise needs the correction above. Earlier g036/l1 at
+b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe instead uses an eligible post-floor listing and optional terminal-kind payload,
+so its trigger and renderer consequence differ. g088/l1 correctly preserves generation increment; it does not establish
+a mounted surface when current is Interrupted and relaunched is false. Could-be-highest: no established security or
+work-loss route. Caveats: frequency is unmeasured; a later live detail normally heals it. No destructive second-Restart
+consequence is asserted. No remaining missing source premise for the narrowed route. No tests or reproductions run.
 
 Returned proposal (claims-022, event 11): **filtered**, suggested bucket **other**.
 
-Same root, trigger and bounded consequence as g037/f3. The mounted-view source route is supported; the complete stated consequence fits the rare self-correcting display filter.
+Same root, trigger and bounded consequence as g037/f3. The mounted-view source route is supported; the complete stated
+consequence fits the rare self-correcting display filter.
 
-Original stronger consequence: Original record offered a newly opened wrong Restart surface and incorrectly implied connected detail inherits cached Interrupted. The cache/detail premise was retracted. Latest route uses mounted pre-Restart current until live detail repairs it; the original temporary card/terminal-access gap remains.
+Original stronger consequence: Original record offered a newly opened wrong Restart surface and incorrectly implied
+connected detail inherits cached Interrupted. The cache/detail premise was retracted. Latest route uses mounted
+pre-Restart current until live detail repairs it; the original temporary card/terminal-access gap remains.
 
-Unresolved premise or limitation: Actual incidence/duration unmeasured. A destructive second-Restart or persistent fresh-detail failure is not established or asserted.
+Unresolved premise or limitation: Actual incidence/duration unmeasured. A destructive second-Restart or persistent
+fresh-detail failure is not established or asserted.
 
-Proposed basis: Propose the same filter disposition as g037/f3, preserving the confirmed conditional mechanism, explicit premise correction, unmeasured timing and no-loss caveat. Exact duplicate within this named batch; g089/l1 is mentioned by the histories but was not supplied and was not independently read.
+Proposed basis: Propose the same filter disposition as g037/f3, preserving the confirmed conditional mechanism, explicit
+premise correction, unmeasured timing and no-loss caveat. Exact duplicate within this named batch; g089/l1 is mentioned
+by the histories but was not supplied and was not independently read.
 
-Existing parent disposition (event 11): duplicate. Parent read full claims-022 g038/l1 and g037/f3 and reconciles both with g032/c4: same stale sidebar snapshot, success retirement after pending release, mounted pre-Restart Interrupted current until live detail arrives. The corrected live-versus-cached detail premise and Dioxus0.7.10 tasks-before-effects evidence are preserved. No permanent outage, lost work, false successful Restart or destructive second-Restart route was established. Only the complete narrow self-correcting display consequence receives the canonical filter decision; all original events, locations and qualifications remain in the record. This does not absorb g036/l1's different eligible-listing trigger.
+Existing parent disposition (event 11): duplicate. Parent read full claims-022 g038/l1 and g037/f3 and reconciles both
+with g032/c4: same stale sidebar snapshot, success retirement after pending release, mounted pre-Restart Interrupted
+current until live detail arrives. The corrected live-versus-cached detail premise and Dioxus0.7.10 tasks-before-effects
+evidence are preserved. No permanent outage, lost work, false successful Restart or destructive second-Restart route was
+established. Only the complete narrow self-correcting display consequence receives the canonical filter decision; all
+original events, locations and qualifications remain in the record. This does not absorb g036/l1's different
+eligible-listing trigger.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g038 record](records/review-through-00de0b6c/groups/g038.json). Record ID: `l1`.
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g038 record](records/review-through-00de0b6c/groups/g038.json). Record ID: `l1`.
 
 ### g089/l1
 
@@ -123,34 +335,95 @@ Latest reviewer record, event 5 (finding, open):
 Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e
 
 ## TLDR
-After reconnecting to a host and successfully restarting an interrupted session, its already-open view can keep showing the interrupted recovery card until live detail arrives. A delayed sidebar response can erase the success before the view consumes it. The original temporary missing-terminal consequence is preserved; no permanent failure or destructive consequence is asserted.
+
+After reconnecting to a host and successfully restarting an interrupted session, its already-open view can keep showing
+the interrupted recovery card until live detail arrives. A delayed sidebar response can erase the success before the
+view consumes it. The original temporary missing-terminal consequence is preserved; no permanent failure or destructive
+consequence is asserted.
 
 ## Details
-Synthesis result: retain this source-supported conditional race, with the delivery-order premise explicit. It duplicates the caller-named g037/f3 and g038/l1 at this same full revision. Do not count these as three independently discovered defects. No parent drop is accepted or proposed. The earlier related g036/l1 at b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe has a distinct trigger/fix boundary, described below.
 
-Complete trigger and source checks: aggregate.rs:547 captures host state before the awaited cached_slice at :578; row_of at :357 derives stale from that captured state. The in-flight sidebar can therefore carry stale=true from the earlier outage while the independent session detail has already reported nonstale Interrupted and enabled Restart. After the Restart POST succeeds, list/view.rs:3416–3419 records success, requests sidebar refresh and releases pending. No listing fence is inserted. The refresh calls reader::request_read (:644–680); SurfaceReader::claim/request (:405–458) explicitly leaves an existing running read alive and queues the new demand. ReadGate::accept_success (ops.rs:183–190) compares the reply generation with the latest applied listing, not Restart completion. Thus that old reply can still commit after pending release. list/view.rs:1985 calls retirement; session_ops.rs:77–80 treats stale as confirming regardless of status, and :215–226 clears restart_succeeded without a read-age floor.
+Synthesis result: retain this source-supported conditional race, with the delivery-order premise explicit. It duplicates
+the caller-named g037/f3 and g038/l1 at this same full revision. Do not count these as three independently discovered
+defects. No parent drop is accepted or proposed. The earlier related g036/l1 at b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe
+has a distinct trigger/fix boundary, described below.
 
-Completion-to-effect ordering was independently checked in the pinned dependency source: Cargo.lock pins dioxus-core, dioxus-hooks and dioxus-desktop to 0.7.10. dioxus-hooks/src/use_effect.rs:15–47 queues a callback that reads shared state when it later runs. dioxus-core/src/virtual_dom.rs:507–537 polls ready tasks before effects and returns for dirty scopes; src/scheduler.rs:61–78 ranks effects below tasks and scopes. dioxus-desktop/src/webview.rs:537–590 returns while edits are unflushed before continuing virtual-DOM polling. These paths permit a ready old-list response task to retire success before the mounted completion observer; they do not guarantee that the observer wins. No actual task schedule was observed or reproduced.
+Complete trigger and source checks: aggregate.rs:547 captures host state before the awaited cached_slice at :578; row_of
+at :357 derives stale from that captured state. The in-flight sidebar can therefore carry stale=true from the earlier
+outage while the independent session detail has already reported nonstale Interrupted and enabled Restart. After the
+Restart POST succeeds, list/view.rs:3416–3419 records success, requests sidebar refresh and releases pending. No listing
+fence is inserted. The refresh calls reader::request_read (:644–680); SurfaceReader::claim/request (:405–458) explicitly
+leaves an existing running read alive and queues the new demand. ReadGate::accept_success (ops.rs:183–190) compares the
+reply generation with the latest applied listing, not Restart completion. Thus that old reply can still commit after
+pending release. list/view.rs:1985 calls retirement; session_ops.rs:77–80 treats stale as confirming regardless of
+status, and :215–226 clears restart_succeeded without a read-age floor.
 
-The mounted view still owns its earlier nonstale Interrupted current; sidebar retirement does not replace that state. The selection bridge follows title and requests independent detail, rather than copying the sidebar status (session_view.rs:1245–1273). At :549–564 the observer sees the changed durable restart_revision and increments mount_generation, but with restart_succeeded cleared it cannot set relaunched=true. At :1709–1710 the desired set remains empty because terminal_absence/keep_terminal_surface (:3701–3722) rejects Interrupted with relaunched=false. This is lost terminal admission, not a lost numerical generation increment; preserving restart_revision alone does not settle it. The changed isolated observer test (:3915–3970) asserts the increment, not mounted terminal admission.
+Completion-to-effect ordering was independently checked in the pinned dependency source: Cargo.lock pins dioxus-core,
+dioxus-hooks and dioxus-desktop to 0.7.10. dioxus-hooks/src/use_effect.rs:15–47 queues a callback that reads shared
+state when it later runs. dioxus-core/src/virtual_dom.rs:507–537 polls ready tasks before effects and returns for dirty
+scopes; src/scheduler.rs:61–78 ranks effects below tasks and scopes. dioxus-desktop/src/webview.rs:537–590 returns while
+edits are unflushed before continuing virtual-DOM polling. These paths permit a ready old-list response task to retire
+success before the mounted completion observer; they do not guarantee that the observer wins. No actual task schedule
+was observed or reproduced.
 
-Repair and limits: connected GET session detail drains live supervisor sessions (sessions.rs:3052–3095 and :3195–3222); only its no-client branch (:3162–3192) serves cached metadata. Therefore the finding does not claim that a newly fetched connected detail inherits cached Interrupted through merged_status. The relevant old status is the mounted view's existing accepted detail. A successful post-Restart live detail repairs the gap. Detail failure may lengthen it but is not required to create the ordering. The precise unobserved runtime premise is delivery of the pre-completion stale sidebar reply after pending clears and before the mounted observer or fresh detail supplies the restarted run. Available source establishes that this is permitted, not its frequency. Runtime timing evidence would measure incidence, not supply a missing code path, and was not requested.
+The mounted view still owns its earlier nonstale Interrupted current; sidebar retirement does not replace that state.
+The selection bridge follows title and requests independent detail, rather than copying the sidebar status
+(session_view.rs:1245–1273). At :549–564 the observer sees the changed durable restart_revision and increments
+mount_generation, but with restart_succeeded cleared it cannot set relaunched=true. At :1709–1710 the desired set
+remains empty because terminal_absence/keep_terminal_surface (:3701–3722) rejects Interrupted with relaunched=false.
+This is lost terminal admission, not a lost numerical generation increment; preserving restart_revision alone does not
+settle it. The changed isolated observer test (:3915–3970) asserts the increment, not mounted terminal admission.
 
-Cross-revision comparison: directly checked b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe session_ops.rs:50–114 and :188–233, plus session_view.rs:535–565 and :1252–1273. That revision already checks generation > restart_listing_floor, yet a newer eligible sidebar listing can clear Lifecycle.restart before the mounted observer uses it. Besides relaunched it can lose the reply terminal-kind override, an aspect absent after this group's grid-only change. Restoring the old floor or fencing pre-completion listing replies fixes this finding's specific stale-evidence trigger, but does not fix g036/l1's eligible-newer-listing consumer race. Keeping successful completion knowledge durable for mounted consumers separately from the retireable seed for future views could address both. Preserve these trigger and repair boundaries when deduplicating.
+Repair and limits: connected GET session detail drains live supervisor sessions (sessions.rs:3052–3095 and :3195–3222);
+only its no-client branch (:3162–3192) serves cached metadata. Therefore the finding does not claim that a newly fetched
+connected detail inherits cached Interrupted through merged_status. The relevant old status is the mounted view's
+existing accepted detail. A successful post-Restart live detail repairs the gap. Detail failure may lengthen it but is
+not required to create the ordering. The precise unobserved runtime premise is delivery of the pre-completion stale
+sidebar reply after pending clears and before the mounted observer or fresh detail supplies the restarted run. Available
+source establishes that this is permitted, not its frequency. Runtime timing evidence would measure incidence, not
+supply a missing code path, and was not requested.
 
-Contract: SPEC_impl.md:1136–1139 says Restart completion reattaches the agent terminal, a view mounted during the request observes completion, and a view opened before the listing catches up can use the retained successful reply. SPEC.md Lifecycle operations:1897–1900 likewise preserves action outcomes across navigation and mounted completion observation. Suggested bucket: other, unchanged; temporary presentation/attachment failure only. Could-be-highest: no established security or work-loss route. Confidence: likely, naming the response/effect ordering premise above; code paths and absence of ordering protection confirmed through source, behavior not observed in execution. proposed_drop: false. possible_cover: duplicate g037/f3 and g038/l1 supplied by the caller; related but distinct g036/l1 as above. All earlier records remain preserved. No new discovery in this coverage-repair/synthesis turn. No open source lead, reproduction, test, build, or checkout change.
+Cross-revision comparison: directly checked b3d6b3eff6b7508e0b1fb6ec5b5cde31d27ebabe session_ops.rs:50–114 and :188–233,
+plus session_view.rs:535–565 and :1252–1273. That revision already checks generation > restart_listing_floor, yet a
+newer eligible sidebar listing can clear Lifecycle.restart before the mounted observer uses it. Besides relaunched it
+can lose the reply terminal-kind override, an aspect absent after this group's grid-only change. Restoring the old floor
+or fencing pre-completion listing replies fixes this finding's specific stale-evidence trigger, but does not fix
+g036/l1's eligible-newer-listing consumer race. Keeping successful completion knowledge durable for mounted consumers
+separately from the retireable seed for future views could address both. Preserve these trigger and repair boundaries
+when deduplicating.
+
+Contract: SPEC_impl.md:1136–1139 says Restart completion reattaches the agent terminal, a view mounted during the
+request observes completion, and a view opened before the listing catches up can use the retained successful reply.
+SPEC.md Lifecycle operations:1897–1900 likewise preserves action outcomes across navigation and mounted completion
+observation. Suggested bucket: other, unchanged; temporary presentation/attachment failure only. Could-be-highest: no
+established security or work-loss route. Confidence: likely, naming the response/effect ordering premise above; code
+paths and absence of ordering protection confirmed through source, behavior not observed in execution. proposed_drop:
+false. possible_cover: duplicate g037/f3 and g038/l1 supplied by the caller; related but distinct g036/l1 as above. All
+earlier records remain preserved. No new discovery in this coverage-repair/synthesis turn. No open source lead,
+reproduction, test, build, or checkout change.
 
 Returned proposal (claims-058, event 5): **filtered**, suggested bucket **other**.
 
-This is the f560058 old-stale-sidebar route also present in g088/l1. The source permits its ordering, but its whole established consequence is temporary wrong presentation/terminal admission repaired by live detail or ordinary reopening, within the rare self-correcting filter.
+This is the f560058 old-stale-sidebar route also present in g088/l1. The source permits its ordering, but its whole
+established consequence is temporary wrong presentation/terminal admission repaired by live detail or ordinary
+reopening, within the rare self-correcting filter.
 
-Original stronger consequence: Initially high if material terminal-remount failure were established; latest history explicitly narrows to other, temporary missing terminal until live detail succeeds. Preserve the distinction from lost numerical generation and from the earlier eligible-new-listing/terminal-kind route.
+Original stronger consequence: Initially high if material terminal-remount failure were established; latest history
+explicitly narrows to other, temporary missing terminal until live detail succeeds. Preserve the distinction from lost
+numerical generation and from the earlier eligible-new-listing/terminal-kind route.
 
-Unresolved premise or limitation: The delivery-before-observer schedule remains unobserved; source permits it. No permanent outage or lost user work is established. Parent-supplied g037/f3 and g038/l1 were not batch inputs, so no independent alias judgment is made for them.
+Unresolved premise or limitation: The delivery-before-observer schedule remains unobserved; source permits it. No
+permanent outage or lost user work is established. Parent-supplied g037/f3 and g038/l1 were not batch inputs, so no
+independent alias judgment is made for them.
 
-Proposed basis: Filter the established narrowed consequence; reconcile this named alias with g088/l1 without erasing its broader earlier trigger or severity disagreement.
+Proposed basis: Filter the established narrowed consequence; reconcile this named alias with g088/l1 without erasing its
+broader earlier trigger or severity disagreement.
 
-Existing parent disposition (event 5): duplicate. Parent read full claims058 and prior g032/c4. Exact f560058 old stale-sidebar snapshot subset: earlier cached_slice wait survives completion demand and stale row retires payload before mounted observer; generation alone does not admit terminal; independent live detail repairs. Same established bounded consequence and full rare self-correcting filter; preserve initial high suggestion and withdrawn prolonged-cache premise. Earlier eligible-new-listing route remains separate g036/l1, not claimed fixed by restoring age floor.
+Existing parent disposition (event 5): duplicate. Parent read full claims058 and prior g032/c4. Exact f560058 old
+stale-sidebar snapshot subset: earlier cached_slice wait survives completion demand and stale row retires payload before
+mounted observer; generation alone does not admit terminal; independent live detail repairs. Same established bounded
+consequence and full rare self-correcting filter; preserve initial high suggestion and withdrawn prolonged-cache
+premise. Earlier eligible-new-listing route remains separate g036/l1, not claimed fixed by restoring age floor.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g089 record](records/review-through-00de0b6c/groups/g089.json). Record ID: `l1`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g089 record](records/review-through-00de0b6c/groups/g089.json). Record ID: `l1`.

@@ -1,7 +1,53 @@
 [
-  {"key":"g087/l1","line":13,"disposition":"duplicate","group":"replace-with-environment-recent-bypasses-held-placement-admission","bucket":"high","recording":"retain-verified","needs_independent_drop_check":false,"reason":"Parent read complete claims057 and compared retained g086/l2. Same newly introduced350a4b33 Recent acceptance mutates fixed-source Replace to fresh entry.target; host_fixed rejects submission and disables picker, Reset preserves placement. Retain all direct/search caller provenance, correction to original introduction attribution and ordinary-host/recent/cancel-reopen recovery limits under one high item. No create, source deletion or work-loss is sent; exact claims057 coverage found no acceptance/pending repair/filter. g085/l2 remains to reconcile separately."},
-  {"key":"g087/l2","line":16,"disposition":"verified","group":"failed-launch-reopens","bucket":"high","recording":"extend-existing","queue_target_candidate":"review_feedback_queue/moved-on-launch-return.md","needs_independent_drop_check":false,"reason":"Parent read complete claims057 and full existing moved-on-launch-return item. Newly introduced533169cf one-shot60s wake timer is a useful caller extension of the same existing naming-only activity admission defect. At7462-7487/7519 the failure return passes no pending.press_baseline;2071-2135 no-baseline admission and5595-5634 isolation/direct focus can reopen over later session typing. Preserve still-waiting matching press, consumed/cancelled/retired opening and later-modal caveats; no destructive follow-on or highest consequence. Extend existing high item with timer provenance rather than duplicate or dismiss useful new scope."},
-  {"key":"g088/l1","line":12,"disposition":"rejected","group":"restart-retirement-two-filtered-trigger-subsets","bucket":"other","recording":"filtered","needs_independent_drop_check":false,"reason":"Parent read complete claims058 and compares prior g032/c4 old-stale-listing and g036/l1 newer-eligible-listing judgments. This owner records BOTH subsets. Preserve separate introducing revisions, read-age-floor versus consumption fix boundaries, high suggestion, generation-only refutation withdrawal and live-detail correction. Both established consequences are narrow scheduling-dependent temporary interrupted/empty-terminal presentation, repaired by independent live detail or ordinary reopen. No durable mutation/false success/wrong target/security/work loss. FILTER rare self-correcting display boundary quoted in claims058 fully matches each bounded subset; no blanket runtime refutation. Composite audit group keeps both canonical references without collapsing their distinct trigger/fix scopes; no new queue defect."},
-  {"key":"g089/l1","line":5,"disposition":"duplicate","group":"restart-success-retired-by-precompletion-stale-listing","bucket":"other","recording":"filtered","needs_independent_drop_check":false,"reason":"Parent read full claims058 and prior g032/c4. Exact f560058 old stale-sidebar snapshot subset: earlier cached_slice wait survives completion demand and stale row retires payload before mounted observer; generation alone does not admit terminal; independent live detail repairs. Same established bounded consequence and full rare self-correcting filter; preserve initial high suggestion and withdrawn prolonged-cache premise. Earlier eligible-new-listing route remains separate g036/l1, not claimed fixed by restoring age floor."},
-  {"key":"g088/l3","line":16,"disposition":"duplicate","group":"warned-delete-handoff-clears-error-before-view-admission","bucket":"other","recording":"filtered","needs_independent_drop_check":false,"reason":"Parent read full claims058 and prior g036/l2. Same2ef10815 ID-only warned_delete publication removes persistent refusal before destination-view admission. Narrow publication/navigation/effect interval can discard only failed Delete's reason/offer; unselected completion already preserves Error. Nothing destructive sent, false success, security or work loss. Full FILTER rare lost-diagnostic boundary matches and does not waive whole-environment consent. Preserve unresolved timing and limited competing-claim variant, exact navigation-only established route and all prior source checks under canonical filtered group."}
+  {
+    "key": "g087/l1",
+    "line": 13,
+    "disposition": "duplicate",
+    "group": "replace-with-environment-recent-bypasses-held-placement-admission",
+    "bucket": "high",
+    "recording": "retain-verified",
+    "needs_independent_drop_check": false,
+    "reason": "Parent read complete claims057 and compared retained g086/l2. Same newly introduced350a4b33 Recent acceptance mutates fixed-source Replace to fresh entry.target; host_fixed rejects submission and disables picker, Reset preserves placement. Retain all direct/search caller provenance, correction to original introduction attribution and ordinary-host/recent/cancel-reopen recovery limits under one high item. No create, source deletion or work-loss is sent; exact claims057 coverage found no acceptance/pending repair/filter. g085/l2 remains to reconcile separately."
+  },
+  {
+    "key": "g087/l2",
+    "line": 16,
+    "disposition": "verified",
+    "group": "failed-launch-reopens",
+    "bucket": "high",
+    "recording": "extend-existing",
+    "queue_target_candidate": "review_feedback_queue/moved-on-launch-return.md",
+    "needs_independent_drop_check": false,
+    "reason": "Parent read complete claims057 and full existing moved-on-launch-return item. Newly introduced533169cf one-shot60s wake timer is a useful caller extension of the same existing naming-only activity admission defect. At7462-7487/7519 the failure return passes no pending.press_baseline;2071-2135 no-baseline admission and5595-5634 isolation/direct focus can reopen over later session typing. Preserve still-waiting matching press, consumed/cancelled/retired opening and later-modal caveats; no destructive follow-on or highest consequence. Extend existing high item with timer provenance rather than duplicate or dismiss useful new scope."
+  },
+  {
+    "key": "g088/l1",
+    "line": 12,
+    "disposition": "rejected",
+    "group": "restart-retirement-two-filtered-trigger-subsets",
+    "bucket": "other",
+    "recording": "filtered",
+    "needs_independent_drop_check": false,
+    "reason": "Parent read complete claims058 and compares prior g032/c4 old-stale-listing and g036/l1 newer-eligible-listing judgments. This owner records BOTH subsets. Preserve separate introducing revisions, read-age-floor versus consumption fix boundaries, high suggestion, generation-only refutation withdrawal and live-detail correction. Both established consequences are narrow scheduling-dependent temporary interrupted/empty-terminal presentation, repaired by independent live detail or ordinary reopen. No durable mutation/false success/wrong target/security/work loss. FILTER rare self-correcting display boundary quoted in claims058 fully matches each bounded subset; no blanket runtime refutation. Composite audit group keeps both canonical references without collapsing their distinct trigger/fix scopes; no new queue defect."
+  },
+  {
+    "key": "g089/l1",
+    "line": 5,
+    "disposition": "duplicate",
+    "group": "restart-success-retired-by-precompletion-stale-listing",
+    "bucket": "other",
+    "recording": "filtered",
+    "needs_independent_drop_check": false,
+    "reason": "Parent read full claims058 and prior g032/c4. Exact f560058 old stale-sidebar snapshot subset: earlier cached_slice wait survives completion demand and stale row retires payload before mounted observer; generation alone does not admit terminal; independent live detail repairs. Same established bounded consequence and full rare self-correcting filter; preserve initial high suggestion and withdrawn prolonged-cache premise. Earlier eligible-new-listing route remains separate g036/l1, not claimed fixed by restoring age floor."
+  },
+  {
+    "key": "g088/l3",
+    "line": 16,
+    "disposition": "duplicate",
+    "group": "warned-delete-handoff-clears-error-before-view-admission",
+    "bucket": "other",
+    "recording": "filtered",
+    "needs_independent_drop_check": false,
+    "reason": "Parent read full claims058 and prior g036/l2. Same2ef10815 ID-only warned_delete publication removes persistent refusal before destination-view admission. Narrow publication/navigation/effect interval can discard only failed Delete's reason/offer; unselected completion already preserves Error. Nothing destructive sent, false success, security or work loss. Full FILTER rare lost-diagnostic boundary matches and does not waive whole-environment consent. Preserve unresolved timing and limited competing-claim variant, exact navigation-only established route and all prior source checks under canonical filtered group."
+  }
 ]

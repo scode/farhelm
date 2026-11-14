@@ -1,4 +1,16 @@
 [
- {"key":"g028/c4","proposal":"claim-checks/claims-016/result.json","parent_proposal":"source-refuted-rendered-delete-scope-widening","final_independent_gate":"required-before-highest-drop","reason":"Parent read full016: exact row Delete token/header shown_delete key consumed and answered lane overrides refreshed EnvironmentDelete scope. This binds request and wording to drawn question, refuting named connection-refresh Session→Whole widening. Original whole-resource files/process loss retained for fresh checker of both actual consumers and token contract. No acceptance of unconfirmed deletion; other old-question/Stop/control roots unaffected."},
- {"key":"g028/c6","proposal":"claim-checks/claims-016/result.json","parent_proposal":"source-refuted-nested-delete-rpc-timer","final_independent_gate":"required-by-conservative-destructive-followup-flag","reason":"Full016 actual client request capacity reservation/reply wait has no inner timeout, delete_session_or_seal direct call leaves enclosing240s operative;30s supervisor admission and page540/180 budgets distinct. Refutes only suspected shorter nested timer/spurious unanswered whole-environment followup. Original followup still needs separate warning, no established unauthorized loss; preserve conservative gate and avoid asserting every provider destruction fits bound."}
+  {
+    "key": "g028/c4",
+    "proposal": "claim-checks/claims-016/result.json",
+    "parent_proposal": "source-refuted-rendered-delete-scope-widening",
+    "final_independent_gate": "required-before-highest-drop",
+    "reason": "Parent read full016: exact row Delete token/header shown_delete key consumed and answered lane overrides refreshed EnvironmentDelete scope. This binds request and wording to drawn question, refuting named connection-refresh Session→Whole widening. Original whole-resource files/process loss retained for fresh checker of both actual consumers and token contract. No acceptance of unconfirmed deletion; other old-question/Stop/control roots unaffected."
+  },
+  {
+    "key": "g028/c6",
+    "proposal": "claim-checks/claims-016/result.json",
+    "parent_proposal": "source-refuted-nested-delete-rpc-timer",
+    "final_independent_gate": "required-by-conservative-destructive-followup-flag",
+    "reason": "Full016 actual client request capacity reservation/reply wait has no inner timeout, delete_session_or_seal direct call leaves enclosing240s operative;30s supervisor admission and page540/180 budgets distinct. Refutes only suspected shorter nested timer/spurious unanswered whole-environment followup. Original followup still needs separate warning, no established unauthorized loss; preserve conservative gate and avoid asserting every provider destruction fits bound."
+  }
 ]

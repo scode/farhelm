@@ -4,13 +4,30 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Unverified collection: If a legacy pane PID is recycled during startup's process snapshot for a newly started host tab, old-terminal cleanup can attribute the old pane to the new tab and stop that new tab's processes, including work under another supervisor running as the same user. Suggested bucket: highest; could-be-highest: yes. This preserves the original strongest consequence, rather than reducing it to a stale-root or harmless cleanup concern. Source route: old_terminals.rs:457 snapshots pid/ppid/start, 464 reads the child's current environment without checking its start identity, and 473-476 stores the old subtree identities under the newly read owner. Shipped host tabs do carry the required markers: service/core.rs:14690-14697 injects the real session and tab UUIDs; host_tabs.rs:629-641 puts them in the child's initial environment. The wrongly read Tab owner enters both the sessions set at old_terminals.rs:321-327 and old_tabs' direct list at 369-375, bypassing the host-record exclusion used only for scope-discovered tabs at 399-402. sweep:329-342 then names that new tab's possible scope and exact session/tab marker. Root revalidation does not prevent it: sweep.rs:1595-1646 drops changed roots as Ok(None), while 1475-1539 still checks the named scope or scans markers; the Tab marker claims at 252-260 match that new tab. No need to assume an agent for a nonexistent database row: direct snapshot Tab owners are used without such a row. Server verification does constrain this: no subtree is retained unless the pinned server passes verification and is signalled; AlreadyGone, mismatch and timeo
+Unverified collection: If a legacy pane PID is recycled during startup's process snapshot for a newly started host tab,
+old-terminal cleanup can attribute the old pane to the new tab and stop that new tab's processes, including work under
+another supervisor running as the same user. Suggested bucket: highest; could-be-highest: yes. This preserves the
+original strongest consequence, rather than reducing it to a stale-root or harmless cleanup concern. Source route:
+old_terminals.rs:457 snapshots pid/ppid/start, 464 reads the child's current environment without checking its start
+identity, and 473-476 stores the old subtree identities under the newly read owner. Shipped host tabs do carry the
+required markers: service/core.rs:14690-14697 injects the real session and tab UUIDs; host_tabs.rs:629-641 puts them in
+the child's initial environment. The wrongly read Tab owner enters both the sessions set at old_terminals.rs:321-327 and
+old_tabs' direct list at 369-375, bypassing the host-record exclusion used only for scope-discovered tabs at 399-402.
+sweep:329-342 then names that new tab's possible scope and exact session/tab marker. Root revalidation does not prevent
+it: sweep.rs:1595-1646 drops changed roots as Ok(None), while 1475-1539 still checks the named scope or scans markers;
+the Tab marker claims at 252-260 match that new tab. No need to assume an agent for a nonexistent database row: direct
+snapshot Tab owners are used without such a row. Server verification does constrain this: no subtree is retained unless
+the pinned server passes verification and is signalled; AlreadyGone, mismatch and timeo
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **highest**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **highest**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g097/l4`.
 
@@ -20,21 +37,70 @@ Confidence: Unverified collection; recording proposals and any disagreement rema
 
 Latest reviewer record, event 19 (finding, open):
 
-Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Synthesis resolution; source only, no execution. TLDR: If a legacy pane PID is recycled during startup's process snapshot for a newly started host tab, old-terminal cleanup can attribute the old pane to the new tab and stop that new tab's processes, including work under another supervisor running as the same user. Suggested bucket: highest; could-be-highest: yes. This preserves the original strongest consequence, rather than reducing it to a stale-root or harmless cleanup concern. Source route: old_terminals.rs:457 snapshots pid/ppid/start, 464 reads the child's current environment without checking its start identity, and 473-476 stores the old subtree identities under the newly read owner. Shipped host tabs do carry the required markers: service/core.rs:14690-14697 injects the real session and tab UUIDs; host_tabs.rs:629-641 puts them in the child's initial environment. The wrongly read Tab owner enters both the sessions set at old_terminals.rs:321-327 and old_tabs' direct list at 369-375, bypassing the host-record exclusion used only for scope-discovered tabs at 399-402. sweep:329-342 then names that new tab's possible scope and exact session/tab marker. Root revalidation does not prevent it: sweep.rs:1595-1646 drops changed roots as Ok(None), while 1475-1539 still checks the named scope or scans markers; the Tab marker claims at 252-260 match that new tab. No need to assume an agent for a nonexistent database row: direct snapshot Tab owners are used without such a row. Server verification does constrain this: no subtree is retained unless the pinned server passes verification and is signalled; AlreadyGone, mismatch and timeout discard it (old_terminals.rs:223-277). That guards server-PID reuse, not this child attribution. Consequential attribution is bounded by the same absolute 15-second startup deadline: snapshot output arriving after timeout is discarded at 204-216 and termination timing out discards it at 273-277. proposed_drop: specification acceptance of short bounded PID reuse, for the caller's independent interpretation/check; no parent drop is accepted. Exact SPEC_impl.md:5431-5435: "Process-number reuse inside a short window is accepted, for now." and "Code that signals or adopts a process by its number may lose the race in which that process exits and the kernel hands the number to an unrelated process within a short, bounded window: between reading a number and checking it, between reaping a child and signalling its group, while a watchdog fires just as its child finishes, or during a polling loop of at most a few seconds." Exact exclusion at 5438-5439: "What is not accepted is carrying a bare number across unbounded waits or asynchronous work, or storing it for later." Material caveat for independent review: the outer bound here is 15 seconds, longer than the few-second polling example, while child PID-to-owner attribution occurs synchronously inside that bounded snapshot result. Acceptance is an interpretation, not a source refutation or a rarity-based downgrade. Confidence: confirmed conditional source route; independent acceptance judgment outstanding. possible_cover: unknown; parent owns broader old-terminal attribution coverage, and no queue sources were searched. Discovery turn 3 normalization: kind is now finding with the same highest consequence and exact proposed_drop basis, pending independent review. Preserve both interpretive caveats: the deadline is 15 seconds rather than the few-second example, and the rule excludes carrying a bare number across unbounded waits or asynchronous work. Neighbour g162/l4 concerns the separate back-to-back SIGTERM-to-SIGCONT window, with no intervening await; it does not settle this child snapshot-to-environment attribution and later marker/scope sweep. No parent drop or lowering has been accepted. All earlier history remains append-only.
+Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. Synthesis resolution; source only, no execution. TLDR: If a
+legacy pane PID is recycled during startup's process snapshot for a newly started host tab, old-terminal cleanup can
+attribute the old pane to the new tab and stop that new tab's processes, including work under another supervisor running
+as the same user. Suggested bucket: highest; could-be-highest: yes. This preserves the original strongest consequence,
+rather than reducing it to a stale-root or harmless cleanup concern. Source route: old_terminals.rs:457 snapshots
+pid/ppid/start, 464 reads the child's current environment without checking its start identity, and 473-476 stores the
+old subtree identities under the newly read owner. Shipped host tabs do carry the required markers:
+service/core.rs:14690-14697 injects the real session and tab UUIDs; host_tabs.rs:629-641 puts them in the child's
+initial environment. The wrongly read Tab owner enters both the sessions set at old_terminals.rs:321-327 and old_tabs'
+direct list at 369-375, bypassing the host-record exclusion used only for scope-discovered tabs at 399-402.
+sweep:329-342 then names that new tab's possible scope and exact session/tab marker. Root revalidation does not prevent
+it: sweep.rs:1595-1646 drops changed roots as Ok(None), while 1475-1539 still checks the named scope or scans markers;
+the Tab marker claims at 252-260 match that new tab. No need to assume an agent for a nonexistent database row: direct
+snapshot Tab owners are used without such a row. Server verification does constrain this: no subtree is retained unless
+the pinned server passes verification and is signalled; AlreadyGone, mismatch and timeout discard it
+(old_terminals.rs:223-277). That guards server-PID reuse, not this child attribution. Consequential attribution is
+bounded by the same absolute 15-second startup deadline: snapshot output arriving after timeout is discarded at 204-216
+and termination timing out discards it at 273-277. proposed_drop: specification acceptance of short bounded PID reuse,
+for the caller's independent interpretation/check; no parent drop is accepted. Exact SPEC_impl.md:5431-5435:
+"Process-number reuse inside a short window is accepted, for now." and "Code that signals or adopts a process by its
+number may lose the race in which that process exits and the kernel hands the number to an unrelated process within a
+short, bounded window: between reading a number and checking it, between reaping a child and signalling its group, while
+a watchdog fires just as its child finishes, or during a polling loop of at most a few seconds." Exact exclusion at
+5438-5439: "What is not accepted is carrying a bare number across unbounded waits or asynchronous work, or storing it
+for later." Material caveat for independent review: the outer bound here is 15 seconds, longer than the few-second
+polling example, while child PID-to-owner attribution occurs synchronously inside that bounded snapshot result.
+Acceptance is an interpretation, not a source refutation or a rarity-based downgrade. Confidence: confirmed conditional
+source route; independent acceptance judgment outstanding. possible_cover: unknown; parent owns broader old-terminal
+attribution coverage, and no queue sources were searched. Discovery turn 3 normalization: kind is now finding with the
+same highest consequence and exact proposed_drop basis, pending independent review. Preserve both interpretive caveats:
+the deadline is 15 seconds rather than the few-second example, and the rule excludes carrying a bare number across
+unbounded waits or asynchronous work. Neighbour g162/l4 concerns the separate back-to-back SIGTERM-to-SIGCONT window,
+with no intervening await; it does not settle this child snapshot-to-environment attribution and later marker/scope
+sweep. No parent drop or lowering has been accepted. All earlier history remains append-only.
 
 Returned proposal (claims-064, event 19): **retain-verified**, suggested bucket **highest**.
 
-The conditional wrong-tab termination route is established in source. Whether the general short-PID-reuse acceptance covers this attribution-and-later-sweep route remains ambiguous. Retain unless the required independent check agrees to the narrowly stated spec-based drop. This is distinct from server PID verification and back-to-back signal races.
+The conditional wrong-tab termination route is established in source. Whether the general short-PID-reuse acceptance
+covers this attribution-and-later-sweep route remains ambiguous. Retain unless the required independent check agrees to
+the narrowly stated spec-based drop. This is distinct from server PID verification and back-to-back signal races.
 
-Original stronger consequence: Old-terminal cleanup can stop a newly started host tab's user processes/work, including under another supervisor of the same user, after a recycled pane pid supplies that new tab's markers. Preserve highest; no parent drop/lowering was accepted in the history.
+Original stronger consequence: Old-terminal cleanup can stop a newly started host tab's user processes/work, including
+under another supervisor of the same user, after a recycled pane pid supplies that new tab's markers. Preserve highest;
+no parent drop/lowering was accepted in the history.
 
-Unresolved premise or limitation: Runtime occurrence/frequency is unobserved. The source route is conditional on pane-pid recycling before its environment read; that is a trigger, not a missing shipped-control route. The unresolved question is acceptance scope, not whether stale-root rejection alone prevents the sweep.
+Unresolved premise or limitation: Runtime occurrence/frequency is unobserved. The source route is conditional on
+pane-pid recycling before its environment read; that is a trigger, not a missing shipped-control route. The unresolved
+question is acceptance scope, not whether stale-root rejection alone prevents the sweep.
 
-Proposed basis: Retain the conditional source-confirmed finding. Any spec-based dismissal needs an independent judgment on both the 15-second bound and the exclusion for carrying bare numbers across asynchronous work.
+Proposed basis: Retain the conditional source-confirmed finding. Any spec-based dismissal needs an independent judgment
+on both the 15-second bound and the exclusion for carrying bare numbers across asynchronous work.
 
-Existing parent disposition (event 19): under-investigation. Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it.
+Existing parent disposition (event 19): under-investigation. Record durably acknowledged; parent source/contract
+validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This
+preserves the claim and uncertainty without accepting, dropping or lowering it.
 
-Unapplied parent proposal: retain-highest-pane-owner-PID-reuse-marker-sweep-pending-acceptance-scope. Full064 conditional source route snapshots pane PID/start then reads environment by barePID without child-token check; recycled newhosttab contributes real session/tab markers. Later sweep rejects changed old root but still acts on wrong owner scope/marker, including another same-user supervisor. Fifteen-second server deadline does not restore lost owner identity. Intentional retirement preserves hostterminals, accepted verification-to-signal handoff filter is different, upgradefilter not clearly confined oldaffectedwork. General shortPIDrace clause versus asynchronous/later-work exclusion is ambiguous; retain highest until fresh exact-scope verdict, not lower on rarity. Runtimeincidence unobserved, reusedPID trigger is not a missing shipped producer.
+Unapplied parent proposal: retain-highest-pane-owner-PID-reuse-marker-sweep-pending-acceptance-scope. Full064
+conditional source route snapshots pane PID/start then reads environment by barePID without child-token check; recycled
+newhosttab contributes real session/tab markers. Later sweep rejects changed old root but still acts on wrong owner
+scope/marker, including another same-user supervisor. Fifteen-second server deadline does not restore lost owner
+identity. Intentional retirement preserves hostterminals, accepted verification-to-signal handoff filter is different,
+upgradefilter not clearly confined oldaffectedwork. General shortPIDrace clause versus asynchronous/later-work exclusion
+is ambiguous; retain highest until fresh exact-scope verdict, not lower on rarity. Runtimeincidence unobserved,
+reusedPID trigger is not a missing shipped producer.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g097 record](records/review-through-00de0b6c/groups/g097.json). Record ID: `l4`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g097 record](records/review-through-00de0b6c/groups/g097.json). Record ID: `l4`.

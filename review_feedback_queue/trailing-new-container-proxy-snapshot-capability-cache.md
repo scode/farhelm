@@ -4,13 +4,30 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Unverified collection: After the container host proxy settings change, a newly launched container can keep the old or absent proxy settings for its lifetime, preventing its agents from reaching the network. This supersedes the original design-only candidate; its original suspected network consequence is preserved and now source-confirmed. At pinned tip provisioning/tensorlake_add.rs 377–398 admits cached place metadata and registers a fresh environment; environment_session_steps 521–555 performs ensure_prepared then create. environment/podman.rs 975–990 calls places.fresh before preparation. However podman_probe.rs 18–20 and 326–334 accept observations up to 300 seconds old, and fresh 385–406 returns such a cached result without refreshing. With an existing prepared image no intervening build is needed. Creation at podman.rs 1183–1205 gets ready.proxy through self.place at 1195. self.place 148–164 uses places.runtime; podman_probe.rs 340–380 accepts a same-route cached success without any age check or forced read. Thus after a completed launcher probe, change the host manager proxy while keeping that launcher open, then launch within five minutes: admission and installation both use the old snapshot. Probe source at podman_probe.rs 596–628 reads the manager only when probe runs, selects the proxy values, and returns them in ReadyPlace at 658–663. Installation is not a second read of the host manager: podman.rs proxies 558–638 reads the container manager only for XDG_CONFIG_HOME, renders the passed cached values at 588–589, installs their environment.d file at 612–614, and unsets/imports precisely
+Unverified collection: After the container host proxy settings change, a newly launched container can keep the old or
+absent proxy settings for its lifetime, preventing its agents from reaching the network. This supersedes the original
+design-only candidate; its original suspected network consequence is preserved and now source-confirmed. At pinned tip
+provisioning/tensorlake_add.rs 377–398 admits cached place metadata and registers a fresh environment;
+environment_session_steps 521–555 performs ensure_prepared then create. environment/podman.rs 975–990 calls places.fresh
+before preparation. However podman_probe.rs 18–20 and 326–334 accept observations up to 300 seconds old, and fresh
+385–406 returns such a cached result without refreshing. With an existing prepared image no intervening build is needed.
+Creation at podman.rs 1183–1205 gets ready.proxy through self.place at 1195. self.place 148–164 uses places.runtime;
+podman_probe.rs 340–380 accepts a same-route cached success without any age check or forced read. Thus after a completed
+launcher probe, change the host manager proxy while keeping that launcher open, then launch within five minutes:
+admission and installation both use the old snapshot. Probe source at podman_probe.rs 596–628 reads the manager only
+when probe runs, selects the proxy values, and returns them in ReadyPlace at 658–663. Installation is not a second read
+of the host manager: podman.rs proxies 558–638 reads the container manager only for XDG_CONFIG_HOME, renders the passed
+cached values at 588–589, installs their environment.d file at 612–614, and unsets/imports precisely
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **high**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **high**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g003/f1`, `g064/c4`.
 
@@ -20,21 +37,69 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 8 (finding, open):
 
-Reviewed assigned contract commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed. Verified implementation revision: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db; git blame attributes the creation-time self.place/proxies call to full commit 56659839785691f76da3af5d8f51b511cff4ba8b, which is in the supplied commit list. TLDR: After the container host proxy settings change, a newly launched container can keep the old or absent proxy settings for its lifetime, preventing its agents from reaching the network. This supersedes the original design-only candidate; its original suspected network consequence is preserved and now source-confirmed. At pinned tip provisioning/tensorlake_add.rs 377–398 admits cached place metadata and registers a fresh environment; environment_session_steps 521–555 performs ensure_prepared then create. environment/podman.rs 975–990 calls places.fresh before preparation. However podman_probe.rs 18–20 and 326–334 accept observations up to 300 seconds old, and fresh 385–406 returns such a cached result without refreshing. With an existing prepared image no intervening build is needed. Creation at podman.rs 1183–1205 gets ready.proxy through self.place at 1195. self.place 148–164 uses places.runtime; podman_probe.rs 340–380 accepts a same-route cached success without any age check or forced read. Thus after a completed launcher probe, change the host manager proxy while keeping that launcher open, then launch within five minutes: admission and installation both use the old snapshot. Probe source at podman_probe.rs 596–628 reads the manager only when probe runs, selects the proxy values, and returns them in ReadyPlace at 658–663. Installation is not a second read of the host manager: podman.rs proxies 558–638 reads the container manager only for XDG_CONFIG_HOME, renders the passed cached values at 588–589, installs their environment.d file at 612–614, and unsets/imports precisely those values at 621–636. The creation path then restarts the supervisor at 1214–1216. After admission, 1223–1227 deliberately refuses to rewrite the snapshot on later probes/retries/reboots, so this new container does not heal when the cache refreshes. Contract: original SPEC.md 4802–4804, unchanged at tip 4877–4879, says "Containers inherit proxy variables from the container host's systemd user manager environment at creation" and "Later host changes affect newly created containers." Original SPEC_impl.md 6561–6564 says read during a probe but never authorizes stale values for a later creation; its introduction gives SPEC.md precedence. Suggested bucket: other (configuration-propagation correctness); could-be-highest: false on established evidence. Confidence: confirmed by source/contract and caller trace; no execution observed. proposed_drop: false; no parent drop accepted. possible_cover: none; no forbidden coverage searches. Fix direction: sample the host manager proxy for the new environment at creation, independently of capability-cache reuse, while preserving existing admitted environments. Caveats: requires a host manager-environment change between observation and launch; an explicit completed refresh after that change avoids the route. Initial observation is bounded to five minutes before preparation, but a long preparation can age it further because installation uses the age-unbounded runtime cache. No security disclosure or loss-of-work route is claimed. No tests or reproductions run.
+Reviewed assigned contract commit: c8bc155cc36723c8c53870944d07ce8ec61ef9ed. Verified implementation revision:
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db; git blame attributes the creation-time self.place/proxies call to full commit
+56659839785691f76da3af5d8f51b511cff4ba8b, which is in the supplied commit list. TLDR: After the container host proxy
+settings change, a newly launched container can keep the old or absent proxy settings for its lifetime, preventing its
+agents from reaching the network. This supersedes the original design-only candidate; its original suspected network
+consequence is preserved and now source-confirmed. At pinned tip provisioning/tensorlake_add.rs 377–398 admits cached
+place metadata and registers a fresh environment; environment_session_steps 521–555 performs ensure_prepared then
+create. environment/podman.rs 975–990 calls places.fresh before preparation. However podman_probe.rs 18–20 and 326–334
+accept observations up to 300 seconds old, and fresh 385–406 returns such a cached result without refreshing. With an
+existing prepared image no intervening build is needed. Creation at podman.rs 1183–1205 gets ready.proxy through
+self.place at 1195. self.place 148–164 uses places.runtime; podman_probe.rs 340–380 accepts a same-route cached success
+without any age check or forced read. Thus after a completed launcher probe, change the host manager proxy while keeping
+that launcher open, then launch within five minutes: admission and installation both use the old snapshot. Probe source
+at podman_probe.rs 596–628 reads the manager only when probe runs, selects the proxy values, and returns them in
+ReadyPlace at 658–663. Installation is not a second read of the host manager: podman.rs proxies 558–638 reads the
+container manager only for XDG_CONFIG_HOME, renders the passed cached values at 588–589, installs their environment.d
+file at 612–614, and unsets/imports precisely those values at 621–636. The creation path then restarts the supervisor at
+1214–1216. After admission, 1223–1227 deliberately refuses to rewrite the snapshot on later probes/retries/reboots, so
+this new container does not heal when the cache refreshes. Contract: original SPEC.md 4802–4804, unchanged at tip
+4877–4879, says "Containers inherit proxy variables from the container host's systemd user manager environment at
+creation" and "Later host changes affect newly created containers." Original SPEC_impl.md 6561–6564 says read during a
+probe but never authorizes stale values for a later creation; its introduction gives SPEC.md precedence. Suggested
+bucket: other (configuration-propagation correctness); could-be-highest: false on established evidence. Confidence:
+confirmed by source/contract and caller trace; no execution observed. proposed_drop: false; no parent drop accepted.
+possible_cover: none; no forbidden coverage searches. Fix direction: sample the host manager proxy for the new
+environment at creation, independently of capability-cache reuse, while preserving existing admitted environments.
+Caveats: requires a host manager-environment change between observation and launch; an explicit completed refresh after
+that change avoids the route. Initial observation is bounded to five minutes before preparation, but a long preparation
+can age it further because installation uses the age-unbounded runtime cache. No security disclosure or loss-of-work
+route is claimed. No tests or reproductions run.
 
 Returned proposal (claims-001, event 8): **retain-verified**, suggested bucket **high**.
 
-A newly created container can permanently receive the prior manager proxy values after the host proxy changes. On a host that requires the changed proxy, this prevents agents reaching the network until the container is repaired or replaced, a material UX failure. This is source-established conditional behavior, with no measured incident or security/work-loss claim.
+A newly created container can permanently receive the prior manager proxy values after the host proxy changes. On a host
+that requires the changed proxy, this prevents agents reaching the network until the container is repaired or replaced,
+a material UX failure. This is source-established conditional behavior, with no measured incident or security/work-loss
+claim.
 
-Original stronger consequence: The original design-only stale/absent proxy and network-failure concern was first set aside for lack of implementation evidence, then reopened and source-confirmed from the in-range creation lifecycle. That withdrawal is superseded rather than silently erased. The original reviewer suggested other; high here follows the established conditional loss of agent network access for the container lifetime.
+Original stronger consequence: The original design-only stale/absent proxy and network-failure concern was first set
+aside for lack of implementation evidence, then reopened and source-confirmed from the in-range creation lifecycle. That
+withdrawal is superseded rather than silently erased. The original reviewer suggested other; high here follows the
+established conditional loss of agent network access for the container lifetime.
 
-Unresolved premise or limitation: The network consequence is conditional on the old or absent proxy no longer working, as on a proxy-dependent host after a proxy replacement. Requires the manager change after observation and before creation; an explicit completed refresh avoids it. The 300-second bound applies before preparation, while lengthy preparation may age the runtime cache further. No security disclosure, policy bypass or work loss is established.
+Unresolved premise or limitation: The network consequence is conditional on the old or absent proxy no longer working,
+as on a proxy-dependent host after a proxy replacement. Requires the manager change after observation and before
+creation; an explicit completed refresh avoids it. The 300-second bound applies before preparation, while lengthy
+preparation may age the runtime cache further. No security disclosure, policy bypass or work loss is established.
 
-Proposed basis: Record the stale creation snapshot. Preserve admitted containers' deliberate stable settings while separating new-container proxy sampling from reusable capability observations. No drop or highest lowering proposed.
+Proposed basis: Record the stale creation snapshot. Preserve admitted containers' deliberate stable settings while
+separating new-container proxy sampling from reusable capability observations. No drop or highest lowering proposed.
 
-Existing parent disposition (event 8): verified. Parent's original source check and fully read focused001 exact current coverage establish cached ReadyPlace proxy values reach newly created containers: fresh accepts300s capability cache; runtime returns a same-route cached success without age bound; preparation can age it further; create passes ready.proxy rather than reading the host manager. Installed per-container values deliberately persist through later refresh/reboot. SPEC4877-4879 says later host changes affect newly created containers; probe-time implementation wording does not explicitly accept stale new-container inheritance, and product rule wins observable conflict. Conditional high effect is lasting agent network failure on a proxy-dependent host after old proxy stops working, requiring repair/replacement; no security disclosure or work loss established. No exact Planned/unlanded plan/BUGS/queue/active-ledger cover, and durable wrong settings exceed rare-glitch filter. Preserve original other suggestion and source-only confidence.
+Existing parent disposition (event 8): verified. Parent's original source check and fully read focused001 exact current
+coverage establish cached ReadyPlace proxy values reach newly created containers: fresh accepts300s capability cache;
+runtime returns a same-route cached success without age bound; preparation can age it further; create passes ready.proxy
+rather than reading the host manager. Installed per-container values deliberately persist through later refresh/reboot.
+SPEC4877-4879 says later host changes affect newly created containers; probe-time implementation wording does not
+explicitly accept stale new-container inheritance, and product rule wins observable conflict. Conditional high effect is
+lasting agent network failure on a proxy-dependent host after old proxy stops working, requiring repair/replacement; no
+security disclosure or work loss established. No exact Planned/unlanded plan/BUGS/queue/active-ledger cover, and durable
+wrong settings exceed rare-glitch filter. Preserve original other suggestion and source-only confidence.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g003 record](records/review-through-00de0b6c/groups/g003.json). Record ID: `f1`.
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g003 record](records/review-through-00de0b6c/groups/g003.json). Record ID: `f1`.
 
 ### g064/c4
 
@@ -42,19 +107,50 @@ Confidence: Unverified collection; recording proposals and any disagreement rema
 
 Latest reviewer record, event 12 (candidate, open):
 
-Reviewed foundation commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6; integrated source checked: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: Newly created containers can permanently inherit the host manager's earlier proxy settings. This is the already-supplied g003/f1, not a new local discovery. Details: Directly checked podman_probe.rs:324-332 ready accepts a matching-route success up to FRESH_FOR=300 seconds, fresh at :383-390 returns it immediately, and runtime at :338-362 returns matching-route success without an age check. Proxy values enter ReadyPlace only during probe at :594-626 and :656-661. Integrated provider place at podman.rs:150-164 resolves this same runtime cache; initial setup at :1197-1207 passes its ready.proxy to proxies; :1225-1228 leaves already-admitted snapshots unchanged. No second manager-environment read at the creation boundary is supplied by these paths. SPEC.md Container sessions at :4802-4804 says exactly 'Containers inherit proxy variables from the container host's systemd user manager environment at creation' and 'Later host changes affect newly created containers.' SPEC_impl.md:6561-6564 requires reading proxy input during a probe and writing selected values at creation; that mechanism does not authorize using an earlier host proxy snapshot for a new environment. Recent capability admission is therefore not a refutation of proxy-snapshot age. Existing prepared image plus manager proxy edit after the completed launcher observation and launch within five minutes suffices; long preparation can age the snapshot further. Suggested bucket: other/configuration propagation, matching supplied owner; confidence: confirmed by source/contracts, no execution. proposed_drop: exact identity with supplied g003/f1 for consolidation only, not a source refutation or accepted drop. possible_cover: g003/f1 latest record embedded in discovery-neighbours.json, owner retains the full finding. Could-be-highest: false on established network-configuration consequence; no disclosure or loss-of-work route established. This closes the local c4 lead without duplicating ownership or discovery credit.
+Reviewed foundation commit: 04ffdbb35773cef36e73eb798c005ddbeb9a9de6; integrated source checked:
+56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: Newly created containers can permanently inherit the host manager's
+earlier proxy settings. This is the already-supplied g003/f1, not a new local discovery. Details: Directly checked
+podman_probe.rs:324-332 ready accepts a matching-route success up to FRESH_FOR=300 seconds, fresh at :383-390 returns it
+immediately, and runtime at :338-362 returns matching-route success without an age check. Proxy values enter ReadyPlace
+only during probe at :594-626 and :656-661. Integrated provider place at podman.rs:150-164 resolves this same runtime
+cache; initial setup at :1197-1207 passes its ready.proxy to proxies; :1225-1228 leaves already-admitted snapshots
+unchanged. No second manager-environment read at the creation boundary is supplied by these paths. SPEC.md Container
+sessions at :4802-4804 says exactly 'Containers inherit proxy variables from the container host's systemd user manager
+environment at creation' and 'Later host changes affect newly created containers.' SPEC_impl.md:6561-6564 requires
+reading proxy input during a probe and writing selected values at creation; that mechanism does not authorize using an
+earlier host proxy snapshot for a new environment. Recent capability admission is therefore not a refutation of
+proxy-snapshot age. Existing prepared image plus manager proxy edit after the completed launcher observation and launch
+within five minutes suffices; long preparation can age the snapshot further. Suggested bucket: other/configuration
+propagation, matching supplied owner; confidence: confirmed by source/contracts, no execution. proposed_drop: exact
+identity with supplied g003/f1 for consolidation only, not a source refutation or accepted drop. possible_cover: g003/f1
+latest record embedded in discovery-neighbours.json, owner retains the full finding. Could-be-highest: false on
+established network-configuration consequence; no disclosure or loss-of-work route established. This closes the local c4
+lead without duplicating ownership or discovery credit.
 
 Returned proposal (claims-041, event 12): **retain-verified**, suggested bucket **other**.
 
-A new container can inherit an earlier host-manager proxy snapshot and retain it after admission. This is source-established configuration propagation failure. The history attributes the same defect to g003/f1; that record is not among this batch's named claims, so exact cross-batch consolidation remains the parent's task rather than a dismissal here.
+A new container can inherit an earlier host-manager proxy snapshot and retain it after admission. This is
+source-established configuration propagation failure. The history attributes the same defect to g003/f1; that record is
+not among this batch's named claims, so exact cross-batch consolidation remains the parent's task rather than a
+dismissal here.
 
-Original stronger consequence: New containers permanently inherit old proxy settings; the supplied history claims no highest consequence and no established credential disclosure or loss of work.
+Original stronger consequence: New containers permanently inherit old proxy settings; the supplied history claims no
+highest consequence and no established credential disclosure or loss of work.
 
-Unresolved premise or limitation: No premise missing for stale selected proxy values. A concrete connectivity disruption, credential disclosure or user-work-loss route is not established. Parent should compare its named g003/f1 record before deduplicating; its contents were not separately supplied here.
+Unresolved premise or limitation: No premise missing for stale selected proxy values. A concrete connectivity
+disruption, credential disclosure or user-work-loss route is not established. Parent should compare its named g003/f1
+record before deduplicating; its contents were not separately supplied here.
 
-Proposed basis: Retain the source-confirmed configuration defect under the stable underlying key. The local candidate's earlier consolidation proposal must not erase the finding if g003/f1 is not retained elsewhere.
+Proposed basis: Retain the source-confirmed configuration defect under the stable underlying key. The local candidate's
+earlier consolidation proposal must not erase the finding if g003/f1 is not retained elsewhere.
 
-Existing parent disposition (event 12): duplicate. Parent read full claims-041 c4 and the acceptedg003/f1 decision/source checks. Both establish same-route cached ReadyPlace.proxy being selected for a new container rather than sampling its host manager at creation, then deliberately retaining that per-container snapshot. g003/f1 already carries high conditional lasting network failure when the old proxy stops working on a proxy-dependent host. Preserve c4's originalother suggestion and narrower established configuration effect; this alias does not lower the canonical consequence or add unsupported disclosure/work-loss claims. Explicit bootstrap exports and empty-value serialization are separate causes. Source/contract confidence is conditional analysis, no runtime observation.
+Existing parent disposition (event 12): duplicate. Parent read full claims-041 c4 and the acceptedg003/f1
+decision/source checks. Both establish same-route cached ReadyPlace.proxy being selected for a new container rather than
+sampling its host manager at creation, then deliberately retaining that per-container snapshot. g003/f1 already carries
+high conditional lasting network failure when the old proxy stops working on a proxy-dependent host. Preserve c4's
+originalother suggestion and narrower established configuration effect; this alias does not lower the canonical
+consequence or add unsupported disclosure/work-loss claims. Explicit bootstrap exports and empty-value serialization are
+separate causes. Source/contract confidence is conditional analysis, no runtime observation.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g064 record](records/review-through-00de0b6c/groups/g064.json). Record ID: `c4`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g064 record](records/review-through-00de0b6c/groups/g064.json). Record ID: `c4`.

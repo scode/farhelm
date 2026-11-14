@@ -4,13 +4,31 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Source-confirmed review record: the newly enabled Container image choice in Add host's recipe editor permits saving a Podman-only recipe, automatically selects it for a Tensorlake host, and leaves Continue enabled. Continue can only fail with 'this recipe's base cannot run on Tensorlake'. Source: assigned recipe_editor.rs:660-692 removes the staged visibility/read-only restrictions. tensorlake/add_host.rs:291-295 embeds that editor and selects saved.name on Save; 132-138 loads every recipe without filtering, 326-338 renders ordinary enabled options, 355 checks only lock/nonempty host name/recipe, and 172-208 sends the selection without a provider check. Backend boundary: provisioning/tensorlake_add.rs:649-668 marks this fresh-host probe new_install=true and saved_prepared=false; 714-728 resolves the recipe and refuses its Podman-only base before confirmation/setup admission. Contract: SPEC.md:358-363 specifies the full inline editor for Tensorlake Add host; 441-447 says container-image/login bases support Podman only and 'Unsupported recipes remain visible but disabled with a reason.' Shared launcher ProviderUi::recipe_refusal at environment_ui.rs:283-296 already expresses that exhaustive compatibility rule. Suggested fix: apply provider compatibility to Add host options and Continue, retaining disabled choices/reasons; saving a valid shared-catalog container recipe need not be prohibited, but must not enable an unusable Tensorlake continuation. Suggested bucket: other (unusable enabled choice and avoidable failed primary step). Could-be-highest: no established security or user-work-loss route; effective 
+Source-confirmed review record: the newly enabled Container image choice in Add host's recipe editor permits saving a
+Podman-only recipe, automatically selects it for a Tensorlake host, and leaves Continue enabled. Continue can only fail
+with 'this recipe's base cannot run on Tensorlake'. Source: assigned recipe_editor.rs:660-692 removes the staged
+visibility/read-only restrictions. tensorlake/add_host.rs:291-295 embeds that editor and selects saved.name on Save;
+132-138 loads every recipe without filtering, 326-338 renders ordinary enabled options, 355 checks only lock/nonempty
+host name/recipe, and 172-208 sends the selection without a provider check. Backend boundary:
+provisioning/tensorlake_add.rs:649-668 marks this fresh-host probe new_install=true and saved_prepared=false; 714-728
+resolves the recipe and refuses its Podman-only base before confirmation/setup admission. Contract: SPEC.md:358-363
+specifies the full inline editor for Tensorlake Add host; 441-447 says container-image/login bases support Podman only
+and 'Unsupported recipes remain visible but disabled with a reason.' Shared launcher ProviderUi::recipe_refusal at
+environment_ui.rs:283-296 already expresses that exhaustive compatibility rule. Suggested fix: apply provider
+compatibility to Add host options and Continue, retaining disabled choices/reasons; saving a valid shared-catalog
+container recipe need not be prohibited, but must not enable an unusable Tensorlake continuation. Suggested bucket:
+other (unusable enabled choice and avoidable failed primary step). Could-be-highest: no established security or
+user-work-loss route; effective
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g060/l2`.
 
@@ -20,19 +38,86 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 17 (finding, open):
 
-Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. Discovery pass 1. TLDR: the newly enabled Container image choice in Add host's recipe editor permits saving a Podman-only recipe, automatically selects it for a Tensorlake host, and leaves Continue enabled. Continue can only fail with 'this recipe's base cannot run on Tensorlake'. Source: assigned recipe_editor.rs:660-692 removes the staged visibility/read-only restrictions. tensorlake/add_host.rs:291-295 embeds that editor and selects saved.name on Save; 132-138 loads every recipe without filtering, 326-338 renders ordinary enabled options, 355 checks only lock/nonempty host name/recipe, and 172-208 sends the selection without a provider check. Backend boundary: provisioning/tensorlake_add.rs:649-668 marks this fresh-host probe new_install=true and saved_prepared=false; 714-728 resolves the recipe and refuses its Podman-only base before confirmation/setup admission. Contract: SPEC.md:358-363 specifies the full inline editor for Tensorlake Add host; 441-447 says container-image/login bases support Podman only and 'Unsupported recipes remain visible but disabled with a reason.' Shared launcher ProviderUi::recipe_refusal at environment_ui.rs:283-296 already expresses that exhaustive compatibility rule. Suggested fix: apply provider compatibility to Add host options and Continue, retaining disabled choices/reasons; saving a valid shared-catalog container recipe need not be prohibited, but must not enable an unusable Tensorlake continuation. Suggested bucket: other (unusable enabled choice and avoidable failed primary step). Could-be-highest: no established security or user-work-loss route; effective backend refusal occurs before setup/billing. Confidence: confirmed source/contract route; no runtime observation. proposed_drop: false. possible_cover: none in supplied neighbour projection; prohibited coverage sources not searched. Caveats: a saved Tensorlake API key and valid nonempty host name are needed to reach the normal form. Saving the recipe is valid for Podman; selecting a compatible recipe or editing the saved recipe in Recipes recovers. Unfiltered Add host choices/Continue are pre-existing caller behavior, not separately claimed as introduced by this patch; the assigned new route is their interaction with the newly enabled inline container recipe card and automatic selection on Save. No new issue credit for existing externally authored incompatible recipes. No billed create, credential leak, wrong-provider execution, resource loss or permanent lockout is claimed. Distinct from shared-launcher size labels and failed/successful status invalidation issues. Persistence check: git diff from this reviewed commit to pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty for recipe_editor.rs and tensorlake/add_host.rs, so neither the new card nor the captured caller behavior was repaired in the remaining range. All readily checkable premises settled; no unresolved lead remains for this ID. Original failed-Continue consequence retained with introduction and backend-refusal limits.
+Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. Discovery pass 1. TLDR: the newly enabled Container image
+choice in Add host's recipe editor permits saving a Podman-only recipe, automatically selects it for a Tensorlake host,
+and leaves Continue enabled. Continue can only fail with 'this recipe's base cannot run on Tensorlake'. Source: assigned
+recipe_editor.rs:660-692 removes the staged visibility/read-only restrictions. tensorlake/add_host.rs:291-295 embeds
+that editor and selects saved.name on Save; 132-138 loads every recipe without filtering, 326-338 renders ordinary
+enabled options, 355 checks only lock/nonempty host name/recipe, and 172-208 sends the selection without a provider
+check. Backend boundary: provisioning/tensorlake_add.rs:649-668 marks this fresh-host probe new_install=true and
+saved_prepared=false; 714-728 resolves the recipe and refuses its Podman-only base before confirmation/setup admission.
+Contract: SPEC.md:358-363 specifies the full inline editor for Tensorlake Add host; 441-447 says container-image/login
+bases support Podman only and 'Unsupported recipes remain visible but disabled with a reason.' Shared launcher
+ProviderUi::recipe_refusal at environment_ui.rs:283-296 already expresses that exhaustive compatibility rule. Suggested
+fix: apply provider compatibility to Add host options and Continue, retaining disabled choices/reasons; saving a valid
+shared-catalog container recipe need not be prohibited, but must not enable an unusable Tensorlake continuation.
+Suggested bucket: other (unusable enabled choice and avoidable failed primary step). Could-be-highest: no established
+security or user-work-loss route; effective backend refusal occurs before setup/billing. Confidence: confirmed
+source/contract route; no runtime observation. proposed_drop: false. possible_cover: none in supplied neighbour
+projection; prohibited coverage sources not searched. Caveats: a saved Tensorlake API key and valid nonempty host name
+are needed to reach the normal form. Saving the recipe is valid for Podman; selecting a compatible recipe or editing the
+saved recipe in Recipes recovers. Unfiltered Add host choices/Continue are pre-existing caller behavior, not separately
+claimed as introduced by this patch; the assigned new route is their interaction with the newly enabled inline container
+recipe card and automatic selection on Save. No new issue credit for existing externally authored incompatible recipes.
+No billed create, credential leak, wrong-provider execution, resource loss or permanent lockout is claimed. Distinct
+from shared-launcher size labels and failed/successful status invalidation issues. Persistence check: git diff from this
+reviewed commit to pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty for recipe_editor.rs and
+tensorlake/add_host.rs, so neither the new card nor the captured caller behavior was repaired in the remaining range.
+All readily checkable premises settled; no unresolved lead remains for this ID. Original failed-Continue consequence
+retained with introduction and backend-refusal limits.
 
 Returned proposal (claims-038, event 17): **retain-verified**, suggested bucket **other**.
 
-Saving a newly enabled container recipe in Add host selects a Podman-only recipe while Tensorlake Continue remains enabled. Continue deterministically reaches the backend compatibility refusal. The recipe itself is valid shared-catalog data; the defect is the unusable enabled continuation.
+Saving a newly enabled container recipe in Add host selects a Podman-only recipe while Tensorlake Continue remains
+enabled. Continue deterministically reaches the backend compatibility refusal. The recipe itself is valid shared-catalog
+data; the defect is the unusable enabled continuation.
 
-Original stronger consequence: Earlier wording also mentioned pre-existing externally authored container recipes appearing enabled. Preserve that context, but introduction in this range is the newly editable inline container card interacting with automatic selection on Save. Pre-existing options alone receive no separate new-issue credit. Saving remains valid for Podman; choosing a compatible recipe or editing the saved recipe through Recipes recovers. The failed-Continue consequence has not been withdrawn or lowered from highest.
+Original stronger consequence: Earlier wording also mentioned pre-existing externally authored container recipes
+appearing enabled. Preserve that context, but introduction in this range is the newly editable inline container card
+interacting with automatic selection on Save. Pre-existing options alone receive no separate new-issue credit. Saving
+remains valid for Podman; choosing a compatible recipe or editing the saved recipe through Recipes recovers. The
+failed-Continue consequence has not been withdrawn or lowered from highest.
 
-Unresolved premise or limitation: None for the enabled-choice and failed-Continue route. A saved Tensorlake API key and valid nonempty host name are prerequisites. No billed creation, credential leak, wrong-provider execution, resource loss or permanent lockout follows from the checked backend refusal.
+Unresolved premise or limitation: None for the enabled-choice and failed-Continue route. A saved Tensorlake API key and
+valid nonempty host name are prerequisites. No billed creation, credential leak, wrong-provider execution, resource loss
+or permanent lockout follows from the checked backend refusal.
 
-Proposed basis: Retain as other: a source-confirmed unusable enabled choice and avoidable failed primary step, with a straightforward compatible-choice workaround and effective pre-setup backend refusal.
+Proposed basis: Retain as other: a source-confirmed unusable enabled choice and avoidable failed primary step, with a
+straightforward compatible-choice workaround and effective pre-setup backend refusal.
 
-Existing parent disposition (event 17): verified. Parent explicitly accepted named retain-verified proposal from claims-038 after inspecting it. Saving a newly enabled container recipe in Add host selects a Podman-only recipe while Tensorlake Continue remains enabled. Continue deterministically reaches the backend compatibility refusal. The recipe itself is valid shared-catalog data; the defect is the unusable enabled continuation. Retain as other: a source-confirmed unusable enabled choice and avoidable failed primary step, with a straightforward compatible-choice workaround and effective pre-setup backend refusal. Checked source/results: ["350a4b33b6d4476f4a78e43cea124bc2b828f462 diff and crates/farhelm-ui/src/tensorlake/recipe_editor.rs:660-692 remove the staged card/readonly restrictions. The inline Add host use is at tensorlake/add_host.rs:291-295 and selects saved.name without compatibility admission.","Same revision:add_host.rs:132-138 loads every recipe; :326-338 renders ordinary enabled options; :355 tests only lock/nonempty recipe/name; :172-208 sends the selected name without provider admission.","Same revision:crates/farhelm-helm/src/provisioning/tensorlake_add.rs:649-668 sets new_install=true and saved_prepared=false for a fresh host; :714-728 refuses a base that does not support Tensorlake before returning a setup confirmation. environment_ui.rs:283-296 already contains the shared exhaustive base compatibility decision.","Reviewed SPEC.md:358-363 requires the full inline editor, while :441-447 requires unsupported recipes visible but disabled with a reason. git diff to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty for recipe_editor.rs and add_host.rs. No runtime observation."] Current coverage/results: ["Current SPEC.md:366-383 Add host and :451-488 shared catalog, plus SPEC_impl.md Adding Tensorlake hosts and Shared recipes and prepared artifacts, checked. Full editing and backend refusal do not accept an enabled incompatible Continue.","TODO Planned empty. plans/queue/podman-environments.md:269-274,330-339,373-383 requires provider-disabled choices but its implementing product commits are already in range. No unlanded plan specifically fixing Add host's inline-selection/Continue path found.","BUGS.md, full INDEX.md and matching Add-host/recipe/provider queue searches found no exact cover. add-host-refusal-bypasses-dialog-admission.md concerns delayed dialog admission, not incompatible recipe selection. Shared-launcher scope does not automatically cover this separate Add host caller.","Active TRIAGE_OUTCOMES.md recipe/Tensorlake/provider searches found no exact decision. FILTER.md read: this uses normal shipped controls, and retrying the same choice fails again; it does not fit rare safe failure followed by successful retry. Archive not read."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "Earlier wording also mentioned pre-existing externally authored container recipes appearing enabled. Preserve that context, but introduction in this range is the newly editable inline container card interacting with automatic selection on Save. Pre-existing options alone receive no separate new-issue credit. Saving remains valid for Podman; choosing a compatible recipe or editing the saved recipe through Recipes recovers. The failed-Continue consequence has not been withdrawn or lowered from highest."; "None for the enabled-choice and failed-Continue route. A saved Tensorlake API key and valid nonempty host name are prerequisites. No billed creation, credential leak, wrong-provider execution, resource loss or permanent lockout follows from the checked backend refusal.".
+Existing parent disposition (event 17): verified. Parent explicitly accepted named retain-verified proposal from
+claims-038 after inspecting it. Saving a newly enabled container recipe in Add host selects a Podman-only recipe while
+Tensorlake Continue remains enabled. Continue deterministically reaches the backend compatibility refusal. The recipe
+itself is valid shared-catalog data; the defect is the unusable enabled continuation. Retain as other: a
+source-confirmed unusable enabled choice and avoidable failed primary step, with a straightforward compatible-choice
+workaround and effective pre-setup backend refusal. Checked source/results: ["350a4b33b6d4476f4a78e43cea124bc2b828f462
+diff and crates/farhelm-ui/src/tensorlake/recipe_editor.rs:660-692 remove the staged card/readonly restrictions. The
+inline Add host use is at tensorlake/add_host.rs:291-295 and selects saved.name without compatibility admission.","Same
+revision:add_host.rs:132-138 loads every recipe; :326-338 renders ordinary enabled options; :355 tests only
+lock/nonempty recipe/name; :172-208 sends the selected name without provider admission.","Same
+revision:crates/farhelm-helm/src/provisioning/tensorlake_add.rs:649-668 sets new_install=true and saved_prepared=false
+for a fresh host; :714-728 refuses a base that does not support Tensorlake before returning a setup confirmation.
+environment_ui.rs:283-296 already contains the shared exhaustive base compatibility decision.","Reviewed SPEC.md:358-363
+requires the full inline editor, while :441-447 requires unsupported recipes visible but disabled with a reason. git
+diff to 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty for recipe_editor.rs and add_host.rs. No runtime
+observation."] Current coverage/results: ["Current SPEC.md:366-383 Add host and :451-488 shared catalog, plus
+SPEC_impl.md Adding Tensorlake hosts and Shared recipes and prepared artifacts, checked. Full editing and backend
+refusal do not accept an enabled incompatible Continue.","TODO Planned empty.
+plans/queue/podman-environments.md:269-274,330-339,373-383 requires provider-disabled choices but its implementing
+product commits are already in range. No unlanded plan specifically fixing Add host's inline-selection/Continue path
+found.","BUGS.md, full INDEX.md and matching Add-host/recipe/provider queue searches found no exact cover.
+add-host-refusal-bypasses-dialog-admission.md concerns delayed dialog admission, not incompatible recipe selection.
+Shared-launcher scope does not automatically cover this separate Add host caller.","Active TRIAGE_OUTCOMES.md
+recipe/Tensorlake/provider searches found no exact decision. FILTER.md read: this uses normal shipped controls, and
+retrying the same choice fails again; it does not fit rare safe failure followed by successful retry. Archive not
+read."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "Earlier wording also
+mentioned pre-existing externally authored container recipes appearing enabled. Preserve that context, but introduction
+in this range is the newly editable inline container card interacting with automatic selection on Save. Pre-existing
+options alone receive no separate new-issue credit. Saving remains valid for Podman; choosing a compatible recipe or
+editing the saved recipe through Recipes recovers. The failed-Continue consequence has not been withdrawn or lowered
+from highest."; "None for the enabled-choice and failed-Continue route. A saved Tensorlake API key and valid nonempty
+host name are prerequisites. No billed creation, credential leak, wrong-provider execution, resource loss or permanent
+lockout follows from the checked backend refusal.".
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g060 record](records/review-through-00de0b6c/groups/g060.json). Record ID: `l2`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g060 record](records/review-through-00de0b6c/groups/g060.json). Record ID: `l2`.

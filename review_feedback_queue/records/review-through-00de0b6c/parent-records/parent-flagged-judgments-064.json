@@ -1,8 +1,44 @@
 [
- {"key":"g097/c1","proposal":"claim-checks/claims-064/result.json","parent_proposal":"exact-spec-accepted-intentional-old-terminal-process-and-screen-retirement","final_independent_gate":"required-before-highest-drop","reason":"Parent read full064 in two bounded halves. Explicit startup retirement terminates old agents/tabs and retained final screens, exactly accepted by product/impl, including separately logged nonfatal cleanup failure. Highest actual process/content consequence preserved until gate. Scope only intended old resources, not wrong server/pane attribution, inadequate warnings or survivor assurance; aliases need actual join. No ordinary-upgrade rarity filter or Mid-term TODO cover."},
- {"key":"g097/l1","proposal":"claim-checks/claims-064/result.json","parent_proposal":"source-refuted-ordinary-tmux-process-title-destroys-socket-argv","final_independent_gate":"required-before-original-high-retirement-failure-drop","reason":"Full064 pinned upstream3.7c/3.8 title implementation uses PR_SET_NAME/no-op rather than overwriting argv; inspected Linuxcmdline/DarwinKERN_PROCARGS2 read argv, stock build scripts add no title patch/libbsd injection. CurrentHomebrew/Apple primary source supports ordinaryDarwin inference, not every historical package. Refute named supported-route process-title mismatch only, preserve historical distro limitation and old-agent survival/highUX consequence; nonfatal spec failure policy is not proof of matching argv."},
- {"key":"g097/c2","proposal":"claim-checks/claims-064/result.json","parent_proposal":"source-refuted-queued-container-host-fallback-and-specific-vacuous-test-oracle","final_independent_gate":"required-before-highest-isolation-drop","reason":"Full064 old nonnull JSON marker survives decode and refuses before prepare/exec, active/retry guards retain it; new specs intentionallyNone do not eraseoldones. Separate regression establishes absent markers, requires exact RETIRED_MESSAGE/sentinel and child helper successful report, so missing directories alone cannot satisfy full oracle. Production correctness and test discrimination are separate proofs. Preserve outside-host isolation/work/security consequence, not every endpoint/oldbinary tested or certified."},
- {"key":"g097/l3","proposal":"claim-checks/claims-064/result.json","parent_proposal":"source-refuted-ordinary-predecessor-relative-tmux-socket-argv-mismatch","final_independent_gate":"required-before-original-high-retirement-failure-drop","reason":"Full064 predecessor canonicalizes state dir before driver, stores absolute tmux.sock and passes exact separate-S spelling. New absolute retirement probe therefore doesn't introduce ordinary relative mismatch. Same-user pinned server/subtree checks bound selection but don't settle last-read/signal or pane-owner race097l4. Preserve unsupported deliberate reserved-path replacement/historical uninspected release limits and original high survival consequence for fresh gate; no blanket signal safety."},
- {"key":"g097/l4","proposal":"claim-checks/claims-064/result.json","parent_proposal":"retain-highest-pane-owner-PID-reuse-marker-sweep-pending-acceptance-scope","final_independent_gate":"required-before-any-spec-filter-drop-or-lowering","reason":"Full064 conditional source route snapshots pane PID/start then reads environment by barePID without child-token check; recycled newhosttab contributes real session/tab markers. Later sweep rejects changed old root but still acts on wrong owner scope/marker, including another same-user supervisor. Fifteen-second server deadline does not restore lost owner identity. Intentional retirement preserves hostterminals, accepted verification-to-signal handoff filter is different, upgradefilter not clearly confined oldaffectedwork. General shortPIDrace clause versus asynchronous/later-work exclusion is ambiguous; retain highest until fresh exact-scope verdict, not lower on rarity. Runtimeincidence unobserved, reusedPID trigger is not a missing shipped producer."},
- {"key":"g098/c1","proposal":"claim-checks/claims-064/result.json","parent_proposal":"source-refuted-moved-terminal-probe-loses-pinned-root-or-final-output-gate","final_independent_gate":"required-before-original-highest-process-loss-drop","reason":"Full064 moved probe preserves adoption-pinned tuple rather than recapturing new start from barePID; Stop/Restart/tabreap carry through downstream root revalidation rejecting changed/unreadable identities. Final error detail requires processed dead/finalstate, separate artifact excerpt gate retained. Refute named helper-move root-admission/classification loss, not every later signal/descendant/race. Preserve reused-user-process work loss and incomplete-diagnostic distinction for gate; reported101c2 overlap not automatic alias."}
+  {
+    "key": "g097/c1",
+    "proposal": "claim-checks/claims-064/result.json",
+    "parent_proposal": "exact-spec-accepted-intentional-old-terminal-process-and-screen-retirement",
+    "final_independent_gate": "required-before-highest-drop",
+    "reason": "Parent read full064 in two bounded halves. Explicit startup retirement terminates old agents/tabs and retained final screens, exactly accepted by product/impl, including separately logged nonfatal cleanup failure. Highest actual process/content consequence preserved until gate. Scope only intended old resources, not wrong server/pane attribution, inadequate warnings or survivor assurance; aliases need actual join. No ordinary-upgrade rarity filter or Mid-term TODO cover."
+  },
+  {
+    "key": "g097/l1",
+    "proposal": "claim-checks/claims-064/result.json",
+    "parent_proposal": "source-refuted-ordinary-tmux-process-title-destroys-socket-argv",
+    "final_independent_gate": "required-before-original-high-retirement-failure-drop",
+    "reason": "Full064 pinned upstream3.7c/3.8 title implementation uses PR_SET_NAME/no-op rather than overwriting argv; inspected Linuxcmdline/DarwinKERN_PROCARGS2 read argv, stock build scripts add no title patch/libbsd injection. CurrentHomebrew/Apple primary source supports ordinaryDarwin inference, not every historical package. Refute named supported-route process-title mismatch only, preserve historical distro limitation and old-agent survival/highUX consequence; nonfatal spec failure policy is not proof of matching argv."
+  },
+  {
+    "key": "g097/c2",
+    "proposal": "claim-checks/claims-064/result.json",
+    "parent_proposal": "source-refuted-queued-container-host-fallback-and-specific-vacuous-test-oracle",
+    "final_independent_gate": "required-before-highest-isolation-drop",
+    "reason": "Full064 old nonnull JSON marker survives decode and refuses before prepare/exec, active/retry guards retain it; new specs intentionallyNone do not eraseoldones. Separate regression establishes absent markers, requires exact RETIRED_MESSAGE/sentinel and child helper successful report, so missing directories alone cannot satisfy full oracle. Production correctness and test discrimination are separate proofs. Preserve outside-host isolation/work/security consequence, not every endpoint/oldbinary tested or certified."
+  },
+  {
+    "key": "g097/l3",
+    "proposal": "claim-checks/claims-064/result.json",
+    "parent_proposal": "source-refuted-ordinary-predecessor-relative-tmux-socket-argv-mismatch",
+    "final_independent_gate": "required-before-original-high-retirement-failure-drop",
+    "reason": "Full064 predecessor canonicalizes state dir before driver, stores absolute tmux.sock and passes exact separate-S spelling. New absolute retirement probe therefore doesn't introduce ordinary relative mismatch. Same-user pinned server/subtree checks bound selection but don't settle last-read/signal or pane-owner race097l4. Preserve unsupported deliberate reserved-path replacement/historical uninspected release limits and original high survival consequence for fresh gate; no blanket signal safety."
+  },
+  {
+    "key": "g097/l4",
+    "proposal": "claim-checks/claims-064/result.json",
+    "parent_proposal": "retain-highest-pane-owner-PID-reuse-marker-sweep-pending-acceptance-scope",
+    "final_independent_gate": "required-before-any-spec-filter-drop-or-lowering",
+    "reason": "Full064 conditional source route snapshots pane PID/start then reads environment by barePID without child-token check; recycled newhosttab contributes real session/tab markers. Later sweep rejects changed old root but still acts on wrong owner scope/marker, including another same-user supervisor. Fifteen-second server deadline does not restore lost owner identity. Intentional retirement preserves hostterminals, accepted verification-to-signal handoff filter is different, upgradefilter not clearly confined oldaffectedwork. General shortPIDrace clause versus asynchronous/later-work exclusion is ambiguous; retain highest until fresh exact-scope verdict, not lower on rarity. Runtimeincidence unobserved, reusedPID trigger is not a missing shipped producer."
+  },
+  {
+    "key": "g098/c1",
+    "proposal": "claim-checks/claims-064/result.json",
+    "parent_proposal": "source-refuted-moved-terminal-probe-loses-pinned-root-or-final-output-gate",
+    "final_independent_gate": "required-before-original-highest-process-loss-drop",
+    "reason": "Full064 moved probe preserves adoption-pinned tuple rather than recapturing new start from barePID; Stop/Restart/tabreap carry through downstream root revalidation rejecting changed/unreadable identities. Final error detail requires processed dead/finalstate, separate artifact excerpt gate retained. Refute named helper-move root-admission/classification loss, not every later signal/descendant/race. Preserve reused-user-process work loss and incomplete-diagnostic distinction for gate; reported101c2 overlap not automatic alias."
+  }
 ]

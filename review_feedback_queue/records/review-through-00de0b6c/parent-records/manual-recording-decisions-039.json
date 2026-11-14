@@ -1,6 +1,42 @@
 [
- {"key":"g020/l8","line":30,"disposition":"verified","group":"environment-create-result-drops-operation-claim-remints-current","bucket":"other","recording":"new","needs_independent_drop_check":false,"reason":"Parentreadallprimarylatehistory/actualcaller/discard/protocontract, thenfullfreshfocused128result.190dnewagentcallerreceivesSessionInfoonly aftercreateactualclaimdiscarded, samplescurrenthost_clientandusesitforstaleprojection; separatelyscheduledsame-entryreconnectcanremintcurrentclaimsooldoperationreplyhostSome/stalefalse. Actualmutationconnectionfreshnesscontractincludescreate; stableUUID/reference andsuccessfulcreatevalidbutnotfreshnessproof. Introduced190d/persists00de/currentmain; bothSPECs/Planned/plans/BUGS/INDEX/matchingqueue/activeledgernoexactacceptance/repair. FILTERrare-diagnosticplausiblebutnotfullclearboundary: structuredsuccessfreshnessismorethanerror/logandnotautomaticallyrefresheddisplay; unclear-matchruleretains. No strongerwrongmachine/reference/duplicate/security/worklossinvented. Retainverifiedotherconditionalmetadataonly. PreserveGUIqualifiedJSONandrealcreatesuccess; laterstalenessmustnottriggerfailedcreate/rollback. 024c3GUIhistoryandoriginalauthoritycomponentseparate, notmergedhere. Fullchecks/caveatsclaims128."},
- {"key":"g027/l6","line":17,"disposition":"duplicate","group":"environment-create-result-drops-operation-claim-remints-current","bucket":"other","recording":"new-with-canonical","needs_independent_drop_check":false,"reason":"Full128exactnamedAPI/managercorroborationofthe020l8claimloss/remintroot. Preserveactualoriginalclaimreturn/session-onlyownedcompletion/reconnectpublication boundaries,disconnectedfallbackalreadycorrect,onlyreplacementbeforelatersamplesuffices. Otherconditionalreplyaccuracy/noharmruntimeclaim. Retaincanonicalratherthanfilterviaalias; no independentdefect, noGUIhistorymerge."},
- {"key":"g045/l4","line":25,"disposition":"duplicate","group":"environment-create-result-drops-operation-claim-remints-current","bucket":"other","recording":"new-with-canonical","needs_independent_drop_check":false,"reason":"Full128exactownedresultpayload/lifetimecorroborationof020l8, notadditionalroot. Provisioningmutexnotconnectionlease,postbookkeepingoneshotlosesclaim; keepoutwardGUIprogressheaders+qualifiedSessionInfoJSONandsuccessfulcreate. No stale-triggeredrollbackorfailureconversion, no physicalretarget/reference/duplicate/workloss. UnderlyingothercanonicalretainedunderunclearFILTERboundary; originalallownerrecordskept."},
- {"key":"g052/l9","line":21,"disposition":"duplicate","group":"environment-create-result-drops-operation-claim-remints-current","bucket":"other","recording":"new-with-canonical","needs_independent_drop_check":false,"reason":"Full128exactprotocolcreatingreplyactualoperationconnectioncontractcorroborates020l8. Stablelogicalentryandvalidcreatedreferencearenotfreshness; mandatoryAllow/logicalhostoperationacceptanceofseparatec3approvalauthoritydoesnotwaivereplyprovenance. Retainothercanonicalconditionalmetadatafalsefreshnesswithcurrent-disconnectedfallbackgood,noruntime/security/workloss. Originalhighestc3untouched, nohiddenlowering."}
+  {
+    "key": "g020/l8",
+    "line": 30,
+    "disposition": "verified",
+    "group": "environment-create-result-drops-operation-claim-remints-current",
+    "bucket": "other",
+    "recording": "new",
+    "needs_independent_drop_check": false,
+    "reason": "Parentreadallprimarylatehistory/actualcaller/discard/protocontract, thenfullfreshfocused128result.190dnewagentcallerreceivesSessionInfoonly aftercreateactualclaimdiscarded, samplescurrenthost_clientandusesitforstaleprojection; separatelyscheduledsame-entryreconnectcanremintcurrentclaimsooldoperationreplyhostSome/stalefalse. Actualmutationconnectionfreshnesscontractincludescreate; stableUUID/reference andsuccessfulcreatevalidbutnotfreshnessproof. Introduced190d/persists00de/currentmain; bothSPECs/Planned/plans/BUGS/INDEX/matchingqueue/activeledgernoexactacceptance/repair. FILTERrare-diagnosticplausiblebutnotfullclearboundary: structuredsuccessfreshnessismorethanerror/logandnotautomaticallyrefresheddisplay; unclear-matchruleretains. No strongerwrongmachine/reference/duplicate/security/worklossinvented. Retainverifiedotherconditionalmetadataonly. PreserveGUIqualifiedJSONandrealcreatesuccess; laterstalenessmustnottriggerfailedcreate/rollback. 024c3GUIhistoryandoriginalauthoritycomponentseparate, notmergedhere. Fullchecks/caveatsclaims128."
+  },
+  {
+    "key": "g027/l6",
+    "line": 17,
+    "disposition": "duplicate",
+    "group": "environment-create-result-drops-operation-claim-remints-current",
+    "bucket": "other",
+    "recording": "new-with-canonical",
+    "needs_independent_drop_check": false,
+    "reason": "Full128exactnamedAPI/managercorroborationofthe020l8claimloss/remintroot. Preserveactualoriginalclaimreturn/session-onlyownedcompletion/reconnectpublication boundaries,disconnectedfallbackalreadycorrect,onlyreplacementbeforelatersamplesuffices. Otherconditionalreplyaccuracy/noharmruntimeclaim. Retaincanonicalratherthanfilterviaalias; no independentdefect, noGUIhistorymerge."
+  },
+  {
+    "key": "g045/l4",
+    "line": 25,
+    "disposition": "duplicate",
+    "group": "environment-create-result-drops-operation-claim-remints-current",
+    "bucket": "other",
+    "recording": "new-with-canonical",
+    "needs_independent_drop_check": false,
+    "reason": "Full128exactownedresultpayload/lifetimecorroborationof020l8, notadditionalroot. Provisioningmutexnotconnectionlease,postbookkeepingoneshotlosesclaim; keepoutwardGUIprogressheaders+qualifiedSessionInfoJSONandsuccessfulcreate. No stale-triggeredrollbackorfailureconversion, no physicalretarget/reference/duplicate/workloss. UnderlyingothercanonicalretainedunderunclearFILTERboundary; originalallownerrecordskept."
+  },
+  {
+    "key": "g052/l9",
+    "line": 21,
+    "disposition": "duplicate",
+    "group": "environment-create-result-drops-operation-claim-remints-current",
+    "bucket": "other",
+    "recording": "new-with-canonical",
+    "needs_independent_drop_check": false,
+    "reason": "Full128exactprotocolcreatingreplyactualoperationconnectioncontractcorroborates020l8. Stablelogicalentryandvalidcreatedreferencearenotfreshness; mandatoryAllow/logicalhostoperationacceptanceofseparatec3approvalauthoritydoesnotwaivereplyprovenance. Retainothercanonicalconditionalmetadatafalsefreshnesswithcurrent-disconnectedfallbackgood,noruntime/security/workloss. Originalhighestc3untouched, nohiddenlowering."
+  }
 ]

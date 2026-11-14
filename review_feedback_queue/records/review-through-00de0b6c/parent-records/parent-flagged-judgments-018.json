@@ -1,4 +1,16 @@
 [
- {"key":"g031/f2","proposal":"claim-checks/claims-018/result.json","parent_proposal":"retain-verified-retry-description-live-dispatch-with-proposed-other-narrowing","final_independent_gate":"required-before-lowering-original-highest","reason":"Parent read full018 and actual current SPEC sandbox Delete/seal passage1485-1555. Retry ordinary failed sealed resource already permanently authorized destruction of every file/process, seal never lifts and helm finishes destruction after failure/restart even without new Retry. Endpoint strictly sealed_failed. Proposed other for actual misleading connection help and live-phase dispatch, not new unauthorized destruction; fresh gate must independently accept exact permanent-prior-consent narrowing. Original old reconnect Retry→destruction highest interpretation preserved until gate. Current ordinary wrong help means rare diagnostic filter not fullmatch; retain defect regardless lowered severity verdict."},
- {"key":"g031/f5","proposal":"claim-checks/claims-018/result.json","parent_proposal":"source-refuted-same-page-same-host-admission-overlap","final_independent_gate":"required-by-conservative-host-work-collision-flag","reason":"Full018 sharedrun_with checks provisioning/mutationbusy and synchronously inserts perhost before spawn, bothregistry/lifecycle routes share; removedglobaltoken leaves allowedcrosshostconcurrency. Proposed onlysamepage samehost source refutation with exactSPEC perhostserialization quote, not crosswindow/unrelatedbackendcollision safety. Preserveoriginalpossiblework-host collision andnoestablisheddestructiveroute for conservativefreshgate."}
+  {
+    "key": "g031/f2",
+    "proposal": "claim-checks/claims-018/result.json",
+    "parent_proposal": "retain-verified-retry-description-live-dispatch-with-proposed-other-narrowing",
+    "final_independent_gate": "required-before-lowering-original-highest",
+    "reason": "Parent read full018 and actual current SPEC sandbox Delete/seal passage1485-1555. Retry ordinary failed sealed resource already permanently authorized destruction of every file/process, seal never lifts and helm finishes destruction after failure/restart even without new Retry. Endpoint strictly sealed_failed. Proposed other for actual misleading connection help and live-phase dispatch, not new unauthorized destruction; fresh gate must independently accept exact permanent-prior-consent narrowing. Original old reconnect Retry→destruction highest interpretation preserved until gate. Current ordinary wrong help means rare diagnostic filter not fullmatch; retain defect regardless lowered severity verdict."
+  },
+  {
+    "key": "g031/f5",
+    "proposal": "claim-checks/claims-018/result.json",
+    "parent_proposal": "source-refuted-same-page-same-host-admission-overlap",
+    "final_independent_gate": "required-by-conservative-host-work-collision-flag",
+    "reason": "Full018 sharedrun_with checks provisioning/mutationbusy and synchronously inserts perhost before spawn, bothregistry/lifecycle routes share; removedglobaltoken leaves allowedcrosshostconcurrency. Proposed onlysamepage samehost source refutation with exactSPEC perhostserialization quote, not crosswindow/unrelatedbackendcollision safety. Preserveoriginalpossiblework-host collision andnoestablisheddestructiveroute for conservativefreshgate."
+  }
 ]

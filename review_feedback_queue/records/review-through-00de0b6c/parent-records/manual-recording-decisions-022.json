@@ -1,5 +1,32 @@
 [
-  {"key":"g092/l1","line":11,"disposition":"rejected","group":"replay-reveal-helper-retired-async-write-rationale","bucket":"other","recording":"out-of-range","needs_independent_drop_check":false,"reason":"Parent read full claims060 and judges the stated attribution question. The unchanged universal asynchronous-write rationale already misdescribes the retained ordinary-grid callers at the exclusive base; their source, false explanation and user consequence persist unchanged. Removing the last old-run caller to which that wording happened to apply makes it universally stale but adds no new false application or new promise for a surviving caller. Unlike a new branch or contract applying old text to a new domain, this only removes a correctly described branch. Preserve647f0227's removal and historical documentation mismatch, but no in-range introduced/worsened consequence established for this exact helper. Correct production reveal is not the refutation. No security/user-work loss or stronger consequence."},
-  {"key":"g093/f1","line":9,"disposition":"duplicate","group":"podman-test-payload-producer-consumer-tmux-mismatch","bucket":"other","recording":"repaired-in-range","needs_independent_drop_check":false,"reason":"Parent read full claims061 and now reconciles exact producer-side counterpart with g067/l3 and g070/l2.500548b9 stops staging tmux while same-revision consumer190-196 requires it before fixture creation; fresh output fails, cached output can conceal. d751ff16 explicitly repairs consumer;00de retains archive-only admission. Preserve all original IDs, source facts and introduction/repair as historical true defect, with no residual queue item or false claim it never occurred. No highest consequence."},
-  {"key":"g093/l1","line":19,"disposition":"rejected","group":"mac-devbuild-header-retains-removed-local-tmux-requirement","bucket":"other","recording":"repaired-in-range","needs_independent_drop_check":false,"reason":"Parent read full claims061.17a3fe85 removes local app/preflight tmux requirement, making inherited developer-script header53-60 newly false. cb762a31 corrects that header before tip;00de49-55 retains correction. Historical documentation defect preserved with both revisions, no residual item requiring fix. Remote Linux payload staging is a different prerequisite and not a runtime refutation of the original false local guidance. No higher consequence."}
+  {
+    "key": "g092/l1",
+    "line": 11,
+    "disposition": "rejected",
+    "group": "replay-reveal-helper-retired-async-write-rationale",
+    "bucket": "other",
+    "recording": "out-of-range",
+    "needs_independent_drop_check": false,
+    "reason": "Parent read full claims060 and judges the stated attribution question. The unchanged universal asynchronous-write rationale already misdescribes the retained ordinary-grid callers at the exclusive base; their source, false explanation and user consequence persist unchanged. Removing the last old-run caller to which that wording happened to apply makes it universally stale but adds no new false application or new promise for a surviving caller. Unlike a new branch or contract applying old text to a new domain, this only removes a correctly described branch. Preserve647f0227's removal and historical documentation mismatch, but no in-range introduced/worsened consequence established for this exact helper. Correct production reveal is not the refutation. No security/user-work loss or stronger consequence."
+  },
+  {
+    "key": "g093/f1",
+    "line": 9,
+    "disposition": "duplicate",
+    "group": "podman-test-payload-producer-consumer-tmux-mismatch",
+    "bucket": "other",
+    "recording": "repaired-in-range",
+    "needs_independent_drop_check": false,
+    "reason": "Parent read full claims061 and now reconciles exact producer-side counterpart with g067/l3 and g070/l2.500548b9 stops staging tmux while same-revision consumer190-196 requires it before fixture creation; fresh output fails, cached output can conceal. d751ff16 explicitly repairs consumer;00de retains archive-only admission. Preserve all original IDs, source facts and introduction/repair as historical true defect, with no residual queue item or false claim it never occurred. No highest consequence."
+  },
+  {
+    "key": "g093/l1",
+    "line": 19,
+    "disposition": "rejected",
+    "group": "mac-devbuild-header-retains-removed-local-tmux-requirement",
+    "bucket": "other",
+    "recording": "repaired-in-range",
+    "needs_independent_drop_check": false,
+    "reason": "Parent read full claims061.17a3fe85 removes local app/preflight tmux requirement, making inherited developer-script header53-60 newly false. cb762a31 corrects that header before tip;00de49-55 retains correction. Historical documentation defect preserved with both revisions, no residual item requiring fix. Remote Linux payload staging is a different prerequisite and not a runtime refutation of the original false local guidance. No higher consequence."
+  }
 ]

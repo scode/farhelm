@@ -1,6 +1,30 @@
 [
- {"key":"g024/c4","proposal":"claim-checks/claims-013/result.json","parent_proposal":"retain-verified-other-noun-with-original-dispatch-refutation","final_independent_gate":"required-for-original-wrong-provider-claim","reason":"Parentreadfull013. NewlyreachablepausedPodman→SuspendedsharedAPIrefusaldeterministicallynamesTensorlake; correctstoredbindingproviderdispatchdoesnotrepairdiagnostic. OrdinarysupportedAPIinputnotrare timing/unsupportedtrigger, so rare-diagnosticfilterdoesnotfullymatch. Retainotherwordingdefectandtest/commentcontext; separatelyoriginalwrongprovideroperationroutesource-refuted byexhaustivebinding/lifecyclePodmanresume, preservepossibleuserprocessharmforfreshgate. Relatedc5enumdocsdifferenttextsurface, notfullcover."},
- {"key":"g025/f1","proposal":"claim-checks/claims-013/result.json","parent_proposal":"source-refuted-keyed-cross-session-identity","final_independent_gate":"required-before-highest-drop","reason":"Full013bothSessionViewandSessionRowproductionownerskeysessionID, Controlsquestionremounts onidentitychange; refreshedcapturesstaywithinthatID. Refutesactingonanotheragent/tabsviacomponentreuse, notsame-sessionno-tabs/endedguarddrift/direction/openingtoken. Preservepotentialhighestworkprocessconsequence andnoactualinputorder/runtimeclaim; freshgatecheckbothcallerkeys/mounts, don'timportlaterguardfix."},
- {"key":"g025/f4","proposal":"claim-checks/claims-013/result.json","parent_proposal":"retain-verified-other-source-mutex-delay-with-original-ownership-refutation","final_independent_gate":"required-for-original-resource-loss-withdrawals","reason":"Full013ordinaryAddcallerretainsrealguardaroundcreate_host_sandboxpassingNoneintoextractedcreate_recorded, whichdropsNoneatRunningthenawaitsSSH; parentpreviouslydroppedrealguardatRunningbeforessh. NewpostRunningpeerlaunch/buildexclusionpastcontractestablished, boundedattemptsnotrecursivepermanentdeadlock; no runtimeelapsed/billingclaim. Retainothermutexboundary+falseeffectiverationale, compare045l1samecause/fixbeforealias. Earlierdeletedsource/unrelatedsandboxadoption/recreationlossroutesnarrowlyrefutedbyadmission/savedID/pending/source-before-send checks; preserveoriginalhighestpossibilitiesforfreshgate, notsilentlowering."},
- {"key":"g025/f5","proposal":"claim-checks/claims-013/result.json","parent_proposal":"source-refuted-environment-endpoint-fallback-resend","final_independent_gate":"required-before-potential-workloss-drop","reason":"Full013newclientrequesthasrecipe/place/noordinaryhost, protecteddistinctenvironmentroute strictdecoder/oneownedtask/progressheaderandresult; receiptfunnelonce, authrefusalrequestsloginwithoutresend andtransport/header/decodeUnknownnoautomaticfallback. Refutesnamedwronghost/duplicatecreatefromendpointmigration, notallunknownoutcomeretrypolicy. Originalhighestdependsadditionalunshownwrongdestructivecleanup; keeporiginalchainandhighavailabilitypossibilityforfreshgate. No runtime/artifacttest inferred."}
+  {
+    "key": "g024/c4",
+    "proposal": "claim-checks/claims-013/result.json",
+    "parent_proposal": "retain-verified-other-noun-with-original-dispatch-refutation",
+    "final_independent_gate": "required-for-original-wrong-provider-claim",
+    "reason": "Parentreadfull013. NewlyreachablepausedPodman→SuspendedsharedAPIrefusaldeterministicallynamesTensorlake; correctstoredbindingproviderdispatchdoesnotrepairdiagnostic. OrdinarysupportedAPIinputnotrare timing/unsupportedtrigger, so rare-diagnosticfilterdoesnotfullymatch. Retainotherwordingdefectandtest/commentcontext; separatelyoriginalwrongprovideroperationroutesource-refuted byexhaustivebinding/lifecyclePodmanresume, preservepossibleuserprocessharmforfreshgate. Relatedc5enumdocsdifferenttextsurface, notfullcover."
+  },
+  {
+    "key": "g025/f1",
+    "proposal": "claim-checks/claims-013/result.json",
+    "parent_proposal": "source-refuted-keyed-cross-session-identity",
+    "final_independent_gate": "required-before-highest-drop",
+    "reason": "Full013bothSessionViewandSessionRowproductionownerskeysessionID, Controlsquestionremounts onidentitychange; refreshedcapturesstaywithinthatID. Refutesactingonanotheragent/tabsviacomponentreuse, notsame-sessionno-tabs/endedguarddrift/direction/openingtoken. Preservepotentialhighestworkprocessconsequence andnoactualinputorder/runtimeclaim; freshgatecheckbothcallerkeys/mounts, don'timportlaterguardfix."
+  },
+  {
+    "key": "g025/f4",
+    "proposal": "claim-checks/claims-013/result.json",
+    "parent_proposal": "retain-verified-other-source-mutex-delay-with-original-ownership-refutation",
+    "final_independent_gate": "required-for-original-resource-loss-withdrawals",
+    "reason": "Full013ordinaryAddcallerretainsrealguardaroundcreate_host_sandboxpassingNoneintoextractedcreate_recorded, whichdropsNoneatRunningthenawaitsSSH; parentpreviouslydroppedrealguardatRunningbeforessh. NewpostRunningpeerlaunch/buildexclusionpastcontractestablished, boundedattemptsnotrecursivepermanentdeadlock; no runtimeelapsed/billingclaim. Retainothermutexboundary+falseeffectiverationale, compare045l1samecause/fixbeforealias. Earlierdeletedsource/unrelatedsandboxadoption/recreationlossroutesnarrowlyrefutedbyadmission/savedID/pending/source-before-send checks; preserveoriginalhighestpossibilitiesforfreshgate, notsilentlowering."
+  },
+  {
+    "key": "g025/f5",
+    "proposal": "claim-checks/claims-013/result.json",
+    "parent_proposal": "source-refuted-environment-endpoint-fallback-resend",
+    "final_independent_gate": "required-before-potential-workloss-drop",
+    "reason": "Full013newclientrequesthasrecipe/place/noordinaryhost, protecteddistinctenvironmentroute strictdecoder/oneownedtask/progressheaderandresult; receiptfunnelonce, authrefusalrequestsloginwithoutresend andtransport/header/decodeUnknownnoautomaticfallback. Refutesnamedwronghost/duplicatecreatefromendpointmigration, notallunknownoutcomeretrypolicy. Originalhighestdependsadditionalunshownwrongdestructivecleanup; keeporiginalchainandhighavailabilitypossibilityforfreshgate. No runtime/artifacttest inferred."
+  }
 ]

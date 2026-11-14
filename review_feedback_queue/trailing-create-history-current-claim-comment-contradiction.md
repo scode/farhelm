@@ -4,13 +4,31 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Source-confirmed review record: The create path tells future maintainers that remembered GUI defaults deliberately bypass the connection-claim recheck, but this change makes the default/history write depend on that recheck. The comment now teaches the opposite of the protection implemented below. Source: sessions.rs:1748-1755 says the cache seed revalidates the captured claim while 'the remembered default does not, by design: it is a helm-wide suggestion'. The new record_created_history docs at :2038-2043 explicitly state a normal reconnect revokes the old claim and skips convenience history. The implementation at :2065-2111 takes the host write lock and checks entry UUID, incarnation, current client and connected identity before the SQLite history transaction, which owns remembered defaults as well as recent history. That guard was added by this assigned commit; the retained old explanation is therefore newly inaccurate even though the comment text predates the patch. This is a documentation-correctness finding, not a claim that production writes actually bypass the guard. Contract: SPEC_impl.md Composer history requires captured request provenance; the code's new ingress guard establishes current operation authority and its docs explain the reconnect/adoption constraint. The root comment rules require nearby documentation to track changed invariants. Suggested bucket: other. Confidence: confirmed by contradictory source at the reviewed revision; source-only, no execution. proposed_drop: false. possible_cover: none. Could-be-highest: false; no runtime security/work-loss route is asserted. Caveat: later-i
+Source-confirmed review record: The create path tells future maintainers that remembered GUI defaults deliberately
+bypass the connection-claim recheck, but this change makes the default/history write depend on that recheck. The comment
+now teaches the opposite of the protection implemented below. Source: sessions.rs:1748-1755 says the cache seed
+revalidates the captured claim while 'the remembered default does not, by design: it is a helm-wide suggestion'. The new
+record_created_history docs at :2038-2043 explicitly state a normal reconnect revokes the old claim and skips
+convenience history. The implementation at :2065-2111 takes the host write lock and checks entry UUID, incarnation,
+current client and connected identity before the SQLite history transaction, which owns remembered defaults as well as
+recent history. That guard was added by this assigned commit; the retained old explanation is therefore newly inaccurate
+even though the comment text predates the patch. This is a documentation-correctness finding, not a claim that
+production writes actually bypass the guard. Contract: SPEC_impl.md Composer history requires captured request
+provenance; the code's new ingress guard establishes current operation authority and its docs explain the
+reconnect/adoption constraint. The root comment rules require nearby documentation to track changed invariants.
+Suggested bucket: other. Confidence: confirmed by contradictory source at the reviewed revision; source-only, no
+execution. proposed_drop: false. possible_cover: none. Could-be-highest: false; no runtime security/work-loss route is
+asserted. Caveat: later-i
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g024/f1`.
 
@@ -20,19 +38,67 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 17 (finding, open):
 
-Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: The create path tells future maintainers that remembered GUI defaults deliberately bypass the connection-claim recheck, but this change makes the default/history write depend on that recheck. The comment now teaches the opposite of the protection implemented below. Source: sessions.rs:1748-1755 says the cache seed revalidates the captured claim while 'the remembered default does not, by design: it is a helm-wide suggestion'. The new record_created_history docs at :2038-2043 explicitly state a normal reconnect revokes the old claim and skips convenience history. The implementation at :2065-2111 takes the host write lock and checks entry UUID, incarnation, current client and connected identity before the SQLite history transaction, which owns remembered defaults as well as recent history. That guard was added by this assigned commit; the retained old explanation is therefore newly inaccurate even though the comment text predates the patch. This is a documentation-correctness finding, not a claim that production writes actually bypass the guard. Contract: SPEC_impl.md Composer history requires captured request provenance; the code's new ingress guard establishes current operation authority and its docs explain the reconnect/adoption constraint. The root comment rules require nearby documentation to track changed invariants. Suggested bucket: other. Confidence: confirmed by contradictory source at the reviewed revision; source-only, no execution. proposed_drop: false. possible_cover: none. Could-be-highest: false; no runtime security/work-loss route is asserted. Caveat: later-in-range comment persistence and precise remembered-preference writer will be checked before closing this pass; the observed contradiction at the assigned revision is already definite. Attribution/persistence checks completed: the range-base sessions.rs already carried the explanatory comment (:1724-1731), and the immediate parent at :1995-2019 recorded convenience history without the new incarnation/current-client callback. The assigned 5665983 patch introduces record_created_history and its callback, so its behavioral change makes the older retained comment false; this is not dismissal merely because the words predate one patch. The exact remembered-default writer is store.rs:210-295: record_launch_history writes preferences.remembered_permissions and remembered_wrapper_prefixes at :283-291. It is called only inside the same guarded history transaction at :9023-9024, after current() at :8864. There is no separate unguarded remembered-default tail that could make the old comment correct. Endpoint sessions.rs retains the contradiction at :1882-1884 versus :2175-2178, and endpoint store.rs retains the same guarded call. Correct the caller comment to match current-claim admission while preserving the independent rule that successful create itself still succeeds if convenience bookkeeping is skipped. All readily checkable premises settled; no runtime or documentation-generation check needed to substantiate the source contradiction.
+Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: The create path tells future maintainers that
+remembered GUI defaults deliberately bypass the connection-claim recheck, but this change makes the default/history
+write depend on that recheck. The comment now teaches the opposite of the protection implemented below. Source:
+sessions.rs:1748-1755 says the cache seed revalidates the captured claim while 'the remembered default does not, by
+design: it is a helm-wide suggestion'. The new record_created_history docs at :2038-2043 explicitly state a normal
+reconnect revokes the old claim and skips convenience history. The implementation at :2065-2111 takes the host write
+lock and checks entry UUID, incarnation, current client and connected identity before the SQLite history transaction,
+which owns remembered defaults as well as recent history. That guard was added by this assigned commit; the retained old
+explanation is therefore newly inaccurate even though the comment text predates the patch. This is a
+documentation-correctness finding, not a claim that production writes actually bypass the guard. Contract: SPEC_impl.md
+Composer history requires captured request provenance; the code's new ingress guard establishes current operation
+authority and its docs explain the reconnect/adoption constraint. The root comment rules require nearby documentation to
+track changed invariants. Suggested bucket: other. Confidence: confirmed by contradictory source at the reviewed
+revision; source-only, no execution. proposed_drop: false. possible_cover: none. Could-be-highest: false; no runtime
+security/work-loss route is asserted. Caveat: later-in-range comment persistence and precise remembered-preference
+writer will be checked before closing this pass; the observed contradiction at the assigned revision is already
+definite. Attribution/persistence checks completed: the range-base sessions.rs already carried the explanatory comment
+(:1724-1731), and the immediate parent at :1995-2019 recorded convenience history without the new
+incarnation/current-client callback. The assigned 5665983 patch introduces record_created_history and its callback, so
+its behavioral change makes the older retained comment false; this is not dismissal merely because the words predate one
+patch. The exact remembered-default writer is store.rs:210-295: record_launch_history writes
+preferences.remembered_permissions and remembered_wrapper_prefixes at :283-291. It is called only inside the same
+guarded history transaction at :9023-9024, after current() at :8864. There is no separate unguarded remembered-default
+tail that could make the old comment correct. Endpoint sessions.rs retains the contradiction at :1882-1884 versus
+:2175-2178, and endpoint store.rs retains the same guarded call. Correct the caller comment to match current-claim
+admission while preserving the independent rule that successful create itself still succeeds if convenience bookkeeping
+is skipped. All readily checkable premises settled; no runtime or documentation-generation check needed to substantiate
+the source contradiction.
 
 Returned proposal (claims-013, event 17): **retain-verified**, suggested bucket **other**.
 
-The caller comment says remembered defaults bypass the claim check, while the new guarded transaction contains their only writer. This is a source-comment defect, not a production bypass.
+The caller comment says remembered defaults bypass the claim check, while the new guarded transaction contains their
+only writer. This is a source-comment defect, not a production bypass.
 
-Original stronger consequence: No runtime security or work-loss consequence was asserted; the record consistently concerns misleading documentation of the guard.
+Original stronger consequence: No runtime security or work-loss consequence was asserted; the record consistently
+concerns misleading documentation of the guard.
 
 Unresolved premise or limitation: No missing premise stated in this returned proposal.
 
-Proposed basis: Record the changed invariant's inaccurate explanation. Preserve that skipping convenience bookkeeping must not fail an already successful create.
+Proposed basis: Record the changed invariant's inaccurate explanation. Preserve that skipping convenience bookkeeping
+must not fail an already successful create.
 
-Existing parent disposition (event 17): verified. Parent explicitly accepted named retain-verified proposal from claims-013 after inspecting it. The caller comment says remembered defaults bypass the claim check, while the new guarded transaction contains their only writer. This is a source-comment defect, not a production bypass. Record the changed invariant's inaccurate explanation. Preserve that skipping convenience bookkeeping must not fail an already successful create. Checked source/results: ["56659839785691f76da3af5d8f51b511cff4ba8b:sessions.rs:1748-1755 says remembered default does not revalidate; :2038-2111 documents and checks current entry, incarnation, connected client and identity before history admission (paths under crates/farhelm-helm/src).","Same revision store.rs:283-291 writes remembered permissions/wrappers; :8864 calls current() before the transaction; :9023-9024 calls record_launch_history within it.","The sessions.rs patch adds record_created_history and its current-claim callback. At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:sessions.rs:1882-1884 and :2175-2178 the contradictory explanations remain. No runtime bypass or execution is claimed."] Current coverage/results: ["SPEC_impl.md Composer history:5038-5092 and preferences:262-278 describe accepted-launch provenance and transaction-owned remembered choices, not an accepted false code comment. SPEC.md environment/ordinary launch rules do not accept this contradiction.","TODO.md Planned is empty; BUGS.md does not concern history. Searched plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for remembered defaults, claim/history guards and provenance.","TRIAGE_OUTCOMES.md history-reply-lacks-installation-provenance.md:1056-1068 concerns late GUI GET replies, not this server-side comment; not exact coverage. No matching unlanded plan or queue item found. FILTER.md does not cover durable misleading maintainer documentation merely because reconnect is an edge case."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "No runtime security or work-loss consequence was asserted; the record consistently concerns misleading documentation of the guard."; null.
+Existing parent disposition (event 17): verified. Parent explicitly accepted named retain-verified proposal from
+claims-013 after inspecting it. The caller comment says remembered defaults bypass the claim check, while the new
+guarded transaction contains their only writer. This is a source-comment defect, not a production bypass. Record the
+changed invariant's inaccurate explanation. Preserve that skipping convenience bookkeeping must not fail an already
+successful create. Checked source/results: ["56659839785691f76da3af5d8f51b511cff4ba8b:sessions.rs:1748-1755 says
+remembered default does not revalidate; :2038-2111 documents and checks current entry, incarnation, connected client and
+identity before history admission (paths under crates/farhelm-helm/src).","Same revision store.rs:283-291 writes
+remembered permissions/wrappers; :8864 calls current() before the transaction; :9023-9024 calls record_launch_history
+within it.","The sessions.rs patch adds record_created_history and its current-claim callback. At
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:sessions.rs:1882-1884 and :2175-2178 the contradictory explanations remain. No
+runtime bypass or execution is claimed."] Current coverage/results: ["SPEC_impl.md Composer history:5038-5092 and
+preferences:262-278 describe accepted-launch provenance and transaction-owned remembered choices, not an accepted false
+code comment. SPEC.md environment/ordinary launch rules do not accept this contradiction.","TODO.md Planned is empty;
+BUGS.md does not concern history. Searched plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for remembered defaults,
+claim/history guards and provenance.","TRIAGE_OUTCOMES.md history-reply-lacks-installation-provenance.md:1056-1068
+concerns late GUI GET replies, not this server-side comment; not exact coverage. No matching unlanded plan or queue item
+found. FILTER.md does not cover durable misleading maintainer documentation merely because reconnect is an edge case."]
+Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "No runtime security or
+work-loss consequence was asserted; the record consistently concerns misleading documentation of the guard."; null.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g024 record](records/review-through-00de0b6c/groups/g024.json). Record ID: `f1`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g024 record](records/review-through-00de0b6c/groups/g024.json). Record ID: `f1`.

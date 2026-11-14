@@ -96,7 +96,10 @@
       "FILTER.md unnecessary; no rarity basis used."
     ],
     "exact_cover_quotes": [
-      {"source": "SPEC.md:4894-4896, Retired containerized sessions", "quote": "Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused."}
+      {
+        "source": "SPEC.md:4894-4896, Retired containerized sessions",
+        "quote": "Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and Replace with are refused."
+      }
     ],
     "missing_premise": null,
     "original_stronger_consequence": "An old container could remain running after Stop's removal path was deleted; reviewer suggested high if Stop were still supported. The product intentionally refuses this operation instead of reporting success.",
@@ -230,11 +233,26 @@
       "FILTER.md Upgrades from older releases combined with another rare condition is a material possible cover: this route needs legacy state plus failed/timed-out bounded startup cleanup and allows session work loss. Its security/trust-boundary exclusion makes application to bypassing a destructive-consent guard ambiguous. Recommend retention pending the parent's explicit boundary judgment and independent drop check. The session-status/partial-operation filter expressly excludes destructive actions without required confirmation; the rare-diagnostic filter excludes lost processes/work. No filter applied."
     ],
     "exact_cover_quotes": [
-      {"source": "SPEC_impl.md:2815-2816, Ending the old private tmux server", "quote": "A sweep that runs out of time leaves the rest for the session's Restart or Delete: the conversion commits regardless."},
-      {"source": "SPEC.md:3008-3010, Terminal experience", "quote": "those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running."},
-      {"source": "SPEC.md:2050-2060, Lifecycle operations", "quote": "a destructive confirmation authorizes only what the prompt the user answered said would happen"},
-      {"source": "review_feedback_queue/FILTER.md, Upgrades from older releases combined with another rare condition", "quote": "Unlike the filters above, this one also covers losing user-owned work within the affected sessions"},
-      {"source": "review_feedback_queue/FILTER.md, same filter exclusions", "quote": "a security or trust-boundary consequence."}
+      {
+        "source": "SPEC_impl.md:2815-2816, Ending the old private tmux server",
+        "quote": "A sweep that runs out of time leaves the rest for the session's Restart or Delete: the conversion commits regardless."
+      },
+      {
+        "source": "SPEC.md:3008-3010, Terminal experience",
+        "quote": "those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running."
+      },
+      {
+        "source": "SPEC.md:2050-2060, Lifecycle operations",
+        "quote": "a destructive confirmation authorizes only what the prompt the user answered said would happen"
+      },
+      {
+        "source": "review_feedback_queue/FILTER.md, Upgrades from older releases combined with another rare condition",
+        "quote": "Unlike the filters above, this one also covers losing user-owned work within the affected sessions"
+      },
+      {
+        "source": "review_feedback_queue/FILTER.md, same filter exclusions",
+        "quote": "a security or trust-boundary consequence."
+      }
     ],
     "missing_premise": "No remaining source premise for the conditional route was identified. The unresolved issue is whether the explicit retirement/leftovers-for-Delete exception or upgrade filter covers this later destructive-consent violation. The startup survivor is a required condition, not an observed incident.",
     "original_stronger_consequence": "A legacy agent actually surviving bounded upgrade cleanup can be shown interrupted with zero tabs; a subsequent NothingAlive Delete can stop it without a killing warning and lose unsaved user-owned process work. Keep highest regardless of rarity. Intentional upgrade retirement itself was authorized and is not the disputed action.",

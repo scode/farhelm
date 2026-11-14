@@ -4,13 +4,20 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Source-confirmed review record: the revised regression explanation tells maintainers that leaving a full-screen application erases its frame from Farhelm's emulator. The emulator actually retains the frame in its inactive buffer. The valid replay assertion checks the restored primary screen, not erasure of the alternate frame or proof that only a stop-time capture could make it reappear.
+Source-confirmed review record: the revised regression explanation tells maintainers that leaving a full-screen
+application erases its frame from Farhelm's emulator. The emulator actually retains the frame in its inactive buffer.
+The valid replay assertion checks the restored primary screen, not erasure of the alternate frame or proof that only a
+stop-time capture could make it reappear.
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g143/g143-l4`.
 
@@ -20,19 +27,96 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 13 (finding, open):
 
-Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a; persistence checked through inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the revised regression explanation tells maintainers that leaving a full-screen application erases its frame from Farhelm's emulator. The emulator actually retains the frame in its inactive buffer. The valid replay assertion checks the restored primary screen, not erasure of the alternate frame or proof that only a stop-time capture could make it reappear. Details: session_lifecycle.rs:3677-3681 says 'the alt-screen frame is gone from the terminal’s emulator entirely, and only a capture taken before the kill could bring its marker back'. The fixture's SIGTERM handler at crates/farhelm-fixtures/src/fake_agent.rs:1730-1742 only writes ESC[?1049l and exits. QueryHandler::unset_private_mode at crates/farhelm-terminal-emulator/src/queries.rs:435-453 delegates mode 1049 to Term. vendor/alacritty_terminal/src/term/mod.rs:2523-2526 resets that mode with swap_alt; :794-814 clears inactive_grid only on ENTRY (:795-804), while EXIT simply swaps grid and inactive_grid (:811-812), preserving the old alternate cells in inactive_grid. Readily checkable post-exit premise was then checked: hosts/terminal.rs:3911-3923 flushes an open synchronized update and records liveness without erasing that grid. Snapshot painter comments at snapshot/v1/paint.rs:183-187 independently state that alternate cells are cleared on entry. Current rendering is correct: grid_output.rs:327-337 reads term.grid(), the active screen, and service/grid_stream.rs:423-460 uses that projection for catch-up. The test at session_lifecycle.rs:3713-3735 asserts complete replay lacks the two alternate markers and that the obsolete snapshots directory is absent. A regression selecting the retained inactive grid could also fail those marker assertions without a pre-kill capture. This is a documentation/diagnostic-rationale defect, not a present replay failure or lost test coverage claim. Full-range attribution: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:5249-5254 describes tmux; the assigned 08399d09 hunk explicitly transfers the erasure claim to Farhelm's emulator. The later through-tip diff changes only separate scrollback and dead-agent comments, leaving this wording and the cited implementation unchanged. Contract: SPEC.md:2893-2898 defines viewability by what the terminal holds and forbids painting a captured frame into another terminal; SPEC_impl.md:2603-2611 specifies visible exited-session semantics and no stop-time captured frame. Neither requires inactive-buffer erasure. Fix direction: explain that graceful exit selects the primary screen and replay must project that active screen, without claiming erasure or a unique cause for future marker failures. Suggested bucket: other (misleading maintainer/test documentation). Confidence: confirmed source/contract analysis. proposed_drop: false. possible_cover: none; prohibited coverage sources not searched. Could-be-highest: false; no security, user-work-loss or catastrophic tooling route alleged. Material caveats: the existing visible no-marker/no-obsolete-snapshot assertions remain useful; this is distinct from the neighbour's missing positive live-alt-screen reconnect oracle. No tests, builds, reproduction, runtime observation or installed-vendor claim. Same-ID revision adds post-exit/projection and through-tip checks; original consequence preserved.
+Reviewed commit: 08399d092d20815ced6619c26df2391944ae2b4a; persistence checked through inclusive tip
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the revised regression explanation tells maintainers that leaving a
+full-screen application erases its frame from Farhelm's emulator. The emulator actually retains the frame in its
+inactive buffer. The valid replay assertion checks the restored primary screen, not erasure of the alternate frame or
+proof that only a stop-time capture could make it reappear. Details: session_lifecycle.rs:3677-3681 says 'the alt-screen
+frame is gone from the terminal’s emulator entirely, and only a capture taken before the kill could bring its marker
+back'. The fixture's SIGTERM handler at crates/farhelm-fixtures/src/fake_agent.rs:1730-1742 only writes ESC[?1049l and
+exits. QueryHandler::unset_private_mode at crates/farhelm-terminal-emulator/src/queries.rs:435-453 delegates mode 1049
+to Term. vendor/alacritty_terminal/src/term/mod.rs:2523-2526 resets that mode with swap_alt; :794-814 clears
+inactive_grid only on ENTRY (:795-804), while EXIT simply swaps grid and inactive_grid (:811-812), preserving the old
+alternate cells in inactive_grid. Readily checkable post-exit premise was then checked: hosts/terminal.rs:3911-3923
+flushes an open synchronized update and records liveness without erasing that grid. Snapshot painter comments at
+snapshot/v1/paint.rs:183-187 independently state that alternate cells are cleared on entry. Current rendering is
+correct: grid_output.rs:327-337 reads term.grid(), the active screen, and service/grid_stream.rs:423-460 uses that
+projection for catch-up. The test at session_lifecycle.rs:3713-3735 asserts complete replay lacks the two alternate
+markers and that the obsolete snapshots directory is absent. A regression selecting the retained inactive grid could
+also fail those marker assertions without a pre-kill capture. This is a documentation/diagnostic-rationale defect, not a
+present replay failure or lost test coverage claim. Full-range attribution: exclusive base
+6e423e30068b62c6cfa276c6d720ee35bb70387a:5249-5254 describes tmux; the assigned 08399d09 hunk explicitly transfers the
+erasure claim to Farhelm's emulator. The later through-tip diff changes only separate scrollback and dead-agent
+comments, leaving this wording and the cited implementation unchanged. Contract: SPEC.md:2893-2898 defines viewability
+by what the terminal holds and forbids painting a captured frame into another terminal; SPEC_impl.md:2603-2611 specifies
+visible exited-session semantics and no stop-time captured frame. Neither requires inactive-buffer erasure. Fix
+direction: explain that graceful exit selects the primary screen and replay must project that active screen, without
+claiming erasure or a unique cause for future marker failures. Suggested bucket: other (misleading maintainer/test
+documentation). Confidence: confirmed source/contract analysis. proposed_drop: false. possible_cover: none; prohibited
+coverage sources not searched. Could-be-highest: false; no security, user-work-loss or catastrophic tooling route
+alleged. Material caveats: the existing visible no-marker/no-obsolete-snapshot assertions remain useful; this is
+distinct from the neighbour's missing positive live-alt-screen reconnect oracle. No tests, builds, reproduction, runtime
+observation or installed-vendor claim. Same-ID revision adds post-exit/projection and through-tip checks; original
+consequence preserved.
 
 Returned proposal (claims-091, event 13): **retain-verified**, suggested bucket **other**.
 
-The newly migrated explanation says the alternate frame is gone from the emulator entirely. The fixture only leaves alternate mode, and the emulator retains those cells in its inactive grid. The valid replay assertions test the active primary screen; they establish neither erasure nor a unique stop-time-capture cause for a future marker failure.
+The newly migrated explanation says the alternate frame is gone from the emulator entirely. The fixture only leaves
+alternate mode, and the emulator retains those cells in its inactive grid. The valid replay assertions test the active
+primary screen; they establish neither erasure nor a unique stop-time-capture cause for a future marker failure.
 
-Original stronger consequence: Maintainers can misread the regression oracle and diagnose any reappearing alternate marker as evidence of pre-kill screen capture, even though inactive-buffer retention supplies another possible source. Earlier unresolved lead became this source-verified finding; its consequence was not lowered.
+Original stronger consequence: Maintainers can misread the regression oracle and diagnose any reappearing alternate
+marker as evidence of pre-kill screen capture, even though inactive-buffer retention supplies another possible source.
+Earlier unresolved lead became this source-verified finding; its consequence was not lowered.
 
-Unresolved premise or limitation: None for the documentation defect. No runtime failure, installed-vendor behavior or positive live-alt-screen reconnect coverage claim is established or needed.
+Unresolved premise or limitation: None for the documentation defect. No runtime failure, installed-vendor behavior or
+positive live-alt-screen reconnect coverage claim is established or needed.
 
-Proposed basis: Retain in other with confirmed source confidence. Explain primary-screen selection and active-screen replay without claiming inactive-buffer erasure or a unique cause for marker regressions. Preserve the useful existing assertions and distinguish the separate missing positive reconnect oracle.
+Proposed basis: Retain in other with confirmed source confidence. Explain primary-screen selection and active-screen
+replay without claiming inactive-buffer erasure or a unique cause for marker regressions. Preserve the useful existing
+assertions and distinguish the separate missing positive reconnect oracle.
 
-Existing parent disposition (event 13): verified. Parent explicitly accepted named retain-verified proposal from claims-091 after inspecting it. The newly migrated explanation says the alternate frame is gone from the emulator entirely. The fixture only leaves alternate mode, and the emulator retains those cells in its inactive grid. The valid replay assertions test the active primary screen; they establish neither erasure nor a unique stop-time-capture cause for a future marker failure. Retain in other with confirmed source confidence. Explain primary-screen selection and active-screen replay without claiming inactive-buffer erasure or a unique cause for marker regressions. Preserve the useful existing assertions and distinguish the separate missing positive reconnect oracle. Checked source/results: ["At 08399d092d20815ced6619c26df2391944ae2b4a, session_lifecycle.rs:3677-3683 claims complete emulator erasure and a unique pre-kill capture explanation. :3713-3735 checks complete replay for absence of two alternate markers and for absence of the obsolete snapshots directory. These remain useful assertions.","At that revision, fake_agent.rs:1730-1742 writes only ESC[?1049l then _exit(0). Emulator queries.rs:435-453 delegates mode 1049 reset to Term. vendor/alacritty_terminal/src/term/mod.rs:2523-2526 calls swap_alt, whose :795-804 clears alternate cells only on entry; exit at :811-814 swaps grids without erasing the old alternate cells.","At that revision, hosts/terminal.rs:3911-3923 flushes synchronized output and records exit without clearing the retained inactive grid. grid_output.rs:327-337 projects term.grid(), the active screen, and service/grid_stream.rs:423-460 uses that projection for catch-up. Current rendering is therefore not alleged wrong.","At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a, session_lifecycle.rs:5249-5254 described tmux. The 08399d09 hunk explicitly transfers the erasure claim to Farhelm's emulator. The reviewed-to-tip diff leaves this wording and the cited emulator/projection implementation unchanged.","Historical SPEC.md:2893-2898 and SPEC_impl.md:2603-2611 describe visible exited-terminal semantics and forbid stop-time captured-frame painting. Neither requires inactive-buffer erasure. A projection mistakenly selecting inactive cells could violate the marker oracle without taking a pre-kill capture. This is a source-established documentation defect, not observed replay failure, lost test coverage or user-work loss."] Current coverage/results: {"SPEC.md":"Current Terminal experience paragraph :2893-2898 read in context. 'Viewable means what the terminal itself holds' concerns visible results; the following full-screen-exit wording does not require destruction of an inactive grid. No exact accepted cover.","SPEC_impl.md":"Current Grid streams, Launch failure classification and emulator descriptions searched/read. Active visible screen and no captured-frame painting do not authorize claiming inactive-buffer erasure.","TODO.md Planned":"Empty; no coverage. Other snapshot topics do not cover this explanatory error.","plans/queue":"Searched altscreen, alternate/inactive buffer, stop-time capture and the named test. tmux-drop-from-docs.md was read in full; its generic comment audit is already landed per plans/REPORTS.md:32, so it is not an unlanded exact fix. No other matching plan found.","BUGS.md":"Read in full; unrelated SSH provisioning issue only.","INDEX.md and queue":"Full index read and targeted queue searches for altscreen, inactive grids/buffers, stop-time screen capture and the exact explanation found no same-root item. Alternate-screen selection and snapshot issues have different triggers/consequences. No extension recommended.","TRIAGE_OUTCOMES.md":"Searched active ledger for the named test and inactive-buffer/alternate-erasure/stop-capture explanation; no matching decision.","FILTER.md":"No filter fully matches. This is a persistent test explanation under the ordinary graceful-exit fixture, not an imprecise diagnostic reached only through a rare trigger."} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "Maintainers can misread the regression oracle and diagnose any reappearing alternate marker as evidence of pre-kill screen capture, even though inactive-buffer retention supplies another possible source. Earlier unresolved lead became this source-verified finding; its consequence was not lowered."; "None for the documentation defect. No runtime failure, installed-vendor behavior or positive live-alt-screen reconnect coverage claim is established or needed.".
+Existing parent disposition (event 13): verified. Parent explicitly accepted named retain-verified proposal from
+claims-091 after inspecting it. The newly migrated explanation says the alternate frame is gone from the emulator
+entirely. The fixture only leaves alternate mode, and the emulator retains those cells in its inactive grid. The valid
+replay assertions test the active primary screen; they establish neither erasure nor a unique stop-time-capture cause
+for a future marker failure. Retain in other with confirmed source confidence. Explain primary-screen selection and
+active-screen replay without claiming inactive-buffer erasure or a unique cause for marker regressions. Preserve the
+useful existing assertions and distinguish the separate missing positive reconnect oracle. Checked source/results: ["At
+08399d092d20815ced6619c26df2391944ae2b4a, session_lifecycle.rs:3677-3683 claims complete emulator erasure and a unique
+pre-kill capture explanation. :3713-3735 checks complete replay for absence of two alternate markers and for absence of
+the obsolete snapshots directory. These remain useful assertions.","At that revision, fake_agent.rs:1730-1742 writes
+only ESC[?1049l then _exit(0). Emulator queries.rs:435-453 delegates mode 1049 reset to Term.
+vendor/alacritty_terminal/src/term/mod.rs:2523-2526 calls swap_alt, whose :795-804 clears alternate cells only on entry;
+exit at :811-814 swaps grids without erasing the old alternate cells.","At that revision, hosts/terminal.rs:3911-3923
+flushes synchronized output and records exit without clearing the retained inactive grid. grid_output.rs:327-337
+projects term.grid(), the active screen, and service/grid_stream.rs:423-460 uses that projection for catch-up. Current
+rendering is therefore not alleged wrong.","At exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a,
+session_lifecycle.rs:5249-5254 described tmux. The 08399d09 hunk explicitly transfers the erasure claim to Farhelm's
+emulator. The reviewed-to-tip diff leaves this wording and the cited emulator/projection implementation
+unchanged.","Historical SPEC.md:2893-2898 and SPEC_impl.md:2603-2611 describe visible exited-terminal semantics and
+forbid stop-time captured-frame painting. Neither requires inactive-buffer erasure. A projection mistakenly selecting
+inactive cells could violate the marker oracle without taking a pre-kill capture. This is a source-established
+documentation defect, not observed replay failure, lost test coverage or user-work loss."] Current coverage/results:
+{"SPEC.md":"Current Terminal experience paragraph :2893-2898 read in context. 'Viewable means what the terminal itself
+holds' concerns visible results; the following full-screen-exit wording does not require destruction of an inactive
+grid. No exact accepted cover.","SPEC_impl.md":"Current Grid streams, Launch failure classification and emulator
+descriptions searched/read. Active visible screen and no captured-frame painting do not authorize claiming
+inactive-buffer erasure.","TODO.md Planned":"Empty; no coverage. Other snapshot topics do not cover this explanatory
+error.","plans/queue":"Searched altscreen, alternate/inactive buffer, stop-time capture and the named test.
+tmux-drop-from-docs.md was read in full; its generic comment audit is already landed per plans/REPORTS.md:32, so it is
+not an unlanded exact fix. No other matching plan found.","BUGS.md":"Read in full; unrelated SSH provisioning issue
+only.","INDEX.md and queue":"Full index read and targeted queue searches for altscreen, inactive grids/buffers,
+stop-time screen capture and the exact explanation found no same-root item. Alternate-screen selection and snapshot
+issues have different triggers/consequences. No extension recommended.","TRIAGE_OUTCOMES.md":"Searched active ledger for
+the named test and inactive-buffer/alternate-erasure/stop-capture explanation; no matching decision.","FILTER.md":"No
+filter fully matches. This is a persistent test explanation under the ordinary graceful-exit fixture, not an imprecise
+diagnostic reached only through a rare trigger."} Exact cited cover: [] Original stronger consequence and missing
+premise remain preserved: "Maintainers can misread the regression oracle and diagnose any reappearing alternate marker
+as evidence of pre-kill screen capture, even though inactive-buffer retention supplies another possible source. Earlier
+unresolved lead became this source-verified finding; its consequence was not lowered."; "None for the documentation
+defect. No runtime failure, installed-vendor behavior or positive live-alt-screen reconnect coverage claim is
+established or needed.".
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g143 record](records/review-through-00de0b6c/groups/g143.json). Record ID: `g143-l4`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g143 record](records/review-through-00de0b6c/groups/g143.json). Record ID: `g143-l4`.

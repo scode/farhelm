@@ -4,13 +4,19 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Source-confirmed review record: the rewritten sentinel-reload explanation teaches that failing to retain an in-memory terminal handle leaks its host past Delete, despite retained launch records supplying an independent deletion path. This misstates the lifecycle/ownership contract for future maintainers; no production leak is claimed.
+Source-confirmed review record: the rewritten sentinel-reload explanation teaches that failing to retain an in-memory
+terminal handle leaks its host past Delete, despite retained launch records supplying an independent deletion path. This
+misstates the lifecycle/ownership contract for future maintainers; no production leak is claimed.
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g111/l2`.
 
@@ -20,19 +26,75 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 17 (finding, open):
 
-Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the rewritten sentinel-reload explanation teaches that failing to retain an in-memory terminal handle leaks its host past Delete, despite retained launch records supplying an independent deletion path. This misstates the lifecycle/ownership contract for future maintainers; no production leak is claimed. Details: core.rs:6792–6799 says a SessionEntry with no terminal 'breaks Attach and leaks the host out from under DeleteSession’s teardown'. Keeping the handle is necessary for Attach and the final screen, but its absence alone does not leak the ordinary host in this branch. host_launch.rs:537–579 records the selected socket/starter in .host at :557–563 before starting.finish gives the first stage its child spec. Sentinel cleanup core.rs:7057–7058 invokes cleanup_launch_artifacts; launch_artifacts.rs:327–329 calls remove_settled_best_effort, whose :483–494 expressly preserves .host because settling the agent does not settle its host. The startup launch-dir sweep also keeps .host (:764–778). With agent=None, session_hosts.rs:238–260 includes the record because no held socket excludes it; :272–305 settles/classifies it and :317–323 retains the RecordedHost. At :743–791 Delete shuts down attributable recorded hosts or refuses if their end cannot be confirmed. This same-file source contract is explicit at core.rs:10367–10370: 'No discovery belongs here: an unknown terminal stays unknown, and Delete finds a terminal-less entry’s hosts by their launch records.' SPEC_impl.md, Terminal host, Delete ends every terminal host of the session (:2423–2436), names that same fallback. Correct production recovery refutes an actual leak, but does not make the newly rewritten explanation true. Fix the rationale to name Attach/final-screen preservation while acknowledging recorded-host recovery; retaining the found handle is still correct. Attribution across the whole pinned range: the parent core.rs:7083–7091 specifically described a tmux-session leak; the assigned rewrite newly generalizes it to hosts despite the independent .host path. The remaining in-range core changes f560058da19e02716e6f943883a9508b447aff4e and 08399d092d20815ced6619c26df2391944ae2b4a do not repair the comment. At inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db the same claim remains at :6794–6798. Suggested bucket: other (documentation correctness). Could-be-highest: no established security or work-loss route from this comment. Confidence: confirmed source/caller/contract analysis only. proposed_drop: false. possible_cover: no matching supplied interface finding; g129/l2 concerns report-anchor prose, a distinct boundary. Material caveat: removing a host record out of band could remove the backstop, but the comment states the dependency without that premise and the ordinary sentinel path retains the record. No tests, builds, runtime observations or reproductions. All readily checkable l2 premises are resolved. Final discovery checks of retained publication and successful host starts found no separate runtime defect.
+Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: the rewritten sentinel-reload explanation teaches that
+failing to retain an in-memory terminal handle leaks its host past Delete, despite retained launch records supplying an
+independent deletion path. This misstates the lifecycle/ownership contract for future maintainers; no production leak is
+claimed. Details: core.rs:6792–6799 says a SessionEntry with no terminal 'breaks Attach and leaks the host out from
+under DeleteSession’s teardown'. Keeping the handle is necessary for Attach and the final screen, but its absence alone
+does not leak the ordinary host in this branch. host_launch.rs:537–579 records the selected socket/starter in .host at
+:557–563 before starting.finish gives the first stage its child spec. Sentinel cleanup core.rs:7057–7058 invokes
+cleanup_launch_artifacts; launch_artifacts.rs:327–329 calls remove_settled_best_effort, whose :483–494 expressly
+preserves .host because settling the agent does not settle its host. The startup launch-dir sweep also keeps .host
+(:764–778). With agent=None, session_hosts.rs:238–260 includes the record because no held socket excludes it; :272–305
+settles/classifies it and :317–323 retains the RecordedHost. At :743–791 Delete shuts down attributable recorded hosts
+or refuses if their end cannot be confirmed. This same-file source contract is explicit at core.rs:10367–10370: 'No
+discovery belongs here: an unknown terminal stays unknown, and Delete finds a terminal-less entry’s hosts by their
+launch records.' SPEC_impl.md, Terminal host, Delete ends every terminal host of the session (:2423–2436), names that
+same fallback. Correct production recovery refutes an actual leak, but does not make the newly rewritten explanation
+true. Fix the rationale to name Attach/final-screen preservation while acknowledging recorded-host recovery; retaining
+the found handle is still correct. Attribution across the whole pinned range: the parent core.rs:7083–7091 specifically
+described a tmux-session leak; the assigned rewrite newly generalizes it to hosts despite the independent .host path.
+The remaining in-range core changes f560058da19e02716e6f943883a9508b447aff4e and
+08399d092d20815ced6619c26df2391944ae2b4a do not repair the comment. At inclusive tip
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db the same claim remains at :6794–6798. Suggested bucket: other (documentation
+correctness). Could-be-highest: no established security or work-loss route from this comment. Confidence: confirmed
+source/caller/contract analysis only. proposed_drop: false. possible_cover: no matching supplied interface finding;
+g129/l2 concerns report-anchor prose, a distinct boundary. Material caveat: removing a host record out of band could
+remove the backstop, but the comment states the dependency without that premise and the ordinary sentinel path retains
+the record. No tests, builds, runtime observations or reproductions. All readily checkable l2 premises are resolved.
+Final discovery checks of retained publication and successful host starts found no separate runtime defect.
 
 Returned proposal (claims-072, event 17): **retain-verified**, suggested bucket **other**.
 
-The changed comment incorrectly presents the in-memory handle as necessary to keep the ordinary host reachable by Delete. The retained record supplies an independent path. Correct runtime behavior does not refute this documentation defect.
+The changed comment incorrectly presents the in-memory handle as necessary to keep the ordinary host reachable by
+Delete. The retained record supplies an independent path. Correct runtime behavior does not refute this documentation
+defect.
 
-Original stronger consequence: Inaccurate maintainer-facing lifecycle documentation; the initial lead explicitly did not claim a production host leak. The final source confirms the documentation defect, not a runtime leak.
+Original stronger consequence: Inaccurate maintainer-facing lifecycle documentation; the initial lead explicitly did not
+claim a production host leak. The final source confirms the documentation defect, not a runtime leak.
 
-Unresolved premise or limitation: None for the documentation mismatch. A deleted-out-of-band .host record could remove the fallback, but that is not the ordinary branch the comment describes and does not rescue its unconditional rationale.
+Unresolved premise or limitation: None for the documentation mismatch. A deleted-out-of-band .host record could remove
+the fallback, but that is not the ordinary branch the comment describes and does not rescue its unconditional rationale.
 
-Proposed basis: Record an other-priority comment-correctness finding explaining Attach/final-screen retention and the independent recorded-host Delete fallback. No behavior change is needed.
+Proposed basis: Record an other-priority comment-correctness finding explaining Attach/final-screen retention and the
+independent recorded-host Delete fallback. No behavior change is needed.
 
-Existing parent disposition (event 17): verified. Parent explicitly accepted named retain-verified proposal from claims-072 after inspecting it. The changed comment incorrectly presents the in-memory handle as necessary to keep the ordinary host reachable by Delete. The retained record supplies an independent path. Correct runtime behavior does not refute this documentation defect. Record an other-priority comment-correctness finding explaining Attach/final-screen retention and the independent recorded-host Delete fallback. No behavior change is needed. Checked source/results: ["At 1ed482d core.rs:6792-6799 says a terminal-less SessionEntry leaks the host out from under Delete teardown. At inclusive tip 00de0b6c core.rs:6791-6798 retains that assertion.","At 1ed482d host_launch.rs:553-579 writes the .host record before starting.finish. launch_artifacts.rs:483-494 deliberately preserves .host on sentinel settlement, and :764-778 retains it during startup sweeps.","session_hosts.rs:238-260 includes recorded hosts when no runtime holds their socket; :272-324 settles/classifies and retains them; :743-791 ends attributable recorded hosts or refuses if end cannot be confirmed.","The same core.rs:10367-10370 explicitly says Delete finds terminal-less entries' hosts by launch records. Retaining the handle is still needed for Attach/final-screen access; removing that branch is not proposed.","The host-specific comment rewrite is in 1ed482d and survives the remaining in-range changes. No actual runtime leak, security consequence or work loss is claimed; no execution was performed."] Current coverage/results: ["Current SPEC_impl.md:2345-2399 explicitly defines agent/tab runtimes plus retained launch records as Delete ownership sources. This supports the defect rather than accepting the false explanation. Current SPEC.md lifecycle/terminal sections give no exception making the runtime Delete's sole record.","TODO Planned empty. BUGS, INDEX and active TRIAGE_OUTCOMES searches found no exact comment/recorded-host dependency issue. The existing launch-hold and spare queue matches are unrelated.","The matching tmux docs/comments plan is landed per plans/REPORTS.md:32 and did not remove the assertion at the reviewed tip; its generic audit is not unlanded exact coverage. Other plan searches supplied no targeted repair. FILTER.md's rare-diagnostic rules do not match an unconditional maintainer-facing ownership explanation."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "Inaccurate maintainer-facing lifecycle documentation; the initial lead explicitly did not claim a production host leak. The final source confirms the documentation defect, not a runtime leak."; "None for the documentation mismatch. A deleted-out-of-band .host record could remove the fallback, but that is not the ordinary branch the comment describes and does not rescue its unconditional rationale.".
+Existing parent disposition (event 17): verified. Parent explicitly accepted named retain-verified proposal from
+claims-072 after inspecting it. The changed comment incorrectly presents the in-memory handle as necessary to keep the
+ordinary host reachable by Delete. The retained record supplies an independent path. Correct runtime behavior does not
+refute this documentation defect. Record an other-priority comment-correctness finding explaining Attach/final-screen
+retention and the independent recorded-host Delete fallback. No behavior change is needed. Checked source/results: ["At
+1ed482d core.rs:6792-6799 says a terminal-less SessionEntry leaks the host out from under Delete teardown. At inclusive
+tip 00de0b6c core.rs:6791-6798 retains that assertion.","At 1ed482d host_launch.rs:553-579 writes the .host record
+before starting.finish. launch_artifacts.rs:483-494 deliberately preserves .host on sentinel settlement, and :764-778
+retains it during startup sweeps.","session_hosts.rs:238-260 includes recorded hosts when no runtime holds their socket;
+:272-324 settles/classifies and retains them; :743-791 ends attributable recorded hosts or refuses if end cannot be
+confirmed.","The same core.rs:10367-10370 explicitly says Delete finds terminal-less entries' hosts by launch records.
+Retaining the handle is still needed for Attach/final-screen access; removing that branch is not proposed.","The
+host-specific comment rewrite is in 1ed482d and survives the remaining in-range changes. No actual runtime leak,
+security consequence or work loss is claimed; no execution was performed."] Current coverage/results: ["Current
+SPEC_impl.md:2345-2399 explicitly defines agent/tab runtimes plus retained launch records as Delete ownership sources.
+This supports the defect rather than accepting the false explanation. Current SPEC.md lifecycle/terminal sections give
+no exception making the runtime Delete's sole record.","TODO Planned empty. BUGS, INDEX and active TRIAGE_OUTCOMES
+searches found no exact comment/recorded-host dependency issue. The existing launch-hold and spare queue matches are
+unrelated.","The matching tmux docs/comments plan is landed per plans/REPORTS.md:32 and did not remove the assertion at
+the reviewed tip; its generic audit is not unlanded exact coverage. Other plan searches supplied no targeted repair.
+FILTER.md's rare-diagnostic rules do not match an unconditional maintainer-facing ownership explanation."] Exact cited
+cover: [] Original stronger consequence and missing premise remain preserved: "Inaccurate maintainer-facing lifecycle
+documentation; the initial lead explicitly did not claim a production host leak. The final source confirms the
+documentation defect, not a runtime leak."; "None for the documentation mismatch. A deleted-out-of-band .host record
+could remove the fallback, but that is not the ordinary branch the comment describes and does not rescue its
+unconditional rationale.".
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g111 record](records/review-through-00de0b6c/groups/g111.json). Record ID: `l2`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g111 record](records/review-through-00de0b6c/groups/g111.json). Record ID: `l2`.

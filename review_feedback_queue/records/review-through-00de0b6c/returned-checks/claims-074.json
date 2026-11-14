@@ -240,7 +240,11 @@
       "FILTER.md": "Not used; this is replacement-contract/source refutation."
     },
     "exact_cover_quotes": [
-      {"source": "SPEC_impl.md:2148-2149", "quote": "A hook report is anchored at the host's child; while the session's entry is not yet published the report waits for a later pass rather than being refused.", "scope": "Refutes requiring immediate admission in the retired tmux test; does not accept dropped reports."}
+      {
+        "source": "SPEC_impl.md:2148-2149",
+        "quote": "A hook report is anchored at the host's child; while the session's entry is not yet published the report waits for a later pass rather than being refused.",
+        "scope": "Refutes requiring immediate admission in the retired tmux test; does not accept dropped reports."
+      }
     ],
     "missing_premise": null,
     "original_stronger_consequence": "Removal might lose startup conversation reports, suggested high if actual reports were lost. The source checks establish retry instead, not comprehensive regression coverage. A missing capture denies Resume; no wrong-conversation execution or loss of user-owned work was established.",

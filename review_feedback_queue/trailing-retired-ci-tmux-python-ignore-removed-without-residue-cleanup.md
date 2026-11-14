@@ -1,3 +1,6 @@
+<!-- dprint-ignore-file -->
+<!-- Not formatted: dprint would rewrite `__init__` in this file's bare paths and URLs to `**init**`, breaking them. -->
+
 # Unignoring an older non-self-ignored venv can add generated files to jj changes
 
 Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db

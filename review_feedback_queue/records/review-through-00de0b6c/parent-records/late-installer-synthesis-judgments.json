@@ -1,4 +1,14 @@
 [
-  {"id":"g071","turn":6,"offset":15,"reason":"Read complete reply/event15 and complete final delivery audit1341lines,zero gaps/unfinished/unrecognized. f5 retains concrete older-target mechanism and prior universal-handoff correction, adds exact installer-specific no-advice clause and caller-supplied criterion as proposed policy acceptance. No new defect or unresolved lead; parent recording disposition still owed. Separate discovery required after this late input."},
-  {"id":"g072","turn":6,"offset":19,"reason":"Read reply and all three events17-19 with complete audit863lines,zero gaps/unfinished/unrecognized. Original c1 changes to candidate only on explicit installer no-advice policy, not false all-old-target handoff or current-release exact-output proof. Selected-target/handoff clauses supply no contrary warning obligation. Concrete older-target consequence, bounded test responsibility and all earlier bases preserved. No open lead; separate discovery now required."}
+  {
+    "id": "g071",
+    "turn": 6,
+    "offset": 15,
+    "reason": "Read complete reply/event15 and complete final delivery audit1341lines,zero gaps/unfinished/unrecognized. f5 retains concrete older-target mechanism and prior universal-handoff correction, adds exact installer-specific no-advice clause and caller-supplied criterion as proposed policy acceptance. No new defect or unresolved lead; parent recording disposition still owed. Separate discovery required after this late input."
+  },
+  {
+    "id": "g072",
+    "turn": 6,
+    "offset": 19,
+    "reason": "Read reply and all three events17-19 with complete audit863lines,zero gaps/unfinished/unrecognized. Original c1 changes to candidate only on explicit installer no-advice policy, not false all-old-target handoff or current-release exact-output proof. Selected-target/handoff clauses supply no contrary warning obligation. Concrete older-target consequence, bounded test responsibility and all earlier bases preserved. No open lead; separate discovery now required."
+  }
 ]

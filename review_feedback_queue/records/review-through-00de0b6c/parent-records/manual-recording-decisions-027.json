@@ -1,4 +1,22 @@
 [
-  {"key":"g129/l2","line":11,"disposition":"duplicate","group":"spec-report-discard-on-terminal-disappearance","bucket":"other","recording":"retain-verified","needs_independent_drop_check":false,"reason":"Parent read complete claims082 and prior canonical g016/l2/claims007. Same new terminal-gone definitive-discard promise at1ed482 report_files43-56 andf96dd436SPEC_impl4644-4645 contradicts missing-anchor Internal→Retry and Gone retained-child historical admission. Join retained source/spec documentation root, with distinct introductioncommits and both counterexamples retained. Runtime retry/retainedanchor behavior predatesrange; no new runtime lostconversation or wrongResume claim. No exact currentcover/filter found; persistent false source/spec contract retainedother."},
-  {"key":"g129/c2","line":4,"disposition":"excluded","group":"terminal-kind-report-removal-protocol-fence","bucket":"other","recording":"bounded-live-peer-refutation-old-page-qualified","needs_independent_drop_check":false,"reason":"Parent read full claims082 and narrows its protocol-fence basis: protocol77 and exact hello equality refute incompatible live helm/supervisor peers, coordinated statusprojection removal matches sameversion schema. That handshake does NOT fence an alreadyloadedoldbrowserpage. The accepted old-page misdrawing/attachment refusal requires reload per exact Gridstreams2949-2955, already checked with other owners. Separate rawJSONpaste reinterpretation/highest condition remains retained under017l1/196l1 and is neither refuted nor accepted by this candidate decision. No stronger consequence or whole-removal clearance inferred. No applicablefilter needed for the narrow native-peer source refutation."}
+  {
+    "key": "g129/l2",
+    "line": 11,
+    "disposition": "duplicate",
+    "group": "spec-report-discard-on-terminal-disappearance",
+    "bucket": "other",
+    "recording": "retain-verified",
+    "needs_independent_drop_check": false,
+    "reason": "Parent read complete claims082 and prior canonical g016/l2/claims007. Same new terminal-gone definitive-discard promise at1ed482 report_files43-56 andf96dd436SPEC_impl4644-4645 contradicts missing-anchor Internal→Retry and Gone retained-child historical admission. Join retained source/spec documentation root, with distinct introductioncommits and both counterexamples retained. Runtime retry/retainedanchor behavior predatesrange; no new runtime lostconversation or wrongResume claim. No exact currentcover/filter found; persistent false source/spec contract retainedother."
+  },
+  {
+    "key": "g129/c2",
+    "line": 4,
+    "disposition": "excluded",
+    "group": "terminal-kind-report-removal-protocol-fence",
+    "bucket": "other",
+    "recording": "bounded-live-peer-refutation-old-page-qualified",
+    "needs_independent_drop_check": false,
+    "reason": "Parent read full claims082 and narrows its protocol-fence basis: protocol77 and exact hello equality refute incompatible live helm/supervisor peers, coordinated statusprojection removal matches sameversion schema. That handshake does NOT fence an alreadyloadedoldbrowserpage. The accepted old-page misdrawing/attachment refusal requires reload per exact Gridstreams2949-2955, already checked with other owners. Separate rawJSONpaste reinterpretation/highest condition remains retained under017l1/196l1 and is neither refuted nor accepted by this candidate decision. No stronger consequence or whole-removal clearance inferred. No applicablefilter needed for the narrow native-peer source refutation."
+  }
 ]

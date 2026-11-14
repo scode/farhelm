@@ -1,5 +1,22 @@
 [
-  {"id":"g027","turn":5,"offset":17,"reason":"Parent read full reply/events16-17 and complete1293line audit,zero gaps/rejections/unfinished/unrecognized. Exact original-claim loss and UUID-onlyvalidation, typed ownedresult and independent actor replacement corroborate canonical020l8; local candidate correctly records duplicate without implying current correctness. No new independent issue/openlead. Wait named current024/045 synthesis before discovery with this same result boundary."},
-  {"id":"g052","turn":7,"offset":21,"reason":"Parent read full reply/events20-21 and complete1441line audit,zero gaps/rejections/unfinished/unrecognized. Exact creating-verb Created projection shares actual-mutation-connection promise; entry/reference stability does not establish incarnation freshness. Newl9 corroborates canonical020l8 only, keeps approval-authority uncertainty separate. All source premises resolved, no openlead. Wait current024/045 synthesis before separate discovery."},
-  {"id":"g018","turn":7,"offset":23,"verdict":"productive-historical-discovery","discovery":{"new_verified":["f7"],"new_unverified":[],"empty":false},"reason":"Parent read full reply/events20-23 and complete1497line audit,zero gaps/rejections/unfinished/unrecognized. f6 gains supplied021 remediation caveat without newroot. Newf7 is a genuine intermediate provider-noun diagnostic newly reached by Podman, later repaired in190d and confirmed correct at00de; parent records historical repaired disposition, preserving source novelty. Continued pass checkedresolverprecedence,fieldvalidation,retiredsource,testoracles,relayfences; no lead. Another separate discovery required beyond allknown issues. No new integration premise from already-repaired wording; no additional cross-group reopening needed for it."}
+  {
+    "id": "g027",
+    "turn": 5,
+    "offset": 17,
+    "reason": "Parent read full reply/events16-17 and complete1293line audit,zero gaps/rejections/unfinished/unrecognized. Exact original-claim loss and UUID-onlyvalidation, typed ownedresult and independent actor replacement corroborate canonical020l8; local candidate correctly records duplicate without implying current correctness. No new independent issue/openlead. Wait named current024/045 synthesis before discovery with this same result boundary."
+  },
+  {
+    "id": "g052",
+    "turn": 7,
+    "offset": 21,
+    "reason": "Parent read full reply/events20-21 and complete1441line audit,zero gaps/rejections/unfinished/unrecognized. Exact creating-verb Created projection shares actual-mutation-connection promise; entry/reference stability does not establish incarnation freshness. Newl9 corroborates canonical020l8 only, keeps approval-authority uncertainty separate. All source premises resolved, no openlead. Wait current024/045 synthesis before separate discovery."
+  },
+  {
+    "id": "g018",
+    "turn": 7,
+    "offset": 23,
+    "verdict": "productive-historical-discovery",
+    "discovery": { "new_verified": ["f7"], "new_unverified": [], "empty": false },
+    "reason": "Parent read full reply/events20-23 and complete1497line audit,zero gaps/rejections/unfinished/unrecognized. f6 gains supplied021 remediation caveat without newroot. Newf7 is a genuine intermediate provider-noun diagnostic newly reached by Podman, later repaired in190d and confirmed correct at00de; parent records historical repaired disposition, preserving source novelty. Continued pass checkedresolverprecedence,fieldvalidation,retiredsource,testoracles,relayfences; no lead. Another separate discovery required beyond allknown issues. No new integration premise from already-repaired wording; no additional cross-group reopening needed for it."
+  }
 ]

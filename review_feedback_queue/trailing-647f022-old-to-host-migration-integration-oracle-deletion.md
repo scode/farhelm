@@ -4,13 +4,31 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Unverified collection: At this intermediate revision the supervisor still moved existing tmux agents into terminal hosts, but deleting this suite removed its integration regression checks for preserving history, recovering interrupted moves, and keeping the migrated agent alive when its last old tab closed. The exact subject of those tests was subsequently retired before pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db; this is not a current endpoint request to restore obsolete migration tests. Original defect preserved: the 1,545-line deletion removes happy-path migration, failed capture, interrupted move and mixed-tab regression protection while that implementation and contract still existed at 647f0227. In particular parent host_migrations.rs:1345-1454 checks a_moved_agent_outlives_its_tmux_session. SPEC_impl.md:2488-2558 still required migration, safe history copying, failed-read refusal, interrupted adoption and host-only lifecycle after losing the last tmux tab; its exact text includes 'its liveness, Stop, Restart and Delete ask its host.' SPEC.md:3013-3042 still supported mixed old and new terminals. service/core.rs:13058-13063 still dispatched a tmux predecessor to tmux_restart_seed, implemented in service/core/host_restart.rs:763 onward. Searches across supervisor/e2e source found no surviving test executing the actual transition. The remaining core/tests/host_terminals.rs:40-68 checks incomplete tab discovery using a stand-in host with no old tmux session, so it cannot replace this oracle. Sound-looking implementation alone does not refute that lost regression protection. Later resol
+Unverified collection: At this intermediate revision the supervisor still moved existing tmux agents into terminal
+hosts, but deleting this suite removed its integration regression checks for preserving history, recovering interrupted
+moves, and keeping the migrated agent alive when its last old tab closed. The exact subject of those tests was
+subsequently retired before pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db; this is not a current endpoint request
+to restore obsolete migration tests. Original defect preserved: the 1,545-line deletion removes happy-path migration,
+failed capture, interrupted move and mixed-tab regression protection while that implementation and contract still
+existed at 647f0227. In particular parent host_migrations.rs:1345-1454 checks a_moved_agent_outlives_its_tmux_session.
+SPEC_impl.md:2488-2558 still required migration, safe history copying, failed-read refusal, interrupted adoption and
+host-only lifecycle after losing the last tmux tab; its exact text includes 'its liveness, Stop, Restart and Delete ask
+its host.' SPEC.md:3013-3042 still supported mixed old and new terminals. service/core.rs:13058-13063 still dispatched a
+tmux predecessor to tmux_restart_seed, implemented in service/core/host_restart.rs:763 onward. Searches across
+supervisor/e2e source found no surviving test executing the actual transition. The remaining
+core/tests/host_terminals.rs:40-68 checks incomplete tab discovery using a stand-in host with no old tmux session, so it
+cannot replace this oracle. Sound-looking implementation alone does not refute that lost regression protection. Later
+resol
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g152/l1`.
 
@@ -20,19 +38,62 @@ Confidence: Unverified collection; recording proposals and any disagreement rema
 
 Latest reviewer record, event 6 (finding, open):
 
-Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: At this intermediate revision the supervisor still moved existing tmux agents into terminal hosts, but deleting this suite removed its integration regression checks for preserving history, recovering interrupted moves, and keeping the migrated agent alive when its last old tab closed. The exact subject of those tests was subsequently retired before pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db; this is not a current endpoint request to restore obsolete migration tests. Original defect preserved: the 1,545-line deletion removes happy-path migration, failed capture, interrupted move and mixed-tab regression protection while that implementation and contract still existed at 647f0227. In particular parent host_migrations.rs:1345-1454 checks a_moved_agent_outlives_its_tmux_session. SPEC_impl.md:2488-2558 still required migration, safe history copying, failed-read refusal, interrupted adoption and host-only lifecycle after losing the last tmux tab; its exact text includes 'its liveness, Stop, Restart and Delete ask its host.' SPEC.md:3013-3042 still supported mixed old and new terminals. service/core.rs:13058-13063 still dispatched a tmux predecessor to tmux_restart_seed, implemented in service/core/host_restart.rs:763 onward. Searches across supervisor/e2e source found no surviving test executing the actual transition. The remaining core/tests/host_terminals.rs:40-68 checks incomplete tab discovery using a stand-in host with no old tmux session, so it cannot replace this oracle. Sound-looking implementation alone does not refute that lost regression protection. Later resolution, established from source and changed contract: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 changes SPEC.md:3003-3019 to end old terminals at startup, close their tabs, mark live old agents interrupted and restart into empty terminals. Exact text at 3016: 'After an update to this release, Restart, Clone and Replace start such a session in a new, empty terminal.' Next commit 1ed482dde220452e424973faf38a5e1318986333 removes the migration implementation itself: host_restart.rs diff hunk -710,223/+484,12 deletes tmux_restart_seed, its pane-history capture, timeout retry, capture-size and seed-refusal path; hunk -593,33/+388,12 deletes the Replacing::TmuxWindow old-window-removal arm, and earlier hunks delete TmuxSeedFault, Replacing::TmuxWindow and From a tmux pane documentation. At pinned tip, SPEC_impl.md:2780-2823, Ending the old private tmux server, states at 2799-2801: 'The reload then takes every old-kind row as having no terminal, in any state, without looking its recorded pane id up' and converts live rows to interrupted. Actual tip startup source service/core.rs:6141-6149 invokes OldTerminals::end_private_server before reload. Endpoint search finds no tmux_restart_seed or Moving an old session into a host contract. Therefore the intermediate missing migration oracle remains a true historical coverage loss, but its exact behavior no longer ships at endpoint, so no endpoint migration-coverage fix is established. Suggested bucket: other (test regression protection only). Could-be-highest: false; no runtime data-loss or security route established. Confidence: confirmed by source for intermediate coverage loss and later subject retirement; no runtime observation. Proposed_drop: false; parent owns recording and coverage disposition, and no drop is treated as accepted. Possible_cover: none; other group names supplied by the parent are interface context only, not evidence of queue coverage. Checks: all 1,563 assigned mandatory lines redelivered in turn 2 as separate raw-stdout evidence packets <=200 lines and <24,000 encoded bytes; later commit diffs, complete endpoint retirement contract and startup call inspected. No tests, builds or reproductions run. No unresolved premise for this record's stated historical-only consequence.
+Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: At this intermediate revision the supervisor still
+moved existing tmux agents into terminal hosts, but deleting this suite removed its integration regression checks for
+preserving history, recovering interrupted moves, and keeping the migrated agent alive when its last old tab closed. The
+exact subject of those tests was subsequently retired before pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db; this
+is not a current endpoint request to restore obsolete migration tests. Original defect preserved: the 1,545-line
+deletion removes happy-path migration, failed capture, interrupted move and mixed-tab regression protection while that
+implementation and contract still existed at 647f0227. In particular parent host_migrations.rs:1345-1454 checks
+a_moved_agent_outlives_its_tmux_session. SPEC_impl.md:2488-2558 still required migration, safe history copying,
+failed-read refusal, interrupted adoption and host-only lifecycle after losing the last tmux tab; its exact text
+includes 'its liveness, Stop, Restart and Delete ask its host.' SPEC.md:3013-3042 still supported mixed old and new
+terminals. service/core.rs:13058-13063 still dispatched a tmux predecessor to tmux_restart_seed, implemented in
+service/core/host_restart.rs:763 onward. Searches across supervisor/e2e source found no surviving test executing the
+actual transition. The remaining core/tests/host_terminals.rs:40-68 checks incomplete tab discovery using a stand-in
+host with no old tmux session, so it cannot replace this oracle. Sound-looking implementation alone does not refute that
+lost regression protection. Later resolution, established from source and changed contract:
+dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 changes SPEC.md:3003-3019 to end old terminals at startup, close their tabs,
+mark live old agents interrupted and restart into empty terminals. Exact text at 3016: 'After an update to this release,
+Restart, Clone and Replace start such a session in a new, empty terminal.' Next commit
+1ed482dde220452e424973faf38a5e1318986333 removes the migration implementation itself: host_restart.rs diff hunk
+-710,223/+484,12 deletes tmux_restart_seed, its pane-history capture, timeout retry, capture-size and seed-refusal path;
+hunk -593,33/+388,12 deletes the Replacing::TmuxWindow old-window-removal arm, and earlier hunks delete TmuxSeedFault,
+Replacing::TmuxWindow and From a tmux pane documentation. At pinned tip, SPEC_impl.md:2780-2823, Ending the old private
+tmux server, states at 2799-2801: 'The reload then takes every old-kind row as having no terminal, in any state, without
+looking its recorded pane id up' and converts live rows to interrupted. Actual tip startup source
+service/core.rs:6141-6149 invokes OldTerminals::end_private_server before reload. Endpoint search finds no
+tmux_restart_seed or Moving an old session into a host contract. Therefore the intermediate missing migration oracle
+remains a true historical coverage loss, but its exact behavior no longer ships at endpoint, so no endpoint
+migration-coverage fix is established. Suggested bucket: other (test regression protection only). Could-be-highest:
+false; no runtime data-loss or security route established. Confidence: confirmed by source for intermediate coverage
+loss and later subject retirement; no runtime observation. Proposed_drop: false; parent owns recording and coverage
+disposition, and no drop is treated as accepted. Possible_cover: none; other group names supplied by the parent are
+interface context only, not evidence of queue coverage. Checks: all 1,563 assigned mandatory lines redelivered in turn 2
+as separate raw-stdout evidence packets <=200 lines and <24,000 encoded bytes; later commit diffs, complete endpoint
+retirement contract and startup call inspected. No tests, builds or reproductions run. No unresolved premise for this
+record's stated historical-only consequence.
 
 Returned proposal (claims-097, event 6): **needs-parent**, suggested bucket **other**.
 
-The migration suite was deleted while the intermediate revision still promised and implemented migration. That historical test gap is established, but the migration itself was retired within the review range. A current queue repair restoring it would be obsolete.
+The migration suite was deleted while the intermediate revision still promised and implemented migration. That
+historical test gap is established, but the migration itself was retired within the review range. A current queue repair
+restoring it would be obsolete.
 
-Original stronger consequence: Lost migration, history-preservation, interrupted-move and mixed-tab regression coverage while migration still shipped. No actual history loss, stopped agent or security defect was established. Later retirement is not equivalent test coverage and does not retroactively refute the deletion.
+Original stronger consequence: Lost migration, history-preservation, interrupted-move and mixed-tab regression coverage
+while migration still shipped. No actual history loss, stopped agent or security defect was established. Later
+retirement is not equivalent test coverage and does not retroactively refute the deletion.
 
-Unresolved premise or limitation: None for historical missing regression protection. The parent must choose the disposition of a fully retired intermediate gap.
+Unresolved premise or limitation: None for historical missing regression protection. The parent must choose the
+disposition of a fully retired intermediate gap.
 
-Proposed basis: Preserve the historical finding; do not infer a current migration fix. g151/l1 is a related extension about distinct real-process compatibility wiring, not an exact alias. g152/c2's old-source portion belongs here; its ordinary-create concern is independently refuted.
+Proposed basis: Preserve the historical finding; do not infer a current migration fix. g151/l1 is a related extension
+about distinct real-process compatibility wiring, not an exact alias. g152/c2's old-source portion belongs here; its
+ordinary-create concern is independently refuted.
 
-Existing parent disposition (event 6): under-investigation. Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it.
+Existing parent disposition (event 6): under-investigation. Record durably acknowledged; parent source/contract
+validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This
+preserves the claim and uncertainty without accepting, dropping or lowering it.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g152 record](records/review-through-00de0b6c/groups/g152.json). Record ID: `l1`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g152 record](records/review-through-00de0b6c/groups/g152.json). Record ID: `l1`.

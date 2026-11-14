@@ -1,11 +1,65 @@
 [
- {"key":"g005/f4","proposal":"claim-checks/claims-003/result.json","parent_proposal":"filtered-upgrade-plus-rare","final_independent_gate":"required-before-highest-drop","reason":"Parentreadfull003. RetainedRestartquestioncanredrawInterrupted/nothingleftwhilestartupWarncleanupfailedandfreshAgentOnlysweepnowkills oldsurvivor beyonddisplayedstopconsent. Sourceconditionalharmhighest; freshsuccessfulcleanupSUPPLIESharm, notrefutation. Wholetriggerrequiresolderrunningstateacrossupgrade plusstartupcleanupfault/timeout andretainedquestion; filterexpresslycoversaffected-sessionworklosswhenadditionalrarecondition,nosecurity/database/brickingnormalupdatefailureclaimed. Freshcheckcompletefilterboundary andsame032l5alias; preservefalsewarningandno-runtimeobservation. Plainretirementacceptancedoesnotacceptwrongconfirmation."},
- {"key":"g005/f5","proposal":"claim-checks/claims-003/result.json","parent_proposal":"source-refuted-complete-contract-semantics","final_independent_gate":"required-before-drop","reason":"Full003samecompletecontractreadingas004f5: b106reviewedsubsectionexplicitlostreplysealedfinisherdestruction plusserverownedmutationdisconnectlosesreplynotwork defeatunconditionalno-remotemutationreadingofnothingdecided. Actualunknowncallerwordingconfirms, no additionalunapprovedDeleteauthority. Preserveimpreciseshorthand/originaldestructive-resourcemisreading andleadrevision; checkfullcontextratherthanfilterdiagnosticexcuse. Reconcile004f5assameinterpretationroot ifexactscopematches."},
- {"key":"g006/f2","proposal":"claim-checks/claims-003/result.json","parent_proposal":"covered","final_independent_gate":"required-before-drop","reason":"Full003offlineuninstallinactive/failedservicestopskipwithnoownprivatetmuxcleanup leavesoldserver/resourcesaliveandFarhelmaccessgone. ExactSPEC210-219/SPEC_impl7813-7832explicitlyaccept stopped-supervisor survivor includingstartupendingfailurethenstop. Preserve highifnotaccepted/inaccessibleworkcontext, noimplicitseveritydowngrade orwrongtarget/excessdestructionacceptance. Freshcheckexactsurvivoronlyexception; no runtime/ownershipbroadauditcertification."},
- {"key":"g006/f3","proposal":"claim-checks/claims-003/result.json","parent_proposal":"source-refuted-governing-allocation-exception","final_independent_gate":"required-before-drop","reason":"Full003legacyretry rolledbackLIKEspecneverlanded referencesexistingpolicy, whichfullSPEC/impl explicitlyretains errorrow/membership afterallocation; actualFailedStart::Specandoldretry branchesretainallocated/unreadableorigin anddeleteonlynoorigin/Planned. Refutesunconditionalcheckoutownershiphandledeletionreading, notsourcebehaviorrequiredjustbecauseproductioncorrect. Preservepossibleusercheckoutlossinterpretation andseparate107artifactsroot; freshcheckfullcrosscontractexception."},
- {"key":"g007/f1","proposal":"claim-checks/claims-003/result.json","parent_proposal":"covered-same-root-g005/f1","final_independent_gate":"required-before-drop-or-historical-lowering","reason":"Full003samebest-effortstartup/possibleduplicateagentresidual as005f1. ExactSPECacceptsbothcontinuedstartup/endedclassificationandsecondagentbesidesurvivor; freshRestartRefusesweepmeansstartupfailurealonedoesnotprovecoexistingagents. Preserveoriginalpossibleworkcorruption/highestandprovisionalotherlowering forfreshgate, notapplyparentlowering. Portabledetachedunidentifiablesurvivorlimitationdistinct andnoblanketownershipwaiver. SeparatefalseRestartwarning005f4andNothingAliveDelete007c4stayunrefuted."},
- {"key":"g007/c2","proposal":"claim-checks/claims-003/result.json","parent_proposal":"source-refuted-relocated-contract","final_independent_gate":"required-before-drop","reason":"Full003deletedtmuxchaptergenericlaunchclassification/quoting/prestopvalidationactuallyretainedcompleteunderTerminalhost: perlaunchsentinel,pendingStopguard,waypointdiagnosis,literalplaceholderreplacement/metadata,Restartvalidationbeforestop. Directretainedcontractrefutesmissingrule, noimplementationregressionoruniversalcorrectnessclaim. Freshgateconservativebecausequoting/stopprotectionssecurity/workcapable; nofilterorlowseveritybasis."},
- {"key":"g007/c4","proposal":"claim-checks/claims-003/result.json","parent_proposal":"filtered-upgrade-plus-rare","final_independent_gate":"required-before-highest-drop","reason":"Full003realmixedhostagentended+liveoldtabproducer supportedbeforeupgrade, rarestartupEAGAIN/livelistenrefusal losesattributedpaneinventory, NothingAlivehost-onlyguardpasses, conservativeWholeSessionthenkillsundisclosedoldtab/editor. Highestconsentdefectsourceconfirmed, notmissingcleanupandnotrefutedbycorrectsweep. Wholetriggerolderstateplusrarestartupfault; affected-sessionworklossfilterexplicitlyincludes, nosecurity/corruption/bricking/normalupdateinabilityclaimed. Freshcheckfullfilterand128l1alias. IfusingSPECacceptanceinsteadmustsettlenoliveconsentconflict; parentproposesfilteronly, nomisleadingwarningacceptanceinferred."},
- {"key":"g007/c5","proposal":"claim-checks/claims-003/result.json","parent_proposal":"source-refuted-preserved-reservation-provenance","final_independent_gate":"required-before-drop","reason":"Full003TerminalEndeddoesnotclearstoredterminaladdress, exactSPECpreservesitforreservationacceptance. Launchedpredicateusesactualterminal/nonemptyaddress andseparates scope/sentinel/generationzerotransaction, notInterruptedalone. Monotonicsettlementretainsnecessarysentinelonfailure. Refutesnamederasedevidence→duplicatecreate/fabricatedsuccessroutes; preservepotentialconflictinguserworkhighest andnotcertifyallcreate/deletionrecoverypaths. Freshcheckconsumerandtransactionreferences."},
- {"key":"g008/f1","proposal":"claim-checks/claims-003/result.json","parent_proposal":"covered","final_independent_gate":"required-before-highest-drop","reason":"Full003in-rangedbfcintentionallyendsoldprivateagents/tabsandlosesserverheldscreen/history;1edSPECrewritesexistingin-rangebehavior. Exactproducttextacceptstermination,historylossandnewemptyRestart/Clone/Replace. Parentproposesexactacceptancedrop, notoutofrangebecausepredatesassignedpatch. Freshcheckhighestwork/outputloss andlimits: nootherowner/cleanupimplementationerror/laterfalseconfirmation accepted, ordinaryupgradealoneenoughso no rarefilterbasis."}
+  {
+    "key": "g005/f4",
+    "proposal": "claim-checks/claims-003/result.json",
+    "parent_proposal": "filtered-upgrade-plus-rare",
+    "final_independent_gate": "required-before-highest-drop",
+    "reason": "Parentreadfull003. RetainedRestartquestioncanredrawInterrupted/nothingleftwhilestartupWarncleanupfailedandfreshAgentOnlysweepnowkills oldsurvivor beyonddisplayedstopconsent. Sourceconditionalharmhighest; freshsuccessfulcleanupSUPPLIESharm, notrefutation. Wholetriggerrequiresolderrunningstateacrossupgrade plusstartupcleanupfault/timeout andretainedquestion; filterexpresslycoversaffected-sessionworklosswhenadditionalrarecondition,nosecurity/database/brickingnormalupdatefailureclaimed. Freshcheckcompletefilterboundary andsame032l5alias; preservefalsewarningandno-runtimeobservation. Plainretirementacceptancedoesnotacceptwrongconfirmation."
+  },
+  {
+    "key": "g005/f5",
+    "proposal": "claim-checks/claims-003/result.json",
+    "parent_proposal": "source-refuted-complete-contract-semantics",
+    "final_independent_gate": "required-before-drop",
+    "reason": "Full003samecompletecontractreadingas004f5: b106reviewedsubsectionexplicitlostreplysealedfinisherdestruction plusserverownedmutationdisconnectlosesreplynotwork defeatunconditionalno-remotemutationreadingofnothingdecided. Actualunknowncallerwordingconfirms, no additionalunapprovedDeleteauthority. Preserveimpreciseshorthand/originaldestructive-resourcemisreading andleadrevision; checkfullcontextratherthanfilterdiagnosticexcuse. Reconcile004f5assameinterpretationroot ifexactscopematches."
+  },
+  {
+    "key": "g006/f2",
+    "proposal": "claim-checks/claims-003/result.json",
+    "parent_proposal": "covered",
+    "final_independent_gate": "required-before-drop",
+    "reason": "Full003offlineuninstallinactive/failedservicestopskipwithnoownprivatetmuxcleanup leavesoldserver/resourcesaliveandFarhelmaccessgone. ExactSPEC210-219/SPEC_impl7813-7832explicitlyaccept stopped-supervisor survivor includingstartupendingfailurethenstop. Preserve highifnotaccepted/inaccessibleworkcontext, noimplicitseveritydowngrade orwrongtarget/excessdestructionacceptance. Freshcheckexactsurvivoronlyexception; no runtime/ownershipbroadauditcertification."
+  },
+  {
+    "key": "g006/f3",
+    "proposal": "claim-checks/claims-003/result.json",
+    "parent_proposal": "source-refuted-governing-allocation-exception",
+    "final_independent_gate": "required-before-drop",
+    "reason": "Full003legacyretry rolledbackLIKEspecneverlanded referencesexistingpolicy, whichfullSPEC/impl explicitlyretains errorrow/membership afterallocation; actualFailedStart::Specandoldretry branchesretainallocated/unreadableorigin anddeleteonlynoorigin/Planned. Refutesunconditionalcheckoutownershiphandledeletionreading, notsourcebehaviorrequiredjustbecauseproductioncorrect. Preservepossibleusercheckoutlossinterpretation andseparate107artifactsroot; freshcheckfullcrosscontractexception."
+  },
+  {
+    "key": "g007/f1",
+    "proposal": "claim-checks/claims-003/result.json",
+    "parent_proposal": "covered-same-root-g005/f1",
+    "final_independent_gate": "required-before-drop-or-historical-lowering",
+    "reason": "Full003samebest-effortstartup/possibleduplicateagentresidual as005f1. ExactSPECacceptsbothcontinuedstartup/endedclassificationandsecondagentbesidesurvivor; freshRestartRefusesweepmeansstartupfailurealonedoesnotprovecoexistingagents. Preserveoriginalpossibleworkcorruption/highestandprovisionalotherlowering forfreshgate, notapplyparentlowering. Portabledetachedunidentifiablesurvivorlimitationdistinct andnoblanketownershipwaiver. SeparatefalseRestartwarning005f4andNothingAliveDelete007c4stayunrefuted."
+  },
+  {
+    "key": "g007/c2",
+    "proposal": "claim-checks/claims-003/result.json",
+    "parent_proposal": "source-refuted-relocated-contract",
+    "final_independent_gate": "required-before-drop",
+    "reason": "Full003deletedtmuxchaptergenericlaunchclassification/quoting/prestopvalidationactuallyretainedcompleteunderTerminalhost: perlaunchsentinel,pendingStopguard,waypointdiagnosis,literalplaceholderreplacement/metadata,Restartvalidationbeforestop. Directretainedcontractrefutesmissingrule, noimplementationregressionoruniversalcorrectnessclaim. Freshgateconservativebecausequoting/stopprotectionssecurity/workcapable; nofilterorlowseveritybasis."
+  },
+  {
+    "key": "g007/c4",
+    "proposal": "claim-checks/claims-003/result.json",
+    "parent_proposal": "filtered-upgrade-plus-rare",
+    "final_independent_gate": "required-before-highest-drop",
+    "reason": "Full003realmixedhostagentended+liveoldtabproducer supportedbeforeupgrade, rarestartupEAGAIN/livelistenrefusal losesattributedpaneinventory, NothingAlivehost-onlyguardpasses, conservativeWholeSessionthenkillsundisclosedoldtab/editor. Highestconsentdefectsourceconfirmed, notmissingcleanupandnotrefutedbycorrectsweep. Wholetriggerolderstateplusrarestartupfault; affected-sessionworklossfilterexplicitlyincludes, nosecurity/corruption/bricking/normalupdateinabilityclaimed. Freshcheckfullfilterand128l1alias. IfusingSPECacceptanceinsteadmustsettlenoliveconsentconflict; parentproposesfilteronly, nomisleadingwarningacceptanceinferred."
+  },
+  {
+    "key": "g007/c5",
+    "proposal": "claim-checks/claims-003/result.json",
+    "parent_proposal": "source-refuted-preserved-reservation-provenance",
+    "final_independent_gate": "required-before-drop",
+    "reason": "Full003TerminalEndeddoesnotclearstoredterminaladdress, exactSPECpreservesitforreservationacceptance. Launchedpredicateusesactualterminal/nonemptyaddress andseparates scope/sentinel/generationzerotransaction, notInterruptedalone. Monotonicsettlementretainsnecessarysentinelonfailure. Refutesnamederasedevidence→duplicatecreate/fabricatedsuccessroutes; preservepotentialconflictinguserworkhighest andnotcertifyallcreate/deletionrecoverypaths. Freshcheckconsumerandtransactionreferences."
+  },
+  {
+    "key": "g008/f1",
+    "proposal": "claim-checks/claims-003/result.json",
+    "parent_proposal": "covered",
+    "final_independent_gate": "required-before-highest-drop",
+    "reason": "Full003in-rangedbfcintentionallyendsoldprivateagents/tabsandlosesserverheldscreen/history;1edSPECrewritesexistingin-rangebehavior. Exactproducttextacceptstermination,historylossandnewemptyRestart/Clone/Replace. Parentproposesexactacceptancedrop, notoutofrangebecausepredatesassignedpatch. Freshcheckhighestwork/outputloss andlimits: nootherowner/cleanupimplementationerror/laterfalseconfirmation accepted, ordinaryupgradealoneenoughso no rarefilterbasis."
+  }
 ]
