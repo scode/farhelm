@@ -1083,6 +1083,199 @@ fn a_held_app_shortcut_never_reaches_the_program(cx: &mut TestAppContext) {
     assert!(h.focused(&owner), "the premise: the terminal kept focus");
 }
 
+// ---- Paste ---------------------------------------------------------------------------------------------------------
+
+/// This platform's paste chords, as the keymap binds them.
+fn paste_chords() -> Vec<&'static str> {
+    crate::actions::TERMINAL_BINDINGS
+        .iter()
+        .flat_map(|binding| binding.chords(THIS_PLATFORM).iter().copied())
+        .collect()
+}
+
+fn paste(data: &str, last: bool) -> GridInput {
+    GridInput::Paste {
+        data: data.into(),
+        last,
+    }
+}
+
+/// A paste sends the clipboard's text to the program as a paste, not as typing, so the supervisor can bracket it for a
+/// program that asked: from each of this platform's chords (Cmd+V on a Mac; Ctrl+Shift+V and Shift+Insert on Linux)
+/// and from the action itself, which is how a menu item reaches the focused terminal. The text goes out exactly as
+/// copied, an embedded end-of-paste marker included: stripping that marker so it cannot end the paste is the
+/// supervisor's sanitizing (`grid_input.rs`), and a second copy here would drift from it.
+#[gpui::test]
+fn a_paste_sends_the_clipboards_text_as_a_paste(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let copied = "one\ntwo \u{1b}[201~ three";
+    h.cx.write_to_clipboard(ClipboardItem::new_string(copied.into()));
+    let chords = paste_chords();
+    assert!(
+        !chords.is_empty(),
+        "the premise: this platform has a paste chord"
+    );
+    for chord in chords {
+        keys(h.cx, chord);
+        assert_eq!(h.sent(), [(paste(copied, true), true)], "{chord}");
+    }
+    h.cx.dispatch_action(actions::Paste);
+    settle(h.cx);
+    assert_eq!(h.sent(), [(paste(copied, true), true)], "the action");
+}
+
+/// A paste of more than a megabyte reaches the program whole and in order, as the old app's large-paste test asked
+/// (`terminal-flood.spec.ts` at the reference commit). A single input message over 64 KiB would end the attachment, so
+/// the paste goes out as the input mapping's parts, one group, with only the last part closing the paste. The text is
+/// a 23-letter cycle, which no part boundary lines up with, so a lost, repeated or reordered part changes the joined
+/// text.
+#[gpui::test]
+fn a_large_paste_arrives_whole_and_in_order(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let size = 1024 * 1024 + 1;
+    let copied: String = "abcdefghijklmnopqrstuvw"
+        .chars()
+        .cycle()
+        .take(size)
+        .collect();
+    h.cx.write_to_clipboard(ClipboardItem::new_string(copied.clone()));
+    h.cx.dispatch_action(actions::Paste);
+    settle(h.cx);
+    let sent = h.sent();
+    assert!(sent.len() > 1, "a paste this large goes in parts");
+    let mut joined = String::new();
+    for (index, (input, delivered)) in sent.iter().enumerate() {
+        assert!(delivered, "part {index} reached the attachment");
+        match input {
+            GridInput::Paste { data, last } => {
+                assert_eq!(
+                    *last,
+                    index == sent.len() - 1,
+                    "only the last part closes the paste"
+                );
+                joined.push_str(data);
+            }
+            other => panic!("part {index} is not a paste: {other:?}"),
+        }
+    }
+    assert!(joined == copied, "the parts join to the copied text");
+}
+
+/// A paste goes to the program only while the terminal is live, like typing: not while it attaches or replays, and not
+/// while it reconnects, so a paste never lands in a screen the user cannot see.
+#[gpui::test]
+fn a_paste_goes_nowhere_unless_the_terminal_is_live(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    h.cx.write_to_clipboard(ClipboardItem::new_string("copied".into()));
+    assert!(h.focused(&owner), "the premise: focused");
+    assert!(
+        !h.read(|owner, _| owner.is_live()),
+        "the premise: attaching"
+    );
+    h.cx.dispatch_action(actions::Paste);
+    settle(h.cx);
+    assert_eq!(h.sent(), [], "attaching");
+
+    h.attach_showing("screen");
+    assert!(h.focused(&owner), "the premise: still focused");
+    h.fake().drop_link();
+    settle(h.cx);
+    assert!(
+        !h.read(|owner, _| owner.is_live()),
+        "the premise: reconnecting"
+    );
+    h.cx.dispatch_action(actions::Paste);
+    settle(h.cx);
+    assert_eq!(h.sent(), [], "reconnecting");
+
+    h.attach_showing("again");
+    h.cx.dispatch_action(actions::Paste);
+    settle(h.cx);
+    assert_eq!(h.sent(), [(paste("copied", true), true)], "live again");
+}
+
+/// Input made for one attachment never reaches a later one: a paste whose clipboard read finishes after a reconnect
+/// is dropped rather than typed into the new attachment, which the user may not have seen yet. The stream's own stamp
+/// check does the dropping; this pins that the terminal sends with the stamp it was given, not the one live now.
+///
+/// NOTE: The test calls the stamped send directly, because the test platform's clipboard answers at once and cannot
+/// hold a read across a reconnect. So two things about a slow read are not exercised: that `paste` stamps the group
+/// with the attachment live when the user asked, and that a second paste waits for the first. Both are a few lines
+/// in `AttachedTerminal::paste`, read by review.
+#[gpui::test]
+fn input_made_for_an_earlier_attachment_is_dropped(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("first");
+    let first = h.read(|owner, _| owner.attachment).unwrap();
+    h.fake().drop_link();
+    h.attach_showing("second");
+    let second = h.read(|owner, _| owner.attachment).unwrap();
+    assert_ne!(
+        first, second,
+        "the premise: the reconnect made a new attachment"
+    );
+    let owner = h.owner.clone();
+    owner.update(h.cx, |owner, _| {
+        owner.send(first, vec![paste("late", true)]);
+        owner.send(second, vec![paste("now", true)]);
+    });
+    settle(h.cx);
+    assert_eq!(
+        h.sent(),
+        [(paste("late", true), false), (paste("now", true), true)],
+        "the stream refuses the earlier attachment's input and carries the live one's"
+    );
+}
+
+/// Only plain text is pasted, and a clipboard read that reports a file or an image pastes nothing at all, even with
+/// text beside it: SPEC.md's "Attachments" ranks a paste's flavors files first, then images, then text, and a Finder
+/// copy on macOS carries the file's path as text too, which would otherwise be typed into the program. Turning those
+/// pastes into uploads is the attachment work's. (The vendored Wayland read never reports a file, so on Linux a copied
+/// file's text still pastes; that is the read's limit, not this rule's.)
+#[gpui::test]
+fn only_the_clipboards_text_is_pasted(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let file = ClipboardEntry::ExternalPaths(gpui::ExternalPaths(
+        vec![std::path::PathBuf::from("/tmp/copied.png")].into(),
+    ));
+    h.cx.write_to_clipboard(ClipboardItem {
+        entries: vec![file.clone()],
+    });
+    h.cx.dispatch_action(actions::Paste);
+    settle(h.cx);
+    assert_eq!(h.sent(), [], "a file alone pastes nothing");
+
+    h.cx.write_to_clipboard(ClipboardItem {
+        entries: vec![
+            file,
+            ClipboardEntry::String(gpui::ClipboardString::new("text".into())),
+        ],
+    });
+    h.cx.dispatch_action(actions::Paste);
+    settle(h.cx);
+    assert_eq!(h.sent(), [], "nor a file with text beside it");
+
+    h.cx.write_to_clipboard(ClipboardItem::new_string("text".into()));
+    h.cx.dispatch_action(actions::Paste);
+    settle(h.cx);
+    assert_eq!(
+        h.sent(),
+        [(paste("text", true), true)],
+        "the premise: text alone pastes"
+    );
+}
+
 /// The cursor blinks on the ticker, half a second shown and half hidden (the old cursor's blink), only while the
 /// terminal has focus in an active window: unfocused, or with the window inactive, it is drawn outlined and nothing
 /// ticks, so an idle window does not redraw twice a second for a cursor nobody is typing at.

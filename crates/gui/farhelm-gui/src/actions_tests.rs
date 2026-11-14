@@ -23,8 +23,8 @@ use gpui::{
 };
 
 use crate::actions::{
-    CONTEXT, DeleteSession, KeyOwner, RenameSession, TERMINAL_CONTEXT, TERMINAL_KEYS,
-    TEXT_INPUT_CONTEXT, THIS_PLATFORM, owner_on, terminal_key_owner,
+    CONTEXT, DeleteSession, KeyOwner, RenameSession, TERMINAL_BINDINGS, TERMINAL_CONTEXT,
+    TERMINAL_KEYS, TEXT_INPUT_CONTEXT, THIS_PLATFORM, owner_on, terminal_key_owner,
 };
 use crate::components::{Button, HoverHelp, Role, TextInput, TextInputState};
 use crate::focus::{self, OnPress};
@@ -347,15 +347,19 @@ fn every_chord_in_the_table_answers_with_its_own_owner_on_both_platforms(_: &mut
 // ---- Keys in a focused terminal --------------------------------------------------------------------------------------
 
 /// SPEC_impl.md requires "a test that every pass-through key reaches the terminal with the app's bindings loaded".
-/// For every row of the table on this platform that is the program's or the terminal's own: no binding resolves in the
-/// focused terminal (so no Farhelm or Kit action could take it, whether or not its handler would decline), the key
-/// reaches the terminal's listener, and focus stays on the terminal (Tab and Option-Tab did not move it, though the
-/// button beside it is a tab stop).
+/// For every row of the table on this platform that is the program's or the terminal's own, except the terminal's
+/// commands that have an action (the next test has those): no binding resolves in the focused terminal (so no Farhelm
+/// or Kit action could take it, whether or not its handler would decline), the key reaches the terminal's listener,
+/// and focus stays on the terminal (Tab and Option-Tab did not move it, though the button beside it is a tab stop).
 #[gpui::test]
 fn every_key_the_terminal_or_its_program_owns_reaches_the_terminal(cx: &mut TestAppContext) {
     let mut opened = open(cx);
     opened.focus_terminal();
     let stack = opened.stack();
+    let with_action: Vec<&str> = TERMINAL_BINDINGS
+        .iter()
+        .flat_map(|binding| binding.chords(THIS_PLATFORM).iter().copied())
+        .collect();
     for key in TERMINAL_KEYS
         .iter()
         .filter(|key| key.owner != KeyOwner::App)
@@ -363,6 +367,9 @@ fn every_key_the_terminal_or_its_program_owns_reaches_the_terminal(cx: &mut Test
         let Some(chord) = key.chord(THIS_PLATFORM) else {
             continue;
         };
+        if with_action.contains(&chord) {
+            continue;
+        }
         let resolved = opened.cx.update(|_, cx| {
             cx.key_bindings()
                 .borrow()
@@ -389,6 +396,49 @@ fn every_key_the_terminal_or_its_program_owns_reaches_the_terminal(cx: &mut Test
             key.what
         );
     }
+}
+
+/// The terminal's own commands with an action (paste) are bound where a terminal has focus, and only there. A binding
+/// placed before the table's `NoAction` rows would be hidden by them, and a chord left out of the table would make the
+/// keymap walk report it as taken from the program, so this pins both halves on both platforms: every chord of
+/// [`TERMINAL_BINDINGS`] is a [`KeyOwner::Terminal`] row, and on this platform the first binding GPUI tries for it in
+/// a focused terminal is its own action.
+#[gpui::test]
+fn the_terminals_own_actions_take_their_keys_in_a_focused_terminal(cx: &mut TestAppContext) {
+    for platform in [Platform::Mac, Platform::Linux] {
+        for binding in TERMINAL_BINDINGS {
+            for chord in binding.chords(platform) {
+                assert_eq!(
+                    owner_on(platform, &down(parse(chord))),
+                    KeyOwner::Terminal,
+                    "{chord} on {platform:?} is bound to a terminal action, so it must be a Terminal row"
+                );
+            }
+        }
+    }
+    let mut opened = open(cx);
+    opened.focus_terminal();
+    let stack = opened.stack();
+    let mut checked = 0;
+    for binding in TERMINAL_BINDINGS {
+        let action = (binding.bind)("a").action().name();
+        for chord in binding.chords(THIS_PLATFORM) {
+            let resolved = opened.cx.update(|_, cx| {
+                cx.key_bindings()
+                    .borrow()
+                    .bindings_for_input(&[parse(chord)], &stack)
+                    .0
+                    .first()
+                    .map(|binding| binding.action().name())
+            });
+            assert_eq!(resolved, Some(action), "{chord} in a focused terminal");
+            checked += 1;
+        }
+    }
+    assert!(
+        checked > 0,
+        "the premise: this platform binds a terminal action"
+    );
 }
 
 /// The app's shortcuts keep working from a focused terminal: the terminal's context binds none of them away, so a

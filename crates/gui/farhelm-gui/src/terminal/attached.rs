@@ -1,10 +1,10 @@
 //! One attached session terminal: the owner between a helm client terminal stream and the renderer.
 //!
 //! NOTE: This is cut to what the first milestone's slice needs (the migration's orchestrator trimmed it on 2026-11-13):
-//! attach a terminal, show its output, say when it is not live, take focus and send the program its keys. Paste, focus
-//! reports (mode 1004), an input method handler, scrollback, selection, links and the reconnect display with its phase
-//! and Retry come later in the terminal area's work. The session pane ([`crate::session_pane`]) mounts one for the
-//! selected session.
+//! attach a terminal, show its output, say when it is not live, take focus and send the program its keys. The terminal
+//! area added paste since. Focus reports (mode 1004), an input method handler, scrollback, selection, links and the
+//! reconnect display with its phase and Retry come later in that work. The session pane ([`crate::session_pane`]) mounts
+//! one for the selected session.
 //!
 //! [`AttachedTerminal`] owns one stream ([`TerminalHandle`] and [`TerminalEvents`]) and the [`TerminalView`]s that show
 //! it. Here's the TLDR of what it adds on top of the stream and the renderer, each a rule the old app or the GPUI
@@ -44,9 +44,10 @@
 //!
 //! - An app shortcut whose feature has no binding yet is dropped, press and repeats alike. It is Farhelm's, so it
 //!   must not reach the program in the meantime either.
-//! - The terminal's own commands do nothing yet. Each needs something this milestone does not have: Shift+PageUp and
-//!   Shift+PageDown scroll the history, Cmd+A selects and Cmd+C copies the selection, and Cmd+V pastes. They are
-//!   dropped rather than sent, so a program never learns to depend on getting them.
+//! - The terminal's own commands that have no action yet do nothing: Shift+PageUp and Shift+PageDown will scroll the
+//!   history, Cmd+A select and Cmd+C copy the selection. They are dropped rather than sent, so a program never learns
+//!   to depend on getting them. Paste has its action ([`actions::Paste`], [`AttachedTerminal::paste`]), whose binding
+//!   takes its keys before this listener sees them.
 //! - Every other key is the program's. `farhelm-input-mapping`'s `map_key` decides what it means (the supervisor
 //!   encodes the bytes). A key it sends as a key goes out as one; a key it leaves to text input goes out as the text
 //!   the platform says it typed, because there is no input method handler yet to insert it (GPUI inserts text only
@@ -85,14 +86,14 @@ use farhelm_helm_client::terminal::{
 use farhelm_input_mapping::pointer::Geometry;
 use farhelm_input_mapping::{
     Composition, Decision, KeyDown, NativeIdentity, NativeKey, Platform, Route, committed_text,
-    map_key,
+    map_key, pasted_text,
 };
 use farhelm_proto::DetachCode;
 use farhelm_proto::grid::GridInput;
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, ClipboardItem, Context, Entity, FocusHandle,
-    InteractiveElement, IntoElement, KeyDownEvent, NativeKeyIdentity, ParentElement, Pixels,
-    Render, SharedString, Styled, Subscription, Task, Window, canvas, div,
+    AnyElement, App, AppContext as _, Bounds, ClipboardEntry, ClipboardItem, Context, Entity,
+    FocusHandle, InteractiveElement, IntoElement, KeyDownEvent, NativeKeyIdentity, ParentElement,
+    Pixels, Render, SharedString, Styled, Subscription, Task, Window, canvas, div,
     prelude::FluentBuilder as _, px,
 };
 
@@ -205,6 +206,9 @@ pub struct AttachedTerminal {
     composition: Composition,
     /// The cursor blink's ticks, held while the cursor blinks (see the module docs, "Input").
     blink: Option<ticker::Blinking>,
+    /// The latest paste still waiting for the clipboard, which holds the one before it (see
+    /// [`AttachedTerminal::paste`]). Dropped on retirement, which cancels every waiting paste.
+    paste: Option<Task<()>>,
     _session: [Subscription; 2],
     /// How many delivery turns ran, and how many times output was applied to a view, so tests can check the per-turn
     /// bound and that consecutive output is applied as one batch.
@@ -256,6 +260,7 @@ impl AttachedTerminal {
             attachment: None,
             composition: Composition::default(),
             blink: None,
+            paste: None,
             _session: subscriptions,
             #[cfg(test)]
             turns: 0,
@@ -560,18 +565,62 @@ impl AttachedTerminal {
                 program_input(event, actions::THIS_PLATFORM, &mut self.composition)
             }
         };
-        self.send(group);
+        if let Some(attachment) = self.attachment {
+            self.send(attachment, group);
+        }
     }
 
-    /// Send `group` to the program, stamped with the live attachment, as one request. Dropped unless the terminal is
-    /// live, and so is an empty group.
-    fn send(&mut self, group: Vec<GridInput>) {
+    /// Send `group`, which the user made while `attachment` was live, to the program as one request. Dropped unless
+    /// the terminal is live, and so is an empty group. The stream itself writes a group only to the attachment it is
+    /// stamped for ([`TerminalHandle::input`]), so input made before a reconnect and sent after it (a paste whose
+    /// clipboard read finished late) never lands in the later attachment.
+    fn send(&mut self, attachment: Attachment, group: Vec<GridInput>) {
         if !self.is_live() || group.is_empty() {
             return;
         }
-        if let (Some(handle), Some(attachment)) = (&self.handle, self.attachment) {
+        if let Some(handle) = &self.handle {
             handle.input(attachment, group);
         }
+    }
+
+    /// The user's Paste ([`actions::Paste`], from a key or a menu): send the clipboard's text to the program as one
+    /// paste. Nothing happens unless the terminal is live.
+    ///
+    /// The paste is the clipboard's plain text, and nothing at all when the read reports a file or an image (see
+    /// [`clipboard_text`]); those are for the attachment work. The vendored macOS read reports a copied file, so a
+    /// Finder copy pastes nothing. The vendored Wayland read never reports a file list, only an image or text, so a
+    /// file copied on Linux still pastes whatever text its file manager offers (usually its path) until the attachment
+    /// work. The paste goes out as one group of the input mapping's paste parts, so a paste of any size (the old app's
+    /// test pasted over a megabyte) arrives whole and in order or not at all. Bracketed paste, its markers, line endings
+    /// and the sanitizing that strips an embedded end marker so the paste cannot end early are all the supervisor's
+    /// (`grid_input.rs`), so nothing here rewrites the text.
+    ///
+    /// The clipboard is read asynchronously, because SPEC.md has nothing in Farhelm stall on a slow or hung clipboard
+    /// and Wayland's synchronous read blocks the main thread on another program's pipe. Only Wayland's read is really
+    /// asynchronous in the vendored GPUI: the macOS read answers at once from the main thread, so a hung pasteboard
+    /// there still stalls the window, which is the vendored clipboard layer's to fix. So the paste is stamped with
+    /// the attachment that was live when the user asked, and goes nowhere if a different one is live by the time the
+    /// text arrives. Each paste waits for the one before it, so two quick pastes reach the program in the order asked
+    /// even if their reads finish the other way round.
+    fn paste(&mut self, _: &actions::Paste, _: &mut Window, cx: &mut Context<Self>) {
+        let (true, Some(attachment)) = (self.is_live(), self.attachment) else {
+            return;
+        };
+        let read = cx.read_from_clipboard_async();
+        let earlier = self.paste.take();
+        self.paste = Some(cx.spawn(async move |owner, cx| {
+            if let Some(earlier) = earlier {
+                earlier.await;
+            }
+            // A failed read is silent, as every clipboard failure is (SPEC.md, "Terminal experience").
+            let Ok(Some(item)) = read.await else {
+                return;
+            };
+            let Some(text) = clipboard_text(&item).filter(|text| !text.is_empty()) else {
+                return;
+            };
+            let _ = owner.update(cx, |owner, _| owner.send(attachment, pasted_text(&text)));
+        }));
     }
 
     /// The cursor as it should be drawn now, and the blink's ticks held or dropped to match. Called from `render`:
@@ -616,6 +665,7 @@ impl AttachedTerminal {
         self.staging = None;
         self.live = false;
         self.blink = None;
+        self.paste = None;
         cx.notify();
     }
 
@@ -675,6 +725,24 @@ fn fit(metrics: CellMetrics, width: f32, height: f32, scale: f32) -> Option<(u16
         cols.clamp(2., f64::from(MAX_DIMENSION)) as u16,
         rows.clamp(1., f64::from(MAX_DIMENSION)) as u16,
     ))
+}
+
+/// The text a paste sends from clipboard `item`: its plain-text entries, joined, or `None` when it holds a file or an
+/// image at all.
+///
+/// SPEC.md's "Attachments" ranks a paste's flavors files first, then images, then plain text, so a clipboard holding a
+/// file is a file paste even when it carries text too: a Finder copy on macOS adds the file's path as text, and GPUI's
+/// own `ClipboardItem::text` falls back to the path. Turning file and image pastes into uploads is the attachment
+/// work's; until then they paste nothing, rather than a path or label the user did not mean to type.
+fn clipboard_text(item: &ClipboardItem) -> Option<String> {
+    let mut text = String::new();
+    for entry in item.entries() {
+        match entry {
+            ClipboardEntry::String(string) => text.push_str(string.text()),
+            ClipboardEntry::Image(_) | ClipboardEntry::ExternalPaths(_) => return None,
+        }
+    }
+    Some(text)
 }
 
 /// The exit line's words, the old app's `exitText`.
@@ -905,6 +973,7 @@ impl Render for AttachedTerminal {
             .id("terminal-grid")
             .key_context(actions::TERMINAL_CONTEXT)
             .on_key_down(cx.listener(Self::key))
+            .on_action(cx.listener(Self::paste))
             .relative()
             .flex_1()
             .min_h_0()
