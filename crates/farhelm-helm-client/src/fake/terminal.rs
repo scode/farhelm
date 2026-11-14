@@ -40,10 +40,10 @@ const FEED_CAPACITY: usize = 1 << 20;
 pub enum FakeTerminalRequest {
     /// Input, and whether the stream was attached to carry it. Undelivered input is what the real stream drops.
     Input { input: GridInput, delivered: bool },
-    /// A new size for the terminal. Recording it does not mean the helm got it: the real stream sends a resize on the
-    /// socket only while one is open (`Open` or `Attached`). At any other time, including while an attach is
-    /// connecting, it only stores the size, and does not send it once that attach's socket opens either. The helm
-    /// then learns the size from a later attach's query (see [`FakeAttach`]) or from the GUI's next resize.
+    /// A new size for the terminal. Recording it does not mean the helm got it yet. The real stream sends a resize on
+    /// the socket at once only while one is open (`Open` or `Attached`). While an attach is connecting, it sends the
+    /// size as the socket's first message once that socket opens ([`FakeAttach::resize_on_open`]). At any other time
+    /// (waiting for the user, between reconnect attempts) it only stores the size for the next attach's query.
     Resize { cols: u16, rows: u16 },
     /// The user's "Take control". It attaches again only from `Detached` or `Refused`; anywhere else the real stream
     /// ignores it.
@@ -56,12 +56,12 @@ pub enum FakeTerminalRequest {
 }
 
 /// What one attach asked the helm for: the route (displacing or not) and the size, as the real stream would have put
-/// them in the attach request.
+/// them in the attach request, and the resize it sends first on the socket, if any.
 ///
 /// The size of a displacing attach is the one the stream held when it entered `Attaching` (at open or take-control),
-/// because the real stream builds that request at once and a resize while it connects only reaches the next attach.
-/// A reconnect reports the latest size: the real one is built when its backoff ends, which the fake has no moment
-/// for, and resizes during the backoff do apply to it.
+/// because the real stream builds that request at once; a resize while it connects comes as `resize_on_open`. A
+/// reconnect reports the latest size and no resize: the real one is built when its backoff ends, which the fake has no
+/// moment for, and resizes during the backoff do apply to it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FakeAttach {
     /// The displacing route: only the first attempt after open or after a take-control. Every other attach, the
@@ -71,6 +71,9 @@ pub struct FakeAttach {
     pub cols: u16,
     /// The terminal height, in rows, that the attach's query asked for.
     pub rows: u16,
+    /// The size (columns, rows) the stream sends as the socket's first message, because the GUI resized after the
+    /// query was built. `None` when the query's size is still the latest, including a resize there and back.
+    pub resize_on_open: Option<(u16, u16)>,
 }
 
 /// Where the stream is, from the test's side. Only some of these are states the GUI sees: `Open` shows nothing.
@@ -154,6 +157,7 @@ impl FakeTerminal {
             take_control: self.take_control_next,
             cols,
             rows,
+            resize_on_open: (self.size != (cols, rows)).then_some(self.size),
         };
         self.take_control_next = false;
         self.phase = FakePhase::Open;
@@ -415,8 +419,11 @@ mod tests {
     }
 
     /// The real stream builds a displacing attach the moment it starts attaching, so a GUI that opens at one size and
-    /// fits afterwards attaches (and gets its replay) at the first size; a fake that reported the fitted size would
-    /// let a GUI test pass that the real app fails. A reconnect asks for the latest size.
+    /// fits while the attach connects asks (and gets its replay started) at the first size, and the fitted size
+    /// follows as the socket's first resize. A fake that reported the fitted size in the query would let a GUI test
+    /// pass whose replay the real app draws at another size; one that reported no resize would hide that the helm
+    /// does learn the fitted size, which is what the GUI relies on instead of resending it. A reconnect asks for the
+    /// latest size in its query and sends no resize.
     #[test]
     fn a_displacing_attach_asks_for_the_size_it_started_with() {
         let (mut fake, handle, _events) = FakeTerminal::open(&attach());
@@ -426,7 +433,8 @@ mod tests {
             FakeAttach {
                 take_control: true,
                 cols: 80,
-                rows: 24
+                rows: 24,
+                resize_on_open: Some((100, 30)),
             }
         );
         fake.replay_complete();
@@ -437,12 +445,13 @@ mod tests {
             FakeAttach {
                 take_control: false,
                 cols: 100,
-                rows: 30
+                rows: 30,
+                resize_on_open: None,
             }
         );
         fake.replay_complete();
 
-        // The size at take-control counts; one sent after it waits for the next attach.
+        // The size at take-control goes in the query; one sent after it follows on the socket.
         fake.detach(Some(DetachCode::TakenOver), "taken over");
         handle.resize(120, 40);
         handle.take_control();
@@ -452,7 +461,24 @@ mod tests {
             FakeAttach {
                 take_control: true,
                 cols: 120,
-                rows: 40
+                rows: 40,
+                resize_on_open: Some((90, 20)),
+            }
+        );
+        fake.replay_complete();
+
+        // A resize there and back while connecting leaves the query's size current, so nothing follows it.
+        fake.detach(Some(DetachCode::TakenOver), "taken over");
+        handle.take_control();
+        handle.resize(70, 20);
+        handle.resize(90, 20);
+        assert_eq!(
+            fake.attach(),
+            FakeAttach {
+                take_control: true,
+                cols: 90,
+                rows: 20,
+                resize_on_open: None,
             }
         );
     }
@@ -473,7 +499,8 @@ mod tests {
             FakeAttach {
                 take_control: false,
                 cols: 100,
-                rows: 30
+                rows: 30,
+                resize_on_open: None,
             }
         );
         fake.replay_complete();
@@ -489,7 +516,8 @@ mod tests {
             FakeAttach {
                 take_control: false,
                 cols: 120,
-                rows: 40
+                rows: 40,
+                resize_on_open: None,
             }
         );
     }
