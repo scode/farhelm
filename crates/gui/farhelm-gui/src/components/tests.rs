@@ -23,7 +23,7 @@ use super::{
     Tier, Vertical,
 };
 use crate::layers;
-use crate::test_support::{advance, bounds, center, check, click, keys, open, redraw};
+use crate::test_support::{advance, bounds, center, check, click, frame, keys, open, redraw};
 
 /// A click activates an enabled button, and a disabled one ignores it: the old app's disabled buttons were inert, and a
 /// dimmed button that still acted would send a command the user was told was unavailable.
@@ -916,15 +916,10 @@ fn an_option_row_activates_on_a_click_and_never_takes_focus(cx: &mut TestAppCont
         "Tab went past the row to the button"
     );
 
-    cx.update(|window, _| window.set_driver_enabled(true));
-    redraw(cx);
-    let row = cx.update(|window, _| {
-        window
-            .driver_nodes()
-            .iter()
-            .find(|node| node.element_id.as_deref() == Some("option"))
-            .map(|node| (node.role, node.label.clone()))
-    });
+    let row = frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some("option"))
+        .map(|node| (node.role, node.label));
     assert_eq!(
         row,
         Some((Some(Role::ListBoxOption), Some("First result".into())))
