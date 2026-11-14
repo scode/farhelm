@@ -7,20 +7,24 @@
 //! a key passed through, because GPUI lets a key go on when the binding that matched it has no handler or its handler
 //! declines (Farhelm's Dismiss with nothing open, Kit's Copy with no Kit selection). So the tests also read the
 //! keymap's resolution in the focused terminal's real context stack, which shows whether any binding would run at all.
+//!
+//! The last section tests the repeat guard: a held key's auto-repeats are key-down events with `is_held` set, sent
+//! with `simulate_event`, since `simulate_keystrokes` only ever sends fresh presses.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::{
-    App, AppContext as _, Context, FocusHandle, InteractiveElement as _, IntoElement, KeyBinding,
-    KeyContext, KeyDownEvent, Keystroke, Modifiers, ParentElement, Render, Styled, TestAppContext,
-    VisualTestContext, Window, actions, div, point, px,
+    Action as _, App, AppContext as _, Context, FocusHandle, InteractiveElement as _, IntoElement,
+    KeyBinding, KeyContext, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, ParentElement, Render,
+    Styled, TestAppContext, VisualTestContext, Window, actions, div, point, px,
 };
 use gpui_component::Root;
 
 use crate::actions::{
-    CONTEXT, KeyOwner, TERMINAL_CONTEXT, TERMINAL_KEYS, THIS_PLATFORM, owner_on, terminal_key_owner,
+    CONTEXT, DeleteSession, KeyOwner, RenameSession, TERMINAL_CONTEXT, TERMINAL_KEYS,
+    THIS_PLATFORM, owner_on, terminal_key_owner,
 };
 use crate::components::{Button, HoverHelp, Role};
 use crate::focus::{self, OnPress};
@@ -41,18 +45,23 @@ struct Scene {
     received: Rc<RefCell<Vec<Keystroke>>>,
     /// How many times a [`Probe`] binding ran: a test binds one to an app shortcut to see it still works.
     probes: Rc<Cell<usize>>,
+    /// The name of every session shortcut action that ran, in order: what the session list's handlers will see.
+    ran: Rc<RefCell<Vec<&'static str>>>,
 }
 
 impl Render for Scene {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let received = self.received.clone();
         let probes = self.probes.clone();
+        let (deletes, renames) = (self.ran.clone(), self.ran.clone());
         focus::root(div(), &self.focus)
             .size_full()
             .flex()
             .gap(px(8.))
             .p(px(20.))
             .on_action(move |_: &Probe, _, _| probes.set(probes.get() + 1))
+            .on_action(move |action: &DeleteSession, _, _| deletes.borrow_mut().push(action.name()))
+            .on_action(move |action: &RenameSession, _, _| renames.borrow_mut().push(action.name()))
             .child(
                 Button::new(
                     "control",
@@ -86,6 +95,7 @@ struct Opened<'a> {
     terminal: FocusHandle,
     received: Rc<RefCell<Vec<Keystroke>>>,
     probes: Rc<Cell<usize>>,
+    ran: Rc<RefCell<Vec<&'static str>>>,
 }
 
 /// Open the scene, bootstrapped like the app, and focus the terminal stand-in by clicking it (a press focuses a
@@ -94,9 +104,14 @@ fn open(cx: &mut TestAppContext) -> Opened<'_> {
     test_support::install(cx);
     let received = Rc::new(RefCell::new(Vec::new()));
     let probes = Rc::new(Cell::new(0));
+    let ran = Rc::new(RefCell::new(Vec::new()));
     let terminal = cx.update(|cx| cx.focus_handle().tab_stop(true));
-    let (scene_received, scene_probes, scene_terminal) =
-        (received.clone(), probes.clone(), terminal.clone());
+    let (scene_received, scene_probes, scene_ran, scene_terminal) = (
+        received.clone(),
+        probes.clone(),
+        ran.clone(),
+        terminal.clone(),
+    );
     let (_, cx) = cx.add_window_view(|window, cx| {
         let scene = cx.new(|cx| Scene {
             focus: focus::attach(window, cx),
@@ -105,6 +120,7 @@ fn open(cx: &mut TestAppContext) -> Opened<'_> {
             button: cx.focus_handle().tab_stop(true),
             received: scene_received,
             probes: scene_probes,
+            ran: scene_ran,
         });
         Root::new(scene, window, cx)
     });
@@ -116,6 +132,7 @@ fn open(cx: &mut TestAppContext) -> Opened<'_> {
         terminal,
         received,
         probes,
+        ran,
     };
     opened.check();
     opened
@@ -164,6 +181,66 @@ impl Opened<'_> {
     fn stack(&mut self) -> Vec<KeyContext> {
         self.cx.update(|window, _| window.context_stack())
     }
+
+    /// Send a key-down for `chord`: a fresh press, or with `held` an auto-repeat of the key already held down, which is
+    /// how the platform reports a repeat.
+    fn key_down(&mut self, chord: &'static str, held: bool) {
+        self.cx.simulate_event(KeyDownEvent {
+            native_key: None,
+            keystroke: parse(chord),
+            is_held: held,
+            prefer_character_input: false,
+        });
+        self.check();
+    }
+
+    /// Send the key-up that releases `chord`.
+    fn key_up(&mut self, chord: &'static str) {
+        self.cx.simulate_event(KeyUpEvent {
+            native_key: None,
+            keystroke: parse(chord),
+        });
+        self.check();
+    }
+
+    /// Hold `chord` down for a press and two auto-repeats, then release it.
+    fn hold(&mut self, chord: &'static str) {
+        self.key_down(chord, false);
+        self.key_down(chord, true);
+        self.key_down(chord, true);
+        self.key_up(chord);
+    }
+
+    /// How many times the session shortcut action named `name` has run.
+    fn runs_of(&self, name: &str) -> usize {
+        self.ran.borrow().iter().filter(|ran| **ran == name).count()
+    }
+
+    /// Bind the session shortcuts in Farhelm's context on this platform's chords, as the session list will, and return
+    /// each chord with the name of the action it runs.
+    fn bind_session_shortcuts(&mut self) -> [(&'static str, &'static str); 2] {
+        let shortcuts = session_shortcuts();
+        self.cx.update(|_, cx| {
+            cx.bind_keys([
+                KeyBinding::new(shortcuts[0].0, DeleteSession, Some(CONTEXT)),
+                KeyBinding::new(shortcuts[1].0, RenameSession, Some(CONTEXT)),
+            ])
+        });
+        shortcuts
+    }
+}
+
+/// The session Delete and Rename chords on this platform (SPEC.md: Cmd+W and Cmd+L on a Mac, Ctrl+Shift+Backspace and
+/// Ctrl+Shift+L on Linux), each with the name of its action.
+fn session_shortcuts() -> [(&'static str, &'static str); 2] {
+    let (delete, rename) = match THIS_PLATFORM {
+        Platform::Mac => ("cmd-w", "cmd-l"),
+        Platform::Linux => ("ctrl-shift-backspace", "ctrl-shift-l"),
+    };
+    [
+        (delete, DeleteSession.name()),
+        (rename, RenameSession.name()),
+    ]
 }
 
 /// `chord` in GPUI's keystroke syntax, as a keystroke; a chord that does not parse is a broken test or table row.
@@ -491,4 +568,108 @@ fn a_chord_prefix_holds_keys_back_only_in_a_context_that_contains_the_terminal(
         "the next key released Ctrl+K, late, and then itself"
     );
     assert_eq!(opened.probes.get(), 0, "the chord never completed");
+}
+
+// ---- Shortcuts that act once per press -------------------------------------------------------------------------------
+
+/// SPEC.md: the session Delete and Rename shortcuts "ignore repeat". A GPUI binding runs its action on every
+/// auto-repeat, so without the repeat guard holding Cmd+W (or Ctrl+Shift+Backspace) would ask to delete the session
+/// once per repeat. Holding either shortcut runs its action once, for the press; a fresh press after the key is
+/// released runs it again, so the guard is not a lockout that outlives the hold.
+#[gpui::test]
+fn a_held_session_shortcut_runs_once_and_again_after_a_release(cx: &mut TestAppContext) {
+    let mut opened = open(cx);
+    let shortcuts = opened.bind_session_shortcuts();
+    let stack = opened.stack();
+    assert!(
+        !opened.terminal_focused() && stack.iter().any(|context| context.contains(CONTEXT)),
+        "the premise: focus is outside the terminal, inside Farhelm's root: {stack:?}"
+    );
+    for (chord, name) in shortcuts {
+        opened.hold(chord);
+        assert_eq!(opened.runs_of(name), 1, "holding {chord} ran {name} once");
+        opened.hold(chord);
+        assert_eq!(
+            opened.runs_of(name),
+            2,
+            "a fresh press of {chord} after its release ran {name} again"
+        );
+    }
+}
+
+/// The same from a focused terminal, where it matters most: SPEC.md has both shortcuts work from terminal focus
+/// "without sending their chord to the program". A held repeat must neither run the action again nor fall through to
+/// the terminal, which would otherwise see a key no binding took and could pass it to the program.
+#[gpui::test]
+fn a_held_session_shortcut_in_a_terminal_runs_once_and_never_reaches_it(cx: &mut TestAppContext) {
+    let mut opened = open(cx);
+    let shortcuts = opened.bind_session_shortcuts();
+    opened.focus_terminal();
+    for (chord, name) in shortcuts {
+        opened.hold(chord);
+        assert_eq!(opened.runs_of(name), 1, "holding {chord} ran {name} once");
+        opened.hold(chord);
+        assert_eq!(
+            opened.runs_of(name),
+            2,
+            "a fresh press of {chord} after its release ran {name} again"
+        );
+    }
+    assert!(
+        opened.received.borrow().is_empty(),
+        "no press or repeat reached the terminal: {:?}",
+        opened.received.borrow()
+    );
+}
+
+/// The guard is for the listed actions only. A held key bound to anything else runs its binding on every repeat, and a
+/// held key no binding takes reaches the terminal on every repeat: a program reads held arrows, Backspace and letters
+/// that way, and a guard that swallowed them would break typing.
+#[gpui::test]
+fn a_repeat_of_a_key_not_bound_to_a_listed_action_is_untouched(cx: &mut TestAppContext) {
+    let mut opened = open(cx);
+    opened.bind_session_shortcuts();
+    opened
+        .cx
+        .update(|_, cx| cx.bind_keys([KeyBinding::new("ctrl-shift-y", Probe, Some(CONTEXT))]));
+    opened.focus_terminal();
+    opened.hold("ctrl-shift-y");
+    assert_eq!(
+        opened.probes.get(),
+        3,
+        "an unlisted binding ran for the press and each repeat"
+    );
+    opened.received.borrow_mut().clear();
+    opened.hold("a");
+    let received: Vec<String> = opened
+        .received
+        .borrow()
+        .iter()
+        .map(|key| key.key.clone())
+        .collect();
+    assert_eq!(
+        received,
+        ["a", "a", "a"],
+        "a held letter reached the terminal for the press and each repeat"
+    );
+}
+
+/// The guard follows the binding that would run, not the chord. SPEC.md has the Linux Delete chord leave text editors
+/// other than the terminal alone, so where a deeper context binds the same chord to something else (here the
+/// terminal's context, standing in for a text field's), holding the chord repeats that binding and never runs Delete.
+#[gpui::test]
+fn a_listed_chord_that_a_deeper_binding_takes_keeps_its_repeats(cx: &mut TestAppContext) {
+    let mut opened = open(cx);
+    let [(delete, name), _] = opened.bind_session_shortcuts();
+    opened
+        .cx
+        .update(|_, cx| cx.bind_keys([KeyBinding::new(delete, Probe, Some(TERMINAL_CONTEXT))]));
+    opened.focus_terminal();
+    opened.hold(delete);
+    assert_eq!(
+        opened.probes.get(),
+        3,
+        "the deeper binding ran for the press and each repeat"
+    );
+    assert_eq!(opened.runs_of(name), 0, "{name} never ran");
 }
