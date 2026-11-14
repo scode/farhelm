@@ -9,8 +9,11 @@
 //!
 //! NOTE: A cached view ([`crate::cache`]) is not covered by that. The cache wrapper holds its source entity for life
 //! and replays without reading it, so a cached view built over one session's store would go on showing that store
-//! after a reset retired it. A cached view over pushed state must be built per UI session and dropped with it; the
-//! first cached list settles how.
+//! after a reset retired it. A cached view over pushed state must be built per UI session and dropped with it. The
+//! session list, the first list over the store, was expected to settle how, but is drawn uncached instead (the
+//! foundations owner's decision of 2026-11-14): SPEC.md's fleet is tens of sessions, so redrawing the whole list on a
+//! change costs little, and how to cache a view over pushed state is settled when profiling at the listing cap asks for
+//! it. A cached view's state per UI session would live in [`crate::session::PerSession`].
 //!
 //! The data itself is the helm client's [`Collections`]: one generic apply for every collection, decoded once by the
 //! channel. A store belongs to one UI session. A reset drops it with the session, and the next snapshot builds a new

@@ -656,6 +656,22 @@ pub struct HostView {
     pub trash_epoch: u64,
 }
 
+impl HostView {
+    /// The key the UI channel files the host with registry id `id` under in its hosts collection: the id in decimal,
+    /// as the helm spells a numeric key. A session row names its host by that id (`SessionRow::host`), so this is how a
+    /// client finds the row's host without parsing keys itself.
+    pub fn key(id: i64) -> String {
+        id.to_string()
+    }
+
+    /// Whether this is the helm's own machine: the one reserved row whose
+    /// `kind` is `"local"`. One place for that spelling, so a client does not
+    /// compare the wire's kind words itself.
+    pub fn is_local(&self) -> bool {
+        self.kind == "local"
+    }
+}
+
 /// A Tensorlake host's sandbox as `GET /api/hosts` reports it: its name in
 /// Tensorlake, the recipe it was made from, and the size it was created
 /// with (`None` when the stored size cannot be read).

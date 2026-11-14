@@ -20,3 +20,15 @@ sections: Session list, Status, Topology.
 | `tests/menu-highlight.spec.ts`             | 5     | session menu shares one highlight between hover and arrow keys                                 | not yet ported |
 | `tests/retired-container-sessions.spec.ts` | 1     | retired container rows offer Delete only while new containers keep normal controls             | not yet ported |
 | `tests/ui-plan-regressions.spec.ts`        | 5     | header restart and replace refresh the sidebar under build skew                                | not yet ported |
+
+## Deviations from the old app
+
+Where the port does not match the old app, and why. Each stays until the work named in it lands.
+
+- The sidebar is the old `--sidebar-width`, 396 pixels, but in the old app that width also held the 56-pixel host rail.
+  With no rail yet, the session list is 56 pixels wider than the old one; it narrows when the rail lands.
+- The old app marked the open session's row button `aria-current`, which GPUI cannot express. The open row's list item
+  carries the selected state instead (AccessKit reports selection on item-like roles, not on a button).
+- The old app replaced the whole list with "Failed to load sessions: ..." when a read failed. The port keeps the rows it
+  has (a failed read is no evidence that anything went) and shows that line above them, in the style of the old app's
+  full-width failure lines (`.restart-error`).

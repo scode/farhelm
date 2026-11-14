@@ -9,9 +9,9 @@
 //! metadata (availability, order, counts). There is no per-collection code path to drift. Every entry arrives with its
 //! key ([`KeyedEntry`]), the one the helm diffed it by, and that is the key it is filed under, so applying a change
 //! never derives a key from an entry. Looking an entry up by a typed id ([`Collections::get`]) still needs the helm's
-//! spelling of that key (a host's numeric id as a string, for example); a helper in `farhelm-proto` that spells it
-//! comes with the first view that looks entries up that way. The per-collection facts are which type an entry decodes
-//! as and which [`PushedEntry`] variant carries it, and both live in exhaustive matches here.
+//! spelling of that key (a host's numeric id as a string, for example), which `farhelm-proto` spells where a view needs
+//! it (`HostView::key`). The per-collection facts are which type an entry decodes as and which [`PushedEntry`] variant
+//! carries it, and both live in exhaustive matches here.
 //!
 //! [`Collections`] is the one copy of this state. Views read it through [`Collections::ordered`] and
 //! [`Collections::get`], which hand out references; a view that kept its own copy of an entry would be a second

@@ -29,7 +29,7 @@ use gpui_component::Root;
 use crate::components::{Button, HoverHelp, Role};
 use crate::focus::Mark;
 use crate::layers::{self, Dialog};
-use crate::local_state::LocalState;
+use crate::local_state;
 use crate::main_view::MainView;
 use crate::notices::{self, Notice};
 use crate::session::{self, Connection, UiSession};
@@ -634,13 +634,13 @@ fn the_selected_session_survives_a_reset_only_if_it_still_exists(cx: &mut TestAp
     let (mut fake, _connection) = started(cx);
     fake.connect(vec![sessions(&["a", "b"])]);
     cx.run_until_parked();
-    cx.update(|cx| cx.global_mut::<LocalState>().selected_session = Some("a".into()));
+    cx.update(|cx| local_state::select("a", cx));
 
     fake.break_channel();
     fake.connect(vec![sessions(&["a"])]);
     cx.run_until_parked();
     assert_eq!(
-        cx.update(|cx| cx.global::<LocalState>().selected_session.clone()),
+        cx.update(|cx| local_state::selected(cx)),
         Some("a".into()),
         "still there, still selected"
     );
@@ -649,7 +649,7 @@ fn the_selected_session_survives_a_reset_only_if_it_still_exists(cx: &mut TestAp
     fake.connect(vec![unavailable_sessions()]);
     cx.run_until_parked();
     assert_eq!(
-        cx.update(|cx| cx.global::<LocalState>().selected_session.clone()),
+        cx.update(|cx| local_state::selected(cx)),
         Some("a".into()),
         "a failed read is no evidence that the session is gone"
     );
@@ -658,7 +658,7 @@ fn the_selected_session_survives_a_reset_only_if_it_still_exists(cx: &mut TestAp
     fake.connect(vec![truncated_sessions(&["b"])]);
     cx.run_until_parked();
     assert_eq!(
-        cx.update(|cx| cx.global::<LocalState>().selected_session.clone()),
+        cx.update(|cx| local_state::selected(cx)),
         Some("a".into()),
         "a list the helm's cap cut is no evidence either"
     );
@@ -667,7 +667,7 @@ fn the_selected_session_survives_a_reset_only_if_it_still_exists(cx: &mut TestAp
     fake.connect(vec![sessions(&["b"])]);
     cx.run_until_parked();
     assert_eq!(
-        cx.update(|cx| cx.global::<LocalState>().selected_session.clone()),
+        cx.update(|cx| local_state::selected(cx)),
         None,
         "gone from a complete list, so no longer selected"
     );

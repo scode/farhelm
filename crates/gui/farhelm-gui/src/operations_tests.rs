@@ -368,6 +368,11 @@ fn a_completion_says_whether_the_user_moved_on_since_the_work_started(cx: &mut T
     // Simulated windows start inactive, and an inactive window has no focus path for keys to follow.
     window.update(|window, _| window.activate_window());
     window.run_until_parked();
+    // The main view's session list opens a session and tells the helm. Answer that first: the fake answers commands
+    // in the order they were sent, and the replies below are for the renames.
+    for command in fake.commands() {
+        fake.reply(command.id, 204, None);
+    }
     let operations = operations(window);
     let delivered = Delivered::default();
 

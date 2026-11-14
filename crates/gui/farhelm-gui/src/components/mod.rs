@@ -16,6 +16,7 @@
 mod banner;
 mod button;
 mod dialog;
+mod list_row;
 mod text_input;
 
 #[cfg(test)]
@@ -25,9 +26,15 @@ pub use banner::Banner;
 pub use button::{Button, IconButton, Tier};
 pub use dialog::DialogFrame;
 pub use gpui::Role;
+pub use list_row::ListRow;
 pub use text_input::{TextInput, TextInputEvent, TextInputState};
 
-use gpui::{App, ElementId, SharedString, StatefulInteractiveElement, Window};
+use std::rc::Rc;
+
+use gpui::{
+    App, ClickEvent, ElementId, InteractiveElement, SharedString, StatefulInteractiveElement,
+    Window,
+};
 
 use crate::layers::{self, TooltipOwner};
 
@@ -78,6 +85,34 @@ pub(crate) fn with_hover_help<E: StatefulInteractiveElement>(
             layers::show_tooltip(&owner, text.clone(), window, cx);
         } else {
             layers::hide_tooltip(&owner, window, cx);
+        }
+    })
+}
+
+/// A control's activation handler: what a click, or Enter or Space while the control has focus, does.
+pub(crate) type Handler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
+
+/// Make Enter and Space activate `element`, the focused control, the way a click does: the one key rule every control
+/// shares, so the controls cannot drift apart on it.
+///
+/// A held key does not repeat the activation and a modified key (Shift+Enter, say) is not an activation: SPEC.md,
+/// "Repeated or composing Enter cannot answer the new question", whose case is a held Enter that confirmed a question
+/// and would otherwise answer the next one too. The key stops at the control that handled it, so the same press does
+/// not also reach an action bound further up. A disabled control passes `None` and handles no keys.
+pub(crate) fn activate_on_enter_or_space<E: InteractiveElement>(
+    element: E,
+    handler: Option<Handler>,
+) -> E {
+    element.on_key_down(move |event, window, cx| {
+        let key = event.keystroke.key.as_str();
+        if event.is_held || event.keystroke.modifiers.modified() {
+            return;
+        }
+        if (key == "enter" || key == "space")
+            && let Some(handler) = &handler
+        {
+            cx.stop_propagation();
+            handler(&ClickEvent::default(), window, cx);
         }
     })
 }

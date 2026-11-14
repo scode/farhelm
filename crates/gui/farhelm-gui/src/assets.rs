@@ -17,7 +17,9 @@
 //!
 //! The Close and Delete icons are the old app's own action glyphs, copied from its icon module at the reference commit
 //! (14-unit box, 1.2 stroke, round caps and joins). The More icon is a new drawing: the old app wrote the "⋯" character
-//! in text.
+//! in text. The four status shapes are the old stylesheet's `.status-dot` shapes (an 8-pixel box: a filled circle, a
+//! triangle cut with `clip-path`, a diamond, and a ring with a 1.5-pixel border), drawn as SVG because GPUI has no
+//! clip path; the view tints them with the status color, as the old dot took `currentColor`.
 
 use std::borrow::Cow;
 
@@ -71,6 +73,27 @@ pub enum Icon {
     More,
     /// A bin: delete (the old app's Delete glyph).
     Trash,
+    /// A filled circle: the running status.
+    StatusRunning,
+    /// A triangle: the waiting status, the one pointed shape, because it asks for a person.
+    StatusWaiting,
+    /// A filled diamond: idle with output nobody has looked at.
+    StatusUnseen,
+    /// A ring: idle, with nothing new in it.
+    StatusIdle,
+}
+
+impl Icon {
+    /// Every icon, for the asset listing and the test that each one is bundled.
+    pub const ALL: [Icon; 7] = [
+        Icon::Close,
+        Icon::More,
+        Icon::Trash,
+        Icon::StatusRunning,
+        Icon::StatusWaiting,
+        Icon::StatusUnseen,
+        Icon::StatusIdle,
+    ];
 }
 
 impl Icon {
@@ -80,6 +103,10 @@ impl Icon {
             Icon::Close => "icons/close.svg",
             Icon::More => "icons/more.svg",
             Icon::Trash => "icons/trash.svg",
+            Icon::StatusRunning => "icons/status-running.svg",
+            Icon::StatusWaiting => "icons/status-waiting.svg",
+            Icon::StatusUnseen => "icons/status-unseen.svg",
+            Icon::StatusIdle => "icons/status-idle.svg",
         }
     }
 }
@@ -94,6 +121,14 @@ impl Assets {
             "icons/close.svg" => Some(include_bytes!("../assets/icons/close.svg")),
             "icons/more.svg" => Some(include_bytes!("../assets/icons/more.svg")),
             "icons/trash.svg" => Some(include_bytes!("../assets/icons/trash.svg")),
+            "icons/status-running.svg" => {
+                Some(include_bytes!("../assets/icons/status-running.svg"))
+            }
+            "icons/status-waiting.svg" => {
+                Some(include_bytes!("../assets/icons/status-waiting.svg"))
+            }
+            "icons/status-unseen.svg" => Some(include_bytes!("../assets/icons/status-unseen.svg")),
+            "icons/status-idle.svg" => Some(include_bytes!("../assets/icons/status-idle.svg")),
             _ => None,
         }
     }
@@ -105,7 +140,7 @@ impl AssetSource for Assets {
     }
 
     fn list(&self, path: &str) -> gpui::Result<Vec<SharedString>> {
-        Ok([Icon::Close, Icon::More, Icon::Trash]
+        Ok(Icon::ALL
             .into_iter()
             .map(Icon::path)
             .filter(|asset| asset.starts_with(path))
@@ -121,7 +156,7 @@ mod tests {
     /// Every icon the enum names is bundled, so no button can draw a missing glyph.
     #[test]
     fn every_icon_resolves_to_bundled_svg_bytes() {
-        for icon in [Icon::Close, Icon::More, Icon::Trash] {
+        for icon in Icon::ALL {
             let bytes = Assets.load(icon.path()).unwrap().unwrap();
             assert!(bytes.starts_with(b"<svg"), "{icon:?} is not an SVG");
         }

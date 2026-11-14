@@ -8,11 +8,27 @@
   ],
   "app_scenes": [
     {
-      "id": "app-main-window",
-      "title": "The GPUI app's main window as it opens (no views drawn yet: only the window's ground)",
+      "id": "app-session-list",
+      "title": "The main window over the seeded fleet: the session list with the latest session open (no terminal yet)",
+      "reference": "main-running-session",
+      "mockup": false,
+      "steps": [
+        [
+          "wait",
+          "--idle"
+        ]
+      ]
+    },
+    {
+      "id": "app-session-selected",
+      "title": "The session list after clicking another row: that session is open",
       "reference": null,
       "mockup": false,
       "steps": [
+        [
+          "click",
+          "text:Fixture 2"
+        ],
         [
           "wait",
           "--idle"
@@ -95,6 +111,16 @@
       "golden": "terminal-status",
       "title": "An attached terminal's exit line and its detached status line",
       "reference": "terminal-detached-banner"
+    },
+    {
+      "golden": "session-list",
+      "title": "The session list: every status a row draws, with the open session selected",
+      "reference": "main-running-session"
+    },
+    {
+      "golden": "session-list-empty",
+      "title": "The session list over an empty fleet",
+      "reference": "empty-fleet"
     }
   ],
   "reference_scenes": [
