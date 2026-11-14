@@ -21,7 +21,7 @@
 //!   success says nothing: the pushed list already shows the session stopped.
 //!
 //! The question, the preconditions, the command and the progress are functions of a session's row, so the open
-//! session's header (a later piece) can ask the same question and send the same request.
+//! session's header (`session_pane/header.rs`) asks the same question and sends the same request.
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::ui_channel::SessionRow;
@@ -44,8 +44,7 @@ use crate::theme::{self, metrics};
 /// The menu's Stop item's hover help (the item's description line says the same at more length).
 pub(super) const MENU_HELP: &str = "Stop: end the agent and its processes, and close terminal tabs";
 
-/// What a pending Stop says beside its spinner: on its row, and (in the old app) in place of the header's Stop label,
-/// where the header will say it too once it is ported.
+/// What a pending Stop says beside its spinner: on its row, and in place of the open session's header's Stop label.
 pub(crate) const PROGRESS_LABEL: &str = "Stopping…";
 
 // ---- What a Stop of a row asks and sends -----------------------------------------------------------------------------
@@ -151,21 +150,34 @@ impl SessionList {
         let Some(target) = menu::actionable(key, cx) else {
             return;
         };
-        let row = &target.row;
-        let guard = guard(row);
-        if !asks(row, target.skips_questions) {
-            send(key, guard, cx);
-            return;
+        if let Some(ask) = begin(key, &target.row, target.skips_questions, cx) {
+            self.ask_about_row(key, ask, mark, confirm, window, cx);
         }
-        self.ask_about_row(
-            key,
-            || question(key, row, guard),
-            mark,
-            |frozen: Frozen, _: &mut Window, cx: &mut App| send(&frozen.key, frozen.guard, cx),
-            window,
-            cx,
-        );
     }
+}
+
+/// Start a Stop of `row`, filed under `key`, with Skip session confirmations as `skipped`: the one statement of
+/// Stop's ask-or-send rule, for the row's menu and the open session's header alike. When nothing needs asking, the
+/// Stop is sent at once with the guard of `row` as drawn, and there is nothing to ask. Otherwise nothing is sent, and
+/// what comes back builds the question to ask (as often as the caller needs to try showing it), whose answer goes to
+/// [`confirm`].
+pub(crate) fn begin<'a>(
+    key: &'a str,
+    row: &'a SessionRow,
+    skipped: bool,
+    cx: &mut App,
+) -> Option<impl Fn() -> Question<Frozen> + 'a> {
+    let guard = guard(row);
+    if !asks(row, skipped) {
+        send(key, guard, cx);
+        return None;
+    }
+    Some(move || question(key, row, guard))
+}
+
+/// A Stop question was confirmed: send the Stop it froze.
+pub(crate) fn confirm(frozen: Frozen, _: &mut Window, cx: &mut App) {
+    send(&frozen.key, frozen.guard, cx);
 }
 
 /// Send `key`'s Stop with `guard` through the operation store, and keep what its reply says on the row. A session that

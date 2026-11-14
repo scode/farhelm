@@ -30,15 +30,14 @@
 //!   this Replace like Stop's of its Stop, named by its operation the same way.
 //!
 //! The question, the precondition, the command and the progress line are functions of a session's row, so the open
-//! session's header and the interrupted card (later pieces) can ask the same question and send the same request.
+//! session's header (`session_pane/header.rs`) asks the same question and sends the same request, and the interrupted
+//! card (a later piece) can too.
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
+use farhelm_proto::session_requests::ReplaceSessionBody;
 use farhelm_proto::ui_channel::SessionRow;
 use farhelm_proto::{DeleteGuard, SessionReplaceReply, SessionStatus};
-use gpui::{
-    App, Context, ElementId, InteractiveElement, IntoElement, ParentElement, Role, SharedString,
-    StatefulInteractiveElement as _, Styled, Window, div, px,
-};
+use gpui::{App, Context, IntoElement, SharedString, Styled, Window, px};
 use serde_json::json;
 
 use super::outcome;
@@ -48,12 +47,12 @@ use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
 use crate::operations::{Command, OpKey, Outcome, Settled, Work};
 use crate::prompt::{Answer, Question};
-use crate::theme::{self, metrics};
+use crate::theme;
 use crate::{local_state, session};
 
 /// The menu's Replace item's hover help: the old header Replace button's tooltip, which says what the item's short
 /// description line ("Fresh conversation, same settings") means.
-pub(super) const MENU_HELP: &str =
+pub(crate) const MENU_HELP: &str =
     "Replace: swap this session for a fresh conversation with the same settings";
 
 /// How Replace's consequence ends: what takes the source's place, the one clause that tells this question from
@@ -136,19 +135,23 @@ pub(crate) fn question(key: &str, row: &SessionRow, guard: DeleteGuard) -> Quest
     .keeps_focus_on_empty_click()
 }
 
-/// The session's plain Replace, `POST /api/sessions/{id}/replace`, with the source's Delete guard as its two flags and
-/// nothing else: no `with` (that is Replace with), no `intent_key` and no `confirm_yolo` (see the module docs).
+/// The session's plain Replace, `POST /api/sessions/{id}/replace`, as the route's shared client body
+/// ([`ReplaceSessionBody`], which the helm's tests decode into its own request type) with the source's Delete guard as
+/// its two flags and nothing else: no `with` (that is Replace with) and no `confirm_yolo` (see the module docs). The
+/// body has no retry key at all.
 pub(crate) fn command(session: &str, guard: DeleteGuard) -> Result<Command, PathError> {
+    let body = ReplaceSessionBody {
+        confirm_yolo: false,
+        with: None,
+        only_if_nothing_alive: guard.only_if_nothing_alive(),
+        only_if_agent_ended: guard.only_if_agent_ended(),
+    };
     Ok(Command::new(
         Work::Replace,
         Method::Post,
         ApiPath::api(&["sessions", session, "replace"])?,
-        // The route's request type is the helm's `ReplaceReq`, which also carries Replace with's create request; it
-        // moves into the protocol crate with the launcher's create request, and until then the two flags go by hand.
-        Some(json!({
-            "only_if_nothing_alive": guard.only_if_nothing_alive(),
-            "only_if_agent_ended": guard.only_if_agent_ended(),
-        })),
+        // Two booleans and unset options always encode, so `json!` (which panics on a failed encode) cannot fail here.
+        Some(json!(body)),
         "POST /api/sessions/[session]/replace",
     ))
 }
@@ -169,21 +172,33 @@ impl SessionList {
         let Some(target) = menu::actionable(key, cx) else {
             return;
         };
-        let row = &target.row;
-        let guard = delete::guard(row);
-        if target.skips_questions {
-            send(key, guard, cx);
-            return;
+        if let Some(ask) = begin(key, &target.row, target.skips_questions, cx) {
+            self.ask_about_row(key, ask, mark, confirm, window, cx);
         }
-        self.ask_about_row(
-            key,
-            || question(key, row, guard),
-            mark,
-            |frozen: Frozen, _: &mut Window, cx: &mut App| send(&frozen.key, frozen.guard, cx),
-            window,
-            cx,
-        );
     }
+}
+
+/// Start a Replace of `row`, filed under `key`, with Skip session confirmations as `skipped`: the one statement of
+/// Replace's ask-or-send rule, for the row's menu and the open session's header alike. Replace always asks unless the
+/// question is skipped; then it is sent at once with the Delete guard of `row` as drawn, and there is nothing to ask.
+/// Otherwise nothing is sent, and what comes back builds the question to ask, whose answer goes to [`confirm`].
+pub(crate) fn begin<'a>(
+    key: &'a str,
+    row: &'a SessionRow,
+    skipped: bool,
+    cx: &mut App,
+) -> Option<impl Fn() -> Question<Frozen> + 'a> {
+    let guard = delete::guard(row);
+    if skipped {
+        send(key, guard, cx);
+        return None;
+    }
+    Some(move || question(key, row, guard))
+}
+
+/// A Replace question was confirmed: send the Replace it froze.
+pub(crate) fn confirm(frozen: Frozen, _: &mut Window, cx: &mut App) {
+    send(&frozen.key, frozen.guard, cx);
 }
 
 /// Send `key`'s Replace with `guard` through the operation store and start its row's clock. A session that already has
@@ -203,7 +218,7 @@ pub(crate) fn send(key: &str, guard: DeleteGuard, cx: &mut App) {
         })
     });
     match started {
-        Ok(()) => outcome::start_clock(key, cx),
+        Ok(()) => outcome::start_clock(key, Work::Replace, cx),
         Err(refused) => tracing::debug!(?refused, "a Replace was not sent"),
     }
 }
@@ -260,10 +275,9 @@ pub(crate) fn in_flight(key: &str, cx: &App) -> bool {
     })
 }
 
-/// The line under `row`'s lines while its Replace has waited two seconds or more: the spinner at `step`, "Replacing on
-/// <host>…" with the host as the helm names it (escaped, as its own element; "this host" when the helm names none, as
-/// in the old app), then the whole seconds. The old `.launch-progress`: 12 pixels in `--fg-0`, or in the fill's ink on
-/// the selected row, the spinner in the text's color. `None` while there is nothing to show.
+/// The line under `row`'s lines while its Replace has waited two seconds or more: [`outcome::wait_line`]'s "Replacing
+/// on <host>… <n> s" with the spinner at `step`, in `--fg-0`, or in the fill's ink on the selected row, inset as the
+/// row's other lines are. `None` while there is nothing to show.
 pub(super) fn progress_line(
     key: &str,
     row: &SessionRow,
@@ -271,46 +285,15 @@ pub(super) fn progress_line(
     selected: bool,
     cx: &App,
 ) -> Option<impl IntoElement> {
-    let seconds = outcome::replace_seconds(key, cx)?;
     let palette = theme::palette(cx);
     let ink = theme::color(if selected {
         palette.on_fill
     } else {
         palette.fg_0
     });
-    let mut label = HostSentence::new(SharedString::from(format!(
-        "session-replace-progress-label-{key}"
-    )))
-    .text("Replacing on ");
-    label = if row.host_name.is_empty() {
-        label.text("this host")
-    } else {
-        label.host(&HostText::from_host(row.host_name.as_str()))
-    };
-    let label = label.text("…");
-    let name = label.accessible_name();
-    Some(
-        div()
-            .id(ElementId::Name(
-                format!("session-replace-progress-{key}").into(),
-            ))
-            .debug_selector(|| "session-replace-progress".into())
-            .role(Role::Status)
-            .aria_label(name)
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(6.))
-            .min_w_0()
-            .pt(px(2.))
-            .pb(px(8.))
-            .px(px(14.))
-            .text_size(metrics::TEXT_SM)
-            .text_color(ink)
-            .child(delete::spinner_icon(step, px(12.), ink))
-            .child(div().flex_1().min_w_0().child(label))
-            .child(div().flex_none().child(format!("{seconds} s"))),
-    )
+    // The open session's header announces the wait; its row's copy stays a plain line (see `outcome::wait_line`).
+    let line = outcome::wait_line("session", Work::Replace, !selected, key, row, step, ink, cx)?;
+    Some(line.pt(px(2.)).pb(px(8.)).px(px(14.)))
 }
 
 #[cfg(test)]

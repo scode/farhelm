@@ -59,16 +59,17 @@
 //! ancestors, so per-row views would not have limited what a step redraws, only multiplied the notifications.
 //!
 //! Each row has an actions menu ([`menu`]) whose commands so far are Rename ([`rename`]), Mark read or Mark unread
-//! ([`seen`], also on a click on the row's status dot), Replace ([`replace`]), Stop ([`stop`]) and Delete ([`delete`]);
-//! the Rename and Delete shortcuts reach them for the open session ([`rename::open_for_selected`],
-//! [`SessionList::delete_selected`]). What a row says about its operations beyond
-//! "in flight" (a refusal, a success's notice, how long a Replace has waited) is [`outcome`]'s. While any Delete is in
-//! flight, the selection rules hold back their automatic choice, so a list that loses its open session to that Delete
-//! opens the next one only once every Delete has settled; a Stop or a Replace holds nothing back, with one exception
-//! for the open session's own Replace ([`selection`], "A Replace keeps its own source open until it answers"). Every
-//! pending Delete's, Stop's and long Replace's spinner turns from one handle the list holds, the way the pulse does
-//! ([`delete::Spinner`]). A row's menu button and its anchor exist only while the row is drawn, so a menu whose row
-//! scrolls well out of view closes, and a question about a row out of view is asked centered.
+//! ([`seen`], also on a click on the row's status dot), Replace ([`replace`]), Stop ([`stop`]) and Delete ([`delete`]),
+//! and the open session's header (`session_pane/header.rs`) asks the same Stop, Replace and Delete through the same
+//! functions, plus Restart ([`restart`]), which the old row menu never had; the Rename shortcut reaches Rename for the
+//! open session ([`rename::open_for_selected`]), and the Delete shortcut the header's Delete. What a row says about its
+//! operations beyond "in flight" (a refusal, a success's notice, how long a Replace has waited) is [`outcome`]'s. While
+//! any Delete is in flight, the selection rules hold back their automatic choice, so a list that loses its open session
+//! to that Delete opens the next one only once every Delete has settled; a Stop or a Replace holds nothing back, with
+//! one exception for the open session's own Replace ([`selection`], "A Replace keeps its own source open until it
+//! answers"). Every pending Delete's, Stop's and long Replace's spinner turns from one handle the list holds, the way
+//! the pulse does ([`delete::Spinner`]). A row's menu button and its anchor exist only while the row is drawn, so a
+//! menu whose row scrolls well out of view closes, and a question about a row out of view is asked centered.
 //!
 //! The Rename editor the list owns is a dialog rather than part of a row, so a listing that changes under it never
 //! moves its field.
@@ -87,11 +88,12 @@
 
 pub(crate) mod delete;
 pub(crate) mod host_rail;
-mod menu;
+pub(crate) mod menu;
 pub(crate) mod outcome;
 pub(crate) mod quick_switcher;
 pub(crate) mod rename;
 pub(crate) mod replace;
+pub(crate) mod restart;
 mod row;
 pub(crate) mod seen;
 pub(crate) mod selection;
@@ -99,13 +101,13 @@ mod status;
 pub(crate) mod stop;
 
 #[cfg(test)]
-mod lifecycle_tests;
+pub(crate) mod lifecycle_tests;
 
 #[cfg(test)]
 mod list_tests;
 
 #[cfg(test)]
-mod menu_tests;
+pub(crate) mod menu_tests;
 
 #[cfg(test)]
 mod seen_tests;
@@ -475,7 +477,7 @@ impl Render for SessionList {
             let any_spinner = listed.iter().any(|session| {
                 delete::in_flight(session.key, cx).is_some()
                     || stop::in_flight(session.key, cx)
-                    || outcome::replace_seconds(session.key, cx).is_some()
+                    || outcome::waited_seconds(session.key, operations::Work::Replace, cx).is_some()
             });
             (keys, any_pulse, any_spinner)
         };

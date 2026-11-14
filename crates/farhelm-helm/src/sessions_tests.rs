@@ -12474,6 +12474,29 @@ mod client_bodies {
         }
     }
 
+    /// `POST /api/sessions/{id}/restart`: the header's plain Restart sends
+    /// the client body with only its consent set, so its unset fields reach
+    /// the helm as `null` and `false`. They must read as absent, or a plain
+    /// Restart would turn into a Restart with or a named conversation.
+    #[test]
+    fn a_plain_restart_body_decodes_with_only_its_consent() {
+        for stop_if_running in [false, true] {
+            let body = RestartSessionBody {
+                conversation: None,
+                stop_if_running,
+                with: None,
+                with_command: None,
+                confirm_yolo: false,
+            };
+            let req: RestartReq = decode(&body);
+            assert_eq!(req.conversation, None);
+            assert_eq!(req.stop_if_running, stop_if_running);
+            assert_eq!(req.with, None);
+            assert_eq!(req.with_command, None);
+            assert!(!req.confirm_yolo);
+        }
+    }
+
     /// `POST /api/sessions/{id}/replace`: a plain Replace and a Replace with
     /// (whose create is an ordinary create body) decode into `ReplaceReq`,
     /// each delete guard flag landing on its own field.

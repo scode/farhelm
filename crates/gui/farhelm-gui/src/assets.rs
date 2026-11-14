@@ -149,6 +149,9 @@ pub enum Icon {
     Hosts,
     /// A prompt in a window: the Settings dialog's Terminal section (the old app's Terminal glyph).
     Terminal,
+    /// Two curved arrows chasing each other round: restart the agent and resume its conversation (the old app's Restart
+    /// glyph, on the session header's Restart).
+    Restart,
 }
 
 impl Icon {
@@ -192,6 +195,7 @@ impl Icon {
         Icon::Sessions,
         Icon::Hosts,
         Icon::Terminal,
+        Icon::Restart,
     ];
 }
 
@@ -234,6 +238,7 @@ impl Icon {
             Icon::Sessions => "icons/sessions.svg",
             Icon::Hosts => "icons/hosts.svg",
             Icon::Terminal => "icons/terminal.svg",
+            Icon::Restart => "icons/restart.svg",
         }
     }
 }
@@ -297,6 +302,7 @@ impl Assets {
             WORDMARK_LIGHT => Some(include_bytes!(
                 "../../../../packaging/farhelm-desktop/wordmark-light.svg"
             )),
+            "icons/restart.svg" => Some(include_bytes!("../assets/icons/restart.svg")),
             _ => None,
         }
     }

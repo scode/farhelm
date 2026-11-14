@@ -28,13 +28,13 @@ use crate::{layers, session, test_support};
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
 
 /// `key` as an ended session: its agent exited.
-pub(super) fn ended(key: &'static str) -> Fixture {
+pub(crate) fn ended(key: &'static str) -> Fixture {
     session(key).status(json!({"state": "exited", "exit_code": 0}))
 }
 
 /// `fixture`'s entry listing `tabs` terminal tabs. The helm's pinned fixture lists one, so every test says how many
 /// it means.
-pub(super) fn entry(fixture: &Fixture, tabs: usize) -> KeyedEntry {
+pub(crate) fn entry(fixture: &Fixture, tabs: usize) -> KeyedEntry {
     let mut entry = fixture.entry();
     entry.value["tabs"] = Value::Array(
         (0..tabs)
@@ -46,7 +46,7 @@ pub(super) fn entry(fixture: &Fixture, tabs: usize) -> KeyedEntry {
 
 /// A snapshot of `rows` (each with its tab count) in that order, with the first one open, and Skip session
 /// confirmations as `skip` says.
-pub(super) fn snapshot(rows: &[(Fixture, usize)], skip: bool) -> Vec<CollectionState> {
+pub(crate) fn snapshot(rows: &[(Fixture, usize)], skip: bool) -> Vec<CollectionState> {
     let order: Vec<&str> = rows.iter().map(|(fixture, _)| fixture.key).collect();
     let preferences = Preferences {
         visit_history: order.iter().take(1).map(|key| key.to_string()).collect(),
@@ -74,7 +74,7 @@ pub(super) fn snapshot(rows: &[(Fixture, usize)], skip: bool) -> Vec<CollectionS
 }
 
 /// Push `rows` as changed, under the complete listing `order`.
-pub(super) fn push(
+pub(crate) fn push(
     fake: &mut FakeHelm,
     order: &[&str],
     rows: &[(Fixture, usize)],
@@ -113,17 +113,17 @@ fn paths(deletes: &[(u64, String)]) -> Vec<&str> {
 }
 
 /// Whether anything was drawn under `selector` in the last frame.
-pub(super) fn drawn(cx: &mut VisualTestContext, selector: &'static str) -> bool {
+pub(crate) fn drawn(cx: &mut VisualTestContext, selector: &'static str) -> bool {
     cx.debug_bounds(selector).is_some()
 }
 
 /// Whether any dialog, menu or question is open.
-pub(super) fn any_layer(cx: &mut VisualTestContext) -> bool {
+pub(crate) fn any_layer(cx: &mut VisualTestContext) -> bool {
     cx.update(|window, cx| layers::any_open(window, cx))
 }
 
 /// The label of the node drawn under the element id `id`.
-pub(super) fn label_of(cx: &mut VisualTestContext, id: &str) -> Option<String> {
+pub(crate) fn label_of(cx: &mut VisualTestContext, id: &str) -> Option<String> {
     frame(cx)
         .into_iter()
         .find(|node| node.element_id.as_deref() == Some(id))
@@ -629,9 +629,9 @@ fn the_next_session_opens_only_once_the_delete_has_settled(cx: &mut TestAppConte
 
 /// SPEC.md, "Desktop window chrome": the shortcut "invokes the open session's header Delete action with its ordinary
 /// confirmation and busy rules. With no session open it does nothing", and "A visible modal keeps keyboard ownership".
-/// With no header yet, it asks the row's question beside the open session's menu button. Specified: the chord asks
-/// about the open session a, below a's button, with focus on Confirm and nothing sent; the chord again while the
-/// question is open changes nothing; Enter deletes a.
+/// So it asks the header's question, hung under the header's Delete button, not the row's. Specified: the chord asks
+/// about the open session a, below the header's Delete, with focus on Confirm and nothing sent; the chord again while
+/// the question is open changes nothing; Enter deletes a.
 #[gpui::test]
 fn the_shortcut_asks_about_the_open_session_and_waits_while_a_question_is_open(
     cx: &mut TestAppContext,
@@ -639,9 +639,12 @@ fn the_shortcut_asks_about_the_open_session_and_waits_while_a_question_is_open(
     let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
     deletes(&mut fake);
     test_support::keys(cx, DELETE_CHORD);
-    let button = test_support::bounds(cx, "session-menu-a");
+    let button = test_support::bounds(cx, "session-header-delete");
     let question = test_support::bounds(cx, "prompt");
-    assert!(question.top() >= button.bottom(), "asked below a's button");
+    assert!(
+        question.top() >= button.bottom(),
+        "asked below the header's Delete"
+    );
     assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
     assert_eq!(deletes(&mut fake), []);
 

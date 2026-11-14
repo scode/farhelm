@@ -200,6 +200,112 @@ fn a_busy_button_keeps_focus_and_ignores_presses(cx: &mut TestAppContext) {
     assert_eq!(runs.get(), 1, "once not busy, a click ran it");
 }
 
+/// A busy button is also the old `aria-disabled` control whose reason is its hover help (the session header's Restart
+/// for a session that cannot resume): unlike a disabled one, it must stay reachable, or the reason could never be read
+/// from the keyboard, and its tooltip must still show. Its accessible name may say more than its label. Specified: Tab
+/// reaches a busy neutral button; a click, Enter and Space run nothing and leave it focused, Enter and Space stopping
+/// at it; resting the pointer on it shows its help; the frame names it by its accessible name while painting its label.
+#[gpui::test]
+fn a_busy_button_keeps_its_help_and_may_be_named_for_its_reason(cx: &mut TestAppContext) {
+    let runs = Rc::new(Cell::new(0));
+    let passed = Rc::new(Cell::new(0));
+    let focus = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let (counted, handle, heard) = (runs.clone(), focus.clone(), passed.clone());
+    let cx = open(cx, move |_, _| {
+        let (counted, heard) = (counted.clone(), heard.clone());
+        div()
+            .on_key_down(move |event: &gpui::KeyDownEvent, _, _| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    heard.set(heard.get() + 1);
+                }
+            })
+            .child(
+                Button::new(
+                    "restart",
+                    "Restart",
+                    HoverHelp::tooltip("Restart unavailable — the reason"),
+                    Role::Button,
+                )
+                .tier(Tier::Neutral)
+                .compact()
+                .busy(true)
+                .accessible_name("Restart unavailable")
+                .focus(&handle)
+                .on_click(move |_, _, _| counted.set(counted.get() + 1)),
+            )
+            .into_any_element()
+    });
+    keys(cx, "tab");
+    assert!(
+        cx.update(|window, _| focus.is_focused(window)),
+        "Tab reached the busy button"
+    );
+    click(cx, "restart");
+    keys(cx, "enter");
+    keys(cx, "space");
+    assert_eq!(runs.get(), 0, "no press ran it");
+    assert_eq!(passed.get(), 0, "Enter and Space stopped at it");
+    assert!(
+        cx.update(|window, _| focus.is_focused(window)),
+        "and it kept focus"
+    );
+    let nodes = frame(cx);
+    let node = nodes
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some("restart"))
+        .expect("the button was drawn");
+    assert_eq!(node.label.as_deref(), Some("Restart unavailable"));
+    assert!(
+        nodes
+            .iter()
+            .flat_map(|node| &node.texts)
+            .any(|text| text.text.as_ref() == "Restart"),
+        "the label is what it paints"
+    );
+    let at = center(cx, "restart");
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    wait_hover_delay(cx);
+    assert_eq!(
+        tooltip(cx).as_deref(),
+        Some("Restart unavailable — the reason")
+    );
+}
+
+/// A busy button must look unavailable in every filled tier, or a greyed Restart would read as one that works; the
+/// old sheet drew every `aria-disabled` filled button with `--bg-2`, `--border-dim` and `--fg-2`. The unfilled tiers
+/// have no fill to retire and keep their look. Specified, in both palettes: busy neutral, chip, primary and danger
+/// buttons take exactly the retired colors; a busy ghost button keeps the ghost's colors; a neutral one that is not busy
+/// keeps the neutral fill.
+#[test]
+fn a_busy_filled_button_takes_the_retired_look_and_an_unfilled_one_keeps_its_own() {
+    let button = |tier: Tier, busy: bool| {
+        Button::new("b", "B", HoverHelp::tooltip("A button"), Role::Button)
+            .tier(tier)
+            .busy(busy)
+    };
+    for palette in [&crate::theme::DARK, &crate::theme::LIGHT] {
+        let retired = (
+            Some(palette.bg_2),
+            palette.bg_2,
+            Some(palette.border_dim),
+            palette.fg_2,
+        );
+        for tier in [Tier::Neutral, Tier::Chip, Tier::Primary, Tier::Danger] {
+            assert_eq!(button(tier, true).colors(palette), retired, "{tier:?}");
+        }
+        assert_eq!(
+            button(Tier::Ghost, true).colors(palette),
+            button(Tier::Ghost, false).colors(palette),
+            "a ghost keeps its look"
+        );
+        assert_ne!(
+            button(Tier::Neutral, false).colors(palette),
+            retired,
+            "a neutral button that is not busy keeps its fill"
+        );
+    }
+}
+
 /// The text of the tooltip showing now, if any.
 fn tooltip(cx: &mut VisualTestContext) -> Option<gpui::SharedString> {
     cx.update(|window, cx| layers::shown_tooltip(window, cx))
