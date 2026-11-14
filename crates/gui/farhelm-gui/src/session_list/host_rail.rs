@@ -232,14 +232,14 @@ fn clear_from(
     }
 }
 
-/// What the helm's reply to a query says: accepted, or refused in its words ([`super::refusal_words`]), or `None` when
+/// What the helm's reply to a query says: accepted, or refused in its words ([`refusal_words`]), or `None` when
 /// the channel lost the command, which only a reset follows.
 fn answer(result: Result<Reply, CommandError>) -> Option<Result<(), HostText>> {
     let reply = result.ok()?;
     if (200..300).contains(&reply.status) {
         return Some(Ok(()));
     }
-    Some(Err(super::refusal_words(
+    Some(Err(refusal_words(
         reply.status,
         reply.body,
         "PUT /ui/session-query",
@@ -671,4 +671,23 @@ pub(super) fn refusal_sentence(words: &HostText) -> HostSentence {
     HostSentence::new("host-filter-refusal")
         .text("Could not show that host's sessions: ")
         .host(words)
+}
+
+/// The words of a refusal the helm sent with `status` and `body` to the query named `shown`: the helm's own words (a
+/// plain string, trimmed, or the JSON it sent), or, when it sent none, the command and its status. Host text, since the
+/// helm's words may quote a host.
+// The same rule as the operation store's refusal wording (`operations::read` shares it for reads). The rail's query is a
+// PUT on the channel, which neither the operation store nor the read helper sends, and `operations.rs` keeps that
+// wording private and is append-only for areas (docs/gpui/foundation-ownership.md), so the rail holds this one copy.
+fn refusal_words(status: u16, body: Option<serde_json::Value>, shown: &str) -> HostText {
+    let words = match body {
+        Some(serde_json::Value::String(text)) => text.trim().to_owned(),
+        Some(other) => other.to_string(),
+        None => String::new(),
+    };
+    if words.is_empty() {
+        HostText::from_host(format!("{shown}: {status}"))
+    } else {
+        HostText::from_host(words)
+    }
 }

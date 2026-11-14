@@ -692,26 +692,6 @@ fn status_line(text: &'static str) -> impl IntoElement {
         .child(text)
 }
 
-/// The words of a refusal the helm sent with `status` and `body` to the command named `shown` (its method and route,
-/// as `GET /api/sessions`): the helm's own words (a plain string, trimmed, or the JSON it sent), or, when it sent none,
-/// the command and its status, as the operation store words a refusal. Host text, since the helm's words may quote a
-/// host. Shared by the list's own commands that do not go through the operation store (the quick switcher's read, the
-/// host rail's query).
-// The operation store's `Outcome::from_reply` holds the same rule; it is not shared with it because `operations.rs` is
-// append-only for areas (docs/gpui/foundation-ownership.md).
-pub(crate) fn refusal_words(status: u16, body: Option<serde_json::Value>, shown: &str) -> HostText {
-    let words = match body {
-        Some(serde_json::Value::String(text)) => text.trim().to_owned(),
-        Some(other) => other.to_string(),
-        None => String::new(),
-    };
-    if words.is_empty() {
-        HostText::from_host(format!("{shown}: {status}"))
-    } else {
-        HostText::from_host(words)
-    }
-}
-
 /// A failure line across the list's column: 12-pixel red words (a read that failed, a query the helm refused), which
 /// may quote a host and so arrive as a host sentence.
 fn failure_line(sentence: HostSentence, palette: &theme::Palette) -> impl IntoElement {

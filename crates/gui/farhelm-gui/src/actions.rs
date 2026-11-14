@@ -330,9 +330,9 @@ const ONCE_PER_PRESS: &[&dyn Action] = &[
     &RenameSession,
     &TemplateNumberKey { digit: 0 },
     &ShowKeyboardShortcuts,
-    // Not one SPEC.md names (it says "ignore repeat" of Delete and Rename only): the migration's orchestrator decided
-    // that a held chord opens the switcher once. A repeat would only reach the ground's handler, which refuses while
-    // the switcher is open; listed, it never runs the opener again.
+    // SPEC.md does not name this one: its "ignore repeat" ("Desktop window chrome") covers the two session shortcuts.
+    // It is listed the same way so a held chord opens the switcher once; a repeat would only reach the ground's
+    // handler, which refuses while the switcher is open, and listed, it never runs the opener again.
     &QuickSwitcher,
 ];
 
