@@ -12,11 +12,12 @@ use std::rc::Rc;
 
 use gpui::{
     AppContext as _, Entity, FocusHandle, InteractiveElement as _, IntoElement, Modifiers,
-    ParentElement, Styled, TestAppContext, VisualTestContext, div, point, px,
+    MouseButton, ParentElement, StatefulInteractiveElement as _, Styled, TestAppContext,
+    VisualTestContext, div, point, px,
 };
 
 use crate::components::{HoverHelp, Role, Tier};
-use crate::focus::Mark;
+use crate::focus::{self, Mark, OnPress};
 use crate::host_text::{HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId, Subject};
 use crate::prompt::{self, Answer, Presentation, Question};
@@ -760,4 +761,185 @@ fn an_anchored_question_sits_below_its_anchor_and_closes_like_a_menu(cx: &mut Te
         1,
         "nothing but the first Enter confirmed anything"
     );
+}
+
+/// The page of [`a_click_on_an_anchored_question_over_a_terminal_stays_with_the_question`]: the row's menu button the
+/// question is anchored below, then, right under it, a terminal the question's card covers part of.
+///
+/// The terminal is a stand-in: an element tracked the way the attached terminal tracks its grid
+/// (`focus::track(.., OnPress::Focus)` in `terminal/attached.rs`), which is everything the real one does with a press.
+/// The real terminal needs an attachment to a session to draw, and none of that bears on where a press lands.
+struct OverTerminal {
+    anchor: Rc<RefCell<Option<Anchor>>>,
+    opener: FocusHandle,
+    terminal: FocusHandle,
+    /// Clicks and wheel events that reached the terminal stand-in.
+    reached: Rc<Cell<(usize, usize)>>,
+}
+
+/// Open the harness on an [`OverTerminal`] page.
+fn open_over_terminal(cx: &mut TestAppContext) -> (&mut VisualTestContext, OverTerminal) {
+    let (opener, terminal) = cx.update(|cx| {
+        (
+            cx.focus_handle().tab_stop(true),
+            cx.focus_handle().tab_stop(true),
+        )
+    });
+    let page = OverTerminal {
+        anchor: Rc::new(RefCell::new(None)),
+        opener: opener.clone(),
+        terminal: terminal.clone(),
+        reached: Rc::new(Cell::new((0, 0))),
+    };
+    let (out, reached) = (page.anchor.clone(), page.reached.clone());
+    let cx = open(cx, move |window, cx| {
+        let anchor = Anchor::for_element("row-menu-anchor", window, cx);
+        out.replace(Some(anchor.clone()));
+        div()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .relative()
+                    .debug_selector(|| "row-menu".into())
+                    .w(px(80.))
+                    .child(button("opener", &opener))
+                    .child(anchor.track()),
+            )
+            .child({
+                let (clicked, scrolled) = (reached.clone(), reached.clone());
+                focus::track(
+                    div()
+                        .id("terminal")
+                        .debug_selector(|| "terminal".into())
+                        .size(px(400.))
+                        .on_click(move |_, _, _| {
+                            let (clicks, wheels) = clicked.get();
+                            clicked.set((clicks + 1, wheels));
+                        })
+                        .on_scroll(move |_, _, _| {
+                            let (clicks, wheels) = scrolled.get();
+                            scrolled.set((clicks, wheels + 1));
+                        }),
+                    &terminal,
+                    OnPress::Focus,
+                )
+            })
+            .into_any_element()
+    });
+    (cx, page)
+}
+
+/// Why this matters: a row's Delete question (and the Stop and Replace questions to come) is anchored beside the row, and in the app its card sits
+/// over the selected session's terminal. A click on one of its answers was also a press on the terminal under the card,
+/// which takes focus on every press, so focus moved to the terminal before the answer ran; the question then closed
+/// with focus outside it and left it there, instead of returning it where Enter returns it. A click on the card's empty
+/// space reached the terminal the same way, taking focus out of a question still open, so the next keys went to the
+/// program instead of the question.
+///
+/// Specification: with the question's card over a terminal, a click on Confirm confirms once, closes the question and
+/// returns focus to the control that held it when the question opened; a click on Cancel closes it unanswered and
+/// returns focus the same way; a click on the card's empty space leaves the question open with focus on the answer in
+/// use, so Enter then confirms it. In none of these does the terminal take focus, and no click and no wheel turned over
+/// the card reaches it.
+#[gpui::test]
+fn a_click_on_an_anchored_question_over_a_terminal_stays_with_the_question(
+    cx: &mut TestAppContext,
+) {
+    let (cx, page) = open_over_terminal(cx);
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &page.opener),
+        "the premise: the row's menu button has focus"
+    );
+    let Some(anchor) = page.anchor.borrow().clone() else {
+        panic!("the premise: the row's menu button was drawn")
+    };
+    let sent = Rc::new(Cell::new(0));
+    let ask = |cx: &mut VisualTestContext| {
+        let (anchor, record) = (anchor.clone(), sent.clone());
+        let layer = cx.update(|window, cx| {
+            let mark = Mark::take(cx);
+            prompt::ask_anchored(
+                question("alpha").keeps_focus_on_empty_click(),
+                anchor,
+                None,
+                &mark,
+                move |_, _, _| record.set(record.get() + 1),
+                window,
+                cx,
+            )
+        });
+        cx.run_until_parked();
+        check(cx);
+        match layer {
+            Some(layer) => layer,
+            None => panic!("the anchored question did not open"),
+        }
+    };
+    let terminal = bounds(cx, "terminal");
+
+    for (answer, confirms) in [("prompt-confirm", 1), ("prompt-cancel", 0)] {
+        sent.set(0);
+        let layer = ask(cx);
+        let at = center(cx, answer);
+        assert!(
+            terminal.contains(&at),
+            "the premise: {answer} is drawn over the terminal: {at:?} in {terminal:?}"
+        );
+        // The press and the release apart: an answer runs on the release, so the press alone shows whether the
+        // terminal under the card saw it, while the question is still open.
+        cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+        check(cx);
+        assert!(is_open(cx, layer), "the press on {answer} left it open");
+        assert!(
+            !focused(cx, &page.terminal),
+            "the press on {answer} did not focus the terminal under the card"
+        );
+        cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+        check(cx);
+        assert_eq!(sent.get(), confirms, "the click on {answer} answered it");
+        assert!(!is_open(cx, layer), "the click on {answer} closed it");
+        assert!(
+            !focused(cx, &page.terminal),
+            "the click on {answer} left the terminal under the card unfocused"
+        );
+        assert!(
+            focused(cx, &page.opener),
+            "after {answer}, focus went back to the row's menu button"
+        );
+    }
+
+    // The card's bottom padding, below the answers: empty space, and over the terminal.
+    let layer = ask(cx);
+    let card = bounds(cx, "prompt");
+    let empty = point(card.left() + px(4.), card.bottom() - px(4.));
+    assert!(
+        terminal.contains(&empty),
+        "the premise: the card's empty space is over the terminal: {empty:?} in {terminal:?}"
+    );
+    cx.simulate_click(empty, Modifiers::none());
+    check(cx);
+    assert!(is_open(cx, layer), "the click on empty space left it open");
+    assert!(
+        !focused(cx, &page.terminal),
+        "the click on the card's empty space did not focus the terminal under it"
+    );
+    assert_eq!(sent.get(), 0, "the click on empty space answered nothing");
+    cx.simulate_event(gpui::ScrollEvent {
+        position: empty,
+        delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-40.))),
+        ..Default::default()
+    });
+    check(cx);
+    assert_eq!(
+        page.reached.get(),
+        (0, 0),
+        "no click and no wheel on the card reached the terminal under it"
+    );
+    // Focus stayed on Confirm, where this question started, so Enter presses it.
+    keys(cx, "enter");
+    assert_eq!(sent.get(), 1, "Enter after the click confirmed it");
+    assert!(!is_open(cx, layer), "Enter closed it");
+    assert!(focused(cx, &page.opener), "and focus went back");
 }
