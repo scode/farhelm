@@ -37,6 +37,12 @@
 //! The body is a view built once, as the question is asked, from the frozen value; its own controls are not answers.
 //! The anchored and inline questions ignore all four. Approved by the GPUI migration's orchestrator on 2026-11-14.
 //!
+//! A title is usually the app's own words, but may name a host value, as the host setup confirmation's "Set up host ·
+//! <name>" does: then it is a [`HostSentence`](crate::host_text::HostSentence) ([`Question::new`]). The centered and
+//! inline questions draw it through the host-text element, and in every presentation the question's accessible name is
+//! the sentence's accessible name, with the host value escaped as the screen shows it. Approved by the GPUI migration's
+//! orchestrator on 2026-11-14.
+//!
 //! Where focus starts follows SPEC.md, "Opening and closing": on the confirming button for a question the user just
 //! asked for, on Cancel when that button is disabled, when the action is risky and cannot be undone, or when the
 //! question arrived later. Escape and Cancel close it and return focus to where it was (Escape sends it home instead
@@ -47,9 +53,9 @@
 //! dialog frame. [`ask_anchored`] draws it beside the control it is about, as the old app did for the questions a row
 //! or the session header asked: the row's Delete, Stop and Replace questions took the place of the row's menu, and the
 //! header's sat under their buttons (`list/row.rs` and the `.header-confirm` rule at reference commit `24bc0580`). An
-//! anchored question has no title line or veil: its lines in amber (`--warn-bright`), then the answers, on the
-//! floating surface menus use. Its title stays its accessible name. A press outside it closes it, which is Cancel, and
-//! it closes when its anchor is no longer drawn (the row went away), besides when its subject is gone.
+//! anchored question has no title line or veil: its lines in amber (`--warn-bright`), then the answers, on the floating
+//! surface menus use. Its title is not drawn but stays its accessible name. A press outside it closes it, which is
+//! Cancel, and it closes when its anchor is no longer drawn (the row went away), besides when its subject is gone.
 //!
 //! NOTE: The old anchored questions kept the quoted title on one line and cut it with an ellipsis. Here lines wrap, as
 //! they do in the centered form: two sessions whose titles share a long start would otherwise get questions that look
@@ -135,7 +141,8 @@ pub struct Answer {
 /// A question to ask, frozen at the moment it opens. `T` is what the confirming answer acts on: the targets by stable
 /// id and whatever else the action needs, as the user was shown them.
 pub struct Question<T> {
-    title: SharedString,
+    /// The title, and the question's accessible name in every presentation ([`Question::new`]).
+    title: Line,
     summary: Option<Line>,
     lines: Vec<Line>,
     confirm: Answer,
@@ -169,7 +176,16 @@ type DrawTile = Rc<dyn Fn(&mut Window, &mut App) -> AnyElement>;
 
 impl<T: Clone + 'static> Question<T> {
     /// A question titled `title` whose confirming answer is `confirm` and acts on `frozen`. Cancel is the other answer.
-    pub fn new(title: impl Into<SharedString>, confirm: Answer, frozen: T) -> Self {
+    ///
+    /// The title is the question's accessible name wherever it shows, drawn or not (the anchored question draws none).
+    /// Usually it is the app's own words, passed as a string. A title that names a host value, as the host setup
+    /// confirmation's "Set up host · <name>" does (the old app's, ported; SPEC.md titles such as "Suspend <host>?"
+    /// too), is a [`HostSentence`](crate::host_text::HostSentence): it is drawn through the host-text element, and the
+    /// accessible name is the sentence's
+    /// [`HostSentence::accessible_name`](crate::host_text::HostSentence::accessible_name), so the host value is escaped
+    /// both where the user reads it and where a screen reader does. Never format the host's raw value into a string
+    /// title: that would reach the screen and the accessible name unescaped.
+    pub fn new(title: impl Into<Line>, confirm: Answer, frozen: T) -> Self {
         Question {
             title: title.into(),
             summary: None,
@@ -197,7 +213,7 @@ impl<T: Clone + 'static> Question<T> {
 
     /// A one-line summary under the title, usually naming the target. A target a host named (a session's title, a
     /// host's name) goes in as a [`HostSentence`](crate::host_text::HostSentence), never as a string made from its raw
-    /// value; the title stays the app's own words, since it is the question's accessible name.
+    /// value, as it does in the title ([`Question::new`]).
     pub fn summary(mut self, summary: impl Into<Line>) -> Self {
         self.summary = Some(summary.into());
         self
@@ -631,7 +647,7 @@ impl<T: Clone + 'static> Render for Prompt<T> {
                 .id("prompt")
                 .debug_selector(|| "prompt".into())
                 .role(Role::Dialog)
-                .aria_label(question.title.clone())
+                .aria_label(question.title.accessible_text())
                 .flex()
                 .flex_col()
                 .gap(px(6.))
@@ -702,7 +718,7 @@ fn inline<T: Clone + 'static>(
         } else {
             Role::Status
         })
-        .aria_label(question.title.clone())
+        .aria_label(question.title.accessible_text())
         .on_action(
             cx.listener(|prompt, _: &Dismiss, window, cx| prompt.answer(Which::Cancel, window, cx)),
         )

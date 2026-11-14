@@ -1,6 +1,6 @@
 //! Behavior tests for the prompt, on GPUI's simulated platform: that a confirmation acts only on what it showed, where
-//! a question starts and how it is answered, cancelled and closed, how its summary draws a host value, the anchored
-//! question asked beside its control, the inline question drawn inside its owner's dialog (SPEC.md's YOLO
+//! a question starts and how it is answered, cancelled and closed, how its summary and its title draw a host value,
+//! the anchored question asked beside its control, the inline question drawn inside its owner's dialog (SPEC.md's YOLO
 //! confirmation in the launcher), the answer whose action can fail, which keeps its question up with the reason, and a
 //! body the feature draws (the host setup confirmation's plan) with the dialog frame's tile, note and width.
 //!
@@ -21,7 +21,8 @@ use gpui::{
 
 use crate::components::{Button, HoverHelp, Role, Tier};
 use crate::focus::{self, Mark, OnPress};
-use crate::host_text::{HostSentence, HostText};
+use crate::host_text::tests::SPOOFING_CORPUS;
+use crate::host_text::{HostSentence, HostText, Line};
 use crate::layers::{self, Anchor, Dialog, LayerId, Subject};
 use crate::prompt::{self, Answer, Presentation, Question};
 use crate::test_support::{
@@ -491,16 +492,25 @@ fn a_question_closes_when_its_subject_is_gone(cx: &mut TestAppContext) {
     assert!(!sent.get());
 }
 
-/// Ask `question` with no subject, draw it with GPUI's driver record on, and hand back that frame's record: every node
-/// drawn and the text each painted. The question stays open; the caller answers it.
+/// Ask `question` centered with no subject, draw it with GPUI's driver record on, and hand back that frame's record:
+/// every node drawn and the text each painted. The question stays open; the caller answers it.
 fn ask_and_record(
     cx: &mut VisualTestContext,
+    question: Question<String>,
+) -> (prompt::Asked<String>, Vec<gpui::DriverNode>) {
+    ask_and_record_as(cx, Presentation::Centered, question)
+}
+
+/// [`ask_and_record`], shown as `presentation`.
+fn ask_and_record_as(
+    cx: &mut VisualTestContext,
+    presentation: Presentation,
     question: Question<String>,
 ) -> (prompt::Asked<String>, Vec<gpui::DriverNode>) {
     let asked = cx.update(|window, cx| {
         let mark = Mark::take(cx);
         prompt::ask_for_test(
-            Presentation::Centered,
+            presentation,
             question,
             None,
             &mark,
@@ -664,6 +674,123 @@ fn a_summary_that_names_a_host_value_is_drawn_and_named_escaped(cx: &mut TestApp
     cx.update(|window, cx| asked.cancel(window, cx));
     cx.run_until_parked();
     check(cx);
+}
+
+/// A question titled `title`, as the host setup confirmation is ("Set up host · <name>"), frozen at "alpha".
+fn titled(title: impl Into<Line>) -> Question<String> {
+    let set_up = Answer {
+        label: "Set up".into(),
+        help: HoverHelp::tooltip("Set this host up"),
+        tier: Tier::Primary,
+    };
+    Question::new(title, set_up, "alpha".to_string())
+        .summary("Farhelm installs its supervisor there.")
+}
+
+/// The accessible name of the question drawn under `prompt` in `nodes`, in any presentation.
+fn question_name(nodes: &[gpui::DriverNode]) -> Option<String> {
+    nodes
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some("prompt"))
+        .and_then(|node| node.label.as_ref().map(ToString::to_string))
+}
+
+/// Why this matters: the host setup confirmation is titled "Set up host · <name>" (as in the old app), as are SPEC.md's
+/// "Suspend <host>?" and "Create Tensorlake sandbox · <Name>", and the name is one a host or the user typed. The title
+/// is also the dialog's accessible name, so a title made from the raw value would put an override or zero-width
+/// character on screen and into what a screen reader reads, where two hosts that look alike must still be told apart
+/// (SPEC.md: "including in accessible names"). The plain-string case guards every existing question, which passes its
+/// title as app words and must draw and be named as before.
+///
+/// Specification: for every value in the spoofing corpus, a question titled with a [`HostSentence`] "Set up host ·
+/// <value>" is named, centered and anchored alike, "Set up host · " followed by the escaped value, which is the
+/// sentence's accessible name; nothing the question paints holds a presentation-unsafe character; centered, the value
+/// is painted in its escaped presentation, and the title is one `Label` node under its id with that same name. A
+/// question titled with a plain string is
+/// named by that string in both, and paints it as one line when centered.
+#[gpui::test]
+fn a_title_that_names_a_host_value_is_drawn_and_named_escaped(cx: &mut TestAppContext) {
+    let (cx, row) = open_row(cx);
+    for (raw, shown) in SPOOFING_CORPUS {
+        let title = HostSentence::new("prompt-title")
+            .text("Set up host · ")
+            .host(&HostText::from_host(*raw));
+        let expected = format!("Set up host · {shown}");
+        assert_eq!(title.accessible_name().as_ref(), expected, "the premise");
+        for (kind, presentation) in row.presentations() {
+            let (asked, nodes) = ask_and_record_as(cx, presentation, titled(title.clone()));
+            assert_eq!(
+                question_name(&nodes),
+                Some(expected.clone()),
+                "{kind}: the question's name for {shown:?}"
+            );
+            let texts = painted_in_question(cx);
+            assert!(
+                !texts.iter().any(|text| text
+                    .chars()
+                    .any(farhelm_proto::text::is_presentation_unsafe)),
+                "{kind}: nothing painted holds a hidden character; painted: {texts:?}"
+            );
+            if kind == "centered" {
+                assert!(
+                    texts.iter().any(|text| text == shown),
+                    "the value is painted escaped; painted: {texts:?}"
+                );
+                let sentence = nodes
+                    .iter()
+                    .find(|node| node.element_id.as_deref() == Some("prompt-title"));
+                assert_eq!(
+                    sentence
+                        .map(|node| (node.role, node.label.as_deref().map(ToString::to_string))),
+                    Some((Some(Role::Label), Some(expected.clone()))),
+                    "the title is the sentence's one labelled node"
+                );
+            }
+            cx.update(|window, cx| asked.cancel(window, cx));
+            settle(cx);
+        }
+    }
+    for (kind, presentation) in row.presentations() {
+        let (asked, nodes) = ask_and_record_as(cx, presentation, titled("Set up host"));
+        assert_eq!(
+            question_name(&nodes).as_deref(),
+            Some("Set up host"),
+            "{kind}: a string title names it"
+        );
+        if kind == "centered" {
+            let texts = painted_in_question(cx);
+            assert!(
+                texts.iter().any(|text| text == "Set up host"),
+                "painted as given; painted: {texts:?}"
+            );
+        }
+        cx.update(|window, cx| asked.cancel(window, cx));
+        settle(cx);
+    }
+}
+
+/// Why this matters: an inline question draws its title as its heading (the YOLO confirmation's red one) and names
+/// itself by it, a second place a title naming a host value must stay escaped.
+///
+/// Specification: an inline question titled with a [`HostSentence`] naming a value with a right-to-left override is
+/// named with the value escaped, which is the sentence's accessible name, and paints the value escaped.
+#[gpui::test]
+fn an_inline_title_that_names_a_host_value_is_drawn_and_named_escaped(cx: &mut TestAppContext) {
+    let (cx, launcher) = open_launcher(cx);
+    let title = HostSentence::new("prompt-title")
+        .text("Set up host · ")
+        .host(&HostText::from_host("invoice\u{202E}fdp.exe"));
+    let _inline = ask_inline_in(cx, &launcher, titled(title), &Ran::default());
+    assert_eq!(
+        question_name(&frame(cx)).as_deref(),
+        Some("Set up host · invoice<U+202E>fdp.exe"),
+        "the inline question is named with the value escaped"
+    );
+    let texts = painted_in_question(cx);
+    assert!(
+        texts.iter().any(|text| text == "invoice<U+202E>fdp.exe"),
+        "painted escaped; painted: {texts:?}"
+    );
 }
 
 /// Ask `question("alpha")` below the row's menu button, counting confirmations in `sent`.
