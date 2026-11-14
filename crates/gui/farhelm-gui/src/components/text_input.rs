@@ -5,7 +5,8 @@
 //! inputs. Two things are Farhelm's: the label and hover help every control must have, and Kit's built-in right-click
 //! menu, which is turned off because the old app's release builds had no right-click menu on text (browser-behavior
 //! inventory, entry B1). The only ways to get an input's state are [`TextInputState::new`],
-//! [`TextInputState::new_keeping_line_breaks`] and [`TextInputState::new_growing`], so no input can skip that.
+//! [`TextInputState::new_masked`], [`TextInputState::new_keeping_line_breaks`] and [`TextInputState::new_growing`], so
+//! no input can skip that.
 //!
 //! An editor learns what happens in the field through [`TextInputState::subscribe`]: every edit the user makes
 //! ([`TextInputEvent::Changed`], which a draft mirrors) and Enter ([`TextInputEvent::Submitted`], which saves). Kit's
@@ -127,8 +128,25 @@ impl TextInputState {
     /// A new, empty single-line input state with Kit's right-click menu turned off. Line breaks inserted in any way
     /// are dropped (see the module docs).
     pub fn new(window: &mut Window, cx: &mut App) -> Self {
+        Self::line(false, window, cx)
+    }
+
+    /// A new, empty single-line input state whose text draws masked, for a secret the user types but nobody should
+    /// read over their shoulder (the old `type="password"` fields: the ntfy access token). It is [`Self::new`]'s field
+    /// otherwise, with the same events, line-break stripping and right-click menu turned off.
+    pub fn new_masked(window: &mut Window, cx: &mut App) -> Self {
+        Self::line(true, window, cx)
+    }
+
+    /// The single-line field behind [`Self::new`] and [`Self::new_masked`]: Kit's input with its right-click menu off,
+    /// its text drawn masked when `masked` is set.
+    fn line(masked: bool, window: &mut Window, cx: &mut App) -> Self {
         TextInputState(
-            Field::Line(cx.new(|cx| InputState::new(window, cx).context_menu(false))),
+            Field::Line(cx.new(|cx| {
+                InputState::new(window, cx)
+                    .context_menu(false)
+                    .masked(masked)
+            })),
             Rc::new(RefCell::new(SharedString::default())),
             Rc::new(Cell::new(false)),
         )

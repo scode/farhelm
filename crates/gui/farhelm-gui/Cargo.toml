@@ -48,6 +48,9 @@ serde.workspace = true
 # Kit's theme is configured from JSON (`ThemeConfig`); the theme module projects Farhelm's tokens onto it.
 serde_json.workspace = true
 tracing.workspace = true
+# For comparing two server addresses by origin the way the helm does (Settings' ntfy form says before saving whether a
+# saved token goes with a new server). Already built for the terminal's grid model, so naming it adds no crate.
+url.workspace = true
 
 [dev-dependencies]
 # The fake helm and fake terminal streams GUI tests run against. Only here, so the app itself never compiles them.
