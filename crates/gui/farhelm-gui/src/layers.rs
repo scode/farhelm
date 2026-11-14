@@ -58,6 +58,7 @@ use gpui::{
 };
 
 use crate::actions;
+use crate::bootstrap::{installed, installed_mut};
 use crate::focus::{self, Mark};
 use crate::theme::{self, metrics};
 use crate::ticker;
@@ -149,9 +150,7 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
         warm: false,
         cool_down: None,
     });
-    // Checked first: `global_mut` panics on a missing global, and a bare test fixture may not have installed it.
-    if cx.has_global::<Windows>() {
-        let windows = cx.global_mut::<Windows>();
+    if let Some(windows) = installed_mut::<Windows>(cx) {
         windows.0.retain(|_, stack| stack.upgrade().is_some());
         windows.0.insert(handle.window_id(), stack.downgrade());
     }
@@ -163,7 +162,7 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
 }
 
 fn stack(window: &Window, cx: &App) -> Option<Entity<LayerStack>> {
-    cx.try_global::<Windows>()?
+    installed::<Windows>(cx)?
         .0
         .get(&window.window_handle().window_id())?
         .upgrade()
@@ -522,7 +521,7 @@ pub fn close(id: LayerId, window: &mut Window, cx: &mut App) {
 /// traps Tab away from them. Focus follows the ordinary close rule, returning to what held it when the bottom layer
 /// opened (and going home once that is no longer drawn). The tooltip is left alone: it goes with its control.
 pub fn close_all(cx: &mut App) {
-    let Some(windows) = cx.try_global::<Windows>() else {
+    let Some(windows) = installed::<Windows>(cx) else {
         return;
     };
     let stacks: Vec<Entity<LayerStack>> =

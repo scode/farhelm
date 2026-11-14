@@ -30,7 +30,13 @@ pub(crate) fn current() -> TabReach {
 /// navigation switch writes: `2` when it is on (`3` on older systems, whose "All controls" choice set the same bit), `0`
 /// or absent when it is off. Tab reaches every control exactly when that bit is set. Kept separate from the read so the
 /// rule is testable on any platform.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg_attr(
+    not(target_os = "macos"),
+    allow(
+        dead_code,
+        reason = "only the macOS read calls it; elsewhere it is kept, with its tests, so the rule is testable there"
+    )
+)]
 pub(crate) fn from_keyboard_ui_mode(mode: Option<i64>) -> TabReach {
     match mode {
         Some(mode) if mode & 2 != 0 => TabReach::EveryControl,

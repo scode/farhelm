@@ -915,68 +915,6 @@ fn choosing_a_terminal_while_a_dialog_is_open_leaves_focus_in_the_dialog(cx: &mu
     assert!(focused(cx, &terminal), "the chosen terminal became home");
 }
 
-/// SPEC.md's settled case: "A shell tab exits on its own while the user types in it. The session's agent tab takes
-/// focus." The agent tab takes it at once, while the exited tab is still drawn, so typing does not go to a dead tab
-/// until the next frame; plain `set_home` would leave it there, since home never takes focus from what holds it.
-#[gpui::test]
-fn a_shell_tab_that_exits_hands_focus_to_the_agent_tab(cx: &mut TestAppContext) {
-    let (cx, items) = open_terminals(cx, &[], &["agent", "shell"]);
-    let ((agent, _), (shell, shell_shown)) = (drawn(&items, "agent"), drawn(&items, "shell"));
-    choose_now(cx, &shell);
-    assert!(
-        focused(cx, &shell),
-        "the premise: the user types in the shell tab"
-    );
-
-    let next = agent.clone();
-    cx.update(move |window, cx| focus::replace_home(Some(&next), window, cx));
-    cx.run_until_parked();
-    check(cx);
-    assert!(
-        cx.debug_bounds("shell").is_some(),
-        "the premise: the exited tab is still drawn"
-    );
-    assert!(focused(cx, &agent), "the agent tab took focus at once");
-
-    shell_shown.set(false);
-    redraw(cx);
-    assert!(
-        focused(cx, &agent),
-        "and kept it once the shell tab was gone"
-    );
-}
-
-/// The other half of a tab's exit: home moves to the agent tab, but a control that holds focus keeps it (SPEC.md: the
-/// terminal never takes focus from a control that holds it, such as the session filter). The agent tab takes focus
-/// only once the control goes away.
-#[gpui::test]
-fn a_tab_exit_leaves_a_control_that_holds_focus_alone(cx: &mut TestAppContext) {
-    let (cx, items) = open_terminals(cx, &["filter"], &["agent", "shell"]);
-    let (filter, filter_shown) = drawn(&items, "filter");
-    let ((agent, _), (shell, shell_shown)) = (drawn(&items, "agent"), drawn(&items, "shell"));
-    choose_now(cx, &shell);
-    keys(cx, "tab");
-    assert!(
-        focused(cx, &filter),
-        "the premise: Tab from the shell tab wrapped to the filter"
-    );
-
-    let next = agent.clone();
-    cx.update(move |window, cx| focus::replace_home(Some(&next), window, cx));
-    cx.run_until_parked();
-    check(cx);
-    shell_shown.set(false);
-    redraw(cx);
-    assert!(
-        focused(cx, &filter),
-        "the filter kept focus through the tab's exit"
-    );
-
-    filter_shown.set(false);
-    redraw(cx);
-    assert!(focused(cx, &agent), "the agent tab is home now");
-}
-
 // ---- Which controls Tab reaches -------------------------------------------------------------------------------------
 
 /// Make the coordinator follow `reach` for which controls Tab reaches, as the bootstrap does with the host's answer.

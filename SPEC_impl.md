@@ -619,6 +619,12 @@ One bootstrap installs all app-wide state (globals, the channel, the stores, the
 `unwrap` or `expect` in code that platform callbacks can reach: a panic inside an AppKit callback aborts the process.
 State is saved continuously, because GPUI gives quit handlers only 200 ms.
 
+A foundation reads the global the bootstrap installed for it through one bootstrap helper (`bootstrap::installed`),
+never through GPUI's panicking `global`. A missing global fails an assertion in a debug build, which every test and
+agent build is, and in a release build is logged while the caller goes on without it, so an omission in the bootstrap
+fails tests instead of quietly turning a feature off. State that is optional by design (the helm connection, which some
+tests never start, and the agent startup overrides) keeps its own lookup.
+
 Enforced by denying clippy's `unwrap_used` and `expect_used` crate-wide in the GUI crates, the desktop binary's crate
 and the helm client, with tests exempt (each crate's `clippy.toml`), and by `scripts/check-crate-layering.py` failing
 when one of those crates loses the denial.

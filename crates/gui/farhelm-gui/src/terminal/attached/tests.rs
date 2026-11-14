@@ -4,8 +4,9 @@
 //! cursor blink.
 //!
 //! The fake plays the helm (`farhelm_helm_client::fake::terminal`); GPUI's deterministic executor cannot wait on a real
-//! socket. The owner is drawn in a pane of a fixed size inside a bootstrapped window, so its first fit is a real
-//! measurement and its Take control is a real button.
+//! socket. The owner is drawn in a pane of a fixed size inside a window from the shared harness (`test_support`), so its
+//! first fit is a real measurement, its Take control is a real button, and the focus and layer invariants are checked
+//! after every step.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -20,12 +21,12 @@ use gpui::{
     AppContext as _, Context, Entity, KeyBinding, KeyUpEvent, Keystroke, Modifiers, ParentElement,
     Render, Styled, TestAppContext, VisualTestContext, Window, div, point, px,
 };
-use gpui_component::Root;
 
 use super::*;
 use crate::actions::{CONTEXT, DeleteSession, TERMINAL_KEYS, THIS_PLATFORM, owner_on};
 use crate::session::{self, Connection};
-use crate::{focus, layers, test_support};
+use crate::test_support::{self, advance, click, keys, redraw, settle};
+use crate::{focus, root};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
@@ -41,23 +42,41 @@ fn metrics() -> CellMetrics {
 const SECOND_PANE: (f32, f32) = (400., 200.);
 
 /// The window's root: a pane of the size in `size` holding the owner (and, in tests that need one, a second, smaller
-/// pane below it), with the focus and layer foundations attached as in the app, so the Take control button and focus
-/// behave as they do there. It handles the session Delete shortcut's action, as the session view will, counting its
-/// runs.
+/// pane below it), wired through [`root`] as the app's root views are, so the Take control button and focus behave as
+/// they do there. It handles the session Delete shortcut's action on the root element, as the session view will,
+/// counting its runs. Its own root view rather than [`test_support::open`]'s scene because the test changes its size
+/// and reads its counts.
 struct Pane {
     owner: Entity<AttachedTerminal>,
     second: Option<Entity<AttachedTerminal>>,
     size: Rc<Cell<(f32, f32)>>,
     deletes: Rc<Cell<usize>>,
-    _layers: layers::Attachment,
-    focus: focus::Attachment,
+    root: root::Attachment,
+}
+
+impl Pane {
+    /// The pane for `owner` (and `second`) at [`PANE`]'s size, attached to the window it is built in.
+    fn new(
+        owner: Entity<AttachedTerminal>,
+        second: Option<Entity<AttachedTerminal>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Pane {
+        Pane {
+            owner,
+            second,
+            size: Rc::new(Cell::new(PANE)),
+            deletes: Rc::new(Cell::new(0)),
+            root: root::attach(window, cx),
+        }
+    }
 }
 
 impl Render for Pane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (width, height) = self.size.get();
         let deletes = self.deletes.clone();
-        focus::root(div(), &self.focus)
+        let content = div()
             .size_full()
             .flex()
             .flex_col()
@@ -75,8 +94,8 @@ impl Render for Pane {
                     .w(px(SECOND_PANE.0))
                     .h(px(SECOND_PANE.1))
                     .child(second)
-            }))
-            .children(layers::overlay(window, cx))
+            }));
+        root::wrap(content, &self.root, window, cx)
     }
 }
 
@@ -97,8 +116,11 @@ struct Harness<'a> {
     deletes: Rc<Cell<usize>>,
 }
 
-/// A bootstrapped app connected to the fake helm, with an owner made for its UI session and drawn once. The owner's
-/// opener records the attach it was asked for and hands out a fake stream for it.
+/// A bootstrapped app connected to the fake helm, with an owner made for its UI session and drawn in a window the shared
+/// harness opened ([`test_support::open_view`], which has run the per-step checks on its first frame). The owner's
+/// opener records the attach it was asked for and hands out a fake stream for it. Every step a test takes after this
+/// ends in one of the harness's step helpers ([`settle`] for a fake's delivery or a raw key event), so the checks run
+/// after each.
 fn harness(cx: &mut TestAppContext) -> Harness<'_> {
     harness_with(cx, false)
 }
@@ -113,44 +135,46 @@ fn harness_with(cx: &mut TestAppContext, two: bool) -> Harness<'_> {
     let session = cx.update(|cx| connection.read(cx).session().cloned().unwrap());
     let opened: Opened = Rc::new(RefCell::new(None));
     let second_opened: Opened = Rc::new(RefCell::new(None));
-    let size = Rc::new(Cell::new(PANE));
-    let deletes = Rc::new(Cell::new(0));
-    let (pane_size, pane_deletes) = (size.clone(), deletes.clone());
-    let mut owners = Vec::new();
     let slots = [opened.clone(), second_opened.clone()];
-    let (_, cx) = cx.add_window_view(|window, cx| {
-        for slot in slots.into_iter().take(if two { 2 } else { 1 }) {
-            let target = TerminalTarget {
-                session: "s1".into(),
-                tab: None,
-                lease: AttachmentLease::new(),
-            };
-            let open = opener(slot);
-            owners.push(cx.new(|cx| AttachedTerminal::new(&session, target, metrics(), open, cx)));
-        }
-        let pane = cx.new(|cx| Pane {
-            owner: owners[0].clone(),
-            second: owners.get(1).cloned(),
-            size: pane_size,
-            deletes: pane_deletes,
-            _layers: layers::attach(window, cx),
-            focus: focus::attach(window, cx),
-        });
-        Root::new(pane, window, cx)
+    let (pane, cx) = test_support::open_view(cx, |window, cx| {
+        let [first, second] = slots;
+        let first = cx.new(|cx| owner(&session, first, cx));
+        let second = two.then(|| cx.new(|cx| owner(&session, second, cx)));
+        Pane::new(first, second, window, cx)
     });
-    cx.update(|window, _| window.activate_window());
-    cx.run_until_parked();
-    let second = owners.get(1).cloned().map(|owner| (owner, second_opened));
+    let (owner, second, size, deletes) = cx.update(|_, cx| {
+        let pane = pane.read(cx);
+        (
+            pane.owner.clone(),
+            pane.second.clone(),
+            pane.size.clone(),
+            pane.deletes.clone(),
+        )
+    });
     Harness {
         cx,
         helm,
         connection,
-        owner: owners.remove(0),
+        owner,
         size,
         opened,
-        second,
+        second: second.map(|owner| (owner, second_opened)),
         deletes,
     }
+}
+
+/// An owner of session `s1`'s agent terminal for `session`, at [`metrics`], whose opener reports into `slot`.
+fn owner(
+    session: &Entity<UiSession>,
+    slot: Opened,
+    cx: &mut Context<AttachedTerminal>,
+) -> AttachedTerminal {
+    let target = TerminalTarget {
+        session: "s1".into(),
+        tab: None,
+        lease: AttachmentLease::new(),
+    };
+    AttachedTerminal::new(session, target, metrics(), opener(slot), cx)
 }
 
 /// An opener that records the attach it was asked for in `slot` and hands out a fake stream for it.
@@ -175,12 +199,6 @@ impl Harness<'_> {
         std::cell::RefMut::map(self.opened.borrow_mut(), |opened| {
             &mut opened.as_mut().expect("the owner opened no stream").0
         })
-    }
-
-    /// Let the app drain what the fake sent and redraw, then run the harness's per-step checks.
-    fn settle(&mut self) {
-        self.cx.run_until_parked();
-        self.cx.update(test_support::check_invariants);
     }
 
     fn read<R>(&mut self, read: impl FnOnce(&AttachedTerminal, &App) -> R) -> R {
@@ -211,7 +229,7 @@ impl Harness<'_> {
             self.fake().output(message);
         }
         self.fake().replay_complete();
-        self.settle();
+        settle(self.cx);
     }
 
     /// [`Harness::attach_showing`], with the screen's cursor blinking.
@@ -228,7 +246,7 @@ impl Harness<'_> {
             self.fake().output(message);
         }
         self.fake().replay_complete();
-        self.settle();
+        settle(self.cx);
     }
 
     /// The user chooses this terminal's session: the focus coordinator makes `owner` home and focuses it.
@@ -240,7 +258,7 @@ impl Harness<'_> {
             let chosen = focus::Mark::take(cx);
             focus::choose_terminal(&handle, &chosen, window, cx);
         });
-        self.settle();
+        settle(self.cx);
         assert!(
             self.focused(owner),
             "the premise: the chosen terminal holds focus"
@@ -255,12 +273,6 @@ impl Harness<'_> {
         self.cx.update(|window, _| handle.is_focused(window))
     }
 
-    /// Press each key in `chords` (GPUI's syntax, space-separated) as a fresh press, then settle.
-    fn type_keys(&mut self, chords: &str) {
-        self.cx.simulate_keystrokes(chords);
-        self.settle();
-    }
-
     /// A key-down for `chord`: a fresh press, or with `held` an auto-repeat of the key already held down, which is how
     /// the platform reports one. Filled in as GPUI's own simulated typing fills it (the text a plain key types).
     fn key_down(&mut self, chord: &'static str, held: bool) {
@@ -270,7 +282,7 @@ impl Harness<'_> {
             is_held: held,
             prefer_character_input: false,
         });
-        self.settle();
+        settle(self.cx);
     }
 
     /// Hold `chord` down for a press and two auto-repeats, then release it.
@@ -282,7 +294,7 @@ impl Harness<'_> {
             native_key: None,
             keystroke: keystroke(chord),
         });
-        self.settle();
+        settle(self.cx);
     }
 
     /// The input the owner sent since the last call, with whether the stream carried each to the attachment it was
@@ -306,8 +318,7 @@ impl Harness<'_> {
     /// Let `ticks` animation ticks pass, one at a time.
     fn ticks(&mut self, ticks: u32) {
         for _ in 0..ticks {
-            self.cx.executor().advance_clock(ticker::TICK);
-            self.settle();
+            advance(self.cx, ticker::TICK);
         }
     }
 }
@@ -426,12 +437,10 @@ fn the_stream_opens_at_the_fitted_size(cx: &mut TestAppContext) {
 /// once the attachment is live, which it once did to work around a client that dropped that resize.
 #[gpui::test]
 fn a_new_size_is_sent_once(cx: &mut TestAppContext) {
-    let mut h = harness(cx);
+    let h = harness(cx);
     h.size.set((PANE.0 - 40., PANE.1));
-    h.cx.update(|window, _| window.refresh());
-    h.settle();
-    h.cx.update(|window, _| window.refresh());
-    h.settle();
+    redraw(h.cx);
+    redraw(h.cx);
     let smaller = (FITTED.0 - 4, FITTED.1);
     assert_eq!(
         h.fake().received(),
@@ -449,7 +458,7 @@ fn a_new_size_is_sent_once(cx: &mut TestAppContext) {
         h.fake().output(message);
     }
     h.fake().replay_complete();
-    h.settle();
+    settle(h.cx);
     assert_eq!(
         h.fake().received(),
         [],
@@ -457,8 +466,7 @@ fn a_new_size_is_sent_once(cx: &mut TestAppContext) {
     );
     // Live: a later resize goes out once and is not repeated.
     h.size.set(PANE);
-    h.cx.update(|window, _| window.refresh());
-    h.settle();
+    redraw(h.cx);
     assert_eq!(
         h.fake().received(),
         [FakeTerminalRequest::Resize {
@@ -481,7 +489,7 @@ fn a_replay_is_shown_only_once_complete(cx: &mut TestAppContext) {
     assert!(h.read(|owner, _| owner.is_live()));
 
     h.fake().drop_link();
-    h.settle();
+    settle(h.cx);
     assert_eq!(
         h.status().map(|line| line.words),
         Some("Session unavailable — reconnecting".into())
@@ -489,7 +497,7 @@ fn a_replay_is_shown_only_once_complete(cx: &mut TestAppContext) {
     let asked = h.fake().attach();
     h.fake()
         .output(screen(asked.cols, asked.rows, "second", serde_json::Value::Null)[0].clone());
-    h.settle();
+    settle(h.cx);
     // The attachment is announced: no status line, the old screen still up, not live.
     assert_eq!(h.status(), None);
     assert!(!h.read(|owner, _| owner.is_live()));
@@ -501,7 +509,7 @@ fn a_replay_is_shown_only_once_complete(cx: &mut TestAppContext) {
     {
         h.fake().output(message);
     }
-    h.settle();
+    settle(h.cx);
     assert_eq!(h.text().as_deref().map(first_line), Some("first"));
     assert_eq!(
         (h.renders("attached-terminal"), h.renders("terminal")),
@@ -509,7 +517,7 @@ fn a_replay_is_shown_only_once_complete(cx: &mut TestAppContext) {
     );
 
     h.fake().replay_complete();
-    h.settle();
+    settle(h.cx);
     assert_eq!(h.text().as_deref().map(first_line), Some("second"));
     assert_eq!(h.renders("attached-terminal"), 1);
     assert!(h.read(|owner, _| owner.is_live()));
@@ -522,7 +530,7 @@ fn a_replay_is_shown_only_once_complete(cx: &mut TestAppContext) {
     }
     h.fake()
         .detach(Some(DetachCode::TakenOver), "another window took it");
-    h.settle();
+    settle(h.cx);
     assert_eq!(h.text().as_deref().map(first_line), Some("second"));
 }
 
@@ -548,7 +556,7 @@ fn a_flood_is_delivered_in_bounded_turns_that_yield(cx: &mut TestAppContext) {
     let _behind = h.cx.update(|_, cx| {
         cx.spawn(async move |cx| witness.set(Some(cx.update(|cx| owner.read(cx).turns))))
     });
-    h.settle();
+    settle(h.cx);
     assert_eq!(
         seen.get(),
         Some(turns_before + 1),
@@ -572,7 +580,7 @@ fn a_programs_clipboard_write_reaches_the_clipboard(cx: &mut TestAppContext) {
     )
     .unwrap();
     h.fake().output(write);
-    h.settle();
+    settle(h.cx);
     assert_eq!(
         h.cx.read_from_clipboard().and_then(|item| item.text()),
         Some("copied".into())
@@ -591,7 +599,7 @@ fn detached_and_refused_offer_take_control(cx: &mut TestAppContext) {
     h.attach_showing("screen");
     h.fake()
         .detach(Some(DetachCode::TakenOver), "taken over\u{202e}");
-    h.settle();
+    settle(h.cx);
     let line = h.status().unwrap();
     assert_eq!(line.words, "Detached: ");
     assert_eq!(
@@ -602,9 +610,7 @@ fn detached_and_refused_offer_take_control(cx: &mut TestAppContext) {
     // The screen stays up under the banner.
     assert_eq!(h.text().as_deref().map(first_line), Some("screen"));
 
-    let at = h.cx.debug_bounds("terminal-take-control").unwrap().center();
-    h.cx.simulate_click(at, Modifiers::none());
-    h.settle();
+    click(h.cx, "terminal-take-control");
     // The fake acts on the request when asked, and then tells the owner it is attaching again.
     assert_eq!(h.fake().phase(), FakePhase::Attaching);
     assert!(
@@ -612,27 +618,25 @@ fn detached_and_refused_offer_take_control(cx: &mut TestAppContext) {
             .received()
             .contains(&FakeTerminalRequest::TakeControl)
     );
-    h.settle();
+    settle(h.cx);
     assert_eq!(h.status(), None);
     assert!(h.fake().attach().take_control);
 
     h.fake().drop_link();
     h.fake().refuse(401);
-    h.settle();
+    settle(h.cx);
     let line = h.status().unwrap();
     assert_eq!(line.words, "Connection error");
     assert!(line.take_control);
     assert!(h.cx.debug_bounds("terminal-take-control").is_some());
 
-    let at = h.cx.debug_bounds("terminal-take-control").unwrap().center();
-    h.cx.simulate_click(at, Modifiers::none());
-    h.settle();
+    click(h.cx, "terminal-take-control");
     h.fake().phase();
-    h.settle();
+    settle(h.cx);
     h.attach_showing("tab");
     h.fake()
         .detach(Some(DetachCode::TabClosed), "the tab was closed");
-    h.settle();
+    settle(h.cx);
     assert!(!h.status().unwrap().take_control);
     assert!(h.cx.debug_bounds("terminal-take-control").is_none());
 }
@@ -649,7 +653,7 @@ fn a_protocol_fault_closes_the_stream_with_an_error_line(cx: &mut TestAppContext
     )
     .unwrap();
     h.fake().output(second_hello);
-    h.settle();
+    settle(h.cx);
     let line = h.status().unwrap();
     assert_eq!(
         line.words,
@@ -681,13 +685,13 @@ fn a_replayed_exit_shows_its_line_with_the_screen(cx: &mut TestAppContext) {
     )
     .into_iter();
     h.fake().output(replay.next().unwrap());
-    h.settle();
+    settle(h.cx);
     h.reset_renders();
     for message in replay {
         h.fake().output(message);
     }
     h.fake().replay_complete();
-    h.settle();
+    settle(h.cx);
     assert!(h.cx.debug_bounds("terminal-exit").is_some());
     assert_eq!(h.renders("attached-terminal"), 1);
 }
@@ -703,7 +707,7 @@ fn a_live_exit_shows_its_line(cx: &mut TestAppContext) {
         "alt_screen":false,"default_fg":null,"default_bg":null,"history_trimmed":false,"exit":{"signal":15}}))
     .unwrap();
     h.fake().output(exited);
-    h.settle();
+    settle(h.cx);
     assert!(h.cx.debug_bounds("terminal-exit").is_some());
 }
 
@@ -755,7 +759,7 @@ fn the_status_line_keeps_the_newest_rows_in_view(cx: &mut TestAppContext) {
     };
     assert_eq!(placed(&mut h).0.lift, 0.);
     h.fake().detach(Some(DetachCode::TakenOver), "taken over");
-    h.settle();
+    settle(h.cx);
     assert!(h.status().is_some(), "the status line shows");
     let (placement, room) = placed(&mut h);
     assert!(placement.lift > 0., "{placement:?} in {room}");
@@ -776,7 +780,7 @@ fn a_reset_retires_the_owner(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.attach_showing("old connection");
     h.helm.break_channel();
-    h.settle();
+    settle(h.cx);
     assert!(h.cx.update(|_, cx| h.connection.read(cx).session().is_none()));
     assert_eq!(h.fake().phase(), FakePhase::Closed);
     assert_eq!(h.text(), None);
@@ -813,7 +817,7 @@ fn the_probe_reads_the_focused_terminal(cx: &mut TestAppContext) {
         .unwrap()
         .0
         .replay_complete();
-    h.settle();
+    settle(h.cx);
     assert_eq!(probe(&mut h), None, "no terminal holds focus");
 
     let first = h.owner.clone();
@@ -839,30 +843,11 @@ fn the_probe_prefers_the_active_windows_terminal(cx: &mut TestAppContext) {
         h.cx.update(|_, cx| connection.read(cx).session().cloned().unwrap());
     let opened: Opened = Rc::new(RefCell::new(None));
     let slot = opened.clone();
-    let mut made = None;
-    let window = h.cx.cx.add_window(|window, cx| {
-        let target = TerminalTarget {
-            session: "s1".into(),
-            tab: None,
-            lease: AttachmentLease::new(),
-        };
-        let owner =
-            cx.new(|cx| AttachedTerminal::new(&session, target, metrics(), opener(slot), cx));
-        made = Some(owner.clone());
-        let pane = cx.new(|cx| Pane {
-            owner,
-            second: None,
-            size: Rc::new(Cell::new(PANE)),
-            deletes: Rc::new(Cell::new(0)),
-            _layers: layers::attach(window, cx),
-            focus: focus::attach(window, cx),
-        });
-        Root::new(pane, window, cx)
+    let (pane, mut other) = test_support::another_window(h.cx, |window, cx| {
+        let owner = cx.new(|cx| owner(&session, slot, cx));
+        Pane::new(owner, None, window, cx)
     });
-    let second = made.unwrap();
-    let mut other = VisualTestContext::from_window(window.into(), &h.cx.cx);
-    other.update(|window, _| window.activate_window());
-    other.run_until_parked();
+    let second = other.update(|_, cx| pane.read(cx).owner.clone());
     {
         let mut opened = opened.borrow_mut();
         let fake = &mut opened
@@ -875,12 +860,12 @@ fn the_probe_prefers_the_active_windows_terminal(cx: &mut TestAppContext) {
         }
         fake.replay_complete();
     }
-    other.run_until_parked();
+    settle(&mut other);
     other.update(|window, cx| {
         let handle = second.read(cx).focus_handle().clone();
         focus::choose_terminal(&handle, &focus::Mark::take(cx), window, cx);
     });
-    other.run_until_parked();
+    settle(&mut other);
     let probe = |h: &mut Harness| {
         h.cx.cx
             .update(probe::terminal_text)
@@ -899,7 +884,7 @@ fn the_probe_prefers_the_active_windows_terminal(cx: &mut TestAppContext) {
     );
 
     h.cx.update(|window, _| window.activate_window());
-    h.settle();
+    settle(h.cx);
     assert_eq!(
         probe(&mut h).as_deref(),
         Some("first"),
@@ -930,7 +915,7 @@ fn clicking_or_choosing_a_terminal_focuses_it(cx: &mut TestAppContext) {
     );
     // The first pane sits at the window's top left; both panes carry the same debug selector.
     h.cx.simulate_click(point(px(PANE.0 / 2.), px(PANE.1 / 2.)), Modifiers::none());
-    h.settle();
+    settle(h.cx);
     assert!(
         h.focused(&first),
         "a click focuses the terminal it lands on"
@@ -948,11 +933,11 @@ fn tab_moves_through_the_status_line_into_the_terminal(cx: &mut TestAppContext) 
     let mut h = harness(cx);
     h.attach_showing("screen");
     h.fake().detach(Some(DetachCode::TakenOver), "taken over");
-    h.settle();
+    settle(h.cx);
     let owner = h.owner.clone();
     assert!(h.cx.debug_bounds("terminal-take-control").is_some());
     let before = h.cx.update(|window, cx| window.focused(cx));
-    h.type_keys("tab");
+    keys(h.cx, "tab");
     // The window's tab stops are the button and the terminal (the root, where focus rested, is not one), so focus
     // that moved and is not on the terminal is on the button.
     let after = h.cx.update(|window, cx| window.focused(cx));
@@ -960,12 +945,12 @@ fn tab_moves_through_the_status_line_into_the_terminal(cx: &mut TestAppContext) 
         after.is_some() && after != before && !h.focused(&owner),
         "the premise: Tab reached the button first"
     );
-    h.type_keys("tab");
+    keys(h.cx, "tab");
     assert!(
         h.focused(&owner),
         "Tab moved on from the button into the terminal"
     );
-    h.type_keys("tab");
+    keys(h.cx, "tab");
     assert!(h.focused(&owner), "Tab in the terminal is the program's");
 }
 
@@ -978,7 +963,7 @@ fn program_keys_are_sent_to_the_live_attachment(cx: &mut TestAppContext) {
     h.attach_showing("screen");
     let owner = h.owner.clone();
     h.choose(&owner);
-    h.type_keys("a enter shift-a space");
+    keys(h.cx, "a enter shift-a space");
     assert_eq!(
         h.sent(),
         [
@@ -991,7 +976,7 @@ fn program_keys_are_sent_to_the_live_attachment(cx: &mut TestAppContext) {
 
     h.fake().drop_link();
     h.attach_showing("again");
-    h.type_keys("b");
+    keys(h.cx, "b");
     assert_eq!(h.sent(), [(key("b", 66), true)]);
 }
 
@@ -1003,42 +988,42 @@ fn nothing_is_sent_unless_the_terminal_is_live(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     let owner = h.owner.clone();
     h.choose(&owner);
-    h.type_keys("a");
+    keys(h.cx, "a");
     assert_eq!(h.sent(), [], "attaching");
 
     let asked = h.fake().attach();
     let mut replay = screen(asked.cols, asked.rows, "x", serde_json::Value::Null).into_iter();
     h.fake().output(replay.next().unwrap());
-    h.settle();
-    h.type_keys("b");
+    settle(h.cx);
+    keys(h.cx, "b");
     assert_eq!(h.sent(), [], "replaying");
     for message in replay {
         h.fake().output(message);
     }
     h.fake().replay_complete();
-    h.settle();
+    settle(h.cx);
     assert!(h.focused(&owner) && h.read(|owner, _| owner.is_live()));
-    h.type_keys("c");
+    keys(h.cx, "c");
     assert_eq!(h.sent(), [(key("c", 67), true)], "live");
 
     h.fake().drop_link();
-    h.settle();
-    h.type_keys("d");
+    settle(h.cx);
+    keys(h.cx, "d");
     assert_eq!(h.sent(), [], "reconnecting");
 
     h.attach_showing("y");
     h.fake().detach(Some(DetachCode::TakenOver), "taken over");
-    h.settle();
-    h.type_keys("e");
+    settle(h.cx);
+    keys(h.cx, "e");
     assert_eq!(h.sent(), [], "detached");
 
     h.owner
         .clone()
         .update(h.cx, |owner, cx| owner.take_control(cx));
-    h.settle();
+    settle(h.cx);
     h.fake().refuse(401);
-    h.settle();
-    h.type_keys("f");
+    settle(h.cx);
+    keys(h.cx, "f");
     assert!(h.focused(&owner), "the premise: still focused");
     assert_eq!(h.sent(), [], "refused");
 }
@@ -1059,10 +1044,10 @@ fn app_and_terminal_keys_never_reach_the_program(cx: &mut TestAppContext) {
         .collect();
     assert!(!kept.is_empty());
     for chord in kept {
-        h.type_keys(chord);
+        keys(h.cx, chord);
         assert_eq!(h.sent(), [], "{chord} reached the program");
     }
-    h.type_keys("x");
+    keys(h.cx, "x");
     assert_eq!(h.sent(), [(key("x", 88), true)]);
 }
 
@@ -1147,7 +1132,7 @@ fn the_cursor_blinks_only_while_focused(cx: &mut TestAppContext) {
     );
 
     h.cx.deactivate_window();
-    h.settle();
+    settle(h.cx);
     assert_eq!(
         h.phase(),
         CursorPhase {

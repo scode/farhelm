@@ -1,12 +1,13 @@
 //! Tests of the keymap where a terminal has focus: which keys reach the terminal, which stay Farhelm's, and that no
 //! chord prefix holds a key back (SPEC_impl.md, "Actions and keymap").
 //!
-//! Each test opens a window the way the app does (GPUI Kit's `Root` around a root view wired with [`focus::root`]),
-//! with the app's whole keymap from the bootstrap, and a terminal stand-in: an element in [`TERMINAL_CONTEXT`] whose
-//! key listener records every key that reaches it, as the terminal's will. Reaching the listener is not enough to show
-//! a key passed through, because GPUI lets a key go on when the binding that matched it has no handler or its handler
-//! declines (Farhelm's Dismiss with nothing open, Kit's Copy with no Kit selection). So the tests also read the
-//! keymap's resolution in the focused terminal's real context stack, which shows whether any binding would run at all.
+//! Each test opens its window through the shared harness ([`test_support::open_view`]: GPUI Kit's `Root` around a root
+//! view wired through [`crate::root`], with the app's whole keymap from the bootstrap), on a scene holding a terminal
+//! stand-in: an element in [`TERMINAL_CONTEXT`] whose key listener records every key that reaches it, as the
+//! terminal's will. Reaching the listener is not enough to show a key passed through, because GPUI lets a key go on
+//! when the binding that matched it has no handler or its handler declines (Farhelm's Dismiss with nothing open, Kit's
+//! Copy with no Kit selection). So the tests also read the keymap's resolution in the focused terminal's real context
+//! stack, which shows whether any binding would run at all.
 //!
 //! The last section tests the repeat guard: a held key's auto-repeats are key-down events with `is_held` set, sent
 //! with `simulate_event`, since `simulate_keystrokes` only ever sends fresh presses.
@@ -17,10 +18,9 @@ use std::time::Duration;
 
 use gpui::{
     Action as _, App, AppContext as _, Context, FocusHandle, InteractiveElement as _, IntoElement,
-    KeyBinding, KeyContext, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, ParentElement, Render,
-    Styled, TestAppContext, VisualTestContext, Window, actions, div, point, px,
+    KeyBinding, KeyContext, KeyDownEvent, KeyUpEvent, Keystroke, ParentElement, Render, Styled,
+    TestAppContext, VisualTestContext, Window, actions, div, point, px,
 };
-use gpui_component::Root;
 
 use crate::actions::{
     CONTEXT, DeleteSession, KeyOwner, RenameSession, TERMINAL_CONTEXT, TERMINAL_KEYS,
@@ -28,17 +28,19 @@ use crate::actions::{
 };
 use crate::components::{Button, HoverHelp, Role, TextInput, TextInputState};
 use crate::focus::{self, OnPress};
-use crate::{layers, test_support};
+use crate::{layers, root, test_support};
 use farhelm_input_mapping::Platform;
 
 actions!(keymap_tests, [Probe]);
 
 // ---- Harness ---------------------------------------------------------------------------------------------------------
 
-/// A root view wired like the main view, drawing a button (somewhere for Tab to go) and the terminal stand-in.
+/// The scene's root view: a button (somewhere for Tab to go) and the terminal stand-in, wired through [`root`] like the
+/// main view. Its own root view rather than [`test_support::open`]'s scene, because the actions it counts are handled
+/// on the root element, as Farhelm's root handles its own: with nothing else focused, focus rests on the root, and an
+/// action dispatched from there reaches only handlers on the root itself.
 struct Scene {
-    focus: focus::Attachment,
-    _layers: layers::Attachment,
+    root: root::Attachment,
     terminal: FocusHandle,
     button: FocusHandle,
     /// Every key that reached the terminal stand-in's listener, in order.
@@ -54,7 +56,7 @@ impl Render for Scene {
         let received = self.received.clone();
         let probes = self.probes.clone();
         let (deletes, renames) = (self.ran.clone(), self.ran.clone());
-        focus::root(div(), &self.focus)
+        let content = div()
             .size_full()
             .flex()
             .gap(px(8.))
@@ -84,8 +86,8 @@ impl Render for Scene {
                     }),
                 &self.terminal,
                 OnPress::Focus,
-            ))
-            .children(layers::overlay(window, cx))
+            ));
+        root::wrap(content, &self.root, window, cx)
     }
 }
 
@@ -98,61 +100,40 @@ struct Opened<'a> {
     ran: Rc<RefCell<Vec<&'static str>>>,
 }
 
-/// Open the scene, bootstrapped like the app, and focus the terminal stand-in by clicking it (a press focuses a
-/// terminal on every platform).
+/// Open the scene through the shared harness. Nothing holds focus but the root until a test focuses something.
 fn open(cx: &mut TestAppContext) -> Opened<'_> {
     test_support::install(cx);
-    let received = Rc::new(RefCell::new(Vec::new()));
-    let probes = Rc::new(Cell::new(0));
-    let ran = Rc::new(RefCell::new(Vec::new()));
-    let terminal = cx.update(|cx| cx.focus_handle().tab_stop(true));
-    let (scene_received, scene_probes, scene_ran, scene_terminal) = (
-        received.clone(),
-        probes.clone(),
-        ran.clone(),
-        terminal.clone(),
-    );
-    let (_, cx) = cx.add_window_view(|window, cx| {
-        let scene = cx.new(|cx| Scene {
-            focus: focus::attach(window, cx),
-            _layers: layers::attach(window, cx),
-            terminal: scene_terminal,
-            button: cx.focus_handle().tab_stop(true),
-            received: scene_received,
-            probes: scene_probes,
-            ran: scene_ran,
-        });
-        Root::new(scene, window, cx)
+    let (scene, cx) = test_support::open_view(cx, |window, cx| Scene {
+        root: root::attach(window, cx),
+        terminal: cx.focus_handle().tab_stop(true),
+        button: cx.focus_handle().tab_stop(true),
+        received: Rc::new(RefCell::new(Vec::new())),
+        probes: Rc::new(Cell::new(0)),
+        ran: Rc::new(RefCell::new(Vec::new())),
     });
-    // Simulated windows start inactive, and an inactive window has no focus path for keys to follow.
-    cx.update(|window, _| window.activate_window());
-    cx.run_until_parked();
-    let mut opened = Opened {
+    let (terminal, received, probes, ran) = cx.update(|_, cx| {
+        let scene = scene.read(cx);
+        (
+            scene.terminal.clone(),
+            scene.received.clone(),
+            scene.probes.clone(),
+            scene.ran.clone(),
+        )
+    });
+    Opened {
         cx,
         terminal,
         received,
         probes,
         ran,
-    };
-    opened.check();
-    opened
+    }
 }
 
 impl Opened<'_> {
-    /// Run the harness's per-step invariant checks (focus and layers), as every GUI test step does.
-    fn check(&mut self) {
-        self.cx.update(test_support::check_invariants);
-    }
-
     /// Click the terminal stand-in, which focuses it on every platform (a terminal is tracked with
     /// [`OnPress::Focus`]), and assert that it took focus.
     fn focus_terminal(&mut self) {
-        let at = match self.cx.debug_bounds("terminal") {
-            Some(bounds) => bounds.center(),
-            None => panic!("the terminal stand-in was not drawn"),
-        };
-        self.cx.simulate_click(at, Modifiers::none());
-        self.check();
+        test_support::click(self.cx, "terminal");
         assert!(
             self.terminal_focused(),
             "the premise: the terminal stand-in holds focus"
@@ -168,8 +149,7 @@ impl Opened<'_> {
     /// Press `chord` and return whether it reached the terminal's listener, as that same key, and nothing else did.
     fn reaches_terminal(&mut self, chord: &'static str) -> bool {
         self.received.borrow_mut().clear();
-        self.cx.simulate_keystrokes(chord);
-        self.check();
+        test_support::keys(self.cx, chord);
         let expected = parse(chord);
         let received = self.received.borrow();
         received.len() == 1
@@ -191,7 +171,7 @@ impl Opened<'_> {
             is_held: held,
             prefer_character_input: false,
         });
-        self.check();
+        test_support::settle(self.cx);
     }
 
     /// Send the key-up that releases `chord`.
@@ -200,7 +180,7 @@ impl Opened<'_> {
             native_key: None,
             keystroke: parse(chord),
         });
-        self.check();
+        test_support::settle(self.cx);
     }
 
     /// Hold `chord` down for a press and two auto-repeats, then release it.
@@ -458,7 +438,7 @@ fn escape_in_a_terminal_goes_to_the_program_and_leaves_a_tooltip_open(cx: &mut T
         opened.cx.update(|window, cx| {
             layers::show_tooltip_at(&owner, "help".into(), point(px(5.), px(5.)), window, cx)
         });
-        opened.cx.run_until_parked();
+        test_support::settle(opened.cx);
         opened
             .cx
             .update(|window, cx| layers::shown_tooltip(window, cx).is_some())
@@ -553,13 +533,12 @@ fn a_chord_prefix_holds_keys_back_only_in_a_context_that_contains_the_terminal(
 
     // GPUI gives up on a held chord key after a second only when that key alone is bound too or types text into an
     // element that accepts text input; Ctrl+K here is neither, so it waits for the next key with no time limit.
-    opened.cx.executor().advance_clock(Duration::from_secs(2));
-    opened.cx.run_until_parked();
+    test_support::advance(opened.cx, Duration::from_secs(2));
     assert!(
         opened.received.borrow().is_empty(),
         "two seconds on, Ctrl+K is still held back"
     );
-    opened.cx.simulate_keystrokes("a");
+    test_support::keys(opened.cx, "a");
     let received = opened.received.borrow();
     let keys: Vec<&str> = received.iter().map(|key| key.key.as_str()).collect();
     assert_eq!(
