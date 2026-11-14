@@ -1101,23 +1101,33 @@ fn an_option_row_activates_on_a_click_and_never_takes_focus(cx: &mut TestAppCont
 
 /// Open a window drawing one checkbox under `resume` whose checked state lives in `checked`, toggled by its handler,
 /// inside a parent that counts the Enter presses reaching it, with the switch look when `switch` and unavailable while
-/// `disabled` holds. Hands back the Enter count.
+/// `disabled` holds. With `launched`, the checkbox gets a main action ([`Checkbox::on_enter`]) that records the checked
+/// state it ran with there. Hands back the Enter count.
 fn open_checkbox<'a>(
     cx: &'a mut TestAppContext,
     checked: &Rc<Cell<bool>>,
     disabled: &Rc<Cell<bool>>,
     switch: bool,
+    launched: Option<&Rc<RefCell<Vec<bool>>>>,
 ) -> (&'a mut VisualTestContext, Rc<Cell<usize>>) {
     let enters = Rc::new(Cell::new(0));
     let (state, off, heard) = (checked.clone(), disabled.clone(), enters.clone());
+    let launched = launched.cloned();
     let cx = open(cx, move |_, _| {
         let (state, heard) = (state.clone(), heard.clone());
         let role = if switch { Role::Switch } else { Role::CheckBox };
+        let toggled = state.clone();
         let checkbox = Checkbox::new("resume", "Resume", HoverHelp::tooltip("Resume it"), role)
             .checked(state.get())
             .disabled(off.get())
-            .on_toggle(move |next, _, _| state.set(next));
+            .on_toggle(move |next, _, _| toggled.set(next));
         let checkbox = if switch { checkbox.switch() } else { checkbox };
+        let checkbox = match launched.clone() {
+            Some(launched) => {
+                checkbox.on_enter(move |_, _| launched.borrow_mut().push(state.get()))
+            }
+            None => checkbox,
+        };
         div()
             .on_key_down(move |event: &gpui::KeyDownEvent, _, _| {
                 if event.keystroke.key == "enter" {
@@ -1142,7 +1152,7 @@ fn a_checkbox_toggles_on_a_click_or_space_and_not_on_enter(cx: &mut TestAppConte
         let look = if switch { "switch" } else { "checkbox" };
         let checked = Rc::new(Cell::new(false));
         let disabled = Rc::new(Cell::new(false));
-        let (cx, enters) = open_checkbox(cx, &checked, &disabled, switch);
+        let (cx, enters) = open_checkbox(cx, &checked, &disabled, switch, None);
         click(cx, "resume");
         assert!(checked.get(), "{look}: a click turned it on");
         let words = bounds(cx, "resume");
@@ -1220,6 +1230,15 @@ fn release(cx: &mut VisualTestContext, chord: &'static str) {
     check(cx);
 }
 
+/// [`press`] and then [`release`] `chord`, as a real key does, drawing the owner's new state after each half, so a
+/// control that acted again on the release (GPUI's keyboard click) shows it.
+fn stroke(cx: &mut VisualTestContext, chord: &'static str, held: bool) {
+    press(cx, chord, held);
+    redraw(cx);
+    release(cx, chord);
+    redraw(cx);
+}
+
 /// On macOS with Keyboard navigation off, Tab reaches text fields and pop-ups only, and WebKit treated a checkbox as a
 /// button there, so Tab skipped it (SPEC.md, "Keyboard focus"); with every control reached, as on Linux, Tab lands on
 /// it. A checkbox given the pop-up rule instead would be a Tab stop a Mac user never had. Specified: with Tab reaching
@@ -1229,7 +1248,7 @@ fn release(cx: &mut VisualTestContext, chord: &'static str) {
 fn tab_reaches_a_checkbox_only_where_it_reaches_every_control(cx: &mut TestAppContext) {
     let checked = Rc::new(Cell::new(false));
     let disabled = Rc::new(Cell::new(false));
-    let (cx, _) = open_checkbox(cx, &checked, &disabled, false);
+    let (cx, _) = open_checkbox(cx, &checked, &disabled, false, None);
     let reach = Rc::new(Cell::new(crate::focus::TabReach::TextFieldsAndPopups));
     crate::test_support::follow(cx, &reach);
     assert_eq!(focused_id(cx), None, "the premise: nothing has focus yet");
@@ -1253,7 +1272,7 @@ fn a_checkbox_reports_its_role_and_whether_it_is_checked(cx: &mut TestAppContext
     for (switch, role) in [(false, Role::CheckBox), (true, Role::Switch)] {
         let checked = Rc::new(Cell::new(false));
         let disabled = Rc::new(Cell::new(false));
-        let (cx, _) = open_checkbox(cx, &checked, &disabled, switch);
+        let (cx, _) = open_checkbox(cx, &checked, &disabled, switch, None);
         for on in [false, true] {
             checked.set(on);
             let node = frame(cx)
@@ -1821,8 +1840,8 @@ fn tab_enters_a_radio_group_at_its_choice_and_leaves_it_in_one_press(cx: &mut Te
 /// the values shown"). A radio that chose on Enter would change a required answer the user had not given. Specified,
 /// with nothing chosen and focus on A: without the owner's action, Enter (its press and its release, which GPUI turns
 /// into a click on the focused element) changes nothing and reaches what holds the group, and Space chooses A,
-/// reported once, and again reports nothing; with the owner's action, Enter runs it with nothing chosen and does not
-/// reach what holds the group, and a held Enter does nothing at all.
+/// reported once, and again reports nothing; with the owner's action, Enter, pressed and released, runs it once with
+/// nothing chosen and does not reach what holds the group, and a held Enter does nothing at all.
 #[gpui::test]
 fn space_chooses_a_focused_radio_and_enter_goes_on_to_the_owner(cx: &mut TestAppContext) {
     let options = &[("A", false), ("B", false)];
@@ -1870,13 +1889,18 @@ fn space_chooses_a_focused_radio_and_enter_goes_on_to_the_owner(cx: &mut TestApp
         Some("choice-A"),
         "the premise: focus is on A"
     );
-    press_and_draw(cx, "enter");
+    stroke(cx, "enter", false);
     assert_eq!(
         *owner.launched_with.borrow(),
         vec![None],
-        "Enter ran the owner's action, nothing chosen"
+        "Enter ran the owner's action once, nothing chosen"
     );
     assert_eq!(owner.enters_passed.get(), 0, "and stopped at the group");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("choice-A"),
+        "the premise: focus is still on A"
+    );
     held_key(cx, "enter");
     assert_eq!(
         owner.launched_with.borrow().len(),
@@ -1917,7 +1941,8 @@ fn key_up(cx: &mut VisualTestContext, chord: &'static str) {
 /// each a tab stop, chosen with Enter or Space, and Enter on one applied it and then launched. Giving them the radio
 /// keyboard would change how a user steps through the launcher. Specified, in a group of A (chosen), B and C: Tab
 /// reaches A, then B; Enter chooses B; Tab reaches C and Space chooses it; Down neither chooses nor moves; Enter on the
-/// chosen C reports it again. With the owner's action, Enter on B chooses B and then runs the action with B chosen.
+/// chosen C reports it again. With the owner's action, Enter on B, pressed and released, chooses B once and then runs
+/// the action once with B chosen, and stops at the group.
 #[gpui::test]
 fn a_button_group_makes_each_option_a_tab_stop_chosen_with_enter_or_space(cx: &mut TestAppContext) {
     let options = &[("A", false), ("B", false), ("C", false)];
@@ -1966,12 +1991,14 @@ fn a_button_group_makes_each_option_a_tab_stop_chosen_with_enter_or_space(cx: &m
         Some("choice-B"),
         "the premise: focus is on B"
     );
-    press_and_draw(cx, "enter");
+    stroke(cx, "enter", false);
     assert_eq!(
         *owner.launched_with.borrow(),
         vec![Some("B")],
         "Enter chose B, then ran the action"
     );
+    assert_eq!(owner.choices.get(), 1, "its release chose nothing more");
+    assert_eq!(owner.enters_passed.get(), 0, "and it stopped at the group");
 }
 
 /// An unavailable segment of a button group was a disabled `<button>` in the old app, which Tab never reached; a
@@ -2394,6 +2421,9 @@ struct Picker {
     enters: Rc<Cell<usize>>,
     disabled: Rc<Cell<bool>>,
     low_gone: Rc<Cell<bool>>,
+    /// Whether the select gets a main action ([`Select::on_enter`]), and the chosen value it ran with each time.
+    main_action: Rc<Cell<bool>>,
+    launched: Rc<RefCell<Vec<Option<SharedString>>>>,
 }
 
 impl Picker {
@@ -2405,6 +2435,8 @@ impl Picker {
             enters: Rc::new(Cell::new(0)),
             disabled: Rc::new(Cell::new(false)),
             low_gone: Rc::new(Cell::new(false)),
+            main_action: Rc::new(Cell::new(false)),
+            launched: Rc::new(RefCell::new(Vec::new())),
         }
     }
 
@@ -2416,6 +2448,8 @@ impl Picker {
             enters: self.enters.clone(),
             disabled: self.disabled.clone(),
             low_gone: self.low_gone.clone(),
+            main_action: self.main_action.clone(),
+            launched: self.launched.clone(),
         }
     }
 }
@@ -2453,6 +2487,12 @@ fn effort_select(picker: &Picker, extra: fn(Select) -> Select) -> Select {
     let select = match picker.chosen.borrow().clone() {
         Some(value) => select.chosen(value),
         None => select,
+    };
+    let select = if picker.main_action.get() {
+        let (chosen, launched) = (picker.chosen.clone(), picker.launched.clone());
+        select.on_enter(move |_, _| launched.borrow_mut().push(chosen.borrow().clone()))
+    } else {
+        select
     };
     extra(select)
 }
@@ -3421,5 +3461,162 @@ fn a_divider_reports_its_drag_double_click_and_arrows(cx: &mut TestAppContext) {
             divider.value.as_deref()
         ),
         (Some(Role::Splitter), Some("Pane width"), Some("400"))
+    );
+}
+
+// ---- The choice controls' Enter rule ------------------------------------------------------------------------------
+//
+// The rule itself (apply, then the main action, once; a held Enter taken and inert; a modified Enter passed on) is
+// pinned once, on the helper's test at the end. Per control only its wiring is pinned: the radio group's in its tests
+// above, the checkbox's and the closed select's here.
+
+/// Why this matters: Enter on the launcher's Resume checkbox launched with the box as shown and did not toggle it (the
+/// old launcher's `enter_choice` applied nothing there; SPEC.md: "Enter on the ... Resume checkbox launches with the
+/// values shown, without changing them"). A box that toggled on Enter would launch with the opposite of what the user
+/// saw. Specified, with a main action: with focus on the checked box, Enter pressed and released runs the action once
+/// with it checked, leaves it checked and stops there.
+#[gpui::test]
+fn enter_on_a_checkbox_with_a_main_action_runs_it_without_toggling(cx: &mut TestAppContext) {
+    let checked = Rc::new(Cell::new(false));
+    let disabled = Rc::new(Cell::new(false));
+    let launched = Rc::new(RefCell::new(Vec::new()));
+    let (cx, enters) = open_checkbox(cx, &checked, &disabled, false, Some(&launched));
+    // The tests run under Linux's rule, where a click focuses a control.
+    click(cx, "resume");
+    redraw(cx);
+    assert!(checked.get(), "the premise: a click turned it on");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("resume"),
+        "the premise: it has focus"
+    );
+    stroke(cx, "enter", false);
+    assert_eq!(
+        *launched.borrow(),
+        vec![true],
+        "Enter ran the action once, checked"
+    );
+    assert!(checked.get(), "and did not toggle it");
+    assert_eq!(enters.get(), 0, "and stopped there");
+}
+
+/// Why this matters: Enter on the launcher's closed effort, agent-type and host selects launched with the value shown
+/// (SPEC.md: "Enter on the closed host picker, agent-type or effort dropdown ... launches with the values shown"),
+/// while a choice made in the open list only chose, as the native pop-up's own Enter did. A list whose choosing Enter
+/// also launched would start a session before the user finished choosing.
+///
+/// Specified, with Medium chosen and a main action: with focus on the closed control, Enter pressed and released runs
+/// the action once with Medium chosen, opens nothing, reports no choice and stops there; in the open list, Down and
+/// Enter choose High and close the list without running the action.
+#[gpui::test]
+fn enter_on_a_closed_select_with_a_main_action_runs_it_with_the_value_shown(
+    cx: &mut TestAppContext,
+) {
+    let (cx, picker, _) = open_picker(cx, Some("medium"), plain);
+    picker.main_action.set(true);
+    redraw(cx);
+    keys(cx, "tab tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("effort"),
+        "the premise: Tab reached the closed control"
+    );
+
+    stroke(cx, "enter", false);
+    assert_eq!(
+        *picker.launched.borrow(),
+        vec![Some(SharedString::from("medium"))],
+        "Enter ran the action once, with Medium chosen"
+    );
+    assert!(!list_open(cx), "and opened nothing");
+    assert!(picker.heard.borrow().is_empty(), "and reported no choice");
+    assert_eq!(picker.enters.get(), 0, "and stopped there");
+
+    keys(cx, "space");
+    assert!(list_open(cx), "the premise: Space opened the list");
+    keys(cx, "down");
+    stroke(cx, "enter", false);
+    assert!(!list_open(cx), "Enter in the list chose and closed it");
+    assert_eq!(*picker.heard.borrow(), ["high"], "choosing High");
+    assert_eq!(
+        picker.launched.borrow().len(),
+        1,
+        "without running the action"
+    );
+}
+
+/// Why this matters: the launcher draws its own Agent and Command tabs, and Enter on one chose that tab and then
+/// launched (the old launcher's `enter_choice`). Those tabs must follow the same rule as this layer's choices, through
+/// [`super::on_enter_choice`], not a copy of it that can drift. This is also the one test of the rule's whole
+/// contract, the held and modified Enter included; the per-control tests pin only each control's wiring.
+///
+/// Specified, on a tab drawn with the helper and the shared click rule, with its own Enter listener after the helper,
+/// inside an element listening for Enter: Enter pressed and released chooses the tab once and then runs the action
+/// once, reaching neither listener; a click only chooses; a held Enter, pressed and released, does nothing and reaches
+/// neither listener; Shift+Enter runs nothing and reaches the tab's own listener and then the element around it.
+#[gpui::test]
+fn an_areas_own_tab_takes_the_enter_rule_through_the_helper(cx: &mut TestAppContext) {
+    let log: Rc<RefCell<Vec<&'static str>>> = Rc::default();
+    let focus = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let (drawn, handle) = (log.clone(), focus.clone());
+    let cx = open(cx, move |_, _| {
+        let entry = |what: &'static str| {
+            let log = drawn.clone();
+            move || log.borrow_mut().push(what)
+        };
+        let (choose, launch, own, around, clicked) = (
+            entry("choose"),
+            entry("launch"),
+            entry("own"),
+            entry("around"),
+            entry("choose"),
+        );
+        let tab = div()
+            .id("agent-tab")
+            .debug_selector(|| "agent-tab".to_string())
+            .w(px(80.))
+            .h(px(30.));
+        let tab = focus::track(tab, &handle, focus::OnPress::Control);
+        let tab = super::on_enter_choice(tab, move |_, _| choose(), move |_, _| launch())
+            .on_key_down(move |event: &gpui::KeyDownEvent, _, _| {
+                if event.keystroke.key == "enter" {
+                    own();
+                }
+            });
+        let on_click: super::Handler = Rc::new(move |_, _, _| clicked());
+        div()
+            .on_key_down(move |event: &gpui::KeyDownEvent, _, _| {
+                if event.keystroke.key == "enter" {
+                    around();
+                }
+            })
+            .child(super::activate_on_click(tab, Some(on_click)))
+            .into_any_element()
+    });
+    let tab_focused = |cx: &mut VisualTestContext| cx.update(|window, _| focus.is_focused(window));
+    keys(cx, "tab");
+    assert!(tab_focused(cx), "the premise: the tab has focus");
+
+    stroke(cx, "enter", false);
+    assert_eq!(
+        *log.borrow(),
+        ["choose", "launch"],
+        "Enter chose the tab once and then ran the action once, reaching neither listener"
+    );
+    log.borrow_mut().clear();
+    click(cx, "agent-tab");
+    assert_eq!(*log.borrow(), ["choose"], "a click only chose");
+    log.borrow_mut().clear();
+    assert!(
+        tab_focused(cx),
+        "the premise: the click left focus on the tab"
+    );
+    stroke(cx, "enter", true);
+    assert!(log.borrow().is_empty(), "a held Enter did nothing");
+    stroke(cx, "shift-enter", false);
+    assert_eq!(
+        *log.borrow(),
+        ["own", "around"],
+        "Shift+Enter ran nothing and went on to the tab's listener, then the element around it"
     );
 }

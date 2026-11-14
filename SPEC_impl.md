@@ -661,6 +661,16 @@ answer buttons pinned and scrolls the body, and when even those do not fit, the 
 do. The window's minimum size is in SPEC.md ("Desktop window chrome"; `MIN_WINDOW_SIZE` in the app's bootstrap holds
 it).
 
+Enter on a choice control is one rule of the component layer (`components::enter_choice`), the old launcher's
+`enter_choice`. A control takes it only when its owner hands it the dialog's main action, through an `on_enter` builder
+on the radio group, the checkbox and the select. The launcher draws its own Agent and Command tab strip, as the
+migration's orchestrator decided on 2026-11-14, and gives its tabs the rule through `components::on_enter_choice`; that
+decision is no general exception to the constructor rule above. With the action, a plain Enter applies the focused
+choice and runs that action: a segment or chip applies its option first, while a radio, a checkbox and a closed select
+apply nothing and run it with the values shown, as the old launcher did. A held Enter is taken and does nothing, a
+modified Enter goes on under the shared key rule, and Space and a click only choose. Without the action, every control
+keeps its own Enter.
+
 GPUI Kit is used for `Root`, text inputs and named primitives, as the prototype did. Kit's own overlays (dialogs,
 sheets, popovers, menus, notifications, tooltips) are not used, not even inside the component layer: Kit moves focus
 internally and has its own modal, notification and popover layers, which Farhelm's lints cannot see into, so the layer

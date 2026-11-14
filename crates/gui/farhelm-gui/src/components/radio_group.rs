@@ -28,13 +28,13 @@
 //!   old `div` had none (GPUI's accessibility tree drops generic containers, so the role is never set). The label then
 //!   names the control only in code; the help still shows on hover between the options.
 //!
-//! Enter follows the old launcher's `enter_choice`, through [`RadioGroup::on_enter`]. Without it, Enter on a button
-//! option chooses it, and Enter on a radio goes on to whatever holds the group, as a native radio's did. With it (the
-//! owner's main action, a launch), Enter on a button option applies that option and then runs the action, and Enter on
-//! a radio runs the action with the values shown, unchanged (SPEC.md's launcher: "Enter on a choice button ... applies
-//! that choice and then launches"; "Enter on ... YOLO radios ... launches with the values shown"). A held Enter does
-//! nothing there, so holding it never launches twice. A modified Enter (Shift+Enter) is not an activation and goes on to
-//! the owner, following the controls' shared key rule, where the old `enter_choice` ignored modifiers and launched.
+//! Enter follows the choice controls' shared Enter rule ([`super::enter_choice`], the old launcher's `enter_choice`),
+//! through [`RadioGroup::on_enter`]. Without it, Enter on a button option chooses it, and Enter on a radio goes on to
+//! whatever holds the group, as a native radio's did. With it (the owner's main action, a launch), Enter on a button
+//! option applies that option and then runs the action, and Enter on a radio runs the action with the values shown,
+//! unchanged (SPEC.md's launcher: "Enter on a choice button ... applies that choice and then launches"; "Enter on ...
+//! YOLO radios ... launches with the values shown"). A held Enter does nothing there, so holding it never launches
+//! twice. A modified Enter (Shift+Enter) is not an activation and goes on to the owner, as the shared rule says.
 //!
 //! A click chooses the option it lands on. Focus follows the platform's control rule
 //! ([`crate::focus::OnPress::Control`]): on Linux the click focuses the option, on macOS it does not, and with
@@ -81,7 +81,7 @@ use gpui::{
     Toggled, Window, div, prelude::FluentBuilder as _, px, svg,
 };
 
-use super::HoverHelp;
+use super::{HoverHelp, MainAction};
 use crate::assets::Icon;
 use crate::focus;
 use crate::theme::{self, Palette, Token, metrics};
@@ -121,9 +121,6 @@ const DESCRIPTION_GAP: f32 = 3.;
 
 /// What a choice does with the chosen option's value.
 type OnChange<V> = Rc<dyn Fn(&V, &mut Window, &mut App)>;
-
-/// The owner's main action, which Enter on an option runs.
-type OnEnter = Rc<dyn Fn(&mut Window, &mut App)>;
 
 /// One option of a [`RadioGroup`]: its words (drawn, and its accessible name), its hover help, and the value its owner
 /// hears when it is chosen.
@@ -209,7 +206,7 @@ pub struct RadioGroup<V: Clone + PartialEq + 'static> {
     disabled: bool,
     look: Look,
     on_change: Option<OnChange<V>>,
-    on_enter: Option<OnEnter>,
+    on_enter: Option<MainAction>,
 }
 
 /// How a group draws its options; one at a time, so a single field rather than a flag per look. See the module docs.
@@ -308,8 +305,18 @@ impl<V: Clone + PartialEq + 'static> RadioGroup<V> {
         self
     }
 
-    /// The owner's main action, which Enter on a focused option runs (after choosing it, in a button group). The old
-    /// launcher's `enter_choice`; see the module docs.
+    /// The owner's main action, which Enter on a focused option runs (after choosing it, in a button group), under the
+    /// choice controls' shared Enter rule (`components::enter_choice`, which says what the action must guard itself);
+    /// see the module docs.
+    ///
+    /// In a button group the action runs right after [`RadioGroup::on_change`] and reads what it wrote, so
+    /// `on_change` must change the owner's state directly: a choice sent through `window.dispatch_action` runs only
+    /// after the key handler, and the action would see the previous choice.
+    ///
+    /// It covers the whole group, every option alike. An option whose Enter must only choose (SPEC.md's Custom
+    /// permission mode, which selects the mode and focuses its flags editor instead of launching) is the owner's to
+    /// handle: its action checks the choice it runs with. A per-option opt-out comes with the first consumer that
+    /// needs it.
     pub fn on_enter(mut self, handler: impl Fn(&mut Window, &mut App) + 'static) -> Self {
         self.on_enter = Some(Rc::new(handler));
         self
@@ -325,7 +332,7 @@ struct Choice<V> {
     enabled: Vec<bool>,
     chosen: Option<usize>,
     on_change: Option<OnChange<V>>,
-    on_enter: Option<OnEnter>,
+    on_enter: Option<MainAction>,
 }
 
 impl<V> Choice<V> {
@@ -360,35 +367,35 @@ impl<V> Choice<V> {
 
     /// A key pressed on the focused option `index`. See the module docs for which keys do what under each role.
     fn key(&self, index: usize, event: &KeyDownEvent, window: &mut Window, cx: &mut App) {
-        // A modified key is not an activation, the controls' shared key rule: a Shift+Enter goes on to the owner rather
-        // than running `on_enter`, where the old launcher's `enter_choice` ignored modifiers and launched on it.
+        // Enter with the owner's main action: a button applies its option first, while a radio's Enter chooses nothing,
+        // so the action runs with the values shown.
+        let apply = |window: &mut Window, cx: &mut App| {
+            if !self.radio {
+                self.choose(index, window, cx);
+            }
+        };
+        if super::enter_choice(event, self.on_enter.as_ref(), apply, window, cx) {
+            return;
+        }
+        // A modified key is not an activation, the controls' shared key rule.
         if event.keystroke.modifiers.modified() {
             return;
         }
-        match (event.keystroke.key.as_str(), &self.on_enter) {
-            ("space", _) if !event.is_held => {
+        match event.keystroke.key.as_str() {
+            "space" if !event.is_held => {
                 cx.stop_propagation();
                 self.choose(index, window, cx);
             }
-            ("enter", Some(on_enter)) => {
-                // Taken even when held, so a held Enter neither runs the action again nor reaches what holds the group.
-                cx.stop_propagation();
-                if !event.is_held {
-                    if !self.radio {
-                        self.choose(index, window, cx);
-                    }
-                    on_enter(window, cx);
-                }
-            }
-            ("enter", None) if !self.radio && !event.is_held => {
+            // Without the owner's action, Enter chooses a button, as a native button's did, and a radio's goes on.
+            "enter" if !self.radio && !event.is_held => {
                 cx.stop_propagation();
                 self.choose(index, window, cx);
             }
-            ("down" | "right", _) if self.radio => {
+            "down" | "right" if self.radio => {
                 cx.stop_propagation();
                 self.step(index, true, window, cx);
             }
-            ("up" | "left", _) if self.radio => {
+            "up" | "left" if self.radio => {
                 cx.stop_propagation();
                 self.step(index, false, window, cx);
             }
