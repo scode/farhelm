@@ -798,8 +798,9 @@ async fn changes_of(ws: &mut WsTestClient, collection: Collection) -> Collection
 
 /// The snapshot sent on open holds every pushed collection as the GET
 /// routes serve it: the session rows decode as the proto type under their
-/// served ids, hosts are keyed by registry id, preferences are one entry, and
-/// an empty approvals list is an available, empty collection.
+/// served ids, hosts are keyed by registry id, preferences and the
+/// announcement queue are one entry each, and the empty lists (approvals,
+/// templates, notices, host progress) are available, empty collections.
 #[farhelm_testtrace::test]
 async fn the_snapshot_on_open_holds_every_collection_as_served() {
     let mut harness = rest_harness::helm_listing(vec![
@@ -819,7 +820,11 @@ async fn the_snapshot_on_open_holds_every_collection_as_served() {
             Collection::Sessions,
             Collection::Hosts,
             Collection::Preferences,
-            Collection::Approvals
+            Collection::Approvals,
+            Collection::Templates,
+            Collection::Notices,
+            Collection::Announcements,
+            Collection::HostProgress,
         ]
     );
     let sessions = &collections[0];
@@ -849,8 +854,16 @@ async fn the_snapshot_on_open_holds_every_collection_as_served() {
     let local = rest_harness::local_id(&harness.store).await;
     assert_eq!(collections[1].meta.order, [local.to_string()]);
     assert_eq!(collections[2].meta.order, [PREFERENCES_KEY]);
-    assert_eq!(collections[3].meta.availability, Availability::Available);
-    assert!(collections[3].entries.is_empty());
+    for empty in [3, 4, 5, 7] {
+        assert_eq!(
+            collections[empty].meta.availability,
+            Availability::Available,
+            "{:?}",
+            collections[empty].collection
+        );
+        assert!(collections[empty].entries.is_empty());
+    }
+    assert_eq!(collections[6].meta.order, [ANNOUNCEMENTS_KEY]);
 }
 
 const UI_CHANNEL: &str = farhelm_proto::ui_channel::UI_CHANNEL_PATH;
@@ -897,26 +910,238 @@ async fn a_preference_write_outside_the_channel_reaches_an_idle_connected_ui() {
     assert_eq!(preferences.compact, Some(true));
 }
 
-/// Dismissing announcements used not to bump the feed either. Announcements
-/// are not a pushed collection yet, so the bump itself is the observable: a
-/// dismissal must wake the feed that every pushed read hangs on.
+/// Dismissing announcements used not to bump the feed, so a connected GUI
+/// kept showing a dismissed announcement as pending. Made outside the channel
+/// while it is idle, the dismissal can only reach the GUI through the feed
+/// bump, and it arrives as the whole queue with the entry moved to history.
 #[farhelm_testtrace::test]
-async fn dismissing_announcements_bumps_the_feed() {
-    let harness = rest_harness::idle_helm().await;
-    let mut feed = harness.state.manager.events().subscribe();
-    feed.borrow_and_update();
+async fn dismissing_an_announcement_outside_the_channel_moves_it_to_history_on_the_ui() {
+    use farhelm_proto::announcements::{Announcement, AnnouncementQueue};
+    let mut harness = rest_harness::idle_helm().await;
+    harness
+        .store
+        .enqueue_announcements(vec![Announcement {
+            id: "news-1".into(),
+            title: "News".into(),
+            body: "Something new.".into(),
+            detail: None,
+            link: None,
+        }])
+        .await
+        .unwrap();
+    let addr = harness.serve().await;
+    let mut ws = WsTestClient::connect(addr, UI_CHANNEL).await;
+    let ServerMessage::Snapshot { collections } = recv_message(&mut ws).await else {
+        panic!("the first message is the snapshot");
+    };
+    let queue: AnnouncementQueue =
+        serde_json::from_value(collections[6].entries[0].value.clone()).expect("a queue");
+    assert!(
+        queue.pending.iter().any(|entry| entry.id == "news-1"),
+        "premise: the announcement is pending"
+    );
     let status = http(
         &harness,
         "POST",
         "/api/announcements/shown",
-        serde_json::json!({ "ids": ["not-queued"] }),
+        serde_json::json!({ "ids": ["news-1"] }),
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
-    tokio::time::timeout(NOTICE, feed.changed())
+    let changes = changes_of(&mut ws, Collection::Announcements).await;
+    assert_eq!(changes.upsert[0].key, ANNOUNCEMENTS_KEY);
+    let queue: AnnouncementQueue =
+        serde_json::from_value(changes.upsert[0].value.clone()).expect("a queue");
+    assert!(queue.pending.iter().all(|entry| entry.id != "news-1"));
+    assert!(queue.history.iter().any(|entry| entry.id == "news-1"));
+}
+
+/// A template saved outside the channel (another client's HTTP write) reaches
+/// an idle connected UI through the feed bump, keyed by the template's name.
+/// With the channel idle, nothing but the bump in `templates::store_template`
+/// (shared with the agent relay's writes) can deliver it.
+#[farhelm_testtrace::test]
+async fn a_template_saved_outside_the_channel_reaches_an_idle_connected_ui() {
+    let mut harness = rest_harness::idle_helm().await;
+    let addr = harness.serve().await;
+    let mut ws = WsTestClient::connect(addr, UI_CHANNEL).await;
+    let _snapshot = recv_message(&mut ws).await;
+    let status = http(
+        &harness,
+        "PUT",
+        "/api/templates/review",
+        serde_json::json!({ "prompt": "review this" }),
+    )
+    .await;
+    assert!(status.is_success(), "{status}");
+    let changes = changes_of(&mut ws, Collection::Templates).await;
+    assert_eq!(changes.upsert[0].key, "review");
+    let template: farhelm_proto::launcher::LaunchTemplate =
+        serde_json::from_value(changes.upsert[0].value.clone()).expect("a template");
+    assert_eq!(template.fields.prompt.as_deref(), Some("review this"));
+}
+
+/// An agent's `template create`, taken through the whole relay path (the verb
+/// handler, its card on the connected UI, the user's Allow), ends with the
+/// template on that UI, keyed by name. An agent's write is a template change
+/// the GUI did not make, so the push is the only way the GUI learns of it.
+///
+/// NOTE: this does not isolate the write's own feed bump. Answering the card
+/// removes it and bumps the feed, and the re-read that follows can already
+/// include the template. The write's bump is in `templates::store_template`,
+/// which the relay and the GUI's PUT share; the idle-channel PUT test above
+/// is the one that fails without it.
+#[farhelm_testtrace::test]
+async fn an_agents_approved_template_create_reaches_the_connected_ui() {
+    use crate::agent_requests::HelmAgentRequests;
+    use farhelm_proto::{AgentOutcome, AgentReply, AgentVerb};
+    let mut harness = rest_harness::idle_helm().await;
+    let addr = harness.serve().await;
+    let mut ws = WsTestClient::connect(addr, UI_CHANNEL).await;
+    let _snapshot = recv_message(&mut ws).await;
+    let origin = crate::approvals::tests::local_origin(&harness).await;
+    let handler = HelmAgentRequests::for_state(&harness.state);
+    let asking = tokio::spawn(async move {
+        handler
+            .handle(
+                origin,
+                "sess-1",
+                AgentVerb::TemplateCreate {
+                    name: "agent-made".into(),
+                    fields: serde_json::from_value(
+                        serde_json::json!({ "prompt": "from an agent" }),
+                    )
+                    .unwrap(),
+                    host: None,
+                    shortcuts: Default::default(),
+                },
+            )
+            .await
+    });
+    // A template write always waits for a visible Allow, and the card that
+    // asks for it reaches the UI as a pushed approval.
+    let card = changes_of(&mut ws, Collection::Approvals).await;
+    let id = card.upsert[0].key.clone();
+    let status = http(
+        &harness,
+        "POST",
+        &format!("/api/approvals/{id}"),
+        serde_json::json!({ "answer": "allow" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let outcome = tokio::time::timeout(NOTICE, asking)
         .await
-        .expect("the dismissal bumps the feed")
-        .expect("the feed is still open");
+        .expect("the request ends once allowed")
+        .unwrap();
+    assert!(
+        matches!(
+            outcome,
+            AgentOutcome::Ok {
+                reply: AgentReply::TemplateWritten { .. }
+            }
+        ),
+        "{outcome:?}"
+    );
+    let changes = changes_of(&mut ws, Collection::Templates).await;
+    assert_eq!(changes.upsert[0].key, "agent-made");
+    let template: farhelm_proto::launcher::LaunchTemplate =
+        serde_json::from_value(changes.upsert[0].value.clone()).expect("a template");
+    assert_eq!(template.fields.prompt.as_deref(), Some("from an agent"));
+}
+
+/// A trash-listing claim on the harness's local host. `notices`' own claim
+/// helper models an identity-less host, but `helm_listing` scripts the local
+/// supervisor with `local-identity`, and the recording transaction refuses a
+/// claim whose identity differs from the host's stored binding.
+async fn local_trash_claim(harness: &rest_harness::Harness) -> crate::manager::SessionClaim {
+    let mut claim = crate::notices::tests::claim(&harness.store).await;
+    claim.identity = Some("local-identity".to_string());
+    claim
+}
+
+/// Marking a notice read outside the channel reaches an idle connected UI as
+/// the replaced notice. (A notice the supervisor's trash listing raises bumps
+/// the feed at its own boundary; `notices`' forwarded-listing test proves that
+/// bump.)
+#[farhelm_testtrace::test]
+async fn marking_a_notice_read_outside_the_channel_reaches_an_idle_connected_ui() {
+    let mut harness = rest_harness::idle_helm().await;
+    let claim = local_trash_claim(&harness).await;
+    assert!(crate::notices::tests::record(
+        &harness.store,
+        &claim,
+        &crate::notices::tests::stuck("first")
+    ));
+    let addr = harness.serve().await;
+    let mut ws = WsTestClient::connect(addr, UI_CHANNEL).await;
+    let ServerMessage::Snapshot { collections } = recv_message(&mut ws).await else {
+        panic!("the first message is the snapshot");
+    };
+    let notice: farhelm_proto::notices::Notice =
+        serde_json::from_value(collections[5].entries[0].value.clone()).expect("a notice");
+    assert!(!notice.read, "premise: the notice is unread");
+    assert_eq!(collections[5].entries[0].key, notice.id.to_string());
+    let status = http(
+        &harness,
+        "POST",
+        "/api/notices/marks",
+        serde_json::json!({ "action": "read", "ids": [notice.id] }),
+    )
+    .await;
+    assert!(status.is_success(), "{status}");
+    let changes = changes_of(&mut ws, Collection::Notices).await;
+    let marked: farhelm_proto::notices::Notice =
+        serde_json::from_value(changes.upsert[0].value.clone()).expect("a notice");
+    assert_eq!((marked.id, marked.read), (notice.id, true));
+}
+
+/// A provisioning run's progress reaches a connected UI as its steps move:
+/// the step transition (`set_step`, the same call a running plan makes)
+/// bumps the feed, and the host's run arrives keyed by host id.
+#[farhelm_testtrace::test]
+async fn a_provisioning_step_transition_reaches_the_connected_ui() {
+    use farhelm_proto::provisioning::{
+        ProvisioningOperation, ProvisioningView, RunStatus, StepStatus, StepView,
+    };
+    let mut harness = rest_harness::idle_helm().await;
+    let host = rest_harness::local_id(&harness.store).await;
+    harness
+        .state
+        .provisioning
+        .insert_run_for_test(ProvisioningView {
+            host_id: host,
+            run_id: Some("run-1".into()),
+            operation: Some(ProvisioningOperation::Update),
+            status: RunStatus::Running,
+            steps: vec![StepView {
+                step: "install".into(),
+                name: "Install the supervisor".into(),
+                paths: vec![],
+                explanation: None,
+                status: StepStatus::Pending,
+                message: None,
+            }],
+            message: None,
+        })
+        .await;
+    let addr = harness.serve().await;
+    let mut ws = WsTestClient::connect(addr, UI_CHANNEL).await;
+    let ServerMessage::Snapshot { collections } = recv_message(&mut ws).await else {
+        panic!("the first message is the snapshot");
+    };
+    assert_eq!(collections[7].meta.order, [host.to_string()], "premise");
+    harness
+        .state
+        .provisioning
+        .set_step_for_test(host, 0, StepStatus::Running, Some("copying".into()))
+        .await;
+    let changes = changes_of(&mut ws, Collection::HostProgress).await;
+    assert_eq!(changes.upsert[0].key, host.to_string());
+    let run: ProvisioningView =
+        serde_json::from_value(changes.upsert[0].value.clone()).expect("a run");
+    assert_eq!(run.steps[0].status, StepStatus::Running);
+    assert_eq!(run.steps[0].message.as_deref(), Some("copying"));
 }
 
 /// A preference write sent as a command comes back as a change to the
@@ -1161,4 +1386,77 @@ async fn every_pushed_collection_round_trips_through_its_proto_type() {
     assert_eq!(decoded.id, id);
     assert_eq!(entry["id"].as_str(), Some(id.as_str()));
     asking.abort();
+
+    let put = Request::builder()
+        .method("PUT")
+        .uri("/api/templates/review")
+        .header("host", "127.0.0.1:7433")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"prompt":"review this"}"#))
+        .unwrap();
+    assert!(
+        harness
+            .router()
+            .oneshot(put)
+            .await
+            .unwrap()
+            .status()
+            .is_success()
+    );
+    let templates = served(&harness, "/api/templates").await;
+    let _: farhelm_proto::launcher::LaunchTemplate = round_trip(&templates["templates"][0]);
+
+    let claim = local_trash_claim(&harness).await;
+    assert!(crate::notices::tests::record(
+        &harness.store,
+        &claim,
+        &crate::notices::tests::stuck("first")
+    ));
+    let notices = served(&harness, "/api/notices").await;
+    let _: farhelm_proto::notices::Notice = round_trip(&notices["notices"][0]);
+
+    harness
+        .store
+        .enqueue_announcements(vec![farhelm_proto::announcements::Announcement {
+            id: "news-1".into(),
+            title: "News".into(),
+            body: "Something new.".into(),
+            detail: Some("More.".into()),
+            link: Some(farhelm_proto::announcements::AnnouncementLink {
+                label: "Read".into(),
+                url: "https://example.com/news".into(),
+            }),
+        }])
+        .await
+        .unwrap();
+    let announcements = served(&harness, "/api/announcements").await;
+    let queue: farhelm_proto::announcements::AnnouncementQueue = round_trip(&announcements);
+    assert!(queue.pending.iter().any(|entry| entry.id == "news-1"));
+
+    let host = rest_harness::local_id(&harness.store).await;
+    harness
+        .state
+        .provisioning
+        .insert_run_for_test(farhelm_proto::provisioning::ProvisioningView {
+            host_id: host,
+            run_id: Some("run-1".into()),
+            operation: Some(farhelm_proto::provisioning::ProvisioningOperation::Add),
+            status: farhelm_proto::provisioning::RunStatus::Running,
+            steps: vec![farhelm_proto::provisioning::StepView {
+                step: "install".into(),
+                name: "Install the supervisor".into(),
+                paths: vec![farhelm_proto::provisioning::PlanStepPath {
+                    full: "/home/user/.local/bin/farhelm".into(),
+                    short: "~/.local/bin/farhelm".into(),
+                }],
+                explanation: Some("Copies the binary.".into()),
+                status: farhelm_proto::provisioning::StepStatus::Pending,
+                message: None,
+            }],
+            message: None,
+        })
+        .await;
+    let runs = served(&harness, "/api/provisioning").await;
+    let run: farhelm_proto::provisioning::ProvisioningView = round_trip(&runs["runs"][0]);
+    assert_eq!(run.host_id, host);
 }

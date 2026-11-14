@@ -47,9 +47,9 @@ use axum::extract::{State, WebSocketUpgrade, ws};
 use axum::http::{HeaderMap, HeaderValue, Method, Request, StatusCode, header};
 use axum::response::IntoResponse;
 use farhelm_proto::ui_channel::{
-    Availability, ClientMessage, Collection, CollectionChanges, CollectionMeta, CollectionState,
-    Command, KeyedEntry, ListCounts, PREFERENCES_KEY, Reply, SESSION_QUERY_PATH, ServerMessage,
-    SessionQuery,
+    ANNOUNCEMENTS_KEY, Availability, ClientMessage, Collection, CollectionChanges, CollectionMeta,
+    CollectionState, Command, KeyedEntry, ListCounts, PREFERENCES_KEY, Reply, SESSION_QUERY_PATH,
+    ServerMessage, SessionQuery,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, VecDeque};
@@ -186,7 +186,9 @@ pub(crate) struct Projected {
 /// The reads are the collections' existing GET handlers, so every consistency
 /// rule those enforce (staleness marking, owner routing, the listing cap)
 /// holds here too. Every one of them reads helm-local state (the store, the
-/// manager's snapshots, in-memory approvals) and never waits on a host, so
+/// manager's snapshots, in-memory approvals, the provisioning service's
+/// in-memory runs, whose lock no holder keeps across host I/O) and never
+/// waits on a host, so
 /// the snapshot sent when a channel opens never waits on one either. A
 /// collection added here must keep that true.
 #[derive(Clone, Copy)]
@@ -223,6 +225,31 @@ pub(crate) fn production_collections() -> Vec<CollectionSpec> {
             collection: Collection::Approvals,
             path: |_| "/api/approvals".to_string(),
             split: |body| split_keyed_array(body, "approvals", "id"),
+        },
+        CollectionSpec {
+            collection: Collection::Templates,
+            path: |_| "/api/templates".to_string(),
+            split: |body| split_keyed_array(body, "templates", "name"),
+        },
+        CollectionSpec {
+            collection: Collection::Notices,
+            path: |_| "/api/notices".to_string(),
+            split: |body| split_keyed_array(body, "notices", "id"),
+        },
+        CollectionSpec {
+            collection: Collection::Announcements,
+            path: |_| "/api/announcements".to_string(),
+            split: |body| {
+                Ok(Projected {
+                    entries: vec![(ANNOUNCEMENTS_KEY.to_string(), body)],
+                    counts: None,
+                })
+            },
+        },
+        CollectionSpec {
+            collection: Collection::HostProgress,
+            path: |_| "/api/provisioning".to_string(),
+            split: |body| split_keyed_array(body, "runs", "host_id"),
         },
     ]
 }

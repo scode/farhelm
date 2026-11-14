@@ -9,22 +9,12 @@ use crate::units::{SupervisorUnitInputs, render_supervisor_unit};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
-/// Whether a plan is converging an absent install, explicitly updating an
-/// existing one, or removing what provisioning installed. ADD never turns into
-/// UPDATE implicitly, and neither ever turns into UNINSTALL.
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub(crate) enum ProvisioningOperation {
-    Add,
-    Update,
-    /// Remove the supervisor's service, its unit file and Farhelm's private
-    /// lib directory from a remote host, keep the host's state directory, and
-    /// forget the host. Only ever planned for a remote row; the helm's own
-    /// machine is uninstalled with `farhelm uninstall`.
-    Uninstall,
-}
+// The operation and the plan-path shape live in `farhelm-proto`, because provisioning progress carries them to the
+// GUI; the helm-only behavior on them is in the two traits below.
+pub(crate) use farhelm_proto::provisioning::{PlanStepPath, ProvisioningOperation};
 
-impl ProvisioningOperation {
+/// The helm's own wording for an operation, kept out of the shared type because only the helm phrases refusals.
+pub(super) trait OperationRefusal {
     /// What the panel says instead of acting on a host whose supervisor unit
     /// carries `farhelm helm setup`'s managed-by marker.
     ///
@@ -34,7 +24,11 @@ impl ProvisioningOperation {
     /// to do. Installing or updating there is the host's own installer and
     /// setup; removing is the host's own `farhelm uninstall`, which knows how
     /// to take down a setup-owned service.
-    pub(super) fn setup_managed_refusal(self) -> String {
+    fn setup_managed_refusal(self) -> String;
+}
+
+impl OperationRefusal for ProvisioningOperation {
+    fn setup_managed_refusal(self) -> String {
         let unit = crate::units::SUPERVISOR_UNIT_NAME;
         match self {
             Self::Add | Self::Update => format!(
@@ -465,18 +459,16 @@ impl ProvisioningAction {
     }
 }
 
-/// A path in the helm's plan with its complete spelling and a home-relative
-/// spelling for narrow dialog chips. `strip_prefix` checks path components,
-/// so a sibling whose name starts with the home directory is never shortened.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub(super) struct PlanStepPath {
-    pub(super) full: String,
-    pub(super) short: String,
+/// Building a plan path from the inspected host's home, which only the helm does.
+trait StepPathFromHome {
+    fn new(path: &Path, home: &Path) -> Self;
 }
 
-impl PlanStepPath {
+impl StepPathFromHome for PlanStepPath {
     /// Keep a path's full spelling for hover and copying, while shortening
-    /// only paths that are actually inside this inspected host's home.
+    /// only paths that are actually inside this inspected host's home. `strip_prefix`
+    /// checks path components, so a sibling whose name starts with the home directory
+    /// is never shortened.
     fn new(path: &Path, home: &Path) -> Self {
         let full = path.display().to_string();
         let short = path.strip_prefix(home).map_or_else(

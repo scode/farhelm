@@ -11,7 +11,7 @@ use anyhow::Context;
 use axum::extract::State;
 use axum::response::IntoResponse;
 use rusqlite::{Connection, OptionalExtension};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 
 /// Shared by fresh creation and migration so both paths have identical tables.
@@ -35,32 +35,8 @@ pub(crate) const SCHEMA: &str = "
     ) STRICT;
 ";
 
-/// Display-ready content, kept unchanged for the lifetime of its id.
-/// Optional detail and link have no source-specific meaning to the queue:
-/// producers supply their wording and destination, and clients render them.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub(crate) struct Announcement {
-    pub(crate) id: String,
-    pub(crate) title: String,
-    pub(crate) body: String,
-    pub(crate) detail: Option<String>,
-    pub(crate) link: Option<AnnouncementLink>,
-}
-
-/// One optional, labelled destination supplied by the announcement's producer.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub(crate) struct AnnouncementLink {
-    pub(crate) label: String,
-    pub(crate) url: String,
-}
-
-/// One consistent queue snapshot. Pending runs oldest insertion first;
-/// history runs newest shown time first, then newest insertion first.
-#[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub(crate) struct AnnouncementQueue {
-    pub(crate) pending: Vec<Announcement>,
-    pub(crate) history: Vec<Announcement>,
-}
+// The queue's shapes live in `farhelm-proto` so the GUI decodes the same types this module serves.
+pub(crate) use farhelm_proto::announcements::{Announcement, AnnouncementLink, AnnouncementQueue};
 
 impl HelmStore {
     /// The build that created this database, never the build that migrated it.

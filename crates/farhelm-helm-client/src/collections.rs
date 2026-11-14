@@ -4,14 +4,14 @@
 //! its collection holds. An entry that does not decode breaks the channel like any other protocol violation, so the
 //! GUI only ever sees typed state and has no decode error to handle in a view.
 //!
-//! Every collection (sessions, hosts, preferences, approvals) then goes through the same three operations: install a
-//! snapshot, upsert or remove entries by key, and replace the metadata (availability, order, counts). There is no
-//! per-collection code path to drift. Every entry arrives with its key ([`KeyedEntry`]), the one the helm diffed it
-//! by, and that is the key it is filed under, so applying a change never derives a key from an entry. Looking an entry
-//! up by a typed id ([`Collections::get`]) still needs the helm's spelling of that key (a host's numeric id as a
-//! string, for example); a helper in `farhelm-proto` that spells it comes with the first view that looks entries up
-//! that way. The per-collection facts are which type an entry decodes as and which
-//! [`PushedEntry`] variant carries it, and both live in exhaustive matches here.
+//! Every collection (sessions, hosts, preferences, approvals, templates, notices, announcements, host progress) then
+//! goes through the same three operations: install a snapshot, upsert or remove entries by key, and replace the
+//! metadata (availability, order, counts). There is no per-collection code path to drift. Every entry arrives with its
+//! key ([`KeyedEntry`]), the one the helm diffed it by, and that is the key it is filed under, so applying a change
+//! never derives a key from an entry. Looking an entry up by a typed id ([`Collections::get`]) still needs the helm's
+//! spelling of that key (a host's numeric id as a string, for example); a helper in `farhelm-proto` that spells it
+//! comes with the first view that looks entries up that way. The per-collection facts are which type an entry decodes
+//! as and which [`PushedEntry`] variant carries it, and both live in exhaustive matches here.
 //!
 //! [`Collections`] is the one copy of this state. Views read it through [`Collections::ordered`] and
 //! [`Collections::get`], which hand out references; a view that kept its own copy of an entry would be a second
@@ -19,7 +19,11 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use farhelm_proto::announcements::AnnouncementQueue;
 use farhelm_proto::approvals::PendingApproval;
+use farhelm_proto::launcher::LaunchTemplate;
+use farhelm_proto::notices::Notice;
+use farhelm_proto::provisioning::ProvisioningView;
 use farhelm_proto::ui_channel::{
     Collection, CollectionChanges, CollectionMeta, CollectionState, HostView, KeyedEntry,
     Preferences, SessionRow,
@@ -37,6 +41,10 @@ pub enum PushedEntry {
     Host(HostView),
     Preferences(Preferences),
     Approval(PendingApproval),
+    Template(LaunchTemplate),
+    Notice(Notice),
+    Announcements(AnnouncementQueue),
+    HostProgress(ProvisioningView),
 }
 
 /// An entry type that has its own pushed collection, so a reader can name the type and get the collection with it.
@@ -83,6 +91,46 @@ impl Pushed for PendingApproval {
     fn from_entry(entry: &PushedEntry) -> Option<&Self> {
         match entry {
             PushedEntry::Approval(approval) => Some(approval),
+            _ => None,
+        }
+    }
+}
+
+impl Pushed for LaunchTemplate {
+    const COLLECTION: Collection = Collection::Templates;
+    fn from_entry(entry: &PushedEntry) -> Option<&Self> {
+        match entry {
+            PushedEntry::Template(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+impl Pushed for Notice {
+    const COLLECTION: Collection = Collection::Notices;
+    fn from_entry(entry: &PushedEntry) -> Option<&Self> {
+        match entry {
+            PushedEntry::Notice(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+impl Pushed for AnnouncementQueue {
+    const COLLECTION: Collection = Collection::Announcements;
+    fn from_entry(entry: &PushedEntry) -> Option<&Self> {
+        match entry {
+            PushedEntry::Announcements(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+impl Pushed for ProvisioningView {
+    const COLLECTION: Collection = Collection::HostProgress;
+    fn from_entry(entry: &PushedEntry) -> Option<&Self> {
+        match entry {
+            PushedEntry::HostProgress(value) => Some(value),
             _ => None,
         }
     }
@@ -149,6 +197,10 @@ fn decode_entries(
             Collection::Hosts => |value| typed(value, PushedEntry::Host),
             Collection::Preferences => |value| typed(value, PushedEntry::Preferences),
             Collection::Approvals => |value| typed(value, PushedEntry::Approval),
+            Collection::Templates => |value| typed(value, PushedEntry::Template),
+            Collection::Notices => |value| typed(value, PushedEntry::Notice),
+            Collection::Announcements => |value| typed(value, PushedEntry::Announcements),
+            Collection::HostProgress => |value| typed(value, PushedEntry::HostProgress),
         };
     entries
         .into_iter()
@@ -468,5 +520,99 @@ mod tests {
             })
             .is_err()
         );
+    }
+
+    /// The four collections added after the first channel PR (templates, notices, the announcement queue, host
+    /// progress) each decode as their own proto type and are read back through the typed accessors, so a GUI view
+    /// gets typed state for them exactly as for the first four. Built from the proto types, so the test follows the
+    /// wire shape the helm serializes.
+    #[test]
+    fn templates_notices_announcements_and_host_progress_decode_as_their_types() {
+        use farhelm_proto::announcements::Announcement;
+        use farhelm_proto::notices::NoticeContent;
+        use farhelm_proto::provisioning::RunStatus;
+        use farhelm_proto::ui_channel::ANNOUNCEMENTS_KEY;
+        let keyed = |key: &str, value: serde_json::Value| KeyedEntry {
+            key: key.into(),
+            value,
+        };
+        let template = LaunchTemplate {
+            name: "review".into(),
+            fields: serde_json::from_value(json!({ "prompt": "review this" })).unwrap(),
+        };
+        let notice = Notice {
+            id: 7,
+            host: 1,
+            raised_at: 10,
+            read: false,
+            resolved: false,
+            content: NoticeContent::StuckTrash {
+                checkout_id: "c1".into(),
+                name: "c1-archive".into(),
+                repository: "example/project".into(),
+                bytes: Some(4096),
+                reason: "permission denied".into(),
+                at: 20,
+            },
+        };
+        let queue = AnnouncementQueue {
+            pending: vec![Announcement {
+                id: "news-1".into(),
+                title: "News".into(),
+                body: "Something new.".into(),
+                detail: None,
+                link: None,
+            }],
+            history: vec![],
+        };
+        let run = ProvisioningView {
+            host_id: 1,
+            run_id: Some("run-1".into()),
+            operation: None,
+            status: RunStatus::Running,
+            steps: vec![],
+            message: None,
+        };
+        let snapshot = [
+            (
+                Collection::Templates,
+                "review",
+                serde_json::to_value(&template).unwrap(),
+            ),
+            (
+                Collection::Notices,
+                "7",
+                serde_json::to_value(&notice).unwrap(),
+            ),
+            (
+                Collection::Announcements,
+                ANNOUNCEMENTS_KEY,
+                serde_json::to_value(&queue).unwrap(),
+            ),
+            (
+                Collection::HostProgress,
+                "1",
+                serde_json::to_value(&run).unwrap(),
+            ),
+        ]
+        .into_iter()
+        .map(|(collection, key, value)| {
+            decode_state(CollectionState {
+                collection,
+                meta: meta(&[key]),
+                entries: vec![keyed(key, value)],
+            })
+            .expect("the entry decodes as its collection's type")
+        })
+        .collect::<Vec<_>>();
+        let mut held = Collections::default();
+        held.install(&snapshot);
+        assert_eq!(held.get::<LaunchTemplate>("review"), Some(&template));
+        assert_eq!(held.get::<Notice>("7"), Some(&notice));
+        assert_eq!(
+            held.get::<AnnouncementQueue>(ANNOUNCEMENTS_KEY),
+            Some(&queue)
+        );
+        assert_eq!(held.ordered::<ProvisioningView>(), [&run]);
     }
 }

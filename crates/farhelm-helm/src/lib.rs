@@ -779,6 +779,7 @@ fn api_router(state: Arc<AppState>) -> Router {
             "/api/hosts/{id}/provisioning",
             get(provisioning::provisioning_state),
         )
+        .route("/api/provisioning", get(provisioning::provisioning_runs))
         .route(
             "/api/hosts/{id}/destination",
             axum::routing::post(hosts::set_destination),

@@ -50,7 +50,8 @@ pub(crate) use backend::{
     isolate_process_group,
 };
 pub(crate) use http::{
-    probe_host, provision_host, provisioning_error, provisioning_state, uninstall_host, update_host,
+    probe_host, provision_host, provisioning_error, provisioning_runs, provisioning_state,
+    uninstall_host, update_host,
 };
 pub(crate) use payloads::PayloadSelection;
 pub(crate) use plan::ProvisioningTarget;

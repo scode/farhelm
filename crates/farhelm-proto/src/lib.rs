@@ -108,6 +108,8 @@ macro_rules! enum_with_all {
 }
 pub(crate) use enum_with_all;
 
+/// The helm's announcement queue, as it serves it to the GUI.
+pub mod announcements;
 /// Acting `farhelm` commands waiting for the user's approval, as the helm
 /// serves them to the GUI (see the module's own docs).
 pub mod approvals;
@@ -125,8 +127,12 @@ pub mod host_name;
 pub mod http;
 pub mod io;
 pub mod launch;
+/// Shared notices about hosts, as the helm serves them to the GUI.
+pub mod notices;
 /// Final-extension policy shared by desktop settings and the helm's opener.
 pub mod open_extensions;
+/// Host provisioning progress, as the helm serves it to the GUI.
+pub mod provisioning;
 // The GUI's one ordered channel to the helm. Its docs are its own, for the
 // same rustdoc-link reason as `grid`.
 pub mod ui_channel;

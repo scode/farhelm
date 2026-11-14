@@ -7,7 +7,7 @@
 //! credentials, whose current values resolve only at delivery.
 
 use super::super::{
-    http::StepView,
+    http::{ProgressViews as _, StepView},
     plan::{PlanStep, PlanSteps},
 };
 use super::*;
@@ -879,10 +879,16 @@ impl ProvisioningService {
                 .as_ref()
                 .is_some_and(|binding| binding.sandbox == plan.sandbox)
         });
+        // Both refusals below withdraw a run that a connected GUI may already
+        // show (any feed bump while this waited for the lock re-read it), so
+        // each bumps the feed after its removal, as every progress change does.
         if !valid {
-            let mut memory = self.memory.lock().await;
-            memory.busy.remove(&host);
-            memory.runs.remove(&host);
+            {
+                let mut memory = self.memory.lock().await;
+                memory.busy.remove(&host);
+                memory.runs.remove(&host);
+            }
+            self.manager.events().bump();
             return Err(refused(
                 "this Tensorlake host was removed or changed; probe again",
             ));
@@ -892,9 +898,12 @@ impl ProvisioningService {
         // destroyed) can only get in the way of that. Checked under the
         // provisioning lock the deletion takes too.
         if self.manager.is_sealed(host) {
-            let mut memory = self.memory.lock().await;
-            memory.busy.remove(&host);
-            memory.runs.remove(&host);
+            {
+                let mut memory = self.memory.lock().await;
+                memory.busy.remove(&host);
+                memory.runs.remove(&host);
+            }
+            self.manager.events().bump();
             return Err(refused(
                 "this sandbox is being deleted, so it cannot be set up again; use Retry to finish deleting it",
             ));

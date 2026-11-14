@@ -2067,6 +2067,65 @@ async fn setup_of_a_sealed_sandbox_is_refused_before_it_takes_the_host() {
     );
 }
 
+/// Whether `host` has a run in the list the UI channel pushes as host progress.
+async fn retains_run(service: &ProvisioningService, host: HostId) -> bool {
+    let runs = service.runs().await.runs;
+    runs.iter().any(|run| run.host_id == host)
+}
+
+/// Why: a setup claims its host's progress before it waits for the host's
+/// provisioning lock, so a connected GUI can already show the run as running
+/// when a refusal after that wait withdraws it. The GUI re-reads progress
+/// when the fleet feed moves or after its own channel command; a refusal
+/// reached any other way (an HTTP request, the automatic update) has no
+/// command to re-read after, so a withdrawal without a bump left a run on the
+/// GUI that never started. Spec: a setup refused as sealed after its run was
+/// visible leaves no run, and the feed has moved since the seal was noted.
+#[farhelm_testtrace::test]
+async fn a_setup_refused_after_its_run_was_visible_withdraws_it_through_the_feed() {
+    let f = fixture(false).await;
+    let host = f.legacy_host().await;
+    let ProbeResponse::TensorlakeProvisionable { probe_id, .. } =
+        f.probe(ProbeDestination::TensorlakeHost { host }).await
+    else {
+        panic!("ordinary recovery offer")
+    };
+    // Holding the host's provisioning lock parks the setup between its
+    // progress claim and the checks that refuse it.
+    let held = f.harness.manager.host_provision_lock(host).await;
+    let service = Arc::clone(&f.service);
+    let setup = tokio::spawn(async move { service.start_add(ProvisionRequest { probe_id }).await });
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while !retains_run(&f.service, host).await {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("premise: the setup claims the host's progress before it waits for the lock");
+    // Noting the seal bumps the feed itself, so the baseline is read after it:
+    // only the refusal can move the feed from here.
+    f.harness.manager.note_sealed(host);
+    let seen = f.harness.manager.events().revision();
+    drop(held);
+    let refusal = tokio::time::timeout(Duration::from_secs(15), setup)
+        .await
+        .expect("the setup ends once the lock is free")
+        .unwrap()
+        .expect_err("a sealed sandbox cannot be set up again");
+    assert!(
+        format!("{refusal:#}").contains("being deleted"),
+        "{refusal:#}"
+    );
+    assert!(
+        !retains_run(&f.service, host).await,
+        "the refusal leaves no run behind"
+    );
+    assert!(
+        f.harness.manager.events().revision() > seen,
+        "the run's withdrawal bumps the feed, so a GUI that showed it re-reads"
+    );
+}
+
 /// Migrated image and snapshot recipes have no built snapshot, but their old
 /// hosts already own a sandbox. Rerun must skip the builder by durable ID and
 /// by name while the pending-create marker survives a lost ID write,

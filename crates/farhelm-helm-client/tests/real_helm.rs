@@ -184,8 +184,11 @@ fn open(endpoint: HelmEndpoint) -> (HelmConnection, Gui) {
 // ---------------------------------------------------------------------------
 
 /// The GUI's whole model of the helm starts from the snapshot and is kept current by changes the helm pushes before
-/// each reply. This pins both against the real helm: every pushed collection arrives on open, and a command's effect
-/// is already in the GUI's collections when its reply resolves, with no refetch.
+/// each reply. This pins both against the real helm: all eight pushed collections arrive on open, whatever entries a
+/// fresh helm holds in them decode as the client's types (a snapshot entry that does not decode breaks the channel
+/// before `Connected`), and a command's effect is already in the GUI's collections when its reply resolves, with no
+/// refetch. A fresh helm has no templates, notices or provisioning runs, so their entry shapes are pinned by the
+/// helm's `every_pushed_collection_round_trips_through_its_proto_type`, not here.
 #[test]
 fn a_command_s_changes_are_applied_before_its_reply_resolves() {
     let helm = Helm::start();
@@ -201,6 +204,10 @@ fn a_command_s_changes_are_applied_before_its_reply_resolves() {
             Collection::Hosts,
             Collection::Preferences,
             Collection::Approvals,
+            Collection::Templates,
+            Collection::Notices,
+            Collection::Announcements,
+            Collection::HostProgress,
         ] {
             assert!(
                 gui.collections.meta(collection).is_some(),
