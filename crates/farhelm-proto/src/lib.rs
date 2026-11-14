@@ -2806,6 +2806,39 @@ pub struct SessionStopOutcome {
     pub notice: Option<String>,
 }
 
+/// The body of `POST /api/sessions/{id}/stop`: consent from the state shown when the user asked for the Stop. Older
+/// callers never warned about closing tabs, so an omitted field refuses open tabs ([`Default`]); their original
+/// authority to stop the agent stays.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct SessionStopRequest {
+    /// Refuse if any terminal tab is open: the click showed none.
+    pub refuse_if_tabs_open: bool,
+    /// Refuse if the agent is alive again, or cannot be confirmed ended: the click showed it ended.
+    pub refuse_if_agent_running: bool,
+}
+
+impl Default for SessionStopRequest {
+    /// HTTP omission cannot authorize the tab-closing consequence. This deliberately differs from the unrestricted
+    /// internal wire default.
+    fn default() -> Self {
+        Self {
+            refuse_if_tabs_open: true,
+            refuse_if_agent_running: false,
+        }
+    }
+}
+
+/// The success body of `POST /api/sessions/{id}/replace`: the replacement's own session, plus the notice the source's
+/// Delete carried, only when it carried one, so a reader of the body as a bare session still works.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionReplaceReply {
+    #[serde(flatten)]
+    pub session: SessionInfo,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delete_notice: Option<String>,
+}
+
 /// The original managed-checkout request retained under one authenticated key.
 ///
 /// An inspection may be followed by a launch-capable reconciliation. The
@@ -9878,5 +9911,55 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// The GUI and the helm share the Stop request's type, and an omitted field must keep refusing open tabs: older
+    /// callers never warned about closing them. Specified: `{}` decodes as refusing open tabs and not refusing a running
+    /// agent; both flags round-trip under their wire names.
+    #[farhelm_testtrace::test]
+    fn session_stop_request_defaults_to_refusing_open_tabs_and_round_trips() {
+        assert_eq!(
+            serde_json::from_value::<SessionStopRequest>(serde_json::json!({})).unwrap(),
+            SessionStopRequest {
+                refuse_if_tabs_open: true,
+                refuse_if_agent_running: false,
+            }
+        );
+        let wire =
+            serde_json::json!({"refuse_if_tabs_open": false, "refuse_if_agent_running": true});
+        let request: SessionStopRequest = serde_json::from_value(wire.clone()).unwrap();
+        assert!(!request.refuse_if_tabs_open && request.refuse_if_agent_running);
+        assert_eq!(serde_json::to_value(request).unwrap(), wire);
+    }
+
+    /// The Replace reply was a bare session with `delete_notice` added beside its fields, and readers of it as a bare
+    /// session must keep working. Specified, over the helm's pinned session fixture: with no notice the reply is the
+    /// session's own JSON; with one it is that JSON plus `delete_notice`, and it decodes back to the same reply.
+    #[farhelm_testtrace::test]
+    fn session_replace_reply_is_the_session_plus_an_optional_delete_notice() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../farhelm-helm/http-contract/session-list.json"
+        ))
+        .unwrap();
+        let session: SessionInfo = serde_json::from_value(fixture["sessions"][0].clone()).unwrap();
+        let bare = SessionReplaceReply {
+            session: session.clone(),
+            delete_notice: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&bare).unwrap(),
+            serde_json::to_value(&session).unwrap()
+        );
+        let noted = SessionReplaceReply {
+            delete_notice: Some("the checkout moved to the trash".into()),
+            ..bare
+        };
+        let mut wire = serde_json::to_value(&session).unwrap();
+        wire["delete_notice"] = serde_json::json!("the checkout moved to the trash");
+        assert_eq!(serde_json::to_value(&noted).unwrap(), wire);
+        assert_eq!(
+            serde_json::from_value::<SessionReplaceReply>(wire).unwrap(),
+            noted
+        );
     }
 }

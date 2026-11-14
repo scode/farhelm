@@ -11,8 +11,10 @@
 //!
 //! The row's actions menu button sits at its end, outside the open control, so opening the menu never opens the
 //! session ([`super::menu`]). A pending Delete shows its spinner and words in place of the title, which stays the row's
-//! accessible name, and a refusal of the row's last request shows under the row until the next one starts
-//! ([`super::delete`]).
+//! accessible name ([`super::delete`]); a pending Stop shows its spinner and "Stopping…" before the title, which stays
+//! on screen, since the session stays too ([`super::stop`]); a Replace that has waited two seconds says so on a line
+//! under the row ([`super::replace`]). The refusal of the row's last request, or the notice its last success left,
+//! shows under the row for as long as [`super::outcome`] says.
 //!
 //! NOTE: The locality column is kept empty, at its width, so titles start where they did in the old app; the locality,
 //! agent and permission marks, the activity age, the stale cause, the pin and the notification bell are not ported yet.
@@ -25,9 +27,9 @@ use gpui::{
     relative,
 };
 
-use super::delete;
 use super::selection::Listed;
 use super::status::{self, Badge};
+use super::{delete, outcome, replace, stop};
 use crate::components::{HoverHelp, ListRow, Role};
 use crate::focus;
 use crate::host_text::{self, HostSentence, HostText};
@@ -49,11 +51,11 @@ fn under_title() -> gpui::Pixels {
 }
 
 /// The steps of the list's two animations, one for every row: the running pulse's, which only a pulsing status mark
-/// uses, and the pending Delete spinner's.
+/// uses, and the spinner's, which every pending Delete, Stop and long Replace draws.
 #[derive(Clone, Copy)]
 pub(super) struct Steps {
     pub(super) pulse: u64,
-    pub(super) delete: u8,
+    pub(super) spinner: u8,
 }
 
 /// Draw `session`'s row, its animations at the list's `steps`, and `menu`, its actions menu button, at its end. `focus`
@@ -114,11 +116,16 @@ pub(crate) fn row(
                 .children(live.map(|live| live.mark(palette, selected, row.stale, steps.pulse))),
         )
         .child(div().w(metrics::ROW_SLOT).flex_none())
+        // A pending Stop goes before the title, as the old `.stop-progress` did.
+        .children(
+            stop::in_flight(session.key, cx)
+                .then(|| stop::progress(session.key, steps.spinner, selected, cx)),
+        )
         // A pending Delete takes the title's place on screen, as the old row's did; the open control and the list item
         // keep the title as their accessible names.
         .child(match delete::in_flight(session.key, cx) {
             Some(guard) => {
-                delete::progress(session.key, guard, steps.delete, selected, cx).into_any_element()
+                delete::progress(session.key, guard, steps.spinner, selected, cx).into_any_element()
             }
             None => host_text::element(&title)
                 .flex_1()
@@ -171,7 +178,14 @@ pub(crate) fn row(
                 .child(div().flex_1().min_w_0().child(control))
                 .child(menu),
         )
-        .children(delete::failure_line(session.key, selected, cx))
+        .children(replace::progress_line(
+            session.key,
+            row,
+            steps.spinner,
+            selected,
+            cx,
+        ))
+        .children(outcome::row_line(session.key, selected, cx))
         .into_any_element()
 }
 
