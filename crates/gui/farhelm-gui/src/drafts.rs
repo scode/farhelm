@@ -23,24 +23,27 @@
 //! manager's `close_all`) and drops the UI session's operations, so neither the draft nor its pending save reaches the
 //! rebuilt window (SPEC_impl.md, "One failure path: the reset").
 //!
-//! NOTE: The draft is framework-free and does not hold the text input's state. The editor mirrors the input into it:
-//! on the input's change event it calls [`Draft::edit`] with the input's text (and puts the input back to
-//! [`Draft::value`] when the edit is refused because a save is in flight); on a pushed change it calls
-//! [`Draft::follow`] and, when that returns true, sets the input's text (`TextInputState::set_text`, which raises no
-//! change event, so following never marks the field touched). An editor watches its session's store for those pushes
-//! for as long as it is open.
+//! A [`Draft`] is framework-free and holds no text field. A text field over a draft is a [`DraftInput`], which binds
+//! the two so no editor wires them by hand: it mirrors the field's edits into the draft (putting the field back when a
+//! save in flight refuses an edit), follows a pushed value into the field while the draft allows, holds the field
+//! read-only while its save is in flight, and after a refused save takes up the pushed value again if the user had not
+//! touched the field. Forgetting any of those legs in one editor is the bug "a refresh changed what the user was
+//! typing", or its mirror image, a field showing text the draft does not hold, and settings alone has dozens of fields.
+//! The editor still reads its own value from the store (each editor knows where its field's value lives) and hands
+//! every push to [`DraftInput::follow`], for as long as it is open.
 //!
 //! What the Rename editor does when its save settles is in [`Settled::user_moved_on`]'s docs: a successful save closes
 //! the editor even when the user moved on, and focus goes back to the opener only if it is still inside the editor.
 //!
 //! Extension points (`docs/gpui/foundation-ownership.md`): a new editor holds a [`Draft`] per field and saves through
-//! [`save`]. Partial saves are not built: they are used only where the API already supports them or where SPEC.md's
-//! "a GUI write must not undo a change an agent or the command line made" needs them, and the first editor with such a
-//! route adds them here.
+//! [`save`], or a [`DraftInput`] per text field and saves through [`DraftInput::save`]. Partial saves are not built:
+//! they are used only where the API already supports them or where SPEC.md's "a GUI write must not undo a change an
+//! agent or the command line made" needs them, and the first editor with such a route adds them here.
 
 use farhelm_helm_client::PathError;
-use gpui::Context;
+use gpui::{AnyWindowHandle, App, Context, Subscription, Window};
 
+use crate::components::{TextInputEvent, TextInputState};
 use crate::host_text::HostText;
 use crate::operations::{Command, NotStarted, OpKey, Outcome, Settled};
 use crate::session;
@@ -75,9 +78,8 @@ impl<T: Clone + PartialEq> Draft<T> {
         self.touched
     }
 
-    /// Whether a save is in flight. The editor draws its field read-only meanwhile, so the value on screen stays the
-    /// one sent, and ignores its Save. (The Rename editor leaves Save looking enabled, because a disabled button gives
-    /// up focus and the button component has no busy look yet.)
+    /// Whether a save is in flight. The editor's field is read-only meanwhile, so the value on screen stays the one
+    /// sent, and its Save is busy ([`crate::components::Button::busy`]: it keeps focus and ignores presses).
     pub fn is_saving(&self) -> bool {
         self.saving
     }
@@ -91,10 +93,11 @@ impl<T: Clone + PartialEq> Draft<T> {
     /// retypes a title means it, and no comparison can tell that apart from not editing. Returns whether the draft
     /// took the edit.
     ///
-    /// While a save is in flight the edit is refused, and the editor puts its input back to [`Draft::value`]. The
-    /// editor draws the field read-only meanwhile, but an input event can be queued before that draw, as the old app
-    /// found (`rename.rs` at reference commit `24bc0580`). Taking it would be worse than losing a keystroke: the
-    /// save's success would clear the touched mark over text that was never sent, and the next push would overwrite it.
+    /// While a save is in flight the edit is refused, and the field is put back to [`Draft::value`] ([`DraftInput`]
+    /// does that for a text field). The field is read-only meanwhile ([`DraftInput`] holds it so), but an input event
+    /// can be queued before that takes effect, as the old app found (`rename.rs` at reference commit `24bc0580`).
+    /// Taking it would be worse than losing a keystroke: the save's success would clear the touched mark over text that
+    /// was never sent, and the next push would overwrite it.
     #[must_use = "a refused edit leaves the input showing text the draft does not hold"]
     pub fn edit(&mut self, value: T) -> bool {
         if self.saving {
@@ -130,13 +133,14 @@ impl<T: Clone + PartialEq> Draft<T> {
 /// Save one draft of `view` as work on `key` (the session, template, host or preferences it saves): send `command`
 /// built from the draft's value, then, once the helm answers, settle the draft and call `then` with the outcome.
 ///
-/// `field` reaches the draft inside the view; it is a plain function so the save can reach the same draft again when
-/// the reply arrives. A second Save while the first is in flight (Enter pressed again) is refused by the operation
-/// store, like any work on a key with work in flight. Nothing is retried, and if the view is gone when the reply
-/// arrives, only the operation store's record of a refusal remains under `key` (on a session's row, for a session).
+/// `field` reaches the draft inside the view; it holds nothing of the view (a plain function, or a closure over one) so
+/// the save can reach the same draft again when the reply arrives. A second Save while the first is in flight (Enter
+/// pressed again) is refused by the operation store, like any work on a key with work in flight. Nothing is retried,
+/// and if the view is gone when the reply arrives, only the operation store's record of a refusal remains under `key`
+/// (on a session's row, for a session).
 pub fn save<V: 'static, T: Clone + PartialEq + 'static>(
     view: &mut V,
-    field: fn(&mut V) -> &mut Draft<T>,
+    field: impl Fn(&mut V) -> &mut Draft<T> + Copy + 'static,
     key: &OpKey,
     command: impl FnOnce(&T) -> Result<Command, PathError>,
     cx: &mut Context<V>,
@@ -159,6 +163,126 @@ pub fn save<V: 'static, T: Clone + PartialEq + 'static>(
     draft.refusal = None;
     cx.notify();
     Ok(())
+}
+
+// ---- A text field bound to a draft ----------------------------------------------------------------------------------
+
+/// A text field over a [`Draft<String>`], kept in step with it: what the module docs say an editor must otherwise wire
+/// by hand for each field. The editor holds one per text field, draws [`DraftInput::input`] with
+/// [`crate::components::TextInput`], hands it every pushed value ([`DraftInput::follow`]) and saves through
+/// [`DraftInput::save`].
+pub struct DraftInput {
+    draft: Draft<String>,
+    input: TextInputState,
+    /// The value the helm last pushed for the field: what an untouched draft takes up again after a refused save.
+    pushed: String,
+    _events: Subscription,
+}
+
+impl DraftInput {
+    /// A field showing `value` (the raw value from the store) over a draft of it, untouched. `field` reaches this
+    /// within the editor `V`; `on_submit` runs when the user presses Enter in the field (an editor's Save, usually).
+    pub fn new<V: 'static>(
+        value: &str,
+        input: TextInputState,
+        field: fn(&mut V) -> &mut DraftInput,
+        on_submit: fn(&mut V, &mut Window, &mut Context<V>),
+        window: &mut Window,
+        cx: &mut Context<V>,
+    ) -> DraftInput {
+        input.set_text(value.to_owned(), window, cx);
+        let events = input.subscribe(window, cx, move |view, event, window, cx| match event {
+            TextInputEvent::Changed => field(view).edited(window, cx),
+            TextInputEvent::Submitted => on_submit(view, window, cx),
+        });
+        DraftInput {
+            draft: Draft::load(value.to_owned()),
+            input,
+            pushed: value.to_owned(),
+            _events: events,
+        }
+    }
+
+    /// The draft: its value, whether it is touched or saving, and the last refusal.
+    pub fn draft(&self) -> &Draft<String> {
+        &self.draft
+    }
+
+    /// The field's state, for the editor to draw.
+    pub fn input(&self) -> &TextInputState {
+        &self.input
+    }
+
+    /// The helm pushed `pushed` for this field: the field shows it if the draft follows it ([`Draft::follow`]: only
+    /// while untouched and not saving). Setting the field raises no change event, so following never marks it touched.
+    pub fn follow(&mut self, pushed: &str, window: &mut Window, cx: &mut App) {
+        self.pushed = pushed.to_owned();
+        if self.draft.follow(pushed.to_owned()) {
+            self.input.set_text(self.draft.value().clone(), window, cx);
+        }
+    }
+
+    /// The user changed the field: mirror it into the draft. While a save is in flight the field is read-only, so an
+    /// edit arrives then only if it was queued before the field became read-only; the draft refuses it
+    /// ([`Draft::edit`]) and the field is put back to the value being saved. That moves the caret to the end and clears
+    /// the field's undo history, which is why read-only is the main guard and this only the backstop.
+    fn edited<V: 'static>(&mut self, window: &mut Window, cx: &mut Context<V>) {
+        let text = self.input.text(cx).to_string();
+        if !self.draft.edit(text) {
+            self.input.set_text(self.draft.value().clone(), window, cx);
+        }
+        cx.notify();
+    }
+
+    /// Save the field's draft as work on `key`, as [`save`] does, holding the field read-only until the helm answers.
+    /// After a refusal an untouched draft, which did not follow pushes while saving, takes up the last pushed value:
+    /// saving it again must not send back a value someone else has since replaced. A touched draft keeps what the user
+    /// typed. Then `then` runs with the outcome.
+    pub fn save<V: 'static>(
+        view: &mut V,
+        field: fn(&mut V) -> &mut DraftInput,
+        key: &OpKey,
+        command: impl FnOnce(&str) -> Result<Command, PathError>,
+        window: &mut Window,
+        cx: &mut Context<V>,
+        then: impl FnOnce(&mut V, &Settled, &mut Context<V>) + 'static,
+    ) -> Result<(), NotStarted> {
+        let handle = window.window_handle();
+        let started = save(
+            view,
+            move |view| &mut field(view).draft,
+            key,
+            |value: &String| command(value),
+            cx,
+            move |view, settled, cx| {
+                let input = field(view);
+                input.input.set_read_only(false, cx);
+                if let Outcome::Refused(_) = settled.outcome {
+                    input.follow_after_refusal(handle, cx);
+                }
+                then(view, settled, cx);
+            },
+        );
+        if started.is_ok() {
+            // The text on screen must stay the text sent, and read-only keeps the caret and undo history where they
+            // are. `edited` still undoes an edit that was queued before this took effect.
+            field(view).input.set_read_only(true, cx);
+        }
+        started
+    }
+
+    /// Take up the last pushed value after a refused save, if the draft follows it. The field is set once the
+    /// completion has returned, since a completion has no window at hand.
+    fn follow_after_refusal<V: 'static>(&mut self, window: AnyWindowHandle, cx: &mut Context<V>) {
+        if !self.draft.follow(self.pushed.clone()) {
+            return;
+        }
+        let input = self.input.clone();
+        let value = self.draft.value().clone();
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| input.set_text(value, window, cx));
+        });
+    }
 }
 
 #[cfg(test)]

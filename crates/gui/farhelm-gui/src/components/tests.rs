@@ -57,6 +57,61 @@ fn a_click_activates_an_enabled_button_and_not_a_disabled_one(cx: &mut TestAppCo
     );
 }
 
+/// A busy button, whose action is in flight, keeps focus and its place in Tab's order but does nothing when pressed:
+/// the old app's `aria-disabled` Save. Disabling it instead would drop focus out of the dialog's controls for the
+/// length of the save. Specified: Tab reaches the busy button; a click, Enter and Space all leave it focused and run
+/// nothing, and Enter and Space stop at it rather than reaching what holds it; once it is no longer busy, a click runs
+/// it.
+#[gpui::test]
+fn a_busy_button_keeps_focus_and_ignores_presses(cx: &mut TestAppContext) {
+    let runs = Rc::new(Cell::new(0));
+    let busy = Rc::new(Cell::new(true));
+    // Enter and Space that went past the button to the element holding it.
+    let passed = Rc::new(Cell::new(0));
+    let focus = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let (counted, drawn, handle, heard) =
+        (runs.clone(), busy.clone(), focus.clone(), passed.clone());
+    let cx = open(cx, move |_, _| {
+        let (counted, heard) = (counted.clone(), heard.clone());
+        div()
+            .on_key_down(move |event: &gpui::KeyDownEvent, _, _| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    heard.set(heard.get() + 1);
+                }
+            })
+            .child(
+                Button::new("save", "Save", HoverHelp::tooltip("Save it"), Role::Button)
+                    .tier(Tier::Primary)
+                    .busy(drawn.get())
+                    .focus(&handle)
+                    .on_click(move |_, _, _| counted.set(counted.get() + 1)),
+            )
+            .into_any_element()
+    });
+    keys(cx, "tab");
+    assert!(
+        cx.update(|window, _| focus.is_focused(window)),
+        "Tab reached the busy button"
+    );
+    click(cx, "save");
+    keys(cx, "enter");
+    keys(cx, "space");
+    assert_eq!(runs.get(), 0, "no press ran it while busy");
+    assert_eq!(
+        passed.get(),
+        0,
+        "Enter and Space stopped at the busy button"
+    );
+    assert!(
+        cx.update(|window, _| focus.is_focused(window)),
+        "and it kept focus"
+    );
+    busy.set(false);
+    redraw(cx);
+    click(cx, "save");
+    assert_eq!(runs.get(), 1, "once not busy, a click ran it");
+}
+
 /// The text of the tooltip showing now, if any.
 fn tooltip(cx: &mut VisualTestContext) -> Option<gpui::SharedString> {
     cx.update(|window, cx| layers::shown_tooltip(window, cx))

@@ -11,16 +11,20 @@ use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::DeleteGuard;
 use farhelm_proto::ui_channel::{Collection, CollectionChanges, CollectionState, SessionRow};
-use gpui::{AppContext as _, Entity, TestAppContext};
+use gpui::{
+    AppContext as _, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Render,
+    Styled as _, TestAppContext, VisualTestContext, Window, div, px,
+};
 use gpui_component::Root;
 use serde_json::json;
 
-use crate::drafts::{self, Draft};
+use crate::components::{HoverHelp, TextInput, TextInputState};
+use crate::drafts::{self, Draft, DraftInput};
 use crate::host_text::HostText;
 use crate::main_view::MainView;
 use crate::operations::{Command, NotStarted, OpKey, Operations, Outcome, Settled, Work};
 use crate::session::{self, Connection};
-use crate::test_support::{meta, session_entry, sessions, started};
+use crate::test_support::{self, keys, meta, session_entry, sessions, started};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
@@ -833,4 +837,211 @@ fn a_draft_saves_as_work_on_a_template(cx: &mut TestAppContext) {
         assert_eq!(editor.settled, vec![Outcome::Done(None)]);
         assert_eq!(operations.read(cx).in_flight(&OpKey::template("t")), None);
     });
+}
+
+// ---- A text field bound to a draft ---------------------------------------------------------------------------------
+
+/// A stand-in editor with one text field bound to a draft, drawn in a window so the field is real: what a settings or
+/// template field will be. Enter in the field saves it as work on a template.
+struct FieldEditor {
+    prompt: DraftInput,
+    settled: Vec<Outcome>,
+}
+
+impl FieldEditor {
+    fn new(value: &str, window: &mut Window, cx: &mut gpui::Context<Self>) -> Self {
+        let input = TextInputState::new(window, cx);
+        let prompt = DraftInput::new(
+            value,
+            input,
+            |editor: &mut Self| &mut editor.prompt,
+            Self::submit,
+            window,
+            cx,
+        );
+        FieldEditor {
+            prompt,
+            settled: Vec::new(),
+        }
+    }
+
+    /// Enter in the field.
+    fn submit(&mut self, window: &mut Window, cx: &mut gpui::Context<Self>) {
+        let _ = DraftInput::save(
+            self,
+            |editor| &mut editor.prompt,
+            &OpKey::template("t"),
+            |prompt| {
+                let path = ApiPath::api(&["templates", "t"])?;
+                let body = Some(json!({ "prompt": prompt }));
+                Ok(Command::new(
+                    Work::Save,
+                    Method::Put,
+                    path,
+                    body,
+                    "PUT /api/templates/[template]",
+                ))
+            },
+            window,
+            cx,
+            |editor, settled, _| editor.settled.push(settled.outcome.clone()),
+        );
+    }
+}
+
+impl Render for FieldEditor {
+    fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+        div()
+            .debug_selector(|| "field-box".into())
+            .w(px(300.))
+            .child(TextInput::new(
+                "prompt",
+                self.prompt.input(),
+                "Prompt",
+                HoverHelp::tooltip("The template's prompt"),
+            ))
+    }
+}
+
+/// A connected app with a window holding a [`FieldEditor`] over `value`, its field focused.
+fn open_field<'a>(
+    value: &str,
+    cx: &'a mut TestAppContext,
+) -> (FakeHelm, Entity<FieldEditor>, &'a mut VisualTestContext) {
+    let (mut fake, _connection) = started(cx);
+    fake.connect(vec![sessions(&[])]);
+    cx.run_until_parked();
+    let value = value.to_owned();
+    let (editor, cx) =
+        test_support::open_view(cx, move |window, cx| FieldEditor::new(&value, window, cx));
+    test_support::click(cx, "field-box");
+    (fake, editor, cx)
+}
+
+/// The field's text now.
+fn shown(editor: &Entity<FieldEditor>, cx: &mut VisualTestContext) -> String {
+    cx.update(|_, cx| editor.read(cx).prompt.input().text(cx).to_string())
+}
+
+/// Hand the field a pushed value, as the editor's store observer does.
+fn push(editor: &Entity<FieldEditor>, value: &str, cx: &mut VisualTestContext) {
+    let value = value.to_owned();
+    cx.update(|window, cx| {
+        editor.update(cx, |editor, cx| editor.prompt.follow(&value, window, cx))
+    });
+    test_support::settle(cx);
+}
+
+/// The rule the bound field exists to keep for every editor at once: a refresh never changes what the user is typing
+/// (SPEC.md, "Things changing underneath"), while a field the user has not touched shows the current value. Specified:
+/// an untouched field shows a pushed value; once the user types, the draft holds the field's text and a later push
+/// changes neither.
+#[gpui::test]
+fn a_bound_field_follows_pushes_until_the_user_types(cx: &mut TestAppContext) {
+    let (_fake, editor, cx) = open_field("old", cx);
+    push(&editor, "pushed", cx);
+    assert_eq!(
+        shown(&editor, cx),
+        "pushed",
+        "the untouched field followed the push"
+    );
+    keys(cx, "end x");
+    assert_eq!(shown(&editor, cx), "pushedx", "the premise: the user typed");
+    assert!(
+        cx.update(|_, cx| editor.read(cx).prompt.draft().is_touched()),
+        "and the draft knows it"
+    );
+    push(&editor, "pushed again", cx);
+    assert_eq!(
+        shown(&editor, cx),
+        "pushedx",
+        "the push left the typed text alone"
+    );
+    assert_eq!(
+        cx.update(|_, cx| editor.read(cx).prompt.draft().value().clone()),
+        "pushedx"
+    );
+}
+
+/// While a save is in flight the text on screen must stay the text sent: a push shown then would display a value the
+/// helm is not saving, and a keystroke taken then would be lost when the save's success clears the touched mark.
+/// Specified: Enter saves the field's text; while it is in flight a typed letter and a push both leave the field as
+/// sent; once the save is done the draft counts as saved and a letter typed then lands where the caret was, at the
+/// start, which tells the field held read-only (caret untouched) from the backstop that puts the text back (caret moved
+/// to the end) and from a field left read-only (the letter refused).
+#[gpui::test]
+fn a_bound_field_is_read_only_and_shows_no_push_while_saving(cx: &mut TestAppContext) {
+    let (mut fake, editor, cx) = open_field("old", cx);
+    keys(cx, "end x home enter");
+    test_support::settle(cx);
+    let sent = fake.commands();
+    assert_eq!(sent.len(), 1, "the premise: Enter saved the field");
+    assert_eq!(sent[0].body, Some(json!({ "prompt": "oldx" })));
+    keys(cx, "y");
+    push(&editor, "pushed", cx);
+    assert_eq!(
+        shown(&editor, cx),
+        "oldx",
+        "neither the letter nor the push changed the field mid-save"
+    );
+    fake.reply(sent[0].id, 200, None);
+    test_support::settle(cx);
+    assert!(
+        cx.update(|_, cx| !editor.read(cx).prompt.draft().is_touched()),
+        "the save counted as saved"
+    );
+    // The caret sits at the start. Putting the text back moves a one-line field's caret to the end, so had read-only
+    // not kept "y" out, the backstop's put-back would leave this letter at the end instead; and had the save's end
+    // not lifted read-only, the letter would not land at all.
+    keys(cx, "z");
+    assert_eq!(
+        shown(&editor, cx),
+        "zoldx",
+        "once saved, the field takes typing again where the caret was"
+    );
+}
+
+/// A save the helm refused leaves the draft as the user had it, but an untouched field did not follow pushes while it
+/// was saving: saving it again must not send back a value someone else has since replaced. Specified: an untouched
+/// field saved, pushed during the save, and refused takes up the pushed value; a touched one refused the same way keeps
+/// the user's text.
+#[gpui::test]
+fn after_a_refused_save_only_an_untouched_field_takes_up_the_last_push(cx: &mut TestAppContext) {
+    let (mut fake, editor, cx) = open_field("old", cx);
+    keys(cx, "enter");
+    test_support::settle(cx);
+    let sent = fake.commands();
+    assert_eq!(sent.len(), 1, "the premise: the untouched field was saved");
+    push(&editor, "replaced elsewhere", cx);
+    assert_eq!(
+        shown(&editor, cx),
+        "old",
+        "the premise: not shown while saving"
+    );
+    fake.reply(sent[0].id, 409, Some(json!("changed meanwhile")));
+    test_support::settle(cx);
+    assert_eq!(
+        shown(&editor, cx),
+        "replaced elsewhere",
+        "the untouched field took up the push after the refusal"
+    );
+
+    keys(cx, "end x enter");
+    test_support::settle(cx);
+    let sent = fake.commands();
+    assert_eq!(sent.len(), 1, "the premise: the touched field was saved");
+    push(&editor, "replaced again", cx);
+    fake.reply(sent[0].id, 409, Some(json!("changed meanwhile")));
+    test_support::settle(cx);
+    assert_eq!(
+        shown(&editor, cx),
+        "replaced elsewherex",
+        "the touched field kept the user's text"
+    );
+    let refusal = cx.update(|_, cx| editor.read(cx).prompt.draft().refusal().cloned());
+    assert_eq!(
+        refusal,
+        Some(HostText::from_host("changed meanwhile")),
+        "and holds the refusal to show"
+    );
 }
