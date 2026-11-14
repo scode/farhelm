@@ -1,20 +1,20 @@
-# Parity: Launcher and templates
+# Parity: Launcher
 
 Old Playwright specs (reference commit `24bc0580`; read one with `git show 24bc0580:e2e/<path>`) and what replaces them
 in the GPUI app. Port behavior from SPEC.md and these specs' acceptance cases, not one spec file at a time. SPEC.md
-sections: Creation, Sandbox sessions, Managed checkouts, Container sessions.
+sections: Creation, Sandbox sessions, Managed checkouts, Container sessions, Lifecycle operations (Restart with and
+Replace with).
+
+The Replace with cases of `tests/replace.spec.ts` and `tests/terminal-restart.spec.ts` are this area's too, although
+those specs' rows sit in `sidebar-and-session-view.md` with the rest of their tests.
 
 | Old spec                                    | Tests | Covers                                                                                                                                          | Status         |
 | ------------------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
 | `tests/launcher-enter.spec.ts`              | 25    | Clone search Enter picks an unmatched name before a second Enter launches                                                                       | not yet ported |
 | `tests/launcher-tabs.spec.ts`               | 6     | New opens on the agent tab, and each tab keeps its own fields and draft                                                                         | not yet ported |
-| `tests/launcher-template-shortcuts.spec.ts` | 8     | back-to-back bolt and number chords stack on New without submitting                                                                             | not yet ported |
 | `tests/launch-button-alignment.spec.ts`     | 1     | launcher summary and actions stay pinned at ${viewport.width}x${viewport.height}                                                                | not yet ported |
 | `tests/launch-progress.spec.ts`             | 5     | launcher status waits two seconds, counts up and ends on a real refusal                                                                         | not yet ported |
 | `tests/launch-refusal.spec.ts`              | 7     | a quoted command placeholder is refused by native admission                                                                                     | not yet ported |
-| `tests/quick-launch.spec.ts`                | 30    | quick launch submits the wrapper prefix saved in its agent template                                                                             | not yet ported |
-| `tests/templates.spec.ts`                   | 48    | template bolts use a fixed outline or filled drawing for their mark                                                                             | not yet ported |
-| `tests/template-list-shortcut.spec.ts`      | 4     | Cmd-J exact name launches through the fresh quick-launch path                                                                                   | not yet ported |
 | `tests/cursor-composer.spec.ts`             | 1     | Cursor launches without claiming session tracking                                                                                               | not yet ported |
 | `tests/goose-pi-composer.spec.ts`           | 2     | Goose and Pi permission transitions update the rendered draft                                                                                   | not yet ported |
 | `tests/grok-composer.spec.ts`               | 1     | the Grok composer clears and hides unsupported model and effort choices                                                                         | not yet ported |
@@ -37,3 +37,4 @@ sections: Creation, Sandbox sessions, Managed checkouts, Container sessions.
 | `tests/github-checkouts.spec.ts`            | 18    | quick launch waits for a managed preview and ${collide ? "reveals its path race" : "starts directly"}${base ? " for a template base name" : ""} | not yet ported |
 | `tests/claude-trust.spec.ts`                | 4     | Claude trust hint preserves the terminal and opens the opt-in caveats                                                                           | not yet ported |
 | `tests/terminal-create-idempotency.spec.ts` | 9     | a null-permission ${harness} template retains consent and one session after a lost reply                                                        | not yet ported |
+| `tests/restart-with.spec.ts`                | 42    | named restart with requires a target when no conversation was captured                                                                          | not yet ported |
