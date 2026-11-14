@@ -14,7 +14,7 @@
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::ui_channel::Preferences;
 use gpui::{
-    App, Div, FocusHandle, InteractiveElement as _, ParentElement as _, Role,
+    App, Div, FocusHandle, InteractiveElement as _, ParentElement as _, Role, Stateful,
     StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
@@ -99,15 +99,7 @@ impl Choice {
 
     /// `PUT /api/preferences` with only this switch's field, set to `on` (see the module docs).
     pub(super) fn command(self, on: bool) -> Result<Command, PathError> {
-        let mut body = serde_json::Map::new();
-        body.insert(self.field().to_owned(), serde_json::Value::Bool(on));
-        Ok(Command::new(
-            Work::Save,
-            Method::Put,
-            ApiPath::api(&["preferences"])?,
-            Some(serde_json::Value::Object(body)),
-            "PUT /api/preferences",
-        ))
+        patch(self.field(), serde_json::Value::Bool(on))
     }
 
     /// The switch's element id, which tests and the test bridge find it by.
@@ -251,6 +243,35 @@ impl Switch {
     }
 }
 
+/// `PUT /api/preferences` with a sparse body naming only `field`, set to `value`: how every choice in Settings saves
+/// its one field of the preference row (see the module docs for why the body names nothing else).
+pub(super) fn patch(field: &str, value: serde_json::Value) -> Result<Command, PathError> {
+    let mut body = serde_json::Map::new();
+    body.insert(field.to_owned(), value);
+    Ok(Command::new(
+        Work::Save,
+        Method::Put,
+        ApiPath::api(&["preferences"])?,
+        Some(serde_json::Value::Object(body)),
+        "PUT /api/preferences",
+    ))
+}
+
+/// The line under a choice after the helm refused its save, drawn as an alert under the element id `id` so tests and
+/// the test bridge find it next to its control: the danger ink at the help's size and line.
+pub(super) fn failure_line(id: String, text: &'static str, cx: &App) -> Stateful<Div> {
+    let palette = theme::palette(cx);
+    div()
+        .id(gpui::ElementId::Name(id.clone().into()))
+        .debug_selector(move || id.clone())
+        .role(Role::Alert)
+        .aria_label(text)
+        .text_size(metrics::TEXT_SM)
+        .line_height(px(HELP_LINE_HEIGHT))
+        .text_color(theme::color(palette.danger))
+        .child(text)
+}
+
 /// A help paragraph: the old `.host-settings-help` in Settings, in the quieter text color at its line height.
 pub(super) fn help(text: &'static str, cx: &App) -> Div {
     let palette = theme::palette(cx);
@@ -269,7 +290,6 @@ pub(super) fn group(
     on_toggle: impl Fn(bool, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> Div {
-    let palette = theme::palette(cx);
     let choice = switch.choice;
     let shown = switch.shown(preferences);
     let failure = switch
@@ -299,15 +319,5 @@ pub(super) fn group(
                 ),
         )
         .child(help(choice.help(shown), cx))
-        .children(failure.map(|failure| {
-            div()
-                .id(gpui::ElementId::Name(choice.error_id().into()))
-                .debug_selector(move || choice.error_id())
-                .role(Role::Alert)
-                .aria_label(failure)
-                .text_size(metrics::TEXT_SM)
-                .line_height(px(HELP_LINE_HEIGHT))
-                .text_color(theme::color(palette.danger))
-                .child(failure)
-        }))
+        .children(failure.map(|failure| failure_line(choice.error_id(), failure, cx)))
 }

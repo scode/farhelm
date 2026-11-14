@@ -66,6 +66,15 @@ impl Render for Rail {
     }
 }
 
+/// The section button that shows `section`. The harness finds elements by `'static` ids, so these are spelled out.
+fn section_button(section: Section) -> &'static str {
+    match section {
+        Section::Sessions => "settings-section-sessions",
+        Section::Hosts => "settings-section-hosts",
+        Section::Terminal => "settings-section-terminal",
+    }
+}
+
 /// The preferences collection holding `preferences`.
 fn preferences_state(preferences: &Preferences) -> CollectionState {
     CollectionState {
@@ -198,10 +207,11 @@ fn the_gear_opens_settings_at_sessions_with_focus_on_its_first_switch(cx: &mut T
     );
 }
 
-/// SPEC.md lists every section, but this build has only Sessions and Hosts; listing a section with nothing behind it
-/// would offer a button that shows an empty pane. The list follows SPEC.md's order, and the button of the shown section
-/// is the pressed one. Specified: the section list holds exactly the Sessions and Hosts buttons, in that order, Sessions
-/// pressed and Hosts not.
+/// SPEC.md lists every section, but this build has only Sessions, Hosts and Terminal; listing a section with nothing
+/// behind it would offer a button that shows an empty pane. The list follows SPEC.md's order ("Sessions, Appearance,
+/// Hosts, Recipes, Tensorlake, Containers, Credentials, Terminal, ..."), and the button of the shown section is the
+/// pressed one. Specified: the section list holds exactly the Sessions, Hosts and Terminal buttons, in that order,
+/// Sessions pressed and the others not.
 #[gpui::test]
 fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
     let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
@@ -227,6 +237,7 @@ fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
         [
             ("Sessions".to_string(), Some(Toggled::True)),
             ("Hosts".to_string(), Some(Toggled::False)),
+            ("Terminal".to_string(), Some(Toggled::False)),
         ]
     );
 }
@@ -380,9 +391,7 @@ fn each_switch_saves_its_own_preference_field_under_the_preferences_key(cx: &mut
         ),
     ];
     for (section, choice, field, sent_value) in table {
-        if section == Section::Hosts {
-            click(cx, "settings-section-hosts");
-        }
+        click(cx, section_button(section));
         assert_eq!(
             switch_on(cx, choice.id()),
             Some(!sent_value),
@@ -671,4 +680,167 @@ fn an_open_dialog_follows_a_change_made_elsewhere_with_its_help(cx: &mut TestApp
         asks.iter().all(|help| text.contains(help)),
         "the asking wording is back: {text}"
     );
+}
+
+// ---- Terminal ------------------------------------------------------------------------------------------------------
+
+/// The terminal link option that shows as chosen, by its element id, or `None` when none does or the section is not
+/// drawn.
+fn link_chosen(cx: &mut VisualTestContext) -> Option<&'static str> {
+    let nodes = frame(cx);
+    [INTERCEPT, BOTH, PROGRAM].into_iter().find(|&id| {
+        nodes.iter().any(|node| {
+            node.element_id.as_deref() == Some(id) && node.toggled == Some(Toggled::True)
+        })
+    })
+}
+
+/// The three link options' element ids: the group's id and each option's label (`RadioGroup::new`), spelled out
+/// because the harness finds elements by `'static` ids.
+const INTERCEPT: &str = "settings-terminal-links-Open in Farhelm, don't pass the click on";
+const BOTH: &str = "settings-terminal-links-Open in Farhelm and also pass the click on";
+const PROGRAM: &str = "settings-terminal-links-Pass the click on only";
+
+/// The preference row storing `word` as its terminal link choice.
+fn link_row(word: &str) -> Preferences {
+    Preferences {
+        terminal_link_click: Some(word.to_owned()),
+        ..Preferences::default()
+    }
+}
+
+/// SPEC.md, "Session list": Terminal chooses between three link behaviors, and "The latter two choices explain the risk
+/// of a second browser tab and that a program without mouse reporting cannot act on a click". Assistive technology and
+/// the test bridge find the choice by the group's name and role, as the old browser test did ("terminal link segments
+/// keep native keys and descriptions"). The tunnel switch waits for the terminal area's consent question and the
+/// file-types field for file downloads, so neither may be drawn. Specified: Terminal shows a radio group named
+/// "Terminal web links" whose three options are radio buttons in the old order, Intercept chosen when the helm stores
+/// none, each risk sentence on screen, and no tunnel switch or file-types field.
+#[gpui::test]
+fn the_terminal_section_offers_the_link_choices_with_their_risks(cx: &mut TestAppContext) {
+    let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    open_settings(cx);
+    click(cx, "settings-section-terminal");
+    assert_eq!(heading(cx).as_deref(), Some("Terminal"));
+    let nodes = frame(cx);
+    let role_and_name = |id: &str| {
+        nodes
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+            .map(|node| {
+                (
+                    node.role,
+                    node.label.as_ref().map(|label| label.to_string()),
+                )
+            })
+    };
+    assert_eq!(
+        role_and_name(super::terminal::ID),
+        Some((
+            Some(Role::RadioGroup),
+            Some("Terminal web links".to_string())
+        ))
+    );
+    for option in [INTERCEPT, BOTH, PROGRAM] {
+        assert_eq!(
+            role_and_name(option).and_then(|(role, _)| role),
+            Some(Role::RadioButton),
+            "{option} is a radio button"
+        );
+    }
+    assert_eq!(link_chosen(cx), Some(INTERCEPT), "unset reads as Intercept");
+    let (intercept, both, program) = (bounds(cx, INTERCEPT), bounds(cx, BOTH), bounds(cx, PROGRAM));
+    assert!(
+        intercept.bottom() <= both.top() && both.bottom() <= program.top(),
+        "the choices are stacked in the old order"
+    );
+    let text = painted(cx);
+    for risk in [
+        "A program that opens links itself may open a second tab.",
+        "without mouse reporting, clicking a link does nothing.",
+    ] {
+        assert!(text.contains(risk), "the risk is explained: {risk}: {text}");
+    }
+    assert!(!text.contains("tunnels"), "no tunnel switch yet: {text}");
+    assert!(
+        !text.contains("File types"),
+        "no file-types field yet: {text}"
+    );
+}
+
+/// The link choice is one field of the shared row, so a stale copy of another field is never written back, and the
+/// terminals follow only what the helm stores. Specified: a click on "Pass the click on only" sends
+/// `PUT /api/preferences` with only `{"terminal_link_click": "program"}` under the preference row's key and shows that
+/// choice while the save is in flight; once the helm pushes the row and answers, it shows from the store and the key is
+/// free; a push of `both` from elsewhere, with nothing sent, then shows the middle choice.
+#[gpui::test]
+fn a_link_choice_saves_only_its_preference_field_and_follows_the_helm(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    open_settings(cx);
+    click(cx, "settings-section-terminal");
+    click(cx, PROGRAM);
+    let (id, body) = one_save(&mut helm);
+    assert_eq!(body, json!({ "terminal_link_click": "program" }));
+    assert_eq!(preference_work(cx), Some(Work::Save));
+    assert_eq!(link_chosen(cx), Some(PROGRAM), "the pending value shows");
+
+    push(&mut helm, &link_row("program"), cx);
+    helm.reply(id, 204, None);
+    settle(cx);
+    assert_eq!(preference_work(cx), None, "the key is free again");
+    assert_eq!(link_chosen(cx), Some(PROGRAM), "the stored value shows");
+
+    push(&mut helm, &link_row("both"), cx);
+    assert_eq!(link_chosen(cx), Some(BOTH), "a change made elsewhere shows");
+    assert_eq!(sent(&mut helm), [], "the dialog sent nothing of its own");
+}
+
+/// SPEC.md lists link clicks among the choices that "put back the saved choice and show an adjacent error when their
+/// newest save fails", and with no optimistic copy a refused choice never reached a terminal. Specified: a click on
+/// "Open in Farhelm and also pass the click on" shows it while the save is in flight; the helm's refusal brings the
+/// stored Intercept back with the old failure line, an alert, below the choices.
+#[gpui::test]
+fn a_refused_link_choice_shows_the_stored_choice_and_a_failure_line(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    open_settings(cx);
+    click(cx, "settings-section-terminal");
+    click(cx, BOTH);
+    let (id, _) = one_save(&mut helm);
+    assert_eq!(
+        link_chosen(cx),
+        Some(BOTH),
+        "the premise: the pending value shows"
+    );
+
+    helm.reply(id, 503, Some(json!("fixture preference save refused")));
+    settle(cx);
+    assert_eq!(link_chosen(cx), Some(INTERCEPT), "the stored value is back");
+    let failure = frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(super::terminal::ERROR_ID))
+        .map(|node| (node.role, node.label.map(|label| label.to_string())));
+    assert_eq!(
+        failure,
+        Some((
+            Some(Role::Alert),
+            Some("Could not save how terminal links are clicked. Try again.".to_string())
+        ))
+    );
+    assert!(
+        bounds(cx, super::terminal::ERROR_ID).top() >= bounds(cx, super::terminal::ID).bottom(),
+        "the failure line is below the choices"
+    );
+}
+
+/// The helm validates `intercept`, `both` and `program`; anything else must read as the default rather than as no
+/// choice, as the old app's upgrade default did. Specified: no row, an unset field and an unknown word read as
+/// Intercept; `both` and `program` read as themselves.
+#[test]
+fn an_unset_or_unknown_link_choice_reads_as_intercept() {
+    use super::terminal::{LinkClick, stored};
+    assert_eq!(stored(None), LinkClick::Intercept);
+    assert_eq!(stored(Some(&Preferences::default())), LinkClick::Intercept);
+    assert_eq!(stored(Some(&link_row("hover"))), LinkClick::Intercept);
+    assert_eq!(stored(Some(&link_row("both"))), LinkClick::Both);
+    assert_eq!(stored(Some(&link_row("program"))), LinkClick::Program);
 }

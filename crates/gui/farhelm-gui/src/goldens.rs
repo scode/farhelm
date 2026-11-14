@@ -6,8 +6,8 @@
 //! session's terminal, the session list (a fleet of every status a row draws, an empty fleet, a row's open menu, a
 //! row's Delete question, and a pending and a refused Delete), the Rename editor, the select closed and open, the
 //! YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer, the Settings dialog at
-//! Sessions and at Hosts, and the Hosts panel (closed, with Details, and with a host failing to connect), in both
-//! appearances, compared pixel for pixel.
+//! Sessions, at Hosts and at Terminal, and the Hosts panel (closed, with Details, and with a host failing to connect),
+//! in both appearances, compared pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
@@ -1694,10 +1694,10 @@ fn rename_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
 }
 
 /// The Settings dialog over the fake helm's preference row, opened at `section` as the gear opens it (references
-/// `settings-sessions` and `settings-hosts`): focus on the section's first switch, naming on because the row stores no
-/// choice for it, and automatic remote-host updates turned on so the Hosts picture shows a switch in each state. The
-/// opener is the scene's ring handle, which stands in for the gear. The fake and the connection are kept for the
-/// scene's life, like the Rename editor's.
+/// `settings-sessions`, `settings-hosts` and `settings-terminal`): focus on the section's first switch (on the dialog
+/// itself at Terminal), naming on because the row stores no choice for it, and automatic remote-host updates turned on
+/// so the Hosts picture shows a switch in each state. The opener is the scene's ring handle, which stands in for the
+/// gear. The fake and the connection are kept for the scene's life, like the Rename editor's.
 fn settings_scene(
     state: &SceneState,
     section: crate::settings::Section,
@@ -1743,6 +1743,12 @@ fn settings_sessions_setup(state: &SceneState, window: &mut Window, cx: &mut App
 /// Settings at Hosts.
 fn settings_hosts_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene(state, crate::settings::Section::Hosts, window, cx);
+}
+
+/// Settings at Terminal, the default link choice chosen because the row stores none. Focus starts on the dialog itself
+/// (`Section::first`), so no ring shows, as in the reference, where the section was reached by a click.
+fn settings_terminal_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    settings_scene(state, crate::settings::Section::Terminal, window, cx);
 }
 
 /// Make the Hosts panel over a fake helm holding `listed` hosts, with Details on when `details` is; the scene draws it
@@ -2039,6 +2045,12 @@ static SCENES: &[Scene] = &[
         size: (800., 830.),
         draw: empty,
         setup: settings_hosts_setup,
+    },
+    Scene {
+        name: "settings-terminal",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_terminal_setup,
     },
     Scene {
         name: "hosts-panel",

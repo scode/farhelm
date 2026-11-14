@@ -26,9 +26,21 @@ sections: Topology, Supported host setup, Local authority and trust between host
 
 ## `tests/settings.spec.ts`, partly
 
-The dialog's shell and its Sessions and Hosts sections are ported; the cases about the other sections (Appearance,
-Terminal, Checkouts, Agent trust, Notifications, and Recipes, Tensorlake, Containers, Credentials and App) wait for
+The dialog's shell and its Sessions, Hosts and Terminal sections are ported; the cases about the other sections
+(Appearance, Checkouts, Agent trust, Notifications, and Recipes, Tensorlake, Containers, Credentials and App) wait for
 them.
+
+NOTE: Terminal shows only the link choice for now. Its **File types to open with Cmd-click** field governs opening
+downloaded files and comes with file downloads, later in the migration. Its tunnel consent switch waits for the tunnel
+feature's consent question ("Allow tunnels from remote sessions?"), which the terminal area builds with tunnels: turning
+the switch on without that warning would grant consent unasked, which SPEC.md rules out ("consent is off until they
+accept the warning"). The migration's settings-and-hosts area decided on 2026-11-14 to leave the switch out until the
+question exists. The old desktop switch, for when it is ported: turning it on opened the warning and saved consent only
+on Allow; turning it off saved at once, and the helm then closed every open tunnel.
+
+NOTE: Nothing in the new app follows the link choice yet: the GPUI terminal reads neither it nor tunnel consent today.
+The new app's terminals follow them only once the terminal area's link and tunnel pieces land; until then the helm alone
+acts on them (it closes the open tunnels when consent is turned off).
 
 NOTE: The app does not open Settings yet. Its entry point is `settings::open`, and the gear that calls it is drawn by
 the sidebar on the host rail's foot, which is not drawn yet; until it is, only the tests and the screenshot goldens open
@@ -53,14 +65,22 @@ Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs` unless named 
   `a_save_in_flight_goes_on_after_the_dialog_closes`.
 - Following the helm (the live half of "... persist across clients", now that changes arrive live, and the host
   switches' help explaining the current behavior): `an_open_dialog_follows_a_change_made_elsewhere_with_its_help`.
-- The look: the goldens `settings-sessions` and `settings-hosts` (`crates/gui/farhelm-gui/src/goldens.rs`).
+- Terminal ("terminal link segments keep native keys and descriptions", and "settings reports and reverts a refused
+  ${choice.field} save" for `terminal_link_click`): `the_terminal_section_offers_the_link_choices_with_their_risks`
+  (which also checks the group's name and role), `a_link_choice_saves_only_its_preference_field_and_follows_the_helm`,
+  `a_refused_link_choice_shows_the_stored_choice_and_a_failure_line`,
+  `an_unset_or_unknown_link_choice_reads_as_intercept`. The arrows, Space and the description lines as accessible
+  descriptions are the radio group's own, which its tests in `components/tests.rs` cover.
+- The look: the goldens `settings-sessions`, `settings-hosts` and `settings-terminal`
+  (`crates/gui/farhelm-gui/src/goldens.rs`).
 
 Not ported here, and why: the persistence across a second client and reload belongs to the helm's preference route and
 the UI channel's pushes, which their own tests cover; "settings gap keeps focus ..." is the layer manager's empty-space
 rule (`keeps_focus_on_empty_click` is on for Settings), with no Settings-specific test yet; the text selection half of
 it does not apply, since GPUI labels are not selectable; "settings reverses a permanent removal answer without
 reloading" needs the host removal question, which comes with the port of Remove host; the narrow list path is not built
-(Deviations).
+(Deviations); "settings ignores a superseded link-choice failure" has no newer choice to supersede, since a second click
+while a preference save is in flight is refused (Deviations).
 
 ## Deviations
 
@@ -68,6 +88,8 @@ Where the port does not match the old app, and why. Each stays until the work na
 
 ### The Settings dialog
 
+- **Terminal has no tunnel consent switch yet.** It waits for the terminal area's consent question (see the NOTE under
+  `tests/settings.spec.ts` above).
 - **No one-pane layout at 620 pixels and below.** The old dialog showed either the section list or the section below
   that width, with "‹ Settings" to go back. The window's minimum width (720 pixels) is above it, so the layout is
   unreachable and is not built.
@@ -75,12 +97,14 @@ Where the port does not match the old app, and why. Each stays until the work na
   user went on from the top of the section. The focus coordinator moves focus to a control only while no layer is open,
   and the heading is not a control, so focus stays on the section button (Linux), or where it was (macOS, where the
   click does not focus the button; a control in the section that was hidden hands focus to the closest one left).
-- **A click while another preference save is in flight does nothing.** The old app queued every switch's newest click
-  per field and sent it after the earlier one ("the latest click wins"). Here the operation store admits one request on
-  the preference row at a time, so the second click is refused; a second click on the same switch leaves it showing the
-  value in flight, and one on another switch leaves that switch as it was; the user clicks again after the reply, which
-  the embedded helm sends within milliseconds. Accepted by the migration's orchestrator on 2026-11-14, since preference
-  saves are helm-local and take milliseconds; revisit only if a user meets it.
+- **A click or arrow press while another preference save is in flight does nothing.** The old app queued every switch's
+  newest click per field and sent it after the earlier one ("the latest click wins"). Here the operation store admits
+  one request on the preference row at a time, so the second click is refused; a second click on the same switch leaves
+  it showing the value in flight, and one on another switch leaves that switch as it was; the user clicks again after
+  the reply, which the embedded helm sends within milliseconds. In a radio group (Terminal's link choice) the arrows
+  move focus and the choice together, so a second arrow press while the first choice's save is in flight moves focus to
+  the next option while the choice stays where the first press put it. Accepted by the migration's orchestrator on
+  2026-11-14, since preference saves are helm-local and take milliseconds; revisit only if a user meets it.
 - **Every switch reports its refused save.** The old app showed no failure for the two host switches, nor for turning
   Skip session confirmations on, which SPEC.md's best-effort list in "Errors and diagnostics" kept silent because the
   old choice had already taken effect in an optimistic copy. With no optimistic copy a failed save never took effect, so
