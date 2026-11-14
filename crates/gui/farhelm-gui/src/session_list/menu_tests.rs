@@ -163,9 +163,9 @@ pub(super) fn click_at(at: Point<Pixels>) -> [PlatformInput; 2] {
 /// its first command, keeps Tab inside, and Escape gives focus back to the button that opened it. Opening a row's menu
 /// is not opening its session, which would switch what the user is looking at. Specified: clicking b's menu button
 /// opens the menu below the button with focus on its first command, Rename, its header names b and says "Codex ·
-/// Running", a is still the open session and nothing is sent; Tab moves through Replace, Stop and Delete, in the old
-/// menu's order (the separators between their groups take no focus), and then wraps to Rename, staying in the menu;
-/// Escape closes the menu and focus is on b's button.
+/// Running", a is still the open session and nothing is sent; Tab moves through Mark unread (b reads seen), Replace,
+/// Stop and Delete, in the old menu's order (the separators between their groups take no focus), and then wraps to
+/// Rename, staying in the menu; Escape closes the menu and focus is on b's button.
 #[gpui::test]
 fn the_menu_opens_below_its_button_holds_focus_and_leaves_the_selection(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
@@ -189,6 +189,7 @@ fn the_menu_opens_below_its_button_holds_focus_and_leaves_the_selection(cx: &mut
     assert_eq!(sent(&mut fake), []);
 
     for next in [
+        "session-menu-seen",
         "session-menu-replace",
         "session-menu-stop",
         "session-menu-delete",

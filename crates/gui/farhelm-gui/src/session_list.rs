@@ -58,9 +58,10 @@
 //! redraws a notified view's whole window, re-rendering every uncached view in it and dirtying the notified view's
 //! ancestors, so per-row views would not have limited what a step redraws, only multiplied the notifications.
 //!
-//! Each row has an actions menu ([`menu`]) whose commands so far are Rename ([`rename`]), Replace ([`replace`]), Stop
-//! ([`stop`]) and Delete ([`delete`]); the Rename and Delete shortcuts reach them for the open session
-//! ([`rename::open_for_selected`], [`SessionList::delete_selected`]). What a row says about its operations beyond
+//! Each row has an actions menu ([`menu`]) whose commands so far are Rename ([`rename`]), Mark read or Mark unread
+//! ([`seen`], also on a click on the row's status dot), Replace ([`replace`]), Stop ([`stop`]) and Delete ([`delete`]);
+//! the Rename and Delete shortcuts reach them for the open session ([`rename::open_for_selected`],
+//! [`SessionList::delete_selected`]). What a row says about its operations beyond
 //! "in flight" (a refusal, a success's notice, how long a Replace has waited) is [`outcome`]'s. While any Delete is in
 //! flight, the selection rules hold back their automatic choice, so a list that loses its open session to that Delete
 //! opens the next one only once every Delete has settled; a Stop or a Replace holds nothing back, with one exception
@@ -92,6 +93,7 @@ pub(crate) mod quick_switcher;
 pub(crate) mod rename;
 pub(crate) mod replace;
 mod row;
+pub(crate) mod seen;
 mod selection;
 mod status;
 pub(crate) mod stop;
@@ -104,6 +106,9 @@ mod list_tests;
 
 #[cfg(test)]
 mod menu_tests;
+
+#[cfg(test)]
+mod seen_tests;
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -128,7 +133,7 @@ use crate::render_count;
 use crate::session::{self, PerSession};
 use crate::theme::{self, metrics};
 use crate::ticker;
-use selection::{Change, Listed, Stamped};
+use selection::{Change, Listed, Open, Stamped};
 
 /// How far past each edge of its view the list draws rows: about two noncompact rows, so a row scrolling in is already
 /// laid out and a short scroll draws nothing new. Every pixel of it is rows drawn on every frame, which is the cost the
@@ -266,8 +271,16 @@ impl SessionList {
             Change::Select(key) => Some(key.clone()),
             Change::Clear => None,
         };
-        let open = open.and_then(|key| listed.iter().find(|session| session.key == key).copied());
-        let seen = selection::seen_due(open, &current.stamped);
+        let seen = selection::seen_due(
+            match open.as_deref() {
+                None => Open::Nothing,
+                Some(key) => listed
+                    .iter()
+                    .find(|session| session.key == key)
+                    .map_or(Open::Hidden(key), |session| Open::Shown(*session)),
+            },
+            &current.stamped,
+        );
 
         match change {
             Change::Keep => {}
