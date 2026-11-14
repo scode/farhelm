@@ -754,7 +754,7 @@ fn the_status_line_keeps_the_newest_rows_in_view(cx: &mut TestAppContext) {
     let placed = |h: &mut Harness| {
         h.read(|owner, cx| {
             let shown = owner.committed.as_ref().unwrap().read(cx);
-            (owner.placement(shown).unwrap(), owner.room.unwrap())
+            (owner.placement(shown, cx).unwrap(), owner.room.unwrap())
         })
     };
     assert_eq!(placed(&mut h).0.lift, 0.);

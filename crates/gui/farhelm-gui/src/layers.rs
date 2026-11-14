@@ -955,7 +955,7 @@ fn tooltip_card(shown: &ShownTooltip, window: &Window, cx: &App) -> gpui::Div {
 }
 
 /// `--shadow-menu`: `0 6px 18px` in the token's color, shared by menus, popovers and tooltips.
-fn menu_shadow(palette: &theme::Palette) -> Vec<BoxShadow> {
+pub(crate) fn menu_shadow(palette: &theme::Palette) -> Vec<BoxShadow> {
     vec![BoxShadow {
         color: theme::color(palette.shadow_menu),
         offset: point(px(0.), px(6.)),

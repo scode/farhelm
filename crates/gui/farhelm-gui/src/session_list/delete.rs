@@ -22,22 +22,21 @@
 //!   45-degree step per animation tick, eight steps per 0.8-second turn as the old `steps(8)` animation did, from one
 //!   handle the list holds ([`Spinner`]) while a Delete shows and its window is active.
 //!
-//! NOTE: Deferred by decision to a small follow-up, now that the open session's terminal is in the main pane
-//! (`session_pane.rs`, whose NOTE lists the scrim too): the scrim over that terminal that says the same as the row, and
-//! holding back what the Delete itself makes the attached terminal's status line say while it runs, both its
-//! "Detached" notice and its exit line ("Process ended by signal 15"), showing them only if the Delete fails. Until
-//! then the terminal shows them while its row says "Stopping agent…". The pane reads the same [`in_flight`] the row
-//! does. The open session's header, whose Delete the shortcut stands for in SPEC.md, is not ported either; until it
-//! is, the shortcut asks the row's question.
+//! While the open session's Delete is in flight, the main pane says the same over its terminal and holds back the
+//! terminal's own notices (`session_pane.rs`), reading the same [`in_flight`] and [`progress_label`] the row does and
+//! turning its own [`Spinner`].
+//!
+//! NOTE: The open session's header, whose Delete the shortcut stands for in SPEC.md, is not ported; until it is, the
+//! shortcut asks the row's question.
 
 use std::f32::consts::TAU;
 
 use farhelm_proto::DeleteGuard;
 use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
-    App, AppContext as _, Context, Div, ElementId, Entity, FontWeight, InteractiveElement,
-    IntoElement, ParentElement, Role, SharedString, StatefulInteractiveElement as _, Styled,
-    Subscription, Transformation, Window, div, px, radians, svg,
+    App, AppContext as _, Context, Div, ElementId, Entity, FontWeight, Hsla, InteractiveElement,
+    IntoElement, ParentElement, Pixels, Role, SharedString, StatefulInteractiveElement as _,
+    Styled, Subscription, Svg, Transformation, Window, div, px, radians, svg,
 };
 
 use super::SessionList;
@@ -273,8 +272,8 @@ pub(crate) fn in_flight(key: &str, cx: &App) -> Option<DeleteGuard> {
 
 /// What a pending Delete says it is doing, from the guard it was sent with: stopping the agent, stopping only the
 /// terminal tabs of an agent that has ended, or, with nothing alive, removing the session's state. It never claims to
-/// stop what the question did not show running.
-pub(super) fn progress_label(guard: DeleteGuard) -> &'static str {
+/// stop what the question did not show running. The row and the main pane's scrim say the same words.
+pub(crate) fn progress_label(guard: DeleteGuard) -> &'static str {
     match guard {
         DeleteGuard::Unconditional => "Stopping agent…",
         DeleteGuard::AgentEnded => "Stopping tabs…",
@@ -287,11 +286,13 @@ const SPINNER_STEPS: u8 = 8;
 
 /// The spinner's turn, which the list holds while any row shows a pending Delete and its window is active, as it holds
 /// the running pulse, and drops otherwise: a live animation handle keeps the ticker's timer firing ten times a second,
-/// which an inactive window has no use for. Every pending row draws the same step, so one handle serves them all.
+/// which an inactive window has no use for. Every pending row draws the same step, so one handle serves them all. The
+/// main pane holds one of its own, on the same terms, for its scrim.
 ///
 /// The step is counted from the ticker's notifications of the turn's own entity: the ticker notifies it once per tick
-/// and nothing else does, so the count is the number of ticks it has seen. The list observes the entity to redraw.
-pub(super) struct Spinner {
+/// and nothing else does, so the count is the number of ticks it has seen. The view that holds the spinner observes
+/// the entity to redraw.
+pub(crate) struct Spinner {
     turn: Entity<Turn>,
     _redraw: Subscription,
 }
@@ -304,8 +305,8 @@ pub(super) struct Turn {
 }
 
 impl Spinner {
-    /// A spinner starting at its first step, redrawing the list `cx` belongs to on every step.
-    pub(super) fn start(window: &Window, cx: &mut Context<SessionList>) -> Spinner {
+    /// A spinner starting at its first step, redrawing the view `cx` belongs to on every step.
+    pub(crate) fn start<V: 'static>(window: &Window, cx: &mut Context<V>) -> Spinner {
         let turn = cx.new(|cx| Turn {
             step: 0,
             _animating: ticker::animate(window, cx),
@@ -319,7 +320,7 @@ impl Spinner {
     }
 
     /// The step to draw, `0..8`.
-    pub(super) fn step(&self, cx: &App) -> u8 {
+    pub(crate) fn step(&self, cx: &App) -> u8 {
         self.turn.read(cx).step
     }
 }
@@ -357,17 +358,21 @@ pub(super) fn progress(
         .text_size(metrics::TEXT_ROW_TITLE)
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(ink)
-        .child(
-            svg()
-                .path(Icon::Spinner.path())
-                .size(px(12.))
-                .flex_none()
-                .text_color(ink)
-                .with_transformation(Transformation::rotate(radians(
-                    f32::from(step) * TAU / f32::from(SPINNER_STEPS),
-                ))),
-        )
+        .child(spinner_icon(step, px(12.), ink))
         .child(progress_label(guard))
+}
+
+/// The spinner's icon at `step`, `size` square, in `ink`: the row draws it at the old `.delete-spinner`'s 12 pixels,
+/// and the pane's scrim at its card's 16.
+pub(crate) fn spinner_icon(step: u8, size: Pixels, ink: Hsla) -> Svg {
+    svg()
+        .path(Icon::Spinner.path())
+        .size(size)
+        .flex_none()
+        .text_color(ink)
+        .with_transformation(Transformation::rotate(radians(
+            f32::from(step) * TAU / f32::from(SPINNER_STEPS),
+        )))
 }
 
 /// The last refusal of `key`'s work, as the row shows it under its lines until the session's next operation starts:

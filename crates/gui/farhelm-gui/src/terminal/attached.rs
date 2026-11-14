@@ -21,7 +21,8 @@
 //!   batch (so a flood redraws once per turn, not once per message), and then yields to the executor, so a flood cannot
 //!   hold the main thread and frames keep their turn.
 //! - One status line. Whenever the stream is not live and not catching up, one line in the old app's red banner says
-//!   why, with a Take control button where the stream waits for the user.
+//!   why, with a Take control button where the stream waits for the user. Its owner can hold it back, with the exit
+//!   line, while something else explains what is happening ([`AttachedTerminal::hold_notices`]).
 //! - A protocol fault ends the stream. A message the grid model refuses means the peer broke the format; the owner
 //!   closes the stream and says so on the status line. It does not restart the attachment by itself (that, too, waits
 //!   for the terminal area).
@@ -159,9 +160,16 @@ pub struct StatusLine {
     pub take_control: bool,
 }
 
+/// Says, each time the terminal draws, whether its own notices are held back now (see
+/// [`AttachedTerminal::hold_notices`]). Asked rather than told, so the answer comes from wherever the caller keeps it
+/// and this owner keeps no copy that could go stale.
+pub type NoticeHold = Box<dyn Fn(&App) -> bool>;
+
 /// The owner of one attached terminal. See the module docs.
 pub struct AttachedTerminal {
     target: TerminalTarget,
+    /// Holds the status line and the exit line back while it says so; `None` holds nothing.
+    hold: Option<NoticeHold>,
     metrics: CellMetrics,
     /// Taken when the stream is opened, and dropped on retirement so a late fit cannot open one.
     opener: Option<OpenStream>,
@@ -230,6 +238,7 @@ impl AttachedTerminal {
         probe::enroll(cx.weak_entity(), cx);
         AttachedTerminal {
             target,
+            hold: None,
             metrics,
             opener: (!retired).then_some(open),
             handle: None,
@@ -310,6 +319,40 @@ impl AttachedTerminal {
             StreamState::Refused { .. } => line("Connection error".into(), None, true),
             StreamState::Closed => line("Connection closed".into(), None, false),
         }
+    }
+
+    /// Hold back this terminal's own notices, the status line and the exit line, whenever `hold` says so, and show them
+    /// again, as the stream and program then are, once it stops saying so. Nothing is dropped: the notices are drawn
+    /// from the terminal's current state, so a notice that arose while held appears on release if it still applies.
+    ///
+    /// The session pane holds them while a Delete of its session is in flight (SPEC.md, "Lifecycle operations": the
+    /// terminal's own "Detached" notice, which the delete itself causes, is held back meanwhile), because the Delete
+    /// kills the agent and detaches the viewer, and those notices would otherwise read as failures. Only drawing
+    /// changes: a stream that waits for Take control still waits, input still goes out only while live, and
+    /// [`AttachedTerminal::status_line`] keeps reporting the stream's own line.
+    ///
+    /// The hold does not tell the Delete's notices from others: one already showing when the hold begins (an ended
+    /// agent's exit line under "Stopping tabs…", a takeover's band with Take control) goes too, and the screen drops
+    /// the lift it had for it. That is accepted because the pane's scrim covers the terminal for exactly as long, and
+    /// the notice comes back on release if it still applies.
+    ///
+    /// `hold` is asked while drawing, so whatever it reads must notify when its answer changes.
+    pub fn hold_notices(&mut self, hold: NoticeHold) {
+        self.hold = Some(hold);
+    }
+
+    /// Whether the notices are held back now.
+    fn notices_held(&self, cx: &App) -> bool {
+        self.hold.as_ref().is_some_and(|hold| hold(cx))
+    }
+
+    /// How far the shown screen is lifted now (see [`lift`]), for the session pane's tests, which check that held
+    /// notices take no room; `None` before a screen is shown and measured.
+    #[cfg(test)]
+    pub(crate) fn shown_lift(&self, cx: &App) -> Option<f32> {
+        let view = self.committed.as_ref()?;
+        self.placement(view.read(cx), cx)
+            .map(|placement| placement.lift)
     }
 
     /// The user's Take control: attach again through the displacing route. Only the states that wait for it offer it.
@@ -582,12 +625,14 @@ impl AttachedTerminal {
     /// NOTE: The room is measured after the frame that draws it, so when the status line appears or goes away, the
     /// lift follows one frame later: for one frame the newest rows are clipped under a new band, or the screen keeps a
     /// lift it no longer needs. Accepted for the first milestone.
-    fn placement(&self, shown: &TerminalView) -> Option<Placement> {
+    fn placement(&self, shown: &TerminalView, cx: &App) -> Option<Placement> {
         let (scale, room) = (self.scale?, self.room?);
         let rows = u16::try_from(shown.rows.len()).unwrap_or(u16::MAX);
         let cell_height = shown.metrics.cell_size(shown.cols, rows, scale).height;
-        let exit = shown.state.and_then(|state| state.exit).is_some();
-        let band = self.status_line().is_some();
+        // Held notices take no room, so the screen is not lifted for a line nobody sees.
+        let held = self.notices_held(cx);
+        let exit = !held && shown.state.and_then(|state| state.exit).is_some();
+        let band = !held && self.status_line().is_some();
         Some(Placement {
             lift: lift(rows, cell_height, room, exit, band),
             cell_height,
@@ -763,14 +808,15 @@ impl AttachedTerminal {
     /// The shown screen, lifted to fit its room, with its exit line below its last row.
     fn screen(&self, view: &Entity<TerminalView>, cx: &App) -> Vec<AnyElement> {
         let shown = view.read(cx);
-        let Some(placement) = self.placement(shown) else {
+        let Some(placement) = self.placement(shown, cx) else {
             return vec![view.clone().into_any_element()];
         };
         let screen = div()
             .mt(px(-placement.lift))
             .child(view.clone())
             .into_any_element();
-        let Some(exit) = shown.state.and_then(|state| state.exit) else {
+        let exit = shown.state.and_then(|state| state.exit);
+        let Some(exit) = exit.filter(|_| !self.notices_held(cx)) else {
             return vec![screen];
         };
         let cell_height = placement.cell_height;
@@ -810,7 +856,10 @@ impl Render for AttachedTerminal {
         }
         let state = self.committed.as_ref().and_then(|view| view.read(cx).state);
         let (_, ground) = style::defaults(state);
+        // The placeholder goes by the stream's own line, held or not: while a notice is held back, the pane shows
+        // neither it nor "Connecting", which would claim a catch-up that is not happening.
         let status = self.status_line();
+        let banner = status.clone().filter(|_| !self.notices_held(cx));
         let placeholder =
             (status.is_none() && self.committed.is_none() && !self.retired).then(|| {
                 div()
@@ -893,7 +942,7 @@ impl Render for AttachedTerminal {
             .flex_col()
             .overflow_hidden()
             .bg(ground.hsla(1.))
-            .children(status.map(|line| self.banner(line, cx)))
+            .children(banner.map(|line| self.banner(line, cx)))
             .child(body)
             .children(placeholder)
             .child(measure)

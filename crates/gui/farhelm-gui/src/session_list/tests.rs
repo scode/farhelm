@@ -216,7 +216,7 @@ pub(super) fn selected(cx: &mut VisualTestContext) -> Option<String> {
 }
 
 /// One frame's driver record: every element drawn, with its accessible name and the text it painted.
-pub(super) fn frame(cx: &mut VisualTestContext) -> Vec<DriverNode> {
+pub(crate) fn frame(cx: &mut VisualTestContext) -> Vec<DriverNode> {
     cx.update(|window, _| window.set_driver_enabled(true));
     test_support::redraw(cx);
     cx.update(|window, _| window.driver_nodes().to_vec())
@@ -237,7 +237,7 @@ fn row_order(nodes: &[DriverNode]) -> Vec<String> {
 }
 
 /// Every line of text the frame painted.
-pub(super) fn painted(nodes: &[DriverNode]) -> Vec<String> {
+pub(crate) fn painted(nodes: &[DriverNode]) -> Vec<String> {
     nodes
         .iter()
         .flat_map(|node| node.texts.iter().map(|text| text.text.to_string()))

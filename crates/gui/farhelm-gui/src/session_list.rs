@@ -36,7 +36,7 @@
 //! NOTE: Not ported yet, each with the area that brings it: the order menu (the title is the stored order's name, not a
 //! control), filters and their counts, compact rows, marking, pins, the row menu's other commands, and the host rail.
 
-mod delete;
+pub(crate) mod delete;
 mod menu;
 mod row;
 mod selection;
