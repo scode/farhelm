@@ -6,9 +6,9 @@ NOTE: This is a smoke test, not the end-to-end suite. It covers the first slice'
 (the session list, a row's menu, Delete, Rename, and typing into the open session's terminal), so a break in the wiring
 between the app, the helm and the supervisor shows up somewhere, plus the area steps added since (30, 31 and 33, the
 terminal's: a large paste, on a Mac only, text an input method commits, and scrollback; 32, the sidebar's quick
-switcher; 34, the session list's Stop and Replace from a row's menu). The behavior itself is specified and tested in
-process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `terminal/attached/tests.rs`); nothing here
-checks layout or wording beyond the names it clicks.
+switcher; 34, the session list's Stop and Replace from a row's menu; 35, the sidebar's host rail). The behavior itself
+is specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`,
+`terminal/attached/tests.rs`); nothing here checks layout or wording beyond the names it clicks.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -82,6 +82,9 @@ MENU_DESCRIPTION = "Removes the session and its state"
 
 # The quick switcher's footer: visible text only the open switcher draws, so its going tells that the switcher closed.
 SWITCHER_FOOTER = "↑↓ choose · Enter pick · Escape close"
+
+# The host chip's accessible name while the local host is chosen: the snapshot shows it only while the chip is drawn.
+LOCAL_CHIP = "Filtered to host Local; remove filter"
 
 # What every step's name must look like (the module docs say why); `main` checks it before starting the app.
 STEP_NAME = re.compile(r"test_\d\d_")
@@ -400,6 +403,36 @@ class Smoke(unittest.TestCase):
             return ids[replaced] not in titles and len(fresh) == 1
 
         eventually(replacement, f"{replaced} listed under a new id and not under its old one")
+
+    # ---- The sidebar area's host rail (35), on a session of its own --------------------------------------------------
+
+    def test_35_choosing_the_local_host_narrows_the_list_and_its_chip_clears_it(self) -> None:
+        """Choosing a host on the rail is a query the helm serves over the UI channel (`PUT /ui/session-query`), not a
+        filter the window applies, so only the real helm shows that the query took effect: it then counts the matches
+        against the whole fleet, and the list's count line reads "N of M" only for a narrowed listing. Specified: with
+        the helm's local host its only host and a session of this step's own listed, a click on the local host's avatar
+        draws the chip named for the local host, the count line reads "N of N" (N the sessions the helm lists, all on
+        that host) and this step's session is still listed; a click on the chip takes the chip away, the count line
+        back to the plain count, and focus to the rail's All. The step leaves All chosen, as it found it, so no other
+        step sees a narrowed list."""
+        title = f"Rail {uuid.uuid4().hex[:8]}"
+        fixtures = json.loads((RUN / "run.json").read_text())["binaries"]["fixtures"]
+        body = gui_agent.seed_body(0, gui_agent.SESSION_CWD, fixtures)
+        body["title"] = title
+        gui_agent.helm_request(RUN, "POST", "/api/sessions", body)
+        self.ok("wait", "--text", title)
+        hosts = gui_agent.helm_request(RUN, "GET", "/api/hosts")["hosts"]
+        self.assertEqual([host["kind"] for host in hosts], ["local"], "premise: the local host is the helm's only host")
+        self.assertNotIn(LOCAL_CHIP, self.ok("snapshot"), "premise: All is chosen")
+        total = len(listed_titles())
+        self.ok("click", f"id:host-rail-host-{hosts[0]['id']}")
+        eventually(lambda: LOCAL_CHIP in self.ok("snapshot"), "the chip naming the local host")
+        self.ok("wait", "--text", f"{total} of {total}")
+        self.ok("wait", "--text", title)
+        self.ok("click", "id:host-filter-chip")
+        eventually(lambda: LOCAL_CHIP not in self.ok("snapshot"), "the chip going once All is chosen")
+        self.ok("wait", "--gone", f"{total} of {total}")
+        self.assertRegex(self.ok("snapshot", "-i"), r'button "All hosts" \[focused\]', "focus is on All")
 
 
 # The receiver for the large-paste step: once the step types `copy`, it writes its payload file to the clipboard with

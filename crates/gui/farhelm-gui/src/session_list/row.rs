@@ -241,20 +241,26 @@ fn meta_line(
 /// with none of those (a sandbox or container host has no destination), else the name the helm sent with the row. Empty
 /// only when all of those are, and the line then shows the directory alone.
 pub(crate) fn host_label(row: &SessionRow, host: Option<&HostView>) -> String {
-    host.map(|host| {
-        let short = farhelm_proto::host_name::host_short_name(
-            host.is_local(),
-            host.destination.as_deref(),
-            host.alias.as_deref(),
-        );
-        if short.is_empty() {
-            host.name.clone()
-        } else {
-            short
-        }
-    })
-    .filter(|name| !name.is_empty())
-    .unwrap_or_else(|| row.host_name.clone())
+    host.map(short_name)
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| row.host_name.clone())
+}
+
+/// A registered host's short name, the one rule every place that names a host briefly shares (a row's host, the host
+/// rail's caption, the filter chip): its alias, `Local`, or the name derived from its destination, else the registry's
+/// own name for a host with none of those (a sandbox or container host has no destination). Raw host text: the caller
+/// escapes it.
+pub(crate) fn short_name(host: &HostView) -> String {
+    let short = farhelm_proto::host_name::host_short_name(
+        host.is_local(),
+        host.destination.as_deref(),
+        host.alias.as_deref(),
+    );
+    if short.is_empty() {
+        host.name.clone()
+    } else {
+        short
+    }
 }
 
 /// `cwd` with a personal home folded to `~` (`/home/alice/src` becomes `~/src`), or unchanged. A path operation on the
