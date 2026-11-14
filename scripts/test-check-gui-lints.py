@@ -12,6 +12,7 @@ spec = importlib.util.spec_from_file_location("gui_lints", pathlib.Path(__file__
 checker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)
 ban_exceptions, stray_exceptions = checker.ban_exceptions, checker.stray_exceptions
+manifest_switches, stray_configs = checker.manifest_switches, checker.stray_configs
 expectations, unmet, uncovered, banned_paths, diagnostics, cargo_failure = (
     checker.expectations,
     checker.unmet,
@@ -195,6 +196,48 @@ fn wide() {}
         self.assertEqual(ban_exceptions(source), [(1, None), (3, None), (6, "apply")])
         problems = stray_exceptions([("farhelm-gui/src/ticker.rs", source)])
         self.assertEqual(sum("outside its owners" in problem for problem in problems), 3)
+
+    def test_a_manifest_switching_a_ban_off_for_the_whole_crate_is_reported(self):
+        """A crate-level switch acts on every item at once and sits in a manifest the ownership check only reports, so
+        it must fail the check like an item's. Specified: `[lints.clippy]` allowing or expecting a `disallowed_*` ban
+        (dashed or not, plain or as a table with a level), clippy's `style` or `all` group, or `[lints.rust]` allowing
+        `warnings`, is reported; denying them, or allowing an unrelated lint, is not."""
+        manifest = tomllib.loads("""\
+[lints.clippy]
+unwrap_used = "deny"
+disallowed_methods = "allow"
+disallowed-types = { level = "expect", priority = 1 }
+style = "allow"
+too_many_arguments = "allow"
+all = "allow"
+
+[lints.rust]
+warnings = "allow"
+""")
+        problems = manifest_switches("farhelm-gui/Cargo.toml", manifest, {})
+        self.assertEqual(len(problems), 5, problems)
+        for key in ("disallowed_methods", "disallowed-types", "style", "all", "warnings"):
+            self.assertTrue(any(f"] {key} = " in problem for problem in problems), key)
+        self.assertEqual(manifest_switches("x/Cargo.toml", tomllib.loads('[lints.clippy]\nall = "deny"\n'), {}), [])
+
+    def test_a_crate_inheriting_the_workspaces_lints_is_checked_against_them(self):
+        """A crate that says `lints.workspace = true` takes the root manifest's table, which could switch a ban off for
+        every GUI crate at once. Specified: such a crate is reported for a switch in `[workspace.lints.clippy]`, and
+        not for one that only a crate without the inheritance would see."""
+        workspace = tomllib.loads('[workspace.lints.clippy]\ndisallowed_methods = "allow"\n')
+        inheriting = tomllib.loads("[lints]\nworkspace = true\n")
+        problems = manifest_switches("farhelm-gui/Cargo.toml", inheriting, workspace)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("through the workspace's lints", problems[0])
+        self.assertEqual(manifest_switches("farhelm-gui/Cargo.toml", {}, workspace), [])
+
+    def test_a_second_clippy_configuration_under_the_gui_crates_is_reported(self):
+        """Clippy reads the clippy.toml nearest a crate, so a second one under crates/gui would drop every shared ban for
+        the crates under it, without any lint attribute. Specified: only the shared `clippy.toml` at crates/gui passes;
+        a crate-local `clippy.toml` or `.clippy.toml` is reported."""
+        self.assertEqual(stray_configs(["clippy.toml"]), [])
+        problems = stray_configs(["clippy.toml", "farhelm-gui/clippy.toml", "farhelm-grid-model/.clippy.toml"])
+        self.assertEqual(len(problems), 2, problems)
 
 
 if __name__ == "__main__":

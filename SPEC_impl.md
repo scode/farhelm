@@ -753,8 +753,9 @@ The GUI bans are clippy `disallowed-methods` and `disallowed-types`, each entry 
 supervisor, the command line, the desktop binary and the helm client legitimately spawn, sleep and read clocks and are
 unaffected. Each owner holds one `#[allow]` for the call it owns. `cargo clippy --all-targets -- -D warnings` stays
 green, and every lint has a demonstration that it fails on a violation: `scripts/check-gui-lints.py` lints
-`crates/gui/lint-demo`, which commits one violation per ban, and fails when any ban stays silent, or when an `#[allow]`
-of a ban sits anywhere but on its owner's item.
+`crates/gui/lint-demo`, which commits one violation per ban, and fails when any ban stays silent, when an `#[allow]` of
+a ban sits anywhere but on its owner's item, or when a GUI crate switches a ban off as a whole (its manifest's `[lints]`
+table, or a clippy configuration of its own that would replace the shared one).
 
 The test automation bridge is a cargo feature that shipped builds and devbuilds never enable: its socket is
 unauthenticated, and local agent sessions run as the same user, so with the bridge in a build any agent could click

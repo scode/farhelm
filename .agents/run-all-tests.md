@@ -86,7 +86,7 @@ same pin CI and release builds use; no second clippy run on floating stable is n
 - `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`
 - `cargo clippy -p farhelm-desktop --all-targets -- -D warnings`, and the same with `--features agent`
 - `python3 -B scripts/check-gui-lints.py` and `python3 -B scripts/test-check-gui-lints.py` (every GUI lint ban fires,
-  and only its owners switch one off)
+  only its owners switch one off, and no crate switches one off as a whole)
 - `python3 -B scripts/check-crate-layering.py` and `python3 -B scripts/test-check-crate-layering.py`
 - `python3 -B scripts/test-check-foundation-paths.py` (the GPUI foundation ownership check; the check itself judges one
   PR's diff in its landing step, so there is nothing to run it on here)
