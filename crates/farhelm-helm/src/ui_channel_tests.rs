@@ -826,6 +826,80 @@ async fn lifecycle_routes_answer_504_when_the_host_never_answers() {
     }
 }
 
+/// The launcher's create and its host reads are bounded too, so a launch or a
+/// folder check against a host that never answers cannot hold the GUI's
+/// ordered channel: a create, a Browse, an automatic folder check
+/// (`membership_only`) and a checkout preview reply 504 once
+/// `HOST_REPLY_BOUND` passes, and a repository search still answers, its
+/// suggestions marked incomplete and its scan error naming the timeout rather
+/// than telling the user to check Git (SPEC.md "Managed checkouts": an
+/// incomplete scan never blocks a typed repository). The fixture host
+/// answers none of these, and the checkout folder is configured so the
+/// preview and the search reach the host instead of refusing first. Removing
+/// a bound makes this hang until nextest's timeout.
+#[farhelm_testtrace::test(start_paused = true)]
+async fn launcher_routes_answer_within_the_bound_when_the_host_never_answers() {
+    let harness = rest_harness::helm_listing(vec![rest_harness::session("s1", 100)]).await;
+    let host = rest_harness::local_id(&harness.store).await;
+    harness
+        .store
+        .set_checkout_root(None, "/checkouts")
+        .await
+        .expect("a valid checkout root");
+    let create = http(
+        &harness,
+        "POST",
+        "/api/sessions",
+        serde_json::json!({
+            "host": host,
+            "cwd": "/tmp",
+            "command": { "command": "true", "yolo": false, "agent": null, "resume": null },
+        }),
+    )
+    .await;
+    assert_eq!(create, StatusCode::GATEWAY_TIMEOUT, "create");
+    for (route, body) in [
+        (
+            "/api/browse-directory",
+            serde_json::json!({ "host": host, "cwd": "/tmp" }),
+        ),
+        (
+            "/api/browse-directory",
+            serde_json::json!({ "host": host, "cwd": "/tmp", "membership_only": true }),
+        ),
+        (
+            "/api/github-checkout-preview",
+            serde_json::json!({ "host": host, "repo": "owner/repo" }),
+        ),
+    ] {
+        let status = http(&harness, "POST", route, body.clone()).await;
+        assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{route} {body}");
+    }
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/github-repositories")
+        .header("host", "127.0.0.1:7433")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::json!({ "host": host, "query": "" }).to_string(),
+        ))
+        .unwrap();
+    let response = harness.router().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK, "repository search");
+    let body: Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(body["truncated"], true, "{body}");
+    let scan_error = body["scan_error"].as_str().unwrap_or_default();
+    assert!(
+        scan_error.contains("did not answer"),
+        "the scan error names the timeout: {body}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // The endpoint, against a real helm
 // ---------------------------------------------------------------------------
