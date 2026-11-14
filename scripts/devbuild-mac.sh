@@ -2,6 +2,12 @@
 # Build Farhelm from this working copy and run the desktop app, able to update
 # remote hosts to the same build.
 #
+# The app is `farhelm-desktop`: the GPUI window with the helm embedded in its
+# process, which starts the local supervisor from the `farhelm` beside it. Both
+# are plain cargo builds; there is no app bundle, and the app runs as the bare
+# binary from `target/devbuild/`, the way `crates/farhelm-desktop/README.md`
+# describes running it from a build.
+#
 # NOTE: This is a developer fast path, not a release. Nothing is signed, the
 # version reads `0.0.0-unreleased`, and the app's self-updater is off (it only
 # runs for a release installed in ~/Applications/Farhelm.app). It is meant for
@@ -26,8 +32,8 @@
 # Builds land in this checkout's `target/` (CARGO_TARGET_DIR is forced to it),
 # and the runnable app in `target/devbuild/`. Nothing is installed: no app
 # bundle, no ~/Applications, no ~/.local/bin. Outside the checkout, the build
-# tools keep their usual caches (cargo's registry under ~/.cargo, dx's and
-# zig's own), and the running app has its state, in a directory of its own:
+# tools keep their usual caches (cargo's registry under ~/.cargo, zig's own),
+# and the running app has its state, in a directory of its own:
 # `~/.local/state/farhelm-devbuild` (under XDG_STATE_HOME when that is set),
 # beside the installed app's `~/.local/state/farhelm`, which a devbuild never
 # opens unless FARHELM_DESKTOP_STATE_DIR names it. So a devbuild has its own
@@ -45,12 +51,12 @@
 #
 # ## Requirements
 #
-# On the Mac: Rust through rustup, the Xcode Command Line Tools, `dx` (the
-# Dioxus CLI version the repo pins, 0.7.10), the rustup target
-# `wasm32-unknown-unknown` for the web UI, `cargo-zigbuild` and `zig` for the
-# Linux cross-builds with the rustup targets `x86_64-unknown-linux-musl`
-# and/or `aarch64-unknown-linux-musl`. The script checks for each before
-# building anything and prints the commands that install whatever is missing.
+# On the Mac: Rust through rustup, the Xcode Command Line Tools (not Xcode:
+# GPUI is built with its `runtime_shaders` feature, so no Metal compiler is
+# needed), and `cargo-zigbuild` and `zig` for the Linux cross-builds with the
+# rustup targets `x86_64-unknown-linux-musl` and/or
+# `aarch64-unknown-linux-musl`. The script checks for each before building
+# anything and prints the commands that install whatever is missing.
 
 set -euo pipefail
 
@@ -326,7 +332,7 @@ fi
 #
 # Every missing tool is reported at once, before any build starts, because the
 # builds take minutes and finding the second missing tool only after the first
-# one is fixed and the web build has run is a waste of that time. Each entry
+# one is fixed and the app's build has run is a waste of that time. Each entry
 # pairs what is missing with the command that installs it, and the commands
 # are printed together, in dependency order, so they can be pasted as a block.
 # Nothing in the block may stop to ask a question, because the lines pasted
@@ -343,11 +349,11 @@ need() {
   missing_fixes+=("$2")
 }
 
-# Cargo's bin directory goes first because both cargo-installed tools here
-# have namesakes: Homebrew's deno installs its own `dx`, and when Homebrew's
-# bin precedes ~/.cargo/bin on PATH, a bare `dx` runs deno instead of the
-# Dioxus CLI. The version check still runs, so a `dx` from somewhere else, or
-# a Dioxus CLI other than the pinned one, is reported rather than used.
+# Cargo's bin directory goes first. It holds rustup's `cargo` and the
+# `cargo-zigbuild` that `cargo install` puts there, and a shell started before
+# rustup was installed may not have it on PATH yet. Being first also keeps a
+# cargo from elsewhere (Homebrew's `rust`, say, which does not read the
+# checkout's toolchain pin) from being the one that builds.
 export PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH"
 
 # The C compiler and linker every native build needs.
@@ -383,18 +389,13 @@ if [ "$have_rust" -eq 1 ]; then
   rust_toolchain=${rust_toolchain%% *}
   installed_targets=$(rustup target list --installed --toolchain "$rust_toolchain") || exit 1
 fi
-# wasm32 for the web UI dx builds into the desktop app; one musl target per
-# Linux architecture whose payload is built.
-for target in wasm32-unknown-unknown "${arches[@]/%/-unknown-linux-musl}"; do
+# One musl target per Linux architecture whose payload is built. The Mac's own
+# target comes with the toolchain.
+for target in "${arches[@]/%/-unknown-linux-musl}"; do
   printf '%s\n' "$installed_targets" | grep -qx "$target" \
     || need "rustup target $target" "rustup target add${rust_toolchain:+ --toolchain $rust_toolchain} $target"
 done
 
-dx_version=0.7.10
-case "$(dx --version 2>/dev/null)" in
-  "dioxus $dx_version"*) ;;
-  *) need "dx $dx_version, the Dioxus CLI" "cargo install --locked dioxus-cli --version $dx_version" ;;
-esac
 # `cargo-zigbuild --version`, not `cargo zigbuild --version`: the subcommand
 # form rejects --version (seen with cargo-zigbuild 0.23.4).
 cargo-zigbuild --version >/dev/null 2>&1 \
@@ -426,8 +427,8 @@ if [ "${#missing_names[@]}" -gt 0 ]; then
 fi
 
 # Forced rather than honored: the request this script serves is that it touch
-# nothing outside the checkout, and `build-desktop-binary.sh` reads dx's output
-# from `$repo/target` regardless of CARGO_TARGET_DIR.
+# nothing outside the checkout, and the staging below reads the binaries from
+# `$repo/target`.
 export CARGO_TARGET_DIR="$repo/target"
 mkdir -p "$devbuild"
 rm -f "$stamp"
@@ -437,32 +438,24 @@ if [ -n "$(git -C "$repo" status --porcelain 2>/dev/null)" ]; then
   built_from="$built_from, with uncommitted changes"
 fi
 
-# --- The web UI and the desktop app -------------------------------------------
+# --- The desktop app and the CLIs ---------------------------------------------
 #
-# The same two dx builds the release makes, in the order it makes them; see
-# crates/farhelm-desktop/README.md for why a plain `cargo build` of the desktop
-# app renders an empty window. `target/dx` is wiped first because dx keeps
-# every generation it has built there, and a stale web bundle embeds silently.
-
-echo "== building the web UI"
-rm -rf "$CARGO_TARGET_DIR/dx"
-(cd "$repo/crates/farhelm-ui" && dx build --package farhelm-ui --platform web --release)
-
-# Exported for every build below, not just the desktop one. `farhelm-helm`'s
-# build script reruns whenever this variable changes, so building the CLI
-# without it would recompile the helm on every alternation between the two
-# builds. It also makes the CLI release-shaped, as the released one is.
-export FARHELM_UI_DIST="$CARGO_TARGET_DIR/dx/farhelm-ui/release/web/public"
+# The desktop app is an ordinary cargo build. It is outside the workspace's
+# default members, hence `-p`, and it never gets the `agent` feature: the GUI
+# refuses to compile that test bridge into an optimized build
+# (docs/gui-agent.md, "Why the bridge never ships").
+#
+# The native `farhelm` is the app's managed local supervisor and the `farhelm`
+# its sessions call. The Linux ones are what Update pushes to remote hosts.
+# Each package is its own cargo invocation, as in a release, so that one
+# package's dependency features are not unified into the other's binary.
+#
+# Plain `release` profile, not the `dist` profile releases use for `farhelm`:
+# the dist profile adds thin LTO, which makes every incremental rebuild relink
+# the world.
 
 echo "== building the desktop app"
-"$repo/scripts/build-desktop-binary.sh"
-
-# --- The CLIs -----------------------------------------------------------------
-#
-# The native one is the app's managed local supervisor and the `farhelm` its
-# sessions call. The Linux ones are what Update pushes to remote hosts. Plain
-# `release` profile, not the `dist` profile releases use: the dist profile adds
-# thin LTO, which makes every incremental rebuild relink the world.
+(cd "$repo" && cargo build --locked --release -p farhelm-desktop)
 
 echo "== building farhelm for this machine"
 (cd "$repo" && cargo build --locked --release -p farhelm)
@@ -486,9 +479,14 @@ install_atomically() {
 }
 
 # The app starts its supervisor from the `farhelm` beside it (the "sibling"
-# rule in `crates/farhelm-ui/src/desktop/bundle.rs`), so the two go in one
-# directory and no override is needed.
-install_atomically "$CARGO_TARGET_DIR/dist-desktop/farhelm-desktop" "$devbuild/farhelm-desktop"
+# rule, `bundled_farhelm` in `crates/farhelm-desktop/src/bundle.rs`), so the
+# two go in one directory and no override is needed. They stay two bare
+# binaries, not an `.app`: the devbuild of the old app ran a bare binary too,
+# `crates/farhelm-desktop/README.md` describes running the app that way, and
+# nothing the app does needs a bundle yet. (GPUI turns its system
+# notifications off outside a bundle and logs so at startup; the app does not
+# use them.)
+install_atomically "$CARGO_TARGET_DIR/release/farhelm-desktop" "$devbuild/farhelm-desktop"
 install_atomically "$CARGO_TARGET_DIR/release/farhelm" "$devbuild/farhelm"
 
 # The payload directory is rebuilt from scratch each run. Leaving an earlier
