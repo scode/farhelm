@@ -68,7 +68,7 @@ use crate::components::{
 };
 use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
-use crate::layers::{self, Dialog, DialogOptions, DialogPlacement, LayerId};
+use crate::layers::{self, Dialog, DialogPlacement, LayerId};
 use crate::session::{self, UiSession};
 use crate::theme::{self, Palette, metrics};
 use crate::{assets, ticker};
@@ -168,11 +168,7 @@ pub(crate) fn open(window: &mut Window, cx: &mut App) {
     let start = switcher.read(cx).input.focus_handle(cx);
     // Near the window's top, and closed by a press outside the card, as the old switcher was: the layer manager's
     // placement for exactly this dialog. The press goes the way Escape goes, so focus returns to the opener.
-    let options = DialogOptions {
-        placement: DialogPlacement::Top,
-        dismiss_on_outside_press: true,
-    };
-    let Some(layer) = layers::open_dialog_with(
+    let Some(layer) = layers::open_dialog(
         Dialog {
             view: switcher.clone().into(),
             container: cx.focus_handle(),
@@ -184,9 +180,10 @@ pub(crate) fn open(window: &mut Window, cx: &mut App) {
             // The old switcher kept focus in its field whatever was clicked inside the card, rows included.
             keeps_focus_on_empty_click: true,
             returns_to: ReturnTo::Opener,
-            may_dismiss: None,
+            on_dismiss: None,
+            placement: DialogPlacement::Top,
+            dismiss_on_outside_press: true,
         },
-        options,
         &mark,
         window,
         cx,

@@ -463,16 +463,18 @@ Owner: the layer manager. It owns the dialog slot, the popover stack and tooltip
 
 Every overlay is anchored to an element, not to coordinates (SPEC.md has no menu opened at a pointer position). Escape
 from a focused terminal goes to its program (SPEC.md); otherwise it closes only the topmost layer, unless a mode SPEC.md
-says captures the keyboard (the quick-launch sequence) is armed, or the topmost dialog says it may not be dismissed now
-(an editor whose save is in flight), when Escape closes nothing. A dialog whose opener asks for it (the quick switcher,
-as in the old app) also closes on a press on its veil outside it, through Escape's path, so the same guard decides; any
-other dialog's veil only takes the press. Dialogs are centered, or near the window's top for an opener that asks (the
-quick switcher again, so it does not move as its results grow). An overlay closes when its subject is gone, not when it
-moves; anchoring to the element makes a moved row's menu follow the row. Whether a click on a dialog's empty space
-(label text included) keeps focus on the control in use is a property of each dialog, set as SPEC.md's list says; a
-dialog without it takes focus itself, so Enter then presses its main action. Whether a terminal link's destination
-disclosure is covered is a hit test, never a hand-kept list of covering surfaces. Things the user did not start never
-open a layer over what they are doing (SPEC.md, "Keyboard focus").
+says captures the keyboard (the quick-launch sequence) is armed, or the topmost dialog's dismissal hook keeps it open,
+when Escape closes nothing, not even a tooltip: an editor whose save is in flight stays, and an editor leaving an
+unsaved draft stays and asks first, then closes itself if the answer says to leave. A dialog's own Close control goes
+through the same hook; a close its opener makes, a subject going and a reset do not ask. A dialog that asks for it (the
+quick switcher, as in the old app) also closes on a press on its veil outside it, through Escape's path, so the same
+hook decides; any other dialog's veil only takes the press. Dialogs are centered, or near the window's top for an opener
+that asks (the quick switcher again, so it does not move as its results grow). An overlay closes when its subject is
+gone, not when it moves; anchoring to the element makes a moved row's menu follow the row. Whether a click on a dialog's
+empty space (label text included) keeps focus on the control in use is a property of each dialog, set as SPEC.md's list
+says; a dialog without it takes focus itself, so Enter then presses its main action. Whether a terminal link's
+destination disclosure is covered is a hit test, never a hand-kept list of covering surfaces. Things the user did not
+start never open a layer over what they are doing (SPEC.md, "Keyboard focus").
 
 Enforced by clippy bans on GPUI's `deferred` and `anchored` outside the layer manager; by `disallowed-types` on GPUI
 Kit's Dialog, Sheet, Popover, HoverCard, PopupMenu, ContextMenu, DropdownMenu, Notification and Tooltip, and its Select,
@@ -500,9 +502,16 @@ SPEC.md's "One GUI at a time" (2026-10-10) lets input delivered before a redraw 
 behind a Cancel may still submit. What the prompt guarantees is that whatever runs acts on the state the confirmation
 froze when it opened, never on state the user was not shown.
 
+A question has Cancel and its confirming answer at the ends, and may carry extra answers between them, in the order the
+feature adds them, for the questions SPEC.md asks with more than two (the template editor's "Keep editing, Discard, or
+Save", the host confirmations' permanent answer, the YOLO confirmation's guarded and permanent answers). Each extra
+answer follows the same rules: it acts on the frozen value, the first answer pressed wins among all of them, and focus
+never starts on one. Cancel may be relabelled ("Keep editing") or given its own hover help without changing what it
+does.
+
 Enforced by the prompt being the only type that renders answer buttons for a question, and by a generic test, for every
-prompt kind, that changes the confirmation's subject after it opens, then sends Cancel and Confirm with no draw between
-them, and checks that any command sent names the frozen targets and preconditions.
+prompt kind, that changes the confirmation's subject after it opens, then sends its answers (Cancel, Confirm and an
+extra answer) with no draw between them, and checks that any command sent names the frozen targets and preconditions.
 
 ### Work that finishes later: the operation stores
 
