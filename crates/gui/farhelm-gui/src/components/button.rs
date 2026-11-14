@@ -331,10 +331,10 @@ impl RenderOnce for Button {
             // reach the page's empty-space handler and move focus.
             button.on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
         };
-        super::activate_on_enter_or_space(button, key_handler)
-            .when_some(handler, |button, handler| {
-                button.on_click(move |event, window, cx| handler(event, window, cx))
-            })
+        super::activate_on_click(
+            super::activate_on_enter_or_space(button, key_handler),
+            handler,
+        )
     }
 }
 

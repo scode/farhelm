@@ -209,13 +209,13 @@ impl RenderOnce for MenuItem {
         }
         // The visible description is the accessible description, so the help is the tooltip alone.
         let item = super::with_hover_help(item, &self.id, &self.help, false, window, cx);
-        let item = super::activate_on_enter_or_space(
-            focus::track(item, &focus, focus::OnPress::Control),
-            key_handler,
-        )
-        .when_some(handler, |item, handler| {
-            item.on_click(move |event, window, cx| handler(event, window, cx))
-        });
+        let item = super::activate_on_click(
+            super::activate_on_enter_or_space(
+                focus::track(item, &focus, focus::OnPress::Control),
+                key_handler,
+            ),
+            handler,
+        );
         // The pointer entering an item moves the menu's one highlight there; leaving it moves nothing, so the highlight
         // stays where the pointer left it until the keys or the pointer move it on. On a wrapper, because GPUI takes
         // one hover listener per element and the item's own is its tooltip's.

@@ -61,6 +61,80 @@ fn a_click_activates_an_enabled_button_and_not_a_disabled_one(cx: &mut TestAppCo
     );
 }
 
+/// Enter or Space on a focused button runs it once. GPUI also turns the release of an Enter or Space pressed on a
+/// focused element into a click, so a button that ran on the press and ran again on that click would act twice on one
+/// key press whenever focus stays on it (a toggle, a step button, a Save whose dialog stays open), sending a second
+/// command; and a held Enter that answered one question, repeating onto the next question's focused answer, would answer
+/// that one too when released (SPEC.md: "Repeated or composing Enter cannot answer the new question"). In-process tests
+/// that send only the press never saw it. Specified: with a button focused, Enter pressed and released runs it once,
+/// and so does Space; a held Enter's repeat and its release run nothing; a click still runs it once.
+#[gpui::test]
+fn enter_or_space_on_a_focused_button_runs_it_once(cx: &mut TestAppContext) {
+    let runs = Rc::new(Cell::new(0));
+    let focus = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let (counted, handle) = (runs.clone(), focus.clone());
+    let cx = open(cx, move |_, _| {
+        let counted = counted.clone();
+        Button::new(
+            "step",
+            "Step",
+            HoverHelp::tooltip("Step once"),
+            Role::Button,
+        )
+        .focus(&handle)
+        .on_click(move |_, _, _| counted.set(counted.get() + 1))
+        .into_any_element()
+    });
+    keys(cx, "tab");
+    assert!(
+        cx.update(|window, _| focus.is_focused(window)),
+        "the premise: the button has focus"
+    );
+    for key in ["enter", "space"] {
+        let before = runs.get();
+        cx.simulate_event(gpui::KeyDownEvent {
+            native_key: None,
+            keystroke: gpui::Keystroke::parse(key).unwrap(),
+            is_held: false,
+            prefer_character_input: false,
+        });
+        cx.simulate_event(gpui::KeyUpEvent {
+            native_key: None,
+            keystroke: gpui::Keystroke::parse(key).unwrap(),
+        });
+        cx.run_until_parked();
+        check(cx);
+        assert_eq!(
+            runs.get(),
+            before + 1,
+            "{key}, pressed and released, ran it once"
+        );
+    }
+    // A key held down from an earlier press (the Enter that answered the question before this one) repeats onto the
+    // button and is released there: neither the repeat nor the release runs it.
+    let before = runs.get();
+    cx.simulate_event(gpui::KeyDownEvent {
+        native_key: None,
+        keystroke: gpui::Keystroke::parse("enter").unwrap(),
+        is_held: true,
+        prefer_character_input: false,
+    });
+    cx.simulate_event(gpui::KeyUpEvent {
+        native_key: None,
+        keystroke: gpui::Keystroke::parse("enter").unwrap(),
+    });
+    cx.run_until_parked();
+    check(cx);
+    assert_eq!(
+        runs.get(),
+        before,
+        "a held Enter's repeat and release ran nothing"
+    );
+    let before = runs.get();
+    click(cx, "step");
+    assert_eq!(runs.get(), before + 1, "a click ran it once");
+}
+
 /// A busy button, whose action is in flight, keeps focus and its place in Tab's order but does nothing when pressed:
 /// the old app's `aria-disabled` Save. Disabling it instead would drop focus out of the dialog's controls for the
 /// length of the save. Specified: Tab reaches the busy button; a click, Enter and Space all leave it focused and run
