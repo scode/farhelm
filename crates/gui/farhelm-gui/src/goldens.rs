@@ -32,6 +32,7 @@ use crate::assets::Icon;
 use crate::components::{
     Button, Checkbox, DialogFrame, HoverHelp, IconButton, Role, TextInput, TextInputState, Tier,
 };
+use crate::components::{RadioGroup, RadioOption};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -434,6 +435,89 @@ fn focus_ring_setup(_: &SceneState, window: &mut Window, cx: &mut App) {
         }),
         cx,
     );
+}
+
+/// The segmented control both ways the old app used it: a radio group (Appearance's theme) and a button group (the
+/// launcher's effort, one option unavailable), with an unavailable group below. The setup's Tab puts focus on the
+/// first group's choice, so the golden also pins the inset ring in the inverse ink that a chosen segment wears.
+fn segmented_control(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    let help = |text: &'static str| HoverHelp::tooltip(text);
+    let options = |group: RadioGroup<&'static str>, labels: &[&'static str]| {
+        labels.iter().fold(group, |group, &label| {
+            group.option(RadioOption::new(label, help("Golden scene option"), label))
+        })
+    };
+    let theme = RadioGroup::new(
+        "theme",
+        "Color theme",
+        help("Golden scene group"),
+        Role::RadioGroup,
+    )
+    .chosen(Some("System"));
+    let effort = RadioGroup::new("effort", "Effort", help("Golden scene group"), Role::Group)
+        .chosen(Some("Medium"))
+        .option(RadioOption::new(
+            "Default",
+            help("Golden scene option"),
+            "Default",
+        ))
+        .option(RadioOption::new(
+            "Medium",
+            help("Golden scene option"),
+            "Medium",
+        ))
+        .option(RadioOption::new("High", help("Golden scene option"), "High").disabled(true));
+    let unavailable = RadioGroup::new(
+        "off",
+        "Status",
+        help("Golden scene group"),
+        Role::RadioGroup,
+    )
+    .chosen(Some("All"))
+    .disabled(true);
+    div()
+        .flex()
+        .flex_col()
+        .items_start()
+        .gap(px(12.))
+        .child(options(theme, &["System", "Dark", "Light"]))
+        .child(effort)
+        .child(options(unavailable, &["All", "Running", "Idle"]))
+        .into_any_element()
+}
+
+/// Plain radios, as the launcher's "Runs in YOLO mode" drew them: the required choice with nothing chosen yet, the
+/// same choice made, and made but unavailable.
+fn radio_group(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    let yolo = |id: &'static str, chosen: Option<bool>| {
+        RadioGroup::new(
+            id,
+            "Runs in YOLO mode",
+            HoverHelp::tooltip("Golden scene group"),
+            Role::RadioGroup,
+        )
+        .radios()
+        .chosen(chosen)
+        .option(RadioOption::new(
+            "Yes (YOLO)",
+            HoverHelp::tooltip("Golden scene option"),
+            true,
+        ))
+        .option(RadioOption::new(
+            "No",
+            HoverHelp::tooltip("Golden scene option"),
+            false,
+        ))
+    };
+    div()
+        .flex()
+        .flex_col()
+        .items_start()
+        .gap(px(12.))
+        .child(yolo("unanswered", None))
+        .child(yolo("answered", Some(false)))
+        .child(yolo("unavailable", Some(true)).disabled(true))
+        .into_any_element()
 }
 
 /// The connection-lost notice as the main view draws it, full width, with its Dismiss button focused from the keyboard
@@ -1241,6 +1325,18 @@ static SCENES: &[Scene] = &[
         size: (260., 64.),
         draw: focus_ring,
         setup: focus_ring_setup,
+    },
+    Scene {
+        name: "segmented-control",
+        size: (360., 170.),
+        draw: segmented_control,
+        setup: focus_ring_setup,
+    },
+    Scene {
+        name: "radio-group",
+        size: (300., 130.),
+        draw: radio_group,
+        setup: no_setup,
     },
     Scene {
         name: "popover",
