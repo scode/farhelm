@@ -20,8 +20,10 @@
 //! host process once at startup and handed in ([`set_reduced_motion`]); this crate does not query the platform itself.
 //! Under reduced motion no tick loop runs at all, so nothing moves and nothing wakes ten times a second.
 //!
-//! NOTE: There is no animation frame counter yet. The first view that animates adds the phase it needs (a cursor blink,
-//! a pulse) here, beside the tick that drives it.
+//! The ticks are counted, and an animation whose phase changes more slowly than every tick says how often it needs to
+//! hear about it. The one such phase so far is a cursor blink ([`blink`]): a terminal's cursor changes twice a
+//! second, so its view is notified twice a second rather than ten times, and asks its [`Blinking`] handle which half of
+//! the blink it is in. A new phase (a pulse, say) goes here too, beside the tick that drives it.
 
 use std::rc::{Rc, Weak};
 use std::time::Duration;
@@ -34,6 +36,10 @@ pub const TICKS_PER_SECOND: u32 = 10;
 /// The time between two animation ticks.
 pub const TICK: Duration = Duration::from_millis(1000 / TICKS_PER_SECOND as u64);
 
+/// How many ticks each half of a cursor blink lasts: half a second shown, half a second hidden, the old terminal's
+/// one-second `step-end` blink (`.grid-terminal-cursor-blink` in app.css at the reference commit).
+pub const BLINK_HALF_TICKS: u64 = 5;
+
 /// The ticker's state: who animates, and the one task that ticks while anyone does.
 #[derive(Default)]
 struct Ticker {
@@ -44,21 +50,49 @@ struct Ticker {
     running: bool,
     reduced_motion: bool,
     active_override: Option<bool>,
+    /// How many ticks have been delivered since the app started. Only differences between two readings mean anything;
+    /// the count stands still while nothing animates.
+    ticks: u64,
 }
 
 impl Global for Ticker {}
 
-/// One view that animates: it is notified on each tick while its window is active and its handle lives.
+/// One view that animates: it is notified every `every` ticks, counted from the tick count `since` at which it
+/// started, while its window is active and its handle lives.
 struct Subscriber {
     alive: Weak<()>,
     view: EntityId,
     window: AnyWindowHandle,
+    every: u64,
+    since: u64,
 }
 
 /// Held by a view for as long as it animates. Dropping it stops that view's ticks.
 #[must_use = "a view animates only while it holds this"]
 pub struct Animating {
     _alive: Rc<()>,
+}
+
+/// Held by a view whose cursor blinks, for as long as it blinks. Dropping it stops the view's blink ticks; making a new
+/// one starts the blink over on its shown half, which is how a terminal that takes focus shows its cursor at once.
+#[must_use = "a view blinks only while it holds this"]
+pub struct Blinking {
+    _alive: Rc<()>,
+    since: u64,
+}
+
+impl Blinking {
+    /// Whether the blink is in its shown half now. Always shown under reduced motion, so a cursor never stays hidden
+    /// because the blink stopped in its hidden half. The view is notified each time this changes, while its window is
+    /// active; in an inactive window the answer may change unannounced, so a view there should not draw from it.
+    pub fn is_on(&self, cx: &App) -> bool {
+        match cx.try_global::<Ticker>() {
+            Some(ticker) if !ticker.reduced_motion => {
+                (ticker.ticks.saturating_sub(self.since) / BLINK_HALF_TICKS).is_multiple_of(2)
+            }
+            _ => true,
+        }
+    }
 }
 
 /// A one-shot deadline. Dropping it cancels the callback, which is how a hover that ends cancels its tooltip.
@@ -99,18 +133,49 @@ pub fn set_active_override(active: Option<bool>, cx: &mut App) {
     }
 }
 
+/// Whether `window` counts as active for animation: what GPUI says, unless [`set_active_override`] pinned it. A view
+/// that draws differently in an inactive window (a terminal's cursor, unfocused there) asks this rather than GPUI, so
+/// it agrees with whether its ticks come.
+pub fn is_active(window: &Window, cx: &App) -> bool {
+    cx.try_global::<Ticker>()
+        .and_then(|ticker| ticker.active_override)
+        .unwrap_or_else(|| window.is_window_active())
+}
+
 /// Start animating the view `cx` belongs to, in `window`: it is notified on every tick until the handle drops. Under
 /// reduced motion the handle is still returned, but no tick loop starts.
 pub fn animate<V: 'static>(window: &Window, cx: &mut Context<V>) -> Animating {
+    Animating {
+        _alive: subscribe(window, cx, 1).0,
+    }
+}
+
+/// Start the cursor blink of the view `cx` belongs to, in `window`, on its shown half: the view is notified each time
+/// the blink changes half ([`BLINK_HALF_TICKS`]) until the handle drops, and reads the half from the handle. Under
+/// reduced motion nothing ticks and the blink stays shown.
+pub fn blink<V: 'static>(window: &Window, cx: &mut Context<V>) -> Blinking {
+    let (alive, since) = subscribe(window, cx, BLINK_HALF_TICKS);
+    Blinking {
+        _alive: alive,
+        since,
+    }
+}
+
+/// Subscribe the view `cx` belongs to, notified every `every` ticks, and start the tick loop unless it runs or motion is
+/// reduced. Returns the handle's liveness token and the tick count it started at.
+fn subscribe<V: 'static>(window: &Window, cx: &mut Context<V>, every: u64) -> (Rc<()>, u64) {
     let alive = Rc::new(());
     let view = cx.entity_id();
     let Some(ticker) = installed(cx) else {
-        return Animating { _alive: alive };
+        return (alive, 0);
     };
+    let since = ticker.ticks;
     ticker.animating.push(Subscriber {
         alive: Rc::downgrade(&alive),
         view,
         window: window.window_handle(),
+        every,
+        since,
     });
     if !ticker.running && !ticker.reduced_motion {
         ticker.running = true;
@@ -126,7 +191,7 @@ pub fn animate<V: 'static>(window: &Window, cx: &mut Context<V>) -> Animating {
             ticker.tick_loop = Some(task);
         }
     }
-    Animating { _alive: alive }
+    (alive, since)
 }
 
 /// Run `callback` once, `delay` from now, whether or not any window is active. Dropping the returned [`Deadline`]
@@ -140,8 +205,8 @@ pub fn after(delay: Duration, cx: &mut App, callback: impl FnOnce(&mut App) + 's
     Deadline { _task: task }
 }
 
-/// One tick: notify every live subscriber whose window is active. Returns whether the loop should keep running: not
-/// once nobody animates, and not under reduced motion.
+/// One tick: count it, and notify every live subscriber that is due and whose window is active. Returns whether the loop
+/// should keep running: not once nobody animates, and not under reduced motion.
 fn tick(cx: &mut App) -> bool {
     let (subscribers, override_active) = {
         let Some(ticker) = installed(cx) else {
@@ -154,9 +219,12 @@ fn tick(cx: &mut App) -> bool {
             ticker.running = false;
             return false;
         }
+        ticker.ticks += 1;
+        let now = ticker.ticks;
         let subscribers: Vec<(EntityId, AnyWindowHandle)> = ticker
             .animating
             .iter()
+            .filter(|subscriber| (now - subscriber.since).is_multiple_of(subscriber.every))
             .map(|subscriber| (subscriber.view, subscriber.window))
             .collect();
         (subscribers, ticker.active_override)

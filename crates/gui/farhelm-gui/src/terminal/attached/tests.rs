@@ -1,6 +1,7 @@
 //! The attached terminal's contract with its stream, against the helm client's fake terminal: when it attaches and at
 //! what size, which view a replay goes to, how much one turn delivers, what the pane says while the stream is not live,
-//! and that a reset takes the whole thing down.
+//! that a reset takes the whole thing down, and the input side: focus, which keys reach the program and when, and the
+//! cursor blink.
 //!
 //! The fake plays the helm (`farhelm_helm_client::fake::terminal`); GPUI's deterministic executor cannot wait on a real
 //! socket. The owner is drawn in a pane of a fixed size inside a bootstrapped window, so its first fit is a real
@@ -13,14 +14,16 @@ use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::fake::terminal::{
     FakeAttach, FakePhase, FakeTerminal, FakeTerminalRequest,
 };
+use farhelm_input_mapping::Modifiers as KeyModifiers;
 use farhelm_proto::DetachCode;
 use gpui::{
-    AppContext as _, Context, Entity, Modifiers, ParentElement, Render, Styled, TestAppContext,
-    VisualTestContext, Window, div, px,
+    AppContext as _, Context, Entity, KeyBinding, KeyUpEvent, Keystroke, Modifiers, ParentElement,
+    Render, Styled, TestAppContext, VisualTestContext, Window, div, point, px,
 };
 use gpui_component::Root;
 
 use super::*;
+use crate::actions::{CONTEXT, DeleteSession, TERMINAL_KEYS, THIS_PLATFORM, owner_on};
 use crate::session::{self, Connection};
 use crate::{focus, layers, test_support};
 
@@ -34,11 +37,18 @@ fn metrics() -> CellMetrics {
     CellMetrics::new(10., 22., 16.).unwrap()
 }
 
-/// The window's root: a pane of the size in `size` holding the owner, with the focus and layer foundations attached
-/// as in the app, so the Take control button behaves as it does there.
+/// The size of the second owner's pane, in tests that draw two: small enough that both fit the test window.
+const SECOND_PANE: (f32, f32) = (400., 200.);
+
+/// The window's root: a pane of the size in `size` holding the owner (and, in tests that need one, a second, smaller
+/// pane below it), with the focus and layer foundations attached as in the app, so the Take control button and focus
+/// behave as they do there. It handles the session Delete shortcut's action, as the session view will, counting its
+/// runs.
 struct Pane {
     owner: Entity<AttachedTerminal>,
+    second: Option<Entity<AttachedTerminal>>,
     size: Rc<Cell<(f32, f32)>>,
+    deletes: Rc<Cell<usize>>,
     _layers: layers::Attachment,
     focus: focus::Attachment,
 }
@@ -46,59 +56,83 @@ struct Pane {
 impl Render for Pane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (width, height) = self.size.get();
+        let deletes = self.deletes.clone();
         focus::root(div(), &self.focus)
             .size_full()
-            .child(div().w(px(width)).h(px(height)).child(self.owner.clone()))
+            .flex()
+            .flex_col()
+            .on_action(move |_: &DeleteSession, _, _| deletes.set(deletes.get() + 1))
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(width))
+                    .h(px(height))
+                    .child(self.owner.clone()),
+            )
+            .children(self.second.clone().map(|second| {
+                div()
+                    .flex_none()
+                    .w(px(SECOND_PANE.0))
+                    .h(px(SECOND_PANE.1))
+                    .child(second)
+            }))
             .children(layers::overlay(window, cx))
     }
 }
 
-/// One owner in its window, the helm behind its UI session, and the fake stream it opened (once it has).
+/// Where an owner's opener leaves the fake stream it opened and the attach it was asked for.
+type Opened = Rc<RefCell<Option<(FakeTerminal, FakeAttach)>>>;
+
+/// One owner in its window (and maybe a second), the helm behind its UI session, and the fake stream each opened
+/// (once it has).
 struct Harness<'a> {
     cx: &'a mut VisualTestContext,
     helm: FakeHelm,
     connection: Entity<Connection>,
     owner: Entity<AttachedTerminal>,
     size: Rc<Cell<(f32, f32)>>,
-    opened: Rc<RefCell<Option<(FakeTerminal, FakeAttach)>>>,
+    opened: Opened,
+    second: Option<(Entity<AttachedTerminal>, Opened)>,
+    /// How many times the session Delete shortcut's action ran.
+    deletes: Rc<Cell<usize>>,
 }
 
 /// A bootstrapped app connected to the fake helm, with an owner made for its UI session and drawn once. The owner's
 /// opener records the attach it was asked for and hands out a fake stream for it.
 fn harness(cx: &mut TestAppContext) -> Harness<'_> {
+    harness_with(cx, false)
+}
+
+/// [`harness`], with a second owner, made after the first, drawn below it when `two` is set.
+fn harness_with(cx: &mut TestAppContext, two: bool) -> Harness<'_> {
     test_support::install(cx);
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = cx.update(|cx| session::start(handle, events, None, cx));
     helm.connect(Vec::new());
     cx.run_until_parked();
     let session = cx.update(|cx| connection.read(cx).session().cloned().unwrap());
-    let opened = Rc::new(RefCell::new(None));
+    let opened: Opened = Rc::new(RefCell::new(None));
+    let second_opened: Opened = Rc::new(RefCell::new(None));
     let size = Rc::new(Cell::new(PANE));
-    let (slot, pane_size) = (opened.clone(), size.clone());
-    let mut owner = None;
+    let deletes = Rc::new(Cell::new(0));
+    let (pane_size, pane_deletes) = (size.clone(), deletes.clone());
+    let mut owners = Vec::new();
+    let slots = [opened.clone(), second_opened.clone()];
     let (_, cx) = cx.add_window_view(|window, cx| {
-        let open: OpenStream = Box::new(move |attach| {
-            let (fake, handle, events) = FakeTerminal::open(&attach);
-            // What the opener was given; no resize can have overtaken it yet.
-            let asked = FakeAttach {
-                take_control: true,
-                cols: attach.cols,
-                rows: attach.rows,
-                resize_on_open: None,
+        for slot in slots.into_iter().take(if two { 2 } else { 1 }) {
+            let target = TerminalTarget {
+                session: "s1".into(),
+                tab: None,
+                lease: AttachmentLease::new(),
             };
-            *slot.borrow_mut() = Some((fake, asked));
-            (handle, events)
-        });
-        let target = TerminalTarget {
-            session: "s1".into(),
-            tab: None,
-            lease: AttachmentLease::new(),
-        };
-        let made = cx.new(|cx| AttachedTerminal::new(&session, target, metrics(), open, cx));
-        owner = Some(made.clone());
+            let open = opener(slot);
+            owners.push(cx.new(|cx| AttachedTerminal::new(&session, target, metrics(), open, cx)));
+        }
         let pane = cx.new(|cx| Pane {
-            owner: made,
+            owner: owners[0].clone(),
+            second: owners.get(1).cloned(),
             size: pane_size,
+            deletes: pane_deletes,
             _layers: layers::attach(window, cx),
             focus: focus::attach(window, cx),
         });
@@ -106,14 +140,33 @@ fn harness(cx: &mut TestAppContext) -> Harness<'_> {
     });
     cx.update(|window, _| window.activate_window());
     cx.run_until_parked();
+    let second = owners.get(1).cloned().map(|owner| (owner, second_opened));
     Harness {
         cx,
         helm,
         connection,
-        owner: owner.unwrap(),
+        owner: owners.remove(0),
         size,
         opened,
+        second,
+        deletes,
     }
+}
+
+/// An opener that records the attach it was asked for in `slot` and hands out a fake stream for it.
+fn opener(slot: Opened) -> OpenStream {
+    Box::new(move |attach| {
+        let (fake, handle, events) = FakeTerminal::open(&attach);
+        // What the opener was given; no resize can have overtaken it yet.
+        let asked = FakeAttach {
+            take_control: true,
+            cols: attach.cols,
+            rows: attach.rows,
+            resize_on_open: None,
+        };
+        *slot.borrow_mut() = Some((fake, asked));
+        (handle, events)
+    })
 }
 
 impl Harness<'_> {
@@ -160,6 +213,126 @@ impl Harness<'_> {
         self.fake().replay_complete();
         self.settle();
     }
+
+    /// [`Harness::attach_showing`], with the screen's cursor blinking.
+    fn attach_blinking(&mut self) {
+        let asked = self.fake().attach();
+        let mut replay = screen(asked.cols, asked.rows, "blink", serde_json::Value::Null);
+        if let Some(last) = replay.last_mut() {
+            *last = serde_json::from_value(serde_json::json!({"t":"frame","rev":1,
+                "cols":asked.cols,"rows":asked.rows,
+                "cursor":{"x":0,"y":0,"visible":true,"shape":"block","blink":true}}))
+            .unwrap();
+        }
+        for message in replay {
+            self.fake().output(message);
+        }
+        self.fake().replay_complete();
+        self.settle();
+    }
+
+    /// The user chooses this terminal's session: the focus coordinator makes `owner` home and focuses it.
+    fn choose(&mut self, owner: &Entity<AttachedTerminal>) {
+        let handle = self
+            .cx
+            .update(|_, cx| owner.read(cx).focus_handle().clone());
+        self.cx.update(|window, cx| {
+            let chosen = focus::Mark::take(cx);
+            focus::choose_terminal(&handle, &chosen, window, cx);
+        });
+        self.settle();
+        assert!(
+            self.focused(owner),
+            "the premise: the chosen terminal holds focus"
+        );
+    }
+
+    /// Whether `owner`'s pane holds focus now.
+    fn focused(&mut self, owner: &Entity<AttachedTerminal>) -> bool {
+        let handle = self
+            .cx
+            .update(|_, cx| owner.read(cx).focus_handle().clone());
+        self.cx.update(|window, _| handle.is_focused(window))
+    }
+
+    /// Press each key in `chords` (GPUI's syntax, space-separated) as a fresh press, then settle.
+    fn type_keys(&mut self, chords: &str) {
+        self.cx.simulate_keystrokes(chords);
+        self.settle();
+    }
+
+    /// A key-down for `chord`: a fresh press, or with `held` an auto-repeat of the key already held down, which is how
+    /// the platform reports one. Filled in as GPUI's own simulated typing fills it (the text a plain key types).
+    fn key_down(&mut self, chord: &'static str, held: bool) {
+        self.cx.simulate_event(KeyDownEvent {
+            native_key: None,
+            keystroke: keystroke(chord),
+            is_held: held,
+            prefer_character_input: false,
+        });
+        self.settle();
+    }
+
+    /// Hold `chord` down for a press and two auto-repeats, then release it.
+    fn hold(&mut self, chord: &'static str) {
+        self.key_down(chord, false);
+        self.key_down(chord, true);
+        self.key_down(chord, true);
+        self.cx.simulate_event(KeyUpEvent {
+            native_key: None,
+            keystroke: keystroke(chord),
+        });
+        self.settle();
+    }
+
+    /// The input the owner sent since the last call, with whether the stream carried each to the attachment it was
+    /// stamped for. Other requests (resizes) are left out.
+    fn sent(&mut self) -> Vec<(GridInput, bool)> {
+        self.fake()
+            .received()
+            .into_iter()
+            .filter_map(|request| match request {
+                FakeTerminalRequest::Input { input, delivered } => Some((input, delivered)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The cursor the shown screen draws.
+    fn phase(&mut self) -> CursorPhase {
+        self.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).phase)
+    }
+
+    /// Let `ticks` animation ticks pass, one at a time.
+    fn ticks(&mut self, ticks: u32) {
+        for _ in 0..ticks {
+            self.cx.executor().advance_clock(ticker::TICK);
+            self.settle();
+        }
+    }
+}
+
+/// `chord` as GPUI's simulated typing would send it: parsed, with the text a plain key types filled in.
+fn keystroke(chord: &'static str) -> Keystroke {
+    match Keystroke::parse(chord) {
+        Ok(keystroke) => keystroke.with_simulated_ime(),
+        Err(error) => panic!("{chord} does not parse: {error}"),
+    }
+}
+
+/// The `Key` message a plain key sends on this platform: `key` and its DOM key code, no modifiers.
+fn key(key: &str, kc: u32) -> GridInput {
+    GridInput::Key {
+        key: key.into(),
+        code: String::new(),
+        kc,
+        mods: 0,
+        mac: THIS_PLATFORM == Platform::Mac,
+    }
+}
+
+fn text(data: &str) -> GridInput {
+    GridInput::Text { data: data.into() }
 }
 
 /// A complete first screen: hello at `cols` by `rows`, the state with `exit`, `text` on the first row, one frame.
@@ -612,19 +785,598 @@ fn a_reset_retires_the_owner(cx: &mut TestAppContext) {
     assert!(h.cx.debug_bounds("terminal-connecting").is_none());
 }
 
-/// The bridge's `terminal_text` probe reads the newest owner that shows a screen, so an end-to-end run can read what
-/// the terminal displays; an owner still catching up is skipped.
+/// The bridge's `terminal_text` probe reads the terminal that holds focus, which is where an end-to-end run's typing
+/// goes, so the run reads the screen it typed into. Reading the newest terminal instead, as before terminals took
+/// focus, reads the wrong one once a session view shows more than one. With no terminal focused it reads nothing.
 #[gpui::test]
-fn the_probe_reads_the_newest_shown_screen(cx: &mut TestAppContext) {
+fn the_probe_reads_the_focused_terminal(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, true);
+    let probe = |h: &mut Harness| {
+        h.cx.cx
+            .update(probe::terminal_text)
+            .map(|text| first_line(&text).to_owned())
+    };
+    h.attach_showing("older");
+    let (second, second_opened) = h.second.clone().unwrap();
+    let asked = second_opened.borrow_mut().as_mut().unwrap().0.attach();
+    for message in screen(asked.cols, asked.rows, "newer", serde_json::Value::Null) {
+        second_opened
+            .borrow_mut()
+            .as_mut()
+            .unwrap()
+            .0
+            .output(message);
+    }
+    second_opened
+        .borrow_mut()
+        .as_mut()
+        .unwrap()
+        .0
+        .replay_complete();
+    h.settle();
+    assert_eq!(probe(&mut h), None, "no terminal holds focus");
+
+    let first = h.owner.clone();
+    h.choose(&first);
+    assert_eq!(probe(&mut h).as_deref(), Some("older"));
+    h.choose(&second);
+    assert_eq!(probe(&mut h).as_deref(), Some("newer"));
+}
+
+/// Each window keeps its own focus, so two windows can each have a focused terminal. The probe then reads the active
+/// window's, the one a script types into, and among windows that are all inactive (a headless run before activation,
+/// say) the oldest terminal's, so the answer never depends on which window happened to be opened last.
+#[gpui::test]
+fn the_probe_prefers_the_active_windows_terminal(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    assert_eq!(h.cx.update(|_, cx| probe::terminal_text(cx)), None);
-    h.attach_showing("probed");
-    assert_eq!(
-        h.cx.update(|_, cx| probe::terminal_text(cx))
-            .as_deref()
-            .map(first_line),
-        Some("probed")
+    h.attach_showing("first");
+    let first = h.owner.clone();
+    h.choose(&first);
+
+    // A second window with a terminal of its own, made after the first, for the same UI session.
+    let connection = h.connection.clone();
+    let session =
+        h.cx.update(|_, cx| connection.read(cx).session().cloned().unwrap());
+    let opened: Opened = Rc::new(RefCell::new(None));
+    let slot = opened.clone();
+    let mut made = None;
+    let window = h.cx.cx.add_window(|window, cx| {
+        let target = TerminalTarget {
+            session: "s1".into(),
+            tab: None,
+            lease: AttachmentLease::new(),
+        };
+        let owner =
+            cx.new(|cx| AttachedTerminal::new(&session, target, metrics(), opener(slot), cx));
+        made = Some(owner.clone());
+        let pane = cx.new(|cx| Pane {
+            owner,
+            second: None,
+            size: Rc::new(Cell::new(PANE)),
+            deletes: Rc::new(Cell::new(0)),
+            _layers: layers::attach(window, cx),
+            focus: focus::attach(window, cx),
+        });
+        Root::new(pane, window, cx)
+    });
+    let second = made.unwrap();
+    let mut other = VisualTestContext::from_window(window.into(), &h.cx.cx);
+    other.update(|window, _| window.activate_window());
+    other.run_until_parked();
+    {
+        let mut opened = opened.borrow_mut();
+        let fake = &mut opened
+            .as_mut()
+            .expect("the second terminal opened no stream")
+            .0;
+        let asked = fake.attach();
+        for message in screen(asked.cols, asked.rows, "second", serde_json::Value::Null) {
+            fake.output(message);
+        }
+        fake.replay_complete();
+    }
+    other.run_until_parked();
+    other.update(|window, cx| {
+        let handle = second.read(cx).focus_handle().clone();
+        focus::choose_terminal(&handle, &focus::Mark::take(cx), window, cx);
+    });
+    other.run_until_parked();
+    let probe = |h: &mut Harness| {
+        h.cx.cx
+            .update(probe::terminal_text)
+            .map(|text| first_line(&text).to_owned())
+    };
+    assert!(
+        h.focused(&first)
+            && other.update(|window, cx| second.read(cx).focus_handle().is_focused(window)),
+        "the premise: each window's terminal holds its focus"
     );
+    assert!(other.update(|window, _| window.is_window_active()));
+    assert_eq!(
+        probe(&mut h).as_deref(),
+        Some("second"),
+        "the second window is active"
+    );
+
+    h.cx.update(|window, _| window.activate_window());
+    h.settle();
+    assert_eq!(
+        probe(&mut h).as_deref(),
+        Some("first"),
+        "the first window is active"
+    );
+
+    h.cx.deactivate_window();
+    assert!(!other.update(|window, _| window.is_window_active()));
+    assert_eq!(
+        probe(&mut h).as_deref(),
+        Some("first"),
+        "no window is active: the oldest terminal"
+    );
+}
+
+// ---- Input ---------------------------------------------------------------------------------------------------------
+
+/// SPEC.md, "Where focus rests": choosing a session focuses its terminal, taking focus from whatever holds it, and a
+/// press on a terminal focuses it on every platform (a click there is for typing into it). The terminal takes focus
+/// only through the focus coordinator, so this is what the session view's choice and the user's click do.
+#[gpui::test]
+fn clicking_or_choosing_a_terminal_focuses_it(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, true);
+    let (first, second) = (h.owner.clone(), h.second.clone().unwrap().0);
+    assert!(
+        !h.focused(&first) && !h.focused(&second),
+        "the premise: focus rests on the root"
+    );
+    // The first pane sits at the window's top left; both panes carry the same debug selector.
+    h.cx.simulate_click(point(px(PANE.0 / 2.), px(PANE.1 / 2.)), Modifiers::none());
+    h.settle();
+    assert!(
+        h.focused(&first),
+        "a click focuses the terminal it lands on"
+    );
+    h.choose(&second);
+    assert!(!h.focused(&first));
+}
+
+/// Only the grid's area is the terminal's for keys, not the status line above it: Tab moves through the status line's
+/// Take control button and on into the terminal, where it then stays for the program. With the whole pane in the
+/// terminal's key context, the context that hands Tab and Escape to the program, a focused Take control button kept
+/// Tab and Escape from doing anything, and the keyboard could not leave it.
+#[gpui::test]
+fn tab_moves_through_the_status_line_into_the_terminal(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    h.fake().detach(Some(DetachCode::TakenOver), "taken over");
+    h.settle();
+    let owner = h.owner.clone();
+    assert!(h.cx.debug_bounds("terminal-take-control").is_some());
+    let before = h.cx.update(|window, cx| window.focused(cx));
+    h.type_keys("tab");
+    // The window's tab stops are the button and the terminal (the root, where focus rested, is not one), so focus
+    // that moved and is not on the terminal is on the button.
+    let after = h.cx.update(|window, cx| window.focused(cx));
+    assert!(
+        after.is_some() && after != before && !h.focused(&owner),
+        "the premise: Tab reached the button first"
+    );
+    h.type_keys("tab");
+    assert!(
+        h.focused(&owner),
+        "Tab moved on from the button into the terminal"
+    );
+    h.type_keys("tab");
+    assert!(h.focused(&owner), "Tab in the terminal is the program's");
+}
+
+/// The program's keys go out encoded by `farhelm-input-mapping`, stamped with the live attachment so the stream
+/// carries them to it: a plain letter and Enter as keys, and a Shift letter and a space as the text they type, which
+/// with no input method handler nothing else would send. After a reconnect, typing goes to the new attachment.
+#[gpui::test]
+fn program_keys_are_sent_to_the_live_attachment(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    h.type_keys("a enter shift-a space");
+    assert_eq!(
+        h.sent(),
+        [
+            (key("a", 65), true),
+            (key("Enter", 13), true),
+            (text("A"), true),
+            (text(" "), true),
+        ]
+    );
+
+    h.fake().drop_link();
+    h.attach_showing("again");
+    h.type_keys("b");
+    assert_eq!(h.sent(), [(key("b", 66), true)]);
+}
+
+/// Nothing is sent while the terminal is not live: while it attaches, while its replay arrives (the screen it would
+/// type at is not shown yet), while it reconnects, and while it waits detached or refused. Keys typed then are
+/// dropped, not sent once it is live again, as the helm client does with input for a stream that is not attached.
+#[gpui::test]
+fn nothing_is_sent_unless_the_terminal_is_live(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    h.type_keys("a");
+    assert_eq!(h.sent(), [], "attaching");
+
+    let asked = h.fake().attach();
+    let mut replay = screen(asked.cols, asked.rows, "x", serde_json::Value::Null).into_iter();
+    h.fake().output(replay.next().unwrap());
+    h.settle();
+    h.type_keys("b");
+    assert_eq!(h.sent(), [], "replaying");
+    for message in replay {
+        h.fake().output(message);
+    }
+    h.fake().replay_complete();
+    h.settle();
+    assert!(h.focused(&owner) && h.read(|owner, _| owner.is_live()));
+    h.type_keys("c");
+    assert_eq!(h.sent(), [(key("c", 67), true)], "live");
+
+    h.fake().drop_link();
+    h.settle();
+    h.type_keys("d");
+    assert_eq!(h.sent(), [], "reconnecting");
+
+    h.attach_showing("y");
+    h.fake().detach(Some(DetachCode::TakenOver), "taken over");
+    h.settle();
+    h.type_keys("e");
+    assert_eq!(h.sent(), [], "detached");
+
+    h.owner
+        .clone()
+        .update(h.cx, |owner, cx| owner.take_control(cx));
+    h.settle();
+    h.fake().refuse(401);
+    h.settle();
+    h.type_keys("f");
+    assert!(h.focused(&owner), "the premise: still focused");
+    assert_eq!(h.sent(), [], "refused");
+}
+
+/// Keys that are not the program's never reach it: Farhelm's shortcuts that work from a terminal (bound or not yet
+/// bound) and the terminal's own commands, which do nothing until scrollback, selection and paste exist. Each is
+/// pressed in a live, focused terminal, which sends a program key typed after them.
+#[gpui::test]
+fn app_and_terminal_keys_never_reach_the_program(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let kept: Vec<&str> = TERMINAL_KEYS
+        .iter()
+        .filter(|row| row.owner != KeyOwner::Program)
+        .filter_map(|row| row.chord(THIS_PLATFORM))
+        .collect();
+    assert!(!kept.is_empty());
+    for chord in kept {
+        h.type_keys(chord);
+        assert_eq!(h.sent(), [], "{chord} reached the program");
+    }
+    h.type_keys("x");
+    assert_eq!(h.sent(), [(key("x", 88), true)]);
+}
+
+/// A held ordinary key repeats to the program, as in any terminal: held arrows and letters must keep coming.
+#[gpui::test]
+fn a_held_ordinary_key_repeats_to_the_program(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    h.hold("a");
+    assert_eq!(h.sent(), vec![(key("a", 65), true); 3]);
+}
+
+/// A held app shortcut never reaches the program: a bound one that acts once per press runs once (the keymap's repeat
+/// guard drops its repeats before the terminal sees them), and one whose feature has no binding yet is dropped by the
+/// terminal, press and repeats alike.
+#[gpui::test]
+fn a_held_app_shortcut_never_reaches_the_program(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let (delete, switcher) = match THIS_PLATFORM {
+        Platform::Mac => ("cmd-w", "cmd-k"),
+        Platform::Linux => ("ctrl-shift-backspace", "ctrl-shift-k"),
+    };
+    h.cx.update(|_, cx| cx.bind_keys([KeyBinding::new(delete, DeleteSession, Some(CONTEXT))]));
+    h.hold(delete);
+    assert_eq!(h.deletes.get(), 1, "the bound shortcut runs once");
+    h.hold(switcher);
+    assert_eq!(h.sent(), [], "neither reached the program");
+    assert!(h.focused(&owner), "the premise: the terminal kept focus");
+}
+
+/// The cursor blinks on the ticker, half a second shown and half hidden (the old cursor's blink), only while the
+/// terminal has focus in an active window: unfocused, or with the window inactive, it is drawn outlined and nothing
+/// ticks, so an idle window does not redraw twice a second for a cursor nobody is typing at.
+#[gpui::test]
+fn the_cursor_blinks_only_while_focused(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_blinking();
+    let owner = h.owner.clone();
+    h.reset_renders();
+    h.ticks(10);
+    assert_eq!(
+        h.phase(),
+        CursorPhase {
+            focused: false,
+            on: true
+        }
+    );
+    assert_eq!(
+        h.renders("attached-terminal"),
+        0,
+        "unfocused, nothing ticks"
+    );
+
+    h.choose(&owner);
+    assert_eq!(
+        h.phase(),
+        CursorPhase {
+            focused: true,
+            on: true
+        }
+    );
+    h.ticks(ticker::BLINK_HALF_TICKS as u32);
+    assert_eq!(
+        h.phase(),
+        CursorPhase {
+            focused: true,
+            on: false
+        }
+    );
+    h.ticks(ticker::BLINK_HALF_TICKS as u32);
+    assert_eq!(
+        h.phase(),
+        CursorPhase {
+            focused: true,
+            on: true
+        }
+    );
+
+    h.cx.deactivate_window();
+    h.settle();
+    assert_eq!(
+        h.phase(),
+        CursorPhase {
+            focused: false,
+            on: true
+        }
+    );
+    h.reset_renders();
+    h.ticks(10);
+    assert_eq!(h.renders("attached-terminal"), 0, "inactive, nothing ticks");
+}
+
+/// Under reduced motion the cursor holds still, shown, in a focused terminal: nothing on screen moves on its own.
+#[gpui::test]
+fn reduced_motion_keeps_the_cursor_steady(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.cx.update(|_, cx| ticker::set_reduced_motion(true, cx));
+    h.attach_blinking();
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    h.reset_renders();
+    h.ticks(10);
+    assert_eq!(
+        h.phase(),
+        CursorPhase {
+            focused: true,
+            on: true
+        }
+    );
+    assert_eq!(h.renders("attached-terminal"), 0);
+}
+
+/// The keymap (`actions::TERMINAL_KEYS`, through [`owner_on`]) and the input mapping decide terminal keys in two
+/// places, so they are compared on both platforms: every chord the keymap gives the program must be one the terminal
+/// sends, and none it keeps for the app or the terminal itself may be, whether pressed or held (the input mapping is
+/// told an app shortcut is one, as its route asks). Then the other way round: every chord the input mapping treats
+/// as the terminal's own command (paging, select all) must be the terminal's in the keymap.
+///
+/// Some program keys have no legacy encoding, so the terminal sends nothing for them, and both sides are right:
+/// GPUI Kit's inspector toggle (Cmd+Option+I, Ctrl+Shift+I) is the program's only so that Kit's debug-only binding
+/// cannot take it from a focused terminal, and the input mapping, like the old app, has no sequence for either chord
+/// and neither types text. They are listed, so that a program key that starts or stops sending fails here and whoever
+/// changes it updates the list.
+#[test]
+fn the_keymap_and_the_input_mapping_agree_on_terminal_keys() {
+    let no_legacy_encoding: [(Platform, &str); 2] = [
+        (Platform::Mac, "cmd-alt-i"),
+        (Platform::Linux, "ctrl-shift-i"),
+    ];
+    let event = |chord: &'static str, held: bool| KeyDownEvent {
+        native_key: None,
+        keystroke: keystroke(chord),
+        is_held: held,
+        prefer_character_input: false,
+    };
+    let mut silent = Vec::new();
+    for platform in [Platform::Mac, Platform::Linux] {
+        for row in TERMINAL_KEYS {
+            let Some(chord) = row.chord(platform) else {
+                continue;
+            };
+            assert_eq!(
+                owner_on(platform, &event(chord, false)),
+                row.owner,
+                "{chord}"
+            );
+            let sent = program_input(&event(chord, false), platform, &mut Composition::default());
+            match row.owner {
+                KeyOwner::Program if sent.is_empty() => silent.push((platform, chord)),
+                KeyOwner::Program => {}
+                KeyOwner::Terminal => assert_eq!(sent, [], "{platform:?} {chord}"),
+                KeyOwner::App => {
+                    for held in [false, true] {
+                        let keystroke = keystroke(chord);
+                        let decision = map_key(
+                            KeyDown {
+                                native: None,
+                                modifiers: KeyModifiers {
+                                    control: keystroke.modifiers.control,
+                                    alt: keystroke.modifiers.alt,
+                                    shift: keystroke.modifiers.shift,
+                                    platform: keystroke.modifiers.platform,
+                                    function: keystroke.modifiers.function,
+                                },
+                                key: &keystroke.key,
+                                key_char: keystroke.key_char.as_deref(),
+                                is_held: held,
+                                prefer_character_input: false,
+                            },
+                            platform,
+                            &mut Composition::default(),
+                            Route {
+                                terminal_focused: true,
+                                modal_open: false,
+                                app_shortcut: true,
+                            },
+                        );
+                        assert!(
+                            !matches!(decision, Decision::Send(_)),
+                            "{platform:?} {chord} held={held}: {decision:?}"
+                        );
+                    }
+                }
+            }
+        }
+        for chord in [
+            "shift-pageup",
+            "shift-pagedown",
+            "cmd-a",
+            "ctrl-a",
+            "pageup",
+        ] {
+            let decision = map_key(
+                KeyDown {
+                    native: None,
+                    modifiers: {
+                        let modifiers = keystroke(chord).modifiers;
+                        KeyModifiers {
+                            control: modifiers.control,
+                            alt: modifiers.alt,
+                            shift: modifiers.shift,
+                            platform: modifiers.platform,
+                            function: modifiers.function,
+                        }
+                    },
+                    key: &keystroke(chord).key,
+                    key_char: None,
+                    is_held: false,
+                    prefer_character_input: false,
+                },
+                platform,
+                &mut Composition::default(),
+                Route {
+                    terminal_focused: true,
+                    ..Route::default()
+                },
+            );
+            if matches!(
+                decision,
+                Decision::PageUp | Decision::PageDown | Decision::SelectAll
+            ) {
+                assert_eq!(
+                    owner_on(platform, &event(chord, false)),
+                    KeyOwner::Terminal,
+                    "{platform:?} {chord}: {decision:?}"
+                );
+            }
+        }
+    }
+    assert_eq!(
+        silent, no_legacy_encoding,
+        "program chords the terminal sends nothing for"
+    );
+}
+
+/// The key rules as a table, so that each rule is pinned apart from the window: which keys go out as keys, which as
+/// the text they type, and which send nothing at all.
+#[test]
+fn program_input_sends_keys_text_or_nothing() {
+    let event = |chord: &'static str| KeyDownEvent {
+        native_key: None,
+        keystroke: keystroke(chord),
+        is_held: false,
+        prefer_character_input: false,
+    };
+    let on = |chord: &'static str| {
+        program_input(&event(chord), Platform::Linux, &mut Composition::default())
+    };
+    let mods = |mods: u8, kc: u32, key: &str| GridInput::Key {
+        key: key.into(),
+        code: String::new(),
+        kc,
+        mods,
+        mac: false,
+    };
+    assert_eq!(on("a"), [mods(0, 65, "a")]);
+    assert_eq!(on("ctrl-c"), [mods(4, 67, "c")]);
+    assert_eq!(on("escape"), [mods(0, 27, "Escape")]);
+    assert_eq!(on("shift-a"), [text("A")]);
+    assert_eq!(on("space"), [text(" ")]);
+    // A key the mapping leaves to text input that types no text, and a function-modified key, send nothing.
+    assert_eq!(on("ctrl-shift-i"), []);
+    assert_eq!(on("fn-a"), []);
+    // A key with text the platform typed, unknown to the mapping's US inference, goes as that text.
+    let mut accented = event("é");
+    accented.keystroke.key_char = Some("é".into());
+    assert_eq!(
+        program_input(&accented, Platform::Linux, &mut Composition::default()),
+        [text("é")]
+    );
+    // A Mac Option character that is not a dead key is text, as in the old app: Option-S types ß on a US layout.
+    let mut option = event("alt-s");
+    option.keystroke.key_char = Some("ß".into());
+    assert_eq!(
+        program_input(&option, Platform::Mac, &mut Composition::default()),
+        [text("ß")]
+    );
+}
+
+/// A Linux dead key is composed by the platform: the dead key arrives with no text, then the composed key with the
+/// composed character. Sending that character ends the dead-key sequence, as an input method's commit would. Left
+/// pending, the mapping held back the next key that sends a sequence, so Enter after a composed `é` sent nothing and
+/// only a second Enter went through.
+#[test]
+fn a_composed_character_ends_its_dead_key_sequence() {
+    let mut composition = Composition::default();
+    let mut on = |key: &str, key_char: Option<&str>| {
+        let event = KeyDownEvent {
+            native_key: None,
+            keystroke: Keystroke {
+                modifiers: Modifiers::none(),
+                key: key.into(),
+                key_char: key_char.map(Into::into),
+            },
+            is_held: false,
+            prefer_character_input: false,
+        };
+        program_input(&event, Platform::Linux, &mut composition)
+    };
+    assert_eq!(on("dead_acute", None), []);
+    assert_eq!(on("eacute", Some("é")), [text("é")]);
+    let enter = GridInput::Key {
+        key: "Enter".into(),
+        code: String::new(),
+        kc: 13,
+        mods: 0,
+        mac: false,
+    };
+    assert_eq!(on("enter", None), [enter]);
 }
 
 fn first_line(text: &str) -> &str {

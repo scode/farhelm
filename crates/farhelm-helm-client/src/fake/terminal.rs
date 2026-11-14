@@ -10,8 +10,9 @@
 //! The states the GUI sees follow the real stream's rules ([`crate::terminal`]): `Attaching` first; `Attached` only
 //! ahead of an attachment's first output or end of replay, not when its socket opens; `Reconnecting` once per outage
 //! however many attempts follow; a detach that stops the stream (decided by the same function the real stream uses, so
-//! the two cannot disagree) waits in `Detached`; `Closed` on close from every state; and input sent while not attached
-//! is dropped rather than delivered later. Everything but `detach_stops` is restated here rather than shared, so the
+//! the two cannot disagree) waits in `Detached`; `Closed` on close from every state; each `Attached` carries the next
+//! stamp, counted from 1; and input sent while not attached, or stamped for another attachment than the live one, is
+//! dropped rather than delivered later. Everything but `detach_stops` is restated here rather than shared, so the
 //! real stream's parity test (`terminal/tests/parity.rs`) plays one script against both and fails when they part.
 //! Change a rule in either place and that test says whether the other still agrees.
 //!
@@ -27,8 +28,8 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::{TryRecvError, TrySendError};
 
 use crate::terminal::{
-    Request, StreamState, TerminalAttach, TerminalEvent, TerminalEvents, TerminalHandle,
-    detach_stops, stream_channels,
+    Attachment, Request, StreamState, TerminalAttach, TerminalEvent, TerminalEvents,
+    TerminalHandle, detach_stops, stream_channels,
 };
 
 /// The fake feed's capacity: far more events than any test sends, so sending never waits on the GUI. Tokio allocates
@@ -38,7 +39,9 @@ const FEED_CAPACITY: usize = 1 << 20;
 /// Something the GUI sent through its [`TerminalHandle`], as the fake received it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FakeTerminalRequest {
-    /// Input, and whether the stream was attached to carry it. Undelivered input is what the real stream drops.
+    /// Input, and whether the stream was attached to carry it, to the attachment it was stamped for. Undelivered input
+    /// is what the real stream drops. A group sent as one request is recorded as one entry per part, in order, all
+    /// delivered or none.
     Input { input: GridInput, delivered: bool },
     /// A new size for the terminal. Recording it does not mean the helm got it yet. The real stream sends a resize on
     /// the socket at once only while one is open (`Open` or `Attached`). While an attach is connecting, it sends the
@@ -116,6 +119,8 @@ pub struct FakeTerminal {
     attaching_size: (u16, u16),
     /// The latest size the GUI asked for.
     size: (u16, u16),
+    /// How many attachments have gone live: the live one's stamp, 0 before the first.
+    attachments: u64,
     received: Vec<FakeTerminalRequest>,
 }
 
@@ -132,6 +137,7 @@ impl FakeTerminal {
             take_control_next: true,
             attaching_size: size,
             size,
+            attachments: 0,
             received: Vec::new(),
         };
         fake.emit(TerminalEvent::State(StreamState::Attaching));
@@ -268,10 +274,16 @@ impl FakeTerminal {
 
     fn act(&mut self, request: Request) {
         let received = match request {
-            Request::Input(input) => FakeTerminalRequest::Input {
-                input,
-                delivered: self.phase == FakePhase::Attached,
-            },
+            Request::Input { attachment, group } => {
+                let delivered =
+                    self.phase == FakePhase::Attached && attachment == Attachment(self.attachments);
+                self.received.extend(
+                    group
+                        .into_iter()
+                        .map(|input| FakeTerminalRequest::Input { input, delivered }),
+                );
+                return;
+            }
             Request::Resize { cols, rows } => {
                 self.size = (cols, rows);
                 FakeTerminalRequest::Resize { cols, rows }
@@ -306,7 +318,10 @@ impl FakeTerminal {
         if self.phase == FakePhase::Open {
             self.phase = FakePhase::Attached;
             self.reconnecting_shown = false;
-            self.emit(TerminalEvent::State(StreamState::Attached));
+            self.attachments += 1;
+            self.emit(TerminalEvent::State(StreamState::Attached(Attachment(
+                self.attachments,
+            ))));
         }
     }
 
@@ -382,7 +397,10 @@ mod tests {
         assert!(fake.attach().take_control);
         fake.output(GridOutput::HistoryReset);
         fake.replay_complete();
-        assert_eq!(state(events.try_recv()), StreamState::Attached);
+        assert_eq!(
+            state(events.try_recv()),
+            StreamState::Attached(Attachment(1))
+        );
         assert_eq!(
             events.try_recv(),
             Some(TerminalEvent::Output(GridOutput::HistoryReset))
@@ -396,7 +414,10 @@ mod tests {
         assert_eq!(events.try_recv(), None);
         assert!(!fake.attach().take_control);
         fake.replay_complete();
-        assert_eq!(state(events.try_recv()), StreamState::Attached);
+        assert_eq!(
+            state(events.try_recv()),
+            StreamState::Attached(Attachment(2))
+        );
         assert_eq!(events.try_recv(), Some(TerminalEvent::ReplayComplete));
 
         // A takeover waits for the user; take-control attaches through the displacing route again.
@@ -532,7 +553,7 @@ mod tests {
         assert_eq!(state(events.try_recv()), StreamState::Attaching);
 
         fake.attach();
-        handle.input(text("too soon"));
+        handle.input(Attachment(0), vec![text("too soon")]);
         assert_eq!(fake.phase(), FakePhase::Open);
         assert_eq!(events.try_recv(), None);
 
@@ -545,9 +566,12 @@ mod tests {
 
         fake.attach();
         fake.replay_complete();
-        assert_eq!(state(events.try_recv()), StreamState::Attached);
+        assert_eq!(
+            state(events.try_recv()),
+            StreamState::Attached(Attachment(1))
+        );
         assert_eq!(events.try_recv(), Some(TerminalEvent::ReplayComplete));
-        handle.input(text("ls\r"));
+        handle.input(Attachment(1), vec![text("ls\r")]);
         assert_eq!(
             fake.received(),
             [
@@ -601,7 +625,7 @@ mod tests {
             state(events.try_recv()),
             StreamState::Refused { status: 401 }
         );
-        handle.input(text("x"));
+        handle.input(Attachment(0), vec![text("x")]);
         handle.take_control();
         assert_eq!(fake.phase(), FakePhase::Attaching);
         assert_eq!(state(events.try_recv()), StreamState::Attaching);
@@ -637,7 +661,7 @@ mod tests {
         let _ = [events.try_recv(), events.try_recv(), events.try_recv()];
         fake.protocol_fault();
         assert_eq!(state(events.try_recv()), StreamState::Reconnecting);
-        handle.input(text("x"));
+        handle.input(Attachment(1), vec![text("x")]);
         assert_eq!(
             fake.received(),
             [FakeTerminalRequest::Input {
@@ -646,6 +670,41 @@ mod tests {
             }]
         );
         assert!(!fake.attach().take_control);
+    }
+
+    /// A group typed for an attachment that has since been replaced is dropped whole, even though the stream is live
+    /// again by the time it reads it, while a group stamped for the live attachment arrives whole and in order. This
+    /// is the fence GUI tests rely on to show that a keystroke typed at one screen never reaches the next one.
+    #[test]
+    fn input_reaches_only_the_attachment_it_was_stamped_for() {
+        let (mut fake, handle, mut events) = FakeTerminal::open(&attach());
+        fake.attach();
+        fake.replay_complete();
+        let _ = [events.try_recv(), events.try_recv(), events.try_recv()];
+        fake.drop_link();
+        fake.attach();
+        fake.replay_complete();
+        assert_eq!(state(events.try_recv()), StreamState::Reconnecting);
+        assert_eq!(
+            state(events.try_recv()),
+            StreamState::Attached(Attachment(2))
+        );
+        handle.input(Attachment(1), vec![text("a"), text("b")]);
+        handle.input(Attachment(2), vec![text("c"), text("d")]);
+        handle.input(Attachment(2), Vec::new());
+        let input = |data, delivered| FakeTerminalRequest::Input {
+            input: text(data),
+            delivered,
+        };
+        assert_eq!(
+            fake.received(),
+            [
+                input("a", false),
+                input("b", false),
+                input("c", true),
+                input("d", true)
+            ]
+        );
     }
 
     /// The real stream ends when every handle is dropped; the fake must show `Closed` too, or a GUI test could keep
