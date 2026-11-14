@@ -3,7 +3,8 @@
 Each app-wide concern of the GPUI app has one owner (SPEC_impl.md, "GUI architecture"). This table says which paths each
 owner holds and how an area may change them. The lint exceptions column counts the `#[allow]`s that let an owner make
 the one call `crates/gui/clippy.toml` bans everywhere else; `scripts/check-gui-lints.py` fails on such an `#[allow]` on
-any other item (a new one is added to its list along with this column).
+any other item (a new one is added to its list along with this column), and on a crate-wide switch, which no crate
+holds: a ban allowed in a GUI crate's `[lints]` table, or a second clippy configuration under `crates/gui/`.
 
 Owned paths come in two tiers, and which tier a path is in decides what an area does before touching it:
 

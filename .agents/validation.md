@@ -661,10 +661,13 @@ systemd or SSH substrate ran.
   `crates/gui/clippy.toml` still fires: it lints `crates/gui/lint-demo` (a non-default member that violates each ban on
   purpose behind its `violations` feature) and fails when a demo's expected diagnostic is missing or a ban has no demo.
   It also fails on an `allow` or `expect` of a `disallowed_*` lint anywhere in `crates/gui/` but the owner items the
-  foundation ownership table's lint exceptions column lists (the script's `EXCEPTION_OWNERS`). Clippy matches banned
-  paths by name, so a GPUI or GPUI Kit upgrade that moves an item would otherwise end its ban silently. Run it when
-  `crates/gui/clippy.toml`, the demo crate, the GPUI or GPUI Kit versions, or a lint `allow` in `crates/gui/` change.
-  Reuses the default-member clippy build; needs the same Linux packages. CI's `clippy` job runs both.
+  foundation ownership table's lint exceptions column lists (the script's `EXCEPTION_OWNERS`), and on a switch for a
+  whole crate: a `[lints]` entry in a GUI crate's Cargo.toml (or the workspace table it inherits) that allows a ban, its
+  group or `warnings`, and any clippy configuration under `crates/gui/` but the shared `clippy.toml`. Clippy matches
+  banned paths by name, so a GPUI or GPUI Kit upgrade that moves an item would otherwise end its ban silently. Run it
+  when `crates/gui/clippy.toml`, the demo crate, the GPUI or GPUI Kit versions, a lint `allow` in `crates/gui/`, a GUI
+  crate's `[lints]`, or a clippy configuration under `crates/gui/` change. Reuses the default-member clippy build; needs
+  the same Linux packages. CI's `clippy` job runs both.
 - `python3 -B scripts/check-crate-layering.py` and `python3 -B scripts/test-check-crate-layering.py` — from
   `cargo metadata --all-features`, fails when a crate under `crates/gui/` reaches `farhelm-helm` or `farhelm-supervisor`
   through normal or build dependencies, when one other than the GPUI app crates the script names reaches GPUI or GPUI

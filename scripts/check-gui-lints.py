@@ -18,6 +18,13 @@ lists the few items that may carry one: the owners of what the bans protect. The
 anywhere else in `crates/gui/` (the demo crate aside), so a new exception is a change to this list, which review sees,
 rather than a line that slips into a file the ownership check only reports.
 
+The same goes for the two switches that act on a whole crate rather than an item: a `[lints.clippy]` (or `[lints.rust]`)
+entry in a GUI crate's Cargo.toml that allows or expects a ban, its group or every warning (directly, or through
+`lints.workspace = true` and the root manifest's `[workspace.lints]`), and a `clippy.toml` or `.clippy.toml` anywhere
+under `crates/gui/` other than the shared one, which clippy would read instead of the shared bans for that crate. No
+crate has a reason for either, so both fail outright. The manifests are reported paths in the ownership table, so
+without this a crate-level switch would pass both the path check and the attribute scan above.
+
 The crate is a non-default workspace member, so it shares Cargo.lock and the vendored GPUI patches, and its violations
 compile only with the feature; ordinary builds see an empty crate. Run from anywhere. `scripts/test-check-gui-lints.py`
 covers the parsing with fixtures and runs no cargo.
@@ -48,9 +55,12 @@ EXCEPTION_OWNERS = {
     ("farhelm-gui/src/theme.rs", "raw"),
     ("farhelm-gui/src/ticker.rs", "timer"),
 }
-# A lint attribute that would switch a `disallowed_*` ban off: the lint by name, or a group holding it (clippy's
-# `style`, `all`), or every warning.
-SWITCHES_A_BAN = re.compile(r"clippy\s*::\s*(disallowed_\w+|style|all)\b|\bwarnings\b")
+# The clippy groups that hold the `disallowed_*` lints; switching one off switches the bans off too, as does rustc's
+# `warnings`. One list for both scans below, so a group added here is caught in attributes and manifests alike.
+BAN_GROUPS = ("style", "all")
+# A lint attribute that would switch a `disallowed_*` ban off: the lint by name, or a group holding it, or every
+# warning.
+SWITCHES_A_BAN = re.compile(rf"clippy\s*::\s*(disallowed_\w+|{'|'.join(BAN_GROUPS)})\b|\bwarnings\b")
 ITEM = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:fn|mod|impl|struct|enum|const|static|trait|type)\b\s*(\w*)")
 EXPECT = re.compile(r"^\s*// expect: (\w+)(?: (\S+))?\s*$")
 
@@ -136,6 +146,50 @@ def stray_exceptions(files: list[tuple[str, str]]) -> list[str]:
     return problems
 
 
+# A lint table key that names a `disallowed_*` ban, a group holding it, or rustc's `warnings`. Keys may use dashes or
+# underscores, as Cargo accepts both.
+SWITCHED_KEY = re.compile(rf"^(disallowed[_-]\w+|{'|'.join(BAN_GROUPS)}|warnings)$")
+
+
+def lint_level(value) -> str | None:
+    """The level of one lint table entry: `"allow"`, or `{ level = "allow", priority = 1 }`."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return value.get("level")
+    return None
+
+
+def manifest_switches(path: str, manifest: dict, workspace: dict) -> list[str]:
+    """Problems for each entry in a GUI crate's parsed Cargo.toml (`path` names it in messages) that switches a ban off
+    for the whole crate. A crate that inherits the workspace's lints (`lints.workspace = true`) is checked against the
+    root manifest's `[workspace.lints]` instead, since that is the table that applies to it."""
+    lints = manifest.get("lints", {})
+    origin = path
+    if lints.get("workspace") is True:
+        lints = workspace.get("workspace", {}).get("lints", {})
+        origin = f"{path} (through the workspace's lints)"
+    problems = []
+    for tool in ("clippy", "rust"):
+        for key, value in lints.get(tool, {}).items():
+            if SWITCHED_KEY.match(key) and lint_level(value) in ("allow", "expect"):
+                problems.append(
+                    f"{origin}: [lints.{tool}] {key} = {lint_level(value)} switches a GUI lint ban off for the whole "
+                    "crate; no crate may (the bans' only exceptions are items, in the ownership table)"
+                )
+    return problems
+
+
+def stray_configs(paths: list[str]) -> list[str]:
+    """Problems for each clippy configuration file under crates/gui (paths relative to it) other than the shared one:
+    clippy reads the nearest one to a crate, so a second file would replace every shared ban for the crates under it."""
+    return [
+        f"{path}: a clippy configuration under crates/gui other than the shared clippy.toml would replace its bans"
+        for path in paths
+        if path != "clippy.toml"
+    ]
+
+
 def diagnostics(messages: list[dict]) -> list[tuple[str, int, str]]:
     """(lint name without `clippy::`, primary line, message) for each clippy diagnostic in cargo's JSON messages."""
     out = []
@@ -214,7 +268,29 @@ def run() -> int:
         for path in sorted(gui.rglob("*.rs"))
         if DEMO not in path.parents
     ]
-    strays = stray_exceptions(sources)
+    workspace = tomllib.loads((REPO / "Cargo.toml").read_text())
+    manifests = [
+        path
+        for path in sorted(gui.rglob("Cargo.toml"))
+        if DEMO not in path.parents and "target" not in path.relative_to(gui).parts
+    ]
+    configs = [
+        path.relative_to(gui).as_posix()
+        for name in ("clippy.toml", ".clippy.toml")
+        for path in sorted(gui.rglob(name))
+        if "target" not in path.relative_to(gui).parts
+    ]
+    strays = (
+        stray_exceptions(sources)
+        + [
+            problem
+            for path in manifests
+            for problem in manifest_switches(
+                path.relative_to(gui).as_posix(), tomllib.loads(path.read_text()), workspace
+            )
+        ]
+        + stray_configs(configs)
+    )
     if failure := cargo_failure(result.returncode, messages, result.stderr):
         for problem in strays:
             print(f"check-gui-lints: {problem}", file=sys.stderr)
