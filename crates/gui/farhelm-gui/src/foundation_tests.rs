@@ -1,20 +1,18 @@
 //! Behavior tests for the focus coordinator, the layer manager and the prompt, on GPUI's simulated platform.
 //!
-//! Each test builds a window the way the app does (GPUI Kit's `Root` around a root view wired with [`focus::root`] and
-//! [`layers::attach`]), drives it through simulated keys and clicks, so key bindings resolve as they do in the app, and
-//! runs the harness's invariant checks after every step. The rules come from SPEC.md, "Keyboard focus", and
-//! SPEC_impl.md, "Focus", "Overlays" and "Questions".
+//! Each test opens its window through the shared harness ([`crate::test_support::open`]: GPUI Kit's `Root` around a
+//! root view wired as the app's), drives it through simulated keys and clicks, so key bindings resolve as they do in
+//! the app, and runs the harness's invariant checks after every step. The rules come from SPEC.md, "Keyboard focus",
+//! and SPEC_impl.md, "Focus", "Overlays" and "Questions".
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _,
-    IntoElement, KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, ParentElement,
-    Pixels, Point, Render, ScrollDelta, ScrollEvent, Styled, TestAppContext, VisualTestContext,
-    Window, div, point, px,
+    App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
+    KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, ParentElement, Render,
+    ScrollDelta, ScrollEvent, Styled, TestAppContext, VisualTestContext, Window, div, point, px,
 };
-use gpui_component::Root;
 
 use crate::cache::{self, Cached};
 use crate::components::{Button, HoverHelp, Role, TextInput, TextInputState, Tier};
@@ -22,87 +20,10 @@ use crate::focus::{self, Mark, OnPress};
 use crate::host_text::{HostSentence, HostText};
 use crate::layers::{self, Anchor, Dialog, LayerId, Popover, Subject};
 use crate::prompt::{self, Answer, Question};
-use crate::{render_count, test_support};
+use crate::render_count;
+use crate::test_support::{center, check, click, keys, open, redraw};
 
-// ---- Harness ---------------------------------------------------------------------------------------------------------
-
-/// What a test draws in its window, given the window's root view state.
-type Draw = dyn Fn(&mut Window, &mut App) -> AnyElement;
-
-/// A root view wired like the main view: Farhelm's key context and focus actions, the layer stack, the coordinator.
-struct Scene {
-    draw: Box<Draw>,
-    _layers: layers::Attachment,
-    focus: focus::Attachment,
-}
-
-impl Render for Scene {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        render_count::record("scene", cx);
-        focus::root(div(), &self.focus)
-            .size_full()
-            .flex()
-            .flex_col()
-            .items_start()
-            .p(px(20.))
-            .gap(px(8.))
-            .child((self.draw)(window, cx))
-            .children(layers::overlay(window, cx))
-    }
-}
-
-/// Open a bootstrapped window drawing `draw` inside Kit's `Root`, as the app does.
-fn open(
-    cx: &mut TestAppContext,
-    draw: impl Fn(&mut Window, &mut App) -> AnyElement + 'static,
-) -> &mut VisualTestContext {
-    test_support::install(cx);
-    let (_, cx) = cx.add_window_view(|window, cx| {
-        let scene = cx.new(|cx| Scene {
-            draw: Box::new(draw),
-            _layers: layers::attach(window, cx),
-            focus: focus::attach(window, cx),
-        });
-        Root::new(scene, window, cx)
-    });
-    // Simulated windows start inactive, and an inactive window has no focus path for keys to follow.
-    cx.update(|window, _| window.activate_window());
-    cx.run_until_parked();
-    check(cx);
-    cx
-}
-
-/// Run the harness's per-step checks.
-fn check(cx: &mut VisualTestContext) {
-    cx.update(test_support::check_invariants);
-}
-
-/// Redraw after a change the scene's draw function reads from a plain cell, which notifies nothing.
-fn redraw(cx: &mut VisualTestContext) {
-    cx.update(|window, _| window.refresh());
-    cx.run_until_parked();
-    check(cx);
-}
-
-/// Press keys, as the platform would deliver them, and check.
-fn keys(cx: &mut VisualTestContext, keystrokes: &str) {
-    cx.simulate_keystrokes(keystrokes);
-    check(cx);
-}
-
-/// Click the center of the element drawn under `selector`, and check.
-fn click(cx: &mut VisualTestContext, selector: &'static str) {
-    let at = center(cx, selector);
-    cx.simulate_click(at, Modifiers::none());
-    check(cx);
-}
-
-fn center(cx: &mut VisualTestContext, selector: &'static str) -> Point<Pixels> {
-    match cx.debug_bounds(selector) {
-        Some(bounds) => bounds.center(),
-        None => panic!("{selector} was not drawn"),
-    }
-}
+// ---- Helpers on top of the shared harness ----------------------------------------------------------------------------
 
 /// A tab-stop focus handle the test owns, to give a control and then ask whether it is focused.
 fn handle(cx: &mut VisualTestContext) -> FocusHandle {

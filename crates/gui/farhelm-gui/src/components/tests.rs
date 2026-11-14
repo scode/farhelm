@@ -2,77 +2,22 @@
 //!
 //! These cover what a component promises beyond its looks (the goldens pin those): activation, the disabled state,
 //! hover help reaching the layer manager and leaving with its control, and the dialog frame keeping its answers
-//! reachable. Each step ends with the harness's invariant hook (the focus coordinator's and the layer manager's rules).
+//! reachable. Each test opens its window through the shared harness ([`crate::test_support::open`]), and each step ends
+//! with its invariant checks (the focus coordinator's and the layer manager's rules).
 
 use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, Bounds, Context, InteractiveElement, IntoElement, Modifiers, ParentElement,
-    Pixels, Point, Render, ScrollDelta, ScrollEvent, Styled, TestAppContext, VisualTestContext,
-    Window, div, point, px, size,
+    InteractiveElement, IntoElement, Modifiers, ParentElement, ScrollDelta, ScrollEvent, Styled,
+    TestAppContext, VisualTestContext, div, point, px, size,
 };
 
 use gpui::prelude::FluentBuilder as _;
 
 use super::{Button, DialogFrame, HoverHelp, Role, Tier};
-use crate::{focus, layers, test_support};
-
-/// Draws whatever the test gives it, centered, with the layer manager's overlay on top as the main view does, and
-/// redraws when the overlay changes, as the main view does.
-struct Harness {
-    draw: Box<Draw>,
-    _layers: layers::Attachment,
-    focus: focus::Attachment,
-}
-
-/// What a test draws in its window.
-type Draw = dyn Fn(&mut Window, &mut App) -> AnyElement;
-
-impl Render for Harness {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        focus::root(div(), &self.focus)
-            .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .child((self.draw)(window, cx))
-            .children(layers::overlay(window, cx))
-    }
-}
-
-/// A bootstrapped window drawing `draw`.
-fn open(
-    cx: &mut TestAppContext,
-    draw: impl Fn(&mut Window, &mut App) -> AnyElement + 'static,
-) -> &mut VisualTestContext {
-    test_support::install(cx);
-    let (_, cx) = cx.add_window_view(|window, cx| Harness {
-        draw: Box::new(draw),
-        _layers: layers::attach(window, cx),
-        focus: focus::attach(window, cx),
-    });
-    cx.run_until_parked();
-    cx
-}
-
-/// Where the element a test selected was drawn; it must have been.
-fn bounds(cx: &mut VisualTestContext, selector: &'static str) -> Bounds<Pixels> {
-    match cx.debug_bounds(selector) {
-        Some(bounds) => bounds,
-        None => panic!("{selector} was not drawn"),
-    }
-}
-
-/// The center of the element a test selected.
-fn center(cx: &mut VisualTestContext, selector: &'static str) -> Point<Pixels> {
-    bounds(cx, selector).center()
-}
-
-/// Run the harness's per-step checks against this test's window.
-fn check(cx: &mut VisualTestContext) {
-    cx.update(test_support::check_invariants);
-}
+use crate::layers;
+use crate::test_support::{advance, bounds, center, check, click, open, redraw};
 
 /// A click activates an enabled button, and a disabled one ignores it: the old app's disabled buttons were inert, and a
 /// dimmed button that still acted would send a command the user was told was unavailable.
@@ -99,12 +44,8 @@ fn a_click_activates_an_enabled_button_and_not_a_disabled_one(cx: &mut TestAppCo
             .into_any_element()
     });
 
-    let on = center(cx, "on");
-    cx.simulate_click(on, Modifiers::none());
-    check(cx);
-    let off = center(cx, "off");
-    cx.simulate_click(off, Modifiers::none());
-    check(cx);
+    click(cx, "on");
+    click(cx, "off");
     assert_eq!(
         clicks.get(),
         (1, 0),
@@ -118,10 +59,9 @@ fn tooltip(cx: &mut VisualTestContext) -> Option<gpui::SharedString> {
         .map(|shown| shown.text)
 }
 
-/// Wait out the hover delay on the executor's clock, the way a pointer resting on a control does.
+/// Wait out the hover delay on the executor's clock, the way a pointer resting on a control does, and check.
 fn wait_hover_delay(cx: &mut VisualTestContext) {
-    cx.executor().advance_clock(layers::HOVER_DELAY);
-    cx.run_until_parked();
+    advance(cx, layers::HOVER_DELAY);
 }
 
 /// Hovering a control shows its help through the layer manager once the pointer has rested for the old app's hover
@@ -146,9 +86,10 @@ fn hovering_shows_the_controls_help_after_the_hover_delay_and_leaving_hides_it(
     cx.simulate_mouse_move(save, None, Modifiers::none());
     check(cx);
     assert_eq!(tooltip(cx), None, "nothing shows before the hover delay");
-    cx.executor()
-        .advance_clock(layers::HOVER_DELAY - std::time::Duration::from_millis(1));
-    cx.run_until_parked();
+    advance(
+        cx,
+        layers::HOVER_DELAY - std::time::Duration::from_millis(1),
+    );
     assert_eq!(
         tooltip(cx),
         None,
@@ -199,7 +140,6 @@ fn one_controls_leave_never_hides_anothers_tooltip(cx: &mut TestAppContext) {
     let second = point(panel.left() + px(4.), panel.center().y);
     cx.simulate_mouse_move(first, None, Modifiers::none());
     wait_hover_delay(cx);
-    check(cx);
     assert_eq!(
         tooltip(cx),
         Some("Save the title".into()),
@@ -237,7 +177,6 @@ fn a_tooltip_closes_when_its_control_is_no_longer_drawn(cx: &mut TestAppContext)
     let at = center(cx, "gone");
     cx.simulate_mouse_move(at, None, Modifiers::none());
     wait_hover_delay(cx);
-    check(cx);
     assert_eq!(
         tooltip(cx),
         Some("Delete it".into()),
@@ -246,9 +185,7 @@ fn a_tooltip_closes_when_its_control_is_no_longer_drawn(cx: &mut TestAppContext)
 
     // The harness draws from a plain cell that notifies nothing, so redraw it the way a view's own change would.
     shown.set(false);
-    cx.update(|window, _| window.refresh());
-    cx.run_until_parked();
-    check(cx);
+    redraw(cx);
     assert!(
         cx.debug_bounds("gone").is_none(),
         "the premise: the control is no longer drawn"

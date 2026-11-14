@@ -128,8 +128,9 @@ pub struct Attachment {
     _observe: Subscription,
 }
 
-/// Give the root view's window a layer stack, and redraw the root whenever an overlay changes. Every root view calls
-/// this once, from its constructor, and draws [`overlay`] as its last child.
+/// Give the root view's window a layer stack, and redraw the root whenever an overlay changes. Every root view does this
+/// once, from its constructor, through [`crate::root::attach`], and draws through [`crate::root::wrap`], which draws
+/// [`overlay`] as its last child.
 pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachment {
     let handle = window.window_handle();
     let stack = cx.new(|_| LayerStack {
