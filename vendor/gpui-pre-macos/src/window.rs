@@ -74,6 +74,10 @@ use std::{
     time::Duration,
 };
 
+/// Whether windows use the `CAMetalDisplayLink` frame source where it is available. Farhelm turns it
+/// off (the frame-source patch layer): see the comment where a window picks its frame source.
+const USE_METAL_FRAME_SOURCE: bool = false;
+
 const WINDOW_STATE_IVAR: &CStr = c"windowState";
 
 static RESTORES_WORKSPACE_AT_LAUNCH_DEFAULT: Once = Once::new();
@@ -1111,7 +1115,12 @@ impl MacWindow {
             let native_view: *mut AnyObject = msg_send![native_view, initWithFrame: content_bounds];
             assert!(!native_view.is_null());
 
-            let metal_frames = MetalFrameSource::is_available().then(Rc::<MetalFrames>::default);
+            // Farhelm keeps the `CVDisplayLink` + `nextDrawable` frame source on every macOS version
+            // (vendor/README.md, "frame-source"). The `CAMetalDisplayLink` source this crate uses on
+            // macOS 14 and later presents each frame about three refreshes after the update that drew
+            // it (its default `preferredFrameLatency` of 2), which measured 20 ms more typing latency.
+            let metal_frames = (USE_METAL_FRAME_SOURCE && MetalFrameSource::is_available())
+                .then(Rc::<MetalFrames>::default);
             let state = Rc::new(Mutex::new(MacWindowState {
                 handle,
                 foreground_executor,
