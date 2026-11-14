@@ -384,6 +384,13 @@ count of feed subscribers: the helm's own internal subscriptions to the feed nev
 Enforced by tests of an agent request with a connected UI, after a disconnect and after a takeover, and a test that a
 displaced UI cannot take a terminal back.
 
+NOTE: Interim, until the desktop app's approvals area lands (SPEC.md, "Agent-spawned sessions", decided by the
+maintainer on 2026-11-13): in the embedded helm a connected window does not get cards, so a request that needs approval
+is refused at once, with its own message, instead of waiting. It is one switch, `window_without_cards`, set by the
+embedded helm's startup and read only where the approvals module decides whether to card a request; that module's docs
+say how to remove it. A standalone `farhelm helm run` keeps the card path, which only the end-to-end tests reach,
+through a stand-in UI on the test credential; a remote helm a desktop app attaches to would need the switch too.
+
 ### Bulk data stays separate
 
 Terminal streams stay one stream per terminal, with their own reconnect handling, because the supervisor and host behind
@@ -7815,7 +7822,9 @@ a resize moves the pane without changing its size.
 see "The seat: one UI per helm"): the seat is what a window holds for its whole connected life, and the UI channel that
 holds it is what pushes the card to it. A displaced window, or one whose channel dropped, has given the seat up, so a
 request then is refused as having no window to ask in rather than waiting on a card nobody can see. The helm's own
-internal subscriptions to the fleet feed never count as a window.
+internal subscriptions to the fleet feed never count as a window. For now a connected window in the desktop app's helm
+gets no card either: its requests are refused at once with an interim message of their own (see the NOTE in "The seat:
+one UI per helm").
 
 Waiting needs time budgets that outlast the wait. `AgentVerb::may_wait_for_user` names the verbs that can wait (every
 acting verb, no listing); the supervisor's relay gives those an answer budget of its ordinary agent upcall timeout plus
