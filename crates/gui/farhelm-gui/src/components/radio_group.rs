@@ -535,7 +535,7 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
                     // rather than through `with_hover_help`, which would add that listener; this module sits inside
                     // the one that keeps the text private, and the surface still wires the help through the shared
                     // rule.
-                    .aria_description(self.help.0.clone())
+                    .aria_description(self.help.description())
             })
             .relative()
             .flex()
