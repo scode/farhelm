@@ -1,0 +1,6 @@
+{"t":"hello","cols":20,"rows":4,"history_cap":3}
+{"t":"state","mouse":"off","focus":false,"alt_screen":false,"default_fg":null,"default_bg":null,"history_trimmed":false,"exit":null}
+{"t":"rows","rows":[[0,{"w":false,"r":[[0,6,"$ echo",[0,-1,-1]]]}],[1,{"w":true,"r":[[0,5,"hello",[1,2,-1]],[6,2,"中",[0,-1,-1]],[8,2,"文",[0,-1,-1]],[11,3,"web",[8,4,-1,16777471],0]]}]],"links":[["1","https://example.com/"]]}
+{"t":"frame","rev":1,"cols":20,"rows":4,"cursor":{"x":2,"y":2,"visible":true,"shape":"block","blink":true}}
+{"t":"history","first":40,"rows":[{"w":false,"r":[[0,3,"one",[0,-1,-1]]]},{"w":false,"r":[]}],"cols":20}
+{"t":"history","first":42,"rows":[{"w":false,"r":[[0,5,"three",[0,-1,-1]]]},{"w":false,"r":[[0,4,"four",[0,-1,-1]]]}],"cols":20}

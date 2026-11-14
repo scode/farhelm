@@ -22,6 +22,16 @@ bundles, are decompressed byte for byte (`woff2_decompress`) from the website's 
 `website/public/fonts/`. Copyright 2016 The Inter Project Authors ([`rsms/inter`](https://github.com/rsms/inter)). They
 are licensed under the SIL Open Font License, Version 1.1; the complete notice is `OFL-Inter.txt` beside them.
 
+## JetBrains Mono terminal font
+
+The JetBrains Mono Nerd Font regular and bold TrueType files in `crates/gui/farhelm-gui/assets/fonts/`, which the GPUI
+desktop app bundles for its terminal, are decompressed byte for byte (`woff2_decompress`) from the WOFF2 files the old
+app shipped in `crates/farhelm-ui/assets/fonts/` at the GPUI port's reference commit `24bc0580`. Copyright 2020 The
+JetBrains Mono Project Authors ([`JetBrains/JetBrainsMono`](https://github.com/JetBrains/JetBrainsMono)), patched with
+the Nerd Fonts glyph set ([`ryanoasis/nerd-fonts`](https://github.com/ryanoasis/nerd-fonts)). They are licensed under
+the SIL Open Font License, Version 1.1; the complete notice the old app shipped with them is `OFL-JetBrainsMono.txt`
+beside them.
+
 ## Code ported from xterm.js
 
 The supervisor's grid input encoder is a Farhelm port of code from `@xterm/xterm` 6.0.0. The port keeps behavior that
@@ -33,8 +43,9 @@ Dioxus UI's JavaScript grid client carried further ports from xterm.js, its `@xt
 
 The GPUI app's own Rust ports of those JavaScript rules live in `crates/gui/farhelm-grid-model` (`src/selection.rs` and
 `src/links.rs`: selection text, word selection, the URL pattern and line window) and `crates/gui/farhelm-input-mapping`
-(`src/keys.rs`, `src/pointer.rs` and `src/cursor.rs`: the keydown decision, mouse cell rounding, move de-duplication,
-wheel accumulation and the Alt-click cursor move). Their complete notices are in each crate's `LICENSE-PORTED`.
+(`src/keys.rs`, `src/pointer.rs` and `src/cursor.rs`: the keydown decision, the terminal's cell size, mouse cell
+rounding, move de-duplication, wheel accumulation and the Alt-click cursor move). Their complete notices are in each
+crate's `LICENSE-PORTED`.
 
 Each ported function names its origin in a source comment. The code is MIT-licensed: copyright the xterm.js authors,
 SourceLair Private Company and Christopher Jeffrey. The complete notices are in

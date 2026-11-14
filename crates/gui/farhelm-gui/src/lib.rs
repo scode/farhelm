@@ -22,6 +22,7 @@
 //! - [`cache`]: the one way to cache a view.
 //! - [`render_count`]: per-view render counts in test builds.
 //! - [`assets`]: the bundled fonts and icons.
+//! - [`terminal`]: a session terminal's renderer, an uncached view that owns its grid model.
 //! - [`marks`]: the agent harnesses' marks as plain geometry, kept from the old Dioxus UI.
 //!
 //! Still to come, each under its own module: the operation stores, drafts and the rest of actions and keys.
@@ -62,6 +63,7 @@ pub mod prompt;
 pub mod render_count;
 pub mod session;
 pub mod store;
+pub mod terminal;
 pub mod theme;
 pub mod ticker;
 

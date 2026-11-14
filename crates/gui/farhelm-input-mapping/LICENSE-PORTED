@@ -2,9 +2,10 @@ NOTE: The text after the line of dashes is copied unchanged from Farhelm's
 crates/farhelm-ui/assets/grid-ported-code-LICENSES.txt at reference commit
 24bc058066fd57848e788b465719b0e6da2f98f7. Its paths describe the old web
 client, which this crate replaces. Here, the keydown decision is ported in
-src/keys.rs, mouse cell rounding, move de-duplication and wheel step
-accumulation in src/pointer.rs, and the Alt-click cursor move in
-src/cursor.rs. The upstream notices and MIT license texts below are unchanged.
+src/keys.rs, the cell size (DomRenderer's _updateDimensions), mouse cell
+rounding, move de-duplication and wheel step accumulation in
+src/pointer.rs, and the Alt-click cursor move in src/cursor.rs. The
+upstream notices and MIT license texts below are unchanged.
 
 The "ships inside the distributed bundles" paragraph below describes the
 old web client: that asset and bundle are gone. The desktop app links this

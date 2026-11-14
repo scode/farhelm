@@ -670,13 +670,13 @@ systemd or SSH substrate ran.
   those two crates' manifests, or `Cargo.lock` changes. CI's `deny` job runs both.
 - `python3 scripts/record-test-run.py --kind development --selection 'GPUI app goldens' --concurrency 'libtest default threads' -- python3 scripts/check-gui-goldens.py`
   — the GPUI app's screenshot goldens (`crates/gui/farhelm-gui/src/goldens.rs`): every component, the dialog frame and
-  the layer manager's overlays (a tooltip, a popover, the prompt over its veil) and the keyboard focus ring, light and
-  dark, compared pixel for pixel with the PNGs under `crates/gui/farhelm-gui/tests/goldens/<os>/`. The test is ignored
-  in workspace runs because it needs the software renderer, which the script selects (Mesa's lavapipe on Linux: the
-  `mesa-vulkan-drivers` and `libegl-mesa0` packages). After an intended visual change, `--update` rewrites the
-  references; look at each changed PNG before keeping it. A failure leaves the new captures in `gui-goldens/` beside the
-  test binary. Run it when anything under `crates/gui/farhelm-gui/` that draws, its fonts, or GPUI or GPUI Kit change;
-  CI does not run it yet.
+  the layer manager's overlays (a tooltip, a popover, the prompt over its veil), the keyboard focus ring, host-supplied
+  text over its spoofing corpus, and the terminal's styles and cursor shapes, light and dark, compared pixel for pixel
+  with the PNGs under `crates/gui/farhelm-gui/tests/goldens/<os>/`. The test is ignored in workspace runs because it
+  needs the software renderer, which the script selects (Mesa's lavapipe on Linux: the `mesa-vulkan-drivers` and
+  `libegl-mesa0` packages). After an intended visual change, `--update` rewrites the references; look at each changed
+  PNG before keeping it. A failure leaves the new captures in `gui-goldens/` beside the test binary. Run it when
+  anything under `crates/gui/farhelm-gui/` that draws, its fonts, or GPUI or GPUI Kit change; CI does not run it yet.
 - `python3 -B scripts/test-gui-agent.py` — the harness that drives the GPUI app (`scripts/gui-agent.py`,
   `docs/gui-agent.md`; headless on Linux, in the GUI session on a Mac): the run directory's checks (absolute, and
   shallow enough for the deepest socket's path limit), the app's environment (nothing of the caller's display, bus,
@@ -779,24 +779,24 @@ systemd or SSH substrate ran.
   manifest, `Cargo.lock` or `deny.toml` changes. The advisories and bans checks are deliberately not part of it
   (`deny.toml`'s header says why), so do not run a bare `cargo deny check` as this gate.
 - `python3 -B scripts/dependency-notices.py --check` and `python3 -B scripts/test-dependency-notices.py` — the
-  dependency license notices `farhelm licenses` prints (`crates/farhelm/notices/dependencies.txt`, decision D-18) still
-  match the locked graph: the pinned cargo-about (installed by `scripts/install-pinned-cargo-about.py`) runs offline for
-  `farhelm` and `farhelm-desktop` over every release target, and any difference from the committed file fails, naming
-  `python3 scripts/dependency-notices.py` as the regenerate command. It also fails when an MIT, BSD, ISC, Zlib or NCSA
-  text has no real copyright line (cargo-about silently prints the SPDX template, `<year> <copyright holders>`, when it
-  cannot match a crate's own file; `about.toml`'s `clarify` entries and `upstream.toml`'s checked-in upstream texts
-  cover those crates, and `upstream.toml` acknowledges the few whose upstream publishes no copyright line; its
-  `[[extra]]` entries add notices for code a crate compiles in under a license it does not declare, such as FreeType's
-  FTL credit in `freetype-sys`), and when an `upstream.toml` entry no longer matches the graph. The self-test covers the
-  merge, filter, render, check and copyright-guard logic offline, and that `about.toml`'s targets and the script's
-  binaries match `dist-workspace.toml`. About 45 seconds and three minutes of CPU per run (measured 2026-11-13 on an
-  8-core worker: one cargo-about run per binary, each capped at four threads through `RAYON_NUM_THREADS`), plus one
-  `cargo fetch --locked`, nothing compiled. CI's `deny` job runs both, ungated, whenever CI runs. Locally and in a
-  landing step, run the check gated,
-  `python3 -B scripts/dependency-notices.py --check --only-if-inputs-changed-since origin/main`, which skips cargo-about
-  unless `Cargo.lock`, a `Cargo.toml`, `dist-workspace.toml`, `deny.toml` or a file under `crates/farhelm/notices/`
-  changed; and on a machine shared with other agents, run generation and the full check on a separate build worker where
-  one is available, not alongside their builds.
+  dependency license notices `farhelm licenses` prints (`crates/farhelm/notices/dependencies.txt`; the maintainer
+  decided on 2026-11-13 that every shipped binary carries them) still match the locked graph: the pinned cargo-about
+  (installed by `scripts/install-pinned-cargo-about.py`) runs offline for `farhelm` and `farhelm-desktop` over every
+  release target, and any difference from the committed file fails, naming `python3 scripts/dependency-notices.py` as
+  the regenerate command. It also fails when an MIT, BSD, ISC, Zlib or NCSA text has no real copyright line (cargo-about
+  silently prints the SPDX template, `<year> <copyright holders>`, when it cannot match a crate's own file;
+  `about.toml`'s `clarify` entries and `upstream.toml`'s checked-in upstream texts cover those crates, and
+  `upstream.toml` acknowledges the few whose upstream publishes no copyright line; its `[[extra]]` entries add notices
+  for code a crate compiles in under a license it does not declare, such as FreeType's FTL credit in `freetype-sys`),
+  and when an `upstream.toml` entry no longer matches the graph. The self-test covers the merge, filter, render, check
+  and copyright-guard logic offline, and that `about.toml`'s targets and the script's binaries match
+  `dist-workspace.toml`. About 45 seconds and three minutes of CPU per run (measured 2026-11-13 on an 8-core worker: one
+  cargo-about run per binary, each capped at four threads through `RAYON_NUM_THREADS`), plus one `cargo fetch --locked`,
+  nothing compiled. CI's `deny` job runs both, ungated, whenever CI runs. Locally and in a landing step, run the check
+  gated, `python3 -B scripts/dependency-notices.py --check --only-if-inputs-changed-since origin/main`, which skips
+  cargo-about unless `Cargo.lock`, a `Cargo.toml`, `dist-workspace.toml`, `deny.toml` or a file under
+  `crates/farhelm/notices/` changed; and on a machine shared with other agents, run generation and the full check on a
+  separate build worker where one is available, not alongside their builds.
 - `python3 -B scripts/test-install-pinned-nextest.py`, `python3 -B scripts/test-install-pinned-cargo-deny.py` and
   `python3 -B scripts/test-install-pinned-cargo-about.py` — the installers that put the pinned nextest, cargo-deny and
   cargo-about binaries in place for the release build jobs, CI's `deny` job and local runs, and the checksum
