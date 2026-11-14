@@ -7,9 +7,10 @@ NOTE: This is a smoke test, not the end-to-end suite. It covers the first slice'
 between the app, the helm and the supervisor shows up somewhere, plus the area steps added since (30, 31 and 33, the
 terminal's: a large paste, on a Mac only, text an input method commits, and scrollback; 32, the sidebar's quick
 switcher; 34, the session list's Stop and Replace from a row's menu; 35, the sidebar's host rail; 36, the row menu's
-Mark read and Mark unread; 40, the settings-and-hosts area's scripted host setup). The behavior itself is specified and
-tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `terminal/attached/tests.rs`); nothing
-here checks layout or wording beyond the names it clicks.
+Mark read and Mark unread; 37, the sidebar's resize divider; 40, the settings-and-hosts area's scripted host
+setup). The behavior itself is specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`,
+`session_pane.rs`, `terminal/attached/tests.rs`); nothing here checks layout or wording beyond the names it
+clicks.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -87,6 +88,10 @@ SWITCHER_FOOTER = "↑↓ choose · Enter pick · Escape close"
 # The host chip's accessible name while the local host is chosen: the snapshot shows it only while the chip is drawn.
 LOCAL_CHIP = "Filtered to host Local; remove filter"
 
+# The sidebar's divider holding focus, as `snapshot -i` lists it: its role (AccessKit's focusable separator), its name
+# and its state.
+DIVIDER_FOCUSED = re.compile(r'splitter "Sidebar width".*\[focused\]')
+
 # What every step's name must look like (the module docs say why); `main` checks it before starting the app.
 STEP_NAME = re.compile(r"test_\d\d_")
 
@@ -118,6 +123,12 @@ def last_selected() -> str | None:
     """The session the helm remembers as last selected: what the app writes when the user opens a session."""
     assert RUN is not None
     return gui_agent.helm_request(RUN, "GET", "/api/preferences").get("last_selected")
+
+
+def sidebar_width() -> int | None:
+    """The sidebar width the helm stores, `None` while it stores none (the app then draws the default)."""
+    assert RUN is not None
+    return gui_agent.helm_request(RUN, "GET", "/api/preferences").get("sidebar_width")
 
 
 def eventually(check, what: str, timeout: float = EFFECT_TIMEOUT_SECONDS):
@@ -482,6 +493,26 @@ class Smoke(unittest.TestCase):
                 lambda stamped=stamped: (stamp() is not None) == stamped,
                 f"the helm listing {title} {'with' if stamped else 'without'} a seen stamp",
             )
+
+    # ---- The sidebar area's resize divider (37), on no session of its own --------------------------------------------
+
+    def test_37_the_focused_sidebar_divider_steps_the_helms_width(self) -> None:
+        """The sidebar's width is a helm preference shared by every client, so the divider's step is only real once the
+        helm stores it: the in-process tests prove the window sends the write, and only the real helm shows that it
+        accepts the width and keeps it. Specified: with the divider focused by a click on its grip (a separator takes
+        focus on every press, on every platform), Right makes the helm store the width 10 pixels wider than before,
+        focus stays on the divider, and Left makes it store the starting width again. The step leaves the default width
+        stored when it found none, so later steps see the default sidebar."""
+        before = sidebar_width()
+        start = before if before is not None else 396
+        # The press lands on the divider's grip, which lies over its strip and takes the pointer for it.
+        self.ok("click", "id:sidebar-divider-grip")
+        self.assertRegex(self.ok("snapshot", "-i"), DIVIDER_FOCUSED, "premise: the divider holds focus")
+        self.ok("press", "right")
+        eventually(lambda: sidebar_width() == start + 10, f"the helm storing the width {start + 10}")
+        self.assertRegex(self.ok("snapshot", "-i"), DIVIDER_FOCUSED, "focus stays on the divider")
+        self.ok("press", "left")
+        eventually(lambda: sidebar_width() == start, f"the helm storing the width {start} again")
 
     # ---- The settings-and-hosts area's scripted host setup (40), on a host of its own --------------------------------
 

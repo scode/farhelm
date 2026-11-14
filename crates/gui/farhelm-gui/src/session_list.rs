@@ -94,7 +94,7 @@ pub(crate) mod rename;
 pub(crate) mod replace;
 mod row;
 pub(crate) mod seen;
-mod selection;
+pub(crate) mod selection;
 mod status;
 pub(crate) mod stop;
 

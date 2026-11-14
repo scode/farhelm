@@ -277,7 +277,8 @@ Serial admission only works if every handler replies promptly, so every handler 
 - Routes are converted as the work that first ports them needs them, not in a sweep.
 
 Every change a command causes is pushed before that command's reply. When the GUI sees "done", its store already shows
-the result, so the GUI needs no optimistic updates.
+the result, so the GUI needs no optimistic updates (the sidebar's width while the user moves it is the one exception,
+under "The store, and how views redraw").
 
 ### What is pushed, and how changes are found
 
@@ -362,12 +363,12 @@ the new snapshot still has it; it lives in a small foundation of its own outside
 device-local preferences store and has no room for one. The window itself, its size included, is not part of the UI
 session and is untouched. The settings the old app kept per device (appearance, sidebar width, host rail, status sounds,
 terminal text size) become helm preferences in the new app, so they return with the new snapshot like the rest of the
-helm's state (maintainer decision, 2026-11-13; SPEC.md still calls them per device until the change that moves them).
-The store fed by the channel holds only helm state. Half-typed drafts do not survive, and neither do open dialogs and
-menus: going inert closes every layer through the layer manager (`layers::close_all`). Menus would close anyway with the
-ground they are anchored to, but a dialog closes only when its opener or its subject says so, and one left open would
-keep its veil over the inert window, taking the clicks and Tab presses meant for Take back or Retry. Work the helm
-accepted continues independently of the reset.
+helm's state (maintainer decision, 2026-11-13). SPEC.md no longer calls the sidebar width per device; it still calls the
+others per device until the changes that move them. The store fed by the channel holds only helm state. Half-typed
+drafts do not survive, and neither do open dialogs and menus: going inert closes every layer through the layer manager
+(`layers::close_all`). Menus would close anyway with the ground they are anchored to, but a dialog closes only when its
+opener or its subject says so, and one left open would keep its veil over the inert window, taking the clicks and Tab
+presses meant for Take back or Retry. Work the helm accepted continues independently of the reset.
 
 What never gets written again on the GUI side: lost-reply reconciliation, retry keys, request fences, outcome-unknown
 reports, and their tests. On the helm side only machinery that existed solely for the old GUI goes; idempotency the
@@ -424,6 +425,13 @@ decided this on 2026-11-13): its grid is bulk data streamed for one attachment, 
 whole grid, which the wrapper's comparison of computed inputs cannot express. The terminal view
 (`crates/gui/farhelm-gui/src/terminal.rs`) owns its grid model, is never cached, and notifies itself through the methods
 that change what it shows; render-count tests pin that shown output redraws it and output it does not show does not.
+
+The sidebar's width is the one value a view shows ahead of the store (decided by the migration's orchestrator on
+2026-11-14; `crates/gui/farhelm-gui/src/sidebar.rs`). It covers only the width the user is moving, and only until its
+write's reply: during a drag, and from each divider write until the helm replies to it, the sidebar shows the width the
+user set rather than the stored one, because falling back to the stored width for the round trip would snap the sidebar
+back and resize the terminal twice, and a second arrow press would step from the stale width. Only the latest write's
+reply ends it, a refused write falls back to the stored width, and a reset forgets it. No other view keeps such a copy.
 
 The session list builds only the rows in view and a few beyond its edges (GPUI's variable-height `list`), because an
 uncached view re-renders on every window redraw and the running pulse and the terminal's cursor blink redraw the window

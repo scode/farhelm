@@ -1,4 +1,5 @@
-//! The selection rules: which session is open, chosen by a click or automatically, and what choosing one tells the helm.
+//! The selection rules: which session is open, chosen by a click or automatically, and what choosing one tells the
+//! helm.
 //!
 //! SPEC.md, "Session list" and "Status". Ported from the old app's `list/view.rs` (`automatic_selection`,
 //! `newest_created_fallback`, `remember_selection`) and `session_view.rs` (the automatic seen mark). The rules are pure
@@ -6,19 +7,19 @@
 //! window; the session list applies them whenever the store, the selection or the connection changes.
 //!
 //! - **Something is always open while the list has rows.** With nothing selected, the list picks one: the most recent
-//!   visit the helm recorded that is still listed, else (only while the helm has recorded no visits) the remembered last
-//!   selection, else the newest-created session.
-//! - **A selection stays until it is proven gone.** A selected session missing from the listing is dropped only when the
-//!   listing proves it gone ([`session::listing_proves_gone`], the rule a confirmation about a session uses too); a
-//!   truncated, filtered or unavailable listing keeps it, or a passing read failure would close what the user had
-//!   open. When it is proven gone, the automatic choice picks the next one, never the one that just went.
+//!   visit the helm recorded that is still listed, else (only while the helm has recorded no visits) the remembered
+//!   last selection, else the newest-created session.
+//! - **A selection stays until it is proven gone.** A selected session missing from the listing is dropped only when
+//!   the listing proves it gone ([`session::listing_proves_gone`], the rule a confirmation about a session uses too); a
+//!   truncated, filtered or unavailable listing keeps it, or a passing read failure would close what the user had open.
+//!   When it is proven gone, the automatic choice picks the next one, never the one that just went.
 //! - **Choosing tells the helm, once.** Every accepted choice, a click or automatic, is written as the `last_selected`
 //!   preference, from which the helm also keeps its visit history. Choosing the session that is already open writes
 //!   nothing.
-//! - **Only the user's choice takes focus.** A click on a row ([`choose`]) hands the session and the click's mark to the
-//!   pane, whose terminal for that session then takes focus, also when the session was already open (SPEC.md, "Where
-//!   focus rests"). An automatic choice ([`open_automatically`]) does not: its terminal only becomes home, and takes
-//!   focus only when nothing else holds it, so a session that went away under the user never pulls focus from a
+//! - **Only the user's choice takes focus.** A click on a row ([`choose`]) hands the session and the click's mark to
+//!   the pane, whose terminal for that session then takes focus, also when the session was already open (SPEC.md,
+//!   "Where focus rests"). An automatic choice ([`open_automatically`]) does not: its terminal only becomes home, and
+//!   takes focus only when nothing else holds it, so a session that went away under the user never pulls focus from a
 //!   control they are using.
 //! - **Opening marks the output seen.** While a session is open, its latest activity is recorded as seen whenever the
 //!   session becomes open or its activity advances, unless it is stale (its host is not connected) or has ended (SPEC.md,
@@ -277,6 +278,20 @@ fn send(
     what: &'static str,
     cx: &mut App,
 ) {
+    send_then(path, body, what, cx, |_| {});
+}
+
+/// [`send`], then `then` once the helm has replied, whatever it replied (success, refusal, or a command the channel
+/// lost). Nothing is sent, and `then` never runs, when the path cannot be built or the window is inert. `then` does not
+/// run either when a reset retires the UI session first. The sidebar's width writes go through here, keeping their
+/// width on screen until `then` (`crate::sidebar`).
+pub(crate) fn send_then(
+    path: Result<ApiPath, farhelm_helm_client::PathError>,
+    body: serde_json::Value,
+    what: &'static str,
+    cx: &mut App,
+    then: impl FnOnce(&mut App) + 'static,
+) {
     let path = match path {
         Ok(path) => path,
         Err(error) => {
@@ -288,16 +303,13 @@ fn send(
         return;
     };
     current.update(cx, |current, cx| {
-        current.command(
-            Method::Put,
-            path,
-            Some(body),
-            cx,
-            move |_, result, _| match result {
+        current.command(Method::Put, path, Some(body), cx, move |_, result, cx| {
+            match result {
                 Ok(reply) if (200..300).contains(&reply.status) => {}
                 Ok(reply) => tracing::warn!(status = reply.status, "could not {what}"),
                 Err(error) => tracing::debug!(?error, "could not {what}"),
-            },
-        );
+            }
+            then(cx);
+        });
     });
 }

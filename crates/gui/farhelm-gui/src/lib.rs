@@ -22,6 +22,8 @@
 //! - [`settings`]: the Settings dialog the host rail's gear opens, with its sections.
 //! - [`hosts`]: host management, the Hosts panel the sidebar swaps in for its session list, and the per-host rules
 //!   (which actions a host offers).
+//! - [`sidebar`]: the sidebar around the session list: the app header, and its width as a helm preference with the
+//!   divider that changes it.
 //! - [`operations`]: the operation store, which holds work that finishes later (on a session, a host, a template, the
 //!   preferences, a launch), above the views that start it; [`drafts`]: editor fields that follow pushed changes
 //!   until the user touches them, and their saves.
@@ -71,6 +73,7 @@ pub mod session;
 pub mod session_list;
 pub mod session_pane;
 pub mod settings;
+pub mod sidebar;
 pub mod store;
 pub mod terminal;
 pub mod theme;

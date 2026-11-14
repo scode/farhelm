@@ -11,13 +11,18 @@
 //! the caller built in place of the text ([`StatusMark::content`]), the way [`super::Button::content`] does, and keeps
 //! the label, help and role. The help is also the mark's accessible description unless the caller says it only
 //! repeats the name ([`StatusMark::described`]).
+//!
+//! A mark whose text is a value rather than a symbol (the sidebar's version readout) can be drawn in the monospace face
+//! ([`StatusMark::monospace`]) and cut short with an ellipsis when its row is too narrow ([`StatusMark::truncate`]), as
+//! the old `.app-version` was.
 
 use gpui::{
     AnyElement, App, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce, Role,
-    SharedString, StatefulInteractiveElement, Styled, Window, div,
+    SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder as _,
 };
 
 use super::HoverHelp;
+use crate::assets;
 use crate::theme::{self, Token, metrics};
 
 /// A non-interactive status with its label, hover help and role. See the module docs.
@@ -31,6 +36,8 @@ pub struct StatusMark {
     ink: Option<Token>,
     content: Option<AnyElement>,
     described: bool,
+    monospace: bool,
+    truncate: bool,
 }
 
 impl StatusMark {
@@ -53,6 +60,8 @@ impl StatusMark {
             ink: None,
             content: None,
             described: true,
+            monospace: false,
+            truncate: false,
         }
     }
 
@@ -75,6 +84,20 @@ impl StatusMark {
         self.described = described;
         self
     }
+
+    /// Draw the text in the monospace face (`--font-mono`, the terminal's JetBrains Mono), as a version or other value
+    /// whose characters are read one by one.
+    pub fn monospace(mut self) -> Self {
+        self.monospace = true;
+        self
+    }
+
+    /// Let the mark shrink below its text's width and cut the text short with an ellipsis on one line (`min-width: 0;
+    /// overflow: hidden; text-overflow: ellipsis; white-space: nowrap`), so a long value never widens its row.
+    pub fn truncate(mut self) -> Self {
+        self.truncate = true;
+        self
+    }
 }
 
 impl RenderOnce for StatusMark {
@@ -87,7 +110,11 @@ impl RenderOnce for StatusMark {
             .role(self.role)
             .aria_label(self.label.clone())
             .text_size(metrics::TEXT_SM)
-            .text_color(theme::color(ink));
+            .text_color(theme::color(ink))
+            .when(self.monospace, |mark| {
+                mark.font_family(assets::TERMINAL_FONT)
+            })
+            .when(self.truncate, |mark| mark.min_w_0().truncate());
         let mark = match self.content {
             Some(content) => mark.child(content),
             None => mark.child(self.text),
