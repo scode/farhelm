@@ -1,11 +1,17 @@
 //! The app's bundled assets: interface fonts and icon SVGs, compiled into the binary.
 //!
 //! Everything the GUI draws from a file comes from here, never from the filesystem at run time, so a build carries its
-//! whole look and a headless test renders the same pixels on every machine. Fonts are registered with the text system
-//! by the bootstrap ([`crate::bootstrap::install`]); icons are served to GPUI's `svg()` element through [`Assets`].
+//! whole look and a headless test renders the same pixels on every machine. The maintainer decided on 2026-11-13 that
+//! the fonts the shipped app uses stay embedded in the binary this way (fonts needed only by tests are another matter).
+//! Fonts are registered with the text system by the bootstrap ([`crate::bootstrap::install`]); icons are served to
+//! GPUI's `svg()` element through [`Assets`].
 //!
-//! Inter is the old app's interface face (`--font-ui` in its stylesheet). The TTFs are lossless decompressions of the
-//! WOFF2 files the old app shipped; `THIRD_PARTY_NOTICES.md`, "Inter interface font", has the license. The Close and
+//! Inter is the old app's interface face (`--font-ui` in its stylesheet), and JetBrains Mono Nerd Font its terminal face
+//! (regular and bold only, as the old app shipped it). GPUI does not synthesize an oblique the way the old app's
+//! browser did, so italic terminal text draws upright: the maintainer decided on 2026-11-13 that the terminal ships
+//! upright italics until a follow-up change bundles the Italic and Bold Italic faces.
+//! All the TTFs are lossless decompressions of the WOFF2 files the old app shipped at the reference commit;
+//! `THIRD_PARTY_NOTICES.md` has their licenses ("Inter interface font", "JetBrains Mono terminal font"). The Close and
 //! Delete icons are the old app's own action glyphs, copied from its icon module at the reference commit (14-unit box,
 //! 1.2 stroke, round caps and joins). The More icon is a new drawing: the old app wrote the "⋯" character in text.
 
@@ -21,6 +27,23 @@ pub fn ui_fonts() -> Vec<Cow<'static, [u8]>> {
     vec![
         Cow::Borrowed(include_bytes!("../assets/fonts/Inter-Regular.ttf")),
         Cow::Borrowed(include_bytes!("../assets/fonts/Inter-SemiBold.ttf")),
+    ]
+}
+
+/// The terminal font family name, as the bundled faces declare it. Bold and italic requests must use this family so
+/// the text system picks a bundled face instead of substituting another font; with no italic face bundled yet, an
+/// italic request draws in the upright face.
+pub const TERMINAL_FONT: &str = "JetBrainsMono Nerd Font";
+
+/// The terminal faces: regular and bold.
+pub fn terminal_fonts() -> Vec<Cow<'static, [u8]>> {
+    vec![
+        Cow::Borrowed(include_bytes!(
+            "../assets/fonts/JetBrainsMonoNerdFont-Regular.ttf"
+        )),
+        Cow::Borrowed(include_bytes!(
+            "../assets/fonts/JetBrainsMonoNerdFont-Bold.ttf"
+        )),
     ]
 }
 

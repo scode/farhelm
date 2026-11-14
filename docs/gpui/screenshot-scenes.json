@@ -65,6 +65,16 @@
       "golden": "notice-banner",
       "title": "The notice banner, its button focused",
       "reference": "terminal-detached-banner"
+    },
+    {
+      "golden": "terminal-styles",
+      "title": "Terminal text styles, colors and box drawing",
+      "reference": null
+    },
+    {
+      "golden": "terminal-cursors",
+      "title": "Terminal cursor shapes",
+      "reference": null
     }
   ],
   "reference_scenes": [

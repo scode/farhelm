@@ -1,6 +1,7 @@
 //! Headless screenshot goldens: one per component, per dialog frame and per overlay kind (tooltip, popover, the prompt
-//! over its veil), the keyboard focus ring, host-supplied text over its spoofing corpus and the notice banner, in both
-//! appearances, compared pixel for pixel.
+//! over its veil), the keyboard focus ring, host-supplied text over its spoofing corpus, the notice banner, and the
+//! terminal's styles and cursor shapes, in both appearances, compared pixel for pixel. (The terminal stays dark in both
+//! appearances, so it draws identically in both pictures; only the scene's ground around it differs.)
 //!
 //! These are test references, not documentation media: they pin what each component draws, so a change to a token, a
 //! padding or a font shows up as a failing test with the new picture beside the old one, instead of drifting unnoticed.
@@ -30,8 +31,10 @@ use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, Popover, TooltipOwner};
 use crate::notices::Notice;
 use crate::prompt::{self, Answer, Question};
+use crate::terminal::{CellMetrics, CursorPhase, TerminalView, TextSize};
 use crate::test_support;
 use crate::theme::{self, Preference};
+use farhelm_grid_model::GridOutput;
 
 /// How many frames a scene may take to settle before the test gives up: icons decode on the background executor, so
 /// the first frame can lack them. Two consecutive identical captures is the readiness signal; a scene that never
@@ -48,13 +51,16 @@ struct Scene {
 
 /// State a scene keeps across frames: a text input's editable state, the owner token a tooltip scene shows its tooltip
 /// for (it must stay alive, or the layer manager takes the tooltip down), the anchor a popover scene opens its menu
-/// below (recorded when the scene draws), and the focus handle the focus-ring scene's button takes.
+/// below (recorded when the scene draws), the focus handle the focus-ring scene's button takes, and the terminal views
+/// a terminal scene's setup makes (they need the real text system to measure their cells, so they are built after the
+/// window exists).
 #[derive(Clone)]
 struct SceneState {
     input: TextInputState,
     tooltip_owner: Entity<TooltipOwner>,
     anchor: Rc<RefCell<Option<Anchor>>>,
     ring: FocusHandle,
+    terminals: Rc<RefCell<Vec<Entity<TerminalView>>>>,
 }
 
 /// The view a scene is drawn in: the window's ground, then the scene, centered, with the layer manager's overlay.
@@ -355,7 +361,185 @@ fn host_text(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
         .into_any_element()
 }
 
-static SCENES: [Scene; 9] = [
+/// One terminal's whole output for a golden scene, in the grid protocol's JSON description, decoded the way a live
+/// attachment's frames are: a hello at `cols` by `rows`, plain state, the given rows, and one frame with `cursor`.
+/// Panics on a message that does not decode: dropping it would draw a partial terminal, which `--update` would then
+/// bake into the reference.
+fn grid_output(
+    cols: u16,
+    rows: u16,
+    screen: serde_json::Value,
+    cursor: serde_json::Value,
+) -> Vec<GridOutput> {
+    let json = [
+        serde_json::json!({"t":"hello","cols":cols,"rows":rows,"history_cap":0}),
+        serde_json::json!({"t":"state","mouse":"off","focus":false,"alt_screen":false,
+            "default_fg":null,"default_bg":null,"history_trimmed":false,"exit":null}),
+        serde_json::json!({"t":"rows","rows":screen}),
+        serde_json::json!({"t":"frame","rev":1,"cols":cols,"rows":rows,"cursor":cursor}),
+    ];
+    json.into_iter()
+        .map(|value| serde_json::from_value(value).unwrap())
+        .collect()
+}
+
+/// One run in the protocol's JSON form: `[col, width, text, [flags, fg, bg]]`, colors as wire values (-1 the default,
+/// 0-255 a palette index, `0x1000000 | rgb` a truecolor).
+fn run(col: u16, width: u16, text: &str, flags: u16, fg: i64, bg: i64) -> serde_json::Value {
+    serde_json::json!([col, width, text, [flags, fg, bg]])
+}
+
+/// One screen row of runs.
+fn screen_row(y: u16, runs: Vec<serde_json::Value>) -> serde_json::Value {
+    serde_json::json!([y, {"w": false, "r": runs}])
+}
+
+/// A terminal view showing `output` behind no placeholder, with the cursor in `phase`, at the default text size.
+/// Panics when the font cannot be measured or the output is refused, for the same reason as [`grid_output`]: an empty
+/// terminal must fail the golden, never become its reference.
+fn terminal_view(
+    output: Vec<GridOutput>,
+    phase: CursorPhase,
+    cx: &mut App,
+) -> Entity<TerminalView> {
+    let metrics = CellMetrics::measure(TextSize::DEFAULT, cx).unwrap();
+    let view = cx.new(|_| TerminalView::new(metrics));
+    view.update(cx, |view, cx| {
+        let (_, applied) = view.apply(output, cx);
+        applied.unwrap();
+        view.mark_replay_complete(cx).unwrap();
+        view.set_cursor_phase(phase, cx);
+    });
+    view
+}
+
+/// The terminal's styles in the bundled font: the default colors, the sixteen palette colors as backgrounds, bold
+/// brightening, dim, italic (drawn upright: no italic face is bundled yet), inverse, the five underline shapes,
+/// strikethrough, hidden text that keeps its underline, a truecolor foreground, samples of the 256-color cube and gray
+/// ramp, and box drawing. ASCII and box drawing only: no fallback font is bundled for goldens, because the migration's
+/// orchestrator decided on 2026-11-13 that M1 has no fallback-font goldens.
+///
+/// The box drawing is two rows, a box beside shades and a pair of full blocks, so the picture shows whether lines and
+/// blocks meet across cells both ways: programs draw their borders with these characters, and a cell that does not
+/// match the glyph box leaves gaps between them. The two rows are the scene's last, rows 7 and 8: in this scene's
+/// geometry they are the pair whose baselines GPUI would round a device pixel further apart than the glyph is tall
+/// (`Baselines::origin_y` in the terminal module), so the full blocks stacked there show the seam if row baselines stop
+/// stepping by whole device rows. The scene is at 14 points, one of the few sizes at which full blocks meet at all
+/// (`Baselines`' NOTE has the others).
+fn terminal_styles_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    use farhelm_grid_model::style_flags as f;
+    let palette: Vec<_> = (0..16)
+        .map(|i| run(i * 2, 2, "  ", 0, -1, i64::from(i)))
+        .collect();
+    let bold: Vec<_> = (0..8)
+        .map(|i| run(i * 2, 1, "B", f::BOLD, i64::from(i), -1))
+        .collect();
+    let cube: Vec<_> = [16, 52, 88, 124, 160, 196, 46, 21, 232, 244, 255]
+        .into_iter()
+        .enumerate()
+        .map(|(i, index)| run(i as u16 * 2, 2, "  ", 0, -1, index))
+        .collect();
+    let screen = serde_json::json!([
+        screen_row(0, vec![run(0, 12, "default text", 0, -1, -1)]),
+        screen_row(1, palette),
+        screen_row(2, bold),
+        screen_row(
+            3,
+            vec![
+                run(0, 3, "dim", f::DIM, -1, -1),
+                run(4, 6, "italic", f::ITALIC, -1, -1),
+                run(11, 7, "inverse", f::INVERSE, -1, -1),
+                run(19, 8, "truecolr", 0, 0x1ff_8800, -1),
+            ]
+        ),
+        screen_row(
+            4,
+            vec![
+                run(0, 5, "solid", f::UNDERLINE, -1, -1),
+                run(6, 6, "double", f::DOUBLE_UNDERLINE, -1, -1),
+                run(13, 4, "wavy", f::UNDERCURL, -1, -1),
+                run(18, 6, "dotted", f::DOTTED_UNDERLINE, -1, -1),
+                run(25, 6, "dashed", f::DASHED_UNDERLINE, -1, -1),
+            ]
+        ),
+        screen_row(
+            5,
+            vec![
+                run(0, 6, "strike", f::STRIKETHROUGH, -1, -1),
+                run(7, 6, "hidden", f::HIDDEN | f::UNDERLINE, -1, -1),
+            ]
+        ),
+        screen_row(6, cube),
+        screen_row(7, box_row(["┌", "─", "─", "┐"])),
+        screen_row(8, box_row(["└", "─", "─", "┘"])),
+    ]);
+    let cursor = serde_json::json!({"x":0,"y":7,"visible":false,"shape":"block","blink":false});
+    let view = terminal_view(
+        grid_output(36, 9, screen, cursor),
+        CursorPhase {
+            focused: true,
+            on: true,
+        },
+        cx,
+    );
+    state.terminals.borrow_mut().push(view);
+}
+
+/// One row of the styles scene's box drawing: a box edge in columns 0-3, the three shades from full to light in 5-7,
+/// and two full blocks side by side in 9-10.
+fn box_row(edge: [&str; 4]) -> Vec<serde_json::Value> {
+    let shades = ["█", "▓", "░", "", "█", "█"];
+    let edge = edge.into_iter().enumerate();
+    let shades = shades
+        .into_iter()
+        .enumerate()
+        .map(|(i, text)| (i + 5, text));
+    edge.chain(shades)
+        .filter(|(_, text)| !text.is_empty())
+        .map(|(col, text)| run(col as u16, 1, text, 0, -1, -1))
+        .collect()
+}
+
+/// The cursor's shapes side by side, each its own small terminal: a focused block re-painting its glyph in the accent
+/// color, a bar, an underline, an unfocused outline, and a block on a wide character's spacer cell covering the whole
+/// two-cell box. The wide run's glyph has no bundled face; the golden pins the cursor's box, not that glyph.
+fn terminal_cursors_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    let cases = [
+        (0, "block", true),
+        (0, "bar", true),
+        (0, "underline", true),
+        (0, "block", false),
+        (3, "block", true),
+    ];
+    for (x, shape, focused) in cases {
+        let screen = serde_json::json!([screen_row(
+            0,
+            vec![
+                run(0, 2, "ab", 0, -1, -1),
+                run(2, 2, "\u{4e2d}", 0, -1, -1),
+                run(4, 2, "cd", 0, -1, -1),
+            ]
+        )]);
+        let cursor = serde_json::json!({"x":x,"y":0,"visible":true,"shape":shape,"blink":false});
+        let view = terminal_view(
+            grid_output(6, 2, screen, cursor),
+            CursorPhase { focused, on: true },
+            cx,
+        );
+        state.terminals.borrow_mut().push(view);
+    }
+}
+
+/// The terminals a terminal scene's setup made, in a row.
+fn terminals(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    div()
+        .flex()
+        .gap(px(12.))
+        .children(state.terminals.borrow().iter().cloned())
+        .into_any_element()
+}
+
+static SCENES: [Scene; 11] = [
     Scene {
         name: "buttons",
         size: (560., 64.),
@@ -409,6 +593,18 @@ static SCENES: [Scene; 9] = [
         size: (760., 64.),
         draw: notice_banner,
         setup: focus_ring_setup,
+    },
+    Scene {
+        name: "terminal-styles",
+        size: (380., 200.),
+        draw: terminals,
+        setup: terminal_styles_setup,
+    },
+    Scene {
+        name: "terminal-cursors",
+        size: (380., 80.),
+        draw: terminals,
+        setup: terminal_cursors_setup,
     },
 ];
 
@@ -465,6 +661,7 @@ fn component_goldens() -> anyhow::Result<()> {
                         tooltip_owner: cx.new(|_| TooltipOwner),
                         anchor: Rc::new(RefCell::new(None)),
                         ring: cx.focus_handle().tab_stop(true),
+                        terminals: Rc::new(RefCell::new(Vec::new())),
                     };
                     let scene_view = cx.new(|cx| SceneView {
                         scene,

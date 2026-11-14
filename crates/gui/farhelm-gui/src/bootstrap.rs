@@ -65,6 +65,7 @@ pub fn install(cx: &mut App) -> anyhow::Result<()> {
 pub(crate) fn install_app_state(cx: &mut App) -> anyhow::Result<()> {
     gpui_component::init(cx);
     cx.text_system().add_fonts(assets::ui_fonts())?;
+    cx.text_system().add_fonts(assets::terminal_fonts())?;
     // The persisted choice will come from the helm's preferences (the maintainer decided on 2026-11-13 that appearance
     // is a helm preference, not a per-device one); until then every launch starts at System, the old app's default (an
     // agent run may force light or dark, see `starting_preference`).

@@ -10,7 +10,7 @@
 //! This crate is the only place the GUI and the helm meet (SPEC_impl.md, "GUI architecture"): GUI crates never depend
 //! on the helm, and reach it through its API with the credential [`DesktopBootstrap`] holds. The bootstrap, the
 //! startup refusal surface and the updater moved here unchanged from the old Dioxus UI crate when that UI was deleted
-//! (GPUI migration, F1). [`run`] starts them and then hands the main thread to the GPUI app (`farhelm-gui`).
+//! in the GPUI migration. [`run`] starts them and then hands the main thread to the GPUI app (`farhelm-gui`).
 //!
 //! This file holds the bootstrap of the helm and supervisor and the pre-window refusal path. The rest is split by
 //! concern: `window_state` keeps the saved window frame's format and restore rules, `state` owns the app's private state
@@ -105,6 +105,12 @@ const UNICODE_NOTICE: &str = include_str!("../../../vendor/UNICODE-LICENSE.txt")
 /// `assets`), which the license requires to travel with the fonts.
 const INTER_FONT_NOTICE: &str = include_str!("../../gui/farhelm-gui/assets/fonts/OFL-Inter.txt");
 
+/// The SIL Open Font License text of the JetBrains Mono Nerd Font files the GUI crate embeds in this binary for the
+/// terminal (`farhelm-gui`'s `assets`), which the license requires to travel with the fonts. It is the notice the old
+/// app shipped beside the same files (`THIRD_PARTY_NOTICES.md`, "JetBrains Mono terminal font").
+const TERMINAL_FONT_NOTICE: &str =
+    include_str!("../../gui/farhelm-gui/assets/fonts/OFL-JetBrainsMono.txt");
+
 /// What `farhelm-desktop --licenses` prints: every notice that must travel with this binary. That is the notices of the
 /// code Farhelm ported from other projects that this binary links (the GUI terminal crates' ports from xterm.js and VS
 /// Code, and, through the embedded supervisor, its xterm.js-derived input encoding and the emulator's Unicode tables),
@@ -117,7 +123,7 @@ const INTER_FONT_NOTICE: &str = include_str!("../../gui/farhelm-gui/assets/fonts
 /// opened from the app menu, which shows the same text and replaces this flag as the user-facing surface.
 pub fn licenses_text() -> String {
     format!(
-        "{}\n{}\n{UNICODE_NOTICE}\n{DEPENDENCY_NOTICES}\n{RULE}\nInter font (SIL Open Font License 1.1)\n\n{INTER_FONT_NOTICE}",
+        "{}\n{}\n{UNICODE_NOTICE}\n{DEPENDENCY_NOTICES}\n{RULE}\nInter font (SIL Open Font License 1.1)\n\n{INTER_FONT_NOTICE}\n{RULE}\nJetBrains Mono Nerd Font (SIL Open Font License 1.1)\n\n{TERMINAL_FONT_NOTICE}",
         farhelm_gui::PORTED_CODE_NOTICES,
         farhelm_supervisor::grid_input::PORTED_CODE_NOTICES,
     )
@@ -1483,11 +1489,13 @@ mod tests {
 
     /// The desktop binary ships on its own (its archive holds no `farhelm`), so it must carry the dependency notices
     /// itself (the maintainer decided on 2026-11-13 that every shipped binary carries them); losing them would ship
-    /// crates without their required attribution.
+    /// crates without their required attribution. The same goes for the fonts the binary embeds: the OFL requires its
+    /// text to travel with the font files.
     ///
     /// Spec: `licenses_text` holds the embedded supervisor's ported-code notices (xterm.js and the Unicode License), the
-    /// generated notices' header, a dependency only the desktop app links (taffy, through GPUI) with its own copyright
-    /// line, and no SPDX template placeholder.
+    /// OFL of both embedded fonts under their own headers (Inter, and the terminal's JetBrains Mono Nerd Font with its
+    /// copyright line), the generated notices' header, a dependency only the desktop app links (taffy, through GPUI)
+    /// with its own copyright line, and no SPDX template placeholder.
     #[farhelm_testtrace::test]
     fn the_desktop_binary_carries_the_dependency_notices() {
         let text = licenses_text();
@@ -1504,6 +1512,11 @@ mod tests {
         assert!(
             text.contains("SIL OPEN FONT LICENSE") && text.contains("Inter font"),
             "the embedded Inter font's license is missing"
+        );
+        assert!(
+            text.contains("JetBrains Mono Nerd Font (SIL Open Font License 1.1)")
+                && text.contains("Copyright 2020 The JetBrains Mono Project Authors"),
+            "the embedded terminal font's license is missing"
         );
         assert!(
             text.contains(

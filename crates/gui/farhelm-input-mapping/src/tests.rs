@@ -1005,6 +1005,31 @@ fn mouse_table_admission_and_actual_supervisor_bytes() {
     eprintln!("Mouse: {count} rows, {} modifier cases", count * 8);
 }
 
+/// The cell is the old app's, so a pane fits as many columns and rows as it did there. A larger cell would also open
+/// gaps between the box-drawing and block glyphs programs draw their borders with; whether those glyphs meet across
+/// rows at a given text size is up to the renderer (the GUI terminal module's `Baselines`), not this rectangle.
+///
+/// Spec: for JetBrains Mono at 14 px (an 8.4 px advance, 18.48 px ascent plus descent), the height is rounded up to
+/// whole device pixels (19 at ratio 1, 37 device pixels at ratio 2) and spread over the rows so the screen is a whole
+/// number of logical pixels (an odd device height over an odd row count rounds the screen up); the width stays the
+/// advance, adjusted so a row is a whole number of logical pixels; a zero size or an unusable measurement gives none.
+#[test]
+fn cells_are_the_old_apps_rounding_of_the_measured_character() {
+    let cell = |cols, rows, ratio| {
+        Geometry::for_character(8.4, 18.48, cols, rows, ratio)
+            .map(|g| (g.cell_width, g.cell_height, g.columns, g.rows))
+    };
+    assert_eq!(cell(80, 24, 1.), Some((8.4, 19., 80, 24)));
+    assert_eq!(cell(80, 24, 2.), Some((8.4, 18.5, 80, 24)));
+    assert_eq!(cell(36, 8, 2.), Some((302. / 36., 18.5, 36, 8)));
+    assert_eq!(cell(6, 3, 2.), Some((50. / 6., 56. / 3., 6, 3)));
+    assert_eq!(cell(0, 24, 1.), None);
+    assert_eq!(cell(80, 0, 1.), None);
+    assert!(Geometry::for_character(f64::NAN, 18.48, 80, 24, 1.).is_none());
+    assert!(Geometry::for_character(8.4, 0., 80, 24, 1.).is_none());
+    assert!(Geometry::for_character(8.4, 18.48, 80, 24, -2.).is_none());
+}
+
 /// Motion equality is against the last report of any kind and ignores Meta;
 /// wheel fractions and focus gating live in the client, not the byte encoder.
 #[test]

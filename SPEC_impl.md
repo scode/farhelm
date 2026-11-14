@@ -400,6 +400,12 @@ computes the view's inputs from the store and redraws only when they differ, so 
 cached view stale. A child view talks to its parent only by emitting events that the parent subscribes to; a child never
 holds a parent handle to call `update` on it (see the re-entrancy trap below).
 
+A session terminal is the one deliberate exception to store-fed, wrapper-cached views (the migration's orchestrator
+decided this on 2026-11-13): its grid is bulk data streamed for one attachment, not shared state, and its inputs are the
+whole grid, which the wrapper's comparison of computed inputs cannot express. The terminal view
+(`crates/gui/farhelm-gui/src/terminal.rs`) owns its grid model, is never cached, and notifies itself through the methods
+that change what it shows; render-count tests pin that shown output redraws it and output it does not show does not.
+
 Enforced by tests that count redraws per view (an app-level render counter compiled into test builds; no GPUI patch), by
 a test for each store that a change through its public methods redraws the views that read it, and by the per-PR review
 gate.
@@ -735,7 +741,7 @@ Traps that an earlier rule already prevents get one line pointing at it.
 
 ## GUI: Dioxus
 
-NOTE: The Dioxus GUI's sections were deleted with that app (GPUI migration, F1): this one, "GUI: sidebar, sounds, text
+NOTE: The Dioxus GUI's sections were deleted with that app in the GPUI migration: this one, "GUI: sidebar, sounds, text
 size, quick switcher and shortcuts", and "Terminal widget: the grid island" with its "Links in terminals" and "The grid
 client". These two stub headings remain only because open review-queue items cite them. Read the old text at commit
 `6ef88c9a`, or at the GPUI port's reference commit `24bc0580`.
@@ -3907,7 +3913,7 @@ retries on the command accepted with it.
 
 ### Shared preferences and announcements
 
-NOTE: These rules lived in the Dioxus GUI's section until that app was deleted (GPUI migration, F1). They describe the
+NOTE: These rules lived in the Dioxus GUI's section until that app was deleted in the GPUI migration. They describe the
 helm, which still enforces them; the old client-side mechanics that surrounded them went with that app.
 
 The helm keeps the GUI's shared preferences in a singleton row of `helm.db` (`preferences`; the `Preferences` type in

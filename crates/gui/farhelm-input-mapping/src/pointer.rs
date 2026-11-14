@@ -15,6 +15,47 @@ pub struct Geometry {
 }
 
 impl Geometry {
+    /// The cell rectangle the pinned grid-terminal.js drew a `columns` by `rows` grid at, for a character
+    /// `char_width` by `char_height` logical pixels (the font's advance, and its ascent plus descent) on a display of
+    /// `pixel_ratio` device pixels per logical pixel. The renderer draws at this rectangle and pointer mapping reads
+    /// the same one, so a click lands on the cell drawn under it.
+    ///
+    /// The height starts from the character's height rounded up to whole device pixels and is then spread so the whole
+    /// grid is a whole number of logical pixels; it therefore depends on `rows`, and rows generally start a fraction of
+    /// a device pixel off whole ones (a 9-row grid at 14 points on a 2x display has rows of 167/9 logical pixels, 37.11
+    /// device pixels). This rectangle alone does not make glyphs meet across rows: the GUI's terminal renderer places
+    /// each row's glyphs on whole-device-pixel baselines of its own (`Baselines` in its terminal module), with which
+    /// box-drawing verticals meet at every size measured and full blocks only at some sizes. The width stays
+    /// fractional, adjusted only so a whole row is a whole number of logical pixels; it therefore depends on
+    /// `columns`, and a resize can move it by a fraction of a pixel. `None` for a zero size or a measurement that is
+    /// not a positive finite number, which a caller must not draw at.
+    ///
+    /// Ported from xterm.js 6.0.0's `DomRenderer._updateDimensions` through the pinned grid-terminal.js `cellFor`, with
+    /// no letter spacing and a line height of 1 (MIT; notices in LICENSE-PORTED).
+    pub fn for_character(
+        char_width: f64,
+        char_height: f64,
+        columns: u16,
+        rows: u16,
+        pixel_ratio: f64,
+    ) -> Option<Self> {
+        let measured = [char_width, char_height, pixel_ratio]
+            .into_iter()
+            .all(|v| v.is_finite() && v > 0.);
+        if !measured || columns == 0 || rows == 0 {
+            return None;
+        }
+        let (cols, lines) = (f64::from(columns), f64::from(rows));
+        let device_width = char_width * pixel_ratio;
+        let device_height = (char_height * pixel_ratio).ceil();
+        Some(Self {
+            cell_width: (device_width * cols / pixel_ratio).round() / cols,
+            cell_height: (device_height * lines / pixel_ratio).round() / lines,
+            columns,
+            rows,
+        })
+    }
+
     /// Shared guard for program cells and selection boundaries. Both mappings
     /// reject invalid geometry rather than casting NaN or zero-sized coordinates.
     fn valid_point(self, x: f64, y: f64) -> bool {
