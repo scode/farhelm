@@ -3,8 +3,8 @@
 //! NOTE: This is cut to what the first milestone's slice needs (the migration's orchestrator trimmed it on 2026-11-13):
 //! attach a terminal, show its output, say when it is not live, take focus and send the program its keys. Paste, focus
 //! reports (mode 1004), an input method handler, scrollback, selection, links and the reconnect display with its phase
-//! and Retry come later in the terminal area's work. Nothing mounts this in the app's window yet; the session view does
-//! that.
+//! and Retry come later in the terminal area's work. The session pane ([`crate::session_pane`]) mounts one for the
+//! selected session.
 //!
 //! [`AttachedTerminal`] owns one stream ([`TerminalHandle`] and [`TerminalEvents`]) and the [`TerminalView`]s that show
 //! it. Here's the TLDR of what it adds on top of the stream and the renderer, each a rule the old app or the GPUI

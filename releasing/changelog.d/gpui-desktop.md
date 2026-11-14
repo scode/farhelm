@@ -9,11 +9,12 @@ Farhelm no longer has a browser interface. `farhelm helm run` serves no page and
 The GUI is being rebuilt as a native desktop app for macOS and Linux, which replaces both the browser interface and the
 old Mac app. The old Mac app's window is already gone: until the new app lands, the desktop app starts its helm and
 local supervisor and opens a window that lists your sessions in your chosen order, with their status (a running
-session's dot pulses, as in the old app), and lets you pick one, but cannot show a session's terminal yet. That window
-does connect to its helm, says when the connection is lost or another window has taken over, and offers to take the helm
-back. This draft is written while that migration is under way, so builds from the development branch in this period have
-no working GUI, and the entry is revised as the new app lands. Agents and the command line keep working as before,
-except that agent requests that need your approval are refused while the new app is open (below).
+session's dot pulses, as in the old app), and shows the terminal of the one you pick, live, for you to type into. It
+has no terminal tabs, text size control or session controls yet. That window does connect to its helm, says when the
+connection is lost or another window has taken over, and offers to take the helm back. This draft is written while
+that migration is under way, so builds from the development branch in this period have a GUI that still lacks most of
+what the old app could do, and the entry is revised as the new app lands. Agents and the command line keep working as
+before, except that agent requests that need your approval are refused while the new app is open (below).
 
 Five settings the old app kept per device reset to their defaults when you switch to the new app: the appearance
 (System, Dark or Light), the sidebar width, whether the host rail is open, the status sounds on or off, and the terminal

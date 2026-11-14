@@ -22,9 +22,9 @@ end-to-end GUI tests are built on.
 
 Every verb other than `start`, `stop` and `terminal-text` goes to the vendored `gpui-agent` command line unchanged, so
 its README (`vendor/gpui-agent/README.md`, "Commands") is the full list. `gpui-agent skills get core`, run the same way,
-prints its usage guide. `terminal-text` prints the focused terminal's text once the GPUI app has a terminal; until then
-it says there is none, and while no terminal holds focus (after a click on a button, say) it fails saying so rather than
-guessing which terminal was meant: click the terminal or Tab back into it first.
+prints its usage guide. `terminal-text` prints the focused terminal's text. While no terminal holds focus (after a click
+on a button, say) it fails saying so rather than guessing which terminal was meant: click the terminal or Tab back into
+it first.
 
 `start` takes `--sessions N` (fake-agent sessions to seed, default 2, 0 for none), `--size WxH` (Linux only: Mutter's
 virtual monitor, default 1600x1200; refused on a Mac, which uses its real screen), `--no-build` (reuse the binaries
@@ -70,8 +70,8 @@ devbuilds (`scripts/devbuild-mac.sh` builds with `--release`). Nothing else turn
 
 - The app connects to its embedded helm and shows the connection's states (connecting, another window took over with
   Take back, the connection-lost notice) and the session list, where each row is a list item holding a button, both
-  named by its session's title (`click text:"Fixture 2"` opens that session). Opening a session shows no terminal yet:
-  that lands later in the GPUI migration (M1).
+  named by its session's title (`click text:"Fixture 2"` opens that session). Opening a session shows its terminal,
+  which takes focus; `terminal-text` reads the focused one.
 - Headless Mutter reports the window as inactive forever, so agent builds pin the animation ticker's notion of an active
   window on (SPEC_impl.md, "GPUI cookbook: traps"); otherwise nothing would animate in these runs.
 - `stop` signals only processes it can tie to the run, and only while each is still the process that was recorded (its
