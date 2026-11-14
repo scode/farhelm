@@ -7,8 +7,9 @@
 //! decode breaks the channel instead of reaching a row.
 //!
 //! Everything a host or the helm reported (builds, identities, errors, the skew remedy, a twin's name) stays host text:
-//! a detail line is a list of [`Part`]s, the app's words and host values each their own part, drawn each as its own
-//! text element so a host value's direction cannot reorder the words around it.
+//! a detail line is a [`HostSentence`], the app's words and host values each their own part, drawn each as its own
+//! text element so a host value's direction cannot reorder the words around it. Builds, a connected host's identity and
+//! the destination are its monospace parts, as the old app's `DetailPart::MonoPeer` runs were.
 
 use farhelm_proto::http::LOCAL_SUPERVISOR_NOT_RUNNING;
 use farhelm_proto::tensorlake::LifecycleDirection;
@@ -112,7 +113,7 @@ pub(crate) fn hover(state: &HostStateView) -> SharedString {
             ..
         } => HostSentence::new("host-too-new")
             .text("This host runs Farhelm ")
-            .host(&HostText::from_host(build_version.as_str()))
+            .host(&pushed(build_version))
             .text(format!(
                 ", which is newer than this helm's {} (both speak protocol {}); update the helm",
                 farhelm_proto::BUILD_VERSION,
@@ -127,11 +128,11 @@ pub(crate) fn hover(state: &HostStateView) -> SharedString {
             ..
         } if peer_protocol > our_protocol => HostSentence::new("host-too-new")
             .text("This host runs Farhelm ")
-            .host(&HostText::from_host(peer_build.as_str()))
+            .host(&pushed(peer_build))
             .text(format!(
                 " (protocol {peer_protocol}), which is newer than this helm's "
             ))
-            .host(&HostText::from_host(our_build.as_str()))
+            .host(&pushed(our_build))
             .text(format!(" (protocol {our_protocol}); update the helm"))
             .accessible_name(),
         _ => words(state).into(),
@@ -140,55 +141,10 @@ pub(crate) fn hover(state: &HostStateView) -> SharedString {
 
 // ---- Detail lines ----------------------------------------------------------------------------------------------------
 
-/// One part of a detail line.
-///
-/// NOTE: `Part` and [`Line`] are [`HostSentence`] plus a monospace host part, which `HostSentence` does not have yet
-/// (the old app's `DetailPart::MonoPeer`). A monospace part for it has been requested from the host text foundation's
-/// owner; once it lands, a detail line becomes a `HostSentence` and these two types, with the panel's part-drawing loop,
-/// go away.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum Part {
-    /// The app's own words.
-    Text(SharedString),
-    /// A value a host or the helm reported, in the interface font.
-    Host(HostText),
-    /// A reported value that reads as code (a build, an identity, a destination), in the monospace font.
-    Mono(HostText),
-}
-
-/// A detail line: its parts in order.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub(crate) struct Line(pub(crate) Vec<Part>);
-
-impl Line {
-    fn text(mut self, words: impl Into<SharedString>) -> Self {
-        self.0.push(Part::Text(words.into()));
-        self
-    }
-
-    fn host(mut self, value: &str) -> Self {
-        self.0.push(Part::Host(HostText::from_host(value)));
-        self
-    }
-
-    fn mono(mut self, value: &str) -> Self {
-        self.0.push(Part::Mono(HostText::from_host(value)));
-        self
-    }
-
-    /// The line as assistive technology reads it, with every host value escaped as the screen shows it.
-    pub(crate) fn accessible_name(&self) -> SharedString {
-        self.0
-            .iter()
-            .fold(
-                HostSentence::new("host-detail"),
-                |sentence, part| match part {
-                    Part::Text(words) => sentence.text(words.clone()),
-                    Part::Host(value) | Part::Mono(value) => sentence.host(value),
-                },
-            )
-            .accessible_name()
-    }
+/// A value the helm pushed for this host (an error, a build, an identity), taken as host text where the detail lines
+/// and the hover read it.
+fn pushed(value: &str) -> HostText {
+    HostText::from_host(value)
 }
 
 /// What a detail line is, which decides its ink: what the helm knows in the quiet ink, what to do in the ordinary one.
@@ -201,27 +157,42 @@ pub(crate) enum Kind {
 /// The lines a row shows when its details are open, in the old order: the destination behind an alias, the evidence
 /// for the phase, and the remedy where waiting will not help. `twin` names another host by id, as the duplicate lines
 /// mention the entry that holds the same machine, or `None` when the registry does not list it.
+///
+/// Each line is drawn under `host-detail-<host id>-<n>`, numbered from 0 in this order, which is how the panel's tests
+/// and the agent bridge find a row's lines.
 pub(crate) fn detail_lines(
     host: &HostView,
     twin: impl Fn(i64) -> Option<HostText>,
-) -> Vec<(Kind, Line)> {
+) -> Vec<(Kind, HostSentence)> {
+    let id = host.id;
+    let numbered =
+        |n: usize| HostSentence::new(SharedString::from(format!("host-detail-{id}-{n}")));
     let mut lines = Vec::new();
     // Only behind an alias: an unaliased host's name already is its destination.
     if let (Some(_), Some(destination)) = (&host.alias, &host.destination) {
         lines.push((
             Kind::Evidence,
-            Line::default().text("Destination: ").mono(destination),
+            numbered(lines.len())
+                .text("Destination: ")
+                .mono(&pushed(destination)),
         ));
     }
-    lines.push((Kind::Evidence, evidence(&host.state, &twin)));
-    lines.extend(remedy(&host.state, &twin).map(|line| (Kind::Remedy, line)));
+    lines.push((
+        Kind::Evidence,
+        evidence(numbered(lines.len()), &host.state, &twin),
+    ));
+    let last = remedy(numbered(lines.len()), &host.state, &twin);
+    lines.extend(last.map(|line| (Kind::Remedy, line)));
     lines
 }
 
-/// What the helm knows about the host's phase (the old `state_detail`). For a connected host this one line is its
-/// version, identity and session count.
-fn evidence(state: &HostStateView, twin: &impl Fn(i64) -> Option<HostText>) -> Line {
-    let line = Line::default();
+/// What the helm knows about the host's phase (the old `state_detail`), appended to the empty `line`. For a connected
+/// host this one line is its version, identity and session count.
+fn evidence(
+    line: HostSentence,
+    state: &HostStateView,
+    twin: &impl Fn(i64) -> Option<HostText>,
+) -> HostSentence {
     match state {
         HostStateView::Connecting {
             attempt,
@@ -246,7 +217,7 @@ fn evidence(state: &HostStateView, twin: &impl Fn(i64) -> Option<HostText>) -> L
             match last_error {
                 Some(error) => line
                     .text(format!("{lead}; the last one failed: "))
-                    .host(error),
+                    .host(&pushed(error)),
                 None => line.text(lead),
             }
         }
@@ -259,7 +230,7 @@ fn evidence(state: &HostStateView, twin: &impl Fn(i64) -> Option<HostText>) -> L
             if last_error.trim().is_empty() {
                 line.text("The host did not answer")
             } else {
-                line.host(last_error)
+                line.host(&pushed(last_error))
             }
         }
         HostStateView::Connected {
@@ -268,9 +239,9 @@ fn evidence(state: &HostStateView, twin: &impl Fn(i64) -> Option<HostText>) -> L
             refresh,
             ..
         } => {
-            let line = line.text("Farhelm ").mono(build_version);
+            let line = line.text("Farhelm ").mono(&pushed(build_version));
             let line = match identity {
-                Some(identity) => line.text("; identity ").mono(identity),
+                Some(identity) => line.text("; identity ").mono(&pushed(identity)),
                 None => line.text("; no identity reported"),
             };
             let line = line.text("; ");
@@ -280,7 +251,7 @@ fn evidence(state: &HostStateView, twin: &impl Fn(i64) -> Option<HostText>) -> L
                 RefreshView::Ok { sessions } => line.text(format!("{sessions} sessions")),
                 RefreshView::Failed { error } => line
                     .text("the last session refresh failed, so its sessions are last-known: ")
-                    .host(error),
+                    .host(&pushed(error)),
             }
         }
         HostStateView::VersionSkew {
@@ -291,30 +262,29 @@ fn evidence(state: &HostStateView, twin: &impl Fn(i64) -> Option<HostText>) -> L
             ..
         } => line
             .text(format!("The host speaks protocol {peer_protocol} (Farhelm "))
-            .mono(peer_build)
+            .mono(&pushed(peer_build))
             .text(format!("); this helm speaks {our_protocol} (Farhelm "))
-            .mono(our_build)
+            .mono(&pushed(our_build))
             .text(")"),
         HostStateView::IdentityMismatch { recorded, reported } => line
             .text("Recorded as install ")
-            .host(recorded)
+            .host(&pushed(recorded))
             .text("; the destination now reports ")
-            .host(reported)
+            .host(&pushed(reported))
             .text(", so nothing is connected until this is decided"),
         HostStateView::IdentityUnverified { recorded } => line
             .text(
                 "The host answered without an identity, so this helm cannot confirm it is still the install \
                  recorded as ",
             )
-            .host(recorded),
+            .host(&pushed(recorded)),
         HostStateView::Duplicate { twin: id, identity } => {
-            let line = line.text("This entry reaches install ").host(identity);
+            let line = line.text("This entry reaches install ").host(&pushed(identity));
             let line = match twin(*id) {
-                Some(name) => {
-                    let mut line = line.text(", which the entry ");
-                    line.0.push(Part::Host(name));
-                    line.text(" already holds")
-                }
+                Some(name) => line
+                    .text(", which the entry ")
+                    .host(&name)
+                    .text(" already holds"),
                 None => line.text(format!(", which another entry (host {id}) already holds")),
             };
             line.text(", so nothing is connected through this one")
@@ -323,7 +293,7 @@ fn evidence(state: &HostStateView, twin: &impl Fn(i64) -> Option<HostText>) -> L
             if reason.trim().is_empty() {
                 line.text("No connection actor is running for this entry")
             } else {
-                line.host(reason)
+                line.host(&pushed(reason))
             }
         }
         // The environment phases are worded per provider by the environment pieces of the port; until then they read
@@ -335,7 +305,7 @@ fn evidence(state: &HostStateView, twin: &impl Fn(i64) -> Option<HostText>) -> L
             failure: Some(reason),
         } => line
             .text("Deleting this host's environment failed: ")
-            .host(reason),
+            .host(&pushed(reason)),
         HostStateView::Suspended {
             observed_at,
             suspended_by_farhelm_at,
@@ -351,7 +321,7 @@ fn evidence(state: &HostStateView, twin: &impl Fn(i64) -> Option<HostText>) -> L
                 utc_stamp(suspended_by_farhelm_at.unwrap_or(*observed_at) / 1000)
             ));
             match resume_failed {
-                Some(reason) => line.text(". Resume failed: ").host(reason),
+                Some(reason) => line.text(". Resume failed: ").host(&pushed(reason)),
                 None => line,
             }
         }
@@ -377,7 +347,7 @@ fn evidence(state: &HostStateView, twin: &impl Fn(i64) -> Option<HostText>) -> L
                 "The environment is stopped. Resume starts it again; its files remain."
             });
             match start_failed {
-                Some(reason) => line.text(" Start failed: ").host(reason),
+                Some(reason) => line.text(" Start failed: ").host(&pushed(reason)),
                 None => line,
             }
         }
@@ -388,9 +358,12 @@ fn evidence(state: &HostStateView, twin: &impl Fn(i64) -> Option<HostText>) -> L
 /// get none: one is still trying and the other is re-probed forever, so telling the user to act would invent work. The
 /// one exception is the helm's own machine with no supervisor, whose remedy is a command on the machine the user sits
 /// at: the helm's own dial failure spells it out with the right state directory, so that is shown rather than words of
-/// the app's, which cannot know the directory.
-fn remedy(state: &HostStateView, twin: &impl Fn(i64) -> Option<HostText>) -> Option<Line> {
-    let line = Line::default();
+/// the app's, which cannot know the directory. The remedy is appended to the empty `line`.
+fn remedy(
+    line: HostSentence,
+    state: &HostStateView,
+    twin: &impl Fn(i64) -> Option<HostText>,
+) -> Option<HostSentence> {
     match state {
         HostStateView::Unreachable { cause, last_error } if cause == LOCAL_SUPERVISOR_NOT_RUNNING => {
             Some(if last_error.trim().is_empty() {
@@ -399,7 +372,7 @@ fn remedy(state: &HostStateView, twin: &impl Fn(i64) -> Option<HostText>) -> Opt
                      this helm was started with if it has one",
                 )
             } else {
-                line.text("The helm reports: ").host(last_error)
+                line.text("The helm reports: ").host(&pushed(last_error))
             })
         }
         HostStateView::Unreachable { .. }
@@ -411,7 +384,7 @@ fn remedy(state: &HostStateView, twin: &impl Fn(i64) -> Option<HostText>) -> Opt
         | HostStateView::Deleting { failure: None } => None,
         // The helm's own sentence, verbatim: it knows which side is behind.
         HostStateView::VersionSkew { remediation, .. } => {
-            (!remediation.trim().is_empty()).then(|| line.host(remediation))
+            (!remediation.trim().is_empty()).then(|| line.host(&pushed(remediation)))
         }
         HostStateView::IdentityMismatch { .. } => Some(line.text(
             "Adopt the identity the host reports, or fix the destination; adopting resets this host to asking before \
@@ -422,11 +395,10 @@ fn remedy(state: &HostStateView, twin: &impl Fn(i64) -> Option<HostText>) -> Opt
              so a host that starts identifying itself again recovers on its own",
         )),
         HostStateView::Duplicate { twin: id, .. } => Some(match twin(*id) {
-            Some(name) => {
-                let mut line = line.text("Remove ");
-                line.0.push(Part::Host(name));
-                line.text(" or change this entry's destination, then press Retry")
-            }
+            Some(name) => line
+                .text("Remove ")
+                .host(&name)
+                .text(" or change this entry's destination, then press Retry"),
             None => line.text("Remove the other entry or change this entry's destination, then press Retry"),
         }),
         HostStateView::Retired { .. } => {
