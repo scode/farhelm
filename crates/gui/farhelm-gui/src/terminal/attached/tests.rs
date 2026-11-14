@@ -79,10 +79,12 @@ fn harness(cx: &mut TestAppContext) -> Harness<'_> {
     let (_, cx) = cx.add_window_view(|window, cx| {
         let open: OpenStream = Box::new(move |attach| {
             let (fake, handle, events) = FakeTerminal::open(&attach);
+            // What the opener was given; no resize can have overtaken it yet.
             let asked = FakeAttach {
                 take_control: true,
                 cols: attach.cols,
                 rows: attach.rows,
+                resize_on_open: None,
             };
             *slot.borrow_mut() = Some((fake, asked));
             (handle, events)
@@ -225,7 +227,8 @@ fn the_stream_opens_at_the_fitted_size(cx: &mut TestAppContext) {
         Some(FakeAttach {
             take_control: true,
             cols: FITTED.0,
-            rows: FITTED.1
+            rows: FITTED.1,
+            resize_on_open: None,
         })
     );
     // The fake agrees: its displacing attach carries the size the stream was opened with.
@@ -234,7 +237,8 @@ fn the_stream_opens_at_the_fitted_size(cx: &mut TestAppContext) {
         FakeAttach {
             take_control: true,
             cols: FITTED.0,
-            rows: FITTED.1
+            rows: FITTED.1,
+            resize_on_open: None,
         }
     );
     assert!(h.cx.debug_bounds("terminal-connecting").is_some());
@@ -243,11 +247,12 @@ fn the_stream_opens_at_the_fitted_size(cx: &mut TestAppContext) {
     assert_eq!(h.fake().received(), []);
 }
 
-/// A changed size goes out as one resize; a redraw at the same size sends nothing. A resize made while an attach is
-/// connecting reaches no attachment in the helm client, so the owner sends the size again once the next attachment
-/// is live, and only then.
+/// A changed size goes out as one resize, and a redraw at the same size sends nothing: each resize can reflow the
+/// program's screen and its history, so a repeated one is not free. That holds while the first attach is still
+/// connecting too, where the helm client sends the new size as soon as the socket opens; the owner must not resend it
+/// once the attachment is live, which it once did to work around a client that dropped that resize.
 #[gpui::test]
-fn a_new_size_is_sent_once_and_again_after_attaching(cx: &mut TestAppContext) {
+fn a_new_size_is_sent_once(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.size.set((PANE.0 - 40., PANE.1));
     h.cx.update(|window, _| window.refresh());
@@ -262,9 +267,11 @@ fn a_new_size_is_sent_once_and_again_after_attaching(cx: &mut TestAppContext) {
             rows: smaller.1
         }]
     );
-    // The fake's attach was built when the stream started attaching, so it still asks for the first size.
+    // The fake's attach was built when the stream started attaching, so its query still asks for the first size, and
+    // the new one follows as the socket's first message.
     let asked = h.fake().attach();
     assert_eq!((asked.cols, asked.rows), FITTED);
+    assert_eq!(asked.resize_on_open, Some(smaller));
     for message in screen(asked.cols, asked.rows, "x", serde_json::Value::Null) {
         h.fake().output(message);
     }
@@ -272,10 +279,8 @@ fn a_new_size_is_sent_once_and_again_after_attaching(cx: &mut TestAppContext) {
     h.settle();
     assert_eq!(
         h.fake().received(),
-        [FakeTerminalRequest::Resize {
-            cols: smaller.0,
-            rows: smaller.1
-        }]
+        [],
+        "the owner does not resend the size once the attachment is live"
     );
     // Live: a later resize goes out once and is not repeated.
     h.size.set(PANE);

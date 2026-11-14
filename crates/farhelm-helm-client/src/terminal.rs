@@ -136,7 +136,9 @@ impl TerminalHandle {
         let _ = self.requests.send(Request::Input(input));
     }
 
-    /// Fit the terminal to a new size; also the size every later reconnect asks for.
+    /// Fit the terminal to a new size; also the size every later attach asks for. Sent at once while a socket is
+    /// open; while an attach is still connecting, sent as the first message once its socket opens (its query already
+    /// asked for the old size); at any other time kept for the next attach's query.
     pub fn resize(&self, cols: u16, rows: u16) {
         let _ = self.requests.send(Request::Resize { cols, rows });
     }
@@ -371,11 +373,13 @@ impl Stream {
         self.emit(TerminalEvent::State(StreamState::Closed)).await;
     }
 
-    /// Open the socket, serving requests meanwhile. `None` when the stream was closed.
+    /// Open the socket, serving requests meanwhile. `None` when the stream was closed. A socket comes back already
+    /// told the latest size, if a resize during the connect changed it from the one the query asked for.
     async fn connect(
         &mut self,
         take_control: bool,
     ) -> Option<Result<crate::ws::Socket, ConnectError>> {
+        let asked = (self.attach.cols, self.attach.rows);
         let path = match attach_path(&self.attach, take_control) {
             Ok(path) => path,
             // An empty or dot session id has no route; the helm would answer 404, so say that.
@@ -388,15 +392,50 @@ impl Stream {
         tokio::pin!(opening);
         loop {
             tokio::select! {
-                result = &mut opening => return Some(result),
+                result = &mut opening => return Some(match result {
+                    Ok(socket) => self.send_overtaken_size(socket, asked).await,
+                    Err(error) => Err(error),
+                }),
                 _ = self.events.closed() => return None,
                 request = self.requests.recv() => match request {
                     None | Some(Request::Close) => return None,
-                    // The size goes into the next attach's query; the one in flight already asked for the old one.
+                    // The query in flight already asked for the old size, so this one is sent once the socket opens.
                     Some(Request::Resize { cols, rows }) => (self.attach.cols, self.attach.rows) = (cols, rows),
                     Some(Request::Input(_) | Request::TakeControl | Request::ReconnectNow) => {}
                 },
             }
+        }
+    }
+
+    /// Send a newly opened `socket`, whose attach query asked for `asked`, the size the stream holds now, when the two
+    /// differ: a resize that came while the attach was connecting. Without it the helm would keep the query's size
+    /// until the next resize or attach. A failed send is a failed connect, which reconnects like any other.
+    ///
+    /// Sending it as the socket's first message is safe before the attachment is live: the helm reads nothing from a
+    /// terminal socket until the supervisor has answered the attach, and then forwards the resize to that attachment
+    /// like any later one.
+    ///
+    /// NOTE: The supervisor's attach waits up to a second (its `ATTACH_SIZE_WAIT`) for the query's size to take effect
+    /// before it reads the screen it replays. If this resize overtakes the query's size there, that wait can run to its
+    /// end before the replay starts. That is inferred from the supervisor's code, not measured. Sending the resize only
+    /// once the attachment is live instead would trade that wait for a reflow, and the history sent again, after the
+    /// replay.
+    async fn send_overtaken_size(
+        &self,
+        mut socket: crate::ws::Socket,
+        asked: (u16, u16),
+    ) -> Result<crate::ws::Socket, ConnectError> {
+        let (cols, rows) = (self.attach.cols, self.attach.rows);
+        if (cols, rows) == asked {
+            return Ok(socket);
+        }
+        let resize = control_frame(&TerminalClientMessage::Resize { cols, rows });
+        match timeout(self.config.watchdog, socket.send(resize)).await {
+            Ok(Ok(())) => Ok(socket),
+            Ok(Err(error)) => Err(ConnectError::Failed(error.to_string())),
+            Err(_) => Err(ConnectError::Failed(
+                "sending the terminal's size timed out".into(),
+            )),
         }
     }
 

@@ -7,11 +7,11 @@
 //! GUI test built on the fake passing against the old rule, so this test plays one script against both and requires
 //! them to agree, step by step, on what the GUI was shown and on what reached the helm.
 //!
-//! NOTE: This compares the GUI's event feed, the route and size of every accepted attach, and which input reached
-//! the helm. It does not compare timing (pings, the watchdog, the backoff), which the fake does not model and the
-//! real stream's own tests pin, nor the route of an attach that failed or was refused, which the fake does not
-//! report. One script cannot reach every state, so some of the fake's rules are pinned only by its own tests: see
-//! the test's docstring for which.
+//! NOTE: This compares the GUI's event feed, the route and size of every accepted attach and the resize sent as its
+//! socket opens, and which input reached the helm. It does not compare timing (pings, the watchdog, the backoff),
+//! which the fake does not model and the real stream's own tests pin, nor the route of an attach that failed or was
+//! refused, which the fake does not report. One script cannot reach every state, so some of the fake's rules are
+//! pinned only by its own tests: see the test's docstring for which.
 
 use super::*;
 use crate::fake::terminal::{FakeAttach, FakePhase, FakeTerminal, FakeTerminalRequest};
@@ -51,7 +51,7 @@ enum Step {
 struct Observed {
     /// The events the GUI's feed got, in order.
     events: Vec<TerminalEvent>,
-    /// For an accepted attach: its route and the size its query asked for.
+    /// For an accepted attach: its route, the size its query asked for, and the resize sent as its socket opened.
     attach: Option<FakeAttach>,
     /// For input: what reached the helm, if anything did.
     delivered: Option<GridInput>,
@@ -90,7 +90,8 @@ fn script() -> Vec<Step> {
         Accept,
         ReplayComplete,
         // A takeover waits for the user. Input is dropped and reconnect-now ignored; take-control attaches through the
-        // displacing route at the size held when it was asked, and a resize after it waits for a later attach.
+        // displacing route at the size held when it was asked, and a resize while that attach connects is sent as
+        // soon as its socket opens.
         Detach(Some(DetachCode::TakenOver)),
         Input("while detached"),
         ReconnectNow,
@@ -184,11 +185,15 @@ fn run_fake(steps: &[Step]) -> (Vec<Observed>, Vec<FakePhase>) {
 /// extra event shown later, after a step's events were read, is caught only at a later step or at the end, where the
 /// feed must be over.
 ///
+/// An accepted socket is read up to its first ping, which the stream sends only once it serves the socket, after any
+/// resize owed from the connect: that reads the opening resize (or shows there was none) and shows the stream is past
+/// connecting before the next step. A resize made while connecting may be handled by the stream either inside the
+/// connect or as the socket's first request; both put the same resize before that ping, so the step does not race.
+///
 /// A request the GUI sends while a socket is open races the helm's next frame on it, so there the real side waits
 /// for proof that the stream handled the request before the next step: a live resize is read off the socket, and
 /// input on a socket that is open but not live is followed by a resize to the size already held, which the stream
-/// sends only after it has handled that input. Waiting for the socket's first ping first shows the stream is serving
-/// it rather than still connecting, where it would neither send the resize nor deliver input.
+/// sends only after it has handled that input.
 async fn run_real(steps: &[Step], expected: &[Observed], phases: &[FakePhase]) -> Vec<Observed> {
     let (addr, mut connections) = listen().await;
     // The watchdog never fires and only the first ping on each socket is sent (none is answered), so only the script
@@ -220,8 +225,11 @@ async fn run_real(steps: &[Step], expected: &[Observed], phases: &[FakePhase]) -
         match step {
             None => {}
             Some(Step::Accept) => {
-                let accepted = accept_upgrade(next_connection(&mut connections).await).await;
-                seen.attach = Some(attach_of(&accepted.uri));
+                let mut accepted = accept_upgrade(next_connection(&mut connections).await).await;
+                seen.attach = Some(FakeAttach {
+                    resize_on_open: opening_resize(&mut accepted.socket).await,
+                    ..attach_of(&accepted.uri)
+                });
                 socket = Some(accepted.socket);
             }
             Some(Step::Fail) => drop(next_connection(&mut connections).await),
@@ -254,7 +262,6 @@ async fn run_real(steps: &[Step], expected: &[Observed], phases: &[FakePhase]) -
             }
             Some(Step::Input(data)) if phases[index] == FakePhase::Open => {
                 let open = socket.as_mut().unwrap();
-                next_ping(open).await;
                 handle.input(text(data));
                 handle.resize(size.0, size.1);
                 seen.delivered = next_resize(open).await;
@@ -307,13 +314,20 @@ async fn next_connection(connections: &mut mpsc::UnboundedReceiver<TcpStream>) -
         .expect("the listener is alive")
 }
 
-/// Wait for the stream's ping on `socket`, which it sends only while serving the socket. Panics on input, which no
-/// caller expects before the ping.
-async fn next_ping(socket: &mut WebSocketStream<TcpStream>) {
+/// Read a newly accepted `socket` up to the stream's first ping, which it sends only once it serves the socket, and
+/// return the size of the last resize before it. Only the first ping on a socket is ever sent (the script answers
+/// none), so nothing later waits for another. Panics on input, which no step sends before the socket is served.
+async fn opening_resize(socket: &mut WebSocketStream<TcpStream>) -> Option<(u16, u16)> {
+    let mut resize = None;
     loop {
         match timeout(STEP_WAIT, socket.next()).await {
-            Ok(Some(Ok(Message::Text(text)))) if text.as_str() == r#"{"type":"ping"}"# => return,
-            Ok(Some(Ok(Message::Text(_)))) => {}
+            Ok(Some(Ok(Message::Text(text)))) => {
+                match serde_json::from_str::<TerminalClientMessage>(&text) {
+                    Ok(TerminalClientMessage::Ping) => return resize,
+                    Ok(TerminalClientMessage::Resize { cols, rows }) => resize = Some((cols, rows)),
+                    other => panic!("an unexpected control frame before the first ping: {other:?}"),
+                }
+            }
             other => panic!("no ping reached the helm: {other:?}"),
         }
     }
@@ -347,7 +361,8 @@ async fn next_input(socket: &mut WebSocketStream<TcpStream>) -> GridInput {
     }
 }
 
-/// The route and size an attach asked for, read off its path and query the way the fake reports them.
+/// The route and size an attach asked for, read off its path and query the way the fake reports them. The opening
+/// resize is not in the request, so it is left `None` for the caller to fill in from the socket.
 fn attach_of(uri: &str) -> FakeAttach {
     let (path, query) = uri.split_once('?').unwrap();
     let param = |name: &str| -> u16 {
@@ -361,6 +376,7 @@ fn attach_of(uri: &str) -> FakeAttach {
         take_control: !path.ends_with("/unowned"),
         cols: param("cols"),
         rows: param("rows"),
+        resize_on_open: None,
     }
 }
 
@@ -369,8 +385,9 @@ fn attach_of(uri: &str) -> FakeAttach {
 /// restates: the state sequence (`Attached` on the first output rather than on open, `Reconnecting` once per outage
 /// and again after a refusal, `Closed` last), which detach codes stop the stream, an undecodable message as a lost
 /// link, that only take-control from a stopped or refused stream displaces and that a failed displacing attach
-/// retries without displacing, the size each attach asks for (including a resize made while live), and input dropped
-/// while no attachment is live (with a socket open or not). Each step's observations must be equal on both sides.
+/// retries without displacing, the size each attach asks for (including a resize made while live), the resize that
+/// follows an attach whose query a resize overtook while it connected, and input dropped while no attachment is live
+/// (with a socket open or not). Each step's observations must be equal on both sides.
 ///
 /// Not compared here: a close from any state but waiting for the user, and the stream ending when the GUI drops every
 /// handle or its feed. The fake's own tests and the real stream's tests pin those separately.
