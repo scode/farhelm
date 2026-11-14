@@ -402,6 +402,10 @@ pub struct AnchoredDialog {
     pub main_action: Option<MainAction>,
     /// As [`Dialog::keeps_focus_on_empty_click`].
     pub keeps_focus_on_empty_click: bool,
+    /// As [`Dialog::returns_to`]: [`focus::ReturnTo::Opener`] for a row's questions, and
+    /// [`focus::ReturnTo::HomeOnEscape`] for the session header's (SPEC.md: Escape on the header's Stop, Restart,
+    /// Replace or Delete question returns focus to the terminal).
+    pub returns_to: focus::ReturnTo,
 }
 
 /// Where an open dialog sits and whether an outside press dismisses it, as its [`Dialog`] asked.
@@ -500,6 +504,7 @@ pub fn open_anchored(
         subject,
         main_action,
         keeps_focus_on_empty_click,
+        returns_to,
     } = dialog;
     let drawn = drawn(&anchor)?;
     open(
@@ -510,7 +515,7 @@ pub fn open_anchored(
         std::iter::once(drawn).chain(subject).collect(),
         main_action,
         empty_press(keeps_focus_on_empty_click),
-        focus::ReturnTo::Opener,
+        returns_to,
         None,
         mark,
         window,
@@ -618,6 +623,12 @@ fn close_later(window: AnyWindowHandle, id: LayerId, cx: &mut App) {
 /// Close the layer `id`, if it is still open, and anything opened on top of it. If focus was inside what closed, it
 /// returns to what held it when `id` opened, or where `id`'s opener said instead ([`Dialog::returns_to`]).
 pub fn close(id: LayerId, window: &mut Window, cx: &mut App) {
+    close_as(id, false, window, cx);
+}
+
+/// [`close`], saying whether the user dismissed the layer (`dismissed`), which decides where a layer that returns
+/// focus home on Escape only ([`focus::ReturnTo::HomeOnEscape`]) sends it.
+fn close_as(id: LayerId, dismissed: bool, window: &mut Window, cx: &mut App) {
     let Some(stack) = stack(window, cx) else {
         return;
     };
@@ -636,7 +647,12 @@ pub fn close(id: LayerId, window: &mut Window, cx: &mut App) {
     if (focus_was_inside || window.focused(cx).is_none())
         && let Some(bottom) = closed.first()
     {
-        focus::return_to(bottom.returns_to, bottom.opener.as_ref(), window, cx);
+        let returns_to = match bottom.returns_to {
+            focus::ReturnTo::HomeOnEscape if dismissed => focus::ReturnTo::Home,
+            focus::ReturnTo::HomeOnEscape => focus::ReturnTo::Opener,
+            other => other,
+        };
+        focus::return_to(returns_to, bottom.opener.as_ref(), window, cx);
     }
 }
 
@@ -711,7 +727,7 @@ pub fn dismiss(id: LayerId, window: &mut Window, cx: &mut App) {
     };
     let dismissal = hook.map_or(Dismissal::Close, |hook| hook(window, cx));
     if dismissal == Dismissal::Close && is_open(id, window, cx) {
-        close(id, window, cx);
+        close_as(id, true, window, cx);
     }
 }
 
