@@ -48,7 +48,8 @@ use axum::http::{HeaderMap, HeaderValue, Method, Request, StatusCode, header};
 use axum::response::IntoResponse;
 use farhelm_proto::ui_channel::{
     Availability, ClientMessage, Collection, CollectionChanges, CollectionMeta, CollectionState,
-    Command, ListCounts, PREFERENCES_KEY, Reply, SESSION_QUERY_PATH, ServerMessage, SessionQuery,
+    Command, KeyedEntry, ListCounts, PREFERENCES_KEY, Reply, SESSION_QUERY_PATH, ServerMessage,
+    SessionQuery,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, VecDeque};
@@ -79,13 +80,17 @@ const MAX_REPLY_BODY: usize = 32 * 1024 * 1024;
 /// that stopped reading would otherwise park the writer for good.
 const WRITE_DEADLINE: Duration = Duration::from_secs(10);
 
-/// How long the GUI may be silent before the helm pings it, and then how long
-/// the ping may go unanswered before the channel is dropped. The GUI sends its
-/// own heartbeat far more often, so a live GUI never meets this; it exists so
-/// that a GUI that vanished without closing gives up the seat within about a
-/// minute, rather than holding it (and making agent approvals wait on a window
-/// nobody sees) until TCP notices.
-const IDLE_PING_INTERVAL: Duration = Duration::from_secs(30);
+/// How long the GUI may send nothing at all before the helm closes its
+/// channel.
+///
+/// The GUI's client heartbeats every 5 seconds whatever else it is doing, so a
+/// live GUI never comes near this. It exists so that a GUI that vanished
+/// without closing (a remote helm whose network went away; embedded, a closed
+/// socket is already reliable) gives up the seat within about a minute, rather
+/// than holding it, and making agent approvals wait on a window nobody sees,
+/// until TCP notices. The helm sends no keepalive of its own: the GUI's
+/// heartbeat is the liveness signal, so silence is all the helm has to watch.
+const SILENCE_CLOSE: Duration = Duration::from_secs(60);
 
 /// Outgoing messages queued between the channel and its socket writer.
 /// Backpressure past this is the write deadline's job, not memory's.
@@ -114,118 +119,53 @@ pub(crate) const MAX_QUEUED_COMMANDS: usize = 64;
 /// it does not reconnect on its own. Agent approvals ask [`Self::is_held`]
 /// whether a window is open to show a card in, so only a live channel counts:
 /// the helm's own subscriptions to the fleet feed never do.
+///
+/// The seat holds the sending half of the current holder's displacement
+/// signal, and the holder's channel holds the receiving half for as long as it
+/// runs. So "held" is simply "that receiver still exists": a channel that ends
+/// for any reason (the GUI left, a write failed, it was displaced) drops its
+/// receiver and gives the seat up with nothing to release by hand, and a
+/// displaced channel ending later cannot free the seat its successor holds,
+/// because the seat no longer points at it.
 #[derive(Default)]
 pub struct UiSeat {
-    inner: Mutex<SeatInner>,
-}
-
-#[derive(Default)]
-struct SeatInner {
-    /// Bumped per claim, so a released claim can tell whether it still holds
-    /// the seat or was displaced in the meantime.
-    next: u64,
-    holder: Option<(u64, oneshot::Sender<()>)>,
-}
-
-/// One channel's hold on the seat. Dropping it gives the seat up, unless a
-/// newer channel already took it.
-pub struct SeatClaim {
-    seat: Arc<UiSeat>,
-    id: u64,
+    holder: Mutex<Option<oneshot::Sender<()>>>,
 }
 
 impl UiSeat {
-    /// Take the seat for a new channel, displacing any holder. The receiver
-    /// resolves when a later channel displaces this one.
-    pub fn take(self: &Arc<Self>) -> (SeatClaim, oneshot::Receiver<()>) {
+    /// Take the seat for a new channel, displacing any holder. Keep the
+    /// returned receiver for as long as the channel runs: it resolves when a
+    /// later channel displaces this one, and dropping it gives the seat up.
+    pub fn take(&self) -> oneshot::Receiver<()> {
         let (tx, rx) = oneshot::channel();
-        let mut inner = self.inner.lock().expect("seat mutex poisoned");
-        inner.next += 1;
-        let id = inner.next;
-        if let Some((_, displace)) = inner.holder.replace((id, tx)) {
+        let previous = self
+            .holder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .replace(tx);
+        if let Some(displace) = previous {
             let _ = displace.send(());
         }
-        (
-            SeatClaim {
-                seat: Arc::clone(self),
-                id,
-            },
-            rx,
-        )
+        rx
     }
 
     /// Whether a UI channel holds the seat right now: what "a Farhelm window
     /// is open" means for agent approvals. A snapshot, stale once read.
     pub fn is_held(&self) -> bool {
-        self.inner
+        self.holder
             .lock()
-            .expect("seat mutex poisoned")
-            .holder
-            .is_some()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|holder| !holder.is_closed())
     }
 
     /// Hold the seat with no channel behind it, for tests whose subject is
     /// what an open window allows (agent approvals) rather than the channel.
+    /// The seat is held until the returned guard is dropped.
     #[cfg(test)]
-    pub fn hold(self: &Arc<Self>) -> SeatClaim {
-        self.take().0
+    pub fn hold(&self) -> oneshot::Receiver<()> {
+        self.take()
     }
-}
-
-impl Drop for SeatClaim {
-    fn drop(&mut self) {
-        let mut inner = self.seat.inner.lock().expect("seat mutex poisoned");
-        if inner.holder.as_ref().is_some_and(|(id, _)| *id == self.id) {
-            inner.holder = None;
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Paths
-// ---------------------------------------------------------------------------
-
-/// Refuse a command path that is not canonical, instead of normalizing it.
-///
-/// Paths are a trust boundary: the GUI splices ids it got from hosts (a tab
-/// id, a session id) into paths, and the helm does not check those ids. An id
-/// like `../../victim`, or one that decodes to a slash, must not be able to
-/// retarget the request, so anything a URL normalizer would rewrite is refused
-/// here: empty segments, `.` and `..` segments (also percent-encoded), and
-/// segments that decode to `/` or `\`. The GUI's path builder percent-encodes
-/// every segment, so a correct GUI never sends one of these.
-pub(crate) fn check_command_path(path: &str) -> Result<(), &'static str> {
-    // First of all, the path must be something a request can carry at all:
-    // a space or a control character fails here, not later when the request
-    // is built.
-    if path.parse::<axum::http::uri::PathAndQuery>().is_err() {
-        return Err("a command path must be a valid URI path and query");
-    }
-    // Checked on the whole string, query included: the URI parser stops at a `#` and drops the rest, so a fragment
-    // hidden in the query would otherwise be cut off silently instead of refused.
-    if path.contains('#') {
-        return Err("a command path may not carry a fragment");
-    }
-    let path = path.split_once('?').map_or(path, |(path, _query)| path);
-    let Some(rest) = path.strip_prefix("/api/") else {
-        return Err("a command path must start with /api/");
-    };
-    for segment in rest.split('/') {
-        if segment.is_empty() {
-            return Err("a command path may not have empty segments");
-        }
-        if segment.contains('\\') {
-            return Err("a command path may not contain a backslash");
-        }
-        let decoded = percent_encoding::percent_decode_str(segment).collect::<Vec<u8>>();
-        if decoded == b"." || decoded == b".." {
-            return Err("a command path may not have dot segments");
-        }
-        if decoded.contains(&b'/') || decoded.contains(&b'\\') {
-            return Err("a command path may not encode a slash or backslash");
-        }
-    }
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -390,7 +330,10 @@ pub(crate) fn diff(
             let mut upsert = Vec::new();
             for (key, value) in &projected.entries {
                 if previous.entries.get(key) != Some(value) {
-                    upsert.push(value.clone());
+                    upsert.push(KeyedEntry {
+                        key: key.clone(),
+                        value: value.clone(),
+                    });
                 }
             }
             let entries: BTreeMap<String, Value> = projected.entries.into_iter().collect();
@@ -439,8 +382,9 @@ pub(crate) struct Channel {
     sent: BTreeMap<Collection, Sent>,
 }
 
-/// A command in flight: the routed request, or nothing for a channel-local
-/// command, which [`run`] handles itself.
+/// A routed command in flight: the future that runs it through the router
+/// and yields its reply. Channel-local commands never become one; [`run`]
+/// answers those itself.
 type InFlight = Pin<Box<dyn Future<Output = Reply> + Send>>;
 
 impl Channel {
@@ -460,10 +404,10 @@ impl Channel {
 
     /// Build the routed request for `method path` with an optional JSON body.
     ///
-    /// Fails only for a path no request can carry; command paths are checked
-    /// against that first ([`check_command_path`]), and the channel's own
-    /// paths are built from encoded parts, so a failure here is answered as a
-    /// refusal or an unavailable read rather than trusted never to happen.
+    /// Fails only for a path no request can carry; command paths are
+    /// canonical by their type (`ApiPath`), and the channel's own paths are
+    /// built from encoded parts, so a failure here is answered as a refusal or
+    /// an unavailable read rather than trusted never to happen.
     fn request(
         &self,
         method: Method,
@@ -517,7 +461,12 @@ impl Channel {
                 .meta
                 .order
                 .iter()
-                .filter_map(|key| sent.entries.get(key).cloned())
+                .filter_map(|key| {
+                    sent.entries.get(key).map(|value| KeyedEntry {
+                        key: key.clone(),
+                        value: value.clone(),
+                    })
+                })
                 .collect();
             collections.push(CollectionState {
                 collection: spec.collection,
@@ -570,10 +519,14 @@ impl Channel {
             "PATCH" => Method::PATCH,
             other => return refused(format!("a command may not use the method {other:?}")),
         };
-        if let Err(reason) = check_command_path(&command.path) {
-            return refused(reason.to_string());
+        // The path is canonical by its type: a command whose path is not did
+        // not decode, so it never got this far (`farhelm_proto::ui_channel::ApiPath`).
+        // A canonical path can still encode a separator inside one segment (an id
+        // that holds a `/`); routes would decode it into two, so it is refused here.
+        if command.path.encodes_a_separator() {
+            return refused("a command path may not encode a slash or backslash".to_string());
         }
-        let request = match self.request(method, &command.path, command.body.as_ref()) {
+        let request = match self.request(method, command.path.as_str(), command.body.as_ref()) {
             Ok(request) => request,
             Err(error) => return refused(format!("the command cannot be sent: {error}")),
         };
@@ -685,7 +638,7 @@ pub(crate) async fn run(
             let Some(command) = queue.pop_front() else {
                 break;
             };
-            if command.path == SESSION_QUERY_PATH {
+            if command.path.as_str() == SESSION_QUERY_PATH {
                 let (changes, reply) = channel.set_session_query(command).await;
                 for message in changes.into_iter().chain([ServerMessage::Reply(reply)]) {
                     if outgoing.send(message).await.is_err() {
@@ -752,7 +705,8 @@ pub(crate) async fn run(
 ///
 /// Authentication has already run (the protected router's middleware); the
 /// credential it admitted is reused for every routed command. The seat is
-/// taken before the upgrade, so a displaced channel learns it promptly.
+/// taken before the upgrade, so a displaced channel learns it promptly; the
+/// channel holds the seat for exactly as long as it holds `displaced`.
 pub(crate) async fn ui_ws(
     State(state): State<Arc<AppState>>,
     upgrade: WebSocketUpgrade,
@@ -764,7 +718,7 @@ pub(crate) async fn ui_ws(
     let Ok(authorization) = HeaderValue::from_str(&format!("Bearer {secret}")) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let (claim, displaced) = state.manager.ui_seat().take();
+    let displaced = state.manager.ui_seat().take();
     let channel = Channel::new(
         crate::api_router(Arc::clone(&state)),
         authorization,
@@ -776,89 +730,105 @@ pub(crate) async fn ui_ws(
         .max_frame_size(MAX_CLIENT_MESSAGE)
         .max_message_size(MAX_CLIENT_MESSAGE)
         .on_upgrade(move |socket| async move {
-            serve_socket(socket, channel, displaced, feed).await;
-            drop(claim);
+            let (tx, rx) = futures_util::StreamExt::split(socket);
+            serve_socket(tx, rx, channel, displaced, feed).await;
         })
         .into_response()
 }
 
 /// Bridge one WebSocket to [`run`]: decode what the GUI sends, encode what
-/// the channel sends, keep liveness, and end everything together.
-async fn serve_socket(
-    socket: ws::WebSocket,
+/// the channel sends, close on silence, and end everything together.
+///
+/// Generic over the socket's two halves so tests can stand in a sink that
+/// stops accepting writes; production passes the halves of an axum socket.
+///
+/// Three tasks, and how each ending ends the others:
+///
+/// - The channel ([`run`]) ends when the GUI goes away, the channel breaks or
+///   the seat is taken. Its writer then drains what it queued, so a displaced
+///   channel's last message still reaches the GUI before the socket closes.
+/// - The writer owns the outgoing queue. If a write fails or misses its
+///   deadline, the writer ends, and with it the whole channel: [`run`] is
+///   dropped, which drops its seat receiver and so frees the seat. A channel
+///   whose GUI can no longer be written to must not keep the seat (agent
+///   approvals would wait on a window that will never show their card).
+/// - The reader ends on a close, an error, a message it cannot decode (a
+///   command whose path is not canonical is one: see `ApiPath`), or
+///   [`SILENCE_CLOSE`] without any frame.
+pub(crate) async fn serve_socket<Tx, Rx>(
+    mut tx: Tx,
+    mut rx: Rx,
     channel: Channel,
     displaced: oneshot::Receiver<()>,
     feed: watch::Receiver<u64>,
-) {
+) where
+    Tx: futures_util::Sink<ws::Message> + Unpin,
+    Rx: futures_util::Stream<Item = Result<ws::Message, axum::Error>> + Unpin,
+{
     use futures_util::{SinkExt, StreamExt};
 
-    let (mut tx, mut rx) = socket.split();
     let (incoming_tx, incoming_rx) = mpsc::channel(INCOMING_QUEUE);
     let (outgoing_tx, mut outgoing_rx) = mpsc::channel::<ServerMessage>(OUTGOING_QUEUE);
-    let (ping_tx, mut ping_rx) = mpsc::channel::<()>(1);
 
-    // The channel, then the writer draining what it queued: a displaced
-    // channel's last message still reaches the GUI before the socket closes.
-    let channel_and_writer = async move {
-        let core = run(channel, incoming_rx, outgoing_tx, displaced, feed);
-        let writer = async {
-            loop {
-                let frame = tokio::select! {
-                    message = outgoing_rx.recv() => match message {
-                        Some(message) => ws::Message::Text(
-                            serde_json::to_string(&message).expect("wire types serialize").into(),
-                        ),
-                        None => break,
-                    },
-                    Some(()) = ping_rx.recv() => ws::Message::Ping(Vec::new().into()),
-                };
-                match tokio::time::timeout(WRITE_DEADLINE, tx.send(frame)).await {
-                    Ok(Ok(())) => {}
-                    _ => return,
+    let core = run(channel, incoming_rx, outgoing_tx, displaced, feed);
+    // `async move`: the writer owns the outgoing queue and the socket's write
+    // half, so its ending is final for both.
+    let writer = async move {
+        while let Some(message) = outgoing_rx.recv().await {
+            let frame = match serde_json::to_string(&message) {
+                Ok(text) => ws::Message::Text(text.into()),
+                Err(error) => {
+                    tracing::warn!(%error, "a UI channel message did not serialize; closing the channel");
+                    return;
+                }
+            };
+            match tokio::time::timeout(WRITE_DEADLINE, tx.send(frame)).await {
+                Ok(Ok(())) => {}
+                _ => {
+                    tracing::debug!("a UI channel write failed or timed out; closing the channel");
+                    return;
                 }
             }
-            let _ = tokio::time::timeout(WRITE_DEADLINE, tx.send(ws::Message::Close(None))).await;
-        };
-        tokio::join!(core, writer);
+        }
+        let _ = tokio::time::timeout(WRITE_DEADLINE, tx.send(ws::Message::Close(None))).await;
+    };
+    let channel_and_writer = async move {
+        tokio::pin!(writer);
+        tokio::select! {
+            // The channel ended on its own: let the writer drain and close.
+            () = core => writer.await,
+            // The writer ended first, which only a failed write does while
+            // the channel still runs: end the channel with it.
+            () = &mut writer => {}
+        }
     };
 
-    // The reader: any frame proves the GUI is alive; silence earns one Ping,
-    // and silence after that ends the channel.
     let reader = async move {
-        let idle = tokio::time::sleep(IDLE_PING_INTERVAL);
-        tokio::pin!(idle);
-        let mut awaiting = false;
         loop {
-            tokio::select! {
-                () = &mut idle => {
-                    if awaiting || ping_tx.send(()).await.is_err() {
-                        return;
-                    }
-                    awaiting = true;
-                    idle.as_mut().reset(tokio::time::Instant::now() + IDLE_PING_INTERVAL);
+            let frame = match tokio::time::timeout(SILENCE_CLOSE, rx.next()).await {
+                Ok(frame) => frame,
+                Err(_) => {
+                    tracing::debug!("a UI channel sent nothing for {SILENCE_CLOSE:?}; closing it");
+                    return;
                 }
-                frame = rx.next() => {
-                    let message = match frame {
-                        Some(Ok(ws::Message::Text(text))) => {
-                            match serde_json::from_str::<ClientMessage>(text.as_str()) {
-                                Ok(message) => Some(message),
-                                Err(error) => {
-                                    tracing::debug!(%error, "a UI channel sent a message it has no word for; closing it");
-                                    return;
-                                }
-                            }
+            };
+            let message = match frame {
+                Some(Ok(ws::Message::Text(text))) => {
+                    match serde_json::from_str::<ClientMessage>(text.as_str()) {
+                        Ok(message) => message,
+                        Err(error) => {
+                            tracing::debug!(%error, "a UI channel sent a message it has no word for; closing it");
+                            return;
                         }
-                        Some(Ok(ws::Message::Ping(_) | ws::Message::Pong(_))) => None,
-                        Some(Ok(ws::Message::Binary(_) | ws::Message::Close(_))) | None | Some(Err(_)) => return,
-                    };
-                    awaiting = false;
-                    idle.as_mut().reset(tokio::time::Instant::now() + IDLE_PING_INTERVAL);
-                    if let Some(message) = message
-                        && incoming_tx.send(message).await.is_err()
-                    {
-                        return;
                     }
                 }
+                Some(Ok(ws::Message::Ping(_) | ws::Message::Pong(_))) => continue,
+                Some(Ok(ws::Message::Binary(_) | ws::Message::Close(_))) | None | Some(Err(_)) => {
+                    return;
+                }
+            };
+            if incoming_tx.send(message).await.is_err() {
+                return;
             }
         }
     };

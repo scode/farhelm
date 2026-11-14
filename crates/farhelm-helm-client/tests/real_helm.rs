@@ -17,7 +17,7 @@ use farhelm_helm_client::{
     ApiPath, ChannelConfig, ChannelEvent, ChannelEvents, ChannelState, CommandFuture,
     HelmConnection, HelmEndpoint, Method, PushedState,
 };
-use farhelm_proto::ui_channel::{Collection, Entry, HostView, Preferences};
+use farhelm_proto::ui_channel::{Collection, HostView, Preferences};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -275,7 +275,8 @@ fn a_dropped_connection_reconnects_with_a_consistent_snapshot() {
         assert_eq!(held_hosts.len(), fresh.ordered::<HostView>().len());
         for held in held_hosts {
             let fresh_host = fresh
-                .get::<HostView>(&held.key())
+                // Hosts are keyed by their registry id on the wire.
+                .get::<HostView>(&held.id.to_string())
                 .expect("every held host is in the fresh snapshot");
             let mut held = held.clone();
             held.state = fresh_host.state.clone();

@@ -44,8 +44,8 @@ use tokio::time::{Instant, sleep_until, timeout};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::ChannelConfig;
-use crate::path::ApiPath;
 use crate::ws::{ConnectError, HelmEndpoint, open_socket};
+use farhelm_proto::ui_channel::ApiPath;
 
 /// How many events may wait for the caller before the stream stops reading its socket. A grid output message is
 /// usually a few lines of changes, so this is a few screens of backlog; the number is a judgment, not a measurement.
@@ -217,7 +217,7 @@ pub(crate) fn attach_path(
     if let Some(tab) = &attach.tab {
         query.push(("tab", tab.as_str()));
     }
-    Ok(ApiPath::api(&segments)?.with_query(&query))
+    ApiPath::api(&segments)?.with_query(&query)
 }
 
 /// The helm's text frames on a terminal socket. Anything else is ignored, so a newer helm can add notices.

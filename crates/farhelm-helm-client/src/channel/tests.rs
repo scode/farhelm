@@ -463,7 +463,10 @@ async fn an_out_of_order_reply_breaks_the_channel() {
 #[tokio::test(start_paused = true)]
 async fn changes_the_gui_cannot_apply_break_the_channel() {
     let undecodable = ServerMessage::Changes(CollectionChanges {
-        upsert: vec![serde_json::json!({"not": "an approval"})],
+        upsert: vec![farhelm_proto::ui_channel::KeyedEntry {
+            key: "a".into(),
+            value: serde_json::json!({"not": "an approval"}),
+        }],
         ..match changes(&["a"]) {
             ServerMessage::Changes(c) => c,
             _ => unreachable!(),

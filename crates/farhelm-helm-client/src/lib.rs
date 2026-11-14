@@ -14,7 +14,7 @@
 //!   resolves only after every event the helm sent before its reply has been handed out.
 //! - [`collections`] applies that feed to keyed collections with one generic code path.
 //! - [`terminal`] attaches terminal streams (the agent terminal and tabs) and reconnects them.
-//! - [`path`] is the only constructor of a command path.
+//! - [`ApiPath`] (from `farhelm-proto`, where the helm decodes it too) is the only constructor of a command path.
 //! - [`fake`] stands in for the helm in GUI tests, in process and without a runtime.
 //!
 //! NOTE: There is no HTTP client here yet. File transfers (attachment uploads, downloads) are the one thing that does
@@ -24,7 +24,6 @@
 pub mod channel;
 pub mod collections;
 pub mod fake;
-pub mod path;
 pub mod terminal;
 mod ws;
 
@@ -33,7 +32,7 @@ pub use channel::{
     CommandFuture, Method,
 };
 pub use collections::{Collections, Pushed, PushedChanges, PushedEntry, PushedState};
-pub use path::{ApiPath, PathError};
+pub use farhelm_proto::ui_channel::{ApiPath, PathError};
 pub use ws::{ConnectError, HelmEndpoint};
 
 use std::sync::Arc;

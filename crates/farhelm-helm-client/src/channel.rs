@@ -45,8 +45,8 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, sleep_until};
 
 use crate::collections::{PushedChanges, PushedState, decode_changes, decode_state};
-use crate::path::ApiPath;
 use crate::ws::ConnectError;
+use farhelm_proto::ui_channel::ApiPath;
 
 /// Timing for one channel, and for each terminal stream ([`crate::terminal`]), which follows the same liveness and
 /// reconnect rules. Tests shrink or pause these; nothing here reads the wall clock (all of it is tokio time,
@@ -517,7 +517,7 @@ impl Task {
                         in_flight.push_back(InFlight { id, done });
                         // No local queue or cap: the helm closes a channel whose queue overflows, and that is the
                         // same break as any other.
-                        let command = Command { id, method: method.as_str().into(), path: path.as_str().into(), body };
+                        let command = Command { id, method: method.as_str().into(), path, body };
                         if link.tx.send(ClientMessage::Command(command)).is_err() {
                             break Ended::Broken { was_up: up };
                         }

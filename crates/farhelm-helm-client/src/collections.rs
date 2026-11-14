@@ -6,9 +6,12 @@
 //!
 //! Every collection (sessions, hosts, preferences, approvals) then goes through the same three operations: install a
 //! snapshot, upsert or remove entries by key, and replace the metadata (availability, order, counts). There is no
-//! per-collection code path to drift. The per-collection facts are which [`Entry`] type keys its entries (from the
-//! proto crate, where each type's round-trip test pins the key to the one the helm uses) and which [`PushedEntry`]
-//! variant carries it, and both live in exhaustive matches here.
+//! per-collection code path to drift. Every entry arrives with its key ([`KeyedEntry`]), the one the helm diffed it
+//! by, and that is the key it is filed under, so applying a change never derives a key from an entry. Looking an entry
+//! up by a typed id ([`Collections::get`]) still needs the helm's spelling of that key (a host's numeric id as a
+//! string, for example); a helper in `farhelm-proto` that spells it comes with the first view that looks entries up
+//! that way. The per-collection facts are which type an entry decodes as and which
+//! [`PushedEntry`] variant carries it, and both live in exhaustive matches here.
 //!
 //! [`Collections`] is the one copy of this state. Views read it through [`Collections::ordered`] and
 //! [`Collections::get`], which hand out references; a view that kept its own copy of an entry would be a second
@@ -18,10 +21,10 @@ use std::collections::{BTreeMap, HashMap};
 
 use farhelm_proto::approvals::PendingApproval;
 use farhelm_proto::ui_channel::{
-    Collection, CollectionChanges, CollectionMeta, CollectionState, Entry, HostView, Preferences,
-    SessionRow,
+    Collection, CollectionChanges, CollectionMeta, CollectionState, HostView, KeyedEntry,
+    Preferences, SessionRow,
 };
-use serde_json::Value;
+use serde::de::DeserializeOwned;
 
 // ---------------------------------------------------------------------------
 // Typed entries
@@ -37,7 +40,7 @@ pub enum PushedEntry {
 }
 
 /// An entry type that has its own pushed collection, so a reader can name the type and get the collection with it.
-pub trait Pushed: Entry {
+pub trait Pushed: DeserializeOwned {
     /// The collection whose entries are this type.
     const COLLECTION: Collection;
 
@@ -134,31 +137,32 @@ pub fn decode_changes(changes: CollectionChanges) -> Result<PushedChanges, Decod
     })
 }
 
-/// Decode and key every entry with its collection's type. The match is exhaustive on purpose: a new collection fails
-/// to compile here until someone names its entry type.
+/// Decode every entry as its collection's type, keeping the key it arrived under. The match is exhaustive on purpose:
+/// a new collection fails to compile here until someone names its entry type.
 fn decode_entries(
     collection: Collection,
-    entries: Vec<Value>,
+    entries: Vec<KeyedEntry>,
 ) -> Result<Vec<(String, PushedEntry)>, DecodeError> {
-    let decode: fn(Value) -> Result<(String, PushedEntry), serde_json::Error> = match collection {
-        Collection::Sessions => |value| typed(value, PushedEntry::Session),
-        Collection::Hosts => |value| typed(value, PushedEntry::Host),
-        Collection::Preferences => |value| typed(value, PushedEntry::Preferences),
-        Collection::Approvals => |value| typed(value, PushedEntry::Approval),
-    };
+    let decode: fn(KeyedEntry) -> Result<(String, PushedEntry), serde_json::Error> =
+        match collection {
+            Collection::Sessions => |value| typed(value, PushedEntry::Session),
+            Collection::Hosts => |value| typed(value, PushedEntry::Host),
+            Collection::Preferences => |value| typed(value, PushedEntry::Preferences),
+            Collection::Approvals => |value| typed(value, PushedEntry::Approval),
+        };
     entries
         .into_iter()
         .map(|entry| decode(entry).map_err(|error| DecodeError { collection, error }))
         .collect()
 }
 
-/// Decode one entry as `T` and key it with `T`'s own key, the one the helm diffs by.
-fn typed<T: Entry>(
-    value: Value,
+/// Decode one entry's value as `T`, filed under the key it arrived with.
+fn typed<T: DeserializeOwned>(
+    entry: KeyedEntry,
     wrap: fn(T) -> PushedEntry,
 ) -> Result<(String, PushedEntry), serde_json::Error> {
-    let entry: T = serde_json::from_value(value)?;
-    Ok((entry.key(), wrap(entry)))
+    let value: T = serde_json::from_value(entry.value)?;
+    Ok((entry.key, wrap(value)))
 }
 
 // ---------------------------------------------------------------------------
@@ -283,7 +287,7 @@ impl Collections {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use farhelm_proto::ui_channel::Availability;
+    use farhelm_proto::ui_channel::{Availability, PREFERENCES_KEY};
     use serde_json::json;
 
     fn meta(order: &[&str]) -> CollectionMeta {
@@ -294,10 +298,10 @@ mod tests {
         }
     }
 
-    /// An approval whose `destination` carries `label`, so two versions of one key differ. Built from the type so
-    /// the test follows the wire shape instead of hand-copying it.
-    fn approval(id: &str, label: &str) -> Value {
-        serde_json::to_value(PendingApproval {
+    /// An approval whose `destination` carries `label`, so two versions of one key differ, under its id as the wire
+    /// key. Built from the type so the test follows the wire shape instead of hand-copying it.
+    fn approval(id: &str, label: &str) -> KeyedEntry {
+        let value = serde_json::to_value(PendingApproval {
             id: id.into(),
             host_id: 1,
             host_name: "local".into(),
@@ -313,18 +317,26 @@ mod tests {
             own_host_session_action: false,
             expires_at_ms: 0,
         })
-        .unwrap()
+        .unwrap();
+        KeyedEntry {
+            key: id.into(),
+            value,
+        }
     }
 
-    fn preferences(compact: bool) -> Value {
-        serde_json::to_value(Preferences {
+    fn preferences(compact: bool) -> KeyedEntry {
+        let value = serde_json::to_value(Preferences {
             compact: Some(compact),
             ..Preferences::default()
         })
-        .unwrap()
+        .unwrap();
+        KeyedEntry {
+            key: PREFERENCES_KEY.into(),
+            value,
+        }
     }
 
-    fn state(collection: Collection, order: &[&str], entries: Vec<Value>) -> PushedState {
+    fn state(collection: Collection, order: &[&str], entries: Vec<KeyedEntry>) -> PushedState {
         decode_state(CollectionState {
             collection,
             meta: meta(order),
@@ -336,7 +348,7 @@ mod tests {
     fn changes(
         collection: Collection,
         order: &[&str],
-        upsert: Vec<Value>,
+        upsert: Vec<KeyedEntry>,
         remove: &[&str],
     ) -> PushedChanges {
         decode_changes(CollectionChanges {
@@ -420,15 +432,21 @@ mod tests {
         );
     }
 
-    /// An entry without a key cannot be filed, and a half-decoded message would leave the list inconsistent with
-    /// both the old and the new state, so one bad entry fails the whole message's decode. The channel turns that
-    /// failure into a broken connection (its own tests cover that half).
+    /// An entry that is not its collection's type cannot be filed, and a half-decoded message would leave the list
+    /// inconsistent with both the old and the new state, so one bad entry fails the whole message's decode. The
+    /// channel turns that failure into a broken connection (its own tests cover that half).
     #[test]
     fn one_undecodable_entry_fails_the_whole_decode() {
         let result = decode_changes(CollectionChanges {
             collection: Collection::Approvals,
             meta: meta(&[]),
-            upsert: vec![approval("b", "two"), json!({"not": "an approval"})],
+            upsert: vec![
+                approval("b", "two"),
+                KeyedEntry {
+                    key: "c".into(),
+                    value: json!({"not": "an approval"}),
+                },
+            ],
             remove: vec!["a".into()],
         });
         assert!(
@@ -441,7 +459,7 @@ mod tests {
             ),
             "{result:?}"
         );
-        // A valid entry of another collection's type is just as undecodable here: keys come from the right type only.
+        // A valid entry of another collection's type is just as undecodable here: it must decode as this one's type.
         assert!(
             decode_state(CollectionState {
                 collection: Collection::Preferences,
