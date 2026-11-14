@@ -201,6 +201,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   scrolls in a background window, which is common while agents work. Decided on 2026-11-13 to match today; revisit the
   tradeoff.
 
+- **Revisit the KDE-blur dependency decision.** GPUI's Linux backend pulls in `wayland-protocols-plasma`, a crate
+  declared MIT that bundles KDE Wayland protocol XML files licensed LGPL-2.1-or-later, which are compiled into generated
+  bindings in the Linux desktop app. GPUI uses it only as a fallback for blurring a window's background on older KDE
+  Plasma, and Farhelm never asks for a blurred window. Decided on 2026-11-13: remove it with a small patch to the
+  vendored GPUI if that needs no horrible hacks, otherwise accept it as protocol definitions rather than code. Revisit
+  whichever was done, and whether the license check should catch GPL-family files bundled inside a crate whose declared
+  license is permissive.
+
 ### Tensorlake
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
