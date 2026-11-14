@@ -92,7 +92,10 @@ pub(super) fn guarded_permission_help(harness: Option<LaunchHarness>) -> String 
 /// `permission_help`): the mode's heading and explanation, Guarded's flags from the same definition the helm uses, and
 /// the caveat that Farhelm starts the agent this way but cannot guarantee how it behaves. Paragraphs are separated by
 /// blank lines, a heading from its explanation by a line break.
-pub(super) fn permission_help(
+///
+/// A session row's permission shield describes an agent launch with this same help for its stored permission
+/// (`session_list/row_marks.rs`), as the old row did, so the launcher's explanation and the row's never drift apart.
+pub(crate) fn permission_help(
     harness: LaunchHarness,
     permission: Option<LaunchPermission>,
 ) -> String {

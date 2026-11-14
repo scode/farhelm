@@ -36,6 +36,8 @@
 //! - [`assets`]: the bundled fonts and icons.
 //! - [`terminal`]: a session terminal's renderer, an uncached view that owns its grid model.
 //! - [`marks`]: the agent harnesses' marks as plain geometry, kept from the old Dioxus UI.
+//! - [`harness`]: the GUI's per-harness vocabulary: which mark an agent type draws, its picture and identity color,
+//!   the agent's product name, and its status-line words for a mode without checks.
 //! - [`launcher`]: the session launcher (New, Clone, Replace with, Restart with).
 //! - [`templates`]: launch templates and what launches from them (applying templates to the launcher's draft, so far).
 //! - [`desktop`]: the desktop integration: the menu bar, quitting when the main window closes, the window's saved
@@ -61,6 +63,7 @@ pub mod components;
 pub mod desktop;
 pub mod drafts;
 pub mod focus;
+pub mod harness;
 pub mod host_text;
 pub mod hosts;
 pub mod launcher;

@@ -13,11 +13,10 @@ use std::time::Duration;
 
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::ui_channel::{
-    Availability, Collection, CollectionState, HostView, KeyedEntry, PREFERENCES_KEY, Preferences,
-    SIDEBAR_WIDTH_RANGE,
+    Availability, CollectionState, HostView, Preferences, SIDEBAR_WIDTH_RANGE,
 };
 use gpui::{
-    AppContext as _, DriverNode, DriverText, HeadlessAppContext, Modifiers, Pixels, Role,
+    AppContext as _, DriverNode, DriverText, HeadlessAppContext, Modifiers, Pixels, Point, Role,
     TestAppContext, VisualTestContext, point, px, size,
 };
 use gpui_component::Root;
@@ -29,15 +28,17 @@ use super::row::{
     meta_parts,
 };
 use super::status::{self, HostLookup};
-use super::tests::{TEST_NOW, collections, listing, open_main, painted, session};
+use super::tests::{
+    TEST_NOW, collections, listing, open_main, painted, preferences_state, session,
+};
 use crate::main_view::MainView;
-use crate::test_support::{self, frame, meta};
+use crate::test_support::{self, frame};
 use crate::{assets, bootstrap, layers, render_count, theme, ticker};
 
 // ---- Helpers --------------------------------------------------------------------------------------------------------
 
 /// The node drawn under `id`, if any.
-fn node<'a>(nodes: &'a [DriverNode], id: &str) -> Option<&'a DriverNode> {
+pub(super) fn node<'a>(nodes: &'a [DriverNode], id: &str) -> Option<&'a DriverNode> {
     nodes
         .iter()
         .find(|node| node.element_id.as_deref() == Some(id))
@@ -45,7 +46,7 @@ fn node<'a>(nodes: &'a [DriverNode], id: &str) -> Option<&'a DriverNode> {
 
 /// The lines of text painted under `id`, at any depth, in paint order: where a node's text is, since text is painted
 /// by the text elements inside it.
-fn texts_within(nodes: &[DriverNode], id: &str) -> Vec<DriverText> {
+pub(super) fn texts_within(nodes: &[DriverNode], id: &str) -> Vec<DriverText> {
     let Some(top) = nodes
         .iter()
         .position(|node| node.element_id.as_deref() == Some(id))
@@ -95,14 +96,28 @@ fn age_text(nodes: &[DriverNode], key: &str) -> Option<String> {
 /// The hover help showing once the pointer has moved from a corner of `row` (inside its padding, clear of every mark)
 /// onto the middle of the mark drawn under `selector` and rested for the hover delay: the way a pointer reaches a mark
 /// inside a row, so the mark's own hover is the latest.
-fn help_after_crossing(cx: &mut VisualTestContext, row: &str, selector: &str) -> Option<String> {
+pub(super) fn help_after_crossing(
+    cx: &mut VisualTestContext,
+    row: &str,
+    selector: &str,
+) -> Option<String> {
     let nodes = frame(cx);
-    let bounds = |id: &str| match node(&nodes, id) {
-        Some(node) => node.bounds,
-        None => panic!("{id} was not drawn"),
+    let Some(mark) = node(&nodes, selector) else {
+        panic!("{selector} was not drawn");
     };
-    let corner = bounds(row).origin + point(px(2.), px(2.));
-    for at in [corner, bounds(selector).center()] {
+    let at = mark.bounds.center();
+    help_at(cx, row, at)
+}
+
+/// The hover help showing once the pointer has moved from a corner of `row` onto `at` and rested for the hover delay;
+/// for a point that is not one node's centre, such as a picture inside a mark.
+pub(super) fn help_at(cx: &mut VisualTestContext, row: &str, at: Point<Pixels>) -> Option<String> {
+    let nodes = frame(cx);
+    let Some(row) = node(&nodes, row) else {
+        panic!("{row} was not drawn");
+    };
+    let corner = row.bounds.origin + point(px(2.), px(2.));
+    for at in [corner, at] {
         cx.simulate_mouse_move(at, None, Modifiers::none());
         test_support::settle(cx);
     }
@@ -457,22 +472,12 @@ fn narrowest_layout(rows: &[super::tests::Fixture]) -> Vec<DriverNode> {
     cx.update(bootstrap::install).unwrap();
     let (mut fake, handle, events) = FakeHelm::new();
     let _connection = cx.update(|cx| crate::session::start(handle, events, None, cx));
-    let preferences = Preferences {
+    let preferences = preferences_state(Preferences {
         sidebar_width: Some(*SIDEBAR_WIDTH_RANGE.start()),
         ..Preferences::default()
-    };
+    });
     let order: Vec<&str> = rows.iter().map(|row| row.key).collect();
-    fake.connect(vec![
-        listing(&order, rows),
-        CollectionState {
-            collection: Collection::Preferences,
-            meta: meta(&[PREFERENCES_KEY]),
-            entries: vec![KeyedEntry {
-                key: PREFERENCES_KEY.into(),
-                value: serde_json::to_value(preferences).unwrap(),
-            }],
-        },
-    ]);
+    fake.connect(vec![listing(&order, rows), preferences]);
     cx.run_until_parked();
     let window = cx
         .open_window(size(px(1000.), px(600.)), |window, cx| {

@@ -38,8 +38,9 @@ pub(crate) const TEST_NOW: i64 = 1_751_414_398;
 
 /// One session as the helm would push it: the helm's pinned list fixture with the fields these tests are about
 /// replaced. Defaults: titled by its key, running, created and last active at 100, seen at 100 (so nothing is new), in
-/// `/home/user/src/<key>`, with no annotation, on a connected host the fixture names `buildbox`. The screenshot
-/// goldens build their fleet from it too.
+/// `/home/user/src/<key>`, with no annotation, on a connected host the fixture names `buildbox`, launched as the
+/// fixture's Codex agent launch in YOLO with no status-line evidence. The screenshot goldens build their fleet from it
+/// too.
 #[derive(Clone)]
 pub(crate) struct Fixture {
     pub(crate) key: &'static str,
@@ -55,6 +56,10 @@ pub(crate) struct Fixture {
     host: Option<i64>,
     /// The helm's own name for the row's host, when the test names one; else the helm fixture's (`buildbox`).
     host_name: Option<String>,
+    /// The session's launch in the helm's wire form, when the test names one; else the helm fixture's.
+    launch: Option<Value>,
+    /// Whether the supervisor saw the agent's status line in a mode without checks (`screen_yolo`).
+    screen_yolo: bool,
 }
 
 pub(crate) fn session(key: &'static str) -> Fixture {
@@ -70,6 +75,8 @@ pub(crate) fn session(key: &'static str) -> Fixture {
         annotation: None,
         host: None,
         host_name: None,
+        launch: None,
+        screen_yolo: false,
     }
 }
 
@@ -116,6 +123,16 @@ impl Fixture {
         self.host_name = Some(name.to_owned());
         self
     }
+    /// The session launched as `launch`, a `SessionLaunch` in the helm's wire form (`{"kind": "agent", ...}`).
+    pub(crate) fn launch(mut self, launch: Value) -> Self {
+        self.launch = Some(launch);
+        self
+    }
+    /// The session with status-line evidence of a mode without checks, as the supervisor reports it.
+    pub(crate) fn screen_yolo(mut self) -> Self {
+        self.screen_yolo = true;
+        self
+    }
 
     pub(crate) fn entry(&self) -> KeyedEntry {
         let mut entry = session_entry(self.key);
@@ -135,6 +152,10 @@ impl Fixture {
         if let Some(name) = &self.host_name {
             value["host_name"] = json!(name);
         }
+        if let Some(launch) = &self.launch {
+            value["launch"] = launch.clone();
+        }
+        value["screen_yolo"] = json!(self.screen_yolo);
         entry
     }
 
@@ -154,11 +175,15 @@ pub(crate) fn listing(order: &[&str], rows: &[Fixture]) -> CollectionState {
 
 /// The preferences collection with this visit history and remembered last selection.
 pub(crate) fn preferences(history: &[&str], last: Option<&str>) -> CollectionState {
-    let preferences = Preferences {
+    preferences_state(Preferences {
         visit_history: history.iter().map(|key| key.to_string()).collect(),
         last_selected: last.map(str::to_owned),
         ..Preferences::default()
-    };
+    })
+}
+
+/// The preferences collection holding `preferences`, for a test that sets a field [`preferences`] does not.
+pub(crate) fn preferences_state(preferences: Preferences) -> CollectionState {
     CollectionState {
         collection: Collection::Preferences,
         meta: meta(&[PREFERENCES_KEY]),
@@ -579,7 +604,13 @@ fn a_rows_host_text_is_painted_and_named_escaped(cx: &mut TestAppContext) {
         .map(|((raw, _), key)| session(key).title(raw))
         .collect();
     let order: Vec<&str> = rows.iter().map(|row| row.key).collect();
-    let (_fake, cx) = open_main(cx, vec![listing(&order, &rows)]);
+    // At the widest sidebar, so every escaped title fits its row whole beside the marks and the age: the assertions
+    // below compare whole painted strings, and a title cut with an ellipsis would read as one painted unescaped.
+    let preferences = preferences_state(Preferences {
+        sidebar_width: Some(*farhelm_proto::ui_channel::SIDEBAR_WIDTH_RANGE.end()),
+        ..Preferences::default()
+    });
+    let (_fake, cx) = open_main(cx, vec![listing(&order, &rows), preferences]);
     let nodes = frame(cx);
     let texts = painted(&nodes);
     for ((_, shown), key) in SPOOFING_CORPUS.iter().zip(keys.iter().copied()) {

@@ -1621,9 +1621,21 @@ fn session_list_selected_stale_setup(state: &SceneState, _: &mut Window, cx: &mu
 }
 
 /// The fleet of [`session_list_setup`], which the row menu and Delete scenes draw too. Each row lists the helm
-/// fixture's one terminal tab and managed checkout.
+/// fixture's one terminal tab and managed checkout. The rows run on the local host (the red laptop, inverted on the
+/// selected row) and on remotes (the cloud), with one launch of each kind and shield: a guarded Claude launch (an
+/// identity color and the green shield), the fixture's Codex YOLO launch (a grey mark and the amber slashed shield), a
+/// command with no agent asserted not YOLO (the Terminal mark), Cursor under its own setting (the dashed shield), a
+/// guarded Muse launch, and a session from before launch kinds (the amber question mark).
 fn fleet() -> [Fixture; 6] {
     let status = |state: &str| serde_json::json!({ "state": state });
+    let agent = |harness: &str, permissions: serde_json::Value, program: &str| {
+        serde_json::json!({
+            "kind": "agent",
+            "selection": { "harness": harness, "permissions": permissions },
+            "start": [program, "{farhelm_args}"],
+            "resume": null,
+        })
+    };
     let row = |key, title, state, ago: i64| {
         session(key)
             .title(title)
@@ -1635,20 +1647,33 @@ fn fleet() -> [Fixture; 6] {
     const HOUR: i64 = 60 * MINUTE;
     const DAY: i64 = 24 * HOUR;
     [
-        row("a", "Refactor the API client", "running", 5).cwd("/home/user/src/api"),
+        row("a", "Refactor the API client", "running", 5)
+            .cwd("/home/user/src/api")
+            .host(1)
+            .launch(agent("claude", serde_json::json!("guarded"), "claude")),
         row("b", "Review the install docs", "waiting", 2 * MINUTE).cwd("/home/user/src/docs"),
         row("c", "Fix the flaky upload test", "idle", 14 * MINUTE)
             .seen(Some(TEST_NOW - DAY))
-            .cwd("/srv/ci/uploads"),
-        row("d", "Update dependencies", "idle", 3 * HOUR).cwd("/home/user/src/farhelm"),
+            .cwd("/srv/ci/uploads")
+            .launch(serde_json::json!({
+                "kind": "command", "command": "./run-tests.sh", "yolo": false, "agent": null, "resume": null,
+            })),
+        row("d", "Update dependencies", "idle", 3 * HOUR)
+            .cwd("/home/user/src/farhelm")
+            .host(1)
+            .launch(agent("cursor", serde_json::Value::Null, "cursor-agent")),
         row("f", "Benchmark on the build box", "running", DAY)
             .host(3)
             .stale()
-            .cwd("/home/user/bench"),
+            .cwd("/home/user/bench")
+            .launch(agent("muse", serde_json::json!("guarded"), "muse")),
         row("e", "Release notes for 0.40", "exited", 26 * DAY)
             .status(serde_json::json!({ "state": "exited", "exit_code": null }))
             .annotation("stopped by user")
-            .cwd("/home/user/src/farhelm"),
+            .cwd("/home/user/src/farhelm")
+            .launch(serde_json::json!({
+                "kind": "legacy", "invocation": "codex", "agent_kind": "codex", "resume_template": null,
+            })),
     ]
 }
 
