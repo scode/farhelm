@@ -5,12 +5,16 @@
 //! what GPUI's deterministic scheduler needs. Each test stages exactly the feed it is about (a reply queued before a
 //! break, a displacement, a refused credential) and lets the app drain it.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
 use farhelm_helm_client::collections::decode_state;
+use farhelm_helm_client::fake::terminal::{FakePhase, FakeTerminal};
 use farhelm_helm_client::fake::{FakeDecision, FakeHelm};
+use farhelm_helm_client::terminal::{
+    AttachmentLease, StreamState, TerminalAttach, TerminalEvent, TerminalEvents, TerminalHandle,
+};
 use farhelm_helm_client::{ApiPath, ChannelState, Method, PushedState};
 use farhelm_proto::ui_channel::{
     Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, KeyedEntry,
@@ -30,6 +34,7 @@ use crate::main_view::MainView;
 use crate::notices::{self, Notice};
 use crate::session::{self, Connection, UiSession};
 use crate::store::HelmStore;
+use crate::terminal::attached::OpenStream;
 use crate::{render_count, test_support, ticker};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
@@ -360,6 +365,156 @@ fn a_displaced_window_waits_for_take_back_then_rebuilds(cx: &mut TestAppContext)
         cx.update(|cx| notices::posted(cx)),
         vec![Notice::ConnectionLost]
     );
+}
+
+// ---- Terminal streams through the UI session -----------------------------------------------------------------------
+
+/// The fake terminals a test's connection handed out, each with the attach it was opened for.
+type Opened = Rc<RefCell<Vec<(FakeTerminal, TerminalAttach)>>>;
+
+/// [`started`], with the connection handing out fake terminals and recording each one in the returned list.
+fn started_with_terminals(cx: &mut TestAppContext) -> (FakeHelm, Entity<Connection>, Opened) {
+    let (fake, connection) = started(cx);
+    let opened: Opened = Rc::default();
+    let record = opened.clone();
+    cx.update(|cx| {
+        connection.update(cx, |connection, _| {
+            connection.serve_terminals(move |attach| {
+                let (terminal, handle, events) = FakeTerminal::open(&attach);
+                record.borrow_mut().push((terminal, attach));
+                (handle, events)
+            })
+        })
+    });
+    (fake, connection, opened)
+}
+
+/// An agent-terminal attach of session `key` at 100x30.
+fn terminal_attach(key: &str) -> TerminalAttach {
+    TerminalAttach {
+        session: key.into(),
+        tab: None,
+        lease: AttachmentLease::new(),
+        cols: 100,
+        rows: 30,
+    }
+}
+
+/// An opener of `session`'s terminals.
+fn opener(session: &Entity<UiSession>, cx: &mut TestAppContext) -> OpenStream {
+    cx.update(|cx| session.read(cx).terminal_opener())
+}
+
+/// The terminal view's owner opens its stream through the UI session, so the session must hand the owner's attach to
+/// the connection unchanged (the session, the size the owner measured, the lease) and give back that very stream: an
+/// opener that rebuilt the attach or kept the stream would attach the wrong terminal or leave the view with a feed
+/// nobody fills. Specified: the connection is asked once, for exactly that attach, and the handle and feed the owner
+/// gets are the ones it opened.
+#[gpui::test]
+fn a_live_sessions_opener_opens_the_attach_it_is_given(cx: &mut TestAppContext) {
+    let (mut fake, connection, opened) = started_with_terminals(cx);
+    fake.connect(vec![sessions(&["a"])]);
+    cx.run_until_parked();
+    let session = current(&connection, cx).unwrap();
+
+    let open = opener(&session, cx);
+    let attach = terminal_attach("a");
+    let (handle, mut events) = open(attach.clone());
+    let mut opened = opened.borrow_mut();
+    assert_eq!(opened.len(), 1, "the connection opened one stream");
+    let (terminal, asked) = &mut opened[0];
+    assert_eq!(
+        (
+            &asked.session,
+            asked.tab.as_ref(),
+            asked.cols,
+            asked.rows,
+            &asked.lease
+        ),
+        (&attach.session, None, 100, 30, &attach.lease),
+        "for the owner's attach, unchanged"
+    );
+    assert_eq!(
+        events.try_recv(),
+        Some(TerminalEvent::State(StreamState::Attaching)),
+        "the feed is the opened stream's"
+    );
+    handle.close();
+    assert_eq!(terminal.phase(), FakePhase::Closed, "and so is the handle");
+}
+
+/// Assert that `opened` is a stream that was already over: its feed holds `Closed` and then nothing.
+fn assert_already_closed(opened: (TerminalHandle, TerminalEvents), why: &str) {
+    let (_handle, mut events) = opened;
+    assert_eq!(
+        events.try_recv(),
+        Some(TerminalEvent::State(StreamState::Closed)),
+        "{why}"
+    );
+    assert_eq!(events.try_recv(), None, "{why}: the stream is over");
+}
+
+/// A reset or a displacement retires the UI session, and with it every way of attaching a terminal for it: a stream
+/// opened for an inert window would come back by itself, and for a displaced one its first attach displaces, taking
+/// the terminal from the window that now holds the helm (SPEC_impl.md, "The seat: one UI per helm"). The terminal
+/// owner may still hold an opener it was given before, and after a reset nothing else holds the old session, so the
+/// opener must refuse both while the retired session exists and once it is gone. Specified, for a break and then a
+/// displacement: an opener taken before, one taken from the retired session, and one taken before and called once
+/// the session was dropped all open nothing and hand back a stream whose feed holds only `Closed`; the session the
+/// reconnect builds opens again.
+#[gpui::test]
+fn a_retired_session_opens_no_terminal_even_through_an_earlier_opener(cx: &mut TestAppContext) {
+    let (mut fake, connection, opened) = started_with_terminals(cx);
+    fake.connect(vec![sessions(&["a"])]);
+    cx.run_until_parked();
+
+    let retirements: [fn(&mut FakeHelm); 2] = [FakeHelm::break_channel, FakeHelm::displace];
+    for retire in retirements {
+        let session = current(&connection, cx).unwrap();
+        let kept = opener(&session, cx);
+        let kept_past_the_session = opener(&session, cx);
+        retire(&mut fake);
+        cx.run_until_parked();
+        assert!(
+            cx.update(|cx| session.read(cx).is_retired()),
+            "the premise: the session retired"
+        );
+
+        assert_already_closed(kept(terminal_attach("a")), "an earlier opener");
+        assert_already_closed(
+            opener(&session, cx)(terminal_attach("a")),
+            "the retired session's own opener",
+        );
+        // GPUI frees an entity's state only when the app next flushes its effects, after the last handle is gone; the
+        // opener can see that only once the state itself, not just the handle, is gone.
+        let released = Rc::new(Cell::new(false));
+        let seen = released.clone();
+        let _watch = cx.update(|cx| cx.observe_release(&session, move |_, _| seen.set(true)));
+        drop(session);
+        cx.update(|_| {});
+        assert!(
+            released.get(),
+            "the premise: nothing keeps the retired session, and its state is gone"
+        );
+        assert_already_closed(
+            kept_past_the_session(terminal_attach("a")),
+            "an earlier opener called once the session is gone",
+        );
+        assert_eq!(opened.borrow().len(), 0, "no opener opened anything");
+
+        if state(&connection, cx) == ChannelState::Displaced {
+            cx.update(|cx| connection.read(cx).take_back());
+        }
+        fake.connect(vec![sessions(&["a"])]);
+        cx.run_until_parked();
+        let rebuilt = current(&connection, cx).unwrap();
+        let _stream = opener(&rebuilt, cx)(terminal_attach("a"));
+        assert_eq!(
+            opened.borrow_mut().drain(..).count(),
+            1,
+            "the rebuilt session's opener opens"
+        );
+    }
 }
 
 /// A dialog's content: one button holding the focus handle the test gave it.
