@@ -10,6 +10,7 @@ use super::*;
 use crate::rest_harness::{self, WsTestClient};
 use axum::extract::State as AxState;
 use axum::routing::get;
+use farhelm_proto::SessionStatus;
 use farhelm_proto::ui_channel::{Collection, KeyedEntry, SessionRow};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -890,7 +891,8 @@ async fn the_snapshot_on_open_holds_every_collection_as_served() {
         .map(|entry| entry.key.as_str())
         .collect();
     assert_eq!(keys, ids, "each row travels under its served id");
-    // The list's default order is creation time, newest first.
+    // A channel opens in most recent activity order; with both sessions
+    // running and no work burst recorded, that is creation time, newest first.
     assert_eq!(
         ids,
         [
@@ -1468,6 +1470,206 @@ async fn the_session_query_filters_the_pushed_list_and_refusals_keep_the_old_one
         panic!("a refused query sends no changes");
     };
     assert_eq!((reply.id, reply.status), (2, 400));
+}
+
+/// The served ids of a snapshot's session list, in served order.
+fn snapshot_session_ids(message: ServerMessage) -> (Availability, Vec<String>) {
+    let ServerMessage::Snapshot { collections } = message else {
+        panic!("the first message is the snapshot");
+    };
+    let sessions = collections
+        .into_iter()
+        .find(|collection| collection.collection == Collection::Sessions)
+        .expect("the snapshot holds the session list");
+    let ids = sessions
+        .entries
+        .into_iter()
+        .map(|entry| entry.key)
+        .collect();
+    (sessions.meta.availability, ids)
+}
+
+/// The three list orders the UI channel's tests tell apart, as served ids.
+struct ThreeOrders {
+    activity: Vec<String>,
+    title: Vec<String>,
+    created: Vec<String>,
+}
+
+/// A served helm whose three list orders all disagree: `beta` is the oldest
+/// but the only running session (activity puts it first), `gamma` is the
+/// newest (creation order puts it first), and `alpha` sorts first by title.
+async fn three_orders_helm() -> (rest_harness::Harness, std::net::SocketAddr, ThreeOrders) {
+    let running = rest_harness::session("beta", 100);
+    let mut alpha = rest_harness::session("alpha", 200);
+    alpha.status = SessionStatus::Idle;
+    let mut gamma = rest_harness::session("gamma", 300);
+    gamma.status = SessionStatus::Idle;
+    let mut harness = rest_harness::helm_listing(vec![running, alpha, gamma]).await;
+    let addr = harness.serve().await;
+    let ids = |names: [&str; 3]| -> Vec<String> {
+        names
+            .iter()
+            .map(|name| harness.local_session_ref(name))
+            .collect()
+    };
+    let orders = ThreeOrders {
+        activity: ids(["beta", "gamma", "alpha"]),
+        title: ids(["alpha", "beta", "gamma"]),
+        created: ids(["gamma", "alpha", "beta"]),
+    };
+    assert_ne!(
+        orders.activity, orders.created,
+        "premise: activity order differs from creation order"
+    );
+    (harness, addr, orders)
+}
+
+/// Store `list_sort` through the preferences route, as another client or the
+/// command line would: the route's write is what bumps the fleet feed.
+async fn store_list_sort(harness: &rest_harness::Harness, word: &str) {
+    let request = Request::builder()
+        .method("PUT")
+        .uri("/api/preferences")
+        .header("host", "127.0.0.1:7433")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::json!({ "list_sort": word }).to_string(),
+        ))
+        .unwrap();
+    let status = harness.router().oneshot(request).await.unwrap().status();
+    assert_eq!(status, StatusCode::NO_CONTENT, "the preference was stored");
+}
+
+/// A channel opens in the list order the helm has stored, so the GUI's first
+/// snapshot, and the one after every reset, is already in the order the user
+/// picked; before this, every channel opened in creation order and only a
+/// GUI-sent query could correct it, which made the list reorder visibly after
+/// each connect. With nothing stored, and with a stored word this build does
+/// not serve (a row can outlive the build that validated it), the channel
+/// opens in most recent activity order, the client default SPEC.md names, and
+/// the list stays available rather than failing on the stored word.
+#[farhelm_testtrace::test]
+async fn a_channel_opens_in_the_stored_list_order_or_most_recent_activity() {
+    let (harness, addr, orders) = three_orders_helm().await;
+    let stored = |word: &str| -> crate::store::PreferencePatch {
+        serde_json::from_value(serde_json::json!({ "list_sort": word })).unwrap()
+    };
+    let opened = || async {
+        let mut ws = WsTestClient::connect(addr, UI_CHANNEL).await;
+        snapshot_session_ids(recv_message(&mut ws).await)
+    };
+
+    assert_eq!(
+        opened().await,
+        (Availability::Available, orders.activity.clone()),
+        "nothing stored: most recent activity"
+    );
+
+    harness
+        .store
+        .update_preferences(stored("title"))
+        .await
+        .unwrap();
+    assert_eq!(
+        opened().await,
+        (Availability::Available, orders.title),
+        "a stored order is the one a new channel opens in"
+    );
+
+    // The store takes any word; only the route refuses unknown ones, so this
+    // plants what a newer build could have left behind.
+    harness
+        .store
+        .update_preferences(stored("sideways"))
+        .await
+        .unwrap();
+    assert_eq!(
+        opened().await,
+        (Availability::Available, orders.activity),
+        "a word this build does not serve: most recent activity, list available"
+    );
+}
+
+/// SPEC.md ("Session list"): a change to the shared preferences, by an agent
+/// or the command line included, reaches the open window as it happens, and
+/// the list order is one of them. The channel therefore follows the stored
+/// order whenever the GUI's current query names no sort; while it does, that
+/// sort is in force and the preference does not move the list.
+/// Specified: with a channel open in activity order, storing `title` through
+/// the preferences route pushes the sessions in title order; after the GUI's
+/// query names `created` (pushed in creation order), storing `activity`
+/// pushes no change to the sessions; a later query with no sort pushes the
+/// stored `activity` order again, and storing `title` then moves the list.
+#[farhelm_testtrace::test]
+async fn an_open_channel_follows_the_stored_order_until_the_gui_names_one() {
+    let (harness, addr, orders) = three_orders_helm().await;
+    let mut ws = WsTestClient::connect(addr, UI_CHANNEL).await;
+    assert_eq!(
+        snapshot_session_ids(recv_message(&mut ws).await),
+        (Availability::Available, orders.activity.clone()),
+        "premise: the channel opened in activity order"
+    );
+
+    store_list_sort(&harness, "title").await;
+    let changes = changes_of(&mut ws, Collection::Sessions).await;
+    assert_eq!(
+        changes.meta.order,
+        orders.title.clone(),
+        "the open list follows"
+    );
+
+    send_message(
+        &mut ws,
+        &command(
+            1,
+            "PUT",
+            SESSION_QUERY_PATH,
+            Some(serde_json::json!({ "sort": "created" })),
+        ),
+    )
+    .await;
+    let changes = changes_of(&mut ws, Collection::Sessions).await;
+    assert_eq!(changes.meta.order, orders.created, "the GUI's sort applies");
+
+    store_list_sort(&harness, "activity").await;
+    // One re-projection pushes the write's effects, sessions before
+    // preferences (the collections' order), so a reorder would arrive before
+    // the preferences change that carries the new word.
+    loop {
+        match recv_message(&mut ws).await {
+            ServerMessage::Changes(changes) if changes.collection == Collection::Preferences => {
+                break;
+            }
+            ServerMessage::Changes(changes) => assert_ne!(
+                changes.collection,
+                Collection::Sessions,
+                "the GUI's sort stays in force"
+            ),
+            ServerMessage::Reply(_) => {}
+            other => panic!("unexpected message {other:?}"),
+        }
+    }
+
+    // A query that names no sort hands the order back to the preference,
+    // rather than leaving the list in the list route's default (creation)
+    // order, which the GUI's last sort happened to match.
+    send_message(
+        &mut ws,
+        &command(2, "PUT", SESSION_QUERY_PATH, Some(serde_json::json!({}))),
+    )
+    .await;
+    let changes = changes_of(&mut ws, Collection::Sessions).await;
+    assert_eq!(
+        changes.meta.order, orders.activity,
+        "a query with no sort follows the stored order again"
+    );
+    store_list_sort(&harness, "title").await;
+    let changes = changes_of(&mut ws, Collection::Sessions).await;
+    assert_eq!(
+        changes.meta.order, orders.title,
+        "and the preference moves it"
+    );
 }
 
 // ---------------------------------------------------------------------------
