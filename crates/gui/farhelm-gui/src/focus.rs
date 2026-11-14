@@ -757,12 +757,18 @@ pub enum ReturnTo {
     /// was before it opened". Every dialog but those below.
     Opener,
     /// Home as it is when the dialog closes (the selected session's terminal), whatever held focus when it opened. For
-    /// a dialog SPEC.md sends back to the terminal: the Rename editor opened with its shortcut, which may have been
-    /// pressed while a row reached with Tab held focus ("Desktop window chrome").
+    /// a dialog SPEC.md sends back to the terminal however it closes: the Rename editor opened with its shortcut, which
+    /// may have been pressed while a row reached with Tab held focus ("Desktop window chrome").
     ///
     /// Home only once no other layer is left open, since focus never leaves a dialog for the page behind it; with a
     /// layer still open, or with no home, it falls back to [`ReturnTo::Opener`].
     Home,
+    /// [`ReturnTo::Home`] when the user dismisses the layer (Escape, through the layer manager's dismissal), and
+    /// [`ReturnTo::Opener`] when it closes any other way (an answer, a press outside a question, its subject going).
+    /// SPEC.md, "Keyboard focus", for the session header's Stop, Restart, Replace and Delete questions: "Escape cancels
+    /// the header's … question and returns focus to the terminal", while every other close returns focus to where it
+    /// was before it opened.
+    HomeOnEscape,
 }
 
 /// Return focus where `target` says because a layer closed, `opener` being what held focus when it opened, or recover
@@ -775,7 +781,9 @@ pub(crate) fn return_to(
 ) {
     let home = match target {
         ReturnTo::Home if !layers::any_open(window, cx) => home(window, cx),
-        ReturnTo::Home | ReturnTo::Opener => None,
+        // The layer manager turns `HomeOnEscape` into one of the other two before it gets here; reaching here
+        // unturned, it was not a dismissal.
+        ReturnTo::Home | ReturnTo::Opener | ReturnTo::HomeOnEscape => None,
     };
     match home.or_else(|| opener.and_then(WeakFocusHandle::upgrade)) {
         // If it is no longer drawn, GPUI reports the focus as lost on the next frame and [`recover`] runs then.

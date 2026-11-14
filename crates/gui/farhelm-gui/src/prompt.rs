@@ -28,8 +28,9 @@
 //!
 //! Where focus starts follows SPEC.md, "Opening and closing": on the confirming button for a question the user just
 //! asked for, on Cancel when that button is disabled, when the action is risky and cannot be undone, or when the
-//! question arrived later. Escape and Cancel close it and return focus to where it was; Enter on the dialog itself
-//! presses the enabled confirming answer.
+//! question arrived later. Escape and Cancel close it and return focus to where it was (Escape sends it home instead
+//! for a question built with [`Question::returns_home_on_escape`]); Enter on the dialog itself presses the enabled
+//! confirming answer.
 //!
 //! A question shows in one of two ways, with every rule above the same in both. [`ask`] centers it over a veil in the
 //! dialog frame. [`ask_anchored`] draws it beside the control it is about, as the old app did for the questions a row
@@ -98,6 +99,7 @@ pub struct Question<T> {
     confirm_enabled: bool,
     starts_on_cancel: bool,
     keeps_focus_on_empty_click: bool,
+    returns_to: ReturnTo,
     frozen: T,
 }
 
@@ -119,6 +121,7 @@ impl<T: Clone + 'static> Question<T> {
             confirm_enabled: true,
             starts_on_cancel: false,
             keeps_focus_on_empty_click: false,
+            returns_to: ReturnTo::Opener,
             frozen,
         }
     }
@@ -186,6 +189,16 @@ impl<T: Clone + 'static> Question<T> {
         self
     }
 
+    /// Escape on the question sends focus home (the selected session's terminal) rather than back to the control that
+    /// opened it; every other way it closes (an answer, a press outside it) still returns focus to the opener. SPEC.md,
+    /// "Keyboard focus", for the session header's Stop, Restart, Replace and Delete questions: "Escape cancels the
+    /// header's … question and returns focus to the terminal". A row's questions return to their opener on Escape too.
+    /// While there is no home, or another layer is still open, Escape returns focus to the opener all the same.
+    pub fn returns_home_on_escape(mut self) -> Self {
+        self.returns_to = ReturnTo::HomeOnEscape;
+        self
+    }
+
     /// The value the confirming answer acts on.
     pub fn frozen(&self) -> &T {
         &self.frozen
@@ -225,7 +238,7 @@ enum Which {
 }
 
 impl<T: Clone + 'static> Prompt<T> {
-    /// Run `which`, if no answer has run yet: close the question (returning focus to where it was), then, for Confirm
+    /// Run `which`, if no answer has run yet: close the question (returning focus to its opener), then, for Confirm
     /// or an extra answer, hand the frozen value to its action.
     fn answer(&mut self, which: Which, window: &mut Window, cx: &mut Context<Self>) {
         if self.answered || (which == Which::Confirm && !self.question.confirm_enabled) {
@@ -442,6 +455,7 @@ fn ask_inner<T: Clone + 'static>(
     };
     let enabled = question.confirm_enabled;
     let keeps_focus_on_empty_click = question.keeps_focus_on_empty_click;
+    let returns_to = question.returns_to;
     let prompt = cx.new(|_| Prompt {
         question,
         on_confirm: Some(Box::new(on_confirm)),
@@ -470,7 +484,7 @@ fn ask_inner<T: Clone + 'static>(
                 subject,
                 main_action,
                 keeps_focus_on_empty_click,
-                returns_to: ReturnTo::Opener,
+                returns_to,
                 on_dismiss: None,
                 placement: layers::DialogPlacement::Centered,
                 dismiss_on_outside_press: false,
@@ -488,6 +502,7 @@ fn ask_inner<T: Clone + 'static>(
                 subject,
                 main_action,
                 keeps_focus_on_empty_click,
+                returns_to,
             },
             mark,
             window,

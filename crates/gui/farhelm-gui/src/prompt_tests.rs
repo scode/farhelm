@@ -943,3 +943,93 @@ fn a_click_on_an_anchored_question_over_a_terminal_stays_with_the_question(
     assert!(!is_open(cx, layer), "Enter closed it");
     assert!(focused(cx, &page.opener), "and focus went back");
 }
+
+/// SPEC.md, "Keyboard focus": "Escape cancels the header's … question and returns focus to the terminal", while every
+/// other close (an answer, Cancel included) returns focus to where it was before the question opened, and a row's
+/// questions return to the row's menu button on Escape too. A header question whose Escape went back to its button
+/// would leave the user's next keys off the terminal they were working in.
+///
+/// Specified, for a question drawn beside its control and one drawn centered, with a drawn home (standing in for the
+/// selected terminal) and the opener focused: the open question holds focus; a question built with
+/// `returns_home_on_escape` sends focus home on Escape and back to the opener on a click on Cancel; a question built
+/// without it sends focus back to the opener on Escape.
+#[gpui::test]
+fn escape_on_a_question_can_return_focus_home(cx: &mut TestAppContext) {
+    let (opener, home) = cx.update(|cx| {
+        (
+            cx.focus_handle().tab_stop(true),
+            cx.focus_handle().tab_stop(true),
+        )
+    });
+    let anchor_out: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));
+    let (drawn_opener, drawn_home, out) = (opener.clone(), home.clone(), anchor_out.clone());
+    let cx = open(cx, move |window, cx| {
+        let anchor = Anchor::for_element("header-anchor", window, cx);
+        out.replace(Some(anchor.clone()));
+        div()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .relative()
+                    .w(px(80.))
+                    .child(button("opener", &drawn_opener))
+                    .child(anchor.track()),
+            )
+            .child(button("terminal", &drawn_home))
+            .into_any_element()
+    });
+    let terminal = home.clone();
+    cx.update(move |window, cx| crate::focus::set_home(Some(&terminal), window, cx));
+    let anchored = anchor_out
+        .borrow()
+        .clone()
+        .expect("the page drew its anchor");
+    for presentation in [Presentation::Centered, Presentation::Anchored(anchored)] {
+        for (built, close, goes_home) in [
+            (true, "escape", true),
+            (true, "cancel", false),
+            (false, "escape", false),
+        ] {
+            let case = format!("built: {built}, {close}");
+            click(cx, "opener");
+            assert!(
+                focused(cx, &opener),
+                "{case}: the premise: the opener has focus"
+            );
+            let shown = presentation.clone();
+            let asked = cx.update(|window, cx| {
+                let mark = Mark::take(cx);
+                let question = question("alpha");
+                let question = if built {
+                    question.returns_home_on_escape()
+                } else {
+                    question
+                };
+                prompt::ask_for_test(shown, question, None, &mark, |_, _, _| {}, window, cx)
+            });
+            cx.run_until_parked();
+            check(cx);
+            let asked = asked.expect("the question opened");
+            assert!(
+                !focused(cx, &opener) && !focused(cx, &home),
+                "{case}: the premise: the open question holds focus"
+            );
+            if close == "escape" {
+                keys(cx, "escape");
+            } else {
+                click(cx, "prompt-cancel");
+            }
+            assert!(!is_open(cx, asked.layer), "{case}: it closed");
+            let (to, from) = if goes_home {
+                (&home, &opener)
+            } else {
+                (&opener, &home)
+            };
+            assert!(
+                focused(cx, to) && !focused(cx, from),
+                "{case}: where focus went"
+            );
+        }
+    }
+}
