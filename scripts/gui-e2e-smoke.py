@@ -57,6 +57,7 @@ import sys
 import tempfile
 import time
 import unittest
+import urllib.error
 import uuid
 from pathlib import Path
 
@@ -593,8 +594,9 @@ class Smoke(unittest.TestCase):
         backend's event log shows the helm used it rather than real ssh. Specified: the probe's result is
         `provisionable`, the confirmation is accepted for a new host entry the helm lists under that destination, and
         that host's run completes, having run a setup step (not just the probe) through the backend. The fake host it
-        adds stays registered (shown unreachable, since the helm dials it over real ssh), so a step that needs the local
-        host to be the only one, as 35 does, runs before this one."""
+        adds is removed again once its run has ended, so no later step finds a host it did not seed; when the step
+        fails with the run still going (the helm refuses to remove a host while its run holds it), the step's own
+        failure is what it reports, and the host left registered is named on stderr."""
         destination = f"scripted-{uuid.uuid4().hex[:8]}.example"
         probe = gui_agent.helm_request(
             RUN, "POST", "/api/hosts/probe", {"target": {"kind": "ssh", "destination": destination}, "new_entry": {}}
@@ -602,9 +604,6 @@ class Smoke(unittest.TestCase):
         self.assertEqual(probe["result"], "provisionable", probe)
         accepted = gui_agent.helm_request(RUN, "POST", "/api/hosts/provision", {"probe_id": probe["probe_id"]})
         host, run_id = accepted["host_id"], accepted["run_id"]
-        hosts = gui_agent.helm_request(RUN, "GET", "/api/hosts")["hosts"]
-        listed = {row["id"]: row.get("destination") for row in hosts}
-        self.assertEqual(listed.get(host), destination, "the confirmation registered a new entry for the destination")
 
         def settled() -> dict | None:
             """This run's progress once it has finished, either way. "completed" alone is also what the helm reports
@@ -614,12 +613,32 @@ class Smoke(unittest.TestCase):
                 return view
             return None
 
-        view = eventually(settled, f"the scripted setup of {destination} finishing")
-        self.assertEqual(view["status"], "completed", f"the setup failed: {view.get('message')}")
-        log = (gui_agent.scripted_hosts_dir(RUN) / "events.jsonl").read_text()
-        events = [json.loads(line) for line in log.splitlines()]
-        steps = {event["event"] for event in events if event["target"] == f"ssh:{destination}"}
-        self.assertIn("install-farhelm", steps, "the helm ran the setup's steps through the scripted backend")
+        try:
+            hosts = gui_agent.helm_request(RUN, "GET", "/api/hosts")["hosts"]
+            listed = {row["id"]: row.get("destination") for row in hosts}
+            self.assertEqual(
+                listed.get(host), destination, "the confirmation registered a new entry for the destination"
+            )
+
+            view = eventually(settled, f"the scripted setup of {destination} finishing")
+            self.assertEqual(view["status"], "completed", f"the setup failed: {view.get('message')}")
+            log = (gui_agent.scripted_hosts_dir(RUN) / "events.jsonl").read_text()
+            events = [json.loads(line) for line in log.splitlines()]
+            steps = {event["event"] for event in events if event["target"] == f"ssh:{destination}"}
+            self.assertIn("install-farhelm", steps, "the helm ran the setup's steps through the scripted backend")
+        finally:
+            # Whether the step is already failing: then its own error is the report, and the cleanup must not replace
+            # it with an error of its own.
+            failing = sys.exc_info()[0] is not None
+            try:
+                # The helm answers 409 to a removal while the host's run holds it, so wait (bounded) for the run to
+                # end first. The step's own wait above has already done this when the step got that far.
+                eventually(settled, f"the scripted setup of {destination} ending before its host is removed")
+                gui_agent.helm_request(RUN, "DELETE", f"/api/hosts/{host}")
+            except (AssertionError, urllib.error.HTTPError) as error:
+                if not failing:
+                    raise
+                print(f"gui-e2e-smoke: step 40 left host {host} ({destination}) registered: {error}", file=sys.stderr)
 
 
 # The receiver for the large-paste step: once the step types `copy`, it writes its payload file to the clipboard with
