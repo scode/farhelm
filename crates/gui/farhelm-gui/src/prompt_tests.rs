@@ -15,13 +15,14 @@ use gpui::{
     ParentElement, Styled, TestAppContext, VisualTestContext, div, point, px,
 };
 
-use crate::components::Role;
+use crate::components::{HoverHelp, Role, Tier};
 use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
-use crate::layers::{Anchor, LayerId, Subject};
-use crate::prompt::{self, Presentation, Question};
+use crate::layers::{self, Anchor, LayerId, Subject};
+use crate::prompt::{self, Answer, Presentation, Question};
 use crate::test_support::{
-    Thing, bounds, button, check, click, focused, handle, is_open, keys, open, question, redraw,
+    Thing, advance, bounds, button, center, check, click, focused, handle, is_open, keys, open,
+    question, redraw,
 };
 
 // ---- The prompt ------------------------------------------------------------------------------------------------------
@@ -81,7 +82,9 @@ fn open_row(cx: &mut TestAppContext) -> (&mut VisualTestContext, Row) {
 
 /// SPEC_impl.md's generic prompt test, for the one prompt kind there is: change the confirmation's subject after it
 /// opens, then send Cancel and Confirm with no draw between them, and check that any command sent names the frozen
-/// target. Whatever runs acts on what the user was shown. The first answer wins, and Confirm runs at most once.
+/// target. Whatever runs acts on what the user was shown. The first answer wins, and Confirm runs at most once. The
+/// question carries an extra answer ([`Question::alternative`]), which follows the same rules: it acts on the frozen
+/// value, and it is one of the answers the first one wins among.
 ///
 /// Here the frozen value is a plain copy, so the "subject changes" step cannot make the prompt act on something else and
 /// cannot fail: the prompt never sees the live subject. That holds by convention, not by the type: `Question<T>` would
@@ -107,18 +110,24 @@ fn a_confirmation_acts_only_on_what_it_showed(cx: &mut TestAppContext) {
             ["cancel", "confirm"],
             ["confirm", "cancel"],
             ["confirm", "confirm"],
+            ["alternative", "confirm"],
+            ["confirm", "alternative"],
+            ["alternative", "alternative"],
+            ["cancel", "alternative"],
         ]
         .map(|order| (shown.clone(), order))
     }) {
         thing.update(cx, |thing, _| thing.name = "alpha".into());
         sent.borrow_mut().clear();
         let shown = thing.read_with(cx, |thing, _| thing.name.clone());
-        let record = sent.clone();
+        let (record, chosen) = (sent.clone(), sent.clone());
         let asked = cx.update(|window, cx| {
             let mark = Mark::take(cx);
             prompt::ask_for_test(
                 presentation,
-                question(&shown),
+                question(&shown).alternative(keep_it_answer(), move |frozen: String, _, _| {
+                    chosen.borrow_mut().push(format!("kept {frozen}"))
+                }),
                 Some(Subject::of(&thing)),
                 &mark,
                 move |frozen, _, _| record.borrow_mut().push(frozen),
@@ -137,16 +146,17 @@ fn a_confirmation_acts_only_on_what_it_showed(cx: &mut TestAppContext) {
             for answer in order {
                 match answer {
                     "cancel" => asked.cancel(window, cx),
+                    "alternative" => asked.alternative(0, window, cx),
                     _ => asked.confirm(window, cx),
                 }
             }
         });
         cx.run_until_parked();
         check(cx);
-        let expected: Vec<String> = if order[0] == "confirm" {
-            vec!["alpha".into()]
-        } else {
-            Vec::new()
+        let expected: Vec<String> = match order[0] {
+            "confirm" => vec!["alpha".into()],
+            "alternative" => vec!["kept alpha".into()],
+            _ => Vec::new(),
         };
         assert_eq!(
             *sent.borrow(),
@@ -201,6 +211,134 @@ fn a_question_starts_on_the_answer_the_rules_pick(cx: &mut TestAppContext) {
             "{case}: Enter answered and closed it"
         );
     }
+}
+
+/// An extra answer for the test questions: "Keep it", a neutral answer that runs its own action.
+fn keep_it_answer() -> Answer {
+    Answer {
+        label: "Keep it".into(),
+        help: HoverHelp::tooltip("Keep it, and stop asking"),
+        tier: Tier::Neutral,
+    }
+}
+
+/// One extra-answers case: its name, how the question is adjusted, the keys pressed, and which answer ran.
+type ExtraAnswerCase = (
+    &'static str,
+    fn(Question<String>) -> Question<String>,
+    &'static str,
+    &'static str,
+);
+
+/// The extra answers must not change where a question starts or what Enter does there: SPEC.md's template leave
+/// question keeps "initial focus still on Save", so a question that started on an extra answer would discard a draft on
+/// Enter. And their place in reading and Tab order is between Cancel and Confirm, in the order added (SPEC.md's YOLO
+/// confirmation: "Cancel, the guarded option when offered, the outlined permanent YOLO answer, then the filled one-time
+/// YOLO answer"; the leave question's "Keep editing, Discard, or Save").
+///
+/// Specified, for a question shaped like the YOLO one (two extra answers, "guarded" then "always"): Enter at the start
+/// answers Confirm; Shift+Tab from Confirm reaches "always", then "guarded", then Cancel, and Enter on each runs that
+/// answer alone (Cancel runs nothing). A question that starts on Cancel still does.
+#[gpui::test]
+fn extra_answers_sit_in_order_between_cancel_and_confirm_and_never_start(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    let cases: [ExtraAnswerCase; 5] = [
+        ("at the start", |q| q, "enter", "confirmed"),
+        ("one back", |q| q, "shift-tab enter", "always"),
+        ("two back", |q| q, "shift-tab shift-tab enter", "guarded"),
+        (
+            "three back",
+            |q| q,
+            "shift-tab shift-tab shift-tab enter",
+            "",
+        ),
+        (
+            "starting on Cancel",
+            Question::starts_on_cancel,
+            "enter",
+            "",
+        ),
+    ];
+    for (case, adjust, keystrokes, expected) in cases {
+        let ran = Rc::new(RefCell::new(String::new()));
+        let (confirmed, guarded, always) = (ran.clone(), ran.clone(), ran.clone());
+        let asked = cx.update(|window, cx| {
+            let mark = Mark::take(cx);
+            prompt::ask_for_test(
+                Presentation::Centered,
+                adjust(question("alpha"))
+                    .alternative(keep_it_answer(), move |_, _, _| {
+                        guarded.borrow_mut().push_str("guarded")
+                    })
+                    .alternative(keep_it_answer(), move |_, _, _| {
+                        always.borrow_mut().push_str("always")
+                    }),
+                None,
+                &mark,
+                move |_, _, _| confirmed.borrow_mut().push_str("confirmed"),
+                window,
+                cx,
+            )
+        });
+        cx.run_until_parked();
+        check(cx);
+        let asked = asked.expect("the question opened");
+        keys(cx, keystrokes);
+        assert_eq!(
+            *ran.borrow(),
+            expected,
+            "{case}: what {keystrokes:?} answered"
+        );
+        assert!(!is_open(cx, asked.layer), "{case}: the answer closed it");
+    }
+}
+
+/// The old app's questions said what their Cancel keeps ("Cancel: keep the agent and terminal tabs running" on Stop,
+/// Replace and Restart), and the template editor's leave question calls its Cancel "Keep editing": a question words
+/// its own Cancel, but Cancel must still be Cancel, or a relabelled button could start acting.
+///
+/// Specified: a question given its own Cancel answer shows that answer's hover help on its Cancel button after the
+/// hover delay, and a click on that button still cancels it, running nothing.
+#[gpui::test]
+fn a_question_can_word_its_own_cancel(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    let ran = Rc::new(Cell::new(0));
+    let record = ran.clone();
+    let asked = cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        prompt::ask_for_test(
+            Presentation::Centered,
+            question("alpha").cancel_answer(Answer {
+                label: "Cancel".into(),
+                help: HoverHelp::tooltip("Cancel: keep the agent and terminal tabs running"),
+                tier: Tier::Neutral,
+            }),
+            None,
+            &mark,
+            move |_, _, _| record.set(record.get() + 1),
+            window,
+            cx,
+        )
+    });
+    cx.run_until_parked();
+    check(cx);
+    let asked = asked.expect("the question opened");
+    let cancel = center(cx, "prompt-cancel");
+    cx.simulate_mouse_move(cancel, None, Modifiers::none());
+    advance(cx, layers::HOVER_DELAY);
+    assert_eq!(
+        cx.update(|window, cx| layers::shown_tooltip(window, cx))
+            .map(|shown| shown.text),
+        Some("Cancel: keep the agent and terminal tabs running".into()),
+        "Cancel shows the question's own help"
+    );
+    click(cx, "prompt-cancel");
+    assert_eq!(
+        ran.get(),
+        0,
+        "the relabelled Cancel cancelled it, running nothing"
+    );
+    assert!(!is_open(cx, asked.layer), "and closed it");
 }
 
 /// Which questions keep focus on the answer in use when their empty space is clicked is each question's own rule

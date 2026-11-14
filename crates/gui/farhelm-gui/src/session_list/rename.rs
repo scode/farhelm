@@ -20,7 +20,7 @@
 //!   so a title the supervisor refuses reaches the supervisor, and its refusal is what the user reads. A refusal keeps
 //!   the draft and shows the helm's words, escaped, under the field; a success closes the editor. While a save is in
 //!   flight the field is read-only, Cancel and Close are disabled, Escape does nothing (the layer manager asks the
-//!   editor's dismiss guard), and Save draws busy and ignores presses (the old app's busy rules; SPEC.md: "Close uses
+//!   editor's dismissal hook), and Save draws busy and ignores presses (the old app's busy rules; SPEC.md: "Close uses
 //!   the same cancellation and busy-state rules as Cancel"). Save is busy rather than disabled because a disabled
 //!   button gives up focus, and the old app kept a clicked Save focused.
 //! - **Focus.** It starts in the title field, and Tab follows Close, the field, Cancel, Save (the dialog frame draws
@@ -62,7 +62,7 @@ use crate::components::{Button, DialogFrame, HoverHelp, Role, TextInput, TextInp
 use crate::drafts::DraftInput;
 use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
-use crate::layers::{self, Dialog, DismissGuard, LayerId, MainAction};
+use crate::layers::{self, Dialog, DismissHook, Dismissal, LayerId, MainAction};
 use crate::operations::{Command, OpKey, Outcome, Work};
 use crate::store::HelmStore;
 use crate::theme::{self, metrics};
@@ -127,9 +127,15 @@ fn open_returning(
     });
     // Escape follows Cancel's busy rule: it closes nothing while a save is in flight, wherever focus is in the dialog.
     let weak = editor.downgrade();
-    let may_dismiss: DismissGuard = Rc::new(move |cx| {
-        weak.upgrade()
-            .is_none_or(|editor| !editor.read(cx).title.draft().is_saving())
+    let on_dismiss: DismissHook = Rc::new(move |_, cx| {
+        let saving = weak
+            .upgrade()
+            .is_some_and(|editor| editor.read(cx).title.draft().is_saving());
+        if saving {
+            Dismissal::Stay
+        } else {
+            Dismissal::Close
+        }
     });
     let layer = layers::open_dialog(
         Dialog {
@@ -142,7 +148,9 @@ fn open_returning(
             // SPEC.md, "Opening and closing": Rename does not have the keep-focus-on-empty-click rule yet.
             keeps_focus_on_empty_click: false,
             returns_to,
-            may_dismiss: Some(may_dismiss),
+            on_dismiss: Some(on_dismiss),
+            placement: layers::DialogPlacement::Centered,
+            dismiss_on_outside_press: false,
         },
         mark,
         window,
@@ -263,7 +271,8 @@ impl RenameEditor {
         }
     }
 
-    /// Cancel or Close: close the editor, keeping the session's title. Refused while a save is in flight.
+    /// Cancel: close the editor, keeping the session's title. Refused while a save is in flight. (Close dismisses
+    /// the editor instead, through the layer manager, so its dismissal hook decides as it does for Escape.)
     fn cancel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.title.draft().is_saving() {
             return;
@@ -365,7 +374,14 @@ impl Render for RenameEditor {
                 "Close rename",
                 HoverHelp::tooltip("Close rename; keep the current title"),
                 busy,
-                on_editor(weak, RenameEditor::cancel),
+                // A dismissal, so the editor's dismissal hook decides, as it does for Escape. Called from the click,
+                // not from inside an update of the editor: the hook reads the editor.
+                move |_, window, cx| {
+                    let layer = weak.upgrade().and_then(|editor| editor.read(cx).layer);
+                    if let Some(layer) = layer {
+                        layers::dismiss(layer, window, cx);
+                    }
+                },
             )
     }
 }
