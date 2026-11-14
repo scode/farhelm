@@ -50,6 +50,8 @@
 //!   focus, which such a popover never is.
 //! - **One tooltip at a time**, owned by the control that showed it (see [`TooltipOwner`]). It says the app's own
 //!   words, or a host sentence when the help names a host value, drawn through host text's element ([`ShownTooltip`]).
+//! - **The innermost help wins** when a control with hover help sits inside another with its own (a session row's
+//!   marks inside the row); [`hover_began`], "Nested hover help", explains the rule and how it is decided.
 //! - **One pill, drawn above every layer and under the tooltip, that is not a layer** ([`show_pill`]). It is the one
 //!   thing a feature draws over the dialogs without opening one: SPEC.md's quick-launch sequence pill, which stays in
 //!   view above the launcher's veil, as the old one sat at z-index 50 over the launcher's backdrop at 40. It is display
@@ -67,14 +69,22 @@
 //!
 //! A tooltip waits [`HOVER_DELAY`] (the old app's 300 ms) before it shows, through a ticker deadline, and shows at once
 //! when another tooltip is showing or one went away less than that long ago, so a user scanning a row of icons does
-//! not wait at each. Escape or a layer opening puts the tooltip away without that grace, as in the old app.
+//! not wait at each. Escape, a press of any mouse button on a control with help ([`pointer_pressed`]) or a layer
+//! opening puts the tooltip away without that grace, as in the old app. After a press made without moving, the help
+//! stays down while the pointer rests on that control, since nothing changes whose help the pointer calls for.
 //!
-//! NOTE: Still to come here: putting the tooltip away on any pointer press, as the old app's `tooltip.js` did (nothing
-//! on a press path does yet); the covered-terminal-link hit test, which needs the terminal; and the tooltip's pointer
-//! notch and the target ring on its control (both follow element anchoring for tooltips). Until then a tooltip sits
-//! below and right of where the pointer was, and a pointer moving inside a control does not restart the wait. Menu
-//! items are plain buttons until the session row's menu brings the menu item component, so the popover golden shows
-//! centered item labels, which the old menus did not have; it is captured again with that component.
+//! NOTE: Known deviations from the old app's `tooltip.js`, which kept a dismissed control's help down until the pointer
+//! left it: after Escape, the next pointer move brings the help back after the delay; a key other than Escape takes
+//! help down (GPUI ends every hover on a key press, and `tooltip.js` had no key handler but Escape's); after a press, a
+//! key press and then a pointer move bring the help back; a press on a control right after a key press, or a click
+//! whose pointer moves while the button is held, brings the help back after the delay once the button is released (GPUI
+//! ends the control's hover during either and begins it again after); and after a press on a row, a visit to one of its
+//! marks and back shows the row's help again. Still to come here: the covered-terminal-link hit test, which needs the
+//! terminal; and the tooltip's pointer notch and the target ring on its control (both follow element anchoring for
+//! tooltips). Until then a tooltip sits below and right of where the pointer was, and a pointer moving inside a control
+//! does not restart the wait. Menu items are plain buttons until the session row's menu brings the menu item component,
+//! so the popover golden shows centered item labels, which the old menus did not have; it is captured again with that
+//! component.
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -119,6 +129,32 @@ pub struct LayerStack {
     /// A tooltip showed recently enough that the next one skips the hover delay. Cleared by `cool_down`.
     warm: bool,
     cool_down: Option<ticker::Deadline>,
+    /// Every control with hover help the pointer is over, innermost first; the first one's help is the one the pointer
+    /// calls for ([`hover_began`], "Nested hover help").
+    hovered: Vec<Hovered>,
+    /// The first of `hovered` when the hover news last settled. A pointer moving inside the same control changes
+    /// nothing, so it neither shows a showing tooltip again nor (not yet: see the module NOTE) starts a waiting one's
+    /// delay over, and a help a press put away stays away while the hover lasts ([`pointer_pressed`]; the module NOTE
+    /// says when GPUI ends it). A tooltip shown or waiting through a hover is always the winner's; only the goldens'
+    /// [`show_tooltip_at`] shows one that is not.
+    winner: Option<EntityId>,
+    /// The hover news of the event being handled, waiting for [`settle_hover`], which runs once after it: `Some` while
+    /// a settle is scheduled, holding the owners whose move listener ran, in the order GPUI ran them.
+    round: Option<Vec<EntityId>>,
+}
+
+/// One control the pointer is over, as [`LayerStack::hovered`] keeps it.
+struct Hovered {
+    owner: WeakEntity<TooltipOwner>,
+    id: EntityId,
+    /// The help it asked for when its hover began, refreshed each time the control is drawn ([`help_drawn`]). An outer
+    /// control's help may show long after its hover began (the pointer returning from a mark onto its row), and by then
+    /// the control may say something else: a session row's help follows the session's status, and the frame that takes
+    /// a stopped session's live dot away also changes its row's help.
+    help: Line,
+    /// Drops the entry, and settles again, when the control is gone: no hover-leave fires for a control that simply
+    /// stops being drawn, and the control around it, still under the pointer, should then have its help back.
+    _release: Subscription,
 }
 
 /// How long the pointer must rest on a control before its hover help shows: the old app's tooltip delay.
@@ -236,6 +272,9 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
         pending_tooltip: None,
         warm: false,
         cool_down: None,
+        hovered: Vec::new(),
+        winner: None,
+        round: None,
     });
     if let Some(windows) = installed_mut::<Windows>(cx) {
         windows.0.retain(|_, stack| stack.upgrade().is_some());
@@ -983,12 +1022,183 @@ pub struct ShownTooltip {
     help: Line,
 }
 
-/// The hover on the control `owner` began: show `help` as its hover help after [`HOVER_DELAY`], at the pointer's
-/// position, replacing any other tooltip. Shows at once while another tooltip is showing or has only just gone.
+/// The pointer came onto the control `owner`, whose hover help is `help`. This is the hover listener's half of the
+/// tooltip rule, which [`crate::components::with_hover_help`] wires on every control, beside [`hover_moved`] and
+/// [`hover_ended`]. Which hovered control's help shows is decided once, after GPUI has finished telling every
+/// listener about the event ([`settle_hover`]). When it is this control's, it shows after [`HOVER_DELAY`] at the
+/// pointer's position, or at once while another tooltip is showing or has only just gone.
 ///
 /// A host value reaches a tooltip only as part of a [`Line::Sentence`]. The app's own wording is a [`Line::App`], which
 /// a caller makes from a plain string with `.into()`.
-pub fn show_tooltip(owner: &Entity<TooltipOwner>, help: Line, window: &mut Window, cx: &mut App) {
+///
+/// # Nested hover help
+///
+/// A control with help can sit inside another that has its own (a session row's marks inside the row), so the pointer
+/// can be over several at once. The innermost one's help shows, as in the old app, whose tooltip took the help nearest
+/// the element under the pointer. Moving from it back onto the control around it shows that control's help again, and
+/// moving from the outer control onto the inner shows the inner one's. GPUI draws a child after its parent, so on a
+/// pointer move "innermost" means drawn last: of two hovered controls that overlap without nesting, the one drawn over
+/// the other wins. Under a still pointer the newest hover wins until the pointer next moves, which for a control and
+/// the ones inside it is the same answer, since they appear together or the inner one later.
+///
+/// The hover listeners alone cannot say which control is innermost, because the order they arrive in depends on why
+/// the hover changed. On a pointer move GPUI calls them from the last drawn to the first, so a pointer that lands on a
+/// mark in one move tells the mark first and the row last. When a frame moves controls under a still pointer (a
+/// scroll, a row appearing) GPUI calls them in drawing order, row first. And a pointer going from the mark back onto
+/// the row tells only the mark, because the row was hovered all along. So the layer manager keeps every hovered control
+/// ([`LayerStack::hovered`]), newest hover first, which is right for a frame's news and for a pointer that crossed
+/// into a control from the one around it. On a pointer move it takes GPUI's order instead: each hovered control's move
+/// listener ([`hover_moved`]) runs on every move, last drawn first, so the order they ran in is exact.
+pub fn hover_began(owner: &Entity<TooltipOwner>, help: Line, window: &mut Window, cx: &mut App) {
+    let Some(stack) = stack(window, cx) else {
+        return;
+    };
+    let id = owner.entity_id();
+    stack.update(cx, |stack, cx| {
+        let release = cx.observe_release(owner, move |stack, _, cx| {
+            stack.hovered.retain(|hovered| hovered.id != id);
+            stack.settle_after_this_event(cx);
+        });
+        stack.hovered.retain(|hovered| hovered.id != id);
+        stack.hovered.insert(
+            0,
+            Hovered {
+                owner: owner.downgrade(),
+                id,
+                help,
+                _release: release,
+            },
+        );
+        stack.settle_after_this_event(cx);
+    });
+}
+
+/// The pointer moved while over the control `owner`: the move listener's half of the tooltip rule. It says nothing
+/// about the help itself. GPUI runs these on every pointer move, for every hovered control, from the last drawn to the
+/// first, and that order is how [`settle_hover`] tells the innermost control from the ones around it (see "Nested
+/// hover help" at [`hover_began`]).
+pub fn hover_moved(owner: &Entity<TooltipOwner>, window: &mut Window, cx: &mut App) {
+    let Some(stack) = stack(window, cx) else {
+        return;
+    };
+    let id = owner.entity_id();
+    stack.update(cx, |stack, cx| {
+        stack.settle_after_this_event(cx);
+        if let Some(moved) = &mut stack.round
+            && !moved.contains(&id)
+        {
+            moved.push(id);
+        }
+    });
+}
+
+/// The control `owner` is being drawn with `help` as its hover help: refresh the copy kept while the pointer is over
+/// it, so a tooltip of it that begins later says what the control says then (see [`Hovered::help`]). It redraws
+/// nothing: a tooltip already waiting or showing keeps the words it began with. Called while the control renders, so a
+/// cached view's controls refresh exactly when they re-render, which is when their help can change.
+pub fn help_drawn(owner: &Entity<TooltipOwner>, help: &Line, window: &mut Window, cx: &mut App) {
+    let Some(stack) = stack(window, cx) else {
+        return;
+    };
+    let id = owner.entity_id();
+    stack.update(cx, |stack, _| {
+        if let Some(hovered) = stack.hovered.iter_mut().find(|hovered| hovered.id == id)
+            && hovered.help != *help
+        {
+            hovered.help = help.clone();
+        }
+    });
+}
+
+/// The pointer left the control `owner`. Its tooltip goes only if no other hovered control's help takes its place, so
+/// a control leaving never hides another's tooltip: that matters when the pointer moves straight from one control
+/// onto the next and the new control's hover arrives first, and when it moves from a mark back onto the row around
+/// it, whose help then shows.
+pub fn hover_ended(owner: &Entity<TooltipOwner>, window: &mut Window, cx: &mut App) {
+    let Some(stack) = stack(window, cx) else {
+        return;
+    };
+    let id = owner.entity_id();
+    stack.update(cx, |stack, cx| {
+        stack.hovered.retain(|hovered| hovered.id != id);
+        stack.settle_after_this_event(cx);
+    });
+}
+
+/// A mouse button went down on a control with help: put the tooltip away, as the old `tooltip.js` did on
+/// `pointerdown` whatever the button, and make the control under the press (the innermost hovered one) the winner, so
+/// that its help stays down while the pointer rests there and its hover lasts (the module NOTE lists when GPUI ends
+/// it): [`settle_hover`] acts only when the winner changes. Every hovered control's press listener calls this for the
+/// same press; the later calls change nothing.
+pub fn pointer_pressed(window: &mut Window, cx: &mut App) {
+    let Some(stack) = stack(window, cx) else {
+        return;
+    };
+    stack.update(cx, |stack, cx| {
+        let shown = stack.tooltip.is_some();
+        // The press may come in the same update as the pointer move that brought the pointer here, before that move's
+        // settle (the test bridge sends a click's move, press and release together): order the hovers by that move.
+        if let Some(moved) = &stack.round {
+            innermost_first(&mut stack.hovered, moved);
+        }
+        stack.winner = stack.hovered.first().map(|hovered| hovered.id);
+        stack.put_tooltip_away();
+        if shown {
+            cx.notify();
+        }
+    });
+}
+
+/// Put `hovered` in the order a pointer move's move listeners ran in (`moved`), which is innermost first and beats the
+/// order the hovers began in. A control whose move listener did not run keeps its place after them (the sort is
+/// stable), and an empty `moved` (no pointer move: a frame's news) changes nothing.
+fn innermost_first(hovered: &mut [Hovered], moved: &[EntityId]) {
+    if moved.is_empty() {
+        return;
+    }
+    hovered.sort_by_key(|hovered| {
+        moved
+            .iter()
+            .position(|id| *id == hovered.id)
+            .unwrap_or(usize::MAX)
+    });
+}
+
+/// Decide whose help the pointer calls for now that GPUI has told every listener about the event, and show it, or
+/// take the tooltip down when the pointer is over no control with help. Nothing changes while the answer stays the
+/// same control ([`LayerStack::winner`]).
+fn settle_hover(window: &mut Window, cx: &mut App) {
+    let Some(stack) = stack(window, cx) else {
+        return;
+    };
+    let change = stack.update(cx, |stack, _| {
+        let moved = stack.round.take().unwrap_or_default();
+        stack
+            .hovered
+            .retain(|hovered| hovered.owner.upgrade().is_some());
+        innermost_first(&mut stack.hovered, &moved);
+        // This runs on every pointer move over a control with help, so the unchanged case clones nothing.
+        let winner = stack.hovered.first().map(|hovered| hovered.id);
+        if winner == stack.winner {
+            return None;
+        }
+        let previous = std::mem::replace(&mut stack.winner, winner);
+        let next = stack
+            .hovered
+            .first()
+            .and_then(|hovered| Some((hovered.owner.upgrade()?, hovered.help.clone())));
+        Some((previous, next))
+    });
+    match change {
+        None => {}
+        Some((_, Some((owner, help)))) => begin_tooltip(&owner, help, window, cx),
+        Some((previous, None)) => end_tooltip(&stack, previous, cx),
+    }
+}
+
+/// Start `owner`'s tooltip, now that its help is the one the pointer calls for: after [`HOVER_DELAY`], or at once
+/// while another tooltip is showing or has only just gone. Either way it replaces any other tooltip, shown or waiting.
+fn begin_tooltip(owner: &Entity<TooltipOwner>, help: Line, window: &mut Window, cx: &mut App) {
     let at = window.mouse_position();
     let Some(stack) = stack(window, cx) else {
         return;
@@ -1017,7 +1227,46 @@ pub fn show_tooltip(owner: &Entity<TooltipOwner>, help: Line, window: &mut Windo
     });
 }
 
-/// [`show_tooltip`] with the hover beginning at a fixed point, for the screenshot goldens.
+/// Take down `previous`'s tooltip, shown or waiting: the pointer has left it and is over no other control whose help
+/// shows. A tooltip some other control showed stays, so a control leaving never hides another's. A tooltip that was
+/// showing leaves the grace behind it, so the next one within the delay shows at once.
+fn end_tooltip(stack: &Entity<LayerStack>, previous: Option<EntityId>, cx: &mut App) {
+    let Some(previous) = previous else {
+        return;
+    };
+    let hidden = stack.update(cx, |stack, cx| {
+        if stack
+            .pending_tooltip
+            .as_ref()
+            .is_some_and(|(pending, _)| *pending == previous)
+        {
+            stack.pending_tooltip = None;
+        }
+        if !stack
+            .tooltip
+            .as_ref()
+            .is_some_and(|shown| shown.owner == previous)
+        {
+            return false;
+        }
+        stack.tooltip = None;
+        stack.tooltip_release = None;
+        cx.notify();
+        true
+    });
+    if hidden {
+        let weak = stack.downgrade();
+        let cool_down = ticker::after(HOVER_DELAY, cx, move |cx| {
+            let _ = weak.update(cx, |stack, _| stack.warm = false);
+        });
+        stack.update(cx, |stack, _| {
+            stack.warm = true;
+            stack.cool_down = Some(cool_down);
+        });
+    }
+}
+
+/// [`hover_began`]'s tooltip shown at once, with the hover beginning at a fixed point, for the screenshot goldens.
 #[cfg(test)]
 pub(crate) fn show_tooltip_at(
     owner: &Entity<TooltipOwner>,
@@ -1066,47 +1315,24 @@ fn show_tooltip_from(
     });
 }
 
-/// Take down the tooltip if `owner` is the control showing it. A control leaving never hides another's tooltip, which
-/// matters when the pointer moves straight from one control onto the next and the new control's hover arrives first.
-pub fn hide_tooltip(owner: &Entity<TooltipOwner>, window: &mut Window, cx: &mut App) {
-    let Some(stack) = stack(window, cx) else {
-        return;
-    };
-    let owner_id = owner.entity_id();
-    let hidden = stack.update(cx, |stack, cx| {
-        if stack
-            .pending_tooltip
-            .as_ref()
-            .is_some_and(|(pending, _)| *pending == owner_id)
-        {
-            stack.pending_tooltip = None;
+impl LayerStack {
+    /// Run [`settle_hover`] once, after the event being handled: GPUI tells each hovered control's listeners about one
+    /// pointer move (or one frame's hover changes) in turn, and the help to show depends on all of them. A settle runs
+    /// as a deferred effect, which GPUI runs only once the event's listeners have all returned, and the first piece of
+    /// news schedules it.
+    fn settle_after_this_event(&mut self, cx: &mut App) {
+        if self.round.is_some() {
+            return;
         }
-        if stack
-            .tooltip
-            .as_ref()
-            .is_some_and(|shown| shown.owner == owner_id)
-        {
-            stack.tooltip = None;
-            stack.tooltip_release = None;
-            cx.notify();
-            return true;
-        }
-        false
-    });
-    // The pointer moved off a showing tooltip's control: the next one within the delay shows at once.
-    if hidden {
-        let weak = stack.downgrade();
-        let cool_down = ticker::after(HOVER_DELAY, cx, move |cx| {
-            let _ = weak.update(cx, |stack, _| stack.warm = false);
-        });
-        stack.update(cx, |stack, _| {
-            stack.warm = true;
-            stack.cool_down = Some(cool_down);
+        self.round = Some(Vec::new());
+        let window = self.window;
+        // The update fails only when the window is gone, and its stack with it, so the round it leaves open is never
+        // needed again.
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| settle_hover(window, cx));
         });
     }
-}
 
-impl LayerStack {
     /// Take the tooltip down, and any waiting one, without the grace that lets the next one skip the delay: after
     /// Escape or a layer opening, the user has just put one away.
     fn put_tooltip_away(&mut self) {

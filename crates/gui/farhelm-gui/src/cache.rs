@@ -218,17 +218,29 @@ mod tests {
     /// hover change while a frame is being drawn, where GPUI ignores a refresh, so a regression back to refreshing the
     /// window would pass unseen (checked by putting the refresh back: this version fails, the mouse-driven one did not).
     /// The mouse path itself is covered by the component hover tests.
+    ///
+    /// The pointer first moves over no control with help (the list's button sits at the window's corner, where the
+    /// simulated pointer starts): while the pointer is over one, its help would show the moment the test's own tooltip
+    /// went, because the layer manager shows the help of whatever control is still under the pointer.
     #[gpui::test]
     fn showing_and_hiding_a_tooltip_redraws_no_cached_row(cx: &mut TestAppContext) {
         const N: usize = 200;
         let rows = cx.new(|_| Rows((0..N).map(|i| format!("session {i}")).collect()));
         let cx = open(cx, &rows, N);
+        let height = cx.update(|window, _| window.viewport_size().height);
+        let away = gpui::point(px(310.), height - px(1.));
+        cx.simulate_mouse_move(away, None, gpui::Modifiers::none());
+        cx.executor().advance_clock(layers::HOVER_DELAY);
+        cx.run_until_parked();
+        assert_eq!(
+            cx.update(|window, cx| layers::shown_tooltip(window, cx)),
+            None,
+            "the premise: the pointer is over no control with help"
+        );
         let owner = cx.update(|_, cx| cx.new(|_| layers::TooltipOwner));
         cx.update(|_, cx| render_count::reset(cx));
 
-        cx.update(|window, cx| {
-            layers::show_tooltip(&owner, "What this list is".into(), window, cx)
-        });
+        cx.update(|window, cx| layers::hover_began(&owner, "What this list is".into(), window, cx));
         cx.executor().advance_clock(layers::HOVER_DELAY);
         cx.run_until_parked();
         assert!(
@@ -246,7 +258,7 @@ mod tests {
             "showing redraws no row"
         );
 
-        cx.update(|window, cx| layers::hide_tooltip(&owner, window, cx));
+        cx.update(|window, cx| layers::hover_ended(&owner, window, cx));
         cx.run_until_parked();
         assert_eq!(
             cx.update(|window, cx| layers::shown_tooltip(window, cx)),

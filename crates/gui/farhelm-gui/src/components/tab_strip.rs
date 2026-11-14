@@ -272,9 +272,10 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for TabStrip<V> {
                 Rc::new(move |_, window, cx| on_click.choose(index, window, cx));
             tabs.push(super::activate_on_click(element, Some(on_click)));
         }
-        // The strip's help is its accessible description only. A hover listener on the strip would be heard after the
-        // tabs' and replace their tooltips (GPUI tells hover listeners from the last drawn to the first; the radio group
-        // works around the same trap with a surface laid over its options), and each tab already has its own.
+        // The strip's help is its accessible description only, with no tooltip of its own: it got none because a
+        // container's tooltip used to cover its children's. It could now take one through `with_hover_help`, as the
+        // radio group does, since the layer manager shows the innermost control's help; giving it one is a change of
+        // its own.
         div()
             .id(ElementId::Name(self.id.clone()))
             .debug_selector(|| self.id.to_string())
