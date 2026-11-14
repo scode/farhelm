@@ -524,9 +524,12 @@ a waiter never cancels work the helm accepted. A completion that would focus, op
 focus coordinator whether the user has moved on.
 
 The store files each piece of work under a typed key naming what it acts on: a session, a host, a template, the
-preferences, or a launch that has no session yet. A key admits one request at a time, and keys of different kinds never
-collide, so a host and a session that share an id string stay independent. The command itself is built by the feature
-that sends it, with its route's API semantics; the store knows no routes.
+preferences, or a launch or a host being added, neither of which has its id yet. A key admits one request at a time, and
+keys of different kinds never collide, so a host and a session that share an id string stay independent. The command
+itself is built by the feature that sends it, with its route's API semantics; the store knows no routes. A reply settles
+as done, refused, or accepted (202: long work the helm carries on with; the store keeps no result for it, and for host
+setup, Update and Uninstall the result arrives in the hosts' pushed progress). An accepted save leaves its draft
+touched, since the stored value has not changed yet.
 
 Feature code does not detach tasks. GUI crates do not spawn threads or other runtimes' tasks, sleep, or read the system
 clock; time comes from the ticker and async work from GPUI's executor, which keeps tests deterministic. The runtime that
