@@ -664,6 +664,24 @@ fn a_listed_chord_that_a_deeper_binding_takes_keeps_its_repeats(cx: &mut TestApp
 /// was; pressed on a button, it runs Delete.
 #[gpui::test]
 fn the_linux_delete_chord_leaves_a_text_field_alone(cx: &mut TestAppContext) {
+    the_linux_delete_chord_leaves_this_field_alone(cx, TextInputState::new);
+}
+
+/// Why this matters: the field that keeps line breaks is Kit's multi-line text area, not its single-line input, and
+/// the Rename editor draws it. The `NoAction` row reaches it only because Kit's text area sets the same key context;
+/// if a Kit upgrade gave it a context of its own, the Delete chord typed while renaming would delete the session.
+///
+/// Specification: as for the single-line field, with the field from `TextInputState::new_keeping_line_breaks`.
+#[gpui::test]
+fn the_linux_delete_chord_leaves_the_field_that_keeps_line_breaks_alone(cx: &mut TestAppContext) {
+    the_linux_delete_chord_leaves_this_field_alone(cx, TextInputState::new_keeping_line_breaks);
+}
+
+/// The body of the two Delete chord tests above, for a field whose state `make` makes.
+fn the_linux_delete_chord_leaves_this_field_alone(
+    cx: &mut TestAppContext,
+    make: fn(&mut Window, &mut App) -> TextInputState,
+) {
     let chord = "ctrl-shift-backspace";
     let ran = Rc::new(Cell::new(0));
     let field: Rc<RefCell<Option<TextInputState>>> = Rc::new(RefCell::new(None));
@@ -672,7 +690,7 @@ fn the_linux_delete_chord_leaves_a_text_field_alone(cx: &mut TestAppContext) {
     let cx = test_support::open(cx, move |window, cx| {
         let state = kept
             .borrow_mut()
-            .get_or_insert_with(|| TextInputState::new(window, cx))
+            .get_or_insert_with(|| make(window, cx))
             .clone();
         let counted = counted.clone();
         div()

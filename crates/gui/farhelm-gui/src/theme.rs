@@ -352,6 +352,9 @@ pub mod metrics {
     pub const TEXT_MD: Pixels = px(13.);
     /// `.dialog-title`.
     pub const TEXT_TITLE: Pixels = px(18.);
+    /// `.rename-input`'s line height: `line-height: 1.3` at the 13-pixel text size. With Kit's 8-pixel vertical padding
+    /// and its border, a one-row field is 35 pixels high, as the old Rename field was.
+    pub const RENAME_LINE_HEIGHT: Pixels = px(16.9);
     /// `.btn` padding, vertical then horizontal.
     pub const BUTTON_PAD: (Pixels, Pixels) = (px(6.), px(10.));
     /// `.banner` padding, vertical then horizontal: the red band across the top of a surface.

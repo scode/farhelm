@@ -62,6 +62,11 @@
       "reference": null
     },
     {
+      "golden": "text-input-line-breaks",
+      "title": "The text input that keeps pasted line breaks, with one line and with two long lines",
+      "reference": "rename-dialog"
+    },
+    {
       "golden": "focus-ring",
       "title": "The keyboard focus ring",
       "reference": null
