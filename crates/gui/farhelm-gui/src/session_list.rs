@@ -80,11 +80,12 @@
 //! The host rail ([`host_rail`]) is drawn by the list, at the sidebar's left edge with the list's own column beside
 //! it, because choosing a host is the list's query: the rail sets the UI channel's session query, the list's state
 //! keeps the choice per UI session, and the list's column shows the chosen host's chip under its heading and, for a
-//! host with no sessions, an empty state that names it.
+//! host with no sessions, an empty state that names it. The rail's foot, which the list draws after its column, holds
+//! Hosts, which swaps that column for the Hosts panel ([`crate::hosts`]), and the Settings gear.
 //!
 //! NOTE: Not ported yet, each with the area that brings it: the order menu (the title is the stored order's name, not a
 //! control), the status segments, compact rows, marking, pins, the row menu's other commands, and the rail's host
-//! status, foot, Add host and expansion.
+//! status, the foot's controls other than Hosts and Settings, Add host and expansion.
 
 pub(crate) mod delete;
 pub(crate) mod host_rail;
@@ -123,12 +124,13 @@ use farhelm_proto::ui_channel::{
     Availability, Collection, CollectionMeta, Preferences, SessionRow,
 };
 use gpui::{
-    AnyElement, App, Context, FocusHandle, FontWeight, InteractiveElement, IntoElement,
-    ListAlignment, ListState, ParentElement, Pixels, Render, Role, SharedString,
+    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, FontWeight, InteractiveElement,
+    IntoElement, ListAlignment, ListState, ParentElement, Pixels, Render, Role, SharedString,
     StatefulInteractiveElement, Styled, Subscription, WeakEntity, WeakFocusHandle, Window, div, px,
 };
 
 use crate::host_text::{HostSentence, HostText};
+use crate::hosts::HostsPanel;
 use crate::local_state::{self, LocalState};
 use crate::operations;
 use crate::render_count;
@@ -184,6 +186,17 @@ pub struct SessionList {
     /// The host rail's All button's focus handle, a tab stop: kept here rather than in the button's element state so
     /// that removing the host filter from the chip or the empty state can move focus to All ([`host_rail`]).
     all_focus: FocusHandle,
+    /// The Settings gear's focus handle, on the host rail's foot ([`host_rail::foot`]), a tab stop: kept here for the
+    /// window's life so that Settings, which the gear opens with itself as the opener, returns focus to the same
+    /// control when it closes.
+    settings_focus: FocusHandle,
+    /// The Hosts control's focus handle, on the rail's foot, a tab stop: kept here so that Hosts keeps focus when it
+    /// toggles the panel ([`host_rail`]).
+    hosts_focus: FocusHandle,
+    /// The Hosts panel, drawn in place of the list's column while Hosts is pressed. One for the window's life, so the
+    /// panel's Details choice survives closing and reopening it (SPEC.md: opening or closing Hosts keeps "the current
+    /// ... details choice").
+    hosts_panel: Entity<HostsPanel>,
 }
 
 /// What the list keeps for one UI session.
@@ -203,6 +216,9 @@ struct Current {
     /// The host rail's choice and the helm's answers to it. Per UI session because the helm's channel keeps the query
     /// per channel: a new channel starts unfiltered, and so does this.
     hosts: host_rail::Choice,
+    /// Whether the Hosts panel shows in place of the list's column. Per UI session like the choice, so a reset brings
+    /// the window back to Sessions with the rest of the UI.
+    hosts_shown: bool,
 }
 
 impl SessionList {
@@ -226,6 +242,9 @@ impl SessionList {
             hinted_width: None,
             focus_seen: None,
             all_focus: cx.focus_handle().tab_stop(true),
+            settings_focus: cx.focus_handle().tab_stop(true),
+            hosts_focus: cx.focus_handle().tab_stop(true),
+            hosts_panel: cx.new(HostsPanel::new),
         };
         list.settle(cx);
         list
@@ -437,8 +456,9 @@ impl Render for SessionList {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         render_count::record("session-list", cx);
 
-        // The sidebar's body: the host rail, then the list's own column in the width the rail leaves.
-        let body_row = div().flex().flex_row().size_full();
+        // The sidebar's body: the host rail, then the list's own column in the width the rail leaves, then the rail's
+        // foot, which this row positions absolutely over the room the rail leaves at its bottom.
+        let body_row = div().relative().flex().flex_row().size_full();
         let list = div()
             .id("session-list")
             .role(Role::List)
@@ -499,6 +519,7 @@ impl Render for SessionList {
         let shared = self.current.current(cx).rows.clone();
         shared.borrow_mut().start_frame();
         let choice = self.current.current(cx).hosts.clone();
+        let hosts_shown = self.current.current(cx).hosts_shown;
         let weak = cx.weak_entity();
         let collections = store.read(cx).collections();
         let palette = theme::palette(cx);
@@ -507,10 +528,34 @@ impl Render for SessionList {
             choice.chosen(),
             &weak,
             &self.all_focus,
+            hosts_shown,
             palette,
         ));
+        // Drawn after the list's column, so Tab reaches the list's controls before the foot (`host_rail`'s docs).
+        let foot = host_rail::foot(
+            &weak,
+            &self.hosts_focus,
+            hosts_shown,
+            &self.settings_focus,
+            palette,
+        );
+        if hosts_shown {
+            // The panel in the column's box, which gives it the definite height it scrolls its rows in. The list's
+            // column is not drawn meanwhile, so neither are its rows and controls.
+            return body_row
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .h_full()
+                        .child(self.hosts_panel.clone()),
+                )
+                .child(foot);
+        }
         let Some(meta) = collections.meta(Collection::Sessions) else {
-            return body_row.child(list.child(status_line("Loading sessions…")));
+            return body_row
+                .child(list.child(status_line("Loading sessions…")))
+                .child(foot);
         };
         let selected = local_state::selected(cx);
 
@@ -588,14 +633,16 @@ impl Render for SessionList {
                 )
                 .into_any_element()
         };
-        body_row.child(
-            list.child(heading)
-                .children(chip)
-                .children(refused)
-                .children(truncated)
-                .children(unavailable)
-                .child(body),
-        )
+        body_row
+            .child(
+                list.child(heading)
+                    .children(chip)
+                    .children(refused)
+                    .children(truncated)
+                    .children(unavailable)
+                    .child(body),
+            )
+            .child(foot)
     }
 }
 

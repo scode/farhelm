@@ -34,12 +34,28 @@
 //! control, focus returns to the rail's All button"), through the focus coordinator's move for a user's action, which
 //! does nothing once the user has moved on or while a layer is open. All's focus handle is the list's for that reason.
 //!
-//! NOTE: Not drawn yet, each waiting for its area: Add host and the rail's foot (Hosts, Settings, Help, the notices
-//! bell and the expand toggle) for the settings-and-hosts, help and notices areas; an avatar's right-click menu; every
-//! host status (connection dots, update badges, progress rings, dimming and the state words that join the avatar's
-//! name); the rail's expansion to 220 pixels; and the status segments that share the chip's row. A keyboard focus move
-//! onto an avatar below the rail's fold does not scroll it into view (the rail holds about seven hosts at the minimum
-//! window height).
+//! The rail's foot ([`foot`]) is pinned under its entries, which scroll above it, and holds Hosts above the Settings
+//! gear, in the old foot's order. Hosts swaps the list's column for the Hosts panel ([`crate::hosts::HostsPanel`]) and
+//! back, keeping focus on itself; choosing All or a host returns to Sessions (SPEC.md: "All or a host avatar returns
+//! to Sessions"), and while the panel shows, the rail's chosen entry wears a quieter look so the filled Hosts control
+//! marks the view on screen. Whether the panel shows belongs to the UI session, like the choice. The gear opens the
+//! Settings dialog ([`crate::settings::open`]) with itself as the opener, so that Escape and either close control bring
+//! focus back to it (SPEC.md: "Escape and either close control return focus to the gear").
+//!
+//! The foot is drawn by the list after its own column rather than inside the rail, as the old app placed its
+//! `.host-rail-footer` after the sidebar's content: GPUI's Tab order follows the order controls are drawn in, and the
+//! old app kept "host choices before Settings" with the list's controls between them, so Tab goes from the rail
+//! through the list (or the Hosts panel) to the foot. The rail leaves the foot's height free at its bottom
+//! ([`FOOT_HEIGHT`]), and the foot is drawn over that room.
+//!
+//! NOTE: Not drawn yet, each waiting for its area: Add host and the rest of the rail's foot (the notices bell, Help and
+//! the expand toggle) for the settings-and-hosts, help and notices areas; an avatar's right-click menu; every host
+//! status (connection dots, update badges, progress rings, dimming and the state words that join the avatar's name, and
+//! the update count that joins Hosts' name); the rail's expansion to 220 pixels; and the status segments that share the
+//! chip's row. A keyboard focus move onto an avatar below the rail's fold does not scroll it into view (the rail holds
+//! about seven hosts at the minimum window height). The foot is sized for the two controls it holds: the old foot was
+//! 208 pixels, five 40-pixel controls, and it grows back as the others arrive. An accepted quick-switcher pick does not
+//! return from the Hosts panel to Sessions yet, which SPEC.md asks for (recorded in the switcher's NOTE too).
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -57,10 +73,11 @@ use gpui::{
 use super::SessionList;
 use super::row::short_name;
 use crate::assets::Icon;
-use crate::components::{Button, HoverHelp, Role, StatusMark, Tier};
+use crate::components::{Button, HoverHelp, IconButton, Role, StatusMark, Tier};
 use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::session;
+use crate::settings;
 use crate::theme::{self, Palette, Token, metrics};
 
 /// `--host-rail-width` while the rail is collapsed, its only state so far: the rail's whole width, its right edge
@@ -89,6 +106,29 @@ const CHIP_GAP: f32 = 5.;
 /// `.session-status-filter`'s padding (vertical then horizontal) and gap: the row under the heading that holds the chip.
 const CHIP_ROW_PAD: (f32, f32) = (6., 8.);
 const CHIP_ROW_GAP: f32 = 6.;
+
+/// `.host-rail .btn`'s side: the square every rail and foot control is drawn in.
+const RAIL_BUTTON: f32 = 40.;
+
+/// `.host-rail-footer`'s padding: the bottom, and the sides that center a 40-pixel control in the 55 pixels left of the
+/// rail beside its 1-pixel edge.
+const FOOT_PAD_BOTTOM: f32 = 8.;
+const FOOT_PAD_X: f32 = 7.5;
+
+/// The foot's height while it holds Hosts and the gear: two controls and the bottom padding. The old foot's 208 pixels
+/// held five controls; it grows by 40 pixels with each control that joins it.
+pub(super) const FOOT_HEIGHT: f32 = 2. * RAIL_BUTTON + FOOT_PAD_BOTTOM;
+
+/// `SettingsIcon`'s size in the old foot's icon box.
+const SETTINGS_GLYPH: f32 = 16.;
+
+/// Hosts' hover help, the old app's words while no host has an update (the update count that joins its name and help
+/// comes with host status).
+const HOSTS_HELP: &str = "Hosts: show host management";
+
+/// The gear's hover help, the old app's words. The old app added ", and this app's automatic updates" when the desktop
+/// app's updater was active; this app has no updater yet, so the words stop where the old app's did without one.
+const SETTINGS_HELP: &str = "Settings: choices that apply to every host on this helm";
 
 /// The empty state sentence's line height: fixed, so the mark can be centered on the first line of a wrapped name.
 const EMPTY_LINE: f32 = 20.;
@@ -169,11 +209,18 @@ impl Choice {
 impl SessionList {
     /// The user chose `host` (`None` for All) on the rail, the chip or "Show all hosts": press it at once and send the
     /// channel's session query for it, unless it is the choice already. The reply settles the choice ([`Choice`]).
-    /// Nothing happens while the window is inert.
+    /// Any choice also returns from the Hosts panel to Sessions. Nothing happens while the window is inert.
     pub(crate) fn choose_host(&mut self, host: Option<i64>, cx: &mut Context<Self>) {
         let Some(ui) = session::connection(cx).and_then(|c| c.read(cx).session().cloned()) else {
             return;
         };
+        // SPEC.md: "All or a host avatar returns to Sessions". The old app closed the Hosts panel on every choice, the
+        // choice already in force included, so this comes before the check that a repeated choice sends nothing.
+        let current = self.current.current(cx);
+        if current.hosts_shown {
+            current.hosts_shown = false;
+            cx.notify();
+        }
         // Encoded before the choice is taken: a query that could not be sent must not leave a host pressed that no
         // reply will ever settle.
         let body = match serde_json::to_value(SessionQuery {
@@ -217,6 +264,26 @@ impl SessionList {
     fn clear_host(&mut self, mark: &Mark, window: &mut Window, cx: &mut Context<Self>) {
         self.choose_host(None, cx);
         focus::focus_control(&self.all_focus, mark, window, cx);
+    }
+
+    /// The user pressed Hosts: show the Hosts panel in place of the list's column, or Sessions again if it shows. The
+    /// query, the sort, the open session and the panel's own Details choice are untouched (SPEC.md: "opening or closing
+    /// Hosts keeps the current query, sort, selected session and details choice"). Focus stays on Hosts (SPEC.md: "The
+    /// control keeps focus"), also where a click focuses no button (macOS), as the old app focused it explicitly.
+    /// `mark` is the one taken in the control's handler.
+    fn toggle_hosts(&mut self, mark: &Mark, window: &mut Window, cx: &mut Context<Self>) {
+        let current = self.current.current(cx);
+        current.hosts_shown = !current.hosts_shown;
+        cx.notify();
+        focus::focus_control(&self.hosts_focus, mark, window, cx);
+    }
+
+    /// Show the Hosts panel, as pressing Hosts does, without a press or a focus move: for a golden scene, which has no
+    /// focus handle of the foot to hand a mark to.
+    #[cfg(test)]
+    pub(crate) fn show_hosts(&mut self, cx: &mut Context<Self>) {
+        self.current.current(cx).hosts_shown = true;
+        cx.notify();
     }
 }
 
@@ -353,15 +420,19 @@ fn registered(collections: &Collections, id: i64) -> Option<&HostView> {
 // ---- The rail ------------------------------------------------------------------------------------------------------
 
 /// The rail, for the hosts in `collections` with `chosen` pressed; its entries choose through `list`, and All tracks
-/// `all_focus`, the list's handle that removing the filter focuses.
+/// `all_focus`, the list's handle that removing the filter focuses. While `quiet` (the Hosts panel shows), the chosen
+/// entry wears the quieter pressed look, which leaves the filled Hosts control as the mark of the view on screen.
 ///
 /// It scrolls on its own when its entries overflow it, beside the list, which scrolls separately (`overflow: hidden
-/// auto`); its padding and gaps are inside the scrolling element, so a wheel over them scrolls the rail.
+/// auto`); its padding and gaps are inside the scrolling element, so a wheel over them scrolls the rail. The scrolling
+/// part stops [`FOOT_HEIGHT`] above the sidebar's bottom (the old rail's `bottom: 208px`), leaving room the list draws
+/// the [`foot`] over, so no entry ever scrolls under the foot.
 pub(super) fn rail(
     collections: &Collections,
     chosen: Option<i64>,
     list: &WeakEntity<SessionList>,
     all_focus: &FocusHandle,
+    quiet: bool,
     palette: &Palette,
 ) -> impl IntoElement {
     let choose = |host: Option<i64>| {
@@ -379,6 +450,7 @@ pub(super) fn rail(
         )
         .tier(Tier::Rail)
         .pressed(chosen.is_none())
+        .quiet(quiet)
         .focus(all_focus)
         .content(div().child("All"))
         .on_click(choose(None))
@@ -392,6 +464,7 @@ pub(super) fn rail(
             entries.push(avatar(
                 host,
                 chosen == Some(host.id),
+                quiet,
                 choose(Some(host.id)),
                 palette,
             ));
@@ -409,6 +482,7 @@ pub(super) fn rail(
                 )
                 .tier(Tier::Rail)
                 .pressed(true)
+                .quiet(quiet)
                 .disabled(true)
                 .content(div().child("?"))
                 .into_any_element(),
@@ -417,15 +491,15 @@ pub(super) fn rail(
     } else {
         entries.push(unavailable(palette));
     }
-    div()
+    let scrolling = div()
         .id("host-rail")
         // Tests find the rail by this; it records nothing outside test builds.
         .debug_selector(|| "host-rail".into())
         .role(Role::Navigation)
         .aria_label("Hosts")
-        .w(RAIL_WIDTH)
-        .flex_none()
-        .h_full()
+        .w_full()
+        .flex_1()
+        .min_h_0()
         .border_r_1()
         .border_color(theme::color(palette.border_row))
         .bg(theme::color(palette.bg_1))
@@ -439,13 +513,25 @@ pub(super) fn rail(
                 .py(px(RAIL_PAD.0))
                 .px(px(RAIL_PAD.1))
                 .children(entries),
-        )
+        );
+    div()
+        .w(RAIL_WIDTH)
+        .flex_none()
+        .h_full()
+        .flex()
+        .flex_col()
+        .child(scrolling)
+        // The foot's room: empty here, since the list draws the foot over it after its own column (see the module
+        // docs for why the foot is not this element's child).
+        .child(div().flex_none().h(px(FOOT_HEIGHT)))
 }
 
-/// One host's avatar: its mark in a rail button named by its identity, with its short name as a caption under it.
+/// One host's avatar: its mark in a rail button named by its identity, with its short name as a caption under it;
+/// `quiet` as for [`rail`].
 fn avatar(
     host: &HostView,
     chosen: bool,
+    quiet: bool,
     on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
     palette: &Palette,
 ) -> AnyElement {
@@ -466,6 +552,7 @@ fn avatar(
             )
             .tier(Tier::Rail)
             .pressed(chosen)
+            .quiet(quiet)
             .content(host_mark(host.icon, host.color, px(AVATAR_MARK), palette))
             .on_click(on_click),
         )
@@ -503,6 +590,85 @@ fn unavailable(palette: &Palette) -> AnyElement {
             .ink(palette.warn),
         )
         .into_any_element()
+}
+
+/// The rail's foot (`.host-rail-footer`), for the list to draw after its own column, as its last child, over the room
+/// [`rail`] leaves at its bottom: Hosts above the Settings gear, in the old foot's order, pinned there while the rail's
+/// entries scroll above them. `hosts_focus` and `settings_focus` are their focus handles, which the list keeps for the
+/// window's life: Hosts keeps focus when it toggles, and Settings gives focus back to the gear when it closes. Hosts is
+/// pressed and expanded while `hosts_shown`, and toggles the Hosts panel through `list`.
+///
+/// The element places itself (absolutely, at the bottom left of the row the list draws it in), so that row must be
+/// the one that holds the rail at its left edge and fills the sidebar's height.
+pub(super) fn foot(
+    list: &WeakEntity<SessionList>,
+    hosts_focus: &FocusHandle,
+    hosts_shown: bool,
+    settings_focus: &FocusHandle,
+    palette: &Palette,
+) -> impl IntoElement {
+    let list = list.clone();
+    let gear = settings_focus.clone();
+    div()
+        .absolute()
+        .left_0()
+        .bottom_0()
+        .w(RAIL_WIDTH)
+        .h(px(FOOT_HEIGHT))
+        .flex()
+        .flex_col()
+        .items_start()
+        .pb(px(FOOT_PAD_BOTTOM))
+        .px(px(FOOT_PAD_X))
+        .border_r_1()
+        .border_color(theme::color(palette.border_row))
+        .bg(theme::color(palette.bg_1))
+        // An icon button draws the glyph at the old `ActionIcon`'s 14 pixels in the button's own ink, which its pressed
+        // look turns to the inverse. SPEC.md: Hosts "exposes its pressed and expanded state". GPUI's driver record has
+        // no expanded field, so no in-process test reads the expanded state back; the pressed state is tested, and the
+        // button's own `aria-expanded` wiring is the one every expanded button shares (the row menu's ⋯ among them).
+        .child(
+            IconButton::new(
+                "hosts-panel-toggle",
+                Icon::Hosts,
+                "Hosts",
+                HoverHelp::tooltip(HOSTS_HELP),
+                Role::Button,
+            )
+            .tier(Tier::Rail)
+            .pressed(hosts_shown)
+            .expanded(hosts_shown)
+            .focus(hosts_focus)
+            .on_click(move |_, window, cx| {
+                // Taken in the handler, after the coordinator counted this press or key.
+                let mark = Mark::take(cx);
+                let _ = list.update(cx, |list, cx| list.toggle_hosts(&mark, window, cx));
+            }),
+        )
+        .child(
+            Button::new(
+                "app-settings-toggle",
+                "Settings",
+                HoverHelp::tooltip(SETTINGS_HELP),
+                Role::Button,
+            )
+            .tier(Tier::Rail)
+            .focus(settings_focus)
+            // Never pressed, so always the rail's quiet ink.
+            .content(
+                svg()
+                    .path(Icon::Settings.path())
+                    .size(px(SETTINGS_GLYPH))
+                    .flex_none()
+                    .text_color(theme::color(palette.fg_1)),
+            )
+            .on_click(move |_, window, cx| {
+                // Taken in the handler, after the coordinator counted this press or key, so Settings opens for
+                // this press and not for one the user has since moved on from.
+                let mark = Mark::take(cx);
+                settings::open(&gear, &mark, window, cx);
+            }),
+        )
 }
 
 // ---- The chip, the refusal and the empty state ---------------------------------------------------------------------

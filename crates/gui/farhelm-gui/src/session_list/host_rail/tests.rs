@@ -1,6 +1,7 @@
 //! Tests of the host rail: its entries and their names, the session query a choice sends and how the helm's answer
 //! settles it, the chip, the empty state of a host with no sessions, the placeholder of a removed host, the status of a
-//! host list never read, a reset, the keyboard, and the rail's width in the sidebar.
+//! host list never read, a reset, the keyboard, the foot's Hosts control and Settings gear, and the rail's width in
+//! the sidebar.
 //!
 //! Like the list's other tests, these run the real main view over the helm client's fake, which hands the test every
 //! command the window sent, and read controls from GPUI's driver record of the frame by their ids (`host-rail-all`,
@@ -19,8 +20,8 @@ use farhelm_proto::ui_channel::{
     KeyedEntry, ListCounts, SESSION_QUERY_PATH,
 };
 use gpui::{
-    AppContext as _, DriverNode, DriverText, HeadlessAppContext, Modifiers, Role, TestAppContext,
-    Toggled, VisualTestContext, px, size,
+    AppContext as _, DriverNode, DriverText, HeadlessAppContext, Modifiers, Role, ScrollDelta,
+    ScrollEvent, TestAppContext, Toggled, VisualTestContext, point, px, size,
 };
 use gpui_component::Root;
 use serde_json::{Value, json};
@@ -816,6 +817,285 @@ fn tab_from_all_reaches_the_first_avatar_and_space_chooses_it(cx: &mut TestAppCo
     test_support::keys(cx, "enter");
     let (_, body) = one_query(&mut fake);
     assert_eq!(body, json!({ "host": 3 }));
+}
+
+// ---- The foot: Hosts and the Settings gear --------------------------------------------------------------------------
+
+/// The foot's controls' element ids (the old `.hosts-panel-toggle` and `.app-settings-toggle`), outside the
+/// `host-rail-` ids so the entry lists above do not count them.
+const HOSTS: &str = "hosts-panel-toggle";
+const GEAR: &str = "app-settings-toggle";
+
+/// The id of the switch Settings focuses when it opens (its Sessions section's first switch, Skip session
+/// confirmations), as the Settings dialog's own tests name it.
+const FIRST_SWITCH: &str = "settings-skip-session-confirmations";
+
+/// Whether any layer (Settings, here) is open in the test's window.
+fn any_layer_open(cx: &mut VisualTestContext) -> bool {
+    cx.update(|window, cx| layers::any_open(window, cx))
+}
+
+/// Whether the Hosts panel is drawn in place of the list's column: the panel's node is there and the list's is not.
+/// Fails on any other combination, which would mean both or neither show.
+fn panel_shown(cx: &mut VisualTestContext) -> bool {
+    let nodes = frame(cx);
+    let panel = node(&nodes, "hosts-panel").is_some();
+    let list = node(&nodes, "session-list").is_some();
+    assert_ne!(
+        panel, list,
+        "exactly one of the panel and the list is drawn"
+    );
+    panel
+}
+
+/// SPEC.md puts Hosts above Settings at the foot of the host rail ("The **Hosts** control above Settings and Help",
+/// "The gear at the foot of the host rail opens a settings dialog"), and a control that drifted up with the entries or
+/// lost its name would leave a keyboard or screen reader user without the way into host management or Settings. The
+/// old foot's geometry: 40-pixel controls stacked with no gap in a 56-pixel rail, 7.5 pixels in from the left, the last
+/// 8 pixels above the bottom. Specified: in a 1200 by 700 window, Hosts is a button named "Hosts", not pressed, whose
+/// hover help is "Hosts: show host management", directly above the gear, a button named "Settings" whose hover help is
+/// the old app's words without the updater clause; both are 40-pixel squares 7.5 pixels from the window's left edge,
+/// the gear's bottom 8 pixels above the window's; the rail's scrolling part ends at the foot's top, 88 pixels above the
+/// bottom, so both sit wholly below every entry.
+#[gpui::test]
+fn the_foot_holds_hosts_above_the_settings_gear_with_their_names_and_help(cx: &mut TestAppContext) {
+    let (_fake, cx) = open_main(cx, snapshot());
+    cx.simulate_resize(size(px(1200.), px(700.)));
+    test_support::settle(cx);
+    let nodes = frame(cx);
+    assert_eq!(label(&nodes, HOSTS), "Hosts");
+    assert!(!pressed(&nodes, HOSTS), "Sessions shows to begin with");
+    assert_eq!(label(&nodes, GEAR), "Settings");
+    for id in [HOSTS, GEAR] {
+        let control = node(&nodes, id).unwrap();
+        assert_eq!(control.role, Some(Role::Button), "{id}");
+        let at = control.bounds;
+        assert_eq!((at.size.width, at.size.height), (px(40.), px(40.)), "{id}");
+        assert_eq!(at.left(), px(7.5), "{id}");
+    }
+    let (hosts, gear) = (
+        node(&nodes, HOSTS).unwrap().bounds,
+        node(&nodes, GEAR).unwrap().bounds,
+    );
+    assert_eq!(
+        hosts.bottom(),
+        gear.top(),
+        "Hosts sits directly above the gear"
+    );
+    assert_eq!(gear.bottom(), px(700. - 8.));
+    assert_eq!(
+        test_support::bounds(cx, "host-rail").bottom(),
+        hosts.top(),
+        "the entries scroll above the foot"
+    );
+    assert_eq!(hosts.top(), px(700. - 88.));
+    assert_eq!(
+        hover_help(cx, HOSTS).as_deref(),
+        Some("Hosts: show host management")
+    );
+    assert_eq!(
+        hover_help(cx, GEAR).as_deref(),
+        Some("Settings: choices that apply to every host on this helm")
+    );
+}
+
+/// SPEC.md: "The gear always opens sessions and focuses its first switch" and "Escape and either close control return
+/// focus to the gear". The Settings dialog's own tests open it from a stand-in button; this pins the real gear's wiring
+/// (its kept focus handle passed as the opener, its mark taken in the handler), under macOS's click rule, where the
+/// click leaves the gear unfocused and only the explicit hand-over brings focus back to it, and from the keyboard
+/// through the button's Enter. Specified: with focus away from the gear and a click that focuses no control, a click on
+/// the gear opens Settings with focus on its first switch, and Escape closes it with focus on the gear; Enter on the
+/// focused gear then opens it again the same way, and Escape again leaves focus on the gear.
+#[gpui::test]
+fn the_gear_opens_settings_at_its_first_switch_and_escape_returns_to_the_gear(
+    cx: &mut TestAppContext,
+) {
+    let (mut fake, cx) = open_main(cx, snapshot());
+    answer_everything(&mut fake);
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(false, cx));
+    test_support::check(cx);
+    assert_ne!(
+        focused_id(cx).as_deref(),
+        Some(GEAR),
+        "the premise: focus is away from the gear"
+    );
+
+    test_support::click(cx, GEAR);
+    assert!(any_layer_open(cx), "the click opened Settings");
+    assert_eq!(focused_id(cx).as_deref(), Some(FIRST_SWITCH));
+    test_support::keys(cx, "escape");
+    assert!(!any_layer_open(cx), "Escape closed Settings");
+    assert_eq!(focused_id(cx).as_deref(), Some(GEAR), "after the click");
+
+    test_support::keys(cx, "enter");
+    assert!(any_layer_open(cx), "Enter on the gear opened Settings");
+    assert_eq!(focused_id(cx).as_deref(), Some(FIRST_SWITCH));
+    test_support::keys(cx, "escape");
+    assert!(!any_layer_open(cx));
+    assert_eq!(focused_id(cx).as_deref(), Some(GEAR), "after Enter");
+}
+
+/// SPEC.md: the Hosts control "swaps session content for complete host management", "keeps focus and exposes its
+/// pressed ... state", and opening or closing it keeps the query and the details choice; the old app focused it
+/// explicitly, so it keeps focus on macOS too, where a click focuses no button. Run under that rule for that reason.
+/// While the panel shows, the rail's choice is still in force, so All still reports itself pressed (in the quieter
+/// look, which the `buttons` golden pins). Specified: with a session open, a click on Hosts draws the panel in place of
+/// the list's column, presses Hosts, leaves focus on it, sends nothing, and leaves All pressed; with Details turned on
+/// in the panel, Enter on Hosts brings the list back with the same session open, unpresses Hosts and keeps focus on
+/// it; a click on Hosts again shows the panel with Details still on.
+#[gpui::test]
+fn hosts_swaps_the_list_for_the_panel_and_back_keeping_focus(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot());
+    answer_everything(&mut fake);
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(false, cx));
+    test_support::check(cx);
+    assert!(!panel_shown(cx), "the premise: Sessions shows");
+    let open = crate::session_list::tests::selected(cx);
+    assert!(open.is_some(), "the premise: a session is open");
+
+    test_support::click(cx, HOSTS);
+    assert!(panel_shown(cx), "the click showed the panel");
+    let nodes = frame(cx);
+    assert!(pressed(&nodes, HOSTS));
+    assert!(
+        pressed(&nodes, "host-rail-all"),
+        "the rail's choice is still in force"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some(HOSTS), "after the click");
+    assert_eq!(queries(&mut fake).len(), 0, "opening Hosts sends no query");
+
+    test_support::click(cx, "host-details-toggle");
+    assert_eq!(
+        node(&frame(cx), "host-details-toggle").and_then(|node| node.toggled),
+        Some(Toggled::True),
+        "the premise: Details is on"
+    );
+    // Under this click rule the switch's click took no focus, so Hosts still holds it for the Enter below.
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some(HOSTS),
+        "the premise: Hosts has focus"
+    );
+    test_support::keys(cx, "enter");
+    assert!(!panel_shown(cx), "Enter brought Sessions back");
+    assert!(!pressed(&frame(cx), HOSTS));
+    assert_eq!(
+        crate::session_list::tests::selected(cx),
+        open,
+        "the open session stayed"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some(HOSTS), "after Enter");
+
+    test_support::click(cx, HOSTS);
+    assert!(panel_shown(cx));
+    assert_eq!(
+        node(&frame(cx), "host-details-toggle").and_then(|node| node.toggled),
+        Some(Toggled::True),
+        "the panel kept its Details choice"
+    );
+}
+
+/// SPEC.md: "All or a host avatar returns to Sessions", and the old app closed the panel on every choice, also one
+/// equal to the current choice, which sends no query. Specified: with the panel shown, a click on All (already chosen)
+/// brings the list back and sends nothing; with the panel shown again, a click on host 3's avatar brings the list back
+/// and sends exactly one query, `{"host": 3}`, with Hosts no longer pressed.
+#[gpui::test]
+fn choosing_all_or_a_host_returns_from_the_panel_to_sessions(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot());
+    answer_everything(&mut fake);
+    test_support::click(cx, HOSTS);
+    assert!(panel_shown(cx), "the premise: the panel shows");
+    test_support::click(cx, "host-rail-all");
+    assert!(!panel_shown(cx), "All returned to Sessions");
+    assert_eq!(queries(&mut fake).len(), 0, "All was the choice already");
+
+    test_support::click(cx, HOSTS);
+    assert!(panel_shown(cx), "the premise: the panel shows again");
+    test_support::click(cx, "host-rail-host-3");
+    assert!(!panel_shown(cx), "an avatar returned to Sessions");
+    let (_, body) = one_query(&mut fake);
+    assert_eq!(body, json!({ "host": 3 }));
+    assert!(!pressed(&frame(cx), HOSTS));
+}
+
+/// The old app drew its foot after the sidebar's content so keyboard navigation reached host choices, and the list
+/// between them, before the foot; in GPUI, Tab follows the order controls are drawn in, which is why the list draws the
+/// foot after its own column. A foot drawn inside the rail would put Hosts and the gear between the last avatar and the
+/// list. Specified (Linux's rule, where Tab reaches every control): over an empty fleet with host 3 chosen by a click,
+/// which leaves focus on its avatar and draws the chip as the list's one control, Tab goes to host 2's avatar, the
+/// chip, Hosts, then the gear; Shift+Tab from the gear goes back to Hosts.
+#[gpui::test]
+fn tab_reaches_the_foot_after_the_rail_and_the_lists_controls(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, vec![listing(&[], &[]), hosts(&fleet_hosts())]);
+    answer_everything(&mut fake);
+    test_support::click(cx, "host-rail-host-3");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("host-rail-host-3"),
+        "the premise: the click focused the avatar"
+    );
+    assert!(
+        node(&frame(cx), "host-filter-chip").is_some(),
+        "the premise: the chip is drawn"
+    );
+    for expected in ["host-rail-host-2", "host-filter-chip", HOSTS, GEAR] {
+        test_support::keys(cx, "tab");
+        assert_eq!(focused_id(cx).as_deref(), Some(expected));
+    }
+    test_support::keys(cx, "shift-tab");
+    assert_eq!(focused_id(cx).as_deref(), Some(HOSTS));
+}
+
+/// The old spec "rail scrolling leaves settings and help reachable": a long registry makes the rail scroll, and the
+/// foot must stay where it is whatever the rail's scroll position, with no entry scrolling under it. Specified: in a
+/// 1200 by 500 window over 30 hosts, the last avatar starts below the rail's visible part; after a wheel over the rail
+/// scrolls it to its end, the last avatar lies wholly inside the rail's visible part, above Hosts, and neither foot
+/// control has moved, the gear's bottom still 8 pixels above the window's.
+#[gpui::test]
+fn a_long_host_list_scrolls_above_the_foot_which_stays_put(cx: &mut TestAppContext) {
+    let many: Vec<Host> = (10..40)
+        .map(|id| remote(id, &format!("ops@host-{id}.example.invalid")))
+        .collect();
+    let (_fake, cx) = open_main(cx, vec![listing(&[], &[]), hosts(&many)]);
+    cx.simulate_resize(size(px(1200.), px(500.)));
+    test_support::settle(cx);
+    let rail = test_support::bounds(cx, "host-rail");
+    let foot = (
+        test_support::bounds(cx, HOSTS),
+        test_support::bounds(cx, GEAR),
+    );
+    assert!(
+        test_support::bounds(cx, "host-rail-host-39").top() > rail.bottom(),
+        "the premise: the last host is below the rail's fold"
+    );
+
+    let at = rail.center();
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    cx.simulate_event(ScrollEvent {
+        position: at,
+        delta: ScrollDelta::Pixels(point(px(0.), px(-5000.))),
+        ..Default::default()
+    });
+    test_support::settle(cx);
+    let last = test_support::bounds(cx, "host-rail-host-39");
+    assert!(
+        last.top() >= rail.top() && last.bottom() <= rail.bottom(),
+        "the last host {last:?} shows inside the rail {rail:?}"
+    );
+    assert!(
+        last.bottom() <= foot.0.top(),
+        "and above Hosts {:?}",
+        foot.0
+    );
+    assert_eq!(
+        (
+            test_support::bounds(cx, HOSTS),
+            test_support::bounds(cx, GEAR)
+        ),
+        foot,
+        "the foot did not move"
+    );
+    assert_eq!(foot.1.bottom(), px(500. - 8.));
 }
 
 // ---- Names and marks as pure functions -----------------------------------------------------------------------------

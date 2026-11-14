@@ -44,7 +44,9 @@
 //!
 //! NOTE: Not built here, each waiting for the area that brings it: the `New session named "X"` row, the `tl:`
 //! templates section and its hint, and the Quick launch row (the launcher area); resetting the host and status filters
-//! after a pick they hide (the sidebar's filters, which do not exist yet); and the host's chosen mark beside its name
+//! after a pick they hide (the sidebar's filters, which do not exist yet), and, with the same reach from a pick into the
+//! session list, returning from the Hosts panel to Sessions (SPEC.md: "All or a host avatar returns to Sessions, as
+//! does an accepted quick-switcher pick", `host_rail`'s NOTE); and the host's chosen mark beside its name
 //! (host marks arrive with the sidebar's row marks). The old layout for windows narrower than 600 pixels is not ported
 //! either, because the window's minimum width is 720.
 

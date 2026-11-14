@@ -675,6 +675,11 @@
       "golden": "host-add-dialog",
       "title": "The Add host dialog as it opens, a destination typed: the SSH destination and alias fields with their help, Cancel and Add",
       "reference": "host-add-dialog"
+    },
+    {
+      "golden": "hosts-shown-with-a-host-chosen",
+      "title": "Host management shown with a host chosen: the panel in place of the list, Hosts pressed at the rail's foot, and the chosen avatar in the quieter look",
+      "reference": "hosts-panel"
     }
   ],
   "reference_scenes": [
