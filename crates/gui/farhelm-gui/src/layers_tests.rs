@@ -20,7 +20,9 @@ use gpui::{
 use crate::cache::{self, Cached};
 use crate::components::{Button, HoverHelp, Role};
 use crate::focus::{self, Mark};
-use crate::layers::{self, Anchor, Dialog, LayerId, Popover, Subject};
+use crate::layers::{
+    self, Anchor, Dialog, DialogOptions, DialogPlacement, LayerId, Popover, Subject,
+};
 use crate::prompt;
 use crate::render_count;
 use crate::test_support::{
@@ -583,6 +585,282 @@ fn opening_and_closing_a_layer_redraws_only_the_root(cx: &mut TestAppContext) {
         cx.update(|_, cx| render_count::count("row", cx)),
         0,
         "opening and closing the dialog redrew no cached view"
+    );
+}
+
+// ---- Layers: a dialog's placement and an outside press ---------------------------------------------------------------
+
+/// A dialog's content taller than the window that, like a dialog with a scrolling list, can shrink to the room it is
+/// given (`flex_1` and `min_h_0`): what the top placement's height cap is for.
+struct TallPanel {
+    control: FocusHandle,
+}
+
+impl Render for TallPanel {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .debug_selector(|| "panel".into())
+            .w(px(300.))
+            .flex_1()
+            .min_h_0()
+            .overflow_hidden()
+            .flex()
+            .flex_col()
+            .child(button("only", &self.control))
+            .child(div().flex_none().h(px(4000.)))
+    }
+}
+
+/// What a test of a dialog's options holds on to: the window, the dialog's layer, the page opener's and the dialog
+/// control's focus handles, how many presses the page's corner button got, and an anchor on the page for a menu.
+struct OptionDialog<'a> {
+    cx: &'a mut VisualTestContext,
+    dialog: LayerId,
+    opener: FocusHandle,
+    only: FocusHandle,
+    corner_presses: Rc<Cell<usize>>,
+    menu_anchor: Anchor,
+}
+
+/// Open a dialog over a page whose opener button holds focus, with `options`, its one control `only` starting focused,
+/// and `guard` as its dismiss guard; `tall` makes its content taller than the window. The page also has a button in its
+/// bottom-left corner that counts presses (`page-corner`) and an anchor for a menu at its top left.
+fn open_dialog_with_options(
+    cx: &mut TestAppContext,
+    options: DialogOptions,
+    guard: Option<layers::DismissGuard>,
+    tall: bool,
+) -> OptionDialog<'_> {
+    let page: Rc<RefCell<Option<FocusHandle>>> = Rc::new(RefCell::new(None));
+    let presses = Rc::new(Cell::new(0));
+    let anchor_out: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));
+    let (drawn, counted, out) = (page.clone(), presses.clone(), anchor_out.clone());
+    let cx = open(cx, move |window, cx| {
+        let counted = counted.clone();
+        div()
+            .size_full()
+            .child(anchor_element("menu-anchor", &out, window, cx))
+            .children(drawn.borrow().clone().map(|focus| button("opener", &focus)))
+            .child(
+                div().absolute().bottom_0().left_0().child(
+                    Button::new(
+                        "page-corner",
+                        "Corner",
+                        HoverHelp::tooltip("A page control"),
+                        Role::Button,
+                    )
+                    .on_click(move |_, _, _| counted.set(counted.get() + 1)),
+                ),
+            )
+            .into_any_element()
+    });
+    let opener = handle(cx);
+    page.replace(Some(opener.clone()));
+    redraw(cx);
+    keys(cx, "tab");
+    assert!(focused(cx, &opener), "the premise: the opener holds focus");
+    let (only, container) = (handle(cx), handle(cx));
+    let (start, kept) = (only.clone(), container.clone());
+    let opened = cx.update(move |window, cx| {
+        let view: gpui::AnyView = if tall {
+            cx.new(|_| TallPanel {
+                control: start.clone(),
+            })
+            .into()
+        } else {
+            cx.new(|_| Panel {
+                controls: vec![("only", start.clone())],
+                shown: Rc::new(Cell::new(true)),
+            })
+            .into()
+        };
+        let mark = Mark::take(cx);
+        layers::open_dialog_with(
+            Dialog {
+                view,
+                container: kept,
+                start,
+                subject: None,
+                main_action: None,
+                keeps_focus_on_empty_click: false,
+                returns_to: focus::ReturnTo::Opener,
+                may_dismiss: guard,
+            },
+            options,
+            &mark,
+            window,
+            cx,
+        )
+    });
+    cx.run_until_parked();
+    check(cx);
+    let Some(dialog) = opened else {
+        panic!("the premise: the dialog opened");
+    };
+    let menu_anchor = anchor_out
+        .borrow()
+        .clone()
+        .expect("the page drew its menu anchor");
+    OptionDialog {
+        cx,
+        dialog,
+        opener,
+        only,
+        corner_presses: presses,
+        menu_anchor,
+    }
+}
+
+/// The options a quick-switcher-like dialog asks for: near the top, closing on an outside press.
+const SWITCHER: DialogOptions = DialogOptions {
+    placement: DialogPlacement::Top,
+    dismiss_on_outside_press: true,
+};
+
+/// The old quick switcher sat near the top of the window rather than centered, so it did not jump as its result list
+/// grew, and never grew past three quarters of the window (`.quick-switcher-backdrop` at the reference commit).
+/// Specified: a dialog opened with the top placement is centered across, its top `min(12% of the window height, 80 px)`
+/// from the window's top (80 px in a tall window, 12% in a short one), and a content taller than the window is held to
+/// 75% of the window's height.
+#[gpui::test]
+fn a_dialog_placed_at_the_top_sits_near_the_top_and_is_capped(cx: &mut TestAppContext) {
+    let cx = open_dialog_with_options(cx, SWITCHER, None, true).cx;
+    let viewport = cx.update(|window, _| window.viewport_size());
+    let panel = bounds(cx, "panel");
+    assert!(
+        viewport.height * 0.12 > px(80.),
+        "the premise: a tall window, where the 80 px bound applies"
+    );
+    assert_eq!(panel.top(), px(80.), "its top: {panel:?} in {viewport:?}");
+    assert_eq!(
+        panel.left(),
+        viewport.width - panel.right(),
+        "centered across: {panel:?}"
+    );
+    assert!(
+        panel.size.height <= viewport.height * 0.75 && panel.size.height > px(100.),
+        "its height is held to 75% of the window's: {panel:?} in {viewport:?}"
+    );
+    cx.simulate_resize(gpui::size(px(800.), px(400.)));
+    crate::test_support::settle(cx);
+    let panel = bounds(cx, "panel");
+    assert_eq!(
+        panel.top(),
+        px(48.),
+        "in a 400 px window, 12% of its height: {panel:?}"
+    );
+    assert!(
+        panel.size.height <= px(300.),
+        "and still at most 75% of it: {panel:?}"
+    );
+}
+
+/// The same dialog centered, for contrast: the default placement is unchanged. Specified: its top and bottom margins
+/// are equal.
+#[gpui::test]
+fn a_dialog_placed_by_default_is_centered(cx: &mut TestAppContext) {
+    let cx = open_dialog_with_options(cx, DialogOptions::default(), None, false).cx;
+    let viewport = cx.update(|window, _| window.viewport_size());
+    let panel = bounds(cx, "panel");
+    assert_eq!(
+        panel.top(),
+        viewport.height - panel.bottom(),
+        "centered top to bottom: {panel:?}"
+    );
+}
+
+/// The old quick switcher closed on a press outside it. Specified: with the option, a press on the veil outside the
+/// dialog closes it, as Escape would, returning focus to its opener, and the page control under the press never sees
+/// it (the veil takes it); a press inside the dialog leaves it open.
+#[gpui::test]
+fn a_press_outside_a_dialog_that_asks_for_it_dismisses_it(cx: &mut TestAppContext) {
+    let OptionDialog {
+        cx,
+        dialog,
+        opener,
+        only,
+        corner_presses,
+        ..
+    } = open_dialog_with_options(cx, SWITCHER, None, false);
+    assert!(
+        focused(cx, &only),
+        "the premise: focus starts in the dialog"
+    );
+    click(cx, "panel");
+    assert!(
+        is_open(cx, dialog),
+        "a press inside the dialog left it open"
+    );
+    click(cx, "page-corner");
+    assert!(!is_open(cx, dialog), "a press outside closed it");
+    assert!(
+        focused(cx, &opener),
+        "focus went back to the opener, as for Escape"
+    );
+    assert_eq!(
+        corner_presses.get(),
+        0,
+        "the page control under the press never saw it"
+    );
+}
+
+/// A press inside a menu opened over such a dialog is outside the dialog too, but it is the menu's: dismissing from
+/// the dialog's handler would close the top layer, the menu, before its item could take the press. Specified: with a
+/// menu open over a dialog that closes on an outside press, a press on the menu's item, drawn outside the dialog,
+/// leaves both open.
+#[gpui::test]
+fn a_press_in_a_menu_over_the_dialog_is_the_menus(cx: &mut TestAppContext) {
+    let OptionDialog {
+        cx,
+        dialog,
+        menu_anchor,
+        ..
+    } = open_dialog_with_options(cx, SWITCHER, None, false);
+    let item = handle(cx);
+    let menu = open_menu(cx, menu_anchor, vec![("item", item)]);
+    let (item_box, panel) = (bounds(cx, "item"), bounds(cx, "panel"));
+    assert!(
+        !panel.intersects(&item_box),
+        "the premise: the item is drawn outside the dialog"
+    );
+    click(cx, "item");
+    assert!(is_open(cx, menu), "the menu stayed open");
+    assert!(is_open(cx, dialog), "and so did the dialog");
+}
+
+/// Without the option nothing changes: an outside press is the veil's, and the dialog stays.
+#[gpui::test]
+fn a_press_outside_an_ordinary_dialog_leaves_it_open(cx: &mut TestAppContext) {
+    let OptionDialog {
+        cx,
+        dialog,
+        corner_presses,
+        ..
+    } = open_dialog_with_options(cx, DialogOptions::default(), None, false);
+    click(cx, "page-corner");
+    assert!(is_open(cx, dialog), "the dialog stayed open");
+    assert_eq!(corner_presses.get(), 0, "and the veil took the press");
+}
+
+/// An outside press dismisses through Escape's path, so a dialog that may not be dismissed now (an editor whose save is
+/// in flight) refuses it as it refuses Escape. Specified: with its guard saying no, an outside press leaves the dialog
+/// open and focus inside it; once the guard allows it, the next outside press closes it.
+#[gpui::test]
+fn a_guarded_dialog_refuses_an_outside_press(cx: &mut TestAppContext) {
+    let busy = Rc::new(Cell::new(true));
+    let held = busy.clone();
+    let guard: layers::DismissGuard = Rc::new(move |_| !held.get());
+    let OptionDialog {
+        cx, dialog, only, ..
+    } = open_dialog_with_options(cx, SWITCHER, Some(guard), false);
+    click(cx, "page-corner");
+    assert!(is_open(cx, dialog), "the guarded dialog stayed open");
+    assert!(focused(cx, &only), "and focus stayed in it");
+    busy.set(false);
+    click(cx, "page-corner");
+    assert!(
+        !is_open(cx, dialog),
+        "once allowed, the outside press closed it"
     );
 }
 

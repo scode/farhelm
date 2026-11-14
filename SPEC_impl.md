@@ -457,7 +457,10 @@ Owner: the layer manager. It owns the dialog slot, the popover stack and tooltip
 Every overlay is anchored to an element, not to coordinates (SPEC.md has no menu opened at a pointer position). Escape
 from a focused terminal goes to its program (SPEC.md); otherwise it closes only the topmost layer, unless a mode SPEC.md
 says captures the keyboard (the quick-launch sequence) is armed, or the topmost dialog says it may not be dismissed now
-(an editor whose save is in flight), when Escape closes nothing. An overlay closes when its subject is gone, not when it
+(an editor whose save is in flight), when Escape closes nothing. A dialog whose opener asks for it (the quick switcher,
+as in the old app) also closes on a press on its veil outside it, through Escape's path, so the same guard decides; any
+other dialog's veil only takes the press. Dialogs are centered, or near the window's top for an opener that asks (the
+quick switcher again, so it does not move as its results grow). An overlay closes when its subject is gone, not when it
 moves; anchoring to the element makes a moved row's menu follow the row. Whether a click on a dialog's empty space
 (label text included) keeps focus on the control in use is a property of each dialog, set as SPEC.md's list says; a
 dialog without it takes focus itself, so Enter then presses its main action. Whether a terminal link's destination
