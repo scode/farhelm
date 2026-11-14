@@ -46,7 +46,10 @@
 //! Tab reached on every platform and that focused itself on every press. So the strip is tracked as an element that
 //! takes focus when pressed ([`focus::OnPress::Focus`]), which Tab reaches on macOS with Keyboard navigation off as
 //! well, where it skips buttons; and a press on the grip, which lies over the strip and so takes its presses, moves
-//! focus to the strip on every platform, in one move through the coordinator ([`focus::focus_control`]).
+//! focus to the strip on every platform and from any mouse button, in one move through the coordinator
+//! ([`focus::focus_control`]). Any button, because the old handle's own listener took the primary button only and left
+//! every other press to WebKit, which focuses a `tabindex` element on a mousedown of any button; only the primary
+//! button drags or double-clicks, as only it did there.
 
 use std::ops::RangeInclusive;
 use std::rc::Rc;
@@ -245,16 +248,20 @@ impl RenderOnce for DividerGrip {
             });
         let grip = super::with_hover_help(grip, &id, &divider.help, false, window, cx);
 
-        // The press: focus moves to the strip on every press, in one move through the coordinator (see the module
-        // docs). The grip blocks the pointer from everything behind it, so the page's empty-space rule and GPUI's own
-        // focus-on-press never see this press; the prevented default is only a guard should that blocking change, the
-        // mark every control's press carries in the coordinator's rule. A double-click reports itself and starts
-        // nothing; any other primary press starts a drag.
+        // The press: focus moves to the strip on a press of any mouse button, in one move through the coordinator (see
+        // the module docs). The grip blocks the pointer from everything behind it, so the page's empty-space rule and
+        // GPUI's own focus-on-press never see this press; the prevented default is only a guard should that blocking
+        // change, the mark every control's press carries in the coordinator's rule. Only the primary button goes on to
+        // the gestures, as the old handle's `pointerdown` returned for any other: a double-click reports itself and
+        // starts nothing, and any other primary press starts a drag.
         let (on_drag, on_double_click) = (divider.on_drag.clone(), divider.on_double_click.clone());
         let pressed = dragging.clone();
-        let grip = grip.on_mouse_down(MouseButton::Left, move |event, window, cx| {
+        let grip = grip.on_any_mouse_down(move |event, window, cx| {
             window.prevent_default();
             focus::focus_control(&strip, &Mark::take(cx), window, cx);
+            if event.button != MouseButton::Left {
+                return;
+            }
             if event.click_count >= 2 {
                 // The first press of the pair started a drag that may not have seen its release yet.
                 end(&pressed, &on_drag, window, cx);

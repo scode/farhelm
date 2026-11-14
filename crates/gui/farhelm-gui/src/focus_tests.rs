@@ -768,6 +768,105 @@ fn choosing_a_session_focuses_its_terminal_and_makes_it_home(cx: &mut TestAppCon
     );
 }
 
+/// A right or middle press on the page's empty space sends focus home, as a primary one does. GPUI focuses the window's
+/// root on a press of any mouse button that reaches it, so with the empty-space rule on the primary button alone, a
+/// right press on the list's title in the running app moved focus off the terminal to the root, and the keys typed next
+/// reached nothing. A dialog's veil takes such a press before the page does, so focus stays in the dialog.
+///
+/// Specified, with the terminal home: with the terminal focused, a right and then a middle press on empty space leave
+/// it focused; with a button focused, a right press on empty space sends focus to the terminal; and with a dialog
+/// open, a right press on the page behind it leaves focus on the dialog's control.
+#[gpui::test]
+fn a_right_or_middle_press_on_the_pages_empty_space_sends_focus_home(cx: &mut TestAppContext) {
+    let (cx, items) = open_terminals(cx, &["row"], &["terminal"]);
+    let ((row, _), (terminal, _)) = (drawn(&items, "row"), drawn(&items, "terminal"));
+    choose_now(cx, &terminal);
+    assert!(
+        focused(cx, &terminal),
+        "the premise: the terminal is home and focused"
+    );
+    let empty = point(px(600.), px(500.));
+    // Over the terminal stand-in, the press would be the terminal's own and test nothing of the page's rule.
+    assert!(
+        !bounds(cx, "terminal").contains(&empty) && !bounds(cx, "row").contains(&empty),
+        "the premise: the press lands on empty space"
+    );
+
+    for button in [MouseButton::Right, MouseButton::Middle] {
+        cx.simulate_mouse_down(empty, button, Modifiers::none());
+        cx.simulate_mouse_up(empty, button, Modifiers::none());
+        check(cx);
+        assert!(
+            focused(cx, &terminal),
+            "a {button:?} press on empty space kept focus on the terminal"
+        );
+    }
+
+    keys(cx, "shift-tab");
+    assert!(focused(cx, &row), "the premise: Shift+Tab went to the row");
+    cx.simulate_mouse_down(empty, MouseButton::Right, Modifiers::none());
+    cx.simulate_mouse_up(empty, MouseButton::Right, Modifiers::none());
+    check(cx);
+    assert!(
+        focused(cx, &terminal),
+        "a right press on empty space sent focus home"
+    );
+
+    let only = handle(cx);
+    open_dialog(cx, vec![("only", only.clone())], &only);
+    assert!(
+        focused(cx, &only),
+        "the premise: the dialog's control holds focus"
+    );
+    cx.simulate_mouse_down(empty, MouseButton::Right, Modifiers::none());
+    cx.simulate_mouse_up(empty, MouseButton::Right, Modifiers::none());
+    check(cx);
+    assert!(
+        focused(cx, &only),
+        "a right press behind the dialog left focus on its control"
+    );
+}
+
+/// A press on a disabled control is that control's, though it takes no focus, so it is not a press on the page's empty
+/// space and leaves focus where it was, whichever mouse button made it. The empty-space rule runs on every button, so a
+/// disabled control that marked only its primary press as its own let a right press on it (the header's dimmed
+/// Restart, say) move focus off the control in use, where a primary press on it moved nothing.
+///
+/// Specified: with an enabled button focused and a disabled one beside it, a right and then a middle press on the
+/// disabled button leave the enabled one focused.
+#[gpui::test]
+fn a_right_or_middle_press_on_a_disabled_button_keeps_focus_where_it_was(cx: &mut TestAppContext) {
+    let handles = Rc::new(RefCell::new(None::<(FocusHandle, FocusHandle)>));
+    let drawn = handles.clone();
+    let cx = open(cx, move |_, _| {
+        let Some((on, off)) = drawn.borrow().clone() else {
+            return div().into_any_element();
+        };
+        div()
+            .flex()
+            .gap(px(8.))
+            .child(button("on", &on))
+            .child(button("off", &off).disabled(true))
+            .into_any_element()
+    });
+    let (on, off) = (handle(cx), handle(cx));
+    handles.replace(Some((on.clone(), off)));
+    redraw(cx);
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &on),
+        "the premise: the enabled button holds focus"
+    );
+
+    for button in [MouseButton::Right, MouseButton::Middle] {
+        press_with(cx, "off", button);
+        assert!(
+            focused(cx, &on),
+            "a {button:?} press on the disabled button left focus where it was"
+        );
+    }
+}
+
 /// SPEC.md's settled case: "The user selects a session and, before its terminal finishes loading, types in the session
 /// filter. The filter keeps focus when the terminal arrives." A choice that completes later carries the mark from when
 /// the user chose; once they moved on, the terminal only becomes home, and takes focus when nothing else holds it.

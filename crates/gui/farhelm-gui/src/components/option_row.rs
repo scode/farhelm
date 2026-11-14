@@ -27,8 +27,8 @@
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, ClickEvent, ElementId, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Window, div,
+    AnyElement, App, ClickEvent, ElementId, InteractiveElement, IntoElement, ParentElement,
+    RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Window, div,
     prelude::FluentBuilder as _, px,
 };
 
@@ -128,10 +128,11 @@ impl RenderOnce for OptionRow {
             .bg(theme::color(fill))
             .cursor_pointer()
             .hover(move |style| style.bg(theme::color(hover_fill)))
-            // The press is this control's, though it takes no focus. Marked, it leaves focus on the field under the
-            // page's empty-space rule (as a disabled button's press does); a dialog whose empty space takes focus
-            // ignores the mark, which is why the module docs limit where the row is drawn.
-            .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
+            // A press of any mouse button is this control's, though it takes no focus. Marked, it leaves focus on the
+            // field under the page's empty-space rule, which runs on every button (as a disabled button's press does);
+            // a dialog whose empty space takes focus ignores the mark, which is why the module docs limit where the row
+            // is drawn.
+            .on_any_mouse_down(|_, window, _| window.prevent_default())
             .children(self.children);
         let row = super::with_hover_help(row, &self.id, &self.help, true, window, cx);
         row.when_some(self.on_click, |row, handler| {
