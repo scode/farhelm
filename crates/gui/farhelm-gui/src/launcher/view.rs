@@ -33,7 +33,9 @@ use std::rc::Rc;
 
 use farhelm_helm_client::ApiPath;
 use farhelm_proto::launcher::LaunchCatalogModel;
-use farhelm_proto::ui_channel::{HostView, PREFERENCES_KEY, Preferences, SessionRow};
+use farhelm_proto::ui_channel::{
+    HostStateView, HostView, PREFERENCES_KEY, Preferences, SessionRow,
+};
 use farhelm_proto::{LaunchHarness, LaunchPermission, SessionLaunch, split_wrapper_prefix};
 use gpui::{
     AnyElement, App, AppContext as _, ClickEvent, Context, Div, ElementId, Entity, FontWeight,
@@ -51,13 +53,14 @@ use crate::components::{
 };
 use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
-use crate::hosts::identity::display_name;
+use crate::hosts::identity::{display_name, phase};
 use crate::layers::{self, Dialog, DialogPlacement, LayerId, MainAction};
 use crate::store::HelmStore;
 use crate::theme::{self, metrics};
 use crate::{operations, session};
 
 mod choices;
+mod host_picker;
 mod model_field;
 
 /// `.launch-composer-backdrop .create-session-form`: `width: min(960px, 100%)`.
@@ -164,6 +167,10 @@ pub(crate) struct Launcher {
     pub(super) model_input: TextInputState,
     /// The model field's list and what the user is doing in it.
     model_field: model_field::ModelField,
+    /// The host picker's list, highlight and typeahead.
+    host_picker: host_picker::HostPicker,
+    /// The host button's focus handle; leaving it closes the host list.
+    pub(super) host_focus: gpui::FocusHandle,
     command: TextInputState,
     resume: TextInputState,
     /// Cancel's focus handle, where Restart with starts.
@@ -252,6 +259,16 @@ impl Launcher {
                 launcher.model_blurred(window, cx)
             });
         });
+        // The host list closes when the host button loses focus (the old picker's blur), deferred for the same reason.
+        // Tab stops, as `focus::control_handle` makes every control's: the launcher owns these two because it focuses
+        // or watches them (Restart with starts on Cancel; leaving the host button closes its list).
+        let host_focus = cx.focus_handle().tab_stop(true);
+        let host_blur = cx.on_blur(&host_focus, window, |_, window, cx| {
+            cx.defer_in(window, |launcher, window, cx| {
+                launcher.close_host_list(window, cx);
+                cx.notify();
+            });
+        });
         let mut fields: Vec<Subscription> =
             [
                 (&folder, Input::Folder),
@@ -276,7 +293,7 @@ impl Launcher {
                 })
             })
             .collect();
-        fields.extend([model_events, model_focus, model_blur]);
+        fields.extend([model_events, model_focus, model_blur, host_blur]);
         Launcher {
             draft,
             store: store.clone(),
@@ -292,9 +309,11 @@ impl Launcher {
             flags,
             model_input,
             model_field: model_field::ModelField::default(),
+            host_picker: host_picker::HostPicker::default(),
+            host_focus,
             command,
             resume,
-            cancel_focus: cx.focus_handle(),
+            cancel_focus: cx.focus_handle().tab_stop(true),
             layer: None,
             _fields: fields,
         }
@@ -588,8 +607,8 @@ impl Launcher {
     /// Restart with names the source session's own host name, as the old footer did. Otherwise a host that is not
     /// chosen, or that the store no longer lists, is "Unavailable host", the old footer's words.
     ///
-    /// NOTE: The host picker adds a host's phase while it is not connected ("host1 (Unreachable, retrying)"), as the
-    /// old footer and host list did; the phase words live with the Hosts panel.
+    /// A registered host that is not connected carries its phase in parentheses ("host1 (Unreachable, retrying)"), as
+    /// the old footer and host list did.
     fn target(&self, cx: &App) -> TargetWords {
         let harness = match self.draft.tab {
             Tab::Agent => self.draft.agent.harness,
@@ -610,7 +629,7 @@ impl Launcher {
                 .ordered::<HostView>()
                 .into_iter()
                 .find(|host| host.id == id)
-                .map(display_name)
+                .map(host_name_with_phase)
         });
         let host = source
             .or(registered)
@@ -1119,11 +1138,13 @@ impl Render for Launcher {
                 palette,
             )
         });
+        let host_row = self.host_row(palette, window, cx);
         let destination = div()
             .flex()
             .flex_col()
             .gap(px(ROW_GAP))
             .child(section_label("Destination", palette))
+            .child(host_row)
             .child(row("launcher-folder-row", "Folder", folder, palette))
             .children(name);
         let (on_tab, on_tab_enter) = (weak.clone(), weak.clone());
@@ -1275,5 +1296,16 @@ impl Render for Launcher {
             frame = frame.notices(notices);
         }
         frame
+    }
+}
+
+/// A registered host's name in the launcher (the footer, the host picker's button and list): its display name, with its phase in parentheses while it is not connected
+/// (old `HostOption::label`). The phase is the app's own words; carried in host text, escaping them changes nothing.
+pub(super) fn host_name_with_phase(host: &HostView) -> HostText {
+    let name = display_name(host);
+    if matches!(host.state, HostStateView::Connected { .. }) {
+        name
+    } else {
+        HostText::from_host(format!("{} ({})", name.raw(), phase::words(&host.state)))
     }
 }
