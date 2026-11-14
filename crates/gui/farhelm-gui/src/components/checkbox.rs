@@ -29,8 +29,8 @@
 use std::rc::Rc;
 
 use gpui::{
-    App, ElementId, FocusHandle, InteractiveElement, IntoElement, MouseButton, ParentElement,
-    RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Toggled, Window, div,
+    App, ElementId, FocusHandle, InteractiveElement, IntoElement, ParentElement, RenderOnce, Role,
+    SharedString, StatefulInteractiveElement, Styled, Toggled, Window, div,
     prelude::FluentBuilder as _, px, svg,
 };
 
@@ -292,9 +292,9 @@ impl RenderOnce for Checkbox {
         let control = if enabled {
             focus::track(control, &focus, focus::OnPress::Control)
         } else {
-            // Not tracked, so neither Tab nor a click can focus it; the press is still this control's, so it does not
-            // reach the page's empty-space handler and move focus.
-            control.on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
+            // Not tracked, so neither Tab nor a click can focus it; a press of any mouse button is still this
+            // control's, so it does not reach the page's empty-space handler and move focus.
+            control.on_any_mouse_down(|_, window, _| window.prevent_default())
         };
         let on_space = toggle.clone();
         // A disabled control is not focus-tracked, so its keys never arrive and the action needs no filter.

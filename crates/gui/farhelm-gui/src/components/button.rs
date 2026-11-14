@@ -33,8 +33,8 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, ClickEvent, ElementId, FocusHandle, InteractiveElement, IntoElement,
-    MouseButton, ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled,
-    Toggled, Window, div, prelude::FluentBuilder as _, px, svg,
+    ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Toggled,
+    Window, div, prelude::FluentBuilder as _, px, svg,
 };
 
 use super::{Handler, HoverHelp};
@@ -638,9 +638,9 @@ impl RenderOnce for Button {
         let button = if enabled {
             focus::track(button, &focus, focus::OnPress::Control)
         } else {
-            // Not tracked, so neither Tab nor a click can focus it; the press is still this control's, so it does not
-            // reach the page's empty-space handler and move focus.
-            button.on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
+            // Not tracked, so neither Tab nor a click can focus it; a press of any mouse button is still this
+            // control's, so it does not reach the page's empty-space handler and move focus.
+            button.on_any_mouse_down(|_, window, _| window.prevent_default())
         };
         super::activate_on_click(
             super::activate_on_enter_or_space(button, key_handler),

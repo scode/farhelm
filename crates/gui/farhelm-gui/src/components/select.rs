@@ -56,9 +56,9 @@ use std::rc::Rc;
 
 use gpui::{
     App, AppContext as _, ClickEvent, Context, ElementId, Entity, FocusHandle, InteractiveElement,
-    IntoElement, Keystroke, Modifiers, MouseButton, ParentElement, Render, RenderOnce, Role,
-    SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window, div,
-    prelude::FluentBuilder as _, px, svg,
+    IntoElement, Keystroke, Modifiers, ParentElement, Render, RenderOnce, Role, SharedString,
+    StatefulInteractiveElement, Styled, WeakEntity, Window, div, prelude::FluentBuilder as _, px,
+    svg,
 };
 
 use super::{Handler, HoverHelp, MainAction, MenuItem};
@@ -414,11 +414,9 @@ impl RenderOnce for Select {
                 .child(tracked)
         };
         if !enabled {
-            // Not tracked, so neither Tab nor a click can focus it; the press is still this control's, so it does not
-            // reach the page's empty-space handler and move focus.
-            return wrap(
-                control.on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default()),
-            );
+            // Not tracked, so neither Tab nor a click can focus it; a press of any mouse button is still this
+            // control's, so it does not reach the page's empty-space handler and move focus.
+            return wrap(control.on_any_mouse_down(|_, window, _| window.prevent_default()));
         }
 
         let opening = Rc::new(Opening {

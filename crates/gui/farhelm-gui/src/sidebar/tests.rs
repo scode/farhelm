@@ -494,6 +494,41 @@ fn a_press_on_the_grip_focuses_the_divider_under_either_click_rule(cx: &mut Test
     }
 }
 
+/// The old handle's own listener took the primary button only, so a right or middle press went to WebKit, which
+/// focuses a focusable element on a press of any button: the handle took focus from every press, and only the primary
+/// button dragged. A grip that took the primary button alone left focus where it was on a right press. Specified: under
+/// each click rule, with focus moved off the divider by a press on the header's empty space, a right press and then a
+/// middle press on the grip each focus the divider; neither starts a drag, so a move that reports the primary button
+/// held, which a drag the press started would follow, leaves the sidebar at 396, and the release writes no width.
+#[gpui::test]
+fn a_right_or_middle_press_on_the_grip_focuses_the_divider_and_starts_no_drag(
+    cx: &mut TestAppContext,
+) {
+    let (mut fake, cx) = open(cx, None);
+    for click_focuses_controls in [false, true] {
+        cx.update(|_, cx| focus::set_click_focuses_controls(click_focuses_controls, cx));
+        for button in [MouseButton::Right, MouseButton::Middle] {
+            let mark = test_support::bounds(cx, "app-version");
+            let empty = point(mark.left() - px(40.), mark.center().y);
+            press(cx, empty, 1);
+            release(cx, empty);
+            assert!(!divider_focused(cx), "premise: focus is off the divider");
+            let at = on_divider(cx);
+            cx.simulate_mouse_down(at, button, Modifiers::none());
+            test_support::check(cx);
+            assert!(
+                divider_focused(cx),
+                "{button:?} press, click_focuses_controls: {click_focuses_controls}"
+            );
+            move_to(cx, shifted(at, 40.), true);
+            assert_eq!(width(cx), px(396.), "the {button:?} press started no drag");
+            cx.simulate_mouse_up(shifted(at, 40.), button, Modifiers::none());
+            test_support::check(cx);
+            assert_eq!(written(&mut fake), Vec::<u64>::new());
+        }
+    }
+}
+
 /// The divider reaches 4 pixels into the pane, into the terminal's padding, and must take no more: the old acceptance
 /// case checked that the terminal's first column still receives clicks, for selection, links and programs that read the
 /// mouse, which a divider taking nothing past its 5 pixels implies. Specified, with a session open and the divider
