@@ -93,7 +93,21 @@ pub enum Tier {
     /// accent fill with the accent edge, which the pointer does not change, and the inverse ring one pixel inside the
     /// edge (`outline-offset: -3px`).
     Nav,
+    /// `.templates-quick-mark`: the bolt beside a template in the Templates list, a ghost with no fill at rest, its glyph
+    /// in the quiet `--fg-2` until it holds ⚡, then in the warning amber (`lit`). The old sheet drew no fill under the
+    /// pointer, only an edge; here the pointer gets the ghost tier's hover fill, the nearest look the button draws. A
+    /// lit bolt is also reported pressed ([`Button::pressed`]), without the pressed fill: the amber glyph is its look.
+    QuickMark { lit: bool },
+    /// `.templates-number-key`: a template's number-key button, a ghost in a tight 4-pixel box whose text (a chord, in
+    /// the monospace face, given as [`Button::content`]) is the quiet `--fg-2` with no key and the accent once one is
+    /// bound (`bound`). The same hover note as [`Tier::QuickMark`].
+    NumberKey { bound: bool },
 }
+
+/// The [`Tier::QuickMark`] box's padding, vertical then horizontal (`.templates-quick-mark`: `10px 5px`).
+const QUICK_MARK_PAD: (f32, f32) = (10., 5.);
+/// The [`Tier::NumberKey`] box's padding on every side.
+const NUMBER_KEY_PAD: f32 = 4.;
 
 /// The [`Tier::RowMenu`] box's height: 14-pixel text at `line-height: 1.4`.
 const ROW_MENU_HEIGHT: f32 = 19.6;
@@ -301,6 +315,18 @@ impl Button {
 
     /// Colors for this tier and state: (fill, hover fill, edge, text). Ghost buttons have no fill or edge at rest.
     pub(super) fn colors(&self, palette: &Palette) -> (Option<Token>, Token, Option<Token>, Token) {
+        // Before the pressed looks: a lit bolt is reported pressed but keeps its own look.
+        match self.tier {
+            Tier::QuickMark { lit } => {
+                let ink = if lit { palette.warn } else { palette.fg_2 };
+                return (None, palette.control_hover, None, ink);
+            }
+            Tier::NumberKey { bound } => {
+                let ink = if bound { palette.accent } else { palette.fg_2 };
+                return (None, palette.control_hover, None, ink);
+            }
+            _ => {}
+        }
         if self.pressed == Some(true) && self.quiet {
             return (
                 Some(palette.control_hover),
@@ -344,6 +370,10 @@ impl Button {
         match self.tier {
             Tier::Ghost | Tier::RowMenu { on_fill: false } => {
                 (None, palette.control_hover, None, palette.fg_1)
+            }
+            // Returned above, before the pressed looks.
+            Tier::QuickMark { .. } | Tier::NumberKey { .. } => {
+                (None, palette.control_hover, None, palette.fg_2)
             }
             Tier::RowMenu { on_fill: true } => {
                 (None, palette.accent_fill_hover, None, palette.on_fill)
@@ -418,6 +448,8 @@ impl RenderOnce for Button {
             Tier::Rail | Tier::Link => (px(0.), px(0.)),
             Tier::Chip => (px(CHIP_PAD.0), px(CHIP_PAD.1)),
             Tier::Nav => (px(NAV_PAD.0), px(NAV_PAD.1)),
+            Tier::QuickMark { .. } => (px(QUICK_MARK_PAD.0), px(QUICK_MARK_PAD.1)),
+            Tier::NumberKey { .. } => (px(NUMBER_KEY_PAD), px(NUMBER_KEY_PAD)),
             Tier::Ghost
             | Tier::Neutral
             | Tier::Primary
@@ -441,6 +473,8 @@ impl RenderOnce for Button {
             | Tier::Chip
             | Tier::Link
             | Tier::Nav
+            | Tier::QuickMark { .. }
+            | Tier::NumberKey { .. }
             | Tier::RowMenu { on_fill: false } => palette.accent,
         };
         // An icon-only button is otherwise as high as its icon plus its padding and square; the row menu's box is the
@@ -448,6 +482,8 @@ impl RenderOnce for Button {
         let (pad_x, height) = match self.tier {
             Tier::RowMenu { .. } => (pad_x, Some(px(ROW_MENU_HEIGHT))),
             Tier::Rail => (pad_x, Some(px(RAIL_SIZE))),
+            // The bolt keeps its tall, narrow box (`padding: 10px 5px`), not the square an icon-only button gets.
+            Tier::QuickMark { .. } => (pad_x, None),
             _ if self.show_label || self.content.is_some() => (pad_x, None),
             _ => (pad_y, None),
         };
@@ -577,6 +613,8 @@ impl RenderOnce for Button {
                     | Tier::Chip
                     | Tier::Link
                     | Tier::Nav
+                    | Tier::QuickMark { .. }
+                    | Tier::NumberKey { .. }
             )
         {
             button = button.opacity(0.5);
@@ -643,6 +681,11 @@ impl IconButton {
     /// See [`Button::pressed`].
     pub fn pressed(self, pressed: bool) -> Self {
         IconButton(self.0.pressed(pressed))
+    }
+
+    /// See [`Button::busy`]: the Templates list's bolts keep focus while the mark's write is in flight.
+    pub fn busy(self, busy: bool) -> Self {
+        IconButton(self.0.busy(busy))
     }
 
     /// See [`Button::expanded`].

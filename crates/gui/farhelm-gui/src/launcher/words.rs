@@ -30,7 +30,7 @@ pub(super) const PERMISSION_DOCS: &str = "https://farhelm.io/docs/agents/#permis
 
 /// An effort's name as the launcher shows it (old `effort_label`); `None` is the model's default. "xhigh" stays lower
 /// case, as the agents spell it.
-pub(super) const fn effort_label(effort: Option<LaunchEffort>) -> &'static str {
+pub(crate) const fn effort_label(effort: Option<LaunchEffort>) -> &'static str {
     match effort {
         Some(LaunchEffort::Off) => "Off",
         Some(LaunchEffort::Minimal) => "Minimal",
@@ -47,7 +47,7 @@ pub(super) const fn effort_label(effort: Option<LaunchEffort>) -> &'static str {
 /// A permission's name in the footer and on its segment (old `permission_display_value`), with no choice as
 /// "Default". It differs from the escalation banner's [`super::draft::permission_name`] in two words, as the old app's
 /// did: no choice there is the agent's own setting, and Custom there is "Custom flags".
-pub(super) const fn permission_display(permission: Option<LaunchPermission>) -> &'static str {
+pub(crate) const fn permission_display(permission: Option<LaunchPermission>) -> &'static str {
     match permission {
         None => "Default",
         Some(LaunchPermission::Guarded) => "Guarded",
@@ -148,6 +148,13 @@ const fn guarded_mode(harness: LaunchHarness) -> Option<&'static str> {
         | LaunchHarness::Pi
         | LaunchHarness::OpenCode => None,
     }
+}
+
+/// The heading of [`guarded_mode`] alone ("Guarded · Claude auto mode"): the name a short label uses for a guarded
+/// choice, such as a template's summary in the Templates list. Taken from the same text as the help, so a label can
+/// never name a different vendor mode than the help beside it.
+pub(crate) fn guarded_mode_name(harness: LaunchHarness) -> Option<&'static str> {
+    guarded_mode(harness).and_then(|help| help.lines().next())
 }
 
 /// A note the Agent tab shows under an agent type's choices, for one whose sessions lack something the others have:

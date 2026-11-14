@@ -57,7 +57,7 @@ const FOOTER_LEAD_BASIS: f32 = 220.;
 /// A dialog's frame. The title is the accessible name. The title and the summary are each a [`Line`]: the app's own
 /// words, or a [`HostSentence`](crate::host_text::HostSentence) when they name a host value, which then is a labelled
 /// node of its own inside the dialog. The answers are drawn right-aligned in the order given, the old footer's order
-/// (Cancel first, the main action last).
+/// (Cancel first, the main action last). A frame with no answers, note, lead or notices draws no footer at all.
 #[derive(IntoElement)]
 pub struct DialogFrame {
     id: SharedString,
@@ -253,6 +253,13 @@ impl RenderOnce for DialogFrame {
             .text_color(theme::color(palette.fg_0))
             .child(self.body);
         let body = focus::scroll_region(body, &body_scroll);
+        // A frame with nothing for its footer to hold draws none: the Templates dialog, whose editor carries its own
+        // action row inside the body (SPEC.md: "the complete editor keeps scrolling within the dialog, including its
+        // editor-local action footer").
+        let has_footer = !self.answers.is_empty()
+            || self.note.is_some()
+            || self.footer_lead.is_some()
+            || self.notices.is_some();
         let answers = div()
             .flex()
             .flex_wrap()
@@ -350,7 +357,7 @@ impl RenderOnce for DialogFrame {
             .shadow(dialog_shadow(palette))
             .child(header)
             .child(body)
-            .child(footer);
+            .when(has_footer, |card| card.child(footer));
         focus::scroll_region(card, &card_scroll)
     }
 }

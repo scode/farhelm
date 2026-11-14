@@ -40,6 +40,7 @@ use gpui::{
 use super::{Handler, HoverHelp};
 use crate::assets::Icon;
 use crate::focus;
+use crate::host_text::{HostSentence, Line};
 use crate::theme::{self, metrics};
 
 /// `.menu-item`'s padding, vertical then horizontal.
@@ -58,7 +59,7 @@ pub struct MenuItem {
     /// `None` for a choice that is not the chosen one: an empty slot as wide as an icon, so labels line up.
     icon: Option<Icon>,
     label: SharedString,
-    description: Option<SharedString>,
+    description: Option<Line>,
     /// Words drawn after the label on its line ([`MenuItem::suffix`]).
     suffix: Option<SharedString>,
     /// Whether this is a choice ([`MenuItem::choice`]), and then whether it is the chosen one.
@@ -124,7 +125,16 @@ impl MenuItem {
 
     /// The line under the label that says what the command does ("Removes the session and its state").
     pub fn description(mut self, description: impl Into<SharedString>) -> Self {
-        self.description = Some(description.into());
+        self.description = Some(Line::App(description.into()));
+        self
+    }
+
+    /// [`MenuItem::description`] for a line that names a host value: the Templates dialog's number-key menu says which
+    /// template holds a key ("my-codex (moves here)"), and a template's name is host-supplied text. The sentence is
+    /// drawn through the host-text element, and the item's accessible description is its text with each host value
+    /// escaped, as for hover help that names one.
+    pub fn description_sentence(mut self, description: HostSentence) -> Self {
+        self.description = Some(Line::Sentence(description));
         self
     }
 
@@ -240,9 +250,13 @@ impl RenderOnce for MenuItem {
             })
             .child(copy)
             .when_some(self.chosen, |item, chosen| item.aria_selected(chosen))
-            .when_some(self.description.or(self.suffix), |item, description| {
-                item.aria_description(description)
-            });
+            .when_some(
+                self.description
+                    .as_ref()
+                    .map(Line::accessible_text)
+                    .or(self.suffix),
+                |item, description| item.aria_description(description),
+            );
         if ring {
             // `outline: 2px solid var(--on-fill); outline-offset: -3px`: inside the fill, since an accent ring would
             // vanish against the accent fill.

@@ -1843,6 +1843,61 @@ fn settings_scene(
     keep.push(Box::new(watch));
 }
 
+/// The Templates dialog as the list header's Templates button opens it (reference `templates-dialog`): three templates
+/// with summaries of different shapes, the first holding ⚡ (so its row has the chord line and the filled amber bolt)
+/// and the second holding number key 2. Focus on the dialog itself, where it starts until the editor exists, so no
+/// ring shows. The fake and the connection are kept for the scene's life, like Settings'.
+fn templates_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    let templates = [
+        serde_json::json!({"name": "my-codex", "fields": {"kind": "agent", "agent": "codex", "model": "gpt-6-luna", "effort": "high"}}),
+        serde_json::json!({"name": "review", "fields": {"permissions": "guarded", "name": "review"}}),
+        serde_json::json!({"name": "webbuilder", "fields": {"kind": "command", "command": "make dev", "yolo": false, "destination": {"folder": "/src/web"}}}),
+    ];
+    helm.connect(vec![
+        CollectionState {
+            collection: Collection::Templates,
+            meta: test_support::meta(&["my-codex", "review", "webbuilder"]),
+            entries: templates
+                .iter()
+                .map(|value| KeyedEntry {
+                    key: value["name"].as_str().unwrap_or_default().into(),
+                    value: value.clone(),
+                })
+                .collect(),
+        },
+        CollectionState {
+            collection: Collection::Preferences,
+            meta: test_support::meta(&[PREFERENCES_KEY]),
+            entries: vec![KeyedEntry {
+                key: PREFERENCES_KEY.into(),
+                value: serde_json::json!({
+                    "quick_launch_template": "my-codex",
+                    "template_shortcuts": {"2": "review"},
+                }),
+            }],
+        },
+    ]);
+    // Open once the connection has a UI session, as Settings' scene does.
+    let handle = window.window_handle();
+    let opened = std::cell::Cell::new(false);
+    let watch = cx.observe(&connection, move |connection, cx| {
+        if opened.get() || connection.read(cx).session().is_none() {
+            return;
+        }
+        opened.set(true);
+        let _ = handle.update(cx, |_, window, cx| {
+            let mark = Mark::take(cx);
+            crate::templates::open(&mark, window, cx);
+        });
+    });
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    keep.push(Box::new(watch));
+}
+
 /// Settings as the gear opens it, at Sessions.
 fn settings_sessions_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene(state, crate::settings::Section::Sessions, window, cx);
@@ -2225,6 +2280,12 @@ static SCENES: &[Scene] = &[
         size: (260., 240.),
         draw: select_open,
         setup: select_open_setup,
+    },
+    Scene {
+        name: "templates-dialog",
+        size: (1010., 600.),
+        draw: empty,
+        setup: templates_dialog_setup,
     },
     Scene {
         name: "settings-sessions",

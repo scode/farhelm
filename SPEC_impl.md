@@ -7916,17 +7916,16 @@ exactly as they do to the same edits by hand, with no provenance tracking for te
 once per batch: the draft right after the batch's last agent switch against the draft from before the batch, and not
 when the template that made that switch chose the permission itself. A GitHub repository destination is refused until
 the GPUI launcher holds managed checkouts. The Templates dialog beside New has a bounded list column and a
-selected-template editor; at phone width only the list or editor is shown, with a back link. A draft holds the wire
-fields directly, so absence means no visible field, while explicit null resets and false approval assertions survive
-editing. Add/remove actions change presence; defaults are values inside the controls. The editor's
-agent/command/don't-switch selector writes the kind, with don't-switch offering only placement and name. A kindless
-stored template is inferred in the draft only, marked unsaved against its original baseline; saving explicitly stores
-that switch. Per-harness choices use the shared capability answers and release catalog, not another agent table. Model
-text is unrestricted and suggestions use the existing catalog filter; other incompatible choices stay visible and refuse
-save until corrected or removed. Fields need not form a complete launch, because another stacked template can supply
-what they omit.
+selected-template editor, side by side at every window size the desktop app allows. A draft holds the wire fields
+directly, so absence means no visible field, while explicit null resets and false approval assertions survive editing.
+Add/remove actions change presence; defaults are values inside the controls. The editor's agent/command/don't-switch
+selector writes the kind, with don't-switch offering only placement and name. A kindless stored template is inferred in
+the draft only, marked unsaved against its original baseline; saving explicitly stores that switch. Per-harness choices
+use the shared capability answers and release catalog, not another agent table. Model text is unrestricted and
+suggestions use the existing catalog filter; other incompatible choices stay visible and refuse save until corrected or
+removed. Fields need not form a complete launch, because another stacked template can supply what they omit.
 
-Opening another row, new, duplicate, mobile back, close and Escape share a pending departure and the same inline
+Opening another row, new, duplicate, close and Escape share a pending departure and the same inline
 save/discard/keep-editing prompt. Save keeps the selected editor and refreshes its baseline; duplicate opens an unsaved
 copy with a free name. A rename saves the new name before deleting the old one, so a failure in between leaves both;
 saving under a name another template already has is refused in the panel rather than overwriting that template. A
