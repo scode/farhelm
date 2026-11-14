@@ -39,7 +39,11 @@ enum Step {
     DropLink,
     /// A binary message on the open socket that is not a grid message.
     Undecodable,
+    /// Input stamped for the newest attachment the GUI was shown.
     Input(&'static str),
+    /// Input stamped for the attachment before the newest one: what the GUI sends when it typed for an attachment the
+    /// stream has since replaced.
+    StaleInput(&'static str),
     Resize(u16, u16),
     TakeControl,
     ReconnectNow,
@@ -101,6 +105,8 @@ fn script() -> Vec<Step> {
         Accept,
         ReplayComplete,
         Input("live again"),
+        // Typed for the attachment before the takeover: dropped, although the stream is live.
+        StaleInput("for the old screen"),
         // A refused reconnect waits for the user as well and ends the outage it was part of: after take-control, a
         // failed attempt announces a new one, and the retry does not displace.
         DropLink,
@@ -131,11 +137,21 @@ fn text(data: &str) -> GridInput {
     GridInput::Text { data: data.into() }
 }
 
+/// The stamp of the newest attachment `events` announced, or 0 (no attachment) before the first.
+fn newest(events: &[TerminalEvent], stamp: &mut u64) {
+    for event in events {
+        if let TerminalEvent::State(StreamState::Attached(Attachment(n))) = event {
+            *stamp = *n;
+        }
+    }
+}
+
 /// Play the script against the fake. Index 0 is what the GUI saw on open; index `i` is step `i - 1`. Beside each
 /// step's observations goes the fake's phase after it, which tells `run_real` whether a socket is open and live.
 fn run_fake(steps: &[Step]) -> (Vec<Observed>, Vec<FakePhase>) {
     let (mut fake, handle, mut events) = FakeTerminal::open(&attach("s1"));
     let (mut observed, mut phases) = (Vec::new(), Vec::new());
+    let mut stamp = 0;
     for step in std::iter::once(None).chain(steps.iter().copied().map(Some)) {
         let mut seen = Observed::default();
         match step {
@@ -147,8 +163,13 @@ fn run_fake(steps: &[Step]) -> (Vec<Observed>, Vec<FakePhase>) {
             Some(Step::ReplayComplete) => fake.replay_complete(),
             Some(Step::Detach(code)) => fake.detach(code, "why"),
             Some(Step::Undecodable) => fake.protocol_fault(),
-            Some(Step::Input(data)) => {
-                handle.input(text(data));
+            Some(step @ (Step::Input(data) | Step::StaleInput(data))) => {
+                let stamp = if matches!(step, Step::StaleInput(_)) {
+                    stamp - 1
+                } else {
+                    stamp
+                };
+                handle.input(Attachment(stamp), vec![text(data)]);
                 seen.delivered = fake
                     .received()
                     .into_iter()
@@ -170,6 +191,7 @@ fn run_fake(steps: &[Step]) -> (Vec<Observed>, Vec<FakePhase>) {
         while let Some(event) = events.try_recv() {
             seen.events.push(event);
         }
+        newest(&seen.events, &mut stamp);
         observed.push(seen);
     }
     assert_eq!(events.try_recv(), None);
@@ -210,6 +232,7 @@ async fn run_real(steps: &[Step], expected: &[Observed], phases: &[FakePhase]) -
     // The latest size the GUI asked for, which the resize after early input repeats.
     let mut size = (80, 24);
     let mut observed = Vec::new();
+    let mut stamp = 0;
     for (index, step) in std::iter::once(None)
         .chain(steps.iter().copied().map(Some))
         .enumerate()
@@ -262,12 +285,19 @@ async fn run_real(steps: &[Step], expected: &[Observed], phases: &[FakePhase]) -
             }
             Some(Step::Input(data)) if phases[index] == FakePhase::Open => {
                 let open = socket.as_mut().unwrap();
-                handle.input(text(data));
+                handle.input(Attachment(stamp), vec![text(data)]);
+                handle.resize(size.0, size.1);
+                seen.delivered = next_resize(open).await;
+            }
+            // On a live socket, like input on one that is not live yet: the resize after it shows it was handled.
+            Some(Step::StaleInput(data)) => {
+                let open = socket.as_mut().unwrap();
+                handle.input(Attachment(stamp - 1), vec![text(data)]);
                 handle.resize(size.0, size.1);
                 seen.delivered = next_resize(open).await;
             }
             Some(Step::Input(data)) => {
-                handle.input(text(data));
+                handle.input(Attachment(stamp), vec![text(data)]);
                 if expected[index].delivered.is_some() {
                     let Some(open) = socket.as_mut() else {
                         panic!("step {index}: the fake delivered input while no socket was open")
@@ -295,6 +325,7 @@ async fn run_real(steps: &[Step], expected: &[Observed], phases: &[FakePhase]) -
                 ),
             }
         }
+        newest(&seen.events, &mut stamp);
         observed.push(seen);
     }
     // `Closed` is final: the feed ends after it.
@@ -380,14 +411,15 @@ fn attach_of(uri: &str) -> FakeAttach {
     }
 }
 
-/// The fake terminal must show the GUI what the real stream shows and send the helm what the real stream sends, or
-/// GUI tests built on it pass against rules the app does not follow. One script covers most of the rules the fake
-/// restates: the state sequence (`Attached` on the first output rather than on open, `Reconnecting` once per outage
-/// and again after a refusal, `Closed` last), which detach codes stop the stream, an undecodable message as a lost
-/// link, that only take-control from a stopped or refused stream displaces and that a failed displacing attach
-/// retries without displacing, the size each attach asks for (including a resize made while live), the resize that
-/// follows an attach whose query a resize overtook while it connected, and input dropped while no attachment is live
-/// (with a socket open or not). Each step's observations must be equal on both sides.
+/// The fake terminal must show the GUI what the real stream shows and send the helm what the real stream sends, or GUI
+/// tests built on it pass against rules the app does not follow. One script covers most of the rules the fake restates:
+/// the state sequence (`Attached` on the first output rather than on open, `Reconnecting` once per outage and again
+/// after a refusal, `Closed` last), which detach codes stop the stream, an undecodable message as a lost link, that
+/// only take-control from a stopped or refused stream displaces and that a failed displacing attach retries without
+/// displacing, the size each attach asks for (including a resize made while live), the resize that follows an attach
+/// whose query a resize overtook while it connected, input dropped while no attachment is live (with a socket open or
+/// not), and input stamped for an earlier attachment dropped while a later one is live. Each step's observations must
+/// be equal on both sides.
 ///
 /// Not compared here: a close from any state but waiting for the user, and the stream ending when the GUI drops every
 /// handle or its feed. The fake's own tests and the real stream's tests pin those separately.

@@ -425,6 +425,34 @@ class LockTest(unittest.TestCase):
         self.assertFalse(self.locked_elsewhere(), "a clean second stop releases the lock")
 
 
+class TerminalTextTest(unittest.TestCase):
+    """`terminal-text` reads the probe of the terminal that holds focus. With none focused the probe answers null,
+    which must fail with a message: printed as is, it would look like a terminal whose screen is empty."""
+
+    def run_with(self, stdout: str, returncode: int = 0) -> tuple[int, str, str]:
+        answer = subprocess.CompletedProcess([], returncode, stdout=stdout, stderr="")
+        original = gui_agent.cli
+        gui_agent.cli = lambda *_args, **_kwargs: answer
+        try:
+            import contextlib
+            import io
+
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                status = gui_agent.terminal_text(pathlib.Path("/unused"), {})
+        finally:
+            gui_agent.cli = original
+        return status, out.getvalue(), err.getvalue()
+
+    def test_a_focused_terminals_text_is_printed(self):
+        self.assertEqual(self.run_with('"$ ls"\n'), (0, '"$ ls"\n', ""))
+
+    def test_no_focused_terminal_fails_and_says_so(self):
+        status, out, err = self.run_with("null\n")
+        self.assertEqual((status, out), (1, ""))
+        self.assertIn("no terminal holds focus", err)
+
+
 class CommandLineTest(unittest.TestCase):
     """`command_line` is how `stop` ties a recorded supervisor pid to the run, on Linux (/proc) and macOS (`ps`)."""
 
