@@ -13,8 +13,9 @@ use std::rc::Rc;
 
 use gpui::{
     AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
-    KeyDownEvent, Keystroke, Modifiers, ParentElement, Render, StatefulInteractiveElement as _,
-    Styled, TestAppContext, VisualTestContext, Window, div, point, px,
+    KeyDownEvent, Keystroke, Modifiers, MouseButton, ParentElement, Render,
+    StatefulInteractiveElement as _, Styled, TestAppContext, VisualTestContext, Window, div, point,
+    px,
 };
 
 use crate::cache::{self, Cached};
@@ -32,7 +33,8 @@ use crate::test_support::{
 
 /// A dialog is modal: a click on the page behind it does nothing, because the veil takes it. And in a dialog SPEC.md
 /// lists as keeping focus (the launcher, the Stop, Restart, Replace and Delete questions), a click on its empty space
-/// keeps focus on the control in use (SPEC.md, "Opening and closing").
+/// keeps focus on the control in use (SPEC.md, "Opening and closing"). So does a right press there: GPUI's own
+/// focus-on-press takes a press of any mouse button, and once focused the dialog's container on a right press.
 #[gpui::test]
 fn the_page_behind_a_dialog_takes_no_clicks_and_empty_space_keeps_focus(cx: &mut TestAppContext) {
     let clicks = Rc::new(Cell::new(0));
@@ -72,6 +74,15 @@ fn the_page_behind_a_dialog_takes_no_clicks_and_empty_space_keeps_focus(cx: &mut
     assert!(
         focused(cx, &only),
         "a click on the dialog's empty space kept focus on its control"
+    );
+
+    let empty = point(panel.left() + px(4.), panel.top() + px(4.));
+    cx.simulate_mouse_down(empty, MouseButton::Right, Modifiers::none());
+    cx.simulate_mouse_up(empty, MouseButton::Right, Modifiers::none());
+    check(cx);
+    assert!(
+        focused(cx, &only),
+        "a right press on the dialog's empty space kept focus on its control"
     );
 }
 

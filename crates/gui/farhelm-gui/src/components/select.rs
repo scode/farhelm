@@ -442,9 +442,7 @@ impl RenderOnce for Select {
                     on_key.open(window, cx);
                 }
             })
-            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                on_press.press(window, cx)
-            });
+            .on_any_mouse_down(move |_, window, cx| on_press.press(window, cx));
         // A pointer click opens the list (a press already closed an open one). GPUI's keyboard "click" (the release
         // of an Enter or Space pressed on the closed control) is dropped by the shared click rule: Enter must open
         // nothing, and Space opened the list on its press already.
@@ -466,13 +464,16 @@ impl Opening {
         layers::is_open(layer, window, cx).then_some(layer)
     }
 
-    /// A press on the closed control: it closes the list if the list is open. On the press rather than the click,
-    /// because the press has already focused the control (the pop-up press rule), taking focus out of the open list;
-    /// a press dragged off the control before its release makes no click, and would leave the list open with focus
+    /// A press of any mouse button on the closed control: it closes the list if the list is open. On the press rather
+    /// than the click, because the press has already focused the control (the pop-up press rule, which a press of any
+    /// mouse button follows), taking focus out of the open list; a press dragged off the control before its release
+    /// makes no click, and a right or middle press makes none at all, and either would leave the list open with focus
     /// outside it, its keys gone. The layer manager leaves a press on the anchor to the anchor, so nothing else closes
     /// the list on this press.
     fn press(&self, window: &mut Window, cx: &mut App) {
         let open = self.open_layer(window, cx);
+        // A right or middle press may record this too: it makes no click, and the next primary press overwrites the
+        // record before its own click reads it.
         self.state
             .update(cx, |state, _| state.closed_by_press = open.is_some());
         if let Some(layer) = open {

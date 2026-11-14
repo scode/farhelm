@@ -36,13 +36,15 @@
 //!   into and out of a question the prompt draws inline in a dialog) or, to another control of the layer (because of
 //!   the user's action there, or a result that arrived later), through [`focus_in_layer`].
 //! - **Which press focuses an element.** Every focusable element is tracked through [`track`], which suppresses GPUI's
-//!   own focus-on-press (GPUI focuses any tracked element on mouse-down, a move no lint could see) and applies the
-//!   coordinator's rule instead: on Linux a click focuses the control it lands on; on macOS it does not, as in WebKit
-//!   there. An element that takes focus when pressed (a terminal, a dialog's empty space) takes it only from a press
-//!   that gave focus to nothing inside it ([`OnPress::Focus`]), so a click into a dialog's text field stays in the
-//!   field. `track_focus` itself is banned outside this module. The macOS half is ported from the old app, which ran in
-//!   WebKit. On Linux the old desktop app built against WebKitGTK but was released only for the Mac, so there is no
-//!   shipped behavior to keep, and a click follows the platform.
+//!   own focus-on-press (GPUI focuses any tracked element on a press of any mouse button, a move no lint could see)
+//!   and applies the coordinator's rule instead: on Linux a click focuses the control it lands on; on macOS it does
+//!   not, as in WebKit there; a right or middle press focuses no button or other [`OnPress::Control`] on either. An
+//!   element that takes focus when pressed (a terminal, a dialog's empty space) takes it from a press of any mouse
+//!   button, as the old terminal did on every mousedown, but only from a press that gave focus to nothing inside it
+//!   ([`OnPress::Focus`]), so a click into a dialog's text field stays in the field. `track_focus` itself is banned
+//!   outside this module. The macOS half is ported from the old app, which ran in WebKit. On Linux the old desktop app
+//!   built against WebKitGTK but was released only for the Mac, so there is no shipped behavior to keep, and a click
+//!   follows the platform.
 //! - **Which controls Tab reaches** ([`TabReach`]). On macOS, Tab follows the system's Keyboard navigation setting
 //!   exactly as the old app did: with it off, Tab reaches text fields and pop-ups only and skips buttons, and
 //!   Option-Tab reaches every control; with it on, Tab reaches every control. Linux has no such setting, and Tab
@@ -80,7 +82,7 @@ use std::rc::Rc;
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, Context, Div, Element, ElementId, Entity,
     FocusHandle, Global, GlobalElementId, InspectorElementId, InteractiveElement, IntoElement,
-    Keystroke, KeystrokeEvent, LayoutId, MouseButton, MouseDownEvent, ParentElement, Pixels, Point,
+    Keystroke, KeystrokeEvent, LayoutId, MouseButton, MouseDownEvent, ParentElement, Pixels,
     ScrollHandle, StatefulInteractiveElement, Styled, Subscription, WeakEntity, WeakFocusHandle,
     Window, WindowId, canvas, px,
 };
@@ -545,16 +547,23 @@ pub fn root(element: Div, attachment: &Attachment) -> Div {
 
 // ---- Tracking focusable elements -------------------------------------------------------------------------------------
 
-/// What a press with the pointer does to focus on a tracked element.
+/// What a press with the pointer does to focus on a tracked element. The rule covers a press of every mouse button:
+/// GPUI's own focus-on-press does not look at which mouse button went down, so [`track`] takes every press from it,
+/// and a press of a mouse button the kind does not name below leaves focus where it is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OnPress {
-    /// A control (a button, a menu item): it takes focus where the platform's click rule says so ([`pressed`]). It also
-    /// counts as a button for [`TabReach`]: where Tab reaches text fields and pop-ups only, a plain Tab skips it. A
-    /// pop-up control (a select or combo box) must therefore not use this kind, or it drops out of Tab's order there.
+    /// A control (a button, a menu item): a primary press focuses it where the platform's click rule says so
+    /// ([`pressed`]), and a press of any other mouse button never does. On macOS that is the old app's rule, where no
+    /// click focused one (WebKit); on Linux, where no old app shipped, it is this app's decision: only the primary
+    /// press is the button's. It also counts as a button for [`TabReach`]: where Tab reaches text fields and pop-ups
+    /// only, a plain Tab skips it. A pop-up control (a select or combo box) must therefore not use this kind, or it
+    /// drops out of Tab's order there.
     Control,
-    /// An element that takes focus whenever it is pressed, on every platform: a terminal, which a click types into, a
-    /// pop-up control, or a dialog whose empty space takes focus (the dialogs SPEC.md does not list as keeping it on the
-    /// control in use). A tab stop of this kind counts as a text field or pop-up for [`TabReach`]: Tab always reaches it.
+    /// An element that takes focus whenever it is pressed, with any mouse button and on every platform: a terminal,
+    /// which a click types into, a pop-up control, or a dialog whose empty space takes focus (the dialogs SPEC.md does
+    /// not list as keeping it on the control in use). Any mouse button as the old terminal focused itself on every
+    /// mousedown, so the keys typed after a right or middle click into a full-screen program reach it. A tab stop of
+    /// this kind counts as a text field or pop-up for [`TabReach`]: Tab always reaches it.
     ///
     /// Only a press that gave focus to nothing inside the element focuses it ([`press_was_taken`]): the innermost
     /// element a press focuses wins, as on a web page, so a click into a dialog's text field leaves the field focused.
@@ -588,18 +597,24 @@ pub fn track<E: InteractiveElement + ParentElement>(
     } else {
         element
     };
-    let element = element.on_mouse_down(MouseButton::Left, move |event, window, cx| {
+    // Every mouse button, not only the primary one: GPUI's own focus-on-press takes a press of any of them. With a
+    // listener for the primary button alone, right and middle presses went to GPUI, which focused whatever tracked
+    // element was under the pointer (a button on either platform, a layer's container, a session row, the terminal or
+    // a select without the coordinator's rule) behind the coordinator's back.
+    let element = element.on_any_mouse_down(move |event, window, cx| {
         // Runs before GPUI's own focus-on-press, which a prevented default skips.
         window.prevent_default();
         match on_press {
-            OnPress::Control => pressed(&pressed_handle, window, cx),
+            OnPress::Control if event.button == MouseButton::Left => {
+                pressed(&pressed_handle, window, cx)
+            }
+            OnPress::Control | OnPress::Keep => {}
             OnPress::Focus => {
                 let before = at_press.take();
-                if !press_was_taken(&pressed_handle, before.as_ref(), event.position, window, cx) {
+                if !press_was_taken(&pressed_handle, before.as_ref(), event, window, cx) {
                     apply(Move::To(&pressed_handle), window, cx);
                 }
             }
-            OnPress::Keep => {}
         }
     });
     let kind = match on_press {
@@ -1016,12 +1031,14 @@ fn pressed(handle: &FocusHandle, window: &mut Window, cx: &mut App) {
     }
 }
 
-/// Whether a press at `position` already gave focus to something inside `element`, the [`OnPress::Focus`] element it
-/// reached, so that element must leave focus where it is: `before` is what held focus as the press began. The press was
-/// taken when focus is now inside the element and either moved there while the press was handled (GPUI Kit's text
-/// field focuses itself on mouse-down; on Linux a button does), or the press landed on the control that already holds
-/// focus and is one a press focuses (a second click into a focused field, to place the caret). Anything else is a press
-/// on the element's empty space.
+/// Whether `press` already gave focus to something inside `element`, the [`OnPress::Focus`] element it reached, so that
+/// element must leave focus where it is: `before` is what held focus as the press began. The press was taken when focus
+/// is now inside the element and either moved there while the press was handled (GPUI Kit's text field focuses itself
+/// on mouse-down; on Linux a button does on a primary press), or the press landed on the control that already holds
+/// focus and is one this press focuses (a second click into a focused field, to place the caret; a button only for a
+/// primary press where clicks focus controls, since a press of any other mouse button focuses none). Anything else is
+/// a press on the element's empty space, and a right press on a focused button inside a dialog that takes focus moves
+/// it to the dialog, as a primary press on a macOS button does.
 ///
 /// Inside, because focus can also move elsewhere during the same press: GPUI runs every capture listener before any
 /// bubble listener, and an open menu's or anchored question's press-outside close is a capture listener, which returns
@@ -1043,7 +1060,7 @@ fn pressed(handle: &FocusHandle, window: &mut Window, cx: &mut App) {
 fn press_was_taken(
     element: &FocusHandle,
     before: Option<&FocusHandle>,
-    position: Point<Pixels>,
+    press: &MouseDownEvent,
     window: &Window,
     cx: &App,
 ) -> bool {
@@ -1068,9 +1085,9 @@ fn press_was_taken(
     let (Some(now), Some(state)) = (now, state) else {
         return false;
     };
-    let click_focuses = click_focuses_controls(cx);
+    let click_focuses = press.button == MouseButton::Left && click_focuses_controls(cx);
     state.read(cx).controls.iter().any(|entry| {
-        entry.bounds.contains(&position)
+        entry.bounds.contains(&press.position)
             && (entry.kind == ControlKind::Field || click_focuses)
             && entry.control.upgrade().as_ref() == Some(&now)
     })
