@@ -1613,6 +1613,88 @@ fn a_drag_ends_when_its_selection_is_reset_or_its_view_replaced(cx: &mut TestApp
     );
 }
 
+/// An arrow key as the cursor move sends it: an ordinary key message the supervisor encodes in the program's
+/// cursor-key mode.
+fn arrow(name: &str, kc: u32) -> GridInput {
+    GridInput::Key {
+        key: name.into(),
+        code: name.into(),
+        kc,
+        mods: 0,
+        mac: THIS_PLATFORM == Platform::Mac,
+    }
+}
+
+/// A quick Alt-click (Option on a Mac) moves the program's cursor to the clicked cell by typing arrow keys, as the old
+/// app did, so a shell's line editor puts the cursor where the user clicked: to the release's cell, with Alt read at the
+/// release, and still when the press selected one character. It must not fire for a slow Alt-press or an Alt-drag that
+/// selected more than a character (a view scrolled back is the next test).
+#[gpui::test]
+fn a_quick_alt_click_moves_the_programs_cursor(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("hello world");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let cursor = h.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).cursor);
+    assert_eq!(
+        cursor.map(|cursor| (cursor.x, cursor.y)),
+        Some((0, 0)),
+        "the premise: the cursor is at the first cell"
+    );
+    let right = |n| vec![(arrow("ArrowRight", 39), true); n];
+    let at = h.at_cell(3, 0);
+    h.cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::alt());
+    h.cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::alt());
+    settle(h.cx);
+    assert_eq!(h.sent(), right(3), "three cells right");
+
+    // The cell is the release's, and Alt counts at the release: a press without it, a nudge of one cell (selecting
+    // one character, which still counts as a click) and a release with Alt moves to where the button came up.
+    let (two, three) = (h.at_cell(2, 0), h.at_cell(3, 0));
+    h.cx.simulate_mouse_down(two, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_move(three, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_up(three, MouseButton::Left, Modifiers::alt());
+    settle(h.cx);
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some("l"),
+        "the premise: one character selected"
+    );
+    assert_eq!(h.sent(), right(3));
+
+    h.cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::alt());
+    settle(h.cx);
+    advance(h.cx, Duration::from_millis(600));
+    h.cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::alt());
+    settle(h.cx);
+    assert_eq!(h.sent(), [], "a slow Alt-press is not a click");
+
+    let (from, to) = (h.at_cell(0, 0), h.at_cell(5, 0));
+    h.drag(from, to, Modifiers::alt());
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some("hello"),
+        "the premise: the drag selected text"
+    );
+    assert_eq!(h.sent(), [], "an Alt-drag that selected text moves nothing");
+}
+
+/// Scrolled back, the clicked cell is a history line, not the program's screen, so an Alt-click there moves nothing.
+#[gpui::test]
+fn an_alt_click_in_the_history_moves_nothing(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_with_history(40);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    h.wheel(1.);
+    assert!(!h.following(), "the premise: scrolled back");
+    let at = h.at_cell(2, 0);
+    h.cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::alt());
+    h.cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::alt());
+    settle(h.cx);
+    assert_eq!(h.sent(), []);
+}
+
 /// A double click selects the word and a triple click the line, and the release copies them, as in the old app.
 #[gpui::test]
 fn a_double_click_copies_the_word_and_a_triple_click_the_line(cx: &mut TestAppContext) {

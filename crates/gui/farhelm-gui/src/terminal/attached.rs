@@ -87,9 +87,11 @@
 #[cfg(test)]
 mod tests;
 
+use std::cell::Cell;
 use std::future::Future;
 use std::ops::Range;
 use std::pin::Pin;
+use std::rc::Rc;
 use std::task::Poll;
 use std::time::Duration;
 
@@ -1301,7 +1303,8 @@ impl Render for AttachedTerminal {
                     let released = owner.clone();
                     window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
                         if phase == DispatchPhase::Bubble && event.button == MouseButton::Left {
-                            let _ = released.update(cx, |owner, cx| owner.end_selection(cx));
+                            let _ = released
+                                .update(cx, |owner, cx| owner.end_selection(Some(event), cx));
                         }
                     });
                     let height = f32::from(bounds.size.height);
@@ -1450,7 +1453,15 @@ struct SelectGesture {
     scroll_lines: i64,
     /// The next drag-scroll step, while one is due.
     scroll_tick: Option<ticker::Deadline>,
+    /// Whether the press is still recent enough for an Alt-click to move the cursor: true until
+    /// [`ALT_CLICK_WINDOW`] after the press, when `_quick_window` clears it.
+    quick: Rc<Cell<bool>>,
+    _quick_window: ticker::Deadline,
 }
+
+/// An Alt-click moves the program's cursor only when its release comes within this long of its press (the old app's
+/// `altClickMovesCursor`, which compared the events' timestamps against 500 ms): a slower Alt-press is a selection.
+const ALT_CLICK_WINDOW: Duration = Duration::from_millis(500);
 
 /// Whether a press holds this platform's modifier that forces a local selection over mouse reporting: Option on a
 /// Mac, Shift elsewhere (SPEC.md's selection paragraph; the old app's `pressForcesSelection`).
@@ -1571,11 +1582,16 @@ impl AttachedTerminal {
             }
         };
         view.update(cx, |view, cx| view.set_selection(Some(selection), cx));
+        let quick = Rc::new(Cell::new(true));
+        let expired = quick.clone();
+        let quick_window = ticker::after(ALT_CLICK_WINDOW, cx, move |_| expired.set(false));
         self.select = Some(SelectGesture {
             mode,
             pointer: event.position,
             scroll_lines: 0,
             scroll_tick: None,
+            quick,
+            _quick_window: quick_window,
         });
     }
 
@@ -1627,7 +1643,7 @@ impl AttachedTerminal {
             return;
         }
         if event.pressed_button != Some(MouseButton::Left) {
-            self.end_selection(cx);
+            self.end_selection(None, cx);
             return;
         }
         if let Some(gesture) = &mut self.select {
@@ -1695,18 +1711,54 @@ impl AttachedTerminal {
     /// The primary button came up while a selection is dragged: the gesture ends, and a non-empty selection goes to the
     /// clipboard, every time, even when it is the text already there (SPEC.md: every completed selection re-copies;
     /// the old app's `copySelectionOnMouseUp`). A plain click left an empty selection, so it copies nothing and leaves
-    /// the clipboard alone.
-    fn end_selection(&mut self, cx: &mut Context<Self>) {
-        if self.select.take().is_none() {
+    /// the clipboard alone. A quick Alt-click then moves the program's cursor ([`AttachedTerminal::alt_click`]);
+    /// `release` is the button's release, `None` for one the window never saw, which moves nothing.
+    fn end_selection(&mut self, release: Option<&MouseUpEvent>, cx: &mut Context<Self>) {
+        let Some(gesture) = self.select.take() else {
             return;
-        }
+        };
         let text = self
             .committed
             .as_ref()
             .and_then(|view| view.read(cx).selected_text());
-        if let Some(text) = text {
-            cx.write_to_clipboard(ClipboardItem::new_string(text));
+        if let Some(text) = &text {
+            cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
         }
+        if let Some(release) = release
+            && release.modifiers.alt
+            && gesture.quick.get()
+        {
+            self.alt_click(release.position, text.as_deref(), cx);
+        }
+    }
+
+    /// A quick Alt-click (Option on a Mac) that selected at most one character, with the view on the live screen,
+    /// moves the program's cursor to the clicked cell by typing arrow keys, as the old app did
+    /// (`altClickMovesCursor`, with the input mapping's port of xterm.js's MoveToCell). The keys go to the program as
+    /// one group of ordinary key messages, so the supervisor encodes them in the program's cursor-key mode; like any
+    /// input they clear the selection.
+    fn alt_click(
+        &mut self,
+        position: Point<Pixels>,
+        selected: Option<&str>,
+        cx: &mut Context<Self>,
+    ) {
+        // The old app's `text.length > 1`, which counts UTF-16 units: one character beyond the Basic Multilingual
+        // Plane (an emoji) already counts as more than one there, and here too.
+        if selected.is_some_and(|text| text.encode_utf16().count() > 1) {
+            return;
+        }
+        let (Some(view), Some(attachment)) = (self.committed.clone(), self.attachment) else {
+            return;
+        };
+        if !view.read(cx).is_following() {
+            return;
+        }
+        let Some((x, y)) = self.cell_at(position, cx) else {
+            return;
+        };
+        let keys = view.read(cx).cursor_moves_to(x, y, actions::THIS_PLATFORM);
+        self.send_user(attachment, keys, cx);
     }
 
     /// Select everything the terminal shows, history included ([`actions::SelectAllInTerminal`], Cmd+A on a Mac).
