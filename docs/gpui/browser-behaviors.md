@@ -596,7 +596,8 @@ too-narrow window** — **keep**
 - Code: `localStorage` in `ui/assets/sidebar-width.js:53, 59, 89, 109` (width, rail), `ui/assets/terminal.js:384, 2710`
   (terminal text size), `ui/assets/appearance.js:31` (appearance), `ui/assets/sounds.js:13, 108` (sound switches).
 - Tests: `sidebar-resize.spec.ts`, `appearance.spec.ts`, `terminal-font.spec.ts`, `sounds.spec.ts`.
-- GPUI home: a local preferences store owned by the app, which survives a connection reset.
+- GPUI home: helm preferences, like every other setting (maintainer decision, 2026-11-13); the app keeps no device-local
+  preferences store. They reset to their defaults at the switch to the new app, which the changelog names.
 
 **L9. Sound playback** — **keep** the sounds SPEC names, **drop** the browser's gesture-before-playback rule
 

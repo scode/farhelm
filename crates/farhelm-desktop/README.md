@@ -4,9 +4,10 @@ The desktop app's process: an internal helm running in the same process, the loc
 updater, and the app's own state files. It is a library the GPUI app is wired into, plus the `farhelm-desktop` binary,
 which the installer puts in `~/Applications/Farhelm.app` as the app's main program (D6 in the distribution plan).
 
-NOTE: The GPUI app is not wired in yet. Until it is, the binary starts the embedded helm and the local supervisor, logs
-that the GUI is being rebuilt, and waits for SIGINT or SIGTERM; it opens no window. A startup failure still takes the
-pre-window refusal path (stderr, exit status 1, and on macOS a native alert and a Console line).
+The binary starts the embedded helm and the local supervisor, then hands the main thread to the GPUI app
+(`farhelm_gui::bootstrap::run`), whose window connects to the embedded helm over its UI channel. SIGINT and SIGTERM quit
+the app the ordinary way. A startup failure, and a window that cannot open, take the pre-window refusal path (stderr,
+exit status 1, and on macOS a native alert and a Console line).
 
 The embedded helm serves the app over a fresh loopback port and serves no page. It mints the app's credential in memory
 at startup and hands it over through its readiness channel; nothing is written to disk.

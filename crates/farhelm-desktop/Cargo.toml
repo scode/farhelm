@@ -33,6 +33,8 @@ dirs = "6"
 # helm meet (SPEC_impl.md, "Where the GUI meets the helm").
 farhelm-gui.workspace = true
 farhelm-helm.workspace = true
+# The GPUI app's helm endpoint type, which the desktop builds from the embedded helm's address and credential.
+farhelm-helm-client.workspace = true
 # The shared presentation-unsafe character table, for host text in a startup refusal, and the development-build rule
 # the update readout uses.
 farhelm-proto.workspace = true
@@ -67,7 +69,8 @@ gio = "0.18"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Reads the global `AppleKeyboardUIMode` preference behind System Settings' Keyboard navigation switch, which decides
-# which controls Tab reaches (src/tab_reach.rs, decision D-2). GPUI's macOS backend already links both.
+# which controls Tab reaches (src/tab_reach.rs; settled for the GPUI migration on 2026-11-13: the Mac keeps the old
+# app's behavior). GPUI's macOS backend already links both.
 core-foundation = "0.10"
 core-foundation-sys = "0.8"
 
