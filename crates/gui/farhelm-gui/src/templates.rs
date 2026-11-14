@@ -7,6 +7,8 @@
 //! - [`apply`]: applying one or more templates to a launcher draft, all or nothing, through the draft's own hand-edit
 //!   methods, plus the launcher snapshot that Save as template reads too. No GPUI types.
 //! - [`summary`]: a template's one-line summary, which the Templates list, the quick switcher and the Cmd+J list show.
+//! - [`fields`]: the template editor's model: which fields a template sets, adding and removing them, and why a draft
+//!   cannot be saved. No GPUI types.
 //! - [`dialog`]: the Templates dialog beside New, with each template's ⚡ and number-key buttons.
 //! - [`shortcuts`]: which template holds ⚡ and each number key, and how a change to them is written.
 //!
@@ -21,6 +23,7 @@
 
 pub mod apply;
 pub mod dialog;
+pub mod fields;
 pub mod shortcuts;
 pub mod summary;
 
@@ -28,6 +31,8 @@ pub mod summary;
 mod apply_tests;
 #[cfg(test)]
 mod dialog_tests;
+#[cfg(test)]
+mod fields_tests;
 #[cfg(test)]
 mod shortcuts_tests;
 #[cfg(test)]
