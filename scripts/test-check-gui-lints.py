@@ -11,6 +11,7 @@ import unittest
 spec = importlib.util.spec_from_file_location("gui_lints", pathlib.Path(__file__).with_name("check-gui-lints.py"))
 checker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)
+ban_exceptions, stray_exceptions = checker.ban_exceptions, checker.stray_exceptions
 expectations, unmet, uncovered, banned_paths, diagnostics, cargo_failure = (
     checker.expectations,
     checker.unmet,
@@ -98,6 +99,102 @@ fn second(v: Option<u8>) -> u8 {
         self.assertIn("does not compile", cargo_failure(101, [rustc_error, clippy_error], ""))
         self.assertIsNone(cargo_failure(101, [clippy_error], ""))
 
+
+
+class BanExceptionTest(unittest.TestCase):
+    """A ban switched off outside its owners would quietly undo the rule it protects, in a file the ownership check
+    only reports, so the check must find every such attribute and accept only the owners' own."""
+
+    OWNER = """\
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the owner"
+)]
+/// The one exemption: a doc comment between the attribute and its item.
+#[rustfmt::skip]
+mod raw {
+    pub fn color() {}
+}
+"""
+
+    @staticmethod
+    def owners_but(path: str, source: str) -> list[tuple[str, str]]:
+        """Every owner's file holding just its owner's exception, except `path`, which holds `source`."""
+        files = {}
+        for owner_path, item in checker.EXCEPTION_OWNERS:
+            files.setdefault(owner_path, "")
+            files[owner_path] += f"#[allow(clippy::disallowed_methods)]\nfn {item}() {{}}\n"
+        files[path] = source
+        return sorted(files.items())
+
+    def test_an_owners_exception_is_accepted_with_its_item(self):
+        """Specified: a multi-line `allow` naming a disallowed lint binds to the next item, skipping a doc comment and
+        another attribute between them; with every owner holding its one exception, nothing is reported."""
+        self.assertEqual(ban_exceptions(self.OWNER), [(1, "raw")])
+        self.assertEqual(stray_exceptions(self.owners_but("farhelm-gui/src/theme.rs", self.OWNER)), [])
+
+    def test_the_same_exception_elsewhere_is_reported(self):
+        """Specified: the owner's attribute in another file, or on another item, is a problem naming file and line."""
+        self.assertEqual(
+            stray_exceptions(self.owners_but("farhelm-gui/src/session_list/row.rs", self.OWNER)),
+            [
+                "farhelm-gui/src/session_list/row.rs:1: a lint ban is switched off outside its owners "
+                "(docs/gpui/foundation-ownership.md, lint exceptions)"
+            ],
+        )
+        renamed = self.OWNER.replace("mod raw", "mod other")
+        self.assertEqual(
+            stray_exceptions(self.owners_but("farhelm-gui/src/theme.rs", renamed)),
+            [
+                "farhelm-gui/src/theme.rs:1: a lint ban is switched off outside its owners "
+                "(docs/gpui/foundation-ownership.md, lint exceptions)",
+                "farhelm-gui/src/theme.rs: owner raw holds 0 ban exceptions, not exactly one",
+            ],
+        )
+
+    def test_an_owners_name_used_twice_is_not_the_owner(self):
+        """Specified: a second item of an owner's name in its file carrying an exception (a method or nested function
+        called `timer`) makes the owner hold two, which is reported."""
+        twice = "#[allow(clippy::disallowed_methods)]\nfn timer() {}\nimpl X {\n    #[allow(clippy::disallowed_methods)]\n    fn timer() {}\n}\n"
+        self.assertEqual(
+            stray_exceptions(self.owners_but("farhelm-gui/src/ticker.rs", twice)),
+            ["farhelm-gui/src/ticker.rs: owner timer holds 2 ban exceptions, not exactly one"],
+        )
+
+    def test_groups_and_spacing_that_switch_a_ban_off_are_found(self):
+        """Specified: allowing clippy's `style` or `all` group, or every warning, switches the bans off too and is found,
+        as is an attribute written with spaces around `#`, `[` and `::`; an unrelated `allow` is not."""
+        source = """\
+#[allow(clippy::style)]
+fn a() {}
+#[allow(clippy::all)]
+fn b() {}
+#[allow(warnings)]
+fn c() {}
+# [allow(clippy :: disallowed_types)]
+fn d() {}
+#[allow(dead_code)]
+fn e() {}
+"""
+        self.assertEqual(ban_exceptions(source), [(1, "a"), (3, "b"), (5, "c"), (7, "d")])
+
+    def test_inner_and_statement_exceptions_have_no_owner(self):
+        """Specified: an inner attribute and one on a statement bind to no item, so they are always reported, as is an
+        `expect` or a `cfg_attr` form; an `allow` of an ordinary lint is not a ban exception."""
+        source = """\
+#![allow(clippy::disallowed_types)]
+fn timer() {
+    #[expect(clippy::disallowed_methods)]
+    let _ = now();
+}
+#[cfg_attr(test, allow(clippy::disallowed_methods))]
+fn apply() {}
+#[allow(clippy::too_many_arguments)]
+fn wide() {}
+"""
+        self.assertEqual(ban_exceptions(source), [(1, None), (3, None), (6, "apply")])
+        problems = stray_exceptions([("farhelm-gui/src/ticker.rs", source)])
+        self.assertEqual(sum("outside its owners" in problem for problem in problems), 3)
 
 
 if __name__ == "__main__":
