@@ -15,7 +15,8 @@
 //! - [`collections`] applies that feed to keyed collections with one generic code path.
 //! - [`terminal`] attaches terminal streams (the agent terminal and tabs) and reconnects them.
 //! - [`ApiPath`] (from `farhelm-proto`, where the helm decodes it too) is the only constructor of a command path.
-//! - [`fake`] stands in for the helm in GUI tests, in process and without a runtime.
+//! - [`fake`] stands in for the helm in GUI tests, in process and without a runtime: the UI channel, and terminal
+//!   streams through [`fake::terminal::FakeTerminal`].
 //!
 //! NOTE: There is no HTTP client here yet. File transfers (attachment uploads, downloads) are the one thing that does
 //! not fit a JSON command, and nothing in the first GPUI milestone uses them, so the area that ports transfers adds

@@ -115,7 +115,7 @@ pub enum TerminalEvent {
     ReplayComplete,
 }
 
-enum Request {
+pub(crate) enum Request {
     Input(GridInput),
     Resize { cols: u16, rows: u16 },
     TakeControl,
@@ -181,8 +181,7 @@ pub fn open_terminal(
     attach: TerminalAttach,
     config: ChannelConfig,
 ) -> (TerminalHandle, TerminalEvents) {
-    let (requests_tx, requests) = mpsc::unbounded_channel();
-    let (events_tx, events) = mpsc::channel(EVENT_QUEUE);
+    let (handle, events, requests, events_tx) = stream_channels(EVENT_QUEUE);
     let stream = Stream {
         endpoint,
         attach,
@@ -192,11 +191,31 @@ pub fn open_terminal(
         reconnecting_shown: false,
     };
     tokio::spawn(stream.run());
+    (handle, events)
+}
+
+/// Both ends of one stream's channels: the caller's handle and feed, and the request receiver and event sender that
+/// serve them, with the feed bounded at `capacity`.
+///
+/// The one place a [`TerminalHandle`] and [`TerminalEvents`] are built, so their fields stay private to this module
+/// while the fake terminal (`crate::fake::terminal`) hands the GUI the same types the real stream does.
+pub(crate) fn stream_channels(
+    capacity: usize,
+) -> (
+    TerminalHandle,
+    TerminalEvents,
+    mpsc::UnboundedReceiver<Request>,
+    mpsc::Sender<TerminalEvent>,
+) {
+    let (requests_tx, requests) = mpsc::unbounded_channel();
+    let (events_tx, events) = mpsc::channel(capacity);
     (
         TerminalHandle {
             requests: requests_tx,
         },
         TerminalEvents { events },
+        requests,
+        events_tx,
     )
 }
 
@@ -242,7 +261,7 @@ enum Ended {
 /// Whether a detach notice stops the stream until the user takes control. The match is exhaustive so a new code is
 /// a decision someone has to make here. A missing code comes only from a helm older than the codes and is treated
 /// like `other`.
-fn detach_stops(code: Option<DetachCode>) -> bool {
+pub(crate) fn detach_stops(code: Option<DetachCode>) -> bool {
     match code {
         Some(DetachCode::TakenOver | DetachCode::TabClosed | DetachCode::Stalled) => true,
         Some(DetachCode::Replaced | DetachCode::Other) | None => false,
@@ -289,7 +308,9 @@ impl Stream {
                             .emit(TerminalEvent::State(StreamState::Attaching))
                             .await
                     {
-                        return;
+                        // Closed while waiting for the user: leave through the final `Closed` like every other close.
+                        // (When the caller dropped its feed instead, that last emit just fails.)
+                        break;
                     }
                     take_control = true;
                     backoff.reset();
@@ -339,7 +360,8 @@ impl Stream {
                             .emit(TerminalEvent::State(StreamState::Attaching))
                             .await
                     {
-                        return;
+                        // As for a refusal: a close while detached still reports `Closed`.
+                        break;
                     }
                     take_control = true;
                     backoff.reset();
