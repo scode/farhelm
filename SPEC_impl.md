@@ -504,12 +504,18 @@ while a Delete on another is in flight, each keep their completion handling unti
 a waiter never cancels work the helm accepted. A completion that would focus, open, select or close something asks the
 focus coordinator whether the user has moved on.
 
+The store files each piece of work under a typed key naming what it acts on: a session, a host, a template, the
+preferences, or a launch that has no session yet. A key admits one request at a time, and keys of different kinds never
+collide, so a host and a session that share an id string stay independent. The command itself is built by the feature
+that sends it, with its route's API semantics; the store knows no routes.
+
 Feature code does not detach tasks. GUI crates do not spawn threads or other runtimes' tasks, sleep, or read the system
 clock; time comes from the ticker and async work from GPUI's executor, which keeps tests deterministic. The runtime that
 network I/O needs lives in the helm client, outside `crates/gui/` (see "Where the GUI meets the helm").
 
 Enforced by clippy `disallowed-methods` for detaching, thread and runtime spawns, sleeps and clock reads in the GUI
-crates, and by a test of overlapping actions on two sessions.
+crates, by a test of overlapping actions on two sessions, and by a test of work on a host and a template beside a
+session's, each with its own busy state and refusal.
 
 ### Drafts
 
@@ -520,10 +526,11 @@ today's API semantics. Partial saves are used only where the API already support
 must not undo a change an agent or the command line made" needs them. The two confirmed last-write-wins exceptions
 (templates and number keys, SPEC.md 2026-10-21) stay. A failed save is reported, never retried, and never treated as
 saved; whether the field reverts or keeps its text for editing follows that editor's SPEC rule (several explicit-save
-editors keep the draft).
+editors keep the draft). A save is work in the operation store under the key of what it saves, so an editor of any kind
+(a session's title, a template, the preferences, a host's settings) saves the same way.
 
-Enforced by draft tests that push a change under a touched field and by save tests that load, save untouched and
-compare.
+Enforced by draft tests that push a change under a touched field, by save tests that load, save untouched and compare,
+and by a save under a template's key.
 
 ### Host-supplied text
 

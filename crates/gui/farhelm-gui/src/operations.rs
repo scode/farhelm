@@ -1,43 +1,47 @@
-//! The operation store: work on a session that finishes later, owned above the views that start it.
+//! The operation store: work that finishes later, owned above the views that start it.
 //!
 //! SPEC_impl.md, "Work that finishes later: the operation stores". A Rename or a Delete is started from a row's menu or
 //! a dialog, but its reply can arrive after that menu closed, after the user opened another session, or after the row
-//! scrolled away. In GPUI, dropping a `Task` cancels it, so work held by a view dies with the view, and the old app's
-//! answer (spawning into a scope that outlived the view) is a detached task, which the GUI lints ban. Here the task is
-//! held by the [`SessionOperations`] of the current UI session, under the session it acts on, until it settles or a
-//! reset retires the store.
+//! scrolled away; a template's or the preferences' save outlives its editor the same way. In GPUI, dropping a `Task`
+//! cancels it, so work held by a view dies with the view, and the old app's answer (spawning into a scope that
+//! outlived the view) is a detached task, which the GUI lints ban. Here the task is held by the [`Operations`] of the
+//! current UI session, under the [`OpKey`] of what it acts on, until it settles or a reset retires the store.
+//!
+//! What work acts on is named by an [`OpKey`]: a session, a host, a template, the preferences, or a launch that has no
+//! session yet. Keys of different kinds never collide, so a host and a session with the same id string are independent.
 //!
 //! Here's the TLDR of the rules:
 //!
-//! - One request per session at a time. While a session's Rename is in flight, a Delete of it is refused at
-//!   [`SessionOperations::start`], and a view draws the session's controls as busy from
-//!   [`SessionOperations::in_flight`]. This is the request half of SPEC.md's rule that "an open lifecycle confirmation
-//!   or a pending request refuses another lifecycle action" (the old app's row exclusion for requests, `admit_row_op`
+//! - One request per key at a time. While a session's Rename is in flight, a Delete of it is refused at
+//!   [`Operations::start`], and a view draws the session's controls as busy from [`Operations::in_flight`]. This is
+//!   the request half of SPEC.md's rule that "an open lifecycle confirmation or a pending request refuses another
+//!   lifecycle action" (the old app's row exclusion for requests, `admit_row_op`
 //!   and `row_pending` in `list/view.rs` at reference commit `24bc0580`). The confirmation half is not here: an open
 //!   Delete question belongs to the session list, which keeps the row's menu button inert while its question is open,
-//!   and the Rename editor to its own feature. Work on different sessions is independent: each keeps its own
-//!   completion handling until it settles.
+//!   and the Rename editor to its own feature. Work on different keys is independent: each keeps its own completion
+//!   handling until it settles.
 //! - "Latest wins" is not built. It applies only to work that is explicitly supersedable for the same resource (a
 //!   search being retyped), and none of the work here is. The first supersedable work adds it here, as a property of
 //!   its [`Work`] variant, so that no other work can be superseded by accident.
-//! - Dropping a waiter never cancels the helm's work. The command is on the channel once [`SessionOperations::start`]
+//! - Dropping a waiter never cancels the helm's work. The command is on the channel once [`Operations::start`]
 //!   returns, and nothing here ever sends a cancel: a retired store drops only its own waiting (SPEC_impl.md, "Who owns
 //!   an accepted action").
 //! - A completion asks the focus coordinator. [`Settled::user_moved_on`] says whether the user pressed a key or
 //!   clicked since the work started (the [`Mark`] is taken at the start). When they have, the completion moves no
 //!   focus, opens no dialog and switches no session (SPEC.md, "Who may move focus"). Closing its own subject is not on
 //!   that list: a successful Rename closes its editor either way, as the field's docs say.
-//! - A refusal is reported on its session's row: [`SessionOperations::failure`] keeps the helm's words until the next
-//!   operation on that session starts (SPEC.md: "A failure or partial result appears on the source session's row").
-//!   Nothing here retries.
+//! - A refusal is reported where its subject is shown: [`Operations::failure`] keeps the helm's words until the next
+//!   operation on that key starts (SPEC.md, for sessions: "A failure or partial result appears on the source
+//!   session's row"). Nothing here retries.
 //!
 //! A reset retires the store with its UI session ([`crate::session`]): every task, and with it every completion
 //! callback, is dropped, as are the recorded failures. A completion that was already on its way reaches nobody, and
 //! the generic connection-lost notice is the only report (SPEC_impl.md, "One failure path: the reset").
 //!
-//! Extension points (`docs/gpui/foundation-ownership.md`): a [`Work`] variant for new session work, with a [`Command`]
-//! constructor that keeps today's API semantics for its route and records that work in the command it builds. Work on
-//! something other than a session (a host, a template) needs a store of its own here, keyed by what it acts on.
+//! Extension points (`docs/gpui/foundation-ownership.md`): a [`Work`] variant for a new kind of work. The commands
+//! themselves are built where their feature lives, with [`Command::new`], keeping today's API semantics for their
+//! route (the session list builds its Rename and Delete): this module holds the store, not a catalog of routes. A
+//! new kind of key ([`OpKey`]) is a change here.
 
 use std::collections::HashMap;
 
@@ -50,11 +54,11 @@ use serde_json::Value;
 use crate::focus::{self, Mark};
 use crate::host_text::HostText;
 
-/// The kinds of work a session can have in flight. Exhaustive on purpose: each new kind decides here whether it is
+/// The kinds of work that can be in flight on a key. Exhaustive on purpose: each new kind decides here whether it is
 /// supersedable, so shared code never has to guess.
 ///
-/// A [`Command`] names its own work (its constructor sets it), and [`SessionOperations::start`] takes the work from the
-/// command it sends, so what [`SessionOperations::in_flight`] reports always describes the request on the wire.
+/// A [`Command`] names its own work, and [`Operations::start`] takes the work from the command it sends, so what
+/// [`Operations::in_flight`] reports always describes the request on the wire.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Work {
     /// A title change, from the Rename editor.
@@ -67,68 +71,102 @@ pub enum Work {
     /// `status.rs` at reference commit `24bc0580`); here the row reads the guard back instead of recomputing it from a
     /// status that may have moved since.
     Delete(DeleteGuard),
+    /// An editor's explicit save of its drafts ([`crate::drafts::save`]): a template, the preferences, a host's
+    /// settings. One kind for every editor, because the store treats them alike: none is supersedable, and each is
+    /// busy only on its own key.
+    Save,
 }
 
-/// One command to the helm, built only by the constructors below so its route keeps today's API semantics.
+/// What a piece of work acts on: the key the store files it under, one request at a time per key. Opaque, and built
+/// only by its constructors, so two kinds of thing can never share a key by accident (a host and a session whose ids
+/// happen to be equal stay independent), and code that holds one cannot read an id back out of it to act on.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct OpKey(Key);
+
+/// The kinds of thing work acts on. Private: [`OpKey`]'s constructors are the only way to make one.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum Key {
+    Session(String),
+    Host(String),
+    Template(String),
+    Preferences,
+    Launch(u64),
+}
+
+impl OpKey {
+    /// A session, by the id the helm serves it under.
+    pub fn session(id: &str) -> OpKey {
+        OpKey(Key::Session(id.to_owned()))
+    }
+
+    /// A host, by its registry id.
+    pub fn host(id: &str) -> OpKey {
+        OpKey(Key::Host(id.to_owned()))
+    }
+
+    /// A template, by its name.
+    pub fn template(name: &str) -> OpKey {
+        OpKey(Key::Template(name.to_owned()))
+    }
+
+    /// The preferences, which the helm keeps as one entry.
+    pub fn preferences() -> OpKey {
+        OpKey(Key::Preferences)
+    }
+
+    /// A launch, sent before any session exists for it. `n` must be unique for the life of the UI session's store
+    /// (across the launcher's openings, and quick launches, which never open it): a number reused while an earlier
+    /// launch with it is in flight would be refused as busy, and SPEC.md lets New and the shortcuts start a fresh
+    /// launch at once. A counter kept beside the store, not in a launcher view, gives that.
+    pub fn launch(n: u64) -> OpKey {
+        OpKey(Key::Launch(n))
+    }
+}
+
+/// One command to the helm, with the work it does and how a refusal without words names it. Built where its feature
+/// lives, keeping today's API semantics for its route; nothing here knows any route.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Command {
     work: Work,
     method: Method,
     path: ApiPath,
     body: Option<Value>,
-    /// The command as a refusal without words names it: the method and route with the session's id hidden, as the old
-    /// app's `api::diagnostic_url` hid it. The id is an internal reference (a host's uuid and the session's own id),
-    /// long and meaningless to the user.
+    /// The command as a refusal without words names it: the method and route with any internal id hidden, as the old
+    /// app's `api::diagnostic_url` hid a session's. Such an id (a host's uuid, a session's own id) is long and
+    /// meaningless to the user.
     shown: String,
 }
 
 impl Command {
-    /// `POST /api/sessions/{id}/rename` with `title` exactly as given: no trimming, no emptiness check, no screening
-    /// of control characters. The supervisor owns every rule about what a title may hold, and its refusal is the text
-    /// the user acts on; an empty title is a legal rename. Ported from the old app's `api::rename_session`.
-    pub fn rename(session: &str, title: &str) -> Result<Command, PathError> {
-        Ok(Command {
-            work: Work::Rename,
-            method: Method::Post,
-            path: ApiPath::api(&["sessions", session, "rename"])?,
-            body: Some(serde_json::json!({ "title": title })),
-            shown: "POST /api/sessions/[session]/rename".to_owned(),
-        })
-    }
-
-    /// The ordinary session Delete, `DELETE /api/sessions/{id}`, with the precondition the user's confirmation covered:
-    /// `guard` is what that confirmation showed, so a session that became more alive since is refused rather than
-    /// killed. Only a guard that asks for something adds its flag, as in the old app's `api::delete_url`.
+    /// A command doing `work`: `method` on `path` with `body`, and `shown` as a refusal without words names it (the
+    /// method and route, with any internal id hidden, as `POST /api/sessions/[session]/rename`).
     ///
-    /// NOTE: The helm refuses this for a session in a disposable environment, whose Delete states what happens to the
-    /// environment and asks for it with a flag of its own. That refusal is correct, not a bug; the area that ports
-    /// environment sessions adds their Delete.
-    pub fn delete(session: &str, guard: DeleteGuard) -> Result<Command, PathError> {
-        let path = ApiPath::api(&["sessions", session])?;
-        let flag = match guard {
-            DeleteGuard::NothingAlive => Some("only_if_nothing_alive"),
-            DeleteGuard::AgentEnded => Some("only_if_agent_ended"),
-            DeleteGuard::Unconditional => None,
-        };
-        let (path, shown) = match flag {
-            Some(flag) => (
-                path.with_query(&[(flag, "true")])?,
-                format!("DELETE /api/sessions/[session]?{flag}=true"),
-            ),
-            None => (path, "DELETE /api/sessions/[session]".to_owned()),
-        };
-        Ok(Command {
-            work: Work::Delete(guard),
-            method: Method::Delete,
+    /// NOTE: Only for a route that answers done or refused. A route that can answer 202 (accepted long work) would be
+    /// reported done here before its work succeeded ([`Outcome::Done`]'s NOTE); the accepted outcome comes first.
+    pub fn new(
+        work: Work,
+        method: Method,
+        path: ApiPath,
+        body: Option<Value>,
+        shown: impl Into<String>,
+    ) -> Command {
+        Command {
+            work,
+            method,
             path,
-            body: None,
-            shown,
-        })
+            body,
+            shown: shown.into(),
+        }
     }
 
-    /// The work this command does, as [`SessionOperations::in_flight`] reports it while the command runs.
+    /// The work this command does, as [`Operations::in_flight`] reports it while the command runs.
     pub fn work(&self) -> Work {
         self.work
+    }
+
+    /// The route the command goes to, query included: what a feature's tests check its own commands by.
+    pub fn path(&self) -> &ApiPath {
+        &self.path
     }
 }
 
@@ -136,10 +174,12 @@ impl Command {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Outcome {
     /// The helm did it, and the store already shows the effects (the channel orders a reply after the changes it
-    /// caused). The body is the route's own reply: the renamed session, or a Delete's outcome with its notice.
+    /// caused). The body is the route's own reply (the renamed session, a Delete's outcome with its notice).
     ///
-    /// NOTE: Every 2xx is done, because neither route answers 202 (accepted long work, whose success is not implied).
-    /// The first route converted to accepted work adds that outcome here.
+    /// NOTE: Every 2xx is done, which is right only because no command sent through the store goes to a route that
+    /// answers 202 (accepted long work, whose success is not implied). Some helm routes do (host setup and update,
+    /// for instance); the first feature that sends one through the store adds the accepted outcome here first, as
+    /// [`Command::new`] says.
     Done(Option<Value>),
     /// The helm refused, in its own words, which may quote host values (a supervisor's refusal names the title it
     /// refused), so they are host text. A host timeout is a refusal too, though the work goes on behind it.
@@ -187,22 +227,22 @@ pub struct Settled {
     pub user_moved_on: bool,
 }
 
-/// A refusal recorded on the session it was for, for that session's row to show.
+/// A refusal recorded on the key it was for, for whatever shows that subject (a session's row, an editor) to show.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Failure {
     pub work: Work,
     pub message: HostText,
 }
 
-/// Why [`SessionOperations::start`] sent nothing.
+/// Why [`Operations::start`] sent nothing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NotStarted {
-    /// The session already has this work in flight. Nothing is queued: the user acts again once it settles.
+    /// The key already has this work in flight. Nothing is queued: the user acts again once it settles.
     Busy(Work),
     /// A reset retired this store, or the window is inert and there is none.
     Retired,
-    /// The session's id cannot be a path segment (an empty id, say). The helm never serves one, so this is a bug
-    /// report, not a user-facing state.
+    /// An id in the command's route cannot be a path segment (an empty session id, say). The helm never serves one,
+    /// so this is a bug report, not a user-facing state.
     Path(PathError),
 }
 
@@ -213,21 +253,21 @@ struct InFlight {
     _task: Task<()>,
 }
 
-/// The operation store of one UI session: the work in flight on each session, and the last refusal of each.
+/// The operation store of one UI session: the work in flight on each key, and the last refusal of each.
 ///
 /// Views read it while drawing, through [`crate::session::current_operations`], and keep no handle across draws, as
 /// with the store. Every change notifies, so a row drawn busy redraws when its operation settles.
-pub struct SessionOperations {
+pub struct Operations {
     handle: ChannelHandle,
-    in_flight: HashMap<String, InFlight>,
-    failures: HashMap<String, Failure>,
+    in_flight: HashMap<OpKey, InFlight>,
+    failures: HashMap<OpKey, Failure>,
     retired: bool,
 }
 
-impl SessionOperations {
+impl Operations {
     /// An empty store sending through `handle`, made with its UI session.
-    pub(crate) fn new(handle: ChannelHandle) -> SessionOperations {
-        SessionOperations {
+    pub(crate) fn new(handle: ChannelHandle) -> Operations {
+        Operations {
             handle,
             in_flight: HashMap::new(),
             failures: HashMap::new(),
@@ -235,43 +275,43 @@ impl SessionOperations {
         }
     }
 
-    /// The work in flight on `session`, keyed as the helm files the session.
-    pub fn in_flight(&self, session: &str) -> Option<Work> {
-        self.in_flight.get(session).map(|running| running.work)
+    /// The work in flight on `key`.
+    pub fn in_flight(&self, key: &OpKey) -> Option<Work> {
+        self.in_flight.get(key).map(|running| running.work)
     }
 
-    /// Whether any session has work in flight that `matches`: the session list asks it about Deletes, whose settling
+    /// Whether any key has work in flight that `matches`: the session list asks it about Deletes, whose settling
     /// its automatic selection waits for (SPEC.md: "Automatic selection after Delete waits until every admitted Delete
     /// has settled"), wherever they were started.
     pub fn any_in_flight(&self, matches: impl Fn(Work) -> bool) -> bool {
         self.in_flight.values().any(|running| matches(running.work))
     }
 
-    /// The last refusal of work on `session`, until the next operation on it starts. A session that is gone keeps its
-    /// entry until the UI session resets; nothing draws it, since no row asks.
-    pub fn failure(&self, session: &str) -> Option<&Failure> {
-        self.failures.get(session)
+    /// The last refusal of work on `key`, until the next operation on it starts. A key whose subject is gone (a deleted
+    /// session) keeps its entry until the UI session resets; nothing draws it, since nothing asks.
+    pub fn failure(&self, key: &OpKey) -> Option<&Failure> {
+        self.failures.get(key)
     }
 
-    /// Send `command` on `session`, as the work it names ([`Command::work`]), and call `on_settled` once the helm
+    /// Send `command` on `key`, as the work it names ([`Command::work`]), and call `on_settled` once the helm
     /// answers, unless a reset retires the store first. Call it from the handler of the user's action: that is when the
     /// moved-on mark is taken.
     ///
-    /// Starting clears the session's previous failure, which is the only thing that clears it (the old app's rule:
+    /// Starting clears the key's previous failure, which is the only thing that clears it (the old app's rule:
     /// a row's error stays until the retry that supersedes it). `on_settled` runs after the store has recorded the
     /// outcome and notified, outside the store's update, so it may read the store. It is never called for a command
     /// the reset lost.
     pub fn start(
         &mut self,
-        session: &str,
+        key: &OpKey,
         command: Command,
-        cx: &mut Context<SessionOperations>,
+        cx: &mut Context<Operations>,
         on_settled: impl FnOnce(&Settled, &mut App) + 'static,
     ) -> Result<(), NotStarted> {
         if self.retired {
             return Err(NotStarted::Retired);
         }
-        if let Some(running) = self.in_flight.get(session) {
+        if let Some(running) = self.in_flight.get(key) {
             return Err(NotStarted::Busy(running.work));
         }
         let mark = Mark::take(cx);
@@ -283,46 +323,46 @@ impl SessionOperations {
             shown,
         } = command;
         let reply = self.handle.command(method, path, body);
-        let key = session.to_owned();
+        let settling = key.clone();
         let task = cx.spawn(async move |operations, cx| {
             let result = reply.await;
             cx.update(|cx| {
                 let settled = operations.update(cx, |operations, cx| {
-                    operations.settle(&key, work, result, &shown, &mark, cx)
+                    operations.settle(&settling, work, result, &shown, &mark, cx)
                 });
                 if let Ok(Some(settled)) = settled {
                     on_settled(&settled, cx);
                 }
             });
         });
-        self.failures.remove(session);
+        self.failures.remove(key);
         self.in_flight
-            .insert(session.to_owned(), InFlight { work, _task: task });
+            .insert(key.clone(), InFlight { work, _task: task });
         cx.notify();
         Ok(())
     }
 
-    /// Record how `session`'s operation ended. Returns what its completion is handed, or `None` for a command the
+    /// Record how `key`'s operation ended. Returns what its completion is handed, or `None` for a command the
     /// reset lost. That case cannot arrive in practice: the channel announces a break before it fails the commands
     /// it lost, the announcement retires this store, and retiring drops the task that would have run this.
     fn settle(
         &mut self,
-        session: &str,
+        key: &OpKey,
         work: Work,
         result: Result<Reply, CommandError>,
         shown: &str,
         mark: &Mark,
-        cx: &mut Context<SessionOperations>,
+        cx: &mut Context<Operations>,
     ) -> Option<Settled> {
         // This drops the handle of the very task that is running this code. That is safe, and the completion after it
         // still runs: dropping a running task's handle cancels only its next poll, and this poll is its last. Moving
-        // the removal after the completion would let the completion see its own session as still busy.
-        self.in_flight.remove(session);
+        // the removal after the completion would let the completion see its own key as still busy.
+        self.in_flight.remove(key);
         cx.notify();
         let outcome = Outcome::from_reply(result.ok()?, shown);
         if let Outcome::Refused(message) = &outcome {
             self.failures.insert(
-                session.to_owned(),
+                key.clone(),
                 Failure {
                     work,
                     message: message.clone(),
@@ -337,7 +377,7 @@ impl SessionOperations {
 
     /// The reset retired this store's UI session: drop every waiting task and recorded failure, and start nothing
     /// more. The helm's work goes on; only the waiting ends.
-    pub(crate) fn retire(&mut self, cx: &mut Context<SessionOperations>) {
+    pub(crate) fn retire(&mut self, cx: &mut Context<Operations>) {
         self.retired = true;
         self.in_flight.clear();
         self.failures.clear();

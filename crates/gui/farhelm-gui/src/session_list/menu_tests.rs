@@ -23,7 +23,7 @@ use super::tests::{
     Fixture, change, frame, listing_meta, open_main, painted, selected, sent, session,
 };
 use crate::actions::{DELETE_SESSION_CHORD as DELETE_CHORD, RENAME_SESSION_SHORTCUT_NAME};
-use crate::operations::Command;
+use crate::operations::OpKey;
 use crate::test_support::meta;
 use crate::{layers, session, test_support};
 
@@ -527,9 +527,11 @@ fn any_pending_request_refuses_the_rows_delete(cx: &mut TestAppContext) {
     deletes(&mut fake);
     cx.update(|_, cx| {
         let operations = session::current_operations(cx).unwrap();
-        let rename = Command::rename("a", "renamed").unwrap();
+        let rename = super::rename::command("a", "renamed").unwrap();
         operations.update(cx, |operations, cx| {
-            operations.start("a", rename, cx, |_, _| {}).unwrap()
+            operations
+                .start(&OpKey::session("a"), rename, cx, |_, _| {})
+                .unwrap()
         });
     });
     assert!(

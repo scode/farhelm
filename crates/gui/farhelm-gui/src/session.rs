@@ -44,7 +44,7 @@ use serde_json::Value;
 use crate::layers::{self, Subject};
 use crate::local_state;
 use crate::notices::{self, Notice};
-use crate::operations::SessionOperations;
+use crate::operations::Operations;
 use crate::store::HelmStore;
 use crate::terminal::attached::OpenStream;
 
@@ -74,8 +74,8 @@ pub struct Connection {
 /// session's data.
 pub struct UiSession {
     store: Entity<HelmStore>,
-    /// Work on the sessions in this store that finishes later, retired with the session.
-    operations: Entity<SessionOperations>,
+    /// Work that finishes later (on sessions, hosts, templates, the preferences, launches), retired with the UI session.
+    operations: Entity<Operations>,
     handle: ChannelHandle,
     /// Where this session's terminal streams come from: the connection's source when the snapshot made the session.
     terminals: TerminalSource,
@@ -170,7 +170,7 @@ pub fn current_store(cx: &App) -> Option<Entity<HelmStore>> {
 /// The current UI session's operation store, looked up the same way as [`current_store`] and for the same reason: a
 /// view that reads it while drawing, or starts work from a handler, always reaches the live session's. `None` while the
 /// window is inert.
-pub fn current_operations(cx: &App) -> Option<Entity<SessionOperations>> {
+pub fn current_operations(cx: &App) -> Option<Entity<Operations>> {
     let connection = connection(cx)?;
     let session = connection.read(cx).session.clone()?;
     Some(session.read(cx).operations.clone())
@@ -206,7 +206,7 @@ fn receive(connection: &WeakEntity<Connection>, event: ChannelEvent, cx: &mut Ap
                 let terminals = connection.terminals.clone();
                 UiSession {
                     store: cx.new(|_| HelmStore::from_snapshot(&snapshot)),
-                    operations: cx.new(|_| SessionOperations::new(handle.clone())),
+                    operations: cx.new(|_| Operations::new(handle.clone())),
                     handle,
                     terminals,
                     retired: Rc::new(Cell::new(false)),

@@ -19,8 +19,9 @@
 //!   the reset"); [`store`]: the one copy of what the helm pushed, which views read when they draw;
 //!   [`local_state`]: the selected session's id, the one piece of window state that survives a reset.
 //! - [`session_list`]: the sidebar's session list and the selection rules; [`session_pane`]: the pane beside it.
-//! - [`operations`]: the operation store, which holds work on a session that finishes later, above the views that
-//!   start it; [`drafts`]: editor fields that follow pushed changes until the user touches them, and their saves.
+//! - [`operations`]: the operation store, which holds work that finishes later (on a session, a host, a template, the
+//!   preferences, a launch), above the views that start it; [`drafts`]: editor fields that follow pushed changes
+//!   until the user touches them, and their saves.
 //! - [`ticker`]: the one source of time, for animation (at most 10 ticks a second) and for one-shot deadlines.
 //! - [`notices`]: the notice center, the one place that decides what notice shows.
 //! - [`cache`]: the one way to cache a view.

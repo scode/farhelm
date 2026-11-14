@@ -1,7 +1,8 @@
 //! Drafts: what the user typed into an editor over pushed state, kept apart from what the helm pushes.
 //!
-//! SPEC_impl.md, "Drafts". An editor opens on a value from the store (a session's title, say) and the helm keeps
-//! pushing changes while it is open: another client renames the session, an agent does. A [`Draft`] records whether
+//! SPEC_impl.md, "Drafts". An editor opens on a value from the store (a session's title, a template's fields, a
+//! preference) and the helm keeps pushing changes while it is open: another client renames the session, an agent
+//! edits the template. A [`Draft`] records whether
 //! the user touched its field. Until they do, it follows pushed changes; once they have, a pushed change never
 //! overwrites what they typed. The old app got there by freezing the seed when the editor opened (`rename.rs` at
 //! reference commit `24bc0580`), which also stopped an untouched field from following; following is the rule now.
@@ -41,7 +42,7 @@ use farhelm_helm_client::PathError;
 use gpui::Context;
 
 use crate::host_text::HostText;
-use crate::operations::{Command, NotStarted, Outcome, Settled};
+use crate::operations::{Command, NotStarted, OpKey, Outcome, Settled};
 use crate::session;
 
 /// One editable field over a pushed value: its current value, whether the user touched it, and its save's state.
@@ -126,17 +127,17 @@ impl<T: Clone + PartialEq> Draft<T> {
     }
 }
 
-/// Save one draft of `view` on `session`: send `command` built from the draft's value, then, once the helm
-/// answers, settle the draft and call `then` with the outcome.
+/// Save one draft of `view` as work on `key` (the session, template, host or preferences it saves): send `command`
+/// built from the draft's value, then, once the helm answers, settle the draft and call `then` with the outcome.
 ///
 /// `field` reaches the draft inside the view; it is a plain function so the save can reach the same draft again when
 /// the reply arrives. A second Save while the first is in flight (Enter pressed again) is refused by the operation
-/// store, like any work on a session with work in flight. Nothing is retried, and if the view is gone when the reply
-/// arrives, only the operation store's record of a refusal remains, on the session's row.
+/// store, like any work on a key with work in flight. Nothing is retried, and if the view is gone when the reply
+/// arrives, only the operation store's record of a refusal remains under `key` (on a session's row, for a session).
 pub fn save<V: 'static, T: Clone + PartialEq + 'static>(
     view: &mut V,
     field: fn(&mut V) -> &mut Draft<T>,
-    session: &str,
+    key: &OpKey,
     command: impl FnOnce(&T) -> Result<Command, PathError>,
     cx: &mut Context<V>,
     then: impl FnOnce(&mut V, &Settled, &mut Context<V>) + 'static,
@@ -145,7 +146,7 @@ pub fn save<V: 'static, T: Clone + PartialEq + 'static>(
     let operations = session::current_operations(cx).ok_or(NotStarted::Retired)?;
     let editor = cx.entity().downgrade();
     operations.update(cx, |operations, cx| {
-        operations.start(session, command, cx, move |settled, cx| {
+        operations.start(key, command, cx, move |settled, cx| {
             let _ = editor.update(cx, |view, cx| {
                 field(view).settle(&settled.outcome);
                 then(view, settled, cx);
