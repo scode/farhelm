@@ -21,6 +21,10 @@
 //!   its raw working directory; title matches first, then matches only in the host or the directory, each group in
 //!   the helm's activity order. Matching reads the raw values, so how a value is escaped on screen never changes
 //!   which sessions match.
+//! - **Marks.** A value whose raw form matched has its matched characters drawn in the accent at weight 600 (the old
+//!   `mark`; the fill's ink on the selected row), found again on the escaped spelling the user sees
+//!   ([`mark_positions`], [`host_text::marked`]). A value that did not match is never marked; one that matched only
+//!   through a character shown as an escape marks less or nothing, since no escape is drawn partly marked.
 //! - **Choosing.** The first match is selected after every edit; Up and Down move the selection, stopping at both
 //!   ends, and scroll it into view. Focus stays in the search field the whole time: the rows are not focusable
 //!   ([`OptionRow`]), and the field hands Up and Down over rather than moving its caret ([`TextInput::on_vertical`]).
@@ -43,10 +47,6 @@
 //! after a pick they hide (the sidebar's filters, which do not exist yet); and the host's chosen mark beside its name
 //! (host marks arrive with the sidebar's row marks). The old layout for windows narrower than 600 pixels is not ported
 //! either, because the window's minimum width is 720.
-//!
-//! NOTE: Matching characters are not marked yet. The old switcher drew them in the accent, recomputed on the escaped
-//! spelling, and host text can only be drawn by the host-text module's own elements, which have no way to mark part of
-//! a value; that needs a host-text extension, which is a foundation-change request.
 
 #[cfg(test)]
 mod tests;
@@ -54,9 +54,10 @@ mod tests;
 use farhelm_helm_client::{ApiPath, CommandError, Method};
 use farhelm_proto::ui_channel::{Reply, SessionList, SessionRow};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement as _, Pixels, Render, ScrollHandle, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, px,
+    AnyElement, App, AppContext as _, Context, Entity, FontWeight, HighlightStyle,
+    InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, ScrollHandle,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window,
+    div, px,
 };
 
 use super::menu::{self, AgentName};
@@ -117,6 +118,18 @@ pub(crate) fn matching_positions(text: &str, query: &str) -> Option<Vec<usize>> 
         }
     }
     Some(positions)
+}
+
+/// The characters to mark in `shown`, the escaped spelling the user sees of the value `raw`: none unless `query` matches
+/// `raw` itself (the value took part in the match), and then where `query` occurs in `shown`, which may be nowhere. A
+/// value is matched on its raw form ([`ranked`]) but marked on what is shown, so a title found by typing an invisible
+/// character, which shows as its `<U+…>` escape, is listed with nothing marked, and a value that did not match is not
+/// marked because its escapes happen to spell the query, as in the old switcher.
+pub(crate) fn mark_positions(raw: &str, shown: &str, query: &str) -> Vec<usize> {
+    if matching_positions(raw, query).is_none() {
+        return Vec::new();
+    }
+    matching_positions(shown, query).unwrap_or_default()
 }
 
 /// The sessions of `sessions` (the helm's activity order) that `query` finds, as indices into it, in the order the
@@ -457,11 +470,18 @@ impl Render for QuickSwitcher {
                     let row = &list.sessions[index];
                     let key = row.info.id.clone();
                     let weak = weak.clone();
-                    result_row(row, position == selected, step, columns, palette)
-                        .on_click(move |_, window, cx| {
-                            let _ = weak.update(cx, |switcher, cx| switcher.pick(&key, window, cx));
-                        })
-                        .into_any_element()
+                    result_row(
+                        row,
+                        query.trim(),
+                        position == selected,
+                        step,
+                        columns,
+                        palette,
+                    )
+                    .on_click(move |_, window, cx| {
+                        let _ = weak.update(cx, |switcher, cx| switcher.pick(&key, window, cx));
+                    })
+                    .into_any_element()
                 })
                 .collect(),
             Read::Loading | Read::Failed(_) => Vec::new(),
@@ -581,10 +601,12 @@ impl Columns {
 
 /// One session's result row: its status mark, title, agent, host and working directory on one line, and an ended
 /// status's words on a second line under the title, since they do not fit the mark's column. Everything the host wrote
-/// is host text, each value its own element. On the selected row the title and marks take the inverse ink and the
-/// quieter columns the dimmer one, as the old sheet's selected row did.
+/// is host text, each value its own element, with the characters `query` (already trimmed) matches in it marked. On the
+/// selected row the title and marks take the inverse ink and the quieter columns the dimmer one, as the old sheet's
+/// selected row did.
 fn result_row(
     row: &SessionRow,
+    query: &str,
     selected: bool,
     step: u64,
     columns: Columns,
@@ -626,8 +648,23 @@ fn result_row(
         AgentName::Known(agent) => div().child(agent).into_any_element(),
         AgentName::Program(program) => host_text::element(&program).into_any_element(),
     };
-    let host = host_text::element(&HostText::from_host(row.host_name.as_str())).into_any_element();
-    let directory = host_text::element(&HostText::from_host(row.info.cwd.as_str()))
+    // The old `mark`: the accent at weight 600, or the fill's ink on the selected row's accent fill.
+    let style = HighlightStyle {
+        color: Some(theme::color(if selected {
+            palette.on_fill
+        } else {
+            palette.accent
+        })),
+        font_weight: Some(FontWeight::SEMIBOLD),
+        ..Default::default()
+    };
+    let marked = |raw: &str, value: &HostText| {
+        host_text::marked(value, |shown| mark_positions(raw, shown, query), style)
+    };
+    let host_name = row.host_name.as_str();
+    let host = marked(host_name, &HostText::from_host(host_name)).into_any_element();
+    let cwd = row.info.cwd.as_str();
+    let directory = marked(cwd, &HostText::from_host(cwd))
         .font_family(assets::TERMINAL_FONT)
         .into_any_element();
     let line = div()
@@ -645,7 +682,7 @@ fn result_row(
                 .children(live.map(|live| live.mark(palette, selected, row.stale, step))),
         )
         .child(
-            host_text::element(&title)
+            marked(row.info.title.as_str(), &title)
                 .w(columns.title)
                 .flex_none()
                 .min_w_0()
