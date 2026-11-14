@@ -543,11 +543,35 @@ pub(crate) fn focused_id(cx: &mut VisualTestContext) -> Option<String> {
         .and_then(|node| node.element_id.map(|id| id.to_string()))
 }
 
+/// Whether any dialog or popover is open in the window, as the app's shortcuts that refuse while one is open ask it
+/// ([`layers::any_open`]): a popover that never takes focus counts, and the pill does not.
+pub(crate) fn any_open(cx: &mut VisualTestContext) -> bool {
+    cx.update(|window, cx| layers::any_open(window, cx))
+}
+
+/// Whether focus is inside a session terminal: the focused element's key context path, in the last drawn frame,
+/// includes the terminal's context ([`crate::actions::TERMINAL_CONTEXT`]), which is where the terminal's key bindings
+/// apply. Call it after a step helper, which draws; a focus change since the last frame is judged against that frame.
+///
+/// It asks the keymap's own constant rather than an element id (`terminal-grid`) or a handle: a renamed id would let
+/// every "focus is not on the terminal" assertion pass without checking anything, while the constant is the one the
+/// terminal sets, and a handle needs the terminal view, which a test of another area does not hold.
+pub(crate) fn terminal_focused(cx: &mut VisualTestContext) -> bool {
+    cx.update(|window, _| {
+        window
+            .context_stack()
+            .iter()
+            .any(|context| context.contains(crate::actions::TERMINAL_CONTEXT))
+    })
+}
+
 /// Tests of the shared helpers above, one per helper, appended with it.
 mod shared_helper_tests {
     use gpui::{IntoElement as _, ParentElement as _, TestAppContext, div};
 
+    use super::{any_open, handle, open_dialog, settle, terminal_focused};
     use super::{button, focused, focused_id, keys, open};
+    use gpui::{InteractiveElement as _, Styled as _};
 
     /// Why this matters: tests that hold no focus handle (a GPUI Kit field's, a list row's own) name the focused
     /// element by its id, and a helper that named nothing, or an element other than the focused one, would let a focus
@@ -581,6 +605,74 @@ mod shared_helper_tests {
             "the premise: Tab reached the second button"
         );
         assert_eq!(focused_id(cx).as_deref(), Some("second"));
+    }
+
+    /// Why this matters: the tests of Rename, Delete, Settings, Add host and the quick switcher ask whether anything is
+    /// open to check that a shortcut opened, or refused to open, its dialog, and a helper that always said no (or yes)
+    /// would let either bug pass. Specified: with nothing open it says no; with a dialog open (checked by its id) it
+    /// says yes; once Escape has closed the dialog it says no again.
+    #[gpui::test]
+    fn any_open_says_whether_a_dialog_is_open(cx: &mut TestAppContext) {
+        let opener = cx.update(|cx| cx.focus_handle().tab_stop(true));
+        let drawn = opener.clone();
+        let cx = open(cx, move |_, _| button("opener", &drawn).into_any_element());
+        assert!(!any_open(cx), "nothing is open yet");
+        let start = handle(cx);
+        let (id, _, _) = open_dialog(cx, vec![("inside", start.clone())], &start);
+        assert!(super::is_open(cx, id), "the premise: the dialog is open");
+        assert!(any_open(cx), "the open dialog counts");
+        keys(cx, "escape");
+        assert!(
+            !super::is_open(cx, id),
+            "the premise: Escape closed the dialog"
+        );
+        assert!(!any_open(cx), "nothing is open once it closed");
+    }
+
+    /// Why this matters: tests across areas check that a closed dialog or a switched session hands focus back to the
+    /// terminal, and that a shortcut leaves it there; a helper that answered from anything but the focused element's
+    /// place would let focus land elsewhere unnoticed. Specified, with a stand-in in the terminal's key context beside an
+    /// ordinary button: with nothing focused it says no; with the button focused (checked through its handle) no; once
+    /// the stand-in is chosen as a session view chooses its terminal (checked the same way) yes.
+    #[gpui::test]
+    fn terminal_focused_says_whether_focus_is_in_a_terminal(cx: &mut TestAppContext) {
+        let other = cx.update(|cx| cx.focus_handle().tab_stop(true));
+        let terminal = cx.update(|cx| cx.focus_handle().tab_stop(true));
+        let (drawn_other, drawn_terminal) = (other.clone(), terminal.clone());
+        let cx = open(cx, move |_, _| {
+            let stand_in = div()
+                .key_context(crate::actions::TERMINAL_CONTEXT)
+                .size(gpui::px(40.));
+            div()
+                .child(button("other", &drawn_other))
+                .child(crate::focus::track(
+                    stand_in,
+                    &drawn_terminal,
+                    crate::focus::OnPress::Focus,
+                ))
+                .into_any_element()
+        });
+        assert!(
+            !focused(cx, &other) && !focused(cx, &terminal),
+            "the premise: nothing is focused yet"
+        );
+        assert!(!terminal_focused(cx), "nothing focused is not the terminal");
+        keys(cx, "tab");
+        assert!(focused(cx, &other), "the premise: Tab reached the button");
+        assert!(
+            !terminal_focused(cx),
+            "a button outside it is not the terminal"
+        );
+        cx.update(|window, cx| {
+            let mark = crate::focus::Mark::take(cx);
+            crate::focus::choose_terminal(&terminal, &mark, window, cx);
+        });
+        settle(cx);
+        assert!(
+            focused(cx, &terminal),
+            "the premise: the stand-in took focus"
+        );
+        assert!(terminal_focused(cx), "the terminal's own element is");
     }
 }
 
