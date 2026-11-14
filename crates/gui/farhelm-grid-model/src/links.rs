@@ -73,6 +73,38 @@ pub fn web_target(uri: &str, plain: bool) -> Option<Url> {
     .then_some(parsed)
 }
 
+/// The longest link, in UTF-8 bytes, that a tunnel is offered for: the helm's own cap on a URL it opens (its
+/// "the URL is too long (maximum 4096 bytes)" refusal), so the offer never promises what the helm refuses.
+const TUNNEL_URL_MAX: usize = 4096;
+
+/// The port a link names when it points at a remote host's own loopback, which is what the Mac app offers to reach
+/// through a tunnel (SPEC.md's localhost-tunnel paragraph); `None` for any other link.
+///
+/// The link must be a plain web address by [`web_target`]'s strict rule, whatever kind of link it is (the old app's
+/// `tunnelTarget` held OSC 8 hyperlinks to it too), and at most 4096 bytes. Its host, as the URL parser normalizes it
+/// (so `127.1` and `0x7f000001` are `127.0.0.1`, and a trailing dot is dropped), must be `localhost` or a name under
+/// it, an address in `127.0.0.0/8`, `::1`, or the unspecified `0.0.0.0` or `::` that a server bound to all
+/// addresses prints. LAN addresses, other single-label names and IPv4-mapped IPv6 addresses do not count. The port is
+/// the explicit one, else the scheme's default (80, 443); port 0 is refused.
+///
+/// This only decides the offer. The helm classifies the link again when asked to open the tunnel and is the authority.
+pub fn tunnel_port(uri: &str) -> Option<u16> {
+    if uri.len() > TUNNEL_URL_MAX {
+        return None;
+    }
+    let url = web_target(uri, true)?;
+    let loopback = match url.host()? {
+        url::Host::Domain(name) => {
+            let name = name.trim_end_matches('.');
+            name == "localhost" || name.ends_with(".localhost")
+        }
+        url::Host::Ipv4(address) => address.is_loopback() || address.is_unspecified(),
+        url::Host::Ipv6(address) => address.is_loopback() || address.is_unspecified(),
+    };
+    let port = url.port_or_known_default()?;
+    (loopback && port != 0).then_some(port)
+}
+
 /// ECMAScript whitespace for the pinned policy, without locale or process state.
 pub(super) fn is_js_space(ch: char) -> bool {
     matches!(ch, '\u{9}'..='\u{d}' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}')

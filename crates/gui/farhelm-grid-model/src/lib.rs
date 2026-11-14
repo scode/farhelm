@@ -28,7 +28,7 @@ pub use farhelm_proto::grid::{
 };
 use farhelm_proto::grid::{GridStreamCheck, Row};
 pub use link_disclosure::LinkDisclosure;
-pub use links::{LinkKind, TerminalLink, web_target};
+pub use links::{LinkKind, TerminalLink, tunnel_port, web_target};
 pub use selection::{Position, Selection, SelectionMode};
 pub use viewport::{ViewRow, Viewport, position_of};
 

@@ -5,7 +5,7 @@
     clippy::expect_used,
     reason = "test-only crate; crates/gui/clippy.toml's test allowance covers #[test] functions but not these helpers"
 )]
-use farhelm_grid_model::{GridModel, GridOutput, LinkKind, Position, web_target};
+use farhelm_grid_model::{GridModel, GridOutput, LinkKind, Position, tunnel_port, web_target};
 use serde_json::{Value, json};
 
 /// Explicit cell rows pass the actual wire encoder/checker before lookup. This
@@ -191,5 +191,65 @@ fn pinned_cell_links_and_label_join_oracle() {
                 "grid {index}, row {line}"
             );
         }
+    }
+}
+
+/// A tunnel is offered only for a remote host's own loopback, so the offer must neither miss what a local dev server
+/// prints (`localhost`, `127.1`, a server bound to all addresses) nor catch a LAN address, which the browser on the Mac
+/// can reach by itself and which would then be tunneled to the wrong place. Specified by the old app's table
+/// (`terminal-tunnels.test.js` at reference commit 24bc0580): these hosts give the link's port, the scheme's default
+/// port when none is written, and everything else, including malformed links and port 0, gives none.
+#[test]
+fn tunnel_ports_are_offered_only_for_normalized_loopback_and_wildcard_hosts() {
+    for host in [
+        "localhost",
+        "sub.localhost.",
+        "127.0.0.1",
+        "127.255.1.2",
+        "127.1",
+        "0x7f000001",
+        "0.0.0.0",
+        "[::1]",
+        "[::]",
+    ] {
+        assert_eq!(
+            tunnel_port(&format!("http://{host}:5173/path?q=1#part")),
+            Some(5173),
+            "{host}"
+        );
+    }
+    assert_eq!(tunnel_port("HTTPS://LOCALHOST/path"), Some(443));
+    assert_eq!(tunnel_port("http://localhost/path"), Some(80));
+    for host in [
+        "192.168.1.1",
+        "10.0.0.1",
+        "0.1.2.3",
+        "server",
+        "localhost.example.test",
+        "example.local",
+        "[::ffff:127.0.0.1]",
+        "[fe80::1]",
+        "example.test",
+    ] {
+        assert_eq!(tunnel_port(&format!("http://{host}:5173/")), None, "{host}");
+    }
+    let long = format!("http://localhost/{}", "x".repeat(4096));
+    for uri in [
+        "http://localhost:0/",
+        "http://localhost:000/",
+        "http://localhost:65536/",
+        "http://localhost:bad/",
+        "http://",
+        "//localhost/",
+        "http:localhost",
+        "file://localhost/x",
+        "ftp://localhost/",
+        " http://localhost/",
+        "http://localhost/\npath",
+        "http://localhost/\u{feff}",
+        "http://localhost/\u{7f}",
+        long.as_str(),
+    ] {
+        assert_eq!(tunnel_port(uri), None, "{uri:?}");
     }
 }

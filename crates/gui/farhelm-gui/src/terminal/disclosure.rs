@@ -8,6 +8,10 @@
 //! decides what to show ([`farhelm_grid_model::LinkDisclosure`]); this draws it, every piece of program text through
 //! the host-text element so invisible and direction-changing characters are visible.
 //!
+//! A printed web address gets the panel too when, on a Mac, it points at a remote session's own loopback: the panel
+//! then ends with the tunnel hint, which says that a plain click opens the address on this Mac and Cmd-click through a
+//! tunnel ([`super::tunnels`]). A hyperlink's panel keeps its warning and adds the hint after it.
+//!
 //! The panel is the click's safeguard: a click opens the hyperlink only while the panel is fully visible. It records
 //! where it was drawn and the window's size every frame ([`Drawn`]); its owner reads that at the click. It takes no
 //! focus and holds nothing that does: it is a non-focusing popover the layer manager draws on top, anchored to a
@@ -22,7 +26,7 @@ use gpui::{
     Size, StatefulInteractiveElement, Styled, Window, canvas, div, prelude::FluentBuilder as _, px,
 };
 
-use crate::host_text::{self, HostText};
+use crate::host_text::{self, HostSentence, HostText};
 use crate::theme::{self, metrics};
 
 /// The warning's first line (the old app's words).
@@ -54,15 +58,23 @@ pub(crate) struct DisclosureView {
     target: HostText,
     /// The link's own text, when it names somewhere else.
     claimed: Option<HostText>,
+    /// The tunnel offer for a remote host's loopback link, drawn last, after the warning if there is one, which it
+    /// never replaces (SPEC.md: the hover "preserves any OSC hyperlink mismatch warning").
+    hint: Option<HostSentence>,
     drawn: Drawn,
 }
 
 impl DisclosureView {
-    pub(crate) fn new(disclosure: &LinkDisclosure, drawn: Drawn) -> Self {
+    pub(crate) fn new(
+        disclosure: &LinkDisclosure,
+        hint: Option<HostSentence>,
+        drawn: Drawn,
+    ) -> Self {
         DisclosureView {
             host: HostText::from_host(disclosure.host.as_str()),
             target: HostText::from_host(disclosure.target.as_str()),
             claimed: disclosure.claimed_text.as_deref().map(HostText::from_host),
+            hint,
             drawn,
         }
     }
@@ -142,6 +154,12 @@ impl Render for DisclosureView {
                     .text_color(theme::color(strong)),
             )
             .child(host_text::element(&self.target))
+            .children(self.hint.clone().map(|hint| {
+                div()
+                    .debug_selector(|| super::tunnels::HINT_ID.into())
+                    .mt(px(4.))
+                    .child(hint)
+            }))
             .child(recorder)
     }
 }
