@@ -16,13 +16,14 @@ use super::backend::{
 };
 use super::credential_delivery::CredentialDelivery;
 use super::http::{
-    HostPlanResponse, ProbeDestination, ProbeRequest, ProbeResponse, ProvisionRequest,
-    ProvisioningRequestError, ProvisioningView, RunAccepted, RunStatus, StepStatus,
+    HostPlanResponse, ProbeDestination, ProbeRequest, ProbeResponse, ProgressViews as _,
+    ProvisionRequest, ProvisioningRequestError, ProvisioningRuns, ProvisioningView, RunAccepted,
+    RunStatus, StepStatus,
 };
 use super::payloads::{PayloadSelection, PayloadSource, production_payloads};
 use super::plan::{
-    PlanLayout, ProvisioningAction, ProvisioningOperation, ProvisioningPlan, ProvisioningTarget,
-    ResolvedPath, UninstallFacts,
+    OperationRefusal as _, PlanLayout, ProvisioningAction, ProvisioningOperation, ProvisioningPlan,
+    ProvisioningTarget, ResolvedPath, UninstallFacts,
 };
 use crate::manager::{ConnectionManager, HostState, peer_text};
 use crate::store::{
@@ -2087,10 +2088,17 @@ impl ProvisioningService {
         // meanwhile. See `ActorHandle::provision_lock`.
         let host_write = self.manager.host_provision_lock(host).await;
         if let Err(error) = self.host_row(host).await {
-            let mut memory = self.memory.lock().await;
-            memory.busy.remove(&host);
-            memory.runs.remove(&host);
-            memory.automatic_runs.remove(&host);
+            {
+                let mut memory = self.memory.lock().await;
+                memory.busy.remove(&host);
+                memory.runs.remove(&host);
+                memory.automatic_runs.remove(&host);
+            }
+            // The claim's run may already be on a connected GUI (any bump
+            // while this waited for the lock re-read it), and the automatic
+            // path has no command reply to re-read after, so the withdrawal
+            // must bump too or the GUI keeps showing a run that never starts.
+            self.manager.events().bump();
             return Err(error);
         }
         self.manager.events().bump();
@@ -2915,6 +2923,25 @@ impl ProvisioningService {
         Ok(ActionOutcome::Completed)
     }
 
+    /// Retain `view` as its host's run without publishing it, the way admission stores a run before its feed bump;
+    /// lets the UI channel's tests start from a run without driving a whole provisioning plan.
+    #[cfg(test)]
+    pub(crate) async fn insert_run_for_test(&self, view: ProvisioningView) {
+        self.memory.lock().await.runs.insert(view.host_id, view);
+    }
+
+    /// [`Self::set_step`], for tests outside this module: the real progress transition, with its feed bump.
+    #[cfg(test)]
+    pub(crate) async fn set_step_for_test(
+        &self,
+        host: HostId,
+        index: usize,
+        status: StepStatus,
+        message: Option<String>,
+    ) {
+        self.set_step(host, index, status, message).await;
+    }
+
     /// Publish one progress transition through the fleet's no-data feed.
     async fn set_step(
         &self,
@@ -2953,6 +2980,20 @@ impl ProvisioningService {
             .get(&host)
             .cloned()
             .unwrap_or_else(|| ProvisioningView::idle(host)))
+    }
+
+    /// Every run this helm process retains, ordered by host id: the UI channel's host-progress collection.
+    ///
+    /// Reads only the in-memory runs, so it never waits on a host; every change to them bumps the fleet feed, which
+    /// is what makes a connected GUI re-read this. A host with no retained run is left out rather than listed idle.
+    ///
+    /// Unlike [`Self::view`] it takes no progress-read slot. Those bound the per-host reads a feed bump can start all
+    /// at once, each with a store read; this is one memory read per connected channel per bump.
+    pub(crate) async fn runs(&self) -> ProvisioningRuns {
+        let memory = self.memory.lock().await;
+        let mut runs: Vec<ProvisioningView> = memory.runs.values().cloned().collect();
+        runs.sort_by_key(|run| run.host_id);
+        ProvisioningRuns { runs }
     }
 
     pub(super) async fn host_row(&self, host: HostId) -> anyhow::Result<HostRow> {

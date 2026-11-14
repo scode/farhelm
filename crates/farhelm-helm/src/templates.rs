@@ -41,9 +41,9 @@ pub(crate) async fn list_templates(State(state): State<Arc<AppState>>) -> impl I
 /// The URL is the name's only authority, so a body cannot redirect a write
 /// to another template; the body is the fields alone. Last write wins
 /// (SPEC.md wants no concurrency check for the GUI's writes; only an
-/// agent's write carries a [`Precondition`]). Clients read templates when their
-/// launcher or Templates panel opens; nothing pushes a template change into
-/// a launcher already open in another client.
+/// agent's write carries a [`Precondition`]). A saved write bumps the fleet
+/// feed (in [`store_template`], which agent writes share), and the UI channel
+/// pushes the changed catalog to the connected GUI on that bump.
 pub(crate) async fn put_template(
     State(state): State<Arc<AppState>>,
     AxPath(name): AxPath<String>,

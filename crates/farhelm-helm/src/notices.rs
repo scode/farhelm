@@ -33,34 +33,13 @@ pub(crate) const SCHEMA: &str = "
     ) STRICT;
 ";
 
-/// A condition's last-known explanation. Bytes describe the last successful
-/// measurement, which can outlive a later unknown or unrequested measurement.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub(crate) enum NoticeContent {
-    StuckTrash {
-        checkout_id: String,
-        name: String,
-        repository: String,
-        bytes: Option<u64>,
-        reason: String,
-        at: i64,
-    },
-}
-
-/// Stable identity and first observation belong to the notice, not to each
-/// removal attempt. Resolved notices are always served as read.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub(crate) struct Notice {
-    pub(crate) id: i64,
-    pub(crate) host: HostId,
-    pub(crate) raised_at: i64,
-    pub(crate) read: bool,
-    pub(crate) resolved: bool,
-    pub(crate) content: NoticeContent,
-}
+// The notice shapes live in `farhelm-proto` so the GUI decodes the same types this module serves.
+pub(crate) use farhelm_proto::notices::{Notice, NoticeContent};
 
 /// Exact current panel snapshot, newest first, retained until explicit clear.
+///
+/// Only this wrapper stays here: the GUI decodes the [`Notice`] entries the UI channel splits out of it, never the
+/// wrapper, so it is not part of the shared shape.
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) struct Notices {
     pub(crate) notices: Vec<Notice>,
@@ -353,7 +332,7 @@ pub(crate) async fn marks(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::rest_harness::{self, FleetBuilder, HostScript};
     use axum::body::Body;
@@ -365,7 +344,7 @@ mod tests {
 
     /// Supply real capable-listing evidence without requiring filesystem removal
     /// in storage tests; the supervisor owns and tests that safety boundary.
-    fn stuck(id: &str) -> CheckoutTrashListing {
+    pub(crate) fn stuck(id: &str) -> CheckoutTrashListing {
         CheckoutTrashListing {
             checkouts: vec![ArchivedCheckout {
                 id: id.into(),
@@ -387,7 +366,7 @@ mod tests {
 
     /// The reserved entry is enough for database behavior, including the
     /// identity-less host compatibility path.
-    async fn claim(store: &HelmStore) -> manager::SessionClaim {
+    pub(crate) async fn claim(store: &HelmStore) -> manager::SessionClaim {
         let host = rest_harness::local_id(store).await;
         manager::SessionClaim {
             host,
@@ -399,7 +378,7 @@ mod tests {
 
     /// Record through the exact production transaction, with a fixed fixture
     /// connection rather than mutating the process environment or a live helm.
-    fn record(
+    pub(crate) fn record(
         store: &HelmStore,
         claim: &manager::SessionClaim,
         listing: &CheckoutTrashListing,

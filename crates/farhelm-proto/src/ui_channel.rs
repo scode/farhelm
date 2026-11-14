@@ -22,8 +22,11 @@
 //!   ones on the helm (SPEC_impl.md, "Paths are a trust boundary").
 //!
 //! Entries travel as JSON values inside the envelope and are decoded with the
-//! entry types below ([`SessionRow`], [`HostView`], [`Preferences`], the approvals'
-//! [`crate::approvals::PendingApproval`]). Those are the SAME types the helm's
+//! entry types below ([`SessionRow`], [`HostView`], [`Preferences`]) and the
+//! domain modules' ([`crate::approvals::PendingApproval`],
+//! [`crate::launcher::LaunchTemplate`], [`crate::notices::Notice`],
+//! [`crate::announcements::AnnouncementQueue`],
+//! [`crate::provisioning::ProvisioningView`]). Those are the SAME types the helm's
 //! GET handlers serialize, so the helm and the GUI cannot drift into two
 //! copies of one shape (the old GUI hand-mirrored the helm's private types,
 //! and the copies drifted).
@@ -132,12 +135,28 @@ pub enum Collection {
     Preferences,
     /// Agent requests waiting for the user's answer.
     Approvals,
+    /// Launch templates, as `GET /api/templates` serves them, keyed by name.
+    Templates,
+    /// Shared notices about hosts, as `GET /api/notices` serves them, keyed
+    /// by notice id.
+    Notices,
+    /// The announcement queue (pending and shown), as one entry keyed
+    /// [`ANNOUNCEMENTS_KEY`]: the queue is small and its two lists are one
+    /// consistent read, so it travels whole, like the preferences row.
+    Announcements,
+    /// Provisioning progress for every host with a run this helm retains, as
+    /// `GET /api/provisioning` serves it, keyed by host id. A host without a
+    /// run is absent, not listed as idle.
+    HostProgress,
 }
 
 /// The one key the [`Collection::Preferences`] collection uses: the helm has
 /// one preferences row, and modelling it as a one-entry collection keeps it
 /// inside the generic apply rather than giving it a code path of its own.
 pub const PREFERENCES_KEY: &str = "preferences";
+
+/// The one key the [`Collection::Announcements`] collection uses.
+pub const ANNOUNCEMENTS_KEY: &str = "announcements";
 
 /// One entry of a pushed collection, with the key it is filed under.
 ///
@@ -150,8 +169,7 @@ pub const PREFERENCES_KEY: &str = "preferences";
 pub struct KeyedEntry {
     pub key: String,
     /// The entry as the collection's GET route serves it; it decodes as the
-    /// collection's entry type ([`SessionRow`], [`HostView`], [`Preferences`],
-    /// [`crate::approvals::PendingApproval`]).
+    /// collection's entry type (see [`Collection`]'s variants).
     pub value: serde_json::Value,
 }
 
