@@ -48,9 +48,10 @@ committed end-to-end smoke test built on them (`.agents/validation.md` has its c
 ## Seeded sessions
 
 Every seeded session is a command launch of the fake agent (`farhelm-fixtures fake-agent`), titled `Fixture 1`,
-`Fixture 2` and so on in the order seeded, created through the real helm API. `--sessions` seeds the `basic` script, a
-prompt that echoes each line typed into it as `echo:<line>`; it is the one to type into. Its status is whatever the
-supervisor reads, running while it prints and idle a few seconds later.
+`Fixture 2` and so on in the order seeded, created through the real helm API. Each runs in `/tmp`, so the folder its row
+shows is the same on every run and machine; the transcripts the fleet kinds replay stay in the run directory.
+`--sessions` seeds the `basic` script, a prompt that echoes each line typed into it as `echo:<line>`; it is the one to
+type into. Its status is whatever the supervisor reads, running while it prints and idle a few seconds later.
 
 `--fleet` seeds sessions in given statuses for screenshots of them. Each kind other than `basic` runs the fake agent's
 replay script, which prints a three-line transcript ending in `now holds its <kind> screen` and then holds the screen

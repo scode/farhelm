@@ -633,9 +633,23 @@ def listed_states(run: Path) -> dict[str, str | None]:
     return {row["id"]: (row.get("status") or {}).get("state") for row in rows}
 
 
+# The working directory every seeded session runs in. The sessions' folder shows on every row (`host:/tmp`), and SPEC.md
+# puts it in the session's details bar too, so it has to read the same on every run and every machine and name nothing
+# of the machine that took the picture. The run directory (`/tmp/farhelm-tmp/<uuid>/...`) was not stable: each capture
+# showed its own random scratch path, and every picture differed from the last for that alone.
+#
+# NOTE: Not the home directory, though it is the folder the old app's pictures came closest to: the row folds a home to
+# `~` only for a path below it, and leaves a bare `/home/<user>` alone (`abbreviate_home` in the session list), so the
+# account name would show. `/tmp` exists everywhere and is used as it is: nothing is created there, so the rule against a
+# harness making a fixed path under `/tmp` is kept. The fake agent writes nothing to its working directory; the
+# transcripts it replays stay in the run directory.
+SESSION_CWD = Path("/tmp")
+
+
 def seed_sessions(run: Path, kinds: list[str], fixtures: str) -> list[str]:
     """Create one fake-agent session per entry of `kinds` (see FLEET_KINDS) through the embedded helm's API, in that
-    order; return their ids."""
+    order, each running in `SESSION_CWD`; return their ids. A replayed kind's transcript is a file in the run's `work`
+    directory, so it goes with the run."""
     work = run / "work"
     work.mkdir(exist_ok=True)
     ids = []
@@ -644,7 +658,7 @@ def seed_sessions(run: Path, kinds: list[str], fixtures: str) -> list[str]:
         if kind != "basic":
             transcript_file = work / f"fixture-{index}.txt"
             transcript_file.write_text(transcript(index, kind))
-        body = seed_body(index, work, fixtures, kind, transcript_file)
+        body = seed_body(index, SESSION_CWD, fixtures, kind, transcript_file)
         ids.append(helm_request(run, "POST", "/api/sessions", body)["id"])
     return ids
 
