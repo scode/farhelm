@@ -11,7 +11,9 @@
 //! button is a tab stop tracked through [`focus::track`], which applies the coordinator's click rule (on Linux a click
 //! focuses it, on macOS it does not, as in WebKit there) in place of GPUI's own focus-on-press.
 //! A disabled button is not a tab stop and takes no focus on a click (SPEC.md: Tab stays within a dialog's "visible,
-//! enabled controls"). The
+//! enabled controls"). A busy button ([`Button::busy`]), whose action is in flight, is different: it keeps focus and
+//! its place in Tab's order and does nothing when pressed, the old app's `aria-disabled` Save, so the control the user
+//! chose stays focused while its work runs (disabling it would drop focus out of the dialog's controls). The
 //! focus ring is the old `:focus-visible` ring (a 2-pixel accent outline one pixel outside the button, shown only after
 //! keyboard input) together with the hover fill, which the old sheet also gave a focused button so a ghost button's box
 //! is visible to a keyboard user.
@@ -68,6 +70,8 @@ pub struct Button {
     icon: Option<Icon>,
     show_label: bool,
     disabled: bool,
+    /// Whether the button's action is in flight: drawn as unavailable, ignoring activation, but still focusable.
+    busy: bool,
     /// Whether what the button opens is open; `None` for a button that opens nothing.
     expanded: Option<bool>,
     on_click: Option<Handler>,
@@ -94,6 +98,7 @@ impl Button {
             icon: None,
             show_label: true,
             disabled: false,
+            busy: false,
             expanded: None,
             on_click: None,
             focus: None,
@@ -115,6 +120,18 @@ impl Button {
     /// An unavailable button: drawn dimmed (or with the retired fill for primary and danger) and ignoring activation.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    /// A button whose action is in flight (a Save while the save runs): drawn as unavailable (the retired fill for
+    /// primary and danger, the old `aria-disabled` look; the other tiers keep their look and lose only their hover
+    /// fill) and ignoring activation, but, unlike [`Button::disabled`], it stays a tab stop and keeps focus, so the
+    /// button the user pressed is still where focus is when the work settles. A press while busy does nothing at all:
+    /// Enter and Space stop at the button, as they do at an enabled one, instead of going on to whatever holds it. The
+    /// look is applied on the next redraw, so a handler must still keep its own guard for a press that arrives before
+    /// it (Rename's Save checks its draft).
+    pub fn busy(mut self, busy: bool) -> Self {
+        self.busy = busy;
         self
     }
 
@@ -176,8 +193,8 @@ impl Button {
                 Some(palette.border),
                 palette.fg_0,
             ),
-            Tier::Primary if self.disabled => retired,
-            Tier::Danger if self.disabled => retired,
+            Tier::Primary if self.disabled || self.busy => retired,
+            Tier::Danger if self.disabled || self.busy => retired,
             Tier::Primary => (
                 Some(palette.accent_fill),
                 palette.accent_fill_hover,
@@ -228,8 +245,17 @@ impl RenderOnce for Button {
             _ => (pad_y, None),
         };
         let enabled = !self.disabled;
-        let handler = self.on_click.clone().filter(|_| enabled);
-        let key_handler = handler.clone();
+        // A busy button stays focusable (`enabled`), but nothing it does acts while busy (`active`).
+        let active = enabled && !self.busy;
+        let handler = self.on_click.clone().filter(|_| active);
+        // A busy button still takes Enter and Space, doing nothing with them, so a press while busy does nothing at
+        // all, rather than going on up to whatever holds the button, as it would from a button that does not take
+        // them.
+        let key_handler: Option<Handler> = if enabled && self.busy {
+            Some(Rc::new(|_: &ClickEvent, _: &mut Window, _: &mut App| {}))
+        } else {
+            handler.clone()
+        };
 
         let mut button = div()
             .id(ElementId::Name(self.id.clone()))
@@ -274,14 +300,16 @@ impl RenderOnce for Button {
                     .rounded(metrics::RADIUS_SM + px(3.)),
             );
         }
-        if enabled {
+        if active {
             button = button
                 .cursor_pointer()
                 .hover(|style| style.bg(theme::color(hover_fill)));
-        } else if matches!(
-            self.tier,
-            Tier::Ghost | Tier::Neutral | Tier::OnBanner | Tier::RowMenu { .. }
-        ) {
+        } else if !enabled
+            && matches!(
+                self.tier,
+                Tier::Ghost | Tier::Neutral | Tier::OnBanner | Tier::RowMenu { .. }
+            )
+        {
             button = button.opacity(0.5);
         }
         if let Some(icon) = self.icon {

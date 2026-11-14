@@ -530,10 +530,16 @@ must not undo a change an agent or the command line made" needs them. The two co
 (templates and number keys, SPEC.md 2026-10-21) stay. A failed save is reported, never retried, and never treated as
 saved; whether the field reverts or keeps its text for editing follows that editor's SPEC rule (several explicit-save
 editors keep the draft). A save is work in the operation store under the key of what it saves, so an editor of any kind
-(a session's title, a template, the preferences, a host's settings) saves the same way.
+(a session's title, a template, the preferences, a host's settings) saves the same way. A text field over a draft is one
+binding owned by the drafts module, not wiring each editor repeats: it mirrors the user's edits into the draft, shows a
+pushed value only while the draft follows it, is read-only while its save is in flight, and after a refused save takes
+up the last pushed value if the user had not touched it. While a save is in flight its Save button is busy rather than
+disabled: it keeps focus and its place in Tab's order and ignores presses, as the old app's Save did, because a disabled
+button gives up focus.
 
 Enforced by draft tests that push a change under a touched field, by save tests that load, save untouched and compare,
-and by a save under a template's key.
+by a save under a template's key, by tests of the bound field (a push under a touched field, a push and a keystroke
+while saving, the refusal follow-up), and by a test that a busy button keeps focus and ignores presses.
 
 ### Host-supplied text
 

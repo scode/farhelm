@@ -9,7 +9,7 @@
 //!
 //! Here's the TLDR of its rules:
 //!
-//! - **The draft.** The field holds a [`Draft`] seeded from the session's raw title ([`HostText::raw`]), so saving it
+//! - **The draft.** The field is a [`DraftInput`] seeded from the session's raw title ([`HostText::raw`]), so saving it
 //!   untouched sends back the helm's own bytes, hidden characters included. Until the user edits it, the draft follows
 //!   a rename the helm pushes (another client, an agent); once edited, a push never overwrites it (SPEC.md, "Things
 //!   changing underneath": "A refresh never changes what the user is typing"). It does not follow while a save is in
@@ -20,9 +20,9 @@
 //!   so a title the supervisor refuses reaches the supervisor, and its refusal is what the user reads. A refusal keeps
 //!   the draft and shows the helm's words, escaped, under the field; a success closes the editor. While a save is in
 //!   flight the field is read-only, Cancel and Close are disabled, Escape does nothing (the layer manager asks the
-//!   editor's dismiss guard), and Save is ignored (the old app's busy rules; SPEC.md: "Close uses the same cancellation
-//!   and busy-state rules as Cancel"). Save keeps its enabled look meanwhile, because a disabled button gives up focus
-//!   and the button component has no busy look.
+//!   editor's dismiss guard), and Save draws busy and ignores presses (the old app's busy rules; SPEC.md: "Close uses
+//!   the same cancellation and busy-state rules as Cancel"). Save is busy rather than disabled because a disabled
+//!   button gives up focus, and the old app kept a clicked Save focused.
 //! - **Focus.** It starts in the title field, and Tab follows Close, the field, Cancel, Save (the dialog frame draws
 //!   them in that order). Closing it, however it closes, moves focus only if focus is still inside it: that is the
 //!   layer manager's rule, and it is also the rule decided for a successful save
@@ -58,10 +58,8 @@ use gpui::{
     px,
 };
 
-use crate::components::{
-    Button, DialogFrame, HoverHelp, Role, TextInput, TextInputEvent, TextInputState, Tier,
-};
-use crate::drafts::{self, Draft};
+use crate::components::{Button, DialogFrame, HoverHelp, Role, TextInput, TextInputState, Tier};
+use crate::drafts::DraftInput;
 use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Dialog, DismissGuard, LayerId, MainAction};
@@ -121,7 +119,7 @@ fn open_returning(
         .title
         .clone();
     let editor = cx.new(|cx| RenameEditor::new(key.to_owned(), &title, &store, window, cx));
-    let start = editor.read(cx).input.focus_handle(cx);
+    let start = editor.read(cx).title.input().focus_handle(cx);
     let weak = editor.downgrade();
     // Enter on the dialog itself (after a click on its empty space) saves, unless Save is unavailable.
     let main_action: MainAction = Rc::new(move |window, cx| {
@@ -131,7 +129,7 @@ fn open_returning(
     let weak = editor.downgrade();
     let may_dismiss: DismissGuard = Rc::new(move |cx| {
         weak.upgrade()
-            .is_none_or(|editor| !editor.read(cx).draft.is_saving())
+            .is_none_or(|editor| !editor.read(cx).title.draft().is_saving())
     });
     let layer = layers::open_dialog(
         Dialog {
@@ -181,16 +179,15 @@ pub(crate) struct RenameEditor {
     key: String,
     /// The title the store holds now, shown escaped above the field. Kept when the session drops out of the listing.
     current: HostText,
-    /// What the user is saving: the raw title until they edit the field, their text after. The field mirrors it.
-    draft: Draft<String>,
-    /// The title field, one row that keeps pasted line feeds.
-    input: TextInputState,
+    /// The title field (one row that keeps pasted line feeds) over its draft: the raw title until the user edits it,
+    /// their text after.
+    title: DraftInput,
     /// Whether a complete listing has proved the session gone, which disables Save.
     unavailable: bool,
     /// Set right after the layer opens; taken when the editor closes itself, so it closes once.
     layer: Option<LayerId>,
-    /// The field's events and the store's pushes.
-    _subscriptions: [Subscription; 2],
+    /// The store's pushes.
+    _pushes: Subscription,
 }
 
 impl RenameEditor {
@@ -204,35 +201,25 @@ impl RenameEditor {
         cx: &mut Context<Self>,
     ) -> Self {
         let input = TextInputState::new_keeping_line_breaks(window, cx);
-        input.set_text(title.to_owned(), window, cx);
-        let events = input.subscribe(window, cx, |editor, event, window, cx| match event {
-            TextInputEvent::Changed => editor.edited(window, cx),
-            TextInputEvent::Submitted => editor.save(window, cx),
-        });
+        let title_field = DraftInput::new(
+            title,
+            input,
+            |editor: &mut Self| &mut editor.title,
+            Self::save,
+            window,
+            cx,
+        );
         let pushes = cx.observe_in(store, window, |editor, store, window, cx| {
             editor.pushed(&store, window, cx)
         });
         RenameEditor {
             key,
             current: HostText::from_host(title),
-            draft: Draft::load(title.to_owned()),
-            input,
+            title: title_field,
             unavailable: false,
             layer: None,
-            _subscriptions: [events, pushes],
+            _pushes: pushes,
         }
-    }
-
-    /// The user changed the field: mirror it into the draft. While a save is in flight the field is read-only, so an
-    /// edit arrives then only if it was queued before the field became read-only; the draft refuses it
-    /// ([`Draft::edit`]) and the field is put back to the value being saved. That moves the caret to the start, which
-    /// is why read-only is the main guard and this only the backstop.
-    fn edited(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let text = self.input.text(cx).to_string();
-        if !self.draft.edit(text) {
-            self.input.set_text(self.draft.value().clone(), window, cx);
-        }
-        cx.notify();
     }
 
     /// The store changed: follow the session's title where the draft allows, and recompute whether the listing proves
@@ -245,10 +232,7 @@ impl RenameEditor {
             .map(|row| row.info.title.clone());
         if let Some(title) = title {
             self.current = HostText::from_host(title.as_str());
-            if self.draft.follow(title) {
-                // `set_text` raises no change event, so following never marks the draft touched.
-                self.input.set_text(self.draft.value().clone(), window, cx);
-            }
+            self.title.follow(&title, window, cx);
         }
         cx.notify();
     }
@@ -256,51 +240,33 @@ impl RenameEditor {
     /// Save the draft as the session's title, exactly as it stands. Does nothing while Save is unavailable or a save is
     /// in flight. A success closes the editor; a refusal is kept in the draft, which the editor draws.
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.unavailable || self.draft.is_saving() {
+        if self.unavailable || self.title.draft().is_saving() {
             return;
         }
         let key = self.key.clone();
         let handle = window.window_handle();
-        let started = drafts::save(
+        let started = DraftInput::save(
             self,
-            |editor| &mut editor.draft,
+            |editor| &mut editor.title,
             &OpKey::session(&key),
             |title| command(&key, title),
+            window,
             cx,
             move |editor, settled, cx| {
-                editor.input.set_read_only(false, cx);
-                match settled.outcome {
-                    Outcome::Done(_) => editor.close_later(handle, cx),
-                    Outcome::Refused(_) => editor.follow_after_refusal(handle, cx),
+                if let Outcome::Done(_) = settled.outcome {
+                    editor.close_later(handle, cx);
                 }
             },
         );
-        match started {
-            // The text on screen must stay the text sent, and read-only keeps the caret and undo history where they
-            // are. `edited` still undoes an edit that was queued before this took effect.
-            Ok(()) => self.input.set_read_only(true, cx),
+        if let Err(not_started) = started {
             // Another operation started on the session meanwhile, or the window went inert; the draft is untouched.
-            Err(not_started) => tracing::debug!(?not_started, "rename not sent"),
+            tracing::debug!(?not_started, "rename not sent");
         }
-    }
-
-    /// A save the helm refused has settled. An untouched draft did not follow pushes while it was saving, so it takes
-    /// up the current title now: saving it again must not send back a title someone else has since replaced. A touched
-    /// draft keeps what the user typed. The field is set once the completion has returned, since it has no window.
-    fn follow_after_refusal(&mut self, window: AnyWindowHandle, cx: &mut Context<Self>) {
-        if !self.draft.follow(self.current.raw().to_owned()) {
-            return;
-        }
-        let input = self.input.clone();
-        let value = self.draft.value().clone();
-        cx.defer(move |cx| {
-            let _ = window.update(cx, |_, window, cx| input.set_text(value, window, cx));
-        });
     }
 
     /// Cancel or Close: close the editor, keeping the session's title. Refused while a save is in flight.
     fn cancel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.draft.is_saving() {
+        if self.title.draft().is_saving() {
             return;
         }
         if let Some(layer) = self.layer.take() {
@@ -333,7 +299,7 @@ fn on_editor(
 impl Render for RenameEditor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::palette(cx);
-        let busy = self.draft.is_saving();
+        let busy = self.title.draft().is_saving();
         let weak = cx.weak_entity();
         // `.rename-body`: the current title, the field and what the editor has to say, 10 pixels apart.
         let body = div()
@@ -354,7 +320,7 @@ impl Render for RenameEditor {
                     .debug_selector(|| "rename-field".into())
                     .child(TextInput::new(
                         "rename-title",
-                        &self.input,
+                        self.title.input(),
                         "New session title",
                         HoverHelp::tooltip("The session's new title; Enter saves it"),
                     )),
@@ -366,7 +332,7 @@ impl Render for RenameEditor {
                     .text_color(theme::color(palette.warn))
                     .child("This session is no longer available; copy the draft or Cancel")
             }))
-            .children(self.draft.refusal().map(|refusal| {
+            .children(self.title.draft().refusal().map(|refusal| {
                 // The helm's words may quote the refused title, so they are host text: escaped, as one labelled node.
                 div()
                     .text_size(metrics::TEXT_SM)
@@ -389,9 +355,9 @@ impl Render for RenameEditor {
             Role::Button,
         )
         .tier(Tier::Primary)
-        // Not disabled while a save is in flight: a disabled button drops out of focus, and the old app kept a
-        // clicked Save focused (`aria-disabled` only) so focus stayed on the action the user chose. `save` ignores it
-        // meanwhile.
+        // Busy, not disabled, while a save is in flight: a disabled button drops out of focus, and the old app kept a
+        // clicked Save focused (`aria-disabled` only) so focus stayed on the action the user chose.
+        .busy(busy)
         .disabled(self.unavailable)
         .on_click(on_editor(weak.clone(), RenameEditor::save));
         DialogFrame::new("rename", "Rename session", body, vec![cancel, save])

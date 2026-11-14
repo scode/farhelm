@@ -129,13 +129,20 @@ fn any_open(cx: &mut VisualTestContext) -> bool {
 /// The editor's field text.
 fn field(cx: &mut VisualTestContext) -> String {
     let editor = editor(cx);
-    cx.update(|_, cx| editor.read(cx).input.text(cx).to_string())
+    cx.update(|_, cx| editor.read(cx).title.input().text(cx).to_string())
 }
 
 /// Whether the editor's field holds focus.
 fn field_focused(cx: &mut VisualTestContext) -> bool {
     let editor = editor(cx);
-    cx.update(|window, cx| editor.read(cx).input.focus_handle(cx).is_focused(window))
+    cx.update(|window, cx| {
+        editor
+            .read(cx)
+            .title
+            .input()
+            .focus_handle(cx)
+            .is_focused(window)
+    })
 }
 
 /// Whether a session terminal holds focus: the focused element's key context stack is a terminal's.
@@ -266,7 +273,7 @@ fn a_rename_is_refused_while_a_delete_of_that_session_is_in_flight(cx: &mut Test
         "the Save behind the Delete sent nothing"
     );
     let opened = editor(cx);
-    let saving = cx.update(|_, cx| opened.read(cx).draft.is_saving());
+    let saving = cx.update(|_, cx| opened.read(cx).title.draft().is_saving());
     assert!(!saving, "and the draft is not waiting on a save");
 }
 
