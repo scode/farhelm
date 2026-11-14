@@ -15,14 +15,24 @@
 //! connection posts the generic connection-lost notice. Nothing in between tracks
 //! what became of an individual action.
 //!
+//! Terminal streams are not on the UI channel (SPEC_impl.md, "Bulk data stays separate"), but they are opened through
+//! the UI session all the same ([`UiSession::terminal_opener`]), so that a terminal view made for a session that a
+//! reset retired cannot attach anything afterwards. The streams themselves stay with their owners, which close them
+//! when they see the session retire.
+//!
 //! The one thing besides the helm's own state that survives a reset, the selected session's id, lives outside the
 //! session ([`crate::local_state`]); the connection drops it only when a complete snapshot no longer has that session.
 //!
 //! The connection's pump is the one task that reads the feed. It never awaits a command (that would deadlock, see the
 //! helm client's `ChannelEvents`); commands are awaited by tasks the UI session owns.
 
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
+use farhelm_helm_client::terminal::{
+    TerminalAttach, TerminalEvents, TerminalHandle, closed_terminal,
+};
 use farhelm_helm_client::{
     ApiPath, ChannelConfig, ChannelEvent, ChannelEvents, ChannelHandle, ChannelState, CommandError,
     HelmConnection, HelmEndpoint, Method,
@@ -35,6 +45,7 @@ use crate::layers;
 use crate::local_state::LocalState;
 use crate::notices::{self, Notice};
 use crate::store::HelmStore;
+use crate::terminal::attached::OpenStream;
 
 /// The app's connection to its helm: the channel's state and the current UI session.
 pub struct Connection {
@@ -45,10 +56,13 @@ pub struct Connection {
     was_connected: bool,
     /// Whether the channel broke since it was last connected, so the next connect is a recovery.
     lost: bool,
+    /// Where each new UI session's terminal streams come from.
+    terminals: TerminalSource,
     /// The reader of the channel's event feed.
     _pump: Task<()>,
-    /// The helm client's connection, whose runtime must outlive the channel; `None` in tests, which serve a fake.
-    _owner: Option<HelmConnection>,
+    /// The helm client's connection, whose runtime must outlive the channel; `None` in tests, which serve a fake. The
+    /// one strong reference: terminal openers hold it weakly.
+    _owner: Option<Rc<HelmConnection>>,
 }
 
 /// Everything the window got from the helm in one connection, and the work started on its behalf.
@@ -60,10 +74,30 @@ pub struct Connection {
 pub struct UiSession {
     store: Entity<HelmStore>,
     handle: ChannelHandle,
-    retired: bool,
+    /// Where this session's terminal streams come from: the connection's source when the snapshot made the session.
+    terminals: TerminalSource,
+    /// Set once, when a reset retires the session. Shared so that a terminal opener handed out earlier, which runs
+    /// with no GPUI context to read the session through, can still see the retirement (it holds this weakly, so a
+    /// dropped session counts as retired too).
+    retired: Rc<Cell<bool>>,
     /// Commands in flight, each awaited by a task this session owns. Dropping a task cancels its callback.
     pending: HashMap<u64, Task<()>>,
     next_pending: u64,
+}
+
+/// Opens terminal streams for a connection's UI sessions; each session's [`UiSession::terminal_opener`] calls it.
+/// Never fails: where no stream may be opened, the one it hands back is already over.
+type TerminalSource = Rc<dyn Fn(TerminalAttach) -> (TerminalHandle, TerminalEvents)>;
+
+/// The source of a connection that owns the helm client's connection `helm`. It holds `helm` weakly, so an opener a
+/// view keeps never keeps the helm client's runtime alive after the app's connection is gone; a stream asked for then
+/// is already closed.
+fn helm_terminals(helm: &Rc<HelmConnection>) -> TerminalSource {
+    let helm = Rc::downgrade(helm);
+    Rc::new(move |attach| match helm.upgrade() {
+        Some(helm) => helm.terminal(attach, ChannelConfig::default()),
+        None => closed_terminal(),
+    })
 }
 
 struct ConnectionGlobal(Entity<Connection>);
@@ -86,6 +120,12 @@ pub fn start(
     owner: Option<HelmConnection>,
     cx: &mut App,
 ) -> Entity<Connection> {
+    let owner = owner.map(Rc::new);
+    // Without a helm client (a test serving the fake channel that set no source), every stream is already closed.
+    let terminals: TerminalSource = match &owner {
+        Some(helm) => helm_terminals(helm),
+        None => Rc::new(|_| closed_terminal()),
+    };
     let connection = cx.new(|cx| {
         let weak = cx.entity().downgrade();
         let pump = cx.spawn(async move |_, cx| {
@@ -101,6 +141,7 @@ pub fn start(
             session: None,
             was_connected: false,
             lost: false,
+            terminals,
             _pump: pump,
             _owner: owner,
         }
@@ -148,11 +189,14 @@ fn receive(connection: &WeakEntity<Connection>, event: ChannelEvent, cx: &mut Ap
         }
         ChannelEvent::Snapshot(snapshot) => {
             let session = cx.new(|cx| {
-                let handle = connection.read(cx).handle.clone();
+                let connection = connection.read(cx);
+                let handle = connection.handle.clone();
+                let terminals = connection.terminals.clone();
                 UiSession {
                     store: cx.new(|_| HelmStore::from_snapshot(&snapshot)),
                     handle,
-                    retired: false,
+                    terminals,
+                    retired: Rc::new(Cell::new(false)),
                     pending: HashMap::new(),
                     next_pending: 0,
                 }
@@ -204,7 +248,7 @@ fn keep_survivors(session: &Entity<UiSession>, cx: &mut App) {
 /// Retire `session`: cancel its work and mark it, so a completion still on its way is dropped.
 fn retire(session: &Entity<UiSession>, cx: &mut App) {
     session.update(cx, |session, cx| {
-        session.retired = true;
+        session.retired.set(true);
         session.pending.clear();
         cx.notify();
     });
@@ -229,6 +273,16 @@ impl Connection {
     /// The user tries again after the helm refused the app's credential.
     pub fn retry(&self) {
         self.handle.retry();
+    }
+
+    /// Hand terminal streams out from `open` instead of the helm client, for UI sessions made from here on (a session
+    /// takes its source when a snapshot makes it). Tests serve fake terminals through this.
+    #[cfg(test)]
+    pub(crate) fn serve_terminals(
+        &mut self,
+        open: impl Fn(TerminalAttach) -> (TerminalHandle, TerminalEvents) + 'static,
+    ) {
+        self.terminals = Rc::new(open);
     }
 
     /// Record the channel's new state. Returns whether this connect recovers from a break (when the connection-lost
@@ -257,7 +311,29 @@ impl UiSession {
 
     /// Whether a reset retired this session. A retired session runs nothing and delivers nothing.
     pub fn is_retired(&self) -> bool {
-        self.retired
+        self.retired.get()
+    }
+
+    /// An opener for one terminal stream through this session's connection to the helm, for a terminal view's owner
+    /// to call once it knows the terminal's size.
+    ///
+    /// The opener checks the session when it is called, not when it is handed out. If a reset or a displacement has
+    /// retired the session by then, or the session is gone, it opens nothing and hands back a stream that is already
+    /// closed, whose feed holds only `Closed`. So an opener kept across a reset never attaches a terminal for a window
+    /// that went inert. For a displaced window that matters beyond
+    /// tidiness: a stream's first attach displaces, so it could take the terminal from the window that now holds the
+    /// helm (SPEC_impl.md, "The seat: one UI per helm"). Retiring does not close streams opened before it; their
+    /// owners do that when they see the session retire.
+    pub fn terminal_opener(&self) -> OpenStream {
+        let retired = Rc::downgrade(&self.retired);
+        let terminals = self.terminals.clone();
+        Box::new(move |attach| {
+            if retired.upgrade().is_none_or(|retired| retired.get()) {
+                closed_terminal()
+            } else {
+                terminals(attach)
+            }
+        })
     }
 
     /// Send one command, and call `on_done` with the helm's reply once it arrives, unless a reset retired this session
@@ -273,7 +349,7 @@ impl UiSession {
         on_done: impl FnOnce(&mut UiSession, Result<Reply, CommandError>, &mut Context<UiSession>)
         + 'static,
     ) {
-        if self.retired {
+        if self.retired.get() {
             return;
         }
         let id = self.next_pending;
@@ -289,5 +365,53 @@ impl UiSession {
             });
         });
         self.pending.insert(id, task);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use farhelm_helm_client::terminal::{AttachmentLease, StreamState, TerminalEvent};
+
+    /// The app's own terminal source is the one path the GUI tests' fake terminals never reach, and two things about it
+    /// matter: it opens real streams through the helm client's connection, and it holds that connection weakly, so a
+    /// view that keeps an opener does not keep the helm client's runtime (its threads and sockets) alive once the app
+    /// has let go of it. Specified: while the connection lives, a stream from the source is not the already-closed
+    /// one; once the connection is dropped, it is.
+    ///
+    /// No helm runs here. The listener, on a port the system picks, only gives the stream an address that is not
+    /// someone else's and never accepts. The live case reads the feed without waiting: a real stream may not have
+    /// shown `Attaching` yet, but only an already-closed one shows `Closed` at once.
+    #[test]
+    fn the_helm_source_opens_real_streams_only_while_the_helm_connection_lives() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = HelmEndpoint::new(listener.local_addr().unwrap(), "test-secret");
+        let (helm, _channel) = HelmConnection::open(endpoint, ChannelConfig::default()).unwrap();
+        let helm = Rc::new(helm);
+        let terminals = helm_terminals(&helm);
+        let attach = || TerminalAttach {
+            session: "s1".into(),
+            tab: None,
+            lease: AttachmentLease::new(),
+            cols: 80,
+            rows: 24,
+        };
+        let closed = Some(TerminalEvent::State(StreamState::Closed));
+
+        let (_live, mut events) = terminals(attach());
+        assert_ne!(
+            events.try_recv(),
+            closed,
+            "a live connection opens a real stream"
+        );
+
+        drop(helm);
+        let (_gone, mut events) = terminals(attach());
+        assert_eq!(
+            events.try_recv(),
+            closed,
+            "a dropped connection opens nothing"
+        );
+        assert_eq!(events.try_recv(), None, "and that stream is over");
     }
 }

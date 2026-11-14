@@ -97,8 +97,9 @@ pub struct TerminalTarget {
     pub lease: AttachmentLease,
 }
 
-/// Opens the stream once the owner knows its size. The app passes one that calls the helm client's
-/// `HelmConnection::terminal`; tests pass one that hands out a fake terminal's handle and feed. Called at most once
+/// Opens the stream once the owner knows its size. The app passes its UI session's
+/// [`UiSession::terminal_opener`], which opens nothing once the session is retired; tests pass one that hands out a
+/// fake terminal's handle and feed. Called at most once
 /// per owner: the stream reconnects by itself, and Take control goes through the same stream.
 pub type OpenStream = Box<dyn FnOnce(TerminalAttach) -> (TerminalHandle, TerminalEvents)>;
 
