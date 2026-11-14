@@ -132,13 +132,6 @@ pub struct AttachedTerminal {
     fault: Option<SharedString>,
     /// The grid size last fitted, which the stream was opened at or last resized to.
     fit: Option<(u16, u16)>,
-    /// A resize went to the stream while it was not attached. The helm client keeps such a size for its next attach,
-    /// but a resize that arrives while an attach is already connecting reaches no attachment at all, and the GUI cannot
-    /// tell which case it was; so the next attachment gets the current size again once it is live.
-    ///
-    /// NOTE: This is a workaround for the helm client, which should send the size it stored once the socket opens.
-    /// When it does, this goes.
-    resize_owed: bool,
     /// The display's scale at the last fit, which the exit line's placement needs to know the grid's cell.
     scale: Option<f32>,
     /// The height the grid actually has, the pane less the status line and padding, which is where the exit line must
@@ -188,7 +181,6 @@ impl AttachedTerminal {
             live: false,
             fault: None,
             fit: None,
-            resize_owed: false,
             scale: None,
             room: None,
             retired,
@@ -258,8 +250,6 @@ impl AttachedTerminal {
         );
         if let (Some(handle), true, None) = (&self.handle, waiting, &self.fault) {
             handle.take_control();
-            // The stream builds the takeover's attach from the size it holds now, which every resize so far reached.
-            self.resize_owed = false;
             cx.notify();
         }
     }
@@ -289,12 +279,9 @@ impl AttachedTerminal {
         self.fit = Some(size);
         match &self.handle {
             None => self.open(size, cx),
-            Some(handle) => {
-                handle.resize(size.0, size.1);
-                if self.stream != StreamState::Attached {
-                    self.resize_owed = true;
-                }
-            }
+            // The stream delivers a resize whatever state it is in: at once on an open socket, as the first message
+            // of a socket still connecting, and in the query of a later attach otherwise.
+            Some(handle) => handle.resize(size.0, size.1),
         }
     }
 
@@ -426,12 +413,6 @@ impl AttachedTerminal {
         if state == StreamState::Attached {
             let metrics = self.metrics;
             self.staging = Some(cx.new(|_| TerminalView::new(metrics)));
-            if self.resize_owed
-                && let (Some(handle), Some((cols, rows))) = (&self.handle, self.fit)
-            {
-                handle.resize(cols, rows);
-            }
-            self.resize_owed = false;
         }
         self.stream = state;
         cx.notify();
