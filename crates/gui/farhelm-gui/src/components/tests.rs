@@ -29,6 +29,7 @@ use super::{Select, SelectOption};
 use crate::assets::Icon;
 use crate::focus;
 use crate::focus::{Mark, TabReach};
+use crate::host_text::{HostSentence, HostText};
 use crate::layers;
 use crate::layers::Dialog;
 use crate::test_support::{
@@ -337,6 +338,91 @@ fn a_tooltip_closes_when_its_control_is_no_longer_drawn(cx: &mut TestAppContext)
         "the premise: the control is no longer drawn"
     );
     assert_eq!(tooltip(cx), None, "its tooltip went with it");
+}
+
+/// The value the host-sentence help test below names: a direction override, markup-like text and a newline, which
+/// would reverse, pose as formatting or forge a second line if they reached the tooltip raw.
+const SPOOFED_HOST: &str = "a\u{202E}<b>\n";
+
+/// [`SPOOFED_HOST`] as host text shows it: hidden characters escaped, the markup-like text left as the letters it is.
+const SPOOFED_HOST_SHOWN: &str = "a<U+202E><b><U+000A>";
+
+/// Hover help may name a host value (the agent mark's, the permission shield's), and SPEC.md wants every host value the
+/// GUI shows outside a terminal escaped, in accessible names too; a tooltip is the one surface the layer manager draws
+/// on its own, so without a host form there a view would have to format a raw value into help text. Specified: hovering
+/// a control whose help is a host sentence shows that help after the hover delay, drawn in the tooltip as one `Label`
+/// node under the sentence's id, named with the host value escaped, and painting the value as host text's element does,
+/// whole and escaped, with no presentation-unsafe character anywhere in the frame; the tooltip's text, and
+/// `HoverHelp::description` (what `with_hover_help` gives the control as its accessible description), are the
+/// sentence's accessible text. The description the drawn control carries is not checked: GPUI's driver record has no
+/// description field, and the test platform cannot switch on accessibility to read the tree.
+#[gpui::test]
+fn help_naming_a_host_value_draws_it_escaped_in_the_tooltip(cx: &mut TestAppContext) {
+    let help = || {
+        HoverHelp::sentence(
+            HostSentence::new("agent-help")
+                .text("Agent on ")
+                .host(&HostText::from_host(SPOOFED_HOST)),
+        )
+    };
+    let expected = format!("Agent on {SPOOFED_HOST_SHOWN}");
+    assert_eq!(
+        help().description().as_ref(),
+        expected,
+        "the description the control is given is the sentence's accessible text"
+    );
+    assert_eq!(
+        HoverHelp::tooltip("Save it").description().as_ref(),
+        "Save it",
+        "and the app's own help describes the control as it always did"
+    );
+
+    let cx = open(cx, move |_, _| {
+        Button::new("agent", "Agent", help(), Role::Button).into_any_element()
+    });
+    let at = center(cx, "agent");
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    wait_hover_delay(cx);
+    assert_eq!(tooltip(cx).as_deref(), Some(expected.as_str()));
+
+    let nodes = frame(cx);
+    let Some(sentence) = nodes
+        .iter()
+        .position(|node| node.element_id.as_deref() == Some("agent-help"))
+    else {
+        let ids: Vec<_> = nodes.iter().map(|node| &node.element_id).collect();
+        panic!("the tooltip drew no host sentence; recorded ids: {ids:?}");
+    };
+    assert_eq!(nodes[sentence].role, Some(Role::Label));
+    assert_eq!(nodes[sentence].label.as_deref(), Some(expected.as_str()));
+    // Every node recorded below the sentence, at any depth: its parts and their text.
+    let inside = |mut index: usize| loop {
+        match nodes[index].parent {
+            Some(parent) if parent == sentence => return true,
+            Some(parent) => index = parent,
+            None => return false,
+        }
+    };
+    let painted: Vec<String> = (0..nodes.len())
+        .filter(|&index| inside(index))
+        .flat_map(|index| nodes[index].texts.iter().map(|text| text.text.to_string()))
+        .collect();
+    assert!(
+        painted.iter().any(|text| text == SPOOFED_HOST_SHOWN),
+        "the host value was painted whole and escaped, as its own line: {painted:?}"
+    );
+    let unsafe_text: Vec<String> = nodes
+        .iter()
+        .flat_map(|node| node.texts.iter().map(|text| text.text.to_string()))
+        .filter(|text| {
+            text.chars()
+                .any(farhelm_proto::text::is_presentation_unsafe)
+        })
+        .collect();
+    assert!(
+        unsafe_text.is_empty(),
+        "no raw hidden character was painted: {unsafe_text:?}"
+    );
 }
 
 /// In a short window a long dialog body scrolls while the answers stay inside the visible frame. The old app lost

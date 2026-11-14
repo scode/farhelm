@@ -627,6 +627,10 @@ a string with the app's words, so a right-to-left value reorders only within its
 app; a sentence that mixes both keeps each part its own element. The table lists Unicode's whole format category, which
 the old app's terminal-link disclosure escaped, so that disclosure uses it too.
 
+Hover help may name a host value (the agent mark's, the permission shield's) only as a host sentence: the tooltip draws
+it through the escaping element, and the control's accessible description is the sentence's accessible text, the same
+words with each host value escaped.
+
 Enforced by the type: host text has no other conversion to a string, and the component layer accepts it only through the
 escaping element. A corpus of spoofing strings is pushed through the host-text element and the views that render it in
 the slice.
@@ -703,19 +707,27 @@ keypad digit, an extra modifier or a missing one matches nothing; and no row's k
 
 Owner: the ticker, one shared clock and animation ticker.
 
-It serves two kinds of time. Periodic animation ticks come at most 10 times a second and pause while the window is
+It serves three kinds of time. Periodic animation ticks come at most 10 times a second and pause while the window is
 inactive. One-shot deadlines (hover delay, the approval card's pause, banner expiry, copy confirmation, "still waiting"
-thresholds) fire on time whether or not the window is active. It reads reduced motion from the OS. No row or view runs
-its own timer. This carries over the old rule that nothing redraws on its own more than 10 times a second; without it,
-one animating row redraws its whole list at display rate.
+thresholds) fire on time whether or not the window is active. It reads reduced motion from the OS. Wall-clock time is
+for text that says how long ago something happened (a session row's age, the details bar's, the stopped card's): the
+ticker reads the time of day from GPUI's scheduler, which tests advance like every other clock, and one shared 30-second
+clock, as in the old app, notifies each view that shows such text, whether or not its window is active and whatever the
+reduced-motion setting, because an age is information rather than motion and an inactive window is often still on
+screen. A view holds one clock handle for all its rows, and a view that draws an age is drawn uncached, since the cache
+wrapper cannot see the time. No row or view runs its own timer. This carries over the old rule that nothing redraws on
+its own more than 10 times a second; without it, one animating row redraws its whole list at display rate.
 
 GPUI's `with_animation` and `with_animations` are used only in the component layer, and only for one-shot transitions:
 no loops, and switched off under reduced motion.
 
 Enforced by the clock bans under "Work that finishes later"; by `disallowed-methods` on GPUI's
 `BackgroundExecutor::timer`, `request_animation_frame` and `on_next_frame` in the GUI crates outside the ticker and the
-channel's watchdog and heartbeat, and on `with_animation` and `with_animations` outside the component layer; and by a
-test that an animating row redraws at most 10 times a second and not at all while the window is inactive.
+channel's watchdog and heartbeat, and on `with_animation` and `with_animations` outside the component layer; by a test
+that an animating row redraws at most 10 times a second and not at all while the window is inactive; and by a test that
+a view holding the clock redraws every 30 seconds in an inactive window under reduced motion and leaves no timer once it
+is gone. The wall clock itself is held by review, not by the clock bans: no lint stops GUI code from reading GPUI's
+scheduler clock outside the ticker, or a view from reading the time without holding a clock handle.
 
 ### Notices: the notice center
 

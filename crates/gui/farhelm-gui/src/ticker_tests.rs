@@ -1,9 +1,10 @@
 //! Tests of the ticker: an animating view redraws at most ten times a second and only in an active window, the
-//! override and reduced motion, the cursor blink and the running pulse that wake their views only when they change, and
-//! one-shot deadlines.
+//! override and reduced motion, the cursor blink and the running pulse that wake their views only when they change,
+//! one-shot deadlines, the wall clock that follows the executor's clock, and the 30-second clock that redraws its views
+//! whatever the window's activity and starts again after its last handle went.
 //!
 //! Each test installs the app-wide state as the real bootstrap does ([`crate::test_support::install`]), and each but
-//! the deadline test opens a window of its own. Time moves only when the test advances GPUI's simulated clock.
+//! the deadline and wall-clock tests opens a window of its own. Time moves only when the test advances GPUI's simulated clock.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -273,4 +274,145 @@ fn a_deadline_fires_on_time_whatever_the_activity_and_dropping_it_cancels_it(
     cx.run_until_parked();
     assert!(fired.get(), "on time, with no window active");
     assert!(!cancelled.get(), "a dropped deadline never fires");
+}
+
+// ---- Wall-clock time -------------------------------------------------------------------------------------------------
+
+/// Ages are drawn from `ticker::wall_now`, so a test can only check an age if that clock is one it controls: a reading
+/// of the real system clock would make every age a test asserts depend on how long the test took. Specified: across a
+/// stretch of the executor's simulated clock, the wall clock moves by exactly that stretch, and it stands still while
+/// the executor's clock does.
+#[gpui::test]
+fn the_wall_clock_follows_the_executors_clock(cx: &mut TestAppContext) {
+    test_support::install(cx);
+    let start = cx.update(|cx| ticker::wall_now(cx));
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|cx| ticker::wall_now(cx)),
+        start,
+        "no time passes while the test does not advance the clock"
+    );
+    cx.executor().advance_clock(Duration::from_secs(90));
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|cx| ticker::wall_now(cx)),
+        start + Duration::from_secs(90)
+    );
+}
+
+/// A view that shows an age for as long as it holds the ticker's clock handle.
+struct Ager {
+    _clock: ticker::Clock,
+}
+
+impl Render for Ager {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        render_count::record("ager", cx);
+        div()
+    }
+}
+
+/// Whether GPUI's simulated scheduler holds any task or timer, after the test has run everything runnable: the
+/// evidence that a periodic loop ended rather than waiting on its next wake-up.
+/// Takes the executor rather than a context, so a test can ask with or without a window of its own.
+fn scheduler_holds_work(executor: &gpui::BackgroundExecutor) -> bool {
+    executor
+        .scheduler_executor()
+        .scheduler()
+        .as_test()
+        .expect("GPUI tests run on the simulated scheduler")
+        .has_pending_tasks()
+}
+
+/// A session row's age must keep moving in a window the user is not typing into (it is often still on screen) and
+/// under reduced motion (an age is information, not motion), and the old app re-rendered ages every 30 seconds; but a
+/// view that is gone must leave no timer behind, or every closed window would keep the app waking twice a minute.
+/// Specified: with the window inactive and reduced motion on, a view holding a `Clock` is not redrawn before a whole
+/// `CLOCK_PERIOD` has passed and is redrawn once per period after that; once the view is dropped with its window, the
+/// clock loop ends at its next wake-up and leaves no task or timer in the scheduler.
+#[gpui::test]
+fn a_clock_redraws_its_view_every_period_in_an_inactive_window_until_the_view_goes(
+    cx: &mut TestAppContext,
+) {
+    test_support::install(cx);
+    cx.update(|cx| ticker::set_reduced_motion(true, cx));
+    let (ager, cx) = cx.add_window_view(|_, cx| Ager {
+        _clock: ticker::clock(cx),
+    });
+    cx.run_until_parked();
+    cx.deactivate_window();
+    assert!(
+        !cx.update(|window, cx| ticker::is_active(window, cx)),
+        "premise: the window counts as inactive"
+    );
+    cx.update(|_, cx| render_count::reset(cx));
+
+    let count = |cx: &mut VisualTestContext| cx.update(|_, cx| render_count::count("ager", cx));
+    cx.executor()
+        .advance_clock(ticker::CLOCK_PERIOD - Duration::from_secs(1));
+    cx.run_until_parked();
+    assert_eq!(count(cx), 0, "not before a whole period");
+    cx.executor().advance_clock(Duration::from_secs(1));
+    cx.run_until_parked();
+    assert_eq!(count(cx), 1, "once the period ends");
+    for redraws in 2..=3 {
+        cx.executor().advance_clock(ticker::CLOCK_PERIOD);
+        cx.run_until_parked();
+        assert_eq!(count(cx), redraws, "once more per period");
+    }
+
+    assert!(
+        scheduler_holds_work(&cx.executor()),
+        "premise: the clock loop waits on its next period while the view lives"
+    );
+    let gone = ager.downgrade();
+    drop(ager);
+    cx.update(|window, _| window.remove_window());
+    cx.run_until_parked();
+    assert!(
+        gone.upgrade().is_none(),
+        "premise: the view was dropped with its window"
+    );
+    cx.executor().advance_clock(ticker::CLOCK_PERIOD);
+    cx.run_until_parked();
+    assert!(
+        !scheduler_holds_work(&cx.executor()),
+        "the clock loop ended at its first wake-up after the view went, leaving no timer"
+    );
+}
+
+/// The clock loop ends once its last handle is gone, so the next handle must start a new one: closing the only window
+/// that shows ages and opening another (a macOS app keeps running with no window) would otherwise freeze every age in
+/// the new window for good. Specified: after the only `Clock` went with its window and the loop ended (the scheduler
+/// holds no work), a view in a new window that takes a `Clock` is redrawn once when the next `CLOCK_PERIOD` ends.
+#[gpui::test]
+fn a_clock_starts_again_after_its_last_handle_went(cx: &mut TestAppContext) {
+    test_support::install(cx);
+    let first = cx.add_window(|_, cx| Ager {
+        _clock: ticker::clock(cx),
+    });
+    cx.run_until_parked();
+    first
+        .update(cx, |_, window, _| window.remove_window())
+        .expect("premise: the first window is open");
+    cx.run_until_parked();
+    cx.executor().advance_clock(ticker::CLOCK_PERIOD);
+    cx.run_until_parked();
+    assert!(
+        !scheduler_holds_work(&cx.executor()),
+        "premise: the clock loop ended with its last handle"
+    );
+
+    let _second = cx.add_window(|_, cx| Ager {
+        _clock: ticker::clock(cx),
+    });
+    cx.run_until_parked();
+    cx.update(render_count::reset);
+    cx.executor().advance_clock(ticker::CLOCK_PERIOD);
+    cx.run_until_parked();
+    assert_eq!(
+        cx.update(|cx| render_count::count("ager", cx)),
+        1,
+        "a new loop redrew the new view when its period ended"
+    );
 }
