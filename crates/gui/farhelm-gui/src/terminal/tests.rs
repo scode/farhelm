@@ -211,6 +211,7 @@ fn a_cursor_covers_a_wide_characters_whole_box() {
         rows: view.shown.clone(),
         cursor_row: None,
         selected: Vec::new(),
+        underlined: Vec::new(),
         cols: view.cols,
         cursor: view.cursor,
         visible: view.visible,
@@ -848,6 +849,62 @@ fn a_selection_is_trimmed_by_dropped_history_and_cleared_by_a_reset(cx: &mut Tes
     );
     terminal.update(cx, |view, cx| view.set_selection(Some(click), cx));
     assert_eq!(terminal.read_with(cx, |view, _| view.selected_text()), None);
+}
+
+/// A hover rests on the text it read: the link under the pointer is underlined on the rows it covers; when the view
+/// scrolls under the still pointer, what is under it now is looked up, and when the program rewrites those rows the
+/// link is looked up again, so a target that moved away or is gone is no longer underlined (or clickable). The
+/// fixture's second screen row (line 45) carries a program's hyperlink, "web", at columns 11 to 13.
+#[gpui::test]
+fn a_hovered_link_is_underlined_and_dropped_when_its_text_changes(cx: &mut TestAppContext) {
+    let terminal = attached_with_history(cx);
+    terminal.update(cx, |view, cx| view.set_hover(Some((12, 1)), cx));
+    let hovered = terminal.read_with(cx, |view, _| {
+        view.hovered_link()
+            .map(|link| (link.uri.clone(), link.kind.clone()))
+    });
+    assert_eq!(
+        hovered.as_ref().map(|(uri, _)| uri.as_str()),
+        Some("https://example.com/"),
+        "the premise: the fixture's hyperlink is under the pointer"
+    );
+    assert_eq!(
+        terminal.read_with(cx, |view, _| view.underlined_rows()),
+        [(1, 11..14)]
+    );
+
+    // Scrolling under the still pointer brings other text under it: the hover follows the cell, not the link.
+    terminal.update(cx, |view, cx| view.scroll_lines(-1, cx));
+    assert_eq!(
+        terminal.read_with(cx, |view, _| view.hovered_link().cloned()),
+        None,
+        "scrolled off the link"
+    );
+    assert_eq!(terminal.read_with(cx, |view, _| view.underlined_rows()), []);
+    terminal.update(cx, |view, cx| view.follow(cx));
+    assert!(
+        terminal.read_with(cx, |view, _| view.hovered_link().is_some()),
+        "and back on it"
+    );
+
+    let rewritten: GridOutput = serde_json::from_value(serde_json::json!({
+        "t":"rows", "rows":[[1,{"w":false,"r":[[0,5,"plain",[0,-1,-1]]]}]]
+    }))
+    .unwrap();
+    let frame: GridOutput = serde_json::from_value(serde_json::json!({
+        "t":"frame", "rev":2,"cols":20,"rows":4,
+        "cursor":{"x":2,"y":2,"visible":true,"shape":"block","blink":true}
+    }))
+    .unwrap();
+    terminal.update(cx, |view, cx| {
+        let (_, applied) = view.apply([rewritten, frame], cx);
+        applied.unwrap();
+    });
+    assert_eq!(
+        terminal.read_with(cx, |view, _| view.hovered_link().cloned()),
+        None
+    );
+    assert_eq!(terminal.read_with(cx, |view, _| view.underlined_rows()), []);
 }
 
 /// A refused message ends the batch with its error and changes nothing itself, but what came before it in the batch
