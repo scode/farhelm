@@ -7,6 +7,11 @@
 //! The helm has no hosts here, so nothing reaches a supervisor; the collections are whatever an empty helm serves.
 //! Every wait is bounded by [`STEP`] so a regression fails rather than hangs. The one sleep is an observation window
 //! for something that must not happen (an automatic retry), and says so.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    reason = "an integration test: its helpers panic to fail the test, which `allow-*-in-tests` covers only inside `#[test]` functions"
+)]
 
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};

@@ -82,3 +82,10 @@ tempfile.workspace = true
 # under the same name.
 [package.metadata.dist]
 dist = false
+
+# The desktop app's process runs the GPUI app and its platform callbacks, where a panic aborts the app on macOS, so it
+# never unwraps or expects outside tests (`clippy.toml` beside this manifest lets tests). SPEC_impl.md, "Where the GUI
+# meets the helm"; `scripts/check-crate-layering.py` checks this table is here.
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"

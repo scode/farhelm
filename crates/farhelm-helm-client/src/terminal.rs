@@ -37,13 +37,14 @@ use std::collections::VecDeque;
 
 use farhelm_proto::DetachCode;
 use farhelm_proto::grid::{GRID_MAX_MESSAGE, GridInput, GridOutput};
+use farhelm_proto::terminal_socket::{TerminalClientMessage, TerminalServerMessage};
 use futures_util::{SinkExt, StreamExt};
-use serde::Deserialize;
 use tokio::sync::mpsc;
 use tokio::time::{Instant, sleep_until, timeout};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::ChannelConfig;
+use crate::reconnect::Backoff;
 use crate::ws::{ConnectError, HelmEndpoint, open_socket};
 use farhelm_proto::ui_channel::ApiPath;
 
@@ -220,21 +221,6 @@ pub(crate) fn attach_path(
     ApiPath::api(&segments)?.with_query(&query)
 }
 
-/// The helm's text frames on a terminal socket. Anything else is ignored, so a newer helm can add notices.
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum Notice {
-    Pong,
-    ReplayComplete,
-    Detached {
-        reason: String,
-        #[serde(default)]
-        code: Option<DetachCode>,
-    },
-    #[serde(other)]
-    Unknown,
-}
-
 /// How one socket ended.
 enum Ended {
     /// The socket dropped, its watchdog fired, or the helm detached it for a reason that keeps recovering
@@ -263,6 +249,11 @@ fn detach_stops(code: Option<DetachCode>) -> bool {
     }
 }
 
+/// One control message as the text frame that carries it ([`TerminalClientMessage::to_text`] is the one spelling).
+fn control_frame(message: &TerminalClientMessage) -> Message {
+    Message::text(message.to_text())
+}
+
 struct Stream {
     endpoint: HelmEndpoint,
     attach: TerminalAttach,
@@ -277,7 +268,7 @@ struct Stream {
 impl Stream {
     async fn run(mut self) {
         let mut take_control = true;
-        let mut backoff = self.config.reconnect_initial;
+        let mut backoff = Backoff::new(&self.config);
         if !self
             .emit(TerminalEvent::State(StreamState::Attaching))
             .await
@@ -301,7 +292,7 @@ impl Stream {
                         return;
                     }
                     take_control = true;
-                    backoff = self.config.reconnect_initial;
+                    backoff.reset();
                     continue;
                 }
                 Some(Err(error)) => {
@@ -330,14 +321,12 @@ impl Stream {
                         }
                     }
                     if attached {
-                        backoff = self.config.reconnect_initial;
+                        backoff.reset();
                     }
-                    if !skip_wait {
-                        let until = Instant::now() + backoff;
-                        backoff = (backoff * 2).min(self.config.reconnect_max);
-                        if !self.idle(Some(until)).await {
-                            break;
-                        }
+                    if let Some(wait) = backoff.after_break(skip_wait)
+                        && !self.idle(Some(Instant::now() + wait)).await
+                    {
+                        break;
                     }
                 }
                 Ended::Detached { code, reason } => {
@@ -353,7 +342,7 @@ impl Stream {
                         return;
                     }
                     take_control = true;
-                    backoff = self.config.reconnect_initial;
+                    backoff.reset();
                 }
             }
         }
@@ -438,23 +427,23 @@ impl Stream {
                             break Ended::Dropped { attached, skip_wait: false };
                         }
                     },
-                    Some(Ok(Message::Text(text))) => match serde_json::from_str::<Notice>(&text) {
-                        Ok(Notice::Pong) => {
+                    Some(Ok(Message::Text(text))) => match serde_json::from_str::<TerminalServerMessage>(&text) {
+                        Ok(TerminalServerMessage::Pong) => {
                             answered |= attached && ping_sent.is_some();
                             ping_sent = None;
                         }
-                        Ok(Notice::ReplayComplete) => {
+                        Ok(TerminalServerMessage::ReplayComplete) => {
                             Self::mark_attached(&mut attached, &mut pending, &mut self.reconnecting_shown);
                             pending.push_back(TerminalEvent::ReplayComplete);
                         }
-                        Ok(Notice::Detached { reason, code }) if detach_stops(code) => {
+                        Ok(TerminalServerMessage::Detached { reason, code }) if detach_stops(code) => {
                             break Ended::Detached { code, reason };
                         }
-                        Ok(Notice::Detached { reason, code }) => {
+                        Ok(TerminalServerMessage::Detached { reason, code }) => {
                             tracing::debug!(?code, %reason, "terminal detached; backing off and reattaching");
                             break Ended::Dropped { attached, skip_wait: false };
                         }
-                        Ok(Notice::Unknown) | Err(_) => {}
+                        Ok(TerminalServerMessage::Unknown) | Err(_) => {}
                     },
                     Some(Ok(_)) => {}
                     Some(Err(_)) | None => break Ended::Dropped { attached, skip_wait: answered },
@@ -473,7 +462,7 @@ impl Stream {
                         },
                         Some(Request::Resize { cols, rows }) => {
                             (self.attach.cols, self.attach.rows) = (cols, rows);
-                            Message::text(serde_json::json!({"type": "resize", "cols": cols, "rows": rows}).to_string())
+                            control_frame(&TerminalClientMessage::Resize { cols, rows })
                         }
                     };
                     // A write the peer never drains would otherwise block this loop, and with it the watchdog.
@@ -489,7 +478,7 @@ impl Stream {
                     next_ping = Instant::now() + self.config.ping_interval;
                     if ping_sent.is_none() {
                         ping_sent = Some(Instant::now());
-                        let ping = sink.send(Message::text(r#"{"type":"ping"}"#));
+                        let ping = sink.send(control_frame(&TerminalClientMessage::Ping));
                         if !matches!(timeout(watchdog_period, ping).await, Ok(Ok(()))) {
                             break Ended::Dropped { attached, skip_wait: answered };
                         }

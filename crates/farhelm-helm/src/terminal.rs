@@ -39,11 +39,10 @@
 //!
 //! Binary frames are the attachment's grid stream (`farhelm_proto::grid`),
 //! one grid message per frame in each direction, relayed without being read.
-//! Text frames are the control channel (`WsClientMsg`): resize and the
-//! heartbeat's ping from the browser. Two text frames are made on this side
-//! — `PONG_TEXT_MESSAGE` for the heartbeat, and
-//! `REPLAY_COMPLETE_TEXT_MESSAGE` for the marker that separates the catch-up
-//! from live updates — besides the detach notice.
+//! Text frames are the control channel, typed once for both ends in
+//! `farhelm_proto::terminal_socket`: resize and the heartbeat's ping from the
+//! client, and from this side the pong, the marker that separates the
+//! catch-up from live updates, and the detach notice.
 //!
 //! ## Bounds and flow control
 //!
@@ -70,6 +69,7 @@ use crate::sessions::{default_cols, default_rows, resolve_session_ref, route_act
 use crate::{AppState, SupervisorClient, SupervisorError, TermEvent, TermStream};
 use axum::extract::{Path as AxPath, Query, State, WebSocketUpgrade, ws};
 use axum::response::IntoResponse;
+use farhelm_proto::terminal_socket::{TerminalClientMessage, TerminalServerMessage};
 use farhelm_proto::{ErrorKind, TerminalSelector};
 use serde::Deserialize;
 use std::sync::Arc;
@@ -283,76 +283,6 @@ async fn attach_from_query(
     Ok((client, key.session_id, channel, stream))
 }
 
-/// Terminal WebSocket: binary frames are the attachment's grid messages in
-/// both directions; text frames are small JSON control messages (client →
-/// resize/ping; server → detached notice, replay-complete marker, pong).
-/// This is the browser-facing twin of the proto data channel, kept equally
-/// dumb.
-///
-/// `?cols=`/`?rows=` set the initial size (see `TermQuery`'s docs).
-/// The sibling route `/api/sessions/{id}/term/unowned` (PLAN_M6.md item 7)
-/// is this same socket attached NON-DISPLACINGLY, and its refusal arrives
-/// here as an ordinary `{"type":"detached","reason":"another client
-/// attached"}` notice — the same notice, and the same string, a client
-/// displaced while attached receives. That identity is the point: a
-/// browser that was away when it lost the session renders the state it is
-/// actually in without a second vocabulary for it. See `term_ws_if_unowned`
-/// for why it is a path rather than a parameter.
-///
-/// `?tab=<id>` and `?lease=<id>` (PLAN_M4.md item 5) select which of the
-/// session's terminals this socket attaches and under which client
-/// identity; BOTH default to the exact pre-M4 behavior when absent —
-/// the agent terminal, un-leased — so a caller that predates tabs sees no
-/// change at all. `resolve_attach_request` owns the one shape check the
-/// helm makes locally (an explicitly empty `?lease=`, never `?tab=` —
-/// see that function's own docs for why the two are asymmetric);
-/// everything else, including an unknown tab id, is the supervisor's own
-/// `NotFound` and reaches this socket exactly like any other attach
-/// failure — a `{"type":"detached",...}` notice, then close, never a bare
-/// disconnect the browser would blame on the network instead of the
-/// session (see `serve_term`'s single attach-failure arm).
-///
-/// The client → server text messages, all `{"type": ...}`:
-/// - `{"type":"resize","cols":N,"rows":N}` — the terminal's new size.
-/// - `{"type":"ping"}` — the browser's idle-gated liveness probe
-///   (PLAN_M6.md item 7), answered with `{"type":"pong"}` and forwarded to
-///   nobody.
-///
-/// The ping is the one client message this helm ANSWERS itself rather than
-/// relaying, and that is the whole design rather than an optimization. What
-/// the browser needs to know is whether ITS socket is still carrying
-/// anything — the laptop-wake case, where a NAT or sleep timeout killed the
-/// connection and left both ends believing it is open — and that question
-/// is answered entirely by this end replying. Round-tripping it to the
-/// supervisor would answer a different question (is the HOST healthy),
-/// which already has its own surfaces: the host's connection state, the
-/// stall detach, and the detach notice this socket would receive anyway.
-/// It would also put a periodic message on every idle session's control
-/// path for no added signal.
-///
-/// The browser sends no flow control: the helm pauses and resumes the
-/// supervisor from its own queue (this module's "Bounds and flow control").
-/// A `pause` or `resume` from a page is an unknown message, ignored.
-///
-/// Server → client, all text: `{"type":"pong"}`,
-/// `{"type":"detached","reason":...}` and, as of PLAN_M5.md item 4,
-/// `{"type":"replay_complete"}` — the attach's
-/// catch-up boundary, forwarded on this SAME socket after the binary
-/// catch-up messages it follows and before any live ones, because
-/// [`TermEvent::ReplayComplete`] rides the terminal's data queue rather
-/// than jumping ahead of it (see that variant's own docs for why the
-/// ordering is the whole point). Consumers must treat it as pure
-/// presentation, never as a signal for session or lifecycle behavior —
-/// the same restriction `ControlMsg::ReplayComplete`'s docs place on every
-/// consumer of the wire message it forwards.
-/// The fixed wire text for the replay-complete marker (PLAN_M5.md item 4;
-/// see `term_ws`'s docs for where it sits in the server→client message
-/// set). A plain constant rather than a `serde_json::json!` value built
-/// fresh per marker: the shape never varies — no fields, ever — so there
-/// is nothing for a JSON builder to add over a literal, and every marker
-/// this socket ever sends is this exact string.
-const REPLAY_COMPLETE_TEXT_MESSAGE: &str = r#"{"type":"replay_complete"}"#;
-
 /// Whether this failure is the supervisor refusing a non-displacing attach
 /// because another client holds the session.
 ///
@@ -391,16 +321,87 @@ fn refused_as_missing_tab(error: &anyhow::Error, q: &TermQuery) -> bool {
             .is_some_and(|supervised| supervised.kind() == ErrorKind::NotFound)
 }
 
-/// The browser's `{"type":"detached","reason":...,"code":...}` notice.
+/// The `{"type":"detached","reason":...,"code":...}` notice the GUI's terminal client receives.
 ///
-/// `code` is the [`farhelm_proto::DetachCode`] spelling `terminal.js`
-/// decides from (latch a takeover, hold a stall, hide a closed tab);
-/// `reason` is only ever shown. One builder so every exit from this socket
-/// carries both.
-fn detached_notice(detach: &crate::client::Detach) -> serde_json::Value {
-    serde_json::json!({"type": "detached", "reason": detach.reason, "code": detach.code})
+/// `code` is the [`farhelm_proto::DetachCode`] a client decides from (latch a
+/// takeover, hold a stall, hide a closed tab); `reason` is only ever shown.
+/// One builder so every exit from this socket carries both.
+fn detached_notice(detach: &crate::client::Detach) -> TerminalServerMessage {
+    TerminalServerMessage::Detached {
+        reason: detach.reason.clone(),
+        code: Some(detach.code),
+    }
 }
 
+/// One control message as the text frame that carries it ([`TerminalServerMessage::to_text`] is the one spelling).
+fn control_frame(message: &TerminalServerMessage) -> ws::Message {
+    ws::Message::Text(message.to_text().into())
+}
+
+/// Terminal WebSocket: binary frames are the attachment's grid messages in
+/// both directions; text frames are small JSON control messages (client →
+/// resize/ping; server → detached notice, replay-complete marker, pong).
+/// This is the browser-facing twin of the proto data channel, kept equally
+/// dumb.
+///
+/// `?cols=`/`?rows=` set the initial size (see `TermQuery`'s docs).
+/// The sibling route `/api/sessions/{id}/term/unowned` (PLAN_M6.md item 7)
+/// is this same socket attached NON-DISPLACINGLY, and its refusal arrives
+/// here as an ordinary `{"type":"detached","reason":"another client
+/// attached"}` notice — the same notice, and the same string, a client
+/// displaced while attached receives. That identity is the point: a
+/// browser that was away when it lost the session renders the state it is
+/// actually in without a second vocabulary for it. See `term_ws_if_unowned`
+/// for why it is a path rather than a parameter.
+///
+/// `?tab=<id>` and `?lease=<id>` (PLAN_M4.md item 5) select which of the
+/// session's terminals this socket attaches and under which client
+/// identity; BOTH default to the exact pre-M4 behavior when absent —
+/// the agent terminal, un-leased — so a caller that predates tabs sees no
+/// change at all. `resolve_attach_request` owns the one shape check the
+/// helm makes locally (an explicitly empty `?lease=`, never `?tab=` —
+/// see that function's own docs for why the two are asymmetric);
+/// everything else, including an unknown tab id, is the supervisor's own
+/// `NotFound` and reaches this socket exactly like any other attach
+/// failure — a `{"type":"detached",...}` notice, then close, never a bare
+/// disconnect the browser would blame on the network instead of the
+/// session (see `serve_term`'s single attach-failure arm).
+///
+/// The client → server text messages, all `{"type": ...}` and typed as
+/// [`TerminalClientMessage`] (the server → client ones as
+/// [`TerminalServerMessage`]), one definition both ends share:
+/// - `{"type":"resize","cols":N,"rows":N}` — the terminal's new size.
+/// - `{"type":"ping"}` — the browser's idle-gated liveness probe
+///   (PLAN_M6.md item 7), answered with `{"type":"pong"}` and forwarded to
+///   nobody.
+///
+/// The ping is the one client message this helm ANSWERS itself rather than
+/// relaying, and that is the whole design rather than an optimization. What
+/// the browser needs to know is whether ITS socket is still carrying
+/// anything — the laptop-wake case, where a NAT or sleep timeout killed the
+/// connection and left both ends believing it is open — and that question
+/// is answered entirely by this end replying. Round-tripping it to the
+/// supervisor would answer a different question (is the HOST healthy),
+/// which already has its own surfaces: the host's connection state, the
+/// stall detach, and the detach notice this socket would receive anyway.
+/// It would also put a periodic message on every idle session's control
+/// path for no added signal.
+///
+/// The browser sends no flow control: the helm pauses and resumes the
+/// supervisor from its own queue (this module's "Bounds and flow control").
+/// A `pause` or `resume` from a page is an unknown message, ignored.
+///
+/// Server → client, all text: `{"type":"pong"}`,
+/// `{"type":"detached","reason":...}` and, as of PLAN_M5.md item 4,
+/// `{"type":"replay_complete"}` — the attach's
+/// catch-up boundary, forwarded on this SAME socket after the binary
+/// catch-up messages it follows and before any live ones, because
+/// [`TermEvent::ReplayComplete`] rides the terminal's data queue rather
+/// than jumping ahead of it (see that variant's own docs for why the
+/// ordering is the whole point). Consumers must treat it as pure
+/// presentation, never as a signal for session or lifecycle behavior —
+/// the same restriction `ControlMsg::ReplayComplete`'s docs place on every
+/// consumer of the wire message it forwards.
 pub(crate) async fn term_ws(
     State(state): State<Arc<AppState>>,
     upgrade: WebSocketUpgrade,
@@ -503,34 +504,12 @@ fn serve_term_upgrade(
 /// detach just removed.
 const WS_TEARDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// Client-to-helm control messages on a terminal socket. Text frames only
-/// — binary is always one grid input message — and an unparseable one is
-/// ignored
-/// rather than fatal, so adding a message type does not break older
-/// clients. See `term_ws`'s docs for the wire shapes.
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum WsClientMsg {
-    Resize {
-        cols: u16,
-        rows: u16,
-    },
-    /// The browser's liveness probe (PLAN_M6.md item 7), answered here with
-    /// [`PONG_TEXT_MESSAGE`] and never forwarded — see `term_ws`'s docs for
-    /// why the answer belongs to this end of the socket.
-    Ping,
-    /// Test-only fault injection for exercising the inbound task's panic
-    /// cleanup. It is absent from production builds because malformed client
-    /// input must remain harmless to deployed browser versions.
-    #[cfg(test)]
-    Panic,
-}
-
-/// The fixed wire text for the heartbeat's answer.
-///
-/// A constant for the same reason the replay marker is one: the shape never
-/// varies, so there is nothing for a JSON builder to add over a literal.
-const PONG_TEXT_MESSAGE: &str = r#"{"type":"pong"}"#;
+/// The test-only control message that panics the inbound task, for
+/// exercising its panic cleanup. Checked before the shared parse, so the
+/// shared [`TerminalClientMessage`] carries no test variant and malformed
+/// client input stays harmless in shipped builds.
+#[cfg(test)]
+const TEST_PANIC_TEXT_MESSAGE: &str = r#"{"type":"panic"}"#;
 
 /// Pump one attached terminal between the browser and the supervisor.
 ///
@@ -600,11 +579,9 @@ async fn serve_term(
                 // Bound this notice because a peer that cannot accept a
                 // hundred-byte notice within the grace period is one the
                 // reason would never have reached anyway.
-                let _ = tokio::time::timeout(
-                    WS_TEARDOWN_GRACE,
-                    socket.send(ws::Message::Text(notice.to_string().into())),
-                )
-                .await;
+                let _ =
+                    tokio::time::timeout(WS_TEARDOWN_GRACE, socket.send(control_frame(&notice)))
+                        .await;
                 return Err(e);
             }
         };
@@ -660,7 +637,7 @@ async fn serve_term(
                 _ = pong_outbound.notified() => None,
             };
             let message = match next {
-                None => ws::Message::Text(PONG_TEXT_MESSAGE.into()),
+                None => control_frame(&TerminalServerMessage::Pong),
                 Some(TermEvent::Data(bytes)) => ws::Message::Binary(bytes.into()),
                 // The catch-up boundary (PLAN_M5.md item 4). Built as an
                 // ordinary outbound `Message` rather than sent inline like
@@ -671,18 +648,16 @@ async fn serve_term(
                 // like abandoned data, instead of the marker getting a
                 // priority path data never had.
                 Some(TermEvent::ReplayComplete) => {
-                    ws::Message::Text(REPLAY_COMPLETE_TEXT_MESSAGE.into())
+                    control_frame(&TerminalServerMessage::ReplayComplete)
                 }
                 Some(TermEvent::Detached(reason)) => {
                     let notice = detached_notice(&reason);
                     // Bound this notice because a peer that cannot accept a
                     // hundred-byte notice within the grace period is one the
                     // reason would never have reached anyway.
-                    let _ = tokio::time::timeout(
-                        WS_TEARDOWN_GRACE,
-                        ws_tx.send(ws::Message::Text(notice.to_string().into())),
-                    )
-                    .await;
+                    let _ =
+                        tokio::time::timeout(WS_TEARDOWN_GRACE, ws_tx.send(control_frame(&notice)))
+                            .await;
                     break;
                 }
             };
@@ -706,7 +681,7 @@ async fn serve_term(
                     // never have reached anyway.
                     let _ = tokio::time::timeout(
                         WS_TEARDOWN_GRACE,
-                        ws_tx.send(ws::Message::Text(notice.to_string().into())),
+                        ws_tx.send(control_frame(&notice)),
                     )
                     .await;
                     break;
@@ -735,30 +710,34 @@ async fn serve_term(
                         break;
                     }
                 }
-                Ok(ws::Message::Text(text)) => match serde_json::from_str::<WsClientMsg>(&text) {
-                    Ok(WsClientMsg::Resize { cols, rows }) => {
-                        client_inbound
-                            .resize(&session_id_inbound, channel, cols, rows)
-                            .await;
+                #[cfg(test)]
+                Ok(ws::Message::Text(text)) if text.as_str() == TEST_PANIC_TEXT_MESSAGE => {
+                    panic!("test inbound terminal task panic")
+                }
+                Ok(ws::Message::Text(text)) => {
+                    match serde_json::from_str::<TerminalClientMessage>(&text) {
+                        Ok(TerminalClientMessage::Resize { cols, rows }) => {
+                            client_inbound
+                                .resize(&session_id_inbound, channel, cols, rows)
+                                .await;
+                        }
+                        // The one client message answered HERE rather than
+                        // relayed (see `term_ws`'s docs). Notifying never parks,
+                        // which is the property this loop needs: the browser
+                        // that is not draining is exactly the one whose ping
+                        // would otherwise block every keystroke queued behind
+                        // it.
+                        Ok(TerminalClientMessage::Ping) => pong.notify_one(),
+                        // Unparseable or unknown: ignored on purpose, so a
+                        // newer browser bundle talking to an older helm
+                        // degrades rather than dropping the terminal. That
+                        // includes a `pause` or `resume`, which no page sends
+                        // now: the supervisor keeps one paused flag per
+                        // attachment, and the helm's own flow control
+                        // (`SupervisorClient::spawn_grid_flow`) owns it.
+                        Err(_) => {}
                     }
-                    // The one client message answered HERE rather than
-                    // relayed (see `term_ws`'s docs). Notifying never parks,
-                    // which is the property this loop needs: the browser
-                    // that is not draining is exactly the one whose ping
-                    // would otherwise block every keystroke queued behind
-                    // it.
-                    Ok(WsClientMsg::Ping) => pong.notify_one(),
-                    #[cfg(test)]
-                    Ok(WsClientMsg::Panic) => panic!("test inbound terminal task panic"),
-                    // Unparseable or unknown: ignored on purpose, so a
-                    // newer browser bundle talking to an older helm
-                    // degrades rather than dropping the terminal. That
-                    // includes a `pause` or `resume`, which no page sends
-                    // now: the supervisor keeps one paused flag per
-                    // attachment, and the helm's own flow control
-                    // (`SupervisorClient::spawn_grid_flow`) owns it.
-                    Err(_) => {}
-                },
+                }
                 Ok(ws::Message::Close(_)) => break,
                 Ok(_) => {} // ping/pong handled by axum
                 // Surfaced, not swallowed: an oversized message or a
