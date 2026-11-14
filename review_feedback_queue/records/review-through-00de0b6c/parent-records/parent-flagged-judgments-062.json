@@ -1,4 +1,16 @@
 [
- {"key":"g093/c9","proposal":"claim-checks/claims-062/result.json","parent_proposal":"source-refuted-explicit-payload-input-overwrite-and-failed-setup-export","final_independent_gate":"required-before-original-operator-file-drop","reason":"Parent read full062. Explicit input bypasses every build/staging/move write and reaches validation/export only. Actual nextest/worker callers launch standalone bash script, whose own errexit is active; agent-wrapper ignored-errexit warning does not make this subprocess unguarded. Failure stops export. Historical two-asset publication is sequential, not crash-atomic; do not infer pair atomicity or erase distinct archive-path trim issue. Refute two named overwrite/stale-export routes only, preserving operator-owned file concern for fresh gate; no script execution claimed."},
- {"key":"g094/c6","proposal":"claim-checks/claims-062/result.json","parent_proposal":"source-refuted-devbuild-download-authentication-removal-with-dead-consumer","final_independent_gate":"required-before-highest-executable-authentication-drop","reason":"Full062 same patch removes entire tmux cache/download/signature/hash/copy caller and verifier; remaining devbuild builds checkout farhelm archives. Current one-archive provisioning cold release chain still requires signed entry and verified download before extraction, while explicitly selected local payloads stay operator-trusted. Refute former devbuild downloaded-executable route only, not all release metadata/downloads/external publication. Preserve original unsafeinstalledasset/brokenUpdate concern for fresh gate; removing a verifier alone is not general permission."}
+  {
+    "key": "g093/c9",
+    "proposal": "claim-checks/claims-062/result.json",
+    "parent_proposal": "source-refuted-explicit-payload-input-overwrite-and-failed-setup-export",
+    "final_independent_gate": "required-before-original-operator-file-drop",
+    "reason": "Parent read full062. Explicit input bypasses every build/staging/move write and reaches validation/export only. Actual nextest/worker callers launch standalone bash script, whose own errexit is active; agent-wrapper ignored-errexit warning does not make this subprocess unguarded. Failure stops export. Historical two-asset publication is sequential, not crash-atomic; do not infer pair atomicity or erase distinct archive-path trim issue. Refute two named overwrite/stale-export routes only, preserving operator-owned file concern for fresh gate; no script execution claimed."
+  },
+  {
+    "key": "g094/c6",
+    "proposal": "claim-checks/claims-062/result.json",
+    "parent_proposal": "source-refuted-devbuild-download-authentication-removal-with-dead-consumer",
+    "final_independent_gate": "required-before-highest-executable-authentication-drop",
+    "reason": "Full062 same patch removes entire tmux cache/download/signature/hash/copy caller and verifier; remaining devbuild builds checkout farhelm archives. Current one-archive provisioning cold release chain still requires signed entry and verified download before extraction, while explicitly selected local payloads stay operator-trusted. Refute former devbuild downloaded-executable route only, not all release metadata/downloads/external publication. Preserve original unsafeinstalledasset/brokenUpdate concern for fresh gate; removing a verifier alone is not general permission."
+  }
 ]

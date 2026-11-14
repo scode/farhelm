@@ -4,13 +4,30 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Source-confirmed review record: If fleet notices keep arriving more often than the launcher's first recipe/settings read can finish, new environment preparation remains loading for the duration of that activity, because every notice cancels that read and starts it again. Original starvation consequence retained; no empirical cadence or universal launch failure claimed. Source: create_form.rs:3237-3243 fetches recipes then Tensorlake settings sequentially; :3245-3248 restarts that resource, environment history and build status on every observed feed notice. Cargo.lock:1528-1531 pins dioxus-hooks 0.7.10. The installed primary source src/use_resource.rs initializes value=None (:29), publishes Some(res) only after the task finishes (:46-66), and Resource::restart cancels the running task before starting its replacement (:191-194). An earlier completed value survives restart, but first-load cancellation has no value to retain. UI feed.rs:289-314 has no resource-busy awareness: it coalesces notifications delivered before one effect, then invokes the callback for each subsequent notice observed in a later effect. Server feed.rs:149-159 advances watch revisions on every bump; events.rs:239-248 sends successive changed revisions without any minimum interval or coordination with REST completion; assets/events.js:311-332 forwards each received revision immediately; UI FeedState::note_revision at feed.rs:199-201 increments the notice count. There is therefore no transport/publisher invariant requiring a long enough gap for either catalog request, much less their sequential pair, to complete. A concrete shipped produc
+Source-confirmed review record: If fleet notices keep arriving more often than the launcher's first recipe/settings read
+can finish, new environment preparation remains loading for the duration of that activity, because every notice cancels
+that read and starts it again. Original starvation consequence retained; no empirical cadence or universal launch
+failure claimed. Source: create_form.rs:3237-3243 fetches recipes then Tensorlake settings sequentially; :3245-3248
+restarts that resource, environment history and build status on every observed feed notice. Cargo.lock:1528-1531 pins
+dioxus-hooks 0.7.10. The installed primary source src/use_resource.rs initializes value=None (:29), publishes Some(res)
+only after the task finishes (:46-66), and Resource::restart cancels the running task before starting its replacement
+(:191-194). An earlier completed value survives restart, but first-load cancellation has no value to retain. UI
+feed.rs:289-314 has no resource-busy awareness: it coalesces notifications delivered before one effect, then invokes the
+callback for each subsequent notice observed in a later effect. Server feed.rs:149-159 advances watch revisions on every
+bump; events.rs:239-248 sends successive changed revisions without any minimum interval or coordination with REST
+completion; assets/events.js:311-332 forwards each received revision immediately; UI FeedState::note_revision at
+feed.rs:199-201 increments the notice count. There is therefore no transport/publisher invariant requiring a long enough
+gap for either catalog request, much less their sequential pair, to complete. A concrete shipped produc
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **high**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **high**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g086/l5`.
 
@@ -20,19 +37,93 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 24 (finding, open):
 
-Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462; checked through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: If fleet notices keep arriving more often than the launcher's first recipe/settings read can finish, new environment preparation remains loading for the duration of that activity, because every notice cancels that read and starts it again. Original starvation consequence retained; no empirical cadence or universal launch failure claimed. Source: create_form.rs:3237-3243 fetches recipes then Tensorlake settings sequentially; :3245-3248 restarts that resource, environment history and build status on every observed feed notice. Cargo.lock:1528-1531 pins dioxus-hooks 0.7.10. The installed primary source src/use_resource.rs initializes value=None (:29), publishes Some(res) only after the task finishes (:46-66), and Resource::restart cancels the running task before starting its replacement (:191-194). An earlier completed value survives restart, but first-load cancellation has no value to retain. UI feed.rs:289-314 has no resource-busy awareness: it coalesces notifications delivered before one effect, then invokes the callback for each subsequent notice observed in a later effect. Server feed.rs:149-159 advances watch revisions on every bump; events.rs:239-248 sends successive changed revisions without any minimum interval or coordination with REST completion; assets/events.js:311-332 forwards each received revision immediately; UI FeedState::note_revision at feed.rs:199-201 increments the notice count. There is therefore no transport/publisher invariant requiring a long enough gap for either catalog request, much less their sequential pair, to complete. A concrete shipped producer is an accepted template PUT (helm templates.rs:119-150), which bumps the fleet after every accepted write, including the ordinary shared CLI/agent/GUI store path; changes on other surfaces are not queued behind this catalog read. No fabricated wire event is required. Condition is precisely a sequence of observed callbacks with every gap shorter than the catalog task's lifetime; actual frequency and impact duration were not measured. Readiness requires this result: recipe_names derives only from completed sandbox_answer (:3257-3266), initial/shortcut environment-template replay waits on it (:5331-5337, :5402-5407), and environment submission requires it (:5999-6024). The independent SurfaceReader for places cannot publish this separate recipe/settings value. Contract: UI feed.rs:257-263 says feed consumers ask their surface readers to coalesce bursts; reader.rs:24-30 prescribes one non-cancelled read plus one owed follow-up for notices arriving during it. SPEC_impl.md Checkout configuration and discovery explicitly retains the composer's SurfaceReader demand/retry policy; ordinary launch history already uses that policy. Fix direction: give these new feed-driven catalog reads the existing non-cancelling single-flight/follow-up demand owner, preserving initial and successful-observation behavior. Attribution: the full exclusive-base-to-tip -G history for sandbox_catalog.restart/let mut sandbox_catalog identifies only 350a4b33 as introducing this refresh behavior; its assigned patch changes the catalog from mount-only to feed restart. End revision still contains unconditional restarts at create_form.rs:3240-3243. Suggested bucket: high/material UX for blocked environment/template preparation under the stated sustained-notice condition. Confidence: confirmed conditional source route, not runtime observed. proposed_drop: false. possible_cover: supplied g060/l1 concerns Settings failed-status retention/direct retry, g061/l5 status invalidation; no supplied record reports this initial-read cancellation route. Could-be-highest: no established security or loss-of-work route; blocked replay dispatches no create. Caveats: an already successful resource continues using its retained old result during restarts; a sufficiently long quiet interval repairs first-load readiness; ordinary non-environment creation need not depend on these catalogs. Do not describe permanent lockout, guaranteed normal-load incidence, server-side request cancellation or unbounded backend work; those were not established. All readily checkable hook, consumer, producer, readiness and attribution premises are settled; no open lead remains. No tests, builds, reproductions, synthetic payloads or live-install actions performed.
+Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462; checked through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.
+TLDR: If fleet notices keep arriving more often than the launcher's first recipe/settings read can finish, new
+environment preparation remains loading for the duration of that activity, because every notice cancels that read and
+starts it again. Original starvation consequence retained; no empirical cadence or universal launch failure claimed.
+Source: create_form.rs:3237-3243 fetches recipes then Tensorlake settings sequentially; :3245-3248 restarts that
+resource, environment history and build status on every observed feed notice. Cargo.lock:1528-1531 pins dioxus-hooks
+0.7.10. The installed primary source src/use_resource.rs initializes value=None (:29), publishes Some(res) only after
+the task finishes (:46-66), and Resource::restart cancels the running task before starting its replacement (:191-194).
+An earlier completed value survives restart, but first-load cancellation has no value to retain. UI feed.rs:289-314 has
+no resource-busy awareness: it coalesces notifications delivered before one effect, then invokes the callback for each
+subsequent notice observed in a later effect. Server feed.rs:149-159 advances watch revisions on every bump;
+events.rs:239-248 sends successive changed revisions without any minimum interval or coordination with REST completion;
+assets/events.js:311-332 forwards each received revision immediately; UI FeedState::note_revision at feed.rs:199-201
+increments the notice count. There is therefore no transport/publisher invariant requiring a long enough gap for either
+catalog request, much less their sequential pair, to complete. A concrete shipped producer is an accepted template PUT
+(helm templates.rs:119-150), which bumps the fleet after every accepted write, including the ordinary shared
+CLI/agent/GUI store path; changes on other surfaces are not queued behind this catalog read. No fabricated wire event is
+required. Condition is precisely a sequence of observed callbacks with every gap shorter than the catalog task's
+lifetime; actual frequency and impact duration were not measured. Readiness requires this result: recipe_names derives
+only from completed sandbox_answer (:3257-3266), initial/shortcut environment-template replay waits on it (:5331-5337,
+:5402-5407), and environment submission requires it (:5999-6024). The independent SurfaceReader for places cannot
+publish this separate recipe/settings value. Contract: UI feed.rs:257-263 says feed consumers ask their surface readers
+to coalesce bursts; reader.rs:24-30 prescribes one non-cancelled read plus one owed follow-up for notices arriving
+during it. SPEC_impl.md Checkout configuration and discovery explicitly retains the composer's SurfaceReader
+demand/retry policy; ordinary launch history already uses that policy. Fix direction: give these new feed-driven catalog
+reads the existing non-cancelling single-flight/follow-up demand owner, preserving initial and successful-observation
+behavior. Attribution: the full exclusive-base-to-tip -G history for sandbox_catalog.restart/let mut sandbox_catalog
+identifies only 350a4b33 as introducing this refresh behavior; its assigned patch changes the catalog from mount-only to
+feed restart. End revision still contains unconditional restarts at create_form.rs:3240-3243. Suggested bucket:
+high/material UX for blocked environment/template preparation under the stated sustained-notice condition. Confidence:
+confirmed conditional source route, not runtime observed. proposed_drop: false. possible_cover: supplied g060/l1
+concerns Settings failed-status retention/direct retry, g061/l5 status invalidation; no supplied record reports this
+initial-read cancellation route. Could-be-highest: no established security or loss-of-work route; blocked replay
+dispatches no create. Caveats: an already successful resource continues using its retained old result during restarts; a
+sufficiently long quiet interval repairs first-load readiness; ordinary non-environment creation need not depend on
+these catalogs. Do not describe permanent lockout, guaranteed normal-load incidence, server-side request cancellation or
+unbounded backend work; those were not established. All readily checkable hook, consumer, producer, readiness and
+attribution premises are settled; no open lead remains. No tests, builds, reproductions, synthetic payloads or
+live-install actions performed.
 
 Returned proposal (claims-056, event 24): **retain-verified**, suggested bucket **high**.
 
-Every observed fleet notice restarts the resource required for environment preparation. If notice gaps remain shorter than its first sequential recipe/settings read, it cannot publish an initial answer. This condition can block environment/template preparation for the duration of the activity; cadence and duration were not measured.
+Every observed fleet notice restarts the resource required for environment preparation. If notice gaps remain shorter
+than its first sequential recipe/settings read, it cannot publish an initial answer. This condition can block
+environment/template preparation for the duration of the activity; cadence and duration were not measured.
 
-Original stronger consequence: Initial environment catalogs, template replay and saved environment quick-launch preparation can remain loading while delivered fleet-notice cadence outruns completion. Existing successful snapshots remain usable; a long enough quiet interval repairs initial readiness. No create is dispatched from the blocked path and no work-loss/security route is established.
+Original stronger consequence: Initial environment catalogs, template replay and saved environment quick-launch
+preparation can remain loading while delivered fleet-notice cadence outruns completion. Existing successful snapshots
+remain usable; a long enough quiet interval repairs initial readiness. No create is dispatched from the blocked path and
+no work-loss/security route is established.
 
-Unresolved premise or limitation: No empirical incidence or duration. Conditional scheduling route is established; a claim of permanent lockout, guaranteed normal-load failure, or ordinary non-environment launch blockage would need further evidence.
+Unresolved premise or limitation: No empirical incidence or duration. Conditional scheduling route is established; a
+claim of permanent lockout, guaranteed normal-load failure, or ordinary non-environment launch blockage would need
+further evidence.
 
-Proposed basis: Retain conditional initial environment-launch availability defect at high; keep actual cadence and severity frequency explicitly unmeasured.
+Proposed basis: Retain conditional initial environment-launch availability defect at high; keep actual cadence and
+severity frequency explicitly unmeasured.
 
-Existing parent disposition (event 24): verified. Parent explicitly accepted named retain-verified proposal from claims-056 after inspecting it. Every observed fleet notice restarts the resource required for environment preparation. If notice gaps remain shorter than its first sequential recipe/settings read, it cannot publish an initial answer. This condition can block environment/template preparation for the duration of the activity; cadence and duration were not measured. Retain conditional initial environment-launch availability defect at high; keep actual cadence and severity frequency explicitly unmeasured. Checked source/results: ["350a4b33:create_form.rs:3237-3248 combines recipe then settings reads in a Resource and unconditionally restarts it from use_feed_reader; :3257-3266 derives recipe_names only from a completed result; :5999-6024 gates environment submission on that result.","Pinned installed primary source [home]/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dioxus-hooks-0.7.10/src/use_resource.rs:29,46-66,191-194 initializes None, publishes only after completion and cancels the old task before restart. Earlier completed values survive; first-load cancellation has no value to retain.","350a4b33:crates/farhelm-ui/src/feed.rs:250-315 invokes reread for each newly observed notice and explicitly delegates coalescing/retry to readers; it does not wait for this resource. helm templates.rs:119-150 is a shipped producer, bumping the fleet after each accepted write independently of catalog completion. Cargo.lock:1528-1531 confirms dioxus-hooks 0.7.10. 00de0b6c:create_form.rs:3232-3243 retains the restarts. No runtime test, synthetic event, production frequency, server-request cancellation or unbounded backend-work claim."] Current coverage/results: ["SPEC_impl.md:5023 onward preserves composer's SurfaceReader refresh-demand policy; neither specification expressly accepts repeated cancellation preventing first readiness. A quiet interval and retained earlier success limit the consequence but do not refute the conditional route.","Planned empty; BUGS.md unrelated; searched plans/queue and active ledger for initial recipe/catalog cancellation/starvation, no exact repair or acceptance.","Read review_feedback_queue/credential-catalog-success-starvation.md: separate credentials owner invalidates generations rather than cancelling this launcher Resource. It is related scheduling policy, not exact same-root coverage or a fix for this owner. No exact INDEX item. FILTER.md does not establish a brief self-correcting glitch: repeated refresh is itself what prevents initial readiness while the condition persists."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "Initial environment catalogs, template replay and saved environment quick-launch preparation can remain loading while delivered fleet-notice cadence outruns completion. Existing successful snapshots remain usable; a long enough quiet interval repairs initial readiness. No create is dispatched from the blocked path and no work-loss/security route is established."; "No empirical incidence or duration. Conditional scheduling route is established; a claim of permanent lockout, guaranteed normal-load failure, or ordinary non-environment launch blockage would need further evidence.".
+Existing parent disposition (event 24): verified. Parent explicitly accepted named retain-verified proposal from
+claims-056 after inspecting it. Every observed fleet notice restarts the resource required for environment preparation.
+If notice gaps remain shorter than its first sequential recipe/settings read, it cannot publish an initial answer. This
+condition can block environment/template preparation for the duration of the activity; cadence and duration were not
+measured. Retain conditional initial environment-launch availability defect at high; keep actual cadence and severity
+frequency explicitly unmeasured. Checked source/results: ["350a4b33:create_form.rs:3237-3248 combines recipe then
+settings reads in a Resource and unconditionally restarts it from use_feed_reader; :3257-3266 derives recipe_names only
+from a completed result; :5999-6024 gates environment submission on that result.","Pinned installed primary source
+[home]/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dioxus-hooks-0.7.10/src/use_resource.rs:29,46-66,191-194
+initializes None, publishes only after completion and cancels the old task before restart. Earlier completed values
+survive; first-load cancellation has no value to retain.","350a4b33:crates/farhelm-ui/src/feed.rs:250-315 invokes reread
+for each newly observed notice and explicitly delegates coalescing/retry to readers; it does not wait for this resource.
+helm templates.rs:119-150 is a shipped producer, bumping the fleet after each accepted write independently of catalog
+completion. Cargo.lock:1528-1531 confirms dioxus-hooks 0.7.10. 00de0b6c:create_form.rs:3232-3243 retains the restarts.
+No runtime test, synthetic event, production frequency, server-request cancellation or unbounded backend-work claim."]
+Current coverage/results: ["SPEC_impl.md:5023 onward preserves composer's SurfaceReader refresh-demand policy; neither
+specification expressly accepts repeated cancellation preventing first readiness. A quiet interval and retained earlier
+success limit the consequence but do not refute the conditional route.","Planned empty; BUGS.md unrelated; searched
+plans/queue and active ledger for initial recipe/catalog cancellation/starvation, no exact repair or acceptance.","Read
+review_feedback_queue/credential-catalog-success-starvation.md: separate credentials owner invalidates generations
+rather than cancelling this launcher Resource. It is related scheduling policy, not exact same-root coverage or a fix
+for this owner. No exact INDEX item. FILTER.md does not establish a brief self-correcting glitch: repeated refresh is
+itself what prevents initial readiness while the condition persists."] Exact cited cover: [] Original stronger
+consequence and missing premise remain preserved: "Initial environment catalogs, template replay and saved environment
+quick-launch preparation can remain loading while delivered fleet-notice cadence outruns completion. Existing successful
+snapshots remain usable; a long enough quiet interval repairs initial readiness. No create is dispatched from the
+blocked path and no work-loss/security route is established."; "No empirical incidence or duration. Conditional
+scheduling route is established; a claim of permanent lockout, guaranteed normal-load failure, or ordinary
+non-environment launch blockage would need further evidence.".
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g086 record](records/review-through-00de0b6c/groups/g086.json). Record ID: `l5`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g086 record](records/review-through-00de0b6c/groups/g086.json). Record ID: `l5`.

@@ -198,7 +198,10 @@
       "FILTER": "Not needed: exact specification acceptance supplies the basis."
     },
     "exact_cover_quotes": [
-      {"source": "SPEC_impl.md:1886 (current and f560058da19e02716e6f943883a9508b447aff4e)", "quote": "Not built, a near-term entry in `TODO.md`: showing an input method's composition at the cursor (committed text is sent)."}
+      {
+        "source": "SPEC_impl.md:1886 (current and f560058da19e02716e6f943883a9508b447aff4e)",
+        "quote": "Not built, a near-term entry in `TODO.md`: showing an input method's composition at the cursor (committed text is sent)."
+      }
     ],
     "missing_premise": "No runtime IME or cross-engine event-order validation was performed; acceptance is confined to in-progress composition display.",
     "original_stronger_consequence": "Visible uncommitted composition preview/candidate placement omission only, other priority. No committed-input loss or security/work-loss route was claimed.",

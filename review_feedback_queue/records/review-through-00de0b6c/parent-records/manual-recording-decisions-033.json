@@ -1,14 +1,122 @@
 [
- {"key":"g147/c4","line":10,"disposition":"duplicate","group":"podman-test-payload-producer-consumer-tmux-mismatch","bucket":"other","recording":"repaired-in-range","needs_independent_drop_check":false,"reason":"Correct the parent032 grouping typo after actual canonical-key lookup. Same500548 producer-retirement/consumer-required-tmux mismatch as067l3/070l2/093f1, repaired by d751 consumer archive-only expectation. All032 historical source/fresh-versus-stale-fixture/repair/no-current-remnant reasoning remains; this correction only joins the actual existing group, removing erroneous duplicate-only group. No defect dropped on a new premise."},
- {"key":"g154/c3","line":11,"disposition":"rejected","group":"legacy-test-removal-before-retirement/recovery-mode-rendering","bucket":"other","recording":"retired-in-range","needs_independent_drop_check":false,"reason":"Parent read full098.647 removes explicit alternate-buffer entry and cursor/bracketed-paste recovery sequence while old tmux attachment service still exists. Surviving content/grid tests do not protect those exact mode segments; intermediate missing protection is real, not disproved by correct production. dbfc retires exact old service and1ed removes driver bytip, so no current obsolete fixture restoration queued. Preserve earlier no-product-bug dismissal withdrawal and later stronger host race/pause tests; no demonstrated unsafepaste/workloss or currentmode failure."},
- {"key":"g154/l4","line":15,"disposition":"rejected","group":"legacy-test-removal-before-retirement/stalled-server-rss","bucket":"other","recording":"retired-in-range","needs_independent_drop_check":false,"reason":"Full098: deleted647 sustained gated-flood paused-viewer test measures separate tmux/supervisor RSS growth over seven points after warming, with producer progress and controlledstop. Behavioralqueue/history checks, uploadmemory andbrowser-onlybenchmark do not replace this exact live legacy metric. Historical protection lost while supported; dbfc/1ed retire/removesubject bytip, no currenttmuxRSS fixture resurrection required. Preserve pause-after unitassertion and distinct hostRSSquestions; no actual leak/exhaustion/workloss established."},
- {"key":"g155/c5","line":13,"disposition":"rejected","group":"647f0227-removes-supported-tmux-pending-cleanup-request-oracles","bucket":"other","recording":"retired-in-range","needs_independent_drop_check":false,"reason":"Full099:647 deletes deterministic forwarder_cleanup_gate Close/Restart request tests, includingTabClosed/listabsence andfailedRestart/exited-row restoration while oldservice supported. Synthetic result/barrier tests do not cover same request-publication boundary; no productbug needed to establish missing oracle. dbfc endsdriver andtiphasnoneofgate/sink/reapmachinery; preserve trueintermediategap but no obsoletefixturefixcurrentqueue. Distinct156real recoveryoracles andhostgeneric testsremainuseful. No security/workloss route."},
- {"key":"g156/l1","line":8,"disposition":"rejected","group":"647f0227-removes-supported-tmux-transport-sink-crash-recovery-oracles","bucket":"other","recording":"retired-in-range","needs_independent_drop_check":false,"reason":"Full099:647 removes six real old-terminal inputfailure/connectionloss/takeover/sinkkill/concurrentfirstattach/supervisorcrash recovery scenarios while oldsinksserve. Stand-in retry/reap/backoff and registry/barrier tests do not replace successful real recovery/attachment witnesses. Preserve initial no-productfailure dismissal expresslywithdrawn. Laterdbfc/1ed retirement/removal andtipheldnaturaldetachhosttest endexactlegacysubject; no currentoldfixturefix demanded, no inferredruntimeworkloss."},
- {"key":"g160/l2","line":24,"disposition":"rejected","group":"historical-desktop-tmux-abovepin-warning-after-retirement","bucket":"other","recording":"retired-in-range","needs_independent_drop_check":false,"reason":"Full102: dbfc retires supervisor AbovePin emitter whiledesktopstillclassifiesAbovePinsilently, andnew1edauthoritativeinstallationpolicy retainswarningpromise. Sourceconfirmedintermediatecontract/diagnosticmismatch, not refuted byunusedhelperat1ed or prebasefreshnoserversilence.17a3 deletes preflight/requirement endingtriggerandobligationbeforetip. Preserve originalattributionexclusionwithdrawal; no currentwarningfix or runtimeobservation/workloss."},
- {"key":"g175/c2","line":10,"disposition":"rejected","group":"old-terminal-whole-stream-flow-stall-paused-remount-oracles-removed-before-retirement","bucket":"other","recording":"retired-in-range","needs_independent_drop_check":false,"reason":"Full109:647 removes800000record whole-stream correctness/observedwatermarkpause-resume/>55srealstallclosedoriginalsocket/no-reconnect andactuallypausedsame-realmremountreset browserwitnesses whileoldconsumersstillserved. Differentgridpacing orhealthyunpausedremountcannotreplacethem. Historicalprotectionlossreal, previousdifferentmechanisms/noinvalidoracle dismissalwithdrawn. dbfc/f560retireexactoldconsumerandcallbackflowbytip; no obsoletecurrentfixturefix or actualdeliveryfailure/worklossclaimed."},
- {"key":"g175/c3","line":11,"disposition":"rejected","group":"old-terminal-positive-large-websocket-message-oracle-removed-before-retirement","bucket":"other","recording":"retired-in-range","needs_independent_drop_check":false,"reason":"Full109:647 removes positiveone1MiB+1rawmessage acceptance whileliveoldreceiver/socketcontinuity/pre-andpostecho established. Gridchunkeddigest test andcap-relative8MiB+1negative test cannot detect loweringoldpositivethreshold; sourceconfirmsdistinctintermediateoracleloss. dbfc/f560endoldconsumerbytip, noreviveobsoletewholemessagefixture. Preserve originalgrid-substitute dismissalwithdrawal, usefulgridtest, no actualdisconnect/pasteloss/workloss."},
- {"key":"g176/c2","line":12,"disposition":"rejected","group":"retired-xterm-deferred-replay-flush-test-gap","bucket":"other","recording":"retired-in-range","needs_independent_drop_check":false,"reason":"Full110:647 deletes heldreplacementxtermwrite-callback-aftermarker/socketdeath/release/outage/laterliveecho witness whiledeferredonWrittenstilllives. Unchangedaliveguardsdonotrefutelosttestprotection; adjacentlateevidenceduringsocketcloseisnotheldcompletedmarkerflush. f560removesallterm.write/writeBytescallbacksbytip, synchronousgridflushdifferentboundary. Preserveintermediategap andinitialdismissalwithdrawal, no currentobsoletecallbacktestfix/runtimefailure."},
- {"key":"g176/c3","line":13,"disposition":"rejected","group":"retired-xterm-per-tab-write-flow-isolation-test-gap","bucket":"other","recording":"retired-in-range","needs_independent_drop_check":false,"reason":"Full110:647 deletes one-xtermcallbackhold/observedpause/agent+siblingliveinput/resume-afterrelease browserwitness whileper-mountpendingWriteflowremains. Productionunchangedandrealhelmchanneloverflowunitnot equivalent browserpausedinputoracle; historicalgapisreal. f560retirescallbackflowandtiphasnopendingWrite, no currentobsoletefixturefix. Keep separatefromdeferredreplayflush, latergridisolationquestions, no runtimeblocking/worklossinferred."},
- {"key":"g177/c2","line":9,"disposition":"rejected","group":"old-xterm-sustained-viewport-tests-removed-before-retirement","bucket":"other","recording":"retired-in-range","needs_independent_drop_check":false,"reason":"Full111:647 removes753line sustainedrenderedviewport oracle forpre/fullhistorycap eviction,DECSTBM,synchronizedoutput,siblingbandresize whileoldrenderer andstale-paintworkaroundstillserved. Usefulregressionprotectionlost, no-productbug/commitintentisnotrefutation. f560retiresconcretextermrendererbytip; don'trestoreobsoleteviewportworkaroundfixtures. Preservehistoricalgap, distinct178query/selection/unicodetests, no actualstaleviewport/gridbug."},
- {"key":"g178/g178-l1","line":8,"disposition":"rejected","group":"old-xterm-query-selection-unicode-tests-removed-before-retirement","bucket":"other","recording":"retired-in-range","needs_independent_drop_check":false,"reason":"Full111:647 removesoldbrowserqueryreplysuppressionwithpositiveparsercontrol,local/nativeselectiondismissal,andwideemoji/model/DOMgeometrytests whileactualoldDECRQM/DECRQSS/browserrenderercontinues. Independentgridqueries/paintersdon'texerciseoldretainedpaths; initialsplitownership/noactionablebug dismissalwithdrawn. f560retiressubjectbytip; preserveactualintermediategap andno obsoletecurrentfixturefix or inferredunsafeinput/workloss."}
+  {
+    "key": "g147/c4",
+    "line": 10,
+    "disposition": "duplicate",
+    "group": "podman-test-payload-producer-consumer-tmux-mismatch",
+    "bucket": "other",
+    "recording": "repaired-in-range",
+    "needs_independent_drop_check": false,
+    "reason": "Correct the parent032 grouping typo after actual canonical-key lookup. Same500548 producer-retirement/consumer-required-tmux mismatch as067l3/070l2/093f1, repaired by d751 consumer archive-only expectation. All032 historical source/fresh-versus-stale-fixture/repair/no-current-remnant reasoning remains; this correction only joins the actual existing group, removing erroneous duplicate-only group. No defect dropped on a new premise."
+  },
+  {
+    "key": "g154/c3",
+    "line": 11,
+    "disposition": "rejected",
+    "group": "legacy-test-removal-before-retirement/recovery-mode-rendering",
+    "bucket": "other",
+    "recording": "retired-in-range",
+    "needs_independent_drop_check": false,
+    "reason": "Parent read full098.647 removes explicit alternate-buffer entry and cursor/bracketed-paste recovery sequence while old tmux attachment service still exists. Surviving content/grid tests do not protect those exact mode segments; intermediate missing protection is real, not disproved by correct production. dbfc retires exact old service and1ed removes driver bytip, so no current obsolete fixture restoration queued. Preserve earlier no-product-bug dismissal withdrawal and later stronger host race/pause tests; no demonstrated unsafepaste/workloss or currentmode failure."
+  },
+  {
+    "key": "g154/l4",
+    "line": 15,
+    "disposition": "rejected",
+    "group": "legacy-test-removal-before-retirement/stalled-server-rss",
+    "bucket": "other",
+    "recording": "retired-in-range",
+    "needs_independent_drop_check": false,
+    "reason": "Full098: deleted647 sustained gated-flood paused-viewer test measures separate tmux/supervisor RSS growth over seven points after warming, with producer progress and controlledstop. Behavioralqueue/history checks, uploadmemory andbrowser-onlybenchmark do not replace this exact live legacy metric. Historical protection lost while supported; dbfc/1ed retire/removesubject bytip, no currenttmuxRSS fixture resurrection required. Preserve pause-after unitassertion and distinct hostRSSquestions; no actual leak/exhaustion/workloss established."
+  },
+  {
+    "key": "g155/c5",
+    "line": 13,
+    "disposition": "rejected",
+    "group": "647f0227-removes-supported-tmux-pending-cleanup-request-oracles",
+    "bucket": "other",
+    "recording": "retired-in-range",
+    "needs_independent_drop_check": false,
+    "reason": "Full099:647 deletes deterministic forwarder_cleanup_gate Close/Restart request tests, includingTabClosed/listabsence andfailedRestart/exited-row restoration while oldservice supported. Synthetic result/barrier tests do not cover same request-publication boundary; no productbug needed to establish missing oracle. dbfc endsdriver andtiphasnoneofgate/sink/reapmachinery; preserve trueintermediategap but no obsoletefixturefixcurrentqueue. Distinct156real recoveryoracles andhostgeneric testsremainuseful. No security/workloss route."
+  },
+  {
+    "key": "g156/l1",
+    "line": 8,
+    "disposition": "rejected",
+    "group": "647f0227-removes-supported-tmux-transport-sink-crash-recovery-oracles",
+    "bucket": "other",
+    "recording": "retired-in-range",
+    "needs_independent_drop_check": false,
+    "reason": "Full099:647 removes six real old-terminal inputfailure/connectionloss/takeover/sinkkill/concurrentfirstattach/supervisorcrash recovery scenarios while oldsinksserve. Stand-in retry/reap/backoff and registry/barrier tests do not replace successful real recovery/attachment witnesses. Preserve initial no-productfailure dismissal expresslywithdrawn. Laterdbfc/1ed retirement/removal andtipheldnaturaldetachhosttest endexactlegacysubject; no currentoldfixturefix demanded, no inferredruntimeworkloss."
+  },
+  {
+    "key": "g160/l2",
+    "line": 24,
+    "disposition": "rejected",
+    "group": "historical-desktop-tmux-abovepin-warning-after-retirement",
+    "bucket": "other",
+    "recording": "retired-in-range",
+    "needs_independent_drop_check": false,
+    "reason": "Full102: dbfc retires supervisor AbovePin emitter whiledesktopstillclassifiesAbovePinsilently, andnew1edauthoritativeinstallationpolicy retainswarningpromise. Sourceconfirmedintermediatecontract/diagnosticmismatch, not refuted byunusedhelperat1ed or prebasefreshnoserversilence.17a3 deletes preflight/requirement endingtriggerandobligationbeforetip. Preserve originalattributionexclusionwithdrawal; no currentwarningfix or runtimeobservation/workloss."
+  },
+  {
+    "key": "g175/c2",
+    "line": 10,
+    "disposition": "rejected",
+    "group": "old-terminal-whole-stream-flow-stall-paused-remount-oracles-removed-before-retirement",
+    "bucket": "other",
+    "recording": "retired-in-range",
+    "needs_independent_drop_check": false,
+    "reason": "Full109:647 removes800000record whole-stream correctness/observedwatermarkpause-resume/>55srealstallclosedoriginalsocket/no-reconnect andactuallypausedsame-realmremountreset browserwitnesses whileoldconsumersstillserved. Differentgridpacing orhealthyunpausedremountcannotreplacethem. Historicalprotectionlossreal, previousdifferentmechanisms/noinvalidoracle dismissalwithdrawn. dbfc/f560retireexactoldconsumerandcallbackflowbytip; no obsoletecurrentfixturefix or actualdeliveryfailure/worklossclaimed."
+  },
+  {
+    "key": "g175/c3",
+    "line": 11,
+    "disposition": "rejected",
+    "group": "old-terminal-positive-large-websocket-message-oracle-removed-before-retirement",
+    "bucket": "other",
+    "recording": "retired-in-range",
+    "needs_independent_drop_check": false,
+    "reason": "Full109:647 removes positiveone1MiB+1rawmessage acceptance whileliveoldreceiver/socketcontinuity/pre-andpostecho established. Gridchunkeddigest test andcap-relative8MiB+1negative test cannot detect loweringoldpositivethreshold; sourceconfirmsdistinctintermediateoracleloss. dbfc/f560endoldconsumerbytip, noreviveobsoletewholemessagefixture. Preserve originalgrid-substitute dismissalwithdrawal, usefulgridtest, no actualdisconnect/pasteloss/workloss."
+  },
+  {
+    "key": "g176/c2",
+    "line": 12,
+    "disposition": "rejected",
+    "group": "retired-xterm-deferred-replay-flush-test-gap",
+    "bucket": "other",
+    "recording": "retired-in-range",
+    "needs_independent_drop_check": false,
+    "reason": "Full110:647 deletes heldreplacementxtermwrite-callback-aftermarker/socketdeath/release/outage/laterliveecho witness whiledeferredonWrittenstilllives. Unchangedaliveguardsdonotrefutelosttestprotection; adjacentlateevidenceduringsocketcloseisnotheldcompletedmarkerflush. f560removesallterm.write/writeBytescallbacksbytip, synchronousgridflushdifferentboundary. Preserveintermediategap andinitialdismissalwithdrawal, no currentobsoletecallbacktestfix/runtimefailure."
+  },
+  {
+    "key": "g176/c3",
+    "line": 13,
+    "disposition": "rejected",
+    "group": "retired-xterm-per-tab-write-flow-isolation-test-gap",
+    "bucket": "other",
+    "recording": "retired-in-range",
+    "needs_independent_drop_check": false,
+    "reason": "Full110:647 deletes one-xtermcallbackhold/observedpause/agent+siblingliveinput/resume-afterrelease browserwitness whileper-mountpendingWriteflowremains. Productionunchangedandrealhelmchanneloverflowunitnot equivalent browserpausedinputoracle; historicalgapisreal. f560retirescallbackflowandtiphasnopendingWrite, no currentobsoletefixturefix. Keep separatefromdeferredreplayflush, latergridisolationquestions, no runtimeblocking/worklossinferred."
+  },
+  {
+    "key": "g177/c2",
+    "line": 9,
+    "disposition": "rejected",
+    "group": "old-xterm-sustained-viewport-tests-removed-before-retirement",
+    "bucket": "other",
+    "recording": "retired-in-range",
+    "needs_independent_drop_check": false,
+    "reason": "Full111:647 removes753line sustainedrenderedviewport oracle forpre/fullhistorycap eviction,DECSTBM,synchronizedoutput,siblingbandresize whileoldrenderer andstale-paintworkaroundstillserved. Usefulregressionprotectionlost, no-productbug/commitintentisnotrefutation. f560retiresconcretextermrendererbytip; don'trestoreobsoleteviewportworkaroundfixtures. Preservehistoricalgap, distinct178query/selection/unicodetests, no actualstaleviewport/gridbug."
+  },
+  {
+    "key": "g178/g178-l1",
+    "line": 8,
+    "disposition": "rejected",
+    "group": "old-xterm-query-selection-unicode-tests-removed-before-retirement",
+    "bucket": "other",
+    "recording": "retired-in-range",
+    "needs_independent_drop_check": false,
+    "reason": "Full111:647 removesoldbrowserqueryreplysuppressionwithpositiveparsercontrol,local/nativeselectiondismissal,andwideemoji/model/DOMgeometrytests whileactualoldDECRQM/DECRQSS/browserrenderercontinues. Independentgridqueries/paintersdon'texerciseoldretainedpaths; initialsplitownership/noactionablebug dismissalwithdrawn. f560retiressubjectbytip; preserveactualintermediategap andno obsoletecurrentfixturefix or inferredunsafeinput/workloss."
+  }
 ]

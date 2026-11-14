@@ -1,7 +1,37 @@
 [
- {"key":"g082/c2","proposal":"claim-checks/claims-053/result.json","parent_proposal":"retain-highest-successful-legacy-paste-Text-reinterpretation","final_independent_gate":"required-for-any-prior-drop-or-lowering","reason":"Parent read full053. Fresh unknown-kind xterm, no enabled legacy paste wrapper, literal small complete JSON paste preserved through sanitizer/onebinarymessage, new tagged Text parser decodes controls and queues ordinary bytes. This is successful unintended input, beyond named accepted malformed detach/misdrawing; reload does not undo delivered input. Source conditions remain explicit, no runtime command execution/frequency/loss observed. Preserve original reload-only low assessment and later reopened highest route, reconcile196/053/032 aliases without dropping caveats. Broad old-page or upgrade filter coverage is unclear and therefore not accepted."},
- {"key":"g082/c4","proposal":"claim-checks/claims-053/result.json","parent_proposal":"source-refuted-removal-induced-application-ShiftEnter-message-splitting","final_independent_gate":"required-before-original-unintended-submission-drop","reason":"Full053 replacement sends one key event, server encodes ESC-CR as one frame/OneOff. Deleted browser merger therefore does not newly split the application message. PTY short writes and program reads can still split bytes; original overly strong physical single-write inference was withdrawn, and010f1 separate contract defect remains retained. Preserve possible unintended submission/high consequence with no established work loss for fresh gate; do not certify transport atomicity or AltGraph behavior."},
- {"key":"g082/c5","proposal":"claim-checks/claims-053/result.json","parent_proposal":"source-refuted-replacement-clipboard-read-or-render-await-stall","final_independent_gate":"required-before-highest-private-data-drop","reason":"Full053 callbacks only write, enqueue returns with one active/replaceable pending item rather than awaiting clipboard completion; emulator drops ClipboardLoad and emits writes from Live effects. Refute removed-provider replacement read/stall route only, not hostile bridge/all endpoints/browser policy. Original clipboard exfiltration and separate stall concern remain for gate; supervisor clipboard notice-drain work-bound finding is different."},
- {"key":"g082/c6","proposal":"claim-checks/claims-053/result.json","parent_proposal":"source-refuted-deleted-byte-watermarks-remove-grid-flow-control","final_independent_gate":"required-before-original-highest-history-loss-drop","reason":"Full053 parent grid dispatch already bypassed byte backlog, while helm attached client owns queue-driven Pause/Resume and grid page still applies/history-drains. Refute deleted byte watermarks as missing grid protection, not all queue capacity/fairness/malformed/recovery behavior. Preserve silent unrecoverable history/agent-stop possibility for fresh gate. Exact same narrow083c1 with independent parent dispatch proof, not accepted journal-resize filter."},
- {"key":"g083/c1","proposal":"claim-checks/claims-053/result.json","parent_proposal":"same-grid-flow-control-source-refutation","final_independent_gate":"required-before-original-highest-history-loss-drop","reason":"Full053 original parent path returns after grid receive before deleted byte replay/write flow, child keeps direct grid dispatch and bounded drains with independent helm pause owner. Same082c6 hypothesis, retain both records and limits. No runtime actual loss found, no full queue/recovery certification; constructor rollback/test-getter issues remain distinct. Fresh gate must judge narrow refutation and any dedup without erasing original irreversible-output-loss consequence."}
+  {
+    "key": "g082/c2",
+    "proposal": "claim-checks/claims-053/result.json",
+    "parent_proposal": "retain-highest-successful-legacy-paste-Text-reinterpretation",
+    "final_independent_gate": "required-for-any-prior-drop-or-lowering",
+    "reason": "Parent read full053. Fresh unknown-kind xterm, no enabled legacy paste wrapper, literal small complete JSON paste preserved through sanitizer/onebinarymessage, new tagged Text parser decodes controls and queues ordinary bytes. This is successful unintended input, beyond named accepted malformed detach/misdrawing; reload does not undo delivered input. Source conditions remain explicit, no runtime command execution/frequency/loss observed. Preserve original reload-only low assessment and later reopened highest route, reconcile196/053/032 aliases without dropping caveats. Broad old-page or upgrade filter coverage is unclear and therefore not accepted."
+  },
+  {
+    "key": "g082/c4",
+    "proposal": "claim-checks/claims-053/result.json",
+    "parent_proposal": "source-refuted-removal-induced-application-ShiftEnter-message-splitting",
+    "final_independent_gate": "required-before-original-unintended-submission-drop",
+    "reason": "Full053 replacement sends one key event, server encodes ESC-CR as one frame/OneOff. Deleted browser merger therefore does not newly split the application message. PTY short writes and program reads can still split bytes; original overly strong physical single-write inference was withdrawn, and010f1 separate contract defect remains retained. Preserve possible unintended submission/high consequence with no established work loss for fresh gate; do not certify transport atomicity or AltGraph behavior."
+  },
+  {
+    "key": "g082/c5",
+    "proposal": "claim-checks/claims-053/result.json",
+    "parent_proposal": "source-refuted-replacement-clipboard-read-or-render-await-stall",
+    "final_independent_gate": "required-before-highest-private-data-drop",
+    "reason": "Full053 callbacks only write, enqueue returns with one active/replaceable pending item rather than awaiting clipboard completion; emulator drops ClipboardLoad and emits writes from Live effects. Refute removed-provider replacement read/stall route only, not hostile bridge/all endpoints/browser policy. Original clipboard exfiltration and separate stall concern remain for gate; supervisor clipboard notice-drain work-bound finding is different."
+  },
+  {
+    "key": "g082/c6",
+    "proposal": "claim-checks/claims-053/result.json",
+    "parent_proposal": "source-refuted-deleted-byte-watermarks-remove-grid-flow-control",
+    "final_independent_gate": "required-before-original-highest-history-loss-drop",
+    "reason": "Full053 parent grid dispatch already bypassed byte backlog, while helm attached client owns queue-driven Pause/Resume and grid page still applies/history-drains. Refute deleted byte watermarks as missing grid protection, not all queue capacity/fairness/malformed/recovery behavior. Preserve silent unrecoverable history/agent-stop possibility for fresh gate. Exact same narrow083c1 with independent parent dispatch proof, not accepted journal-resize filter."
+  },
+  {
+    "key": "g083/c1",
+    "proposal": "claim-checks/claims-053/result.json",
+    "parent_proposal": "same-grid-flow-control-source-refutation",
+    "final_independent_gate": "required-before-original-highest-history-loss-drop",
+    "reason": "Full053 original parent path returns after grid receive before deleted byte replay/write flow, child keeps direct grid dispatch and bounded drains with independent helm pause owner. Same082c6 hypothesis, retain both records and limits. No runtime actual loss found, no full queue/recovery certification; constructor rollback/test-getter issues remain distinct. Fresh gate must judge narrow refutation and any dedup without erasing original irreversible-output-loss consequence."
+  }
 ]

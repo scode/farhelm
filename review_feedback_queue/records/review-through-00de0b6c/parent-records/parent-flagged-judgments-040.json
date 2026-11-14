@@ -1,3 +1,9 @@
 [
- {"key":"g062/c6","proposal":"claim-checks/claims-040/result.json","parent_proposal":"source-refuted-repeated-focused-release-invocation-loses-surviving-selectors","final_independent_gate":"required-before-original-possible-session-loss-drop","reason":"Parent read full040. Three surviving exact library regressions remain in ordinary required-tmux workspace nextest selection with real fixtures that fail absent/unsupported tmux, pinned recorder/hash checks and process-per-test isolation. Seven deleted e2e bodies have separate obligations not answered by this invocation proof. No later skip guard is attributed retroactively; current production retirement alone would not refute a historical oracle defect. Proposed narrow repeated-invocation omission refutation, not historical job execution/pass or all deleted test coverage. Preserve potential dangerous teardown/private-server crash/work loss for the fresh check."}
+  {
+    "key": "g062/c6",
+    "proposal": "claim-checks/claims-040/result.json",
+    "parent_proposal": "source-refuted-repeated-focused-release-invocation-loses-surviving-selectors",
+    "final_independent_gate": "required-before-original-possible-session-loss-drop",
+    "reason": "Parent read full040. Three surviving exact library regressions remain in ordinary required-tmux workspace nextest selection with real fixtures that fail absent/unsupported tmux, pinned recorder/hash checks and process-per-test isolation. Seven deleted e2e bodies have separate obligations not answered by this invocation proof. No later skip guard is attributed retroactively; current production retirement alone would not refute a historical oracle defect. Proposed narrow repeated-invocation omission refutation, not historical job execution/pass or all deleted test coverage. Preserve potential dangerous teardown/private-server crash/work loss for the fresh check."
+  }
 ]

@@ -257,11 +257,26 @@
       "TODO.md Planned empty; remaining queue/index, BUGS.md and plans/queue searches found no exact early-refusal artifact item. tmux retirement plans have landed. FILTER.md older-release-plus-rare-condition could cover private tidiness after interrupted legacy create, but the original security concern and specific cleanup promise require a narrowly scoped independent disposition rather than silent filtering."
     ],
     "exact_cover_quotes": [
-      {"source": "SPEC_impl.md:94-97", "quote": "files left behind are not a leak, and need no extra cleanup machinery, when they are bounded by a fixed amount, grow only with a rare and explicit user action (such as switching the release download source), or are removed by the next attempt at the same operation or by the next start of the process that owns them."},
-      {"source": "SPEC_impl.md:4980-4982", "quote": "Removing specs is therefore tidiness, not a credential boundary: the shim unlinks its spec as soon as it has read it, creation removes it if the session never starts, and the supervisor's startup sweep removes specs of sessions that no longer exist and of launches a later generation superseded."},
-      {"source": "review_feedback_queue/FILTER.md, Upgrades from older releases combined with another rare condition", "quote": "The trigger needs something carried across an upgrade from an older Farhelm release"},
-      {"source": "review_feedback_queue/FILTER.md, same filter", "quote": "The trigger also needs another rare condition on top of that: a narrow timing window, a crash or fault at a specific point, or an unusual sequence of user or agent actions."},
-      {"source": "review_feedback_queue/FILTER.md, same filter exclusion", "quote": "a security or trust-boundary consequence."}
+      {
+        "source": "SPEC_impl.md:94-97",
+        "quote": "files left behind are not a leak, and need no extra cleanup machinery, when they are bounded by a fixed amount, grow only with a rare and explicit user action (such as switching the release download source), or are removed by the next attempt at the same operation or by the next start of the process that owns them."
+      },
+      {
+        "source": "SPEC_impl.md:4980-4982",
+        "quote": "Removing specs is therefore tidiness, not a credential boundary: the shim unlinks its spec as soon as it has read it, creation removes it if the session never starts, and the supervisor's startup sweep removes specs of sessions that no longer exist and of launches a later generation superseded."
+      },
+      {
+        "source": "review_feedback_queue/FILTER.md, Upgrades from older releases combined with another rare condition",
+        "quote": "The trigger needs something carried across an upgrade from an older Farhelm release"
+      },
+      {
+        "source": "review_feedback_queue/FILTER.md, same filter",
+        "quote": "The trigger also needs another rare condition on top of that: a narrow timing window, a crash or fault at a specific point, or an unusual sequence of user or agent actions."
+      },
+      {
+        "source": "review_feedback_queue/FILTER.md, same filter exclusion",
+        "quote": "a security or trust-boundary consequence."
+      }
     ],
     "missing_premise": "No missing source premise for private leftover timing. A security consequence needs an actual new reader, disclosure, misuse or boundary crossing; none is shown. Whether general next-start acceptance or the more specific never-started creation-cleanup promise controls remains a recording ambiguity.",
     "original_stronger_consequence": "Private launch instructions can retain session credentials or user-supplied command secrets after the refusal removes the session row. The original lead explicitly did not establish credential exposure; the later proposal lowers this to private tidiness and suggests specification coverage.",

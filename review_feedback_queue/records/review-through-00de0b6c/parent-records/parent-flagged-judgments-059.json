@@ -1,6 +1,30 @@
 [
- {"key":"g090/l1","proposal":"claim-checks/claims-059/result.json","parent_proposal":"source-refuted-removed-release-verifier-leaves-devbuild-download-unauthenticated","final_independent_gate":"required-before-highest-executable-authentication-drop","reason":"Parent read full059. Entire former tmux download/cache/signature/hash/copy block removed, staged payload dir cleared and only checkout-built Linux farhelm archives/stamp remain; pinned consumer-name search has no surviving verifier/tmux asset route. Explicit selected local-directory operator trust applies to replacement, not permission for unauthenticated download. Refute only identified former caller, not every external release/download/signing path. Preserve original untrusted executable consequence for fresh gate."},
- {"key":"g090/c2","proposal":"claim-checks/claims-059/result.json","parent_proposal":"source-refuted-recipe-unaware-CLI-None-fields-reset-placement","final_independent_gate":"required-before-original-highest-wrong-host-drop","reason":"Full059 at350 CLI resolves templates first with empty recipe/place catalogs and fails unknown environment recipe before flag edits; ordinary Host/target setters conditional and None serialization omitted. Earlier setter-preservation explanation alone missed earlier fail-closed refusal, now corrected. No silent ordinary fallback or erased placement shown; later190d environment-aware feature is separate. Preserve original command-on-unintended-host/work risk for gate, no broad later CLI certificate."},
- {"key":"g090/c3","proposal":"claim-checks/claims-059/result.json","parent_proposal":"retain-wire-Clone-host-documentation-with-original-runtime-refutation-gate","final_independent_gate":"required-before-original-highest-runtime-drop-or-lowering","reason":"Full059 new190d hostless environment Clone derives source recipe/place and rejects host/cwd/key overrides before approval/revalidation; ordinary clones still require host. This refutes original ordinary host fallback/security/work route but makes unchanged unconditional wire host-required/None-only-refused prose newly false, persisting to tip. Retain distinct other documentation defect; earlier assigned-file/too-minor dismissal superseded. Preserve both paths and original stronger consequence for fresh gate, not treat correct runtime as prose refutation."},
- {"key":"g090/c4","proposal":"claim-checks/claims-059/result.json","parent_proposal":"exact-retired-CLI-access-cover-plus-source-refuted-queued-isolation-fallback","final_independent_gate":"required-before-original-highest-isolation-drop","reason":"Full059 explicit retired entry-point refusal is product contract, with Delete locking/ticket revocation/absence-confirming legacy teardown preserved. Stronger queued old-container command executing outside host separately blocked before argv/checkout by decoded container guard. Cover access retirement and refute pre-exec bypass only, not all container lifetimes; keep original high UX and later highest security/work theories as separate bases for independent gate, no rarity filter."}
+  {
+    "key": "g090/l1",
+    "proposal": "claim-checks/claims-059/result.json",
+    "parent_proposal": "source-refuted-removed-release-verifier-leaves-devbuild-download-unauthenticated",
+    "final_independent_gate": "required-before-highest-executable-authentication-drop",
+    "reason": "Parent read full059. Entire former tmux download/cache/signature/hash/copy block removed, staged payload dir cleared and only checkout-built Linux farhelm archives/stamp remain; pinned consumer-name search has no surviving verifier/tmux asset route. Explicit selected local-directory operator trust applies to replacement, not permission for unauthenticated download. Refute only identified former caller, not every external release/download/signing path. Preserve original untrusted executable consequence for fresh gate."
+  },
+  {
+    "key": "g090/c2",
+    "proposal": "claim-checks/claims-059/result.json",
+    "parent_proposal": "source-refuted-recipe-unaware-CLI-None-fields-reset-placement",
+    "final_independent_gate": "required-before-original-highest-wrong-host-drop",
+    "reason": "Full059 at350 CLI resolves templates first with empty recipe/place catalogs and fails unknown environment recipe before flag edits; ordinary Host/target setters conditional and None serialization omitted. Earlier setter-preservation explanation alone missed earlier fail-closed refusal, now corrected. No silent ordinary fallback or erased placement shown; later190d environment-aware feature is separate. Preserve original command-on-unintended-host/work risk for gate, no broad later CLI certificate."
+  },
+  {
+    "key": "g090/c3",
+    "proposal": "claim-checks/claims-059/result.json",
+    "parent_proposal": "retain-wire-Clone-host-documentation-with-original-runtime-refutation-gate",
+    "final_independent_gate": "required-before-original-highest-runtime-drop-or-lowering",
+    "reason": "Full059 new190d hostless environment Clone derives source recipe/place and rejects host/cwd/key overrides before approval/revalidation; ordinary clones still require host. This refutes original ordinary host fallback/security/work route but makes unchanged unconditional wire host-required/None-only-refused prose newly false, persisting to tip. Retain distinct other documentation defect; earlier assigned-file/too-minor dismissal superseded. Preserve both paths and original stronger consequence for fresh gate, not treat correct runtime as prose refutation."
+  },
+  {
+    "key": "g090/c4",
+    "proposal": "claim-checks/claims-059/result.json",
+    "parent_proposal": "exact-retired-CLI-access-cover-plus-source-refuted-queued-isolation-fallback",
+    "final_independent_gate": "required-before-original-highest-isolation-drop",
+    "reason": "Full059 explicit retired entry-point refusal is product contract, with Delete locking/ticket revocation/absence-confirming legacy teardown preserved. Stronger queued old-container command executing outside host separately blocked before argv/checkout by decoded container guard. Cover access retirement and refute pre-exec bypass only, not all container lifetimes; keep original high UX and later highest security/work theories as separate bases for independent gate, no rarity filter."
+  }
 ]

@@ -1,3 +1,10 @@
 [
-  {"id":"g020","turn":6,"offset":29,"verdict":"productive-discovery-awaiting-interface-synthesis","discovery":{"new_verified":["l8"],"new_unverified":[],"empty":false},"reason":"Parent read full reply/events24-29 and complete1443line audit,zero gaps/rejections/unfinished/unrecognized. l7 preserves exact reciprocal005/018 synthesis; parent keeps separate correction scopes for deadline-model and unconditional-order claims. Newl8 actual-operation SessionClaim is discarded and reminted after owned create result; reconnect can make earlier result falsely fresh by matching replacement claim to itself. Parent directly checked190d caller4570-4597,sessions1780-1807 and proto2638-2661. Narrow reply freshness/source contract defect only, no wrong physical target/reference or highest harm. No open substantive lead; knownl1 remains investigated contract uncertainty. Send concrete API/actor/result/protocol input to original024/027/045/052, then require next discovery beyond l8. Recording filters remain undecided."}
+  {
+    "id": "g020",
+    "turn": 6,
+    "offset": 29,
+    "verdict": "productive-discovery-awaiting-interface-synthesis",
+    "discovery": { "new_verified": ["l8"], "new_unverified": [], "empty": false },
+    "reason": "Parent read full reply/events24-29 and complete1443line audit,zero gaps/rejections/unfinished/unrecognized. l7 preserves exact reciprocal005/018 synthesis; parent keeps separate correction scopes for deadline-model and unconditional-order claims. Newl8 actual-operation SessionClaim is discarded and reminted after owned create result; reconnect can make earlier result falsely fresh by matching replacement claim to itself. Parent directly checked190d caller4570-4597,sessions1780-1807 and proto2638-2661. Narrow reply freshness/source contract defect only, no wrong physical target/reference or highest harm. No open substantive lead; knownl1 remains investigated contract uncertainty. Send concrete API/actor/result/protocol input to original024/027/045/052, then require next discovery beyond l8. Recording filters remain undecided."
+  }
 ]

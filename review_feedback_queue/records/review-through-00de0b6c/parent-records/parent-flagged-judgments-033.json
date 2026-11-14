@@ -1,9 +1,51 @@
 [
- {"key":"g052/c1","proposal":"claim-checks/claims-033/result.json","parent_proposal":"exact-spec-accepted-raster-opening-defaults-and-warning-exemption","final_independent_gate":"required-before-original-possible-highest-policy-drop","reason":"Parent reread033 in two bounded complete outputs after the first clipped output earned no credit. Exact dated product amendment adds png/jpg/jpeg/gif/webp/bmp/avif and grants modifier-click cross-host transfer, including agent-controlled files; source adds exactly those formats and keeps SVG HTML warning. Proposed acceptance only of that extension/warning policy, not arbitrary native image-handler safety or opening without the required gesture. No exploit or additional input route was established; preserve the original security possibility for the fresh gate."},
- {"key":"g052/c2","proposal":"claim-checks/claims-033/result.json","parent_proposal":"source-refuted-erased-retired-isolation-marker-execution","final_independent_gate":"required-before-original-highest-isolation-drop","reason":"Full bounded033: historical container Option remains present despite image_file being discarded as IgnoredAny. Launcher rejects the marker before draft application; supervisor rejects container-bearing launch before argv/execution. The earlier exact-byte-preservation claim was wrong and withdrawn; do not restore it. Refute only decode-erases-isolation→outside-host execution, not archival fingerprint preservation or other deletion paths. Preserve credential/work exposure consequence for the fresh check."},
- {"key":"g052/c3","proposal":"claim-checks/claims-033/result.json","parent_proposal":"split-direct-Allow-gating-refutation-from-pending-place-authority-root","final_independent_gate":"required-before-original-authorization-drop-or-lowering","reason":"Full033 distinct LaunchEnvironment tag requires direct Allow, standing permissions cannot bypass and AlwaysAllow refuses; older UI whole-list decoding refusal is explicitly accepted. These narrow facts do not freeze physical Podman place: the i64/name is captured before approval, only clone source rechecked later. Preserve supporting evidence under020l1/041l2 and pending parent010 logical-host-vs-physical-place contract question; no blanket refutation of credentials/commands reaching a changed endpoint. A private later provisioning snapshot would require its own proof; direct-Allow fields alone do not provide it."},
- {"key":"g052/c4","proposal":"claim-checks/claims-033/result.json","parent_proposal":"source-refuted-missing-Unasked-protocol-consumer","final_independent_gate":"required-by-conservative-destructive-fallback-flag","reason":"Full bounded033 foundation old page cannot opt into new query-gated Delete, later immediate API consumer recognizes exact409/header/value, maps404Gone and uses separate Session/Whole opt-ins. Refutes the named absent marker consumer, not every later rendered confirmation/automatic escalation route. Preserve original missing warned fallback and conservative destructive-context flag; typed documentation or intermediate gate alone is not complete UI correctness evidence."},
- {"key":"g053/c1","proposal":"claim-checks/claims-033/result.json","parent_proposal":"retain-highest-raw-legacy-paste-grid-input-reinterpretation","final_independent_gate":"required-for-any-original-dropping-or-lowering","reason":"Parent read full033 bounded. Fresh unknown-kind xterm after old-page reconnect, no notice selects bytes, literal paste sanitizer removes literalESC but not JSON escapes, unbracketed paste emits once as binary whole message, helm forwards unchanged, new GridInput Text decoding writes decoded controls as ordinary input. Successful data-to-control transformation exceeds clearly named malformed detach/misdrawing acceptance; ambiguous cover retains. Preserve small whole valid message, no active paste wrapper, fresh surface/manual reconnect and no payload/runtime-frequency claims. Same196family with032l6/082/083 support requires canonical reconciliation; earlier high-only/no-highest conclusion superseded, not reason to lower."},
- {"key":"g053/f1","proposal":"claim-checks/claims-033/result.json","parent_proposal":"exact-spec-accepted-deliberate-old-terminal-process-screen-retirement","final_independent_gate":"required-before-highest-drop","reason":"Full033 and parent-read actual current old-terminal passages explicitly require startup termination of old agents/tabs and loss of retained screens, while separately accepting logged failure/second-agent residual. Established work/process/content loss remains highest for gate, not denied or filtered as ordinary upgrade. Proposed exact intentional retirement acceptance only;004f1 installer survival assurance and033r1 hidden cleanup failure are distinct. Protocol77/page reload is not permission to break the permanent terminal-host protocol, whose relevant source did not change."},
- {"key":"g053/c2","proposal":"claim-checks/claims-033/result.json","parent_proposal":"source-refuted-pre77-native-supervisor-admission","final_independent_gate":"required-by-conservative-cross-wire-work-flag","reason":"Full033 proto77 requires exact hello equality, refusing older native supervisor before mixed rendering/input; unchanged terminal-host raw protocol remains a separate permanent compatibility obligation. Narrow peer-edge refutation only, not browser stale page, which remains highest053c1/196. Preserve the original material UX/cross-wire possible-work concern for conservative fresh check; no handshake runtime or whole unchanged module audit claimed."}
+  {
+    "key": "g052/c1",
+    "proposal": "claim-checks/claims-033/result.json",
+    "parent_proposal": "exact-spec-accepted-raster-opening-defaults-and-warning-exemption",
+    "final_independent_gate": "required-before-original-possible-highest-policy-drop",
+    "reason": "Parent reread033 in two bounded complete outputs after the first clipped output earned no credit. Exact dated product amendment adds png/jpg/jpeg/gif/webp/bmp/avif and grants modifier-click cross-host transfer, including agent-controlled files; source adds exactly those formats and keeps SVG HTML warning. Proposed acceptance only of that extension/warning policy, not arbitrary native image-handler safety or opening without the required gesture. No exploit or additional input route was established; preserve the original security possibility for the fresh gate."
+  },
+  {
+    "key": "g052/c2",
+    "proposal": "claim-checks/claims-033/result.json",
+    "parent_proposal": "source-refuted-erased-retired-isolation-marker-execution",
+    "final_independent_gate": "required-before-original-highest-isolation-drop",
+    "reason": "Full bounded033: historical container Option remains present despite image_file being discarded as IgnoredAny. Launcher rejects the marker before draft application; supervisor rejects container-bearing launch before argv/execution. The earlier exact-byte-preservation claim was wrong and withdrawn; do not restore it. Refute only decode-erases-isolation→outside-host execution, not archival fingerprint preservation or other deletion paths. Preserve credential/work exposure consequence for the fresh check."
+  },
+  {
+    "key": "g052/c3",
+    "proposal": "claim-checks/claims-033/result.json",
+    "parent_proposal": "split-direct-Allow-gating-refutation-from-pending-place-authority-root",
+    "final_independent_gate": "required-before-original-authorization-drop-or-lowering",
+    "reason": "Full033 distinct LaunchEnvironment tag requires direct Allow, standing permissions cannot bypass and AlwaysAllow refuses; older UI whole-list decoding refusal is explicitly accepted. These narrow facts do not freeze physical Podman place: the i64/name is captured before approval, only clone source rechecked later. Preserve supporting evidence under020l1/041l2 and pending parent010 logical-host-vs-physical-place contract question; no blanket refutation of credentials/commands reaching a changed endpoint. A private later provisioning snapshot would require its own proof; direct-Allow fields alone do not provide it."
+  },
+  {
+    "key": "g052/c4",
+    "proposal": "claim-checks/claims-033/result.json",
+    "parent_proposal": "source-refuted-missing-Unasked-protocol-consumer",
+    "final_independent_gate": "required-by-conservative-destructive-fallback-flag",
+    "reason": "Full bounded033 foundation old page cannot opt into new query-gated Delete, later immediate API consumer recognizes exact409/header/value, maps404Gone and uses separate Session/Whole opt-ins. Refutes the named absent marker consumer, not every later rendered confirmation/automatic escalation route. Preserve original missing warned fallback and conservative destructive-context flag; typed documentation or intermediate gate alone is not complete UI correctness evidence."
+  },
+  {
+    "key": "g053/c1",
+    "proposal": "claim-checks/claims-033/result.json",
+    "parent_proposal": "retain-highest-raw-legacy-paste-grid-input-reinterpretation",
+    "final_independent_gate": "required-for-any-original-dropping-or-lowering",
+    "reason": "Parent read full033 bounded. Fresh unknown-kind xterm after old-page reconnect, no notice selects bytes, literal paste sanitizer removes literalESC but not JSON escapes, unbracketed paste emits once as binary whole message, helm forwards unchanged, new GridInput Text decoding writes decoded controls as ordinary input. Successful data-to-control transformation exceeds clearly named malformed detach/misdrawing acceptance; ambiguous cover retains. Preserve small whole valid message, no active paste wrapper, fresh surface/manual reconnect and no payload/runtime-frequency claims. Same196family with032l6/082/083 support requires canonical reconciliation; earlier high-only/no-highest conclusion superseded, not reason to lower."
+  },
+  {
+    "key": "g053/f1",
+    "proposal": "claim-checks/claims-033/result.json",
+    "parent_proposal": "exact-spec-accepted-deliberate-old-terminal-process-screen-retirement",
+    "final_independent_gate": "required-before-highest-drop",
+    "reason": "Full033 and parent-read actual current old-terminal passages explicitly require startup termination of old agents/tabs and loss of retained screens, while separately accepting logged failure/second-agent residual. Established work/process/content loss remains highest for gate, not denied or filtered as ordinary upgrade. Proposed exact intentional retirement acceptance only;004f1 installer survival assurance and033r1 hidden cleanup failure are distinct. Protocol77/page reload is not permission to break the permanent terminal-host protocol, whose relevant source did not change."
+  },
+  {
+    "key": "g053/c2",
+    "proposal": "claim-checks/claims-033/result.json",
+    "parent_proposal": "source-refuted-pre77-native-supervisor-admission",
+    "final_independent_gate": "required-by-conservative-cross-wire-work-flag",
+    "reason": "Full033 proto77 requires exact hello equality, refusing older native supervisor before mixed rendering/input; unchanged terminal-host raw protocol remains a separate permanent compatibility obligation. Narrow peer-edge refutation only, not browser stale page, which remains highest053c1/196. Preserve the original material UX/cross-wire possible-work concern for conservative fresh check; no handshake runtime or whole unchanged module audit claimed."
+  }
 ]

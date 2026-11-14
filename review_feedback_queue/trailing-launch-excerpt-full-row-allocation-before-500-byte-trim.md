@@ -4,13 +4,20 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Source-confirmed review record: when a launch fails before its agent starts, assembling its 500-byte error excerpt now makes temporary allocations proportional to the terminal's height and the full width of its last five nonblank rows. The prior reducer kept those temporary text buffers bounded while reading the same full screen. This is a source-confirmed bounded resource regression; this finding does not claim measured latency, OOM or loss of work.
+Source-confirmed review record: when a launch fails before its agent starts, assembling its 500-byte error excerpt now
+makes temporary allocations proportional to the terminal's height and the full width of its last five nonblank rows. The
+prior reducer kept those temporary text buffers bounded while reading the same full screen. This is a source-confirmed
+bounded resource regression; this finding does not claim measured latency, OOM or loss of work.
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g100/l1`.
 
@@ -20,19 +27,72 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 5 (finding, open):
 
-Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: when a launch fails before its agent starts, assembling its 500-byte error excerpt now makes temporary allocations proportional to the terminal's height and the full width of its last five nonblank rows. The prior reducer kept those temporary text buffers bounded while reading the same full screen. This is a source-confirmed bounded resource regression; this finding does not claim measured latency, OOM or loss of work. Details: launch_excerpt_of_text at lines 97-105 collects every nonblank row slice before selecting five; lines 107-117 append and escape all characters of those five rows; only lines 119-124 trim to LAUNCH_EXCERPT_BYTES=500. The replaced parent tmux.rs:180-299 reducer keeps at most five suffixes, trims line/whitespace buffers on each append, and trims the joined result. The existing full-screen extraction in append_launch_excerpt line 72 and hosts/terminal.rs:2233-2240 remains an independent cost: it does not eliminate this newly added vector and escaped-row allocation. Explicit bounds checked: terminal-host protocol.rs:100-145 permits 10,000 columns and 10,000 rows; host_launch.rs:513-514 clamps creates to that bound, not to the ordinary 200-column measurement size. screen.rs:50-96 emits one row per screen row and base plus combining marks; vendor cell.rs:46-56,362-368 caps marks at 16 per cell. Therefore row references are bounded by 10,000, and a conservative ceiling for the five-row temporary string is 5*10,000*17*10+12 = 8,500,012 bytes of escaped text before String-capacity overhead (10 is the maximum char::escape_default spelling length, 12 the four separators). That is an upper bound, not a claim every cell can simultaneously realize that spelling; ignored-format filtering and the 64 MiB extra-storage cap can narrow content. The ordinary 80 MiB / hostile about 190 MiB memory figures in SPEC_impl.md:2869-2878 and emulator lib.rs:47-104 are conditional on 200 columns and full scrollback, not a separate global width admission limit. The 500-byte excerpt contract at SPEC_impl.md:2756-2766 is still met by the returned text; no hard RSS-limit breach is alleged. The two callers run synchronously within async observation/Stop processing (status.rs:652; handlers.rs:1039), so the extra work is paid by those paths, but its wall time was not measured and material user-visible latency is not asserted. A correction can retain only the suffix needed for the escaped 500-byte result and the last five nonblank rows, as the prior reducer did, without changing output. Suggested bucket: other, for the established bounded allocation/work regression; could-be-highest: no established security or work-loss route. Confidence: confirmed from source; no execution. proposed_drop: false (supersedes the earlier proposed drop based only on finite bounds and lack of an observed failure). possible_cover: none. Caveats: full-screen extraction predates this patch; this is neither an unbounded-memory finding nor a claim that the documented terminal memory budgets are necessarily exceeded.
+Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. TLDR: when a launch fails before its agent starts, assembling
+its 500-byte error excerpt now makes temporary allocations proportional to the terminal's height and the full width of
+its last five nonblank rows. The prior reducer kept those temporary text buffers bounded while reading the same full
+screen. This is a source-confirmed bounded resource regression; this finding does not claim measured latency, OOM or
+loss of work. Details: launch_excerpt_of_text at lines 97-105 collects every nonblank row slice before selecting five;
+lines 107-117 append and escape all characters of those five rows; only lines 119-124 trim to LAUNCH_EXCERPT_BYTES=500.
+The replaced parent tmux.rs:180-299 reducer keeps at most five suffixes, trims line/whitespace buffers on each append,
+and trims the joined result. The existing full-screen extraction in append_launch_excerpt line 72 and
+hosts/terminal.rs:2233-2240 remains an independent cost: it does not eliminate this newly added vector and escaped-row
+allocation. Explicit bounds checked: terminal-host protocol.rs:100-145 permits 10,000 columns and 10,000 rows;
+host_launch.rs:513-514 clamps creates to that bound, not to the ordinary 200-column measurement size. screen.rs:50-96
+emits one row per screen row and base plus combining marks; vendor cell.rs:46-56,362-368 caps marks at 16 per cell.
+Therefore row references are bounded by 10,000, and a conservative ceiling for the five-row temporary string is
+5*10,000*17*10+12 = 8,500,012 bytes of escaped text before String-capacity overhead (10 is the maximum
+char::escape_default spelling length, 12 the four separators). That is an upper bound, not a claim every cell can
+simultaneously realize that spelling; ignored-format filtering and the 64 MiB extra-storage cap can narrow content. The
+ordinary 80 MiB / hostile about 190 MiB memory figures in SPEC_impl.md:2869-2878 and emulator lib.rs:47-104 are
+conditional on 200 columns and full scrollback, not a separate global width admission limit. The 500-byte excerpt
+contract at SPEC_impl.md:2756-2766 is still met by the returned text; no hard RSS-limit breach is alleged. The two
+callers run synchronously within async observation/Stop processing (status.rs:652; handlers.rs:1039), so the extra work
+is paid by those paths, but its wall time was not measured and material user-visible latency is not asserted. A
+correction can retain only the suffix needed for the escaped 500-byte result and the last five nonblank rows, as the
+prior reducer did, without changing output. Suggested bucket: other, for the established bounded allocation/work
+regression; could-be-highest: no established security or work-loss route. Confidence: confirmed from source; no
+execution. proposed_drop: false (supersedes the earlier proposed drop based only on finite bounds and lack of an
+observed failure). possible_cover: none. Caveats: full-screen extraction predates this patch; this is neither an
+unbounded-memory finding nor a claim that the documented terminal memory budgets are necessarily exceeded.
 
 Returned proposal (claims-065, event 5): **retain-verified**, suggested bucket **other**.
 
-The replacement reducer retains row references for the full screen and escapes five full rows before trimming. Finite admission bounds do not refute that added allocation/work.
+The replacement reducer retains row references for the full screen and escapes five full rows before trimming. Finite
+admission bounds do not refute that added allocation/work.
 
-Original stronger consequence: The initial concern was extra allocation far beyond the retained diagnostic. A later candidate proposed dropping it after proving finite dimensions; that proposed drop was withdrawn because it answered unboundedness rather than the original regression. Retain bounded cost only.
+Original stronger consequence: The initial concern was extra allocation far beyond the retained diagnostic. A later
+candidate proposed dropping it after proving finite dimensions; that proposed drop was withdrawn because it answered
+unboundedness rather than the original regression. Retain bounded cost only.
 
-Unresolved premise or limitation: Material UX latency, OOM, a violated hard RSS bound, security impact and work loss are not established.
+Unresolved premise or limitation: Material UX latency, OOM, a violated hard RSS bound, security impact and work loss are
+not established.
 
-Proposed basis: Retain other for the source-confirmed bounded allocation/work regression, explicitly preserving pre-existing full-screen cost and unmeasured stronger impacts.
+Proposed basis: Retain other for the source-confirmed bounded allocation/work regression, explicitly preserving
+pre-existing full-screen cost and unmeasured stronger impacts.
 
-Existing parent disposition (event 5): verified. Parent explicitly accepted named retain-verified proposal from claims-065 after inspecting it. The replacement reducer retains row references for the full screen and escapes five full rows before trimming. Finite admission bounds do not refute that added allocation/work. Retain other for the source-confirmed bounded allocation/work regression, explicitly preserving pre-existing full-screen cost and unmeasured stronger impacts. Checked source/results: ["1ed482dde220452e424973faf38a5e1318986333:service/launch_artifacts.rs:97-124 collects all nonblank row slices, appends/escapes five full rows, then trims to 500 bytes. Parent revision tmux.rs:180-299 incrementally bounds line/whitespace suffixes and keeps at most five lines.","Same revision terminal-host/src/protocol.rs:100-145 permits each dimension up to 10,000; host_launch.rs:508-518 clamps to that bound. terminal-emulator/src/screen.rs:50-96 emits base and combining characters for visible cells. vendor cell.rs:46-56,362-368 caps marks at 16 per cell.","Conservative escaped-text ceiling for the five-row intermediate is 5*10000*17*10+12 = 8,500,012 bytes before capacity overhead. This is an upper bound, not a demonstrated simultaneous cell payload. Full-screen extraction already existed and is a separate cost. No latency or memory-failure measurement."] Current coverage/results: ["Both specifications searched for excerpt limits and memory budgets. Current SPEC_impl.md:2658-2667 limits returned text, not these intermediates. Memory budget at :2769-2778 is conditional on 200 columns/full scrollback, not a narrower admission limit.","TODO Planned empty; BUGS, active TRIAGE_OUTCOMES, plans/queue and INDEX searched for excerpt allocation/reduction and launch-error resource cost. No exact coverage found. The tmux-end-old-terminals helper-move instruction is landed, not an outstanding implementation plan.","FILTER.md rare diagnostic/session-status filters do not cover extra supervisor allocation/work. Rare failure context alone is insufficient."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "The initial concern was extra allocation far beyond the retained diagnostic. A later candidate proposed dropping it after proving finite dimensions; that proposed drop was withdrawn because it answered unboundedness rather than the original regression. Retain bounded cost only."; "Material UX latency, OOM, a violated hard RSS bound, security impact and work loss are not established.".
+Existing parent disposition (event 5): verified. Parent explicitly accepted named retain-verified proposal from
+claims-065 after inspecting it. The replacement reducer retains row references for the full screen and escapes five full
+rows before trimming. Finite admission bounds do not refute that added allocation/work. Retain other for the
+source-confirmed bounded allocation/work regression, explicitly preserving pre-existing full-screen cost and unmeasured
+stronger impacts. Checked source/results: ["1ed482dde220452e424973faf38a5e1318986333:service/launch_artifacts.rs:97-124
+collects all nonblank row slices, appends/escapes five full rows, then trims to 500 bytes. Parent revision
+tmux.rs:180-299 incrementally bounds line/whitespace suffixes and keeps at most five lines.","Same revision
+terminal-host/src/protocol.rs:100-145 permits each dimension up to 10,000; host_launch.rs:508-518 clamps to that bound.
+terminal-emulator/src/screen.rs:50-96 emits base and combining characters for visible cells. vendor
+cell.rs:46-56,362-368 caps marks at 16 per cell.","Conservative escaped-text ceiling for the five-row intermediate is
+5*10000*17*10+12 = 8,500,012 bytes before capacity overhead. This is an upper bound, not a demonstrated simultaneous
+cell payload. Full-screen extraction already existed and is a separate cost. No latency or memory-failure measurement."]
+Current coverage/results: ["Both specifications searched for excerpt limits and memory budgets. Current
+SPEC_impl.md:2658-2667 limits returned text, not these intermediates. Memory budget at :2769-2778 is conditional on 200
+columns/full scrollback, not a narrower admission limit.","TODO Planned empty; BUGS, active TRIAGE_OUTCOMES, plans/queue
+and INDEX searched for excerpt allocation/reduction and launch-error resource cost. No exact coverage found. The
+tmux-end-old-terminals helper-move instruction is landed, not an outstanding implementation plan.","FILTER.md rare
+diagnostic/session-status filters do not cover extra supervisor allocation/work. Rare failure context alone is
+insufficient."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "The initial
+concern was extra allocation far beyond the retained diagnostic. A later candidate proposed dropping it after proving
+finite dimensions; that proposed drop was withdrawn because it answered unboundedness rather than the original
+regression. Retain bounded cost only."; "Material UX latency, OOM, a violated hard RSS bound, security impact and work
+loss are not established.".
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g100 record](records/review-through-00de0b6c/groups/g100.json). Record ID: `l1`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g100 record](records/review-through-00de0b6c/groups/g100.json). Record ID: `l1`.

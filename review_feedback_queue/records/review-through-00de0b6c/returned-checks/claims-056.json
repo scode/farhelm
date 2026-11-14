@@ -20,10 +20,19 @@
       "INDEX.md searched/read and matching launch entries checked: no exact existing item. FILTER.md does not independently cover destruction of started work."
     ],
     "exact_cover_quotes": [
-      {"source":"SPEC.md:1480-1485, Sandbox sessions", "quote":"If an ordinary new launch fails before the helm has confirmed session creation, including a lost create reply, it attempts to delete that newly created sandbox and snapshots and shows **Not launched.** with the reason. This may end an agent that started before its reply was lost."},
-      {"source":"SPEC.md:1485", "quote":"Transparent recovery of an ambiguous launch is not promised."},
-      {"source":"SPEC_impl.md:6602-6606, Tensorlake sandbox sessions", "quote":"Lost create replies need no special reconciliation: the newly created resource may be destroyed. Interrupted owned resources remain visible in Hosts, and resources without a row are discoverable by the reserved prefix. There is no new launch journal, retained request fingerprint, exactly-once launch guarantee or startup continuation worker."},
-      {"source":"SPEC.md:4834-4836, Container sessions", "quote":"An ordinary failed initial launch may discard its newly created container, including after a lost session-create reply."}
+      {
+        "source": "SPEC.md:1480-1485, Sandbox sessions",
+        "quote": "If an ordinary new launch fails before the helm has confirmed session creation, including a lost create reply, it attempts to delete that newly created sandbox and snapshots and shows **Not launched.** with the reason. This may end an agent that started before its reply was lost."
+      },
+      { "source": "SPEC.md:1485", "quote": "Transparent recovery of an ambiguous launch is not promised." },
+      {
+        "source": "SPEC_impl.md:6602-6606, Tensorlake sandbox sessions",
+        "quote": "Lost create replies need no special reconciliation: the newly created resource may be destroyed. Interrupted owned resources remain visible in Hosts, and resources without a row are discoverable by the reserved prefix. There is no new launch journal, retained request fingerprint, exactly-once launch guarantee or startup continuation worker."
+      },
+      {
+        "source": "SPEC.md:4834-4836, Container sessions",
+        "quote": "An ordinary failed initial launch may discard its newly created container, including after a lost session-create reply."
+      }
     ],
     "missing_premise": null,
     "original_stronger_consequence": "Preserve both duplicate environments/sessions and extra Tensorlake billing after another explicit launch, and ending an agent or discarding files it created after an internally lost session-create acknowledgement. Cleanup is confined to this fresh resource, not an existing Replace source. Outer client response loss alone does not initiate cleanup. Failed cleanup remains recoverable; no runtime incident was demonstrated.",
@@ -217,7 +226,10 @@
       "Planned empty; BUGS.md unrelated; active ledger and INDEX searched for one-shot wake/post-expiry pending consequence, no distinct exact item. FILTER.md not needed."
     ],
     "exact_cover_quotes": [
-      {"source":"SPEC_impl.md:210-215, GUI: Dioxus", "quote":"The limit is checked when its 60 seconds run out: a press still waiting for a connection then is discarded, even one that saw the host connect and lost it again before that point, while a host that shows a connection pending again only after that point is not bounded by it."}
+      {
+        "source": "SPEC_impl.md:210-215, GUI: Dioxus",
+        "quote": "The limit is checked when its 60 seconds run out: a press still waiting for a connection then is discarded, even one that saw the host connect and lost it again before that point, while a host that shows a connection pending again only after that point is not bounded by it."
+      }
     ],
     "missing_premise": "An actual indefinitely pending later connection and resulting persistent token blockage were not established. That stronger availability consequence could merit high; it is not disproved by the timer's narrow accepted scope.",
     "original_stronger_consequence": "A connection returning to pending after the one-shot expiry can keep the launch waiting with no renewed 60-second bound. A still-waiting press discarded at expiry cannot later create from that spent slot. This check does not bound later preview preparation or certify host-reader progress.",

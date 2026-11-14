@@ -4,13 +4,30 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Unverified collection: recipe cleanup can delete an untagged user-owned local base image, including a sole retained copy of user-authored contents, even though Farhelm checks the explicitly removed artifact's ownership. Source/caller checks: the assigned Podman::clean_recipe at podman.rs:945-950 dispatches to clean_images; rebuild_recipe at913-941 admits prepare_images with rebuild=true. Its generic command/require lowering at169-202 forwards argv without adding --no-prune. build.rs:689-743 checks only the explicit retired image's helm/recipe labels and any container use, then runs image rm -- ID. clean_images at764-788 retires current software/prepared records and uses that same removal. Replacement/failure paths also call retirement (267-278,395-401). User input is reachable: RecipeBase::ContainerImage accepts a nonempty NUL-free local image ID (proto recipes.rs:788-797); build.rs:808-837 accepts an already-existing ID without tagging it, and142-150 launches its build helper from that reference. The assigned run at podman.rs:421-470 uses that image and labels the container; commit at475-551 adds the artifact label but passes no squash/history-removal flag. Software/preparation publish owned child images through build.rs:203-227 and345-395. The saved recipe reference itself creates no Podman protective tag or container reference. Primary supported-floor semantic checks: Podman v4.9.3 cmd/podman/images/rm.go:43,60-64 defaults NoPrune=false; ABI images.go:602-613 passes opts.NoPrune to libimage. In the fetched v4.9.3 vendored libimage/image.go, actual lines193-209 define dangling by no names/child
+Unverified collection: recipe cleanup can delete an untagged user-owned local base image, including a sole retained copy
+of user-authored contents, even though Farhelm checks the explicitly removed artifact's ownership. Source/caller checks:
+the assigned Podman::clean_recipe at podman.rs:945-950 dispatches to clean_images; rebuild_recipe at913-941 admits
+prepare_images with rebuild=true. Its generic command/require lowering at169-202 forwards argv without adding
+--no-prune. build.rs:689-743 checks only the explicit retired image's helm/recipe labels and any container use, then
+runs image rm -- ID. clean_images at764-788 retires current software/prepared records and uses that same removal.
+Replacement/failure paths also call retirement (267-278,395-401). User input is reachable: RecipeBase::ContainerImage
+accepts a nonempty NUL-free local image ID (proto recipes.rs:788-797); build.rs:808-837 accepts an already-existing ID
+without tagging it, and142-150 launches its build helper from that reference. The assigned run at podman.rs:421-470 uses
+that image and labels the container; commit at475-551 adds the artifact label but passes no squash/history-removal flag.
+Software/preparation publish owned child images through build.rs:203-227 and345-395. The saved recipe reference itself
+creates no Podman protective tag or container reference. Primary supported-floor semantic checks: Podman v4.9.3
+cmd/podman/images/rm.go:43,60-64 defaults NoPrune=false; ABI images.go:602-613 passes opts.NoPrune to libimage. In the
+fetched v4.9.3 vendored libimage/image.go, actual lines193-209 define dangling by no names/child
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **highest**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **highest**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g065/l4`.
 
@@ -20,25 +37,89 @@ Confidence: Unverified collection; recording proposals and any disagreement rema
 
 Latest reviewer record, event 21 (finding, open):
 
-Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Late synthesis alias of supplied g061/l8; retain g061/l8 as the original finding owner rather than counting a separate discovery. TLDR: recipe cleanup can delete an untagged user-owned local base image, including a sole retained copy of user-authored contents, even though Farhelm checks the explicitly removed artifact's ownership. Source/caller checks: the assigned Podman::clean_recipe at podman.rs:945-950 dispatches to clean_images; rebuild_recipe at913-941 admits prepare_images with rebuild=true. Its generic command/require lowering at169-202 forwards argv without adding --no-prune. build.rs:689-743 checks only the explicit retired image's helm/recipe labels and any container use, then runs image rm -- ID. clean_images at764-788 retires current software/prepared records and uses that same removal. Replacement/failure paths also call retirement (267-278,395-401). User input is reachable: RecipeBase::ContainerImage accepts a nonempty NUL-free local image ID (proto recipes.rs:788-797); build.rs:808-837 accepts an already-existing ID without tagging it, and142-150 launches its build helper from that reference. The assigned run at podman.rs:421-470 uses that image and labels the container; commit at475-551 adds the artifact label but passes no squash/history-removal flag. Software/preparation publish owned child images through build.rs:203-227 and345-395. The saved recipe reference itself creates no Podman protective tag or container reference.
+Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. Late synthesis alias of supplied g061/l8; retain g061/l8 as
+the original finding owner rather than counting a separate discovery. TLDR: recipe cleanup can delete an untagged
+user-owned local base image, including a sole retained copy of user-authored contents, even though Farhelm checks the
+explicitly removed artifact's ownership. Source/caller checks: the assigned Podman::clean_recipe at podman.rs:945-950
+dispatches to clean_images; rebuild_recipe at913-941 admits prepare_images with rebuild=true. Its generic
+command/require lowering at169-202 forwards argv without adding --no-prune. build.rs:689-743 checks only the explicit
+retired image's helm/recipe labels and any container use, then runs image rm -- ID. clean_images at764-788 retires
+current software/prepared records and uses that same removal. Replacement/failure paths also call retirement
+(267-278,395-401). User input is reachable: RecipeBase::ContainerImage accepts a nonempty NUL-free local image ID (proto
+recipes.rs:788-797); build.rs:808-837 accepts an already-existing ID without tagging it, and142-150 launches its build
+helper from that reference. The assigned run at podman.rs:421-470 uses that image and labels the container; commit
+at475-551 adds the artifact label but passes no squash/history-removal flag. Software/preparation publish owned child
+images through build.rs:203-227 and345-395. The saved recipe reference itself creates no Podman protective tag or
+container reference.
 
-Primary supported-floor semantic checks: Podman v4.9.3 cmd/podman/images/rm.go:43,60-64 defaults NoPrune=false; ABI images.go:602-613 passes opts.NoPrune to libimage. In the fetched v4.9.3 vendored libimage/image.go, actual lines193-209 define dangling by no names/children,509-524 resolve the parent then delete the explicit image,537-560 recurse into a dangling parent unless NoPrune. No Farhelm label predicate runs on that implicit target. The source line numbers differ from g061's anchors, but the checked mechanism is the same. Ordinary commit ancestry is supported by container_commit.go:62-75,169 forwarding an imported builder and Squash option; vendored Buildah image.go:264-278 retains inherited history unless squash/omitHistory and631-660 appends the new history entry. Libimage oci.go:64-99 recognizes shared parent diffIDs plus the one-entry history extension, and layer_tree.go:280-365 locates that parent; children at159-277 uses the same relation. The rmi manual independently states default dangling-parent deletion and --no-prune (https://docs.podman.io/en/v4.9.3/markdown/podman-rmi.1.html). Hence canonical target identity and non-forcing removal constrain the explicit image/in-use containers, not the implicit parent target set. Conditional supported route: a valid untagged user-authored local base is selected by ID, Farhelm commits an owned child, and ordinary recipe cleanup removes the child when no remaining protecting references prevent parent pruning. A sole-copy base can contain user work; no backup or protective name is required by this interface. This is source-supported conditional harm, not an executed reproduction.
+Primary supported-floor semantic checks: Podman v4.9.3 cmd/podman/images/rm.go:43,60-64 defaults NoPrune=false; ABI
+images.go:602-613 passes opts.NoPrune to libimage. In the fetched v4.9.3 vendored libimage/image.go, actual lines193-209
+define dangling by no names/children,509-524 resolve the parent then delete the explicit image,537-560 recurse into a
+dangling parent unless NoPrune. No Farhelm label predicate runs on that implicit target. The source line numbers differ
+from g061's anchors, but the checked mechanism is the same. Ordinary commit ancestry is supported by
+container_commit.go:62-75,169 forwarding an imported builder and Squash option; vendored Buildah image.go:264-278
+retains inherited history unless squash/omitHistory and631-660 appends the new history entry. Libimage oci.go:64-99
+recognizes shared parent diffIDs plus the one-entry history extension, and layer_tree.go:280-365 locates that parent;
+children at159-277 uses the same relation. The rmi manual independently states default dangling-parent deletion and
+--no-prune (https://docs.podman.io/en/v4.9.3/markdown/podman-rmi.1.html). Hence canonical target identity and
+non-forcing removal constrain the explicit image/in-use containers, not the implicit parent target set. Conditional
+supported route: a valid untagged user-authored local base is selected by ID, Farhelm commits an owned child, and
+ordinary recipe cleanup removes the child when no remaining protecting references prevent parent pruning. A sole-copy
+base can contain user work; no backup or protective name is required by this interface. This is source-supported
+conditional harm, not an executed reproduction.
 
-Contract: SPEC.md:4809-4812 explicitly says User-owned base images are retained. SPEC_impl.md:6525-6529 says user bases remain separate from committed layers, and6566-6568 says Never delete a user's base image. The explicit-ID label check does not satisfy that contract when default recursive removal crosses it. Fix direction: image removal must pass --no-prune and separately remove only recorded, ownership-checked artifact IDs. Suggested bucket: highest/loss of user-owned work, matching original g061/l8 consequence. Could-be-highest: yes, the valid sole-copy local-image route crosses an expressly preserved user-base boundary. Confidence: confirmed repository/primary-source contract route, conditional on an untagged local base and no references that prevent pruning; no runtime observation. proposed_drop: false. possible_cover: supplied g061/l8 is the exact same cause/consequence and original owner for consolidation, not searched queue coverage. Caveats: tagged bases or protecting images/containers can prevent pruning; no forced deletion of an in-use base, universal effect, observed loss or measured frequency is claimed. Local c4's failed-script-to-capture refutation and c5's wrong-canonical-CONTAINER-identity refutation remain narrow and do not refute this image ancestry route. Proxy l1/g003's distinct cache/value contracts are unchanged. No tests, builds, reproductions, discovery pass, nested agents or live-install actions.
+Contract: SPEC.md:4809-4812 explicitly says User-owned base images are retained. SPEC_impl.md:6525-6529 says user bases
+remain separate from committed layers, and6566-6568 says Never delete a user's base image. The explicit-ID label check
+does not satisfy that contract when default recursive removal crosses it. Fix direction: image removal must pass
+--no-prune and separately remove only recorded, ownership-checked artifact IDs. Suggested bucket: highest/loss of
+user-owned work, matching original g061/l8 consequence. Could-be-highest: yes, the valid sole-copy local-image route
+crosses an expressly preserved user-base boundary. Confidence: confirmed repository/primary-source contract route,
+conditional on an untagged local base and no references that prevent pruning; no runtime observation. proposed_drop:
+false. possible_cover: supplied g061/l8 is the exact same cause/consequence and original owner for consolidation, not
+searched queue coverage. Caveats: tagged bases or protecting images/containers can prevent pruning; no forced deletion
+of an in-use base, universal effect, observed loss or measured frequency is claimed. Local c4's failed-script-to-capture
+refutation and c5's wrong-canonical-CONTAINER-identity refutation remain narrow and do not refute this image ancestry
+route. Proxy l1/g003's distinct cache/value contracts are unchanged. No tests, builds, reproductions, discovery pass,
+nested agents or live-install actions.
 
-Final late-synthesis premises resolved: the actual fetched Podman v4.9.3 storage/store.go DeleteImage at2528-2644 was read. With commit=true,2583-2586 deletes the image record;2594-2627 walks reclaimable layers while respecting containers/other image layers;2633-2637 physically deletes the resulting layer set. Shared surviving child layers may defer physical reclamation, but they do not preserve the original image object, and removing the final protecting owned artifacts permits reclaiming the user layers. Thus this is not merely an unsupported inference from shared storage. The stated condition remains no surviving protecting references, rather than forced deletion of active user containers. Actual production recipe deletion at tensorlake/recipes.rs:593-614 checks no registered users, admits deletion, then dispatches providers().clean_recipe, reaching this assigned provider. That in-use check cannot protect an untagged local base held only by recipe text. Full selected-path diff from566 to pinned00de shows no build.rs or proto recipes.rs change and only the later lifecycle-lock replacement in podman.rs, so no in-range repair to the image-removal target set is present. Primary-source anchor correction: fetched v4.9.3 ABI flag pass-through is images.go:602-613 and libimage recursion is image.go:537-560; conclusions do not rely on the differing g061 line anchors. No readily checkable source premise remains open for the conditional route. l4 is an alias of original g061/l8, not novelty credit or an accepted drop. Highest consequence, caveats and proposed_drop=false remain unchanged. No execution performed.
+Final late-synthesis premises resolved: the actual fetched Podman v4.9.3 storage/store.go DeleteImage at2528-2644 was
+read. With commit=true,2583-2586 deletes the image record;2594-2627 walks reclaimable layers while respecting
+containers/other image layers;2633-2637 physically deletes the resulting layer set. Shared surviving child layers may
+defer physical reclamation, but they do not preserve the original image object, and removing the final protecting owned
+artifacts permits reclaiming the user layers. Thus this is not merely an unsupported inference from shared storage. The
+stated condition remains no surviving protecting references, rather than forced deletion of active user containers.
+Actual production recipe deletion at tensorlake/recipes.rs:593-614 checks no registered users, admits deletion, then
+dispatches providers().clean_recipe, reaching this assigned provider. That in-use check cannot protect an untagged local
+base held only by recipe text. Full selected-path diff from566 to pinned00de shows no build.rs or proto recipes.rs
+change and only the later lifecycle-lock replacement in podman.rs, so no in-range repair to the image-removal target set
+is present. Primary-source anchor correction: fetched v4.9.3 ABI flag pass-through is images.go:602-613 and libimage
+recursion is image.go:537-560; conclusions do not rely on the differing g061 line anchors. No readily checkable source
+premise remains open for the conditional route. l4 is an alias of original g061/l8, not novelty credit or an accepted
+drop. Highest consequence, caveats and proposed_drop=false remain unchanged. No execution performed.
 
 Returned proposal (claims-042, event 21): **retain-verified**, suggested bucket **highest**.
 
-Ownership checks constrain only the explicit image. Podman removal without --no-prune can then remove an untagged user-owned parent. The conditional sole-copy local-base route crosses the explicit retained-base contract.
+Ownership checks constrain only the explicit image. Podman removal without --no-prune can then remove an untagged
+user-owned parent. The conditional sole-copy local-base route crosses the explicit retained-base contract.
 
-Original stronger consequence: An untagged sole retained copy of a user-authored local base image and its contents can be removed during ordinary recipe cleanup/replacement, beyond the ownership-checked artifact. The local record explicitly mirrors g061/l8; it is not a new discovery. Canonical container deletion and failed-script capture refutations do not narrow this separate highest consequence. Shared child layers may defer physical reclamation without preserving the original image object; final removal of protecting owned artifacts permits reclamation.
+Original stronger consequence: An untagged sole retained copy of a user-authored local base image and its contents can
+be removed during ordinary recipe cleanup/replacement, beyond the ownership-checked artifact. The local record
+explicitly mirrors g061/l8; it is not a new discovery. Canonical container deletion and failed-script capture
+refutations do not narrow this separate highest consequence. Shared child layers may defer physical reclamation without
+preserving the original image object; final removal of protecting owned artifacts permits reclamation.
 
-Unresolved premise or limitation: No missing repository premise for the conditional route. The condition is a valid untagged local user base with no protecting reference when owned descendants are retired; occurrence was not reproduced. Supplied history identifies g061/l8 as original owner, but that separate record is outside this batch and must be reconciled by the parent.
+Unresolved premise or limitation: No missing repository premise for the conditional route. The condition is a valid
+untagged local user base with no protecting reference when owned descendants are retired; occurrence was not reproduced.
+Supplied history identifies g061/l8 as original owner, but that separate record is outside this batch and must be
+reconciled by the parent.
 
-Proposed basis: Retain highest; parent should consolidate under the reported original g061/l8 after comparing that record. Do not count an additional independent defect or treat the alias statement as authorization to drop either record. --no-prune on owned-image removal is the bounded fix direction.
+Proposed basis: Retain highest; parent should consolidate under the reported original g061/l8 after comparing that
+record. Do not count an additional independent defect or treat the alias statement as authorization to drop either
+record. --no-prune on owned-image removal is the bounded fix direction.
 
-Existing parent disposition (event 21): under-investigation. Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it.
+Existing parent disposition (event 21): under-investigation. Record durably acknowledged; parent source/contract
+validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This
+preserves the claim and uncertainty without accepting, dropping or lowering it.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g065 record](records/review-through-00de0b6c/groups/g065.json). Record ID: `l4`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g065 record](records/review-through-00de0b6c/groups/g065.json). Record ID: `l4`.

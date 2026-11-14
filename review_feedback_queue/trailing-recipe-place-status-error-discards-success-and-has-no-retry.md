@@ -4,13 +4,31 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Source-confirmed review record: after a container build-status read fails, Settings replaces previous per-place status and Rebuild controls with an error and offers no retry for that request. It can remain failed on a healthy idle feed. It can recover inside the same Settings opening through a successful recipe Save or other feed-producing mutation; reopening Settings is another workaround. Details and full contract: SPEC.md:441-479 describes the one shared recipe catalog, explicitly requires 'build status per place, with Rebuild per place' at 469-470 and finishes at 478-479: 'A list refresh that fails keeps the rows shown, says they may be out of date, and offers **Retry loading**.' recipes.rs:370-385 creates place_status from observed_places and explicitly restarts it on a fleet notice. containers_settings.rs:209-218 renders Err as only an alert instead of retaining prior successful rows; its Rebuild buttons and their on_refresh are in the successful branch (257-285). The catalog Retry loading at recipes.rs:540-545 is conditional on the separate recipe read_error and calls only reload/fetch_recipes at 401-417. It may therefore be absent when only per-place status fails, and does not retry this request even when present. Request lifecycle checked against Cargo.lock:1528-1531 and the pinned dioxus-hooks 0.7.10 source src/use_resource.rs:22-92,191-194: initial/dependency-triggered tasks store Some(res), including Err; explicit restart cancels the previous task and starts another. No retry follows Err itself. api/environments.rs:29-38, api.rs:2416-2443,2482-2548 confirm a single bounded execution and return
+Source-confirmed review record: after a container build-status read fails, Settings replaces previous per-place status
+and Rebuild controls with an error and offers no retry for that request. It can remain failed on a healthy idle feed. It
+can recover inside the same Settings opening through a successful recipe Save or other feed-producing mutation;
+reopening Settings is another workaround. Details and full contract: SPEC.md:441-479 describes the one shared recipe
+catalog, explicitly requires 'build status per place, with Rebuild per place' at 469-470 and finishes at 478-479: 'A
+list refresh that fails keeps the rows shown, says they may be out of date, and offers **Retry loading**.'
+recipes.rs:370-385 creates place_status from observed_places and explicitly restarts it on a fleet notice.
+containers_settings.rs:209-218 renders Err as only an alert instead of retaining prior successful rows; its Rebuild
+buttons and their on_refresh are in the successful branch (257-285). The catalog Retry loading at recipes.rs:540-545 is
+conditional on the separate recipe read_error and calls only reload/fetch_recipes at 401-417. It may therefore be absent
+when only per-place status fails, and does not retry this request even when present. Request lifecycle checked against
+Cargo.lock:1528-1531 and the pinned dioxus-hooks 0.7.10 source src/use_resource.rs:22-92,191-194:
+initial/dependency-triggered tasks store Some(res), including Err; explicit restart cancels the previous task and starts
+another. No retry follows Err itself. api/environments.rs:29-38, api.rs:2416-2443,2482-2548 confirm a single bounded
+execution and return
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **high**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **high**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g060/l1`.
 
@@ -20,19 +38,112 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 11 (finding, open):
 
-Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: after a container build-status read fails, Settings replaces previous per-place status and Rebuild controls with an error and offers no retry for that request. It can remain failed on a healthy idle feed. It can recover inside the same Settings opening through a successful recipe Save or other feed-producing mutation; reopening Settings is another workaround. Details and full contract: SPEC.md:441-479 describes the one shared recipe catalog, explicitly requires 'build status per place, with Rebuild per place' at 469-470 and finishes at 478-479: 'A list refresh that fails keeps the rows shown, says they may be out of date, and offers **Retry loading**.' recipes.rs:370-385 creates place_status from observed_places and explicitly restarts it on a fleet notice. containers_settings.rs:209-218 renders Err as only an alert instead of retaining prior successful rows; its Rebuild buttons and their on_refresh are in the successful branch (257-285). The catalog Retry loading at recipes.rs:540-545 is conditional on the separate recipe read_error and calls only reload/fetch_recipes at 401-417. It may therefore be absent when only per-place status fails, and does not retry this request even when present. Request lifecycle checked against Cargo.lock:1528-1531 and the pinned dioxus-hooks 0.7.10 source src/use_resource.rs:22-92,191-194: initial/dependency-triggered tasks store Some(res), including Err; explicit restart cancels the previous task and starts another. No retry follows Err itself. api/environments.rs:29-38, api.rs:2416-2443,2482-2548 confirm a single bounded execution and returned error, not a request-level retry ladder. UI lifecycle: RecipeList hooks run before its editor/list return at recipes.rs:448-462; opening and cancelling an editor leaves this resource alive. settings.rs:312-314,629-647 keeps Recipes mounted under hidden sections, so switching sections and back does not restart it. Concrete same-opening recovery: successful recipe create/update emits a feed bump (helm tensorlake/recipes.rs:531-545,558-573), including an accepted unchanged save. Recipe deletion also bumps (593-616). The still-mounted recipe feed handler at recipes.rs:383-385 then restarts the resource; success of that later read is still required. This qualifies the earlier wording: ordinary user actions can recover it, but they are mutation workarounds rather than a retry for the displayed error. Containers Refresh check: containers_settings.rs:17,53-63 owns a separate use_environment_places hook and invokes only that hook's refresh plus container-leftover reload. Each hook owns its own answer signal (environment_ui.rs:689-709). The probe route at helm hosts.rs:1663-1672 and PodmanPlaces refresh/drop at environment/podman_probe.rs:435-475,485-494 update the shared backend cache and Notify, without a fleet event; Notify consumers at 338-400 wait for runtime/fresh probe results, not UI feed invalidations. Therefore Containers Refresh does not directly restart RecipeList's failed resource or guarantee recovery when the recipe hook was already settled. It may indirectly recover if that hook separately observes a changed place answer, for example while it is already polling an in-flight probe. feed.rs:88-98,280-315 leaves failed-read recovery to the caller; environment_ui.rs:713-725 suppresses settled-place polling on a healthy feed. Suggested bucket remains provisional high for losing container build visibility and all per-place Rebuild controls in that view. Frequency, real-world persistence and material UX impact were not measured, and parent has not accepted this priority. Could-be-highest: no established security or loss-of-work route. Confidence: source-confirmed missing direct retry and successful-status retention; recovery paths are source-established, not observed in execution. proposed_drop: false. possible_cover: none. Caveats: successful recipe mutation, any new fleet notice, an actually changed recipe-hook place observation, and reopening Settings can recover after a subsequent successful request. Section navigation and editor cancellation alone do not. No claim of backend build failure, resource loss, or permanent lockout. All readily checkable recovery premises in this synthesis are settled; no open lead remains.
+Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: after a container build-status read fails, Settings
+replaces previous per-place status and Rebuild controls with an error and offers no retry for that request. It can
+remain failed on a healthy idle feed. It can recover inside the same Settings opening through a successful recipe Save
+or other feed-producing mutation; reopening Settings is another workaround. Details and full contract: SPEC.md:441-479
+describes the one shared recipe catalog, explicitly requires 'build status per place, with Rebuild per place' at 469-470
+and finishes at 478-479: 'A list refresh that fails keeps the rows shown, says they may be out of date, and offers
+**Retry loading**.' recipes.rs:370-385 creates place_status from observed_places and explicitly restarts it on a fleet
+notice. containers_settings.rs:209-218 renders Err as only an alert instead of retaining prior successful rows; its
+Rebuild buttons and their on_refresh are in the successful branch (257-285). The catalog Retry loading at
+recipes.rs:540-545 is conditional on the separate recipe read_error and calls only reload/fetch_recipes at 401-417. It
+may therefore be absent when only per-place status fails, and does not retry this request even when present. Request
+lifecycle checked against Cargo.lock:1528-1531 and the pinned dioxus-hooks 0.7.10 source
+src/use_resource.rs:22-92,191-194: initial/dependency-triggered tasks store Some(res), including Err; explicit restart
+cancels the previous task and starts another. No retry follows Err itself. api/environments.rs:29-38,
+api.rs:2416-2443,2482-2548 confirm a single bounded execution and returned error, not a request-level retry ladder. UI
+lifecycle: RecipeList hooks run before its editor/list return at recipes.rs:448-462; opening and cancelling an editor
+leaves this resource alive. settings.rs:312-314,629-647 keeps Recipes mounted under hidden sections, so switching
+sections and back does not restart it. Concrete same-opening recovery: successful recipe create/update emits a feed bump
+(helm tensorlake/recipes.rs:531-545,558-573), including an accepted unchanged save. Recipe deletion also bumps
+(593-616). The still-mounted recipe feed handler at recipes.rs:383-385 then restarts the resource; success of that later
+read is still required. This qualifies the earlier wording: ordinary user actions can recover it, but they are mutation
+workarounds rather than a retry for the displayed error. Containers Refresh check: containers_settings.rs:17,53-63 owns
+a separate use_environment_places hook and invokes only that hook's refresh plus container-leftover reload. Each hook
+owns its own answer signal (environment_ui.rs:689-709). The probe route at helm hosts.rs:1663-1672 and PodmanPlaces
+refresh/drop at environment/podman_probe.rs:435-475,485-494 update the shared backend cache and Notify, without a fleet
+event; Notify consumers at 338-400 wait for runtime/fresh probe results, not UI feed invalidations. Therefore Containers
+Refresh does not directly restart RecipeList's failed resource or guarantee recovery when the recipe hook was already
+settled. It may indirectly recover if that hook separately observes a changed place answer, for example while it is
+already polling an in-flight probe. feed.rs:88-98,280-315 leaves failed-read recovery to the caller;
+environment_ui.rs:713-725 suppresses settled-place polling on a healthy feed. Suggested bucket remains provisional high
+for losing container build visibility and all per-place Rebuild controls in that view. Frequency, real-world persistence
+and material UX impact were not measured, and parent has not accepted this priority. Could-be-highest: no established
+security or loss-of-work route. Confidence: source-confirmed missing direct retry and successful-status retention;
+recovery paths are source-established, not observed in execution. proposed_drop: false. possible_cover: none. Caveats:
+successful recipe mutation, any new fleet notice, an actually changed recipe-hook place observation, and reopening
+Settings can recover after a subsequent successful request. Section navigation and editor cancellation alone do not. No
+claim of backend build failure, resource loss, or permanent lockout. All readily checkable recovery premises in this
+synthesis are settled; no open lead remains.
 
 Returned proposal (claims-038, event 11): **retain-verified**, suggested bucket **high**.
 
-A failed per-place read replaces every displayed container build status and Rebuild control with an error, with no retry for that request. The healthy idle feed owes no further read. This is a source-confirmed persistent loss of useful controls, with recovery workarounds; frequency and material real-world duration were not measured. High is a recommendation, not a parent decision.
+A failed per-place read replaces every displayed container build status and Rebuild control with an error, with no retry
+for that request. The healthy idle feed owes no further read. This is a source-confirmed persistent loss of useful
+controls, with recovery workarounds; frequency and material real-world duration were not measured. High is a
+recommendation, not a parent decision.
 
-Original stronger consequence: Earlier records called this 'without recovery' and said all container rebuild controls could disappear indefinitely in the open panel. Preserve the healthy-idle persistence claim, qualified by successful recipe mutation, any new fleet notice, an actually changed recipe-hook place observation, or reopening Settings followed by a successful read. Section navigation and editor cancellation alone do not restart it. Containers Refresh has no direct restart guarantee but can indirectly help if the recipe hook separately observes a changed answer. This was never a highest-bucket loss-of-work claim.
+Original stronger consequence: Earlier records called this 'without recovery' and said all container rebuild controls
+could disappear indefinitely in the open panel. Preserve the healthy-idle persistence claim, qualified by successful
+recipe mutation, any new fleet notice, an actually changed recipe-hook place observation, or reopening Settings followed
+by a successful read. Section navigation and editor cancellation alone do not restart it. Containers Refresh has no
+direct restart guarantee but can indirectly help if the recipe hook separately observes a changed answer. This was never
+a highest-bucket loss-of-work claim.
 
-Unresolved premise or limitation: No missing source premise for the narrow error/retry defect. Actual frequency, elapsed persistence and measured material UX impact remain unknown. No backend build failure, resource loss, security impact or permanent lockout is established.
+Unresolved premise or limitation: No missing source premise for the narrow error/retry defect. Actual frequency, elapsed
+persistence and measured material UX impact remain unknown. No backend build failure, resource loss, security impact or
+permanent lockout is established.
 
-Proposed basis: Retain the source-confirmed failed-read retention/retry defect with its concrete recovery qualifications; high for loss of all container build visibility and per-place controls in this view.
+Proposed basis: Retain the source-confirmed failed-read retention/retry defect with its concrete recovery
+qualifications; high for loss of all container build visibility and per-place controls in this view.
 
-Existing parent disposition (event 11): verified. Parent explicitly accepted named retain-verified proposal from claims-038 after inspecting it. A failed per-place read replaces every displayed container build status and Rebuild control with an error, with no retry for that request. The healthy idle feed owes no further read. This is a source-confirmed persistent loss of useful controls, with recovery workarounds; frequency and material real-world duration were not measured. High is a recommendation, not a parent decision. Retain the source-confirmed failed-read retention/retry defect with its concrete recovery qualifications; high for loss of all container build visibility and per-place controls in this view. Checked source/results: ["350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/tensorlake/recipes.rs:366-385,401-417,448-462,480-485,540-545: place_status depends on successful place observations/feed notices; catalog Retry calls only fetch_recipes; editor returns occur after the resource hooks.","Same revision:crates/farhelm-ui/src/containers_settings.rs:192-218,257-285: Err displays only an alert; successful rows and their Rebuild/on_refresh controls are absent. No separate successful-status cache exists here.","Same revision:crates/farhelm-ui/src/feed.rs:88-98,280-315 and environment_ui.rs:689-729: feed notices are spent on invocation; settled place hooks do not poll with a healthy feed. Each hook owns its own answer signal. settings.rs:312-314,629-647 keeps section panels mounted.","Pinned dioxus-hooks 0.7.10 cached src/use_resource.rs:22-92,191-195: completion stores Some(res), including Result::Err; dependency changes and explicit restart start new tasks. Completion or ordinary rendering does not schedule error retry. Same reviewed revision api/environments.rs:29-38 and api.rs:2416-2443,2482-2548 return the bounded request's error without a retry ladder.","56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/tensorlake/recipes.rs:531-545,558-573,593-616: successful create/update and deletion emit feed bumps. These permit same-opening recovery after a subsequent successful status read; an accepted unchanged Save also emits a bump.","350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/containers_settings.rs:17,53-63 and environment_ui.rs:689-729: Containers Refresh operates its own hook, not the recipe hook. Helm hosts.rs:1663-1672 and environment/podman_probe.rs:435-475,485-494 update cached probe state and Notify without a fleet bump. A separately observed changed recipe-hook answer can still recover indirectly.","git diff 350a4b33b6d4476f4a78e43cea124bc2b828f462..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty for recipes.rs, recipe_editor.rs, add_host.rs and containers_settings.rs. No runtime reproduction was performed."] Current coverage/results: ["Current SPEC.md:451-488 shared recipe catalog and SPEC_impl.md:6010-6057 Shared recipes and prepared artifacts were read. They require per-place status/Rebuild and failed-refresh retention/retry; neither accepts this error behavior. Reviewed SPEC.md:441-479 has the same rule.","TODO.md:25-26 Planned is empty. Search of plans/queue for recipe/status/retry/refresh found podman-environments.md Settings requirements at 373-383, but no outstanding work that fixes this error path. Its implementing product commits #3328/#3329 are already in the review range; the retained plan text is not evidence of an unlanded fix.","BUGS.md contains only the escaped SSH-output-holder provisioning hang, not recipe status reads. INDEX.md was read in full and matching queue sources searched. failed-recipe-refresh-test-lacks-baseline-row.md concerns a browser oracle for the separate recipe-list read, not this production status resource; no exact duplicate or useful extension identified.","Active TRIAGE_OUTCOMES.md was searched for recipe/status/refresh/retry/Podman. Its recipe credential-delivery decision is unrelated. No exact decision found; archive not read.","FILTER.md read in full: ordinary status request failure does not establish its rare-trigger boundary, and retrying the displayed operation is unavailable. Other filters concern unrelated triggers. No full filter match."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "Earlier records called this 'without recovery' and said all container rebuild controls could disappear indefinitely in the open panel. Preserve the healthy-idle persistence claim, qualified by successful recipe mutation, any new fleet notice, an actually changed recipe-hook place observation, or reopening Settings followed by a successful read. Section navigation and editor cancellation alone do not restart it. Containers Refresh has no direct restart guarantee but can indirectly help if the recipe hook separately observes a changed answer. This was never a highest-bucket loss-of-work claim."; "No missing source premise for the narrow error/retry defect. Actual frequency, elapsed persistence and measured material UX impact remain unknown. No backend build failure, resource loss, security impact or permanent lockout is established.".
+Existing parent disposition (event 11): verified. Parent explicitly accepted named retain-verified proposal from
+claims-038 after inspecting it. A failed per-place read replaces every displayed container build status and Rebuild
+control with an error, with no retry for that request. The healthy idle feed owes no further read. This is a
+source-confirmed persistent loss of useful controls, with recovery workarounds; frequency and material real-world
+duration were not measured. High is a recommendation, not a parent decision. Retain the source-confirmed failed-read
+retention/retry defect with its concrete recovery qualifications; high for loss of all container build visibility and
+per-place controls in this view. Checked source/results:
+["350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/tensorlake/recipes.rs:366-385,401-417,448-462,480-485,540-545:
+place_status depends on successful place observations/feed notices; catalog Retry calls only fetch_recipes; editor
+returns occur after the resource hooks.","Same revision:crates/farhelm-ui/src/containers_settings.rs:192-218,257-285:
+Err displays only an alert; successful rows and their Rebuild/on_refresh controls are absent. No separate
+successful-status cache exists here.","Same revision:crates/farhelm-ui/src/feed.rs:88-98,280-315 and
+environment_ui.rs:689-729: feed notices are spent on invocation; settled place hooks do not poll with a healthy feed.
+Each hook owns its own answer signal. settings.rs:312-314,629-647 keeps section panels mounted.","Pinned dioxus-hooks
+0.7.10 cached src/use_resource.rs:22-92,191-195: completion stores Some(res), including Result::Err; dependency changes
+and explicit restart start new tasks. Completion or ordinary rendering does not schedule error retry. Same reviewed
+revision api/environments.rs:29-38 and api.rs:2416-2443,2482-2548 return the bounded request's error without a retry
+ladder.","56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/tensorlake/recipes.rs:531-545,558-573,593-616:
+successful create/update and deletion emit feed bumps. These permit same-opening recovery after a subsequent successful
+status read; an accepted unchanged Save also emits a
+bump.","350a4b33b6d4476f4a78e43cea124bc2b828f462:crates/farhelm-ui/src/containers_settings.rs:17,53-63 and
+environment_ui.rs:689-729: Containers Refresh operates its own hook, not the recipe hook. Helm hosts.rs:1663-1672 and
+environment/podman_probe.rs:435-475,485-494 update cached probe state and Notify without a fleet bump. A separately
+observed changed recipe-hook answer can still recover indirectly.","git diff
+350a4b33b6d4476f4a78e43cea124bc2b828f462..00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db is empty for recipes.rs,
+recipe_editor.rs, add_host.rs and containers_settings.rs. No runtime reproduction was performed."] Current
+coverage/results: ["Current SPEC.md:451-488 shared recipe catalog and SPEC_impl.md:6010-6057 Shared recipes and prepared
+artifacts were read. They require per-place status/Rebuild and failed-refresh retention/retry; neither accepts this
+error behavior. Reviewed SPEC.md:441-479 has the same rule.","TODO.md:25-26 Planned is empty. Search of plans/queue for
+recipe/status/retry/refresh found podman-environments.md Settings requirements at 373-383, but no outstanding work that
+fixes this error path. Its implementing product commits #3328/#3329 are already in the review range; the retained plan
+text is not evidence of an unlanded fix.","BUGS.md contains only the escaped SSH-output-holder provisioning hang, not
+recipe status reads. INDEX.md was read in full and matching queue sources searched.
+failed-recipe-refresh-test-lacks-baseline-row.md concerns a browser oracle for the separate recipe-list read, not this
+production status resource; no exact duplicate or useful extension identified.","Active TRIAGE_OUTCOMES.md was searched
+for recipe/status/refresh/retry/Podman. Its recipe credential-delivery decision is unrelated. No exact decision found;
+archive not read.","FILTER.md read in full: ordinary status request failure does not establish its rare-trigger
+boundary, and retrying the displayed operation is unavailable. Other filters concern unrelated triggers. No full filter
+match."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "Earlier records
+called this 'without recovery' and said all container rebuild controls could disappear indefinitely in the open panel.
+Preserve the healthy-idle persistence claim, qualified by successful recipe mutation, any new fleet notice, an actually
+changed recipe-hook place observation, or reopening Settings followed by a successful read. Section navigation and
+editor cancellation alone do not restart it. Containers Refresh has no direct restart guarantee but can indirectly help
+if the recipe hook separately observes a changed answer. This was never a highest-bucket loss-of-work claim."; "No
+missing source premise for the narrow error/retry defect. Actual frequency, elapsed persistence and measured material UX
+impact remain unknown. No backend build failure, resource loss, security impact or permanent lockout is established.".
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g060 record](records/review-through-00de0b6c/groups/g060.json). Record ID: `l1`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g060 record](records/review-through-00de0b6c/groups/g060.json). Record ID: `l1`.

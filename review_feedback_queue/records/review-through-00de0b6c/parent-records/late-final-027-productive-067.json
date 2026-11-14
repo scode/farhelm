@@ -1,4 +1,19 @@
 [
- {"id":"g027","turn":8,"offset":25,"state":"complete","verdict":"final-discovery-empty","discovery":{"new_verified":[],"new_unverified":[],"empty":true},"reason":"Parentreadfullreply/everyevent24-25 andcomplete1293lineaudit zero gaps/rejected/unfinished/unrecognized. l9leadrefutedordinarylate-sealpublicationbyactualhold/nudge/parkackcancellingserve refresh beforedestruction/serializedforget/actorstop/sealclear; unsupportedthreadstallpastboundedparkdeadlineisnoconcretecontrarysourceordering. Preservesrealexistingfinisher/ordinaryhostoutcomeissues. Usefulseparatesearchafterlastmanagerinput checkedlaunchvalidation/Delete/wakefixtures andordering. Explicitnonewverified/UAI/openlead; finalemptyconditionmet."},
- {"id":"g067","turn":5,"offset":23,"verdict":"productive-discovery","discovery":{"new_verified":["l5"],"new_unverified":[],"empty":false},"reason":"Parentreadfullreply/everyevent21-23 andcomplete1691lineaudit zero gaps/rejected/unfinished/unrecognized. Directchecked566test240-346 andfake45-90. Newlost-session-create test asserts factsdurablebeforesend but observesonlypostreturn; fakehelperoracle offandchecksotherrecipebuilderfields. Concrete send-thenpersist-thenhandleresultcounterpartpassesallcurrentassertions; productioncorrectpresendpersistdoesnotrefuteoracledefect. Wholefileintroduced566/unchangedtip, othermaintainerassuranceonly/noruntimeharm. Distinct064scheduling/066serializerknownroots, no changedproductioninterfacecontractornewcallerquestion. Noopenlead. Productivepass requiresanotherseparatesearchbeyondl5; focusedcurrentcoveragecheckstillowed."}
+  {
+    "id": "g027",
+    "turn": 8,
+    "offset": 25,
+    "state": "complete",
+    "verdict": "final-discovery-empty",
+    "discovery": { "new_verified": [], "new_unverified": [], "empty": true },
+    "reason": "Parentreadfullreply/everyevent24-25 andcomplete1293lineaudit zero gaps/rejected/unfinished/unrecognized. l9leadrefutedordinarylate-sealpublicationbyactualhold/nudge/parkackcancellingserve refresh beforedestruction/serializedforget/actorstop/sealclear; unsupportedthreadstallpastboundedparkdeadlineisnoconcretecontrarysourceordering. Preservesrealexistingfinisher/ordinaryhostoutcomeissues. Usefulseparatesearchafterlastmanagerinput checkedlaunchvalidation/Delete/wakefixtures andordering. Explicitnonewverified/UAI/openlead; finalemptyconditionmet."
+  },
+  {
+    "id": "g067",
+    "turn": 5,
+    "offset": 23,
+    "verdict": "productive-discovery",
+    "discovery": { "new_verified": ["l5"], "new_unverified": [], "empty": false },
+    "reason": "Parentreadfullreply/everyevent21-23 andcomplete1691lineaudit zero gaps/rejected/unfinished/unrecognized. Directchecked566test240-346 andfake45-90. Newlost-session-create test asserts factsdurablebeforesend but observesonlypostreturn; fakehelperoracle offandchecksotherrecipebuilderfields. Concrete send-thenpersist-thenhandleresultcounterpartpassesallcurrentassertions; productioncorrectpresendpersistdoesnotrefuteoracledefect. Wholefileintroduced566/unchangedtip, othermaintainerassuranceonly/noruntimeharm. Distinct064scheduling/066serializerknownroots, no changedproductioninterfacecontractornewcallerquestion. Noopenlead. Productivepass requiresanotherseparatesearchbeyondl5; focusedcurrentcoveragecheckstillowed."
+  }
 ]

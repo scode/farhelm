@@ -1,3 +1,9 @@
 [
- {"key":"g062/c3","proposal":"claim-checks/claims-039/result.json","parent_proposal":"source-refuted-current-release-payload-inventory-or-static-check-omission","final_independent_gate":"required-by-conservative-release-integrity-flag","reason":"Parent read full039. Production assets and signed-sums declared set agree on four archives; validator requires exact archive/metadata set, extracts each remaining binary and still applies architecture/static-ELF checks to both Linux triples. Removing bare tmux does not empty the extracted Linux set. No current required tmux consumer remains. Refute exact inventory/extraction-loop bypass, not external signing/publication tooling or actual unexecuted artifact bytes. Preserve unchecked payload/release integrity possibility for the fresh gate."}
+  {
+    "key": "g062/c3",
+    "proposal": "claim-checks/claims-039/result.json",
+    "parent_proposal": "source-refuted-current-release-payload-inventory-or-static-check-omission",
+    "final_independent_gate": "required-by-conservative-release-integrity-flag",
+    "reason": "Parent read full039. Production assets and signed-sums declared set agree on four archives; validator requires exact archive/metadata set, extracts each remaining binary and still applies architecture/static-ELF checks to both Linux triples. Removing bare tmux does not empty the extracted Linux set. No current required tmux consumer remains. Refute exact inventory/extraction-loop bypass, not external signing/publication tooling or actual unexecuted artifact bytes. Preserve unchecked payload/release integrity possibility for the fresh gate."
+  }
 ]

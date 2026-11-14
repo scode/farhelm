@@ -1,7 +1,37 @@
 [
- {"key":"g032/c2","proposal":"claim-checks/claims-019/result.json","parent_proposal":"source-refuted-leftover-delete-live-target-rebinding","final_independent_gate":"required-before-highest-drop","reason":"Parent read full019 drawn confirm.current cloned into handler, exact confirm.take(&shown) then synchronous APIconstruct URL/body from capturedrow before ownedfuture. No latercatalog/questionread. Refutes named refreshedleftoverlist wrongcontainerpermanentdelete only, notallownershipdeletion. Preserve original files/process/unpushedwork loss hypothesis for fresh sourcecheck."},
- {"key":"g032/l5","proposal":"claim-checks/claims-019/result.json","parent_proposal":"upgrade-plus-rare-filter-pending-security-boundary","final_independent_gate":"required-before-highest-filter-drop","reason":"Full019 confirms retained Running Restartquestion survivesoldterminalupdate/incompletecleanup then Interrupted consequence says nothinglefttostop while later Restart sweeps survivingprioragentwork. Generictooltipdoesnotrepairfalseconsent. ParentreadactualSPEColdcleanup passage and fullFILTER: imperfectcleanup/secondagent acceptance does NOTaccept misleadinglaterwarning; originalspecdropwithdrawalpreserved. Separatefilter mayfullymatcholderstate+failedcleanup+unusualretainedquestion/affectedagent-onlyworkloss; excludesunrelatedfiles/tabs,brokeninstall,DBcorruption,security/trustboundary. Freshchecker mustsettlewhetherdeceptiveconsent addsseparate trustboundary; ambiguityretains highest. Neverloweronrarityalone."},
- {"key":"g032/l6","proposal":"claim-checks/claims-019/result.json","parent_proposal":"retain-highest-pending-canonical196-reconciliation","final_independent_gate":"required-for-any-original-drop-or-lowering-not-for-retention","reason":"Full019 directlyconfirmsoldpage/App/APIpremises: skewnoticeleavesauthPreferencesGatetree, successfulresponsesremain, missingkindmountsxterm, rawwholeTextJSONparseanddecodedbytesallowed. Successfulinstructionreinterpretationdistinctfromexplicitlyacceptedmalformeddetach/misdrawing. Preservebracketedpastecaveat/unbracketedsurfacewholemessagechainfrom196, no payload/runtime/frequencyclaim. Alreadyretainedsame196rawJSONfamilyand017supportingfindingmustreconcilefullcanonicalbeforeexactalias; no broadreloadcoverorupgradefilterwhilepossibletrustboundaryunsettled. Sourceinterfacesalreadyreviewedsynthesizedearlier; compareactualhistoricaldeliverybeforereopeningagain."},
- {"key":"g032/c8","proposal":"claim-checks/claims-019/result.json","parent_proposal":"source-refuted-deleted-environment-origin-decode-retarget","final_independent_gate":"required-for-original-wrong-host-hypothesis","reason":"Full019 originhostID retainedinteger/nohostjoin, targetSome/cwdhome/creationseqdecode; target-bearingdraftbypassesordinaryhostadmissionandselectsrecipe/placeintent. Refutes NULL/decodefailure/wronghostfromdeleteddiagnosticoriginonly. Originalpossiblewronghostconsequencekeptforfreshchecker; no authorityassertionbasedsolelyspecintendedreuse andnootherhistorybugsrefuted."},
- {"key":"g033/r1","proposal":"claim-checks/claims-019/result.json","parent_proposal":"exact-spec-accepted-old-cleanup-ended-state-and-second-agent","final_independent_gate":"required-before-possible-highest-drop-or-lowering","reason":"Full019 andparentactualSPEC2985-3020/impl2770-2830 explicitlyacceptfailedoldcleanup,endedstateandRestartsecondagent; exacttrigger/consequence/scope. Inrangeintroduceddbfc,notoutofrangejustpredatesf560UIbannerremoval. Oldbannerpredicatealreadyexcludedterminal-lessInterruptedsurvivor,protocolfenceonlyoldernativepeerNOTcurrentcleanupfailures. Originalpossibleduplicateagentworkdamageremainsunestablishedbutkeptforgate, basisdropisexactspecacceptancenotmissingstrongerharmalone. Distinct032l5falsewarningand004f1updatesurvivalpromisenotcoveredbythisacceptance."}
+  {
+    "key": "g032/c2",
+    "proposal": "claim-checks/claims-019/result.json",
+    "parent_proposal": "source-refuted-leftover-delete-live-target-rebinding",
+    "final_independent_gate": "required-before-highest-drop",
+    "reason": "Parent read full019 drawn confirm.current cloned into handler, exact confirm.take(&shown) then synchronous APIconstruct URL/body from capturedrow before ownedfuture. No latercatalog/questionread. Refutes named refreshedleftoverlist wrongcontainerpermanentdelete only, notallownershipdeletion. Preserve original files/process/unpushedwork loss hypothesis for fresh sourcecheck."
+  },
+  {
+    "key": "g032/l5",
+    "proposal": "claim-checks/claims-019/result.json",
+    "parent_proposal": "upgrade-plus-rare-filter-pending-security-boundary",
+    "final_independent_gate": "required-before-highest-filter-drop",
+    "reason": "Full019 confirms retained Running Restartquestion survivesoldterminalupdate/incompletecleanup then Interrupted consequence says nothinglefttostop while later Restart sweeps survivingprioragentwork. Generictooltipdoesnotrepairfalseconsent. ParentreadactualSPEColdcleanup passage and fullFILTER: imperfectcleanup/secondagent acceptance does NOTaccept misleadinglaterwarning; originalspecdropwithdrawalpreserved. Separatefilter mayfullymatcholderstate+failedcleanup+unusualretainedquestion/affectedagent-onlyworkloss; excludesunrelatedfiles/tabs,brokeninstall,DBcorruption,security/trustboundary. Freshchecker mustsettlewhetherdeceptiveconsent addsseparate trustboundary; ambiguityretains highest. Neverloweronrarityalone."
+  },
+  {
+    "key": "g032/l6",
+    "proposal": "claim-checks/claims-019/result.json",
+    "parent_proposal": "retain-highest-pending-canonical196-reconciliation",
+    "final_independent_gate": "required-for-any-original-drop-or-lowering-not-for-retention",
+    "reason": "Full019 directlyconfirmsoldpage/App/APIpremises: skewnoticeleavesauthPreferencesGatetree, successfulresponsesremain, missingkindmountsxterm, rawwholeTextJSONparseanddecodedbytesallowed. Successfulinstructionreinterpretationdistinctfromexplicitlyacceptedmalformeddetach/misdrawing. Preservebracketedpastecaveat/unbracketedsurfacewholemessagechainfrom196, no payload/runtime/frequencyclaim. Alreadyretainedsame196rawJSONfamilyand017supportingfindingmustreconcilefullcanonicalbeforeexactalias; no broadreloadcoverorupgradefilterwhilepossibletrustboundaryunsettled. Sourceinterfacesalreadyreviewedsynthesizedearlier; compareactualhistoricaldeliverybeforereopeningagain."
+  },
+  {
+    "key": "g032/c8",
+    "proposal": "claim-checks/claims-019/result.json",
+    "parent_proposal": "source-refuted-deleted-environment-origin-decode-retarget",
+    "final_independent_gate": "required-for-original-wrong-host-hypothesis",
+    "reason": "Full019 originhostID retainedinteger/nohostjoin, targetSome/cwdhome/creationseqdecode; target-bearingdraftbypassesordinaryhostadmissionandselectsrecipe/placeintent. Refutes NULL/decodefailure/wronghostfromdeleteddiagnosticoriginonly. Originalpossiblewronghostconsequencekeptforfreshchecker; no authorityassertionbasedsolelyspecintendedreuse andnootherhistorybugsrefuted."
+  },
+  {
+    "key": "g033/r1",
+    "proposal": "claim-checks/claims-019/result.json",
+    "parent_proposal": "exact-spec-accepted-old-cleanup-ended-state-and-second-agent",
+    "final_independent_gate": "required-before-possible-highest-drop-or-lowering",
+    "reason": "Full019 andparentactualSPEC2985-3020/impl2770-2830 explicitlyacceptfailedoldcleanup,endedstateandRestartsecondagent; exacttrigger/consequence/scope. Inrangeintroduceddbfc,notoutofrangejustpredatesf560UIbannerremoval. Oldbannerpredicatealreadyexcludedterminal-lessInterruptedsurvivor,protocolfenceonlyoldernativepeerNOTcurrentcleanupfailures. Originalpossibleduplicateagentworkdamageremainsunestablishedbutkeptforgate, basisdropisexactspecacceptancenotmissingstrongerharmalone. Distinct032l5falsewarningand004f1updatesurvivalpromisenotcoveredbythisacceptance."
+  }
 ]

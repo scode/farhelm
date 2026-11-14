@@ -4,13 +4,31 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Unverified collection: a reader is assured that sessions keep running when restarting to update, even during the migration that ends old-terminal agents, tabs and attributable background processes. Original consequence retained: relying on that reassurance can lead someone to finish an update with live work remaining, ending its processes and losing in-memory work. Suggested bucket: highest, documentation capable of inducing loss of processes/work; could-be-highest: yes. Confidence: confirmed from source for inaccurate reassurance and the normal migration's termination route; actual reader reliance is conditional, and no behavior was observed during execution. Source: assigned SPEC.md 762–763 removes the update exception; 3459–3461 restores 'only a host reboot takes sessions down'; scripts/install.sh 1287 adds 'Your sessions keep running.' SPEC.md 3001–3016 describes the deliberate migration; SPEC_impl.md 2784–2833 specifies it. core.rs 6142–6151 invokes OldTerminals::end_private_server when this supervisor owns its state directory, before reload. old_terminals.rs 164–173 invokes end_server, and 224–232 invokes terminate_process_within with TERM/KILL graces. Synthesis check: old_terminals.rs 285–356 sweeps converted old-kind agent rows through their recorded launch scope and AgentOnly target, and discoverable old tabs through their tab scopes and Tab target. This is attributable old-terminal work, not all work on the host or every terminal-host session. Failures/timeouts can leave some processes for later Delete; universal successful cleanup is not a premise of this finding. SPEC.md 2803–2812 des
+Unverified collection: a reader is assured that sessions keep running when restarting to update, even during the
+migration that ends old-terminal agents, tabs and attributable background processes. Original consequence retained:
+relying on that reassurance can lead someone to finish an update with live work remaining, ending its processes and
+losing in-memory work. Suggested bucket: highest, documentation capable of inducing loss of processes/work;
+could-be-highest: yes. Confidence: confirmed from source for inaccurate reassurance and the normal migration's
+termination route; actual reader reliance is conditional, and no behavior was observed during execution. Source:
+assigned SPEC.md 762–763 removes the update exception; 3459–3461 restores 'only a host reboot takes sessions down';
+scripts/install.sh 1287 adds 'Your sessions keep running.' SPEC.md 3001–3016 describes the deliberate migration;
+SPEC_impl.md 2784–2833 specifies it. core.rs 6142–6151 invokes OldTerminals::end_private_server when this supervisor
+owns its state directory, before reload. old_terminals.rs 164–173 invokes end_server, and 224–232 invokes
+terminate_process_within with TERM/KILL graces. Synthesis check: old_terminals.rs 285–356 sweeps converted old-kind
+agent rows through their recorded launch scope and AgentOnly target, and discoverable old tabs through their tab scopes
+and Tab target. This is attributable old-terminal work, not all work on the host or every terminal-host session.
+Failures/timeouts can leave some processes for later Delete; universal successful cleanup is not a premise of this
+finding. SPEC.md 2803–2812 des
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **highest**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **highest**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g002/f1`.
 
@@ -20,21 +38,80 @@ Confidence: Unverified collection; recording proposals and any disagreement rema
 
 Latest reviewer record, event 6 (finding, open):
 
-Reviewed commit: 78e9d68a95119db8452ee139efde13d38546f648. TLDR: a reader is assured that sessions keep running when restarting to update, even during the migration that ends old-terminal agents, tabs and attributable background processes. Original consequence retained: relying on that reassurance can lead someone to finish an update with live work remaining, ending its processes and losing in-memory work. Suggested bucket: highest, documentation capable of inducing loss of processes/work; could-be-highest: yes. Confidence: confirmed from source for inaccurate reassurance and the normal migration's termination route; actual reader reliance is conditional, and no behavior was observed during execution. Source: assigned SPEC.md 762–763 removes the update exception; 3459–3461 restores 'only a host reboot takes sessions down'; scripts/install.sh 1287 adds 'Your sessions keep running.' SPEC.md 3001–3016 describes the deliberate migration; SPEC_impl.md 2784–2833 specifies it. core.rs 6142–6151 invokes OldTerminals::end_private_server when this supervisor owns its state directory, before reload. old_terminals.rs 164–173 invokes end_server, and 224–232 invokes terminate_process_within with TERM/KILL graces. Synthesis check: old_terminals.rs 285–356 sweeps converted old-kind agent rows through their recorded launch scope and AgentOnly target, and discoverable old tabs through their tab scopes and Tab target. This is attributable old-terminal work, not all work on the host or every terminal-host session. Failures/timeouts can leave some processes for later Delete; universal successful cleanup is not a premise of this finding. SPEC.md 2803–2812 describes prior warnings and post-ending notices; the new finding does not challenge that separate warning/residual design. proposed_drop: still only proposed, with no parent acceptance. The exact omission was deliberately accepted in the reviewed commit's own decision. Preserve the narrower exact decision for independent checking: 'Every other update keeps sessions running, so the general statement comes back without the caveat, accepting that the installer prints it during that one update too.' General retirement acceptance alone does not settle inaccurate assurance. Exact SPEC.md 3004–3007 text: 'This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program.' That text accepts retirement, not the reassurance's accuracy. possible_cover: reviewed commit's explicit decision only; no queue/ledger/plans/filter coverage searched. Cross-group synthesis input: same reassurance issue as g004/f1 and g071/f2; retain their original IDs for parent deduplication. Distinct from g033's omitted warning/cleanup-failure residual; no fresh discovery or duplicate ID created here. Caveats: new terminal-host sessions survive; terminal retirement is intended, not introduced by this assurance patch; user files are not alleged to be deleted, and losing in-memory work depends on what the old processes were doing. Revision reason: source-checked agent/tab attribution and bounded-cleanup caveat; original consequence and highest suggestion retained. Checks: source and contracts only; no runtime tests or reproductions. Synthesis timing check: scripts/install.sh 1228–1232 sets updated_installation solely from the successful install-result spelling updated; 1285–1288 then prints the restart instruction and assurance. That branch does not inspect active terminals or distinguish this migration. Thus a terminal user can see the assurance after installation but before the quit/reopen that activates the new supervisor. SPEC_impl.md 7778–7786 confirms Restart to update reopens the app and replaces the prior supervisor, at which point the already-checked core startup ends old terminals. This patch changes wording, not the termination operation. The CLI assurance and SPEC prose are one reassurance root cause shared with g004/f1 and g071/f2; no additional finding is created. The terminal-host comparison deletion at 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e retains the child contract and does not extend retirement to terminal-host sessions. Proposed drop remains unaccepted; retirement specification alone is not a basis for dropping inaccurate reassurance. No readily checkable premise or lead remains unresolved within this group.
+Reviewed commit: 78e9d68a95119db8452ee139efde13d38546f648. TLDR: a reader is assured that sessions keep running when
+restarting to update, even during the migration that ends old-terminal agents, tabs and attributable background
+processes. Original consequence retained: relying on that reassurance can lead someone to finish an update with live
+work remaining, ending its processes and losing in-memory work. Suggested bucket: highest, documentation capable of
+inducing loss of processes/work; could-be-highest: yes. Confidence: confirmed from source for inaccurate reassurance and
+the normal migration's termination route; actual reader reliance is conditional, and no behavior was observed during
+execution. Source: assigned SPEC.md 762–763 removes the update exception; 3459–3461 restores 'only a host reboot takes
+sessions down'; scripts/install.sh 1287 adds 'Your sessions keep running.' SPEC.md 3001–3016 describes the deliberate
+migration; SPEC_impl.md 2784–2833 specifies it. core.rs 6142–6151 invokes OldTerminals::end_private_server when this
+supervisor owns its state directory, before reload. old_terminals.rs 164–173 invokes end_server, and 224–232 invokes
+terminate_process_within with TERM/KILL graces. Synthesis check: old_terminals.rs 285–356 sweeps converted old-kind
+agent rows through their recorded launch scope and AgentOnly target, and discoverable old tabs through their tab scopes
+and Tab target. This is attributable old-terminal work, not all work on the host or every terminal-host session.
+Failures/timeouts can leave some processes for later Delete; universal successful cleanup is not a premise of this
+finding. SPEC.md 2803–2812 describes prior warnings and post-ending notices; the new finding does not challenge that
+separate warning/residual design. proposed_drop: still only proposed, with no parent acceptance. The exact omission was
+deliberately accepted in the reviewed commit's own decision. Preserve the narrower exact decision for independent
+checking: 'Every other update keeps sessions running, so the general statement comes back without the caveat, accepting
+that the installer prints it during that one update too.' General retirement acceptance alone does not settle inaccurate
+assurance. Exact SPEC.md 3004–3007 text: 'This release ends them: the first time a host's supervisor of this release
+starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux
+program.' That text accepts retirement, not the reassurance's accuracy. possible_cover: reviewed commit's explicit
+decision only; no queue/ledger/plans/filter coverage searched. Cross-group synthesis input: same reassurance issue as
+g004/f1 and g071/f2; retain their original IDs for parent deduplication. Distinct from g033's omitted
+warning/cleanup-failure residual; no fresh discovery or duplicate ID created here. Caveats: new terminal-host sessions
+survive; terminal retirement is intended, not introduced by this assurance patch; user files are not alleged to be
+deleted, and losing in-memory work depends on what the old processes were doing. Revision reason: source-checked
+agent/tab attribution and bounded-cleanup caveat; original consequence and highest suggestion retained. Checks: source
+and contracts only; no runtime tests or reproductions. Synthesis timing check: scripts/install.sh 1228–1232 sets
+updated_installation solely from the successful install-result spelling updated; 1285–1288 then prints the restart
+instruction and assurance. That branch does not inspect active terminals or distinguish this migration. Thus a terminal
+user can see the assurance after installation but before the quit/reopen that activates the new supervisor. SPEC_impl.md
+7778–7786 confirms Restart to update reopens the app and replaces the prior supervisor, at which point the
+already-checked core startup ends old terminals. This patch changes wording, not the termination operation. The CLI
+assurance and SPEC prose are one reassurance root cause shared with g004/f1 and g071/f2; no additional finding is
+created. The terminal-host comparison deletion at 61e632323dbc6b4a35ed27bf5b9833102ffd5a4e retains the child contract
+and does not extend retirement to terminal-host sessions. Proposed drop remains unaccepted; retirement specification
+alone is not a basis for dropping inaccurate reassurance. No readily checkable premise or lead remains unresolved within
+this group.
 
 Returned proposal (claims-001, event 6): **retain-verified**, suggested bucket **highest**.
 
-The installer reassures the user before the restart that activates the old-terminal shutdown. The source route to ending running old agents/tabs is established; reader reliance and any particular in-memory loss are conditional. The reviewed commit deliberately accepts the inaccurate message, but retirement acceptance alone does not settle that assurance, and a commit explanation is not one of the listed canonical coverage sources.
+The installer reassures the user before the restart that activates the old-terminal shutdown. The source route to ending
+running old agents/tabs is established; reader reliance and any particular in-memory loss are conditional. The reviewed
+commit deliberately accepts the inaccurate message, but retirement acceptance alone does not settle that assurance, and
+a commit explanation is not one of the listed canonical coverage sources.
 
-Original stronger consequence: A reader relying on the reassurance can finish an update with live old-terminal processes remaining, ending those processes and losing their in-memory work. User files are not alleged deleted, and current terminal-host sessions are outside the route. The original highest concern and the reviewer's deliberately-accepted-omission drop proposal are both preserved.
+Original stronger consequence: A reader relying on the reassurance can finish an update with live old-terminal processes
+remaining, ending those processes and losing their in-memory work. User files are not alleged deleted, and current
+terminal-host sessions are outside the route. The original highest concern and the reviewer's
+deliberately-accepted-omission drop proposal are both preserved.
 
-Unresolved premise or limitation: No missing source premise for inaccurate reassurance and normal termination. Actual user reliance and the contents of interrupted processes are conditional. To drop as an accepted assurance omission, the parent must determine that the explicit commit decision supplies authoritative acceptance beyond the listed specification/ledger sources and obtain the independent verdict.
+Unresolved premise or limitation: No missing source premise for inaccurate reassurance and normal termination. Actual
+user reliance and the contents of interrupted processes are conditional. To drop as an accepted assurance omission, the
+parent must determine that the explicit commit decision supplies authoritative acceptance beyond the listed
+specification/ledger sources and obtain the independent verdict.
 
-Proposed basis: Retain highest on the established source route. Send the reviewer's proposed deliberate-decision drop, with the exact commit explanation and both specification passages, to the independent check before treating the omission as accepted. This consultation does not authorize that drop.
+Proposed basis: Retain highest on the established source route. Send the reviewer's proposed deliberate-decision drop,
+with the exact commit explanation and both specification passages, to the independent check before treating the omission
+as accepted. This consultation does not authorize that drop.
 
-Existing parent disposition (event 6): under-investigation. Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it.
+Existing parent disposition (event 6): under-investigation. Record durably acknowledged; parent source/contract
+validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This
+preserves the claim and uncertainty without accepting, dropping or lowering it.
 
-Unapplied parent proposal: retain-highest. Parentreadfullflagged001. New78e9 restoresunqualifiedsessionskeeprunninginstaller/SPECassurance before ordinaryupdate/firststartup deliberatelyterminatesoldtmuxagents/tabs andtheirwork. Sourceprocessendingrouteshown; readerreliance/lostinmemorycontentsconditional, nofiledeletion/currenthostsessionharmclaimed. Highestretained, no raritylowering. Explicitcommitdecision deliberately acceptsmessageeveninmigration is strongintent but not itselfcanonicalSPEC acceptanceofmisleadingreassurance; carry exactcommitexplanation plusbothcontradictorySPECclauses into finalfreshcheck oforiginalreviewerdropproposal. Do notautomaticallyinferretirementacceptanceacceptspremigrationassuranceorpriorwarning/afternoticecoversmissingwarning;tab-onlylossnoticeabsent. No dropaccepted.
+Unapplied parent proposal: retain-highest. Parentreadfullflagged001. New78e9
+restoresunqualifiedsessionskeeprunninginstaller/SPECassurance before ordinaryupdate/firststartup
+deliberatelyterminatesoldtmuxagents/tabs andtheirwork. Sourceprocessendingrouteshown;
+readerreliance/lostinmemorycontentsconditional, nofiledeletion/currenthostsessionharmclaimed. Highestretained, no
+raritylowering. Explicitcommitdecision deliberately acceptsmessageeveninmigration is strongintent but not
+itselfcanonicalSPEC acceptanceofmisleadingreassurance; carry exactcommitexplanation plusbothcontradictorySPECclauses
+into finalfreshcheck oforiginalreviewerdropproposal. Do
+notautomaticallyinferretirementacceptanceacceptspremigrationassuranceorpriorwarning/afternoticecoversmissingwarning;tab-onlylossnoticeabsent.
+No dropaccepted.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g002 record](records/review-through-00de0b6c/groups/g002.json). Record ID: `f1`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g002 record](records/review-through-00de0b6c/groups/g002.json). Record ID: `f1`.

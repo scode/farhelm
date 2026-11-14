@@ -1,8 +1,44 @@
 [
- {"key":"g003/f3","proposal":"claim-checks/claims-002/result.json","parent_proposal":"covered","final_independent_gate":"required-before-drop","reason":"Parentreadfull002. ExactSPECinitialordinarylaunchacceptance explicitlyincludeslostfirstsession-createreply/alreadystartedagent anddestructiononlyitsnewresource. SourceErr→destroycapturedhostmatches, outerreceiverlossaloneisnottrigger. Highestactualpossiblewrittenworkretained untilfreshAGREE onexactacceptance; Replace preservation/unrelatedresources/confirmedcreate excluded. No rarityfilter or runtimeobservation."},
- {"key":"g003/f6","proposal":"claim-checks/claims-002/result.json","parent_proposal":"source-refuted","final_independent_gate":"required-before-drop","reason":"Parentreadfull002. Immediate-transaction independent spec_json/state_json writes preserveothercolumn; deletionsanddestinationmutation recheck placehostreferencesandrecipecleanup insidefinaltransaction, preparedcoordinates compareexactpriorbinding. Refutes namedordinarywrite/alreadyreferencedplace lossroute, notcrashdurability or approvaltimeretargeting. Originalpotentialsoleaccess/userworkloss route preserved; freshcheck mustcheckwriters/finalguards, no broadownershipsafetyclaim."},
- {"key":"g004/f1","proposal":"claim-checks/claims-002/result.json","parent_proposal":"duplicate-retained-highest-g002/f1","final_independent_gate":"include-both-provenance-and-original-intent-drop","reason":"Full002same78e9 installer/SPECunconditionalsurvivalassuranceduringordinarymigrationthatterminatesoldagents/tabs. Preserveexplicitcommitdeliberate-wordingdecision andbothcontradictorycontractclauses; bareterminationacceptancedoesnotacceptassurance. Canonical002f1 retains highestconditionalworkloss, nofiles/currenthostharm. Dedup exactsameassurance/rootwith004SPEC_implwordingprovenance andlater071f2, do not silentlydiscardtheoriginalreviewerintent-baseddropproposal."},
- {"key":"g004/f3","proposal":"claim-checks/claims-002/result.json","parent_proposal":"covered","final_independent_gate":"required-before-drop","reason":"Full002exactretiredexperimentalcontainerDelete-onlycompatibilitypolicyexpresslyrefusesallterminal/exec/Stop/Restart/Clone/Replaceaccess, includingexistingrunningrows. Intentionallossnormalaccesscovered; noauthorizationforunconfirmedDelete,wrongresource,ornewenvironmentreinterpretation. Preserveliveworkcontext/potentialhighestquestionforfreshconsult; no runtimeclaim or broadcompatibilityexception."},
- {"key":"g004/f5","proposal":"claim-checks/claims-002/result.json","parent_proposal":"source-refuted-complete-contract-semantics","final_independent_gate":"required-before-drop","reason":"Full002completeDelete/sealcontract distinguishesdefinitenothingdeletedConflictbeforedecision fromunansweredunknown. 'nothingdecided/doesnotguess' doesnotpromisenoalreadycommittedmutation: samefullsubsectionexpresslyfinishesdestructionafterlostreplyandrestart,actualrequestwordssayoutcomecannotbeknown. Preserveoriginalpotentialmisreadingaboutuserfiles/processesandfreshcheckwholecontract/callerwording; nofilterdiagnosticexcuse orclaimofnewdestructiveconsent."},
- {"key":"g005/f1","proposal":"claim-checks/claims-002/result.json","parent_proposal":"covered-including-stated-worst-consequence","final_independent_gate":"required-before-drop-or-lowering","reason":"Full002sourceconfirmsstartupWarn-sweepfailurestillcommitsInterrupted; exactSPEC3008-3010/SPEC_impl2815-2821explicitlyacceptthis ANDpossibleRestartsecondagentbesidestillrunning. Fullcoverofstatedmigrationfailureconsequence, notgeneralcleanupwaiver. PreservefreshRefuse-gradeRestartsweepandmissingconcretesurvivorthatpassesit; do not inferduplicateagentsfromknownscopekillfailurealone or requireabsenceproof. Originalpossibleconcurrent-workcorruption/highestretainedinregister; freshcheckexactacceptedfailed-retirementroute, not raritylowering."}
+  {
+    "key": "g003/f3",
+    "proposal": "claim-checks/claims-002/result.json",
+    "parent_proposal": "covered",
+    "final_independent_gate": "required-before-drop",
+    "reason": "Parentreadfull002. ExactSPECinitialordinarylaunchacceptance explicitlyincludeslostfirstsession-createreply/alreadystartedagent anddestructiononlyitsnewresource. SourceErr→destroycapturedhostmatches, outerreceiverlossaloneisnottrigger. Highestactualpossiblewrittenworkretained untilfreshAGREE onexactacceptance; Replace preservation/unrelatedresources/confirmedcreate excluded. No rarityfilter or runtimeobservation."
+  },
+  {
+    "key": "g003/f6",
+    "proposal": "claim-checks/claims-002/result.json",
+    "parent_proposal": "source-refuted",
+    "final_independent_gate": "required-before-drop",
+    "reason": "Parentreadfull002. Immediate-transaction independent spec_json/state_json writes preserveothercolumn; deletionsanddestinationmutation recheck placehostreferencesandrecipecleanup insidefinaltransaction, preparedcoordinates compareexactpriorbinding. Refutes namedordinarywrite/alreadyreferencedplace lossroute, notcrashdurability or approvaltimeretargeting. Originalpotentialsoleaccess/userworkloss route preserved; freshcheck mustcheckwriters/finalguards, no broadownershipsafetyclaim."
+  },
+  {
+    "key": "g004/f1",
+    "proposal": "claim-checks/claims-002/result.json",
+    "parent_proposal": "duplicate-retained-highest-g002/f1",
+    "final_independent_gate": "include-both-provenance-and-original-intent-drop",
+    "reason": "Full002same78e9 installer/SPECunconditionalsurvivalassuranceduringordinarymigrationthatterminatesoldagents/tabs. Preserveexplicitcommitdeliberate-wordingdecision andbothcontradictorycontractclauses; bareterminationacceptancedoesnotacceptassurance. Canonical002f1 retains highestconditionalworkloss, nofiles/currenthostharm. Dedup exactsameassurance/rootwith004SPEC_implwordingprovenance andlater071f2, do not silentlydiscardtheoriginalreviewerintent-baseddropproposal."
+  },
+  {
+    "key": "g004/f3",
+    "proposal": "claim-checks/claims-002/result.json",
+    "parent_proposal": "covered",
+    "final_independent_gate": "required-before-drop",
+    "reason": "Full002exactretiredexperimentalcontainerDelete-onlycompatibilitypolicyexpresslyrefusesallterminal/exec/Stop/Restart/Clone/Replaceaccess, includingexistingrunningrows. Intentionallossnormalaccesscovered; noauthorizationforunconfirmedDelete,wrongresource,ornewenvironmentreinterpretation. Preserveliveworkcontext/potentialhighestquestionforfreshconsult; no runtimeclaim or broadcompatibilityexception."
+  },
+  {
+    "key": "g004/f5",
+    "proposal": "claim-checks/claims-002/result.json",
+    "parent_proposal": "source-refuted-complete-contract-semantics",
+    "final_independent_gate": "required-before-drop",
+    "reason": "Full002completeDelete/sealcontract distinguishesdefinitenothingdeletedConflictbeforedecision fromunansweredunknown. 'nothingdecided/doesnotguess' doesnotpromisenoalreadycommittedmutation: samefullsubsectionexpresslyfinishesdestructionafterlostreplyandrestart,actualrequestwordssayoutcomecannotbeknown. Preserveoriginalpotentialmisreadingaboutuserfiles/processesandfreshcheckwholecontract/callerwording; nofilterdiagnosticexcuse orclaimofnewdestructiveconsent."
+  },
+  {
+    "key": "g005/f1",
+    "proposal": "claim-checks/claims-002/result.json",
+    "parent_proposal": "covered-including-stated-worst-consequence",
+    "final_independent_gate": "required-before-drop-or-lowering",
+    "reason": "Full002sourceconfirmsstartupWarn-sweepfailurestillcommitsInterrupted; exactSPEC3008-3010/SPEC_impl2815-2821explicitlyacceptthis ANDpossibleRestartsecondagentbesidestillrunning. Fullcoverofstatedmigrationfailureconsequence, notgeneralcleanupwaiver. PreservefreshRefuse-gradeRestartsweepandmissingconcretesurvivorthatpassesit; do not inferduplicateagentsfromknownscopekillfailurealone or requireabsenceproof. Originalpossibleconcurrent-workcorruption/highestretainedinregister; freshcheckexactacceptedfailed-retirementroute, not raritylowering."
+  }
 ]

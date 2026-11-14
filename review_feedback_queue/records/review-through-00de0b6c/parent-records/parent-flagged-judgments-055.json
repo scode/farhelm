@@ -1,7 +1,37 @@
 [
- {"key":"g085/c1","proposal":"claim-checks/claims-055/result.json","parent_proposal":"source-refuted-ordinary-Create-template-Host-retains-environment-target","final_independent_gate":"required-by-conservative-wrong-placement-flag","reason":"Parent read full055. Valid ordinary Create template Host replays through host search, select_recipe(None) clears whole target before offered host/authority change. Held host validation atomicity is separate: Replace host_fixed may refuse a Host template and cannot be claimed repaired by this ordinary path. Refute ordinary accepted Host-template allegation only, preserve possible wrong-target framing for gate and actual085l2 incompatible Replace Recent separately."},
- {"key":"g085/l1","proposal":"claim-checks/claims-055/result.json","parent_proposal":"source-refuted-cleared-Recent-host-wrong-installation-launch","final_independent_gate":"required-before-original-wrong-host-drop","reason":"Full055 chosen_host clearing is real, but ordinary history requires current/live destination installation match, retained remembered authority checked before dispatch and after key minting, explicit Recent folder not replaced by defaults, Replace separately refuses another effective source host. No proved wrong-host execution bypass. Preserve real mutation/conditional recovery, no automatic universal Replace repair, and distinguish existingA-B-A history-response provenance item. Fresh gate must judge narrow successful wrong-host route, not all transient refusals."},
- {"key":"g085/l2","proposal":"claim-checks/claims-055/result.json","parent_proposal":"retain-high-incompatible-environment-Recent-in-Replace-with-destructive-gate","final_independent_gate":"required-before-original-highest-consequence-refutation-or-lowering","reason":"Full055 ordinary shipped Recent can set environment target under Replace host_fixed, then submit safely refuses before create/source deletion while direct placement picker disabled. No timing needed; retain actual workflow failure, proposed high. Recovery includes Host search for ordinary source, suitable ordinary Recent conditionally or reopening; session-owned source absent from search, templates cannot clear held target. Earlier permanent-wedge/recovery overclaims corrected. Wrong-environment source deletion would need submit-fence bypass not established, but original destructive possibility stays for fresh gate. Reconcile086l2/087l1 exact roots before aliasing; landed broad plans not future cover/filter."},
- {"key":"g085/l3","proposal":"claim-checks/claims-055/result.json","parent_proposal":"source-refuted-successful-Clone-ordinary-create-inside-disposable-source","final_independent_gate":"required-by-conservative-wrong-placement-work-flag","reason":"Full055 production binding projects complete recipe/place plus legacyTensorlake fallback; missing catalog recipe alone not targetNone. UI leaves absent source unresolved, and ordinary-create backend refuses any session-owned host before host_client. A possible projectionNone does not establish successful launch into disposable source. Refute named execution path, not all transient metadata gaps/refusals or allClonebehavior. Preserve original filesystem reuse/placement concern; late recipe-choice overwrite queue is a distinct cause."},
- {"key":"g085/c5","proposal":"claim-checks/claims-055/result.json","parent_proposal":"source-refuted-queued-nonhome-folder-mutation-under-environment-target","final_independent_gate":"required-by-conservative-cross-machine-destination-flag","reason":"Full055 complete target selection resets ordinary folder authority; edit_folder/choose_existing_folder reject nonempty non-tilde under targetSome, browse delegates to guarded primitive and searchPath/Folder checks target before mutation. Advisory cleanup may occur but stale machine path cannot be restored by these callbacks. Refute exact mutation routes, not all history provenance or later launch trust. Preserve original cross-machine destination framing for conservative gate; no actual launch/security/work-loss sequence established."}
+  {
+    "key": "g085/c1",
+    "proposal": "claim-checks/claims-055/result.json",
+    "parent_proposal": "source-refuted-ordinary-Create-template-Host-retains-environment-target",
+    "final_independent_gate": "required-by-conservative-wrong-placement-flag",
+    "reason": "Parent read full055. Valid ordinary Create template Host replays through host search, select_recipe(None) clears whole target before offered host/authority change. Held host validation atomicity is separate: Replace host_fixed may refuse a Host template and cannot be claimed repaired by this ordinary path. Refute ordinary accepted Host-template allegation only, preserve possible wrong-target framing for gate and actual085l2 incompatible Replace Recent separately."
+  },
+  {
+    "key": "g085/l1",
+    "proposal": "claim-checks/claims-055/result.json",
+    "parent_proposal": "source-refuted-cleared-Recent-host-wrong-installation-launch",
+    "final_independent_gate": "required-before-original-wrong-host-drop",
+    "reason": "Full055 chosen_host clearing is real, but ordinary history requires current/live destination installation match, retained remembered authority checked before dispatch and after key minting, explicit Recent folder not replaced by defaults, Replace separately refuses another effective source host. No proved wrong-host execution bypass. Preserve real mutation/conditional recovery, no automatic universal Replace repair, and distinguish existingA-B-A history-response provenance item. Fresh gate must judge narrow successful wrong-host route, not all transient refusals."
+  },
+  {
+    "key": "g085/l2",
+    "proposal": "claim-checks/claims-055/result.json",
+    "parent_proposal": "retain-high-incompatible-environment-Recent-in-Replace-with-destructive-gate",
+    "final_independent_gate": "required-before-original-highest-consequence-refutation-or-lowering",
+    "reason": "Full055 ordinary shipped Recent can set environment target under Replace host_fixed, then submit safely refuses before create/source deletion while direct placement picker disabled. No timing needed; retain actual workflow failure, proposed high. Recovery includes Host search for ordinary source, suitable ordinary Recent conditionally or reopening; session-owned source absent from search, templates cannot clear held target. Earlier permanent-wedge/recovery overclaims corrected. Wrong-environment source deletion would need submit-fence bypass not established, but original destructive possibility stays for fresh gate. Reconcile086l2/087l1 exact roots before aliasing; landed broad plans not future cover/filter."
+  },
+  {
+    "key": "g085/l3",
+    "proposal": "claim-checks/claims-055/result.json",
+    "parent_proposal": "source-refuted-successful-Clone-ordinary-create-inside-disposable-source",
+    "final_independent_gate": "required-by-conservative-wrong-placement-work-flag",
+    "reason": "Full055 production binding projects complete recipe/place plus legacyTensorlake fallback; missing catalog recipe alone not targetNone. UI leaves absent source unresolved, and ordinary-create backend refuses any session-owned host before host_client. A possible projectionNone does not establish successful launch into disposable source. Refute named execution path, not all transient metadata gaps/refusals or allClonebehavior. Preserve original filesystem reuse/placement concern; late recipe-choice overwrite queue is a distinct cause."
+  },
+  {
+    "key": "g085/c5",
+    "proposal": "claim-checks/claims-055/result.json",
+    "parent_proposal": "source-refuted-queued-nonhome-folder-mutation-under-environment-target",
+    "final_independent_gate": "required-by-conservative-cross-machine-destination-flag",
+    "reason": "Full055 complete target selection resets ordinary folder authority; edit_folder/choose_existing_folder reject nonempty non-tilde under targetSome, browse delegates to guarded primitive and searchPath/Folder checks target before mutation. Advisory cleanup may occur but stale machine path cannot be restored by these callbacks. Refute exact mutation routes, not all history provenance or later launch trust. Preserve original cross-machine destination framing for conservative gate; no actual launch/security/work-loss sequence established."
+  }
 ]

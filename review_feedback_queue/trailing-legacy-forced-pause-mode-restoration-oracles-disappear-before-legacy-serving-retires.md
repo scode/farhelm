@@ -4,13 +4,31 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Unverified collection: This intermediate change removes regression checks that an old terminal recovers its alternate screen and input modes through the viewer attachment, while this revision still serves such terminals. The confirmed consequence is missing test protection, not a demonstrated product failure. Exact deletion: parent terminal_backpressure.rs:664 a_forced_tmux_pause_recovers_an_alternate_screen_pane and :729 a_forced_tmux_pause_restores_modes_and_cursor_state (assigned 00800-000.patch:675–800). The alternate-screen test requires post-reset alternate-buffer entry before ALT-SCREEN APP, and the mode test requires cursor placement after content plus bracketed-paste restoration where supported. SPEC_impl.md:2294–2296 says exactly: 'A supervisor creates every terminal in a terminal host; nothing selects tmux, and the supervisor never starts a tmux server (it still adopts and serves one an earlier supervisor left, "Terminal substrate: private tmux server").' Its :2954–2963 retains old-terminal serving during the transition. The Forwarder recovery remains connection.rs:1853–1871; TmuxReplay::render :1441–1450 sends reset, pre-content modes, content, post-content modes. Concrete competing implementation: Recovery alone omits its mode segments while Attach remains correct. That can restore a full-screen app into the wrong buffer or lose bracketed paste while all raw content assertions pass. Same-revision surviving oracles inspected: tmux/stream.rs:2983–3061 forces a pause, directly calls OutputStream::resume_paused_with_replay, checks content and resumed live output, but discards returned mo
+Unverified collection: This intermediate change removes regression checks that an old terminal recovers its alternate
+screen and input modes through the viewer attachment, while this revision still serves such terminals. The confirmed
+consequence is missing test protection, not a demonstrated product failure. Exact deletion: parent
+terminal_backpressure.rs:664 a_forced_tmux_pause_recovers_an_alternate_screen_pane and :729
+a_forced_tmux_pause_restores_modes_and_cursor_state (assigned 00800-000.patch:675–800). The alternate-screen test
+requires post-reset alternate-buffer entry before ALT-SCREEN APP, and the mode test requires cursor placement after
+content plus bracketed-paste restoration where supported. SPEC_impl.md:2294–2296 says exactly: 'A supervisor creates
+every terminal in a terminal host; nothing selects tmux, and the supervisor never starts a tmux server (it still adopts
+and serves one an earlier supervisor left, "Terminal substrate: private tmux server").' Its :2954–2963 retains
+old-terminal serving during the transition. The Forwarder recovery remains connection.rs:1853–1871; TmuxReplay::render
+:1441–1450 sends reset, pre-content modes, content, post-content modes. Concrete competing implementation: Recovery
+alone omits its mode segments while Attach remains correct. That can restore a full-screen app into the wrong buffer or
+lose bracketed paste while all raw content assertions pass. Same-revision surviving oracles inspected:
+tmux/stream.rs:2983–3061 forces a pause, directly calls OutputStream::resume_paused_with_replay, checks content and
+resumed live output, but discards returned mo
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g154/c3`.
 
@@ -20,19 +38,81 @@ Confidence: Unverified collection; recording proposals and any disagreement rema
 
 Latest reviewer record, event 11 (finding, open):
 
-Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: This intermediate change removes regression checks that an old terminal recovers its alternate screen and input modes through the viewer attachment, while this revision still serves such terminals. The confirmed consequence is missing test protection, not a demonstrated product failure. Exact deletion: parent terminal_backpressure.rs:664 a_forced_tmux_pause_recovers_an_alternate_screen_pane and :729 a_forced_tmux_pause_restores_modes_and_cursor_state (assigned 00800-000.patch:675–800). The alternate-screen test requires post-reset alternate-buffer entry before ALT-SCREEN APP, and the mode test requires cursor placement after content plus bracketed-paste restoration where supported. SPEC_impl.md:2294–2296 says exactly: 'A supervisor creates every terminal in a terminal host; nothing selects tmux, and the supervisor never starts a tmux server (it still adopts and serves one an earlier supervisor left, "Terminal substrate: private tmux server").' Its :2954–2963 retains old-terminal serving during the transition. The Forwarder recovery remains connection.rs:1853–1871; TmuxReplay::render :1441–1450 sends reset, pre-content modes, content, post-content modes. Concrete competing implementation: Recovery alone omits its mode segments while Attach remains correct. That can restore a full-screen app into the wrong buffer or lose bracketed paste while all raw content assertions pass. Same-revision surviving oracles inspected: tmux/stream.rs:2983–3061 forces a pause, directly calls OutputStream::resume_paused_with_replay, checks content and resumed live output, but discards returned modes and never renders them through Forwarder. tmux/test_support.rs:183–202 also resumes directly and discards replay. connection.rs:2294–2482 retains a real Forwarder normal-screen final-output test, asserting one reset, content once and no extra replay marker, but no nondefault alternate/input modes; there is no test of TmuxReplay/Recovery mode segments in that module. Pinned source searches across supervisor/e2e pause/recovery callers found no replacement attachment-level oracle for these two mode cases. Therefore not all catch-up coverage is lost, but the deleted mode sensitivity is. A repair at that historical revision would seed an earlier-release tmux session, adopt it, attach and force pause, preserving these mode/order assertions without restoring new tmux terminal creation.  Discovery also checked the other assigned shared-mechanism deletions rather than treating all tests as obsolete: parent :812's stalled-teardown/takeover test is a best-effort race sweep, and :1152 tests repeated short pauses. At 647f022 the retained host tests have ordinary takeover (host_terminals.rs:3564–3586) and one stalled viewer (:3598–3615), not the combined stale teardown or repeated-pause-cycle oracle. Later f560058da19e02716e6f943883a9508b447aff4e restores both as host-terminal tests: core/tests/host_terminals.rs:3734–3803 holds the attachments lock, queues takeover before stalled teardown, asserts winner attachment survival, requires only TakenOver for the loser and fresh winner output; :3822–3860 runs five short pauses with round-trip resumes and fresh output. Same tests survive at pinned tip :3729–3798/:3817–3855. Thus the missing ongoing shared-race/cumulative-pause claim is refuted by actual later tests, while their intermediate deletion remains historical. This differs from g153/l1's later repaired stale-owner PauseOutput authorization test. Grid pause/history tests alone do not establish any of these combined or legacy mode assertions, and they do not address g139's UploadAck priority oracle.  Retirement boundary resolved: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 core.rs:6426–6438 ends the old server and sets the driver absent, and :6965–6969 maps Tmux rows to None. Its SPEC.md:3003–3017 explicitly changes the product contract to ending old terminals at startup. The mode-recovery subject ceases there; 1ed482dde220452e424973faf38a5e1318986333 subsequently deletes the driver. This later retirement does not retroactively cover 647f022's tests and is not a request to restore obsolete tmux cases at tip.  Suggested bucket: other (regression-test protection in maintainer tooling). Confidence: confirmed source/contract and competing-oracle analysis; no execution or reproduction. proposed_drop: false for the historical test gap. Original c3 consequence/bases preserved: initial/synthesis records found no current production failure, cited correct shared anchor/identity guards and retained grid history tests, distinguished tmux RSS from terminal-host RSS, and proposed a broad drop on those grounds. That rationale cannot refute this test-oracle defect and is withdrawn for this specific gap. Propose excluding only an ongoing tip claim for the retired mode cases and the later repaired shared tests, on the exact retirement/test evidence above; no parent drop accepted. Could-be-highest: no established product security or loss-of-work defect; do not upgrade a missing test into a product failure. possible_cover: parent-supplied g151/l1 process-wiring, g153/c3 mixed-session and g155/c5 pending-cleanup historical test gaps are adjacent, not the same mode oracle; no prohibited coverage sources searched. Material caveats: the removed old race test did not prove it hit the race window; the later test is stronger. No host-memory coverage is inferred from the removed tmux RSS fixture. The assigned part ends at line 1296 and no later deleted body is included. Source-checkable premises for this ID are settled; no open lead remains.
+Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513. TLDR: This intermediate change removes regression checks that
+an old terminal recovers its alternate screen and input modes through the viewer attachment, while this revision still
+serves such terminals. The confirmed consequence is missing test protection, not a demonstrated product failure. Exact
+deletion: parent terminal_backpressure.rs:664 a_forced_tmux_pause_recovers_an_alternate_screen_pane and :729
+a_forced_tmux_pause_restores_modes_and_cursor_state (assigned 00800-000.patch:675–800). The alternate-screen test
+requires post-reset alternate-buffer entry before ALT-SCREEN APP, and the mode test requires cursor placement after
+content plus bracketed-paste restoration where supported. SPEC_impl.md:2294–2296 says exactly: 'A supervisor creates
+every terminal in a terminal host; nothing selects tmux, and the supervisor never starts a tmux server (it still adopts
+and serves one an earlier supervisor left, "Terminal substrate: private tmux server").' Its :2954–2963 retains
+old-terminal serving during the transition. The Forwarder recovery remains connection.rs:1853–1871; TmuxReplay::render
+:1441–1450 sends reset, pre-content modes, content, post-content modes. Concrete competing implementation: Recovery
+alone omits its mode segments while Attach remains correct. That can restore a full-screen app into the wrong buffer or
+lose bracketed paste while all raw content assertions pass. Same-revision surviving oracles inspected:
+tmux/stream.rs:2983–3061 forces a pause, directly calls OutputStream::resume_paused_with_replay, checks content and
+resumed live output, but discards returned modes and never renders them through Forwarder. tmux/test_support.rs:183–202
+also resumes directly and discards replay. connection.rs:2294–2482 retains a real Forwarder normal-screen final-output
+test, asserting one reset, content once and no extra replay marker, but no nondefault alternate/input modes; there is no
+test of TmuxReplay/Recovery mode segments in that module. Pinned source searches across supervisor/e2e pause/recovery
+callers found no replacement attachment-level oracle for these two mode cases. Therefore not all catch-up coverage is
+lost, but the deleted mode sensitivity is. A repair at that historical revision would seed an earlier-release tmux
+session, adopt it, attach and force pause, preserving these mode/order assertions without restoring new tmux terminal
+creation. Discovery also checked the other assigned shared-mechanism deletions rather than treating all tests as
+obsolete: parent :812's stalled-teardown/takeover test is a best-effort race sweep, and :1152 tests repeated short
+pauses. At 647f022 the retained host tests have ordinary takeover (host_terminals.rs:3564–3586) and one stalled viewer
+(:3598–3615), not the combined stale teardown or repeated-pause-cycle oracle. Later
+f560058da19e02716e6f943883a9508b447aff4e restores both as host-terminal tests: core/tests/host_terminals.rs:3734–3803
+holds the attachments lock, queues takeover before stalled teardown, asserts winner attachment survival, requires only
+TakenOver for the loser and fresh winner output; :3822–3860 runs five short pauses with round-trip resumes and fresh
+output. Same tests survive at pinned tip :3729–3798/:3817–3855. Thus the missing ongoing shared-race/cumulative-pause
+claim is refuted by actual later tests, while their intermediate deletion remains historical. This differs from
+g153/l1's later repaired stale-owner PauseOutput authorization test. Grid pause/history tests alone do not establish any
+of these combined or legacy mode assertions, and they do not address g139's UploadAck priority oracle. Retirement
+boundary resolved: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 core.rs:6426–6438 ends the old server and sets the driver
+absent, and :6965–6969 maps Tmux rows to None. Its SPEC.md:3003–3017 explicitly changes the product contract to ending
+old terminals at startup. The mode-recovery subject ceases there; 1ed482dde220452e424973faf38a5e1318986333 subsequently
+deletes the driver. This later retirement does not retroactively cover 647f022's tests and is not a request to restore
+obsolete tmux cases at tip. Suggested bucket: other (regression-test protection in maintainer tooling). Confidence:
+confirmed source/contract and competing-oracle analysis; no execution or reproduction. proposed_drop: false for the
+historical test gap. Original c3 consequence/bases preserved: initial/synthesis records found no current production
+failure, cited correct shared anchor/identity guards and retained grid history tests, distinguished tmux RSS from
+terminal-host RSS, and proposed a broad drop on those grounds. That rationale cannot refute this test-oracle defect and
+is withdrawn for this specific gap. Propose excluding only an ongoing tip claim for the retired mode cases and the later
+repaired shared tests, on the exact retirement/test evidence above; no parent drop accepted. Could-be-highest: no
+established product security or loss-of-work defect; do not upgrade a missing test into a product failure.
+possible_cover: parent-supplied g151/l1 process-wiring, g153/c3 mixed-session and g155/c5 pending-cleanup historical
+test gaps are adjacent, not the same mode oracle; no prohibited coverage sources searched. Material caveats: the removed
+old race test did not prove it hit the race window; the later test is stronger. No host-memory coverage is inferred from
+the removed tmux RSS fixture. The assigned part ends at line 1296 and no later deleted body is included.
+Source-checkable premises for this ID are settled; no open lead remains.
 
 Returned proposal (claims-098, event 11): **retain-verified**, suggested bucket **other**.
 
-Removing the alternate-screen and mode/cursor recovery assertions loses distinct legacy attachment-level test protection while old terminals remain served. Surviving content recovery and grid tests do not assert those mode segments. This is a historical test defect, not an established current mode-restoration failure.
+Removing the alternate-screen and mode/cursor recovery assertions loses distinct legacy attachment-level test protection
+while old terminals remain served. Surviving content recovery and grid tests do not assert those mode segments. This is
+a historical test defect, not an established current mode-restoration failure.
 
-Original stronger consequence: Initial records broadly proposed dropping the removed tmux pause/race/RSS suite because the host grid path differs, shared ownership/anchor guards are correct, and no product failure was established. Later records withdraw that argument for the legacy mode oracle, retain no-runtime/no-host-RSS caveats, and exclude only the retired ongoing legacy claim and later repaired shared tests. UploadAck priority is separately owned and not settled here.
+Original stronger consequence: Initial records broadly proposed dropping the removed tmux pause/race/RSS suite because
+the host grid path differs, shared ownership/anchor guards are correct, and no product failure was established. Later
+records withdraw that argument for the legacy mode oracle, retain no-runtime/no-host-RSS caveats, and exclude only the
+retired ongoing legacy claim and later repaired shared tests. UploadAck priority is separately owned and not settled
+here.
 
-Unresolved premise or limitation: None for loss of the two historical mode-sensitive oracles. An actual product corruption, unsafe paste, or lost-work route is not demonstrated. The old race sweep did not prove hitting its race; later host coverage is stronger.
+Unresolved premise or limitation: None for loss of the two historical mode-sensitive oracles. An actual product
+corruption, unsafe paste, or lost-work route is not demonstrated. The old race sweep did not prove hitting its race;
+later host coverage is stronger.
 
-Proposed basis: Retain the specific intermediate mode-restoration test loss. Preserve the initial withdrawal history and the later retirement/repair boundaries without inventing a current product bug or requesting obsolete tmux tests at tip.
+Proposed basis: Retain the specific intermediate mode-restoration test loss. Preserve the initial withdrawal history and
+the later retirement/repair boundaries without inventing a current product bug or requesting obsolete tmux tests at tip.
 
-Existing parent disposition (event 11): rejected. Parent read full098.647 removes explicit alternate-buffer entry and cursor/bracketed-paste recovery sequence while old tmux attachment service still exists. Surviving content/grid tests do not protect those exact mode segments; intermediate missing protection is real, not disproved by correct production. dbfc retires exact old service and1ed removes driver bytip, so no current obsolete fixture restoration queued. Preserve earlier no-product-bug dismissal withdrawal and later stronger host race/pause tests; no demonstrated unsafepaste/workloss or currentmode failure.
+Existing parent disposition (event 11): rejected. Parent read full098.647 removes explicit alternate-buffer entry and
+cursor/bracketed-paste recovery sequence while old tmux attachment service still exists. Surviving content/grid tests do
+not protect those exact mode segments; intermediate missing protection is real, not disproved by correct production.
+dbfc retires exact old service and1ed removes driver bytip, so no current obsolete fixture restoration queued. Preserve
+earlier no-product-bug dismissal withdrawal and later stronger host race/pause tests; no demonstrated
+unsafepaste/workloss or currentmode failure.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g154 record](records/review-through-00de0b6c/groups/g154.json). Record ID: `c3`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g154 record](records/review-through-00de0b6c/groups/g154.json). Record ID: `c3`.

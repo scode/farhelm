@@ -4,13 +4,19 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Unverified collection: If rebuilding a previously usable container recipe fails, Farhelm removes its last working software image and installation checkpoint instead of retaining them. New sessions then have to rebuild; if the same package/base/installer failure persists, the recipe can no longer launch despite having worked before.
+Unverified collection: If rebuilding a previously usable container recipe fails, Farhelm removes its last working
+software image and installation checkpoint instead of retaining them. New sessions then have to rebuild; if the same
+package/base/installer failure persists, the recipe can no longer launch despite having worked before.
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **high**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **high**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g058/l2`, `g061/l1`.
 
@@ -20,21 +26,97 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 15 (finding, open):
 
-Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; unchanged relevant implementation through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: If rebuilding a previously usable container recipe fails, Farhelm removes its last working software image and installation checkpoint instead of retaining them. New sessions then have to rebuild; if the same package/base/installer failure persists, the recipe can no longer launch despite having worked before. Details: environment/podman.rs:913-941 implements the shipped provider Rebuild operation and passes rebuild=true to prepare_images. podman/build.rs:248-260 moves BOTH current image and prepared into retired_images before calling prepare_images_owned. software :128-132 therefore cannot reuse the old image and a later failure can occur before any replacement is published. On error :267-279 calls reconcile_helpers and retire_images; retire_images_unlocked :689-757 removes unused Farhelm-owned images and clears their ownership records. This removes the prior fallback even when the replacement failed in base pulling, readiness, packages or an installer. No restoration exists on the error path; it only records last_failure at :280-286. fresh_image :510-529 requires both current image and prepared, and ensure_prepared in podman.rs:992-1015 starts another build when absent. Contract: SPEC_impl.md, Podman places, creation and images: 'After successful build/preparation replacement, remove a superseded owned image once no container uses it.' Here the previous images are superseded and deleted before a successful replacement. Keep the old current records while forcing a fresh build, publish the replacement before retiring them, and clean only the failed attempt's resources on failure. Suggested bucket: high/material UX: a failed maintenance action disables new launches of a previously working recipe and may require resolving an unrelated external outage before use can resume. Could-be-highest: no established route; cleanup is nonforcing and skips images referenced by containers, so this finding does not claim loss of container files, processes or unpushed work. The original c2 potentially highest ownership-loss candidate remains independently preserved; this finding concerns premature confirmed deletion of cached build artifacts. Confidence: confirmed source/contract analysis, no runtime reproduction. proposed_drop: false. possible_cover: none. Interface routing: this is later Podman build implementation, so send to the parent for the owning provider/build group's synthesis; preserve this ID and consequence if deduplicated. Synthesis alias reconciliation for discovery turn 3: parent-supplied g061/l1 latest line13 independently reports this same defect, so g058/l2 is an alias for consolidation, not a new discovery or an accepted drop. Its fix guidance clarifies that force intent must bypass both software and prepared reuse shortcuts while retaining active-job joining; retaining old records alone would conceal admitted Rebuild work. The confirmed fallback-loss boundary is failure before successful replacement software publication; a preparation failure after successful software replacement need not roll software back. These clarifications preserve the original availability consequence and high recommendation. LATE INTERFACE QUALIFICATION, synthesis turn 4: c2 now carries the exact user-base pruning route supplied as alias g061/l8. Preserve this l2 original high availability/fallback-deletion consequence and all its prior bases; this is not a drop or lowering of c2/g061/l8. The earlier rationale that removal is nonforcing and skips container users establishes no forced deletion of existing containers, but cannot establish protection of untagged user-base image contents: default recursive parent pruning can cross that boundary when no protecting references remain. That separate highest conditional loss route can run through the same retirement helper after failed Rebuild as well as recipe deletion; it is consolidated under c2/g061/l8 rather than counted as a new l2 mechanism. No unchanged high bucket here may be used to downgrade that separate established user-owned-image route. Source/contract analysis only; no runtime observation.
+Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; unchanged relevant implementation through pinned tip
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: If rebuilding a previously usable container recipe fails, Farhelm
+removes its last working software image and installation checkpoint instead of retaining them. New sessions then have to
+rebuild; if the same package/base/installer failure persists, the recipe can no longer launch despite having worked
+before. Details: environment/podman.rs:913-941 implements the shipped provider Rebuild operation and passes rebuild=true
+to prepare_images. podman/build.rs:248-260 moves BOTH current image and prepared into retired_images before calling
+prepare_images_owned. software :128-132 therefore cannot reuse the old image and a later failure can occur before any
+replacement is published. On error :267-279 calls reconcile_helpers and retire_images; retire_images_unlocked :689-757
+removes unused Farhelm-owned images and clears their ownership records. This removes the prior fallback even when the
+replacement failed in base pulling, readiness, packages or an installer. No restoration exists on the error path; it
+only records last_failure at :280-286. fresh_image :510-529 requires both current image and prepared, and
+ensure_prepared in podman.rs:992-1015 starts another build when absent. Contract: SPEC_impl.md, Podman places, creation
+and images: 'After successful build/preparation replacement, remove a superseded owned image once no container uses it.'
+Here the previous images are superseded and deleted before a successful replacement. Keep the old current records while
+forcing a fresh build, publish the replacement before retiring them, and clean only the failed attempt's resources on
+failure. Suggested bucket: high/material UX: a failed maintenance action disables new launches of a previously working
+recipe and may require resolving an unrelated external outage before use can resume. Could-be-highest: no established
+route; cleanup is nonforcing and skips images referenced by containers, so this finding does not claim loss of container
+files, processes or unpushed work. The original c2 potentially highest ownership-loss candidate remains independently
+preserved; this finding concerns premature confirmed deletion of cached build artifacts. Confidence: confirmed
+source/contract analysis, no runtime reproduction. proposed_drop: false. possible_cover: none. Interface routing: this
+is later Podman build implementation, so send to the parent for the owning provider/build group's synthesis; preserve
+this ID and consequence if deduplicated. Synthesis alias reconciliation for discovery turn 3: parent-supplied g061/l1
+latest line13 independently reports this same defect, so g058/l2 is an alias for consolidation, not a new discovery or
+an accepted drop. Its fix guidance clarifies that force intent must bypass both software and prepared reuse shortcuts
+while retaining active-job joining; retaining old records alone would conceal admitted Rebuild work. The confirmed
+fallback-loss boundary is failure before successful replacement software publication; a preparation failure after
+successful software replacement need not roll software back. These clarifications preserve the original availability
+consequence and high recommendation. LATE INTERFACE QUALIFICATION, synthesis turn 4: c2 now carries the exact user-base
+pruning route supplied as alias g061/l8. Preserve this l2 original high availability/fallback-deletion consequence and
+all its prior bases; this is not a drop or lowering of c2/g061/l8. The earlier rationale that removal is nonforcing and
+skips container users establishes no forced deletion of existing containers, but cannot establish protection of untagged
+user-base image contents: default recursive parent pruning can cross that boundary when no protecting references remain.
+That separate highest conditional loss route can run through the same retirement helper after failed Rebuild as well as
+recipe deletion; it is consolidated under c2/g061/l8 rather than counted as a new l2 mechanism. No unchanged high bucket
+here may be used to downgrade that separate established user-owned-image route. Source/contract analysis only; no
+runtime observation.
 
 Returned proposal (claims-037, event 15): **retain-verified**, suggested bucket **high**.
 
-A failed maintenance Rebuild can remove the last usable software/prepared images before replacement succeeds. A continuing base/package/installer outage then prevents new launches of a previously working recipe. This is distinct from implicit user-base pruning.
+A failed maintenance Rebuild can remove the last usable software/prepared images before replacement succeeds. A
+continuing base/package/installer outage then prevents new launches of a previously working recipe. This is distinct
+from implicit user-base pruning.
 
-Original stronger consequence: Previous working software and installation checkpoints are removed after failed Rebuild, forcing rebuilds or blocking launches. The history reports g061/l1 as a parent-supplied alias, not inspected in this batch. Earlier nonforcing-removal rationale does not establish protection from implicit ancestor pruning; that separate route is retained under c2.
+Original stronger consequence: Previous working software and installation checkpoints are removed after failed Rebuild,
+forcing rebuilds or blocking launches. The history reports g061/l1 as a parent-supplied alias, not inspected in this
+batch. Earlier nonforcing-removal rationale does not establish protection from implicit ancestor pruning; that separate
+route is retained under c2.
 
-Unresolved premise or limitation: Loss of container files/processes is not established by this fallback mechanism. Its high consequence needs replacement failure and a later launch, and becomes prolonged if the dependency failure continues. Separate user-base loss remains highest under g058/c2.
+Unresolved premise or limitation: Loss of container files/processes is not established by this fallback mechanism. Its
+high consequence needs replacement failure and a later launch, and becomes prolonged if the dependency failure
+continues. Separate user-base loss remains highest under g058/c2.
 
-Proposed basis: Retain high for established recipe availability loss; preserve the separate highest pruning route without using this bucket to lower it.
+Proposed basis: Retain high for established recipe availability loss; preserve the separate highest pruning route
+without using this bucket to lower it.
 
-Existing parent disposition (event 15): verified. Parent explicitly accepted named retain-verified proposal from claims-037 after inspecting it. A failed maintenance Rebuild can remove the last usable software/prepared images before replacement succeeds. A continuing base/package/installer outage then prevents new launches of a previously working recipe. This is distinct from implicit user-base pruning. Retain high for established recipe availability loss; preserve the separate highest pruning route without using this bucket to lower it. Checked source/results: ["56659839785691f76da3af5d8f51b511cff4ba8b podman.rs:913-941 is the shipped Rebuild implementation and passes true into prepare_images.","Same revision podman/build.rs:250-260 takes both image and prepared into retired_images before replacement work. :128-132 would otherwise reuse the software image, but its record has already been removed. :267-286 reconciles helpers, retires images on error, and records failure without restoration.","Same revision :689-757 removes unused retired images and clears records. :505-531 requires both current source and preparation for freshness; podman.rs:992-1015 starts fresh work when absent. build.rs is unchanged through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.","Boundary preserved: failure before successful replacement software publication discards fallback; failure during preparation after successful software publication need not roll software back. A fix must force actual rebuilding while retaining prior records and preserve active-job joining. No runtime reproduction."] Current coverage/results: {"specifications":"Current SPEC.md:4885-4889 and SPEC_impl.md:6087-6092 require retiring superseded images after successful replacement; reviewed SPEC_impl.md:6566-6570 says the same. Tensorlake's explicit failure fallback at SPEC.md:550-564 is consistent context, not a Podman exception.","planned_and_plans":"TODO.md Planned is empty; plans/queue/INDEX.md contains no unlanded plan. Historical Superseded images paragraph requires success before retirement; not active repair coverage.","bugs":"BUGS.md has no failed-Rebuild fallback exception.","queue":"Searched INDEX.md for failed Rebuild, fallback, prior images and retirement. Read packages-build-result-retired-under-changed-image-source.md and snapshot-cleanup-races-new-host-registration.md: different Tensorlake source/admission races, not failed explicit Podman Rebuild. No exact item or useful same-root extension.","triage":"Active TRIAGE_OUTCOMES.md searched for Rebuild, fallback, prior images and recipe cleanup; no exact outcome. Archive not read.","filter":"No full filter match: explicit Rebuild is ordinary; the missing durable fallback and continued launch failure are not merely a rare diagnostic or next-refresh glitch."} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "Previous working software and installation checkpoints are removed after failed Rebuild, forcing rebuilds or blocking launches. The history reports g061/l1 as a parent-supplied alias, not inspected in this batch. Earlier nonforcing-removal rationale does not establish protection from implicit ancestor pruning; that separate route is retained under c2."; "Loss of container files/processes is not established by this fallback mechanism. Its high consequence needs replacement failure and a later launch, and becomes prolonged if the dependency failure continues. Separate user-base loss remains highest under g058/c2.".
+Existing parent disposition (event 15): verified. Parent explicitly accepted named retain-verified proposal from
+claims-037 after inspecting it. A failed maintenance Rebuild can remove the last usable software/prepared images before
+replacement succeeds. A continuing base/package/installer outage then prevents new launches of a previously working
+recipe. This is distinct from implicit user-base pruning. Retain high for established recipe availability loss; preserve
+the separate highest pruning route without using this bucket to lower it. Checked source/results:
+["56659839785691f76da3af5d8f51b511cff4ba8b podman.rs:913-941 is the shipped Rebuild implementation and passes true into
+prepare_images.","Same revision podman/build.rs:250-260 takes both image and prepared into retired_images before
+replacement work. :128-132 would otherwise reuse the software image, but its record has already been removed. :267-286
+reconciles helpers, retires images on error, and records failure without restoration.","Same revision :689-757 removes
+unused retired images and clears records. :505-531 requires both current source and preparation for freshness;
+podman.rs:992-1015 starts fresh work when absent. build.rs is unchanged through
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.","Boundary preserved: failure before successful replacement software
+publication discards fallback; failure during preparation after successful software publication need not roll software
+back. A fix must force actual rebuilding while retaining prior records and preserve active-job joining. No runtime
+reproduction."] Current coverage/results: {"specifications":"Current SPEC.md:4885-4889 and SPEC_impl.md:6087-6092
+require retiring superseded images after successful replacement; reviewed SPEC_impl.md:6566-6570 says the same.
+Tensorlake's explicit failure fallback at SPEC.md:550-564 is consistent context, not a Podman
+exception.","planned_and_plans":"TODO.md Planned is empty; plans/queue/INDEX.md contains no unlanded plan. Historical
+Superseded images paragraph requires success before retirement; not active repair coverage.","bugs":"BUGS.md has no
+failed-Rebuild fallback exception.","queue":"Searched INDEX.md for failed Rebuild, fallback, prior images and
+retirement. Read packages-build-result-retired-under-changed-image-source.md and
+snapshot-cleanup-races-new-host-registration.md: different Tensorlake source/admission races, not failed explicit Podman
+Rebuild. No exact item or useful same-root extension.","triage":"Active TRIAGE_OUTCOMES.md searched for Rebuild,
+fallback, prior images and recipe cleanup; no exact outcome. Archive not read.","filter":"No full filter match: explicit
+Rebuild is ordinary; the missing durable fallback and continued launch failure are not merely a rare diagnostic or
+next-refresh glitch."} Exact cited cover: [] Original stronger consequence and missing premise remain preserved:
+"Previous working software and installation checkpoints are removed after failed Rebuild, forcing rebuilds or blocking
+launches. The history reports g061/l1 as a parent-supplied alias, not inspected in this batch. Earlier
+nonforcing-removal rationale does not establish protection from implicit ancestor pruning; that separate route is
+retained under c2."; "Loss of container files/processes is not established by this fallback mechanism. Its high
+consequence needs replacement failure and a later launch, and becomes prolonged if the dependency failure continues.
+Separate user-base loss remains highest under g058/c2.".
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g058 record](records/review-through-00de0b6c/groups/g058.json). Record ID: `l2`.
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g058 record](records/review-through-00de0b6c/groups/g058.json). Record ID: `l2`.
 
 ### g061/l1
 
@@ -42,19 +124,47 @@ Confidence: Unverified collection; recording proposals and any disagreement rema
 
 Latest reviewer record, event 17 (finding, open):
 
-Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; affected implementation unchanged through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: failure of an admitted container recipe Rebuild can discard the previous usable software and installation images, making later launches rebuild and potentially fail on the same external cause. Source: build.rs:250-264 removes both current records before replacement and :267-278 attempts retirement on failure; :721-755 deletes unused owned images without force. SPEC.md:4809-4811 and SPEC_impl.md:6566 require retirement after successful replacement. The admitted current-definition Rebuild route is podman.rs:913-942; ensure_prepared at :993-1035 then has no fallback records. Preserve the original availability/unnecessary-rebuild consequence, high/material UX recommendation and confirmed source confidence; no execution observed and no priority lowering. Rebuild force intent must bypass both prepared reuse at build.rs:306-307 and software reuse at :128-132 without hiding an active job. Retain old records until publication (:216-224); launch admission must still join active work per SPEC_impl.md:6508-6509. Successful software publication can legitimately stale old preparation even if later preparation fails; no software rollback is required then. Interface synthesis before discovery pass 1: supplied g058/l2 reports the exact same before-success retirement route and failure consequence. It is an alias for consolidation, not a new finding, new discovery or accepted drop. Original ID l1 remains open. proposed_drop: false. possible_cover: g058/l2 exact duplicate supplied in discovery-neighbours.json. Could-be-highest: no established user-work loss because retirement checks every container's use and is nonforcing. This alias does not alter original impact, fix constraints, caveats or bucket.
+Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; affected implementation unchanged through pinned tip
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: failure of an admitted container recipe Rebuild can discard the previous
+usable software and installation images, making later launches rebuild and potentially fail on the same external cause.
+Source: build.rs:250-264 removes both current records before replacement and :267-278 attempts retirement on failure;
+:721-755 deletes unused owned images without force. SPEC.md:4809-4811 and SPEC_impl.md:6566 require retirement after
+successful replacement. The admitted current-definition Rebuild route is podman.rs:913-942; ensure_prepared at :993-1035
+then has no fallback records. Preserve the original availability/unnecessary-rebuild consequence, high/material UX
+recommendation and confirmed source confidence; no execution observed and no priority lowering. Rebuild force intent
+must bypass both prepared reuse at build.rs:306-307 and software reuse at :128-132 without hiding an active job. Retain
+old records until publication (:216-224); launch admission must still join active work per SPEC_impl.md:6508-6509.
+Successful software publication can legitimately stale old preparation even if later preparation fails; no software
+rollback is required then. Interface synthesis before discovery pass 1: supplied g058/l2 reports the exact same
+before-success retirement route and failure consequence. It is an alias for consolidation, not a new finding, new
+discovery or accepted drop. Original ID l1 remains open. proposed_drop: false. possible_cover: g058/l2 exact duplicate
+supplied in discovery-neighbours.json. Could-be-highest: no established user-work loss because retirement checks every
+container's use and is nonforcing. This alias does not alter original impact, fix constraints, caveats or bucket.
 
 Returned proposal (claims-039, event 17): **retain-verified**, suggested bucket **high**.
 
-An admitted Rebuild discards both reusable checkpoints before attempting replacement. Failure leaves subsequent launches rebuilding, contrary to the successful-replacement boundary. This is source-established availability loss, with no runtime reproduction.
+An admitted Rebuild discards both reusable checkpoints before attempting replacement. Failure leaves subsequent launches
+rebuilding, contrary to the successful-replacement boundary. This is source-established availability loss, with no
+runtime reproduction.
 
-Original stronger consequence: A failed recipe rebuild deletes the previously usable software and installation checkpoints; later launches must rebuild and may fail for the same network, installer or edited-base cause. Existing-container files/processes were never claimed lost. The supplied history reports g058/l2 as the same route without changing this consequence.
+Original stronger consequence: A failed recipe rebuild deletes the previously usable software and installation
+checkpoints; later launches must rebuild and may fail for the same network, installer or edited-base cause.
+Existing-container files/processes were never claimed lost. The supplied history reports g058/l2 as the same route
+without changing this consequence.
 
-Unresolved premise or limitation: No missing premise for the availability defect. Work loss inside an existing container is not established. The distinct user-base pruning route is retained separately under g061/l8.
+Unresolved premise or limitation: No missing premise for the availability defect. Work loss inside an existing container
+is not established. The distinct user-base pruning route is retained separately under g061/l8.
 
-Proposed basis: Retain a high-priority source-confirmed availability finding; preserve force/reuse/joining fix constraints and the distinction from user-owned-base pruning. No accepted coverage or filter match.
+Proposed basis: Retain a high-priority source-confirmed availability finding; preserve force/reuse/joining fix
+constraints and the distinction from user-owned-base pruning. No accepted coverage or filter match.
 
-Existing parent disposition (event 17): duplicate. Parent read complete claims-039 g061/l1 and claims-037 g058/l2. Both report the same admitted explicit Podman Rebuild taking current software/prepared records at build.rs:250-264 before replacement, retiring them on error, so later launch lacks a working fallback. Canonicalg058/l2 already retains high availability harm; g061 adds force intent past both reuse shortcuts, active-job joining and the successful-software/later-preparation distinction. Preserve all source references, continued-dependency-failure condition and no observed runtime/current-container-work-loss claim. This does not lower or refute the distinct highest implicit user-base pruning route g061/l8/g058/c2.
+Existing parent disposition (event 17): duplicate. Parent read complete claims-039 g061/l1 and claims-037 g058/l2. Both
+report the same admitted explicit Podman Rebuild taking current software/prepared records at build.rs:250-264 before
+replacement, retiring them on error, so later launch lacks a working fallback. Canonicalg058/l2 already retains high
+availability harm; g061 adds force intent past both reuse shortcuts, active-job joining and the
+successful-software/later-preparation distinction. Preserve all source references, continued-dependency-failure
+condition and no observed runtime/current-container-work-loss claim. This does not lower or refute the distinct highest
+implicit user-base pruning route g061/l8/g058/c2.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g061 record](records/review-through-00de0b6c/groups/g061.json). Record ID: `l1`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g061 record](records/review-through-00de0b6c/groups/g061.json). Record ID: `l1`.

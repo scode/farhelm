@@ -4,13 +4,30 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Unverified collection: after migration fails to stop an old checkout preparation, startup can remove its still-live spare claim. Cleanup can keep traversing a directory after the old shim moves it into the allocated checkout, so work written there by another surviving session can be deleted. This restores the original possible work-loss consequence on a narrower, source-established route; it is not a claim that the allocated checkout root itself is recursively selected by pathname. Details and exact ordering: (1) core.rs:7843 marks every old-kind row not live regardless of teardown success, and :8065–8070 sends that snapshot to repo_cache::sweep. repo_cache.rs:120–138 takes only the repository cache lock; spare_take.rs:38–40 explicitly takes no such lock, so it does not exclude an ongoing take. Migration agent sweep failures/timeouts are logged and startup continues (old_terminals.rs:306–318, :351–356). (2) A take validates the allocated directory's dev/inode and canonical path, opens the checkout root O_DIRECTORY|O_NOFOLLOW, then opens the allocated destination and private namespace as separate confined handles (spare_take.rs:295–329, :351–370). Before moving, :142–153 rechecks destination identity and emptiness, enumerates the source and preflights entries; :148–151 orders .git first. The move at :156–174 renames each child from the retained claim directory fd into the retained allocated destination fd, without overwriting. The allocation directory is not replaced. (3) In parallel, spare_checkouts.rs:611–618 opens/verifies the legitimate claim, parks its root under a private trash name, opens/v
+Unverified collection: after migration fails to stop an old checkout preparation, startup can remove its still-live
+spare claim. Cleanup can keep traversing a directory after the old shim moves it into the allocated checkout, so work
+written there by another surviving session can be deleted. This restores the original possible work-loss consequence on
+a narrower, source-established route; it is not a claim that the allocated checkout root itself is recursively selected
+by pathname. Details and exact ordering: (1) core.rs:7843 marks every old-kind row not live regardless of teardown
+success, and :8065–8070 sends that snapshot to repo_cache::sweep. repo_cache.rs:120–138 takes only the repository cache
+lock; spare_take.rs:38–40 explicitly takes no such lock, so it does not exclude an ongoing take. Migration agent sweep
+failures/timeouts are logged and startup continues (old_terminals.rs:306–318, :351–356). (2) A take validates the
+allocated directory's dev/inode and canonical path, opens the checkout root O_DIRECTORY|O_NOFOLLOW, then opens the
+allocated destination and private namespace as separate confined handles (spare_take.rs:295–329, :351–370). Before
+moving, :142–153 rechecks destination identity and emptiness, enumerates the source and preflights entries; :148–151
+orders .git first. The move at :156–174 renames each child from the retained claim directory fd into the retained
+allocated destination fd, without overwriting. The allocation directory is not replaced. (3) In parallel,
+spare_checkouts.rs:611–618 opens/verifies the legitimate claim, parks its root under a private trash name, opens/v
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **highest**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **highest**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g111/l1`.
 
@@ -20,19 +37,92 @@ Confidence: Unverified collection; recording proposals and any disagreement rema
 
 Latest reviewer record, event 13 (finding, open):
 
-Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Attribution: the same behavior already exists in its immediate predecessor dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 (the old-terminal migration); the assigned driver-removal patch preserves it. TLDR: after migration fails to stop an old checkout preparation, startup can remove its still-live spare claim. Cleanup can keep traversing a directory after the old shim moves it into the allocated checkout, so work written there by another surviving session can be deleted. This restores the original possible work-loss consequence on a narrower, source-established route; it is not a claim that the allocated checkout root itself is recursively selected by pathname.  Details and exact ordering: (1) core.rs:7843 marks every old-kind row not live regardless of teardown success, and :8065–8070 sends that snapshot to repo_cache::sweep. repo_cache.rs:120–138 takes only the repository cache lock; spare_take.rs:38–40 explicitly takes no such lock, so it does not exclude an ongoing take. Migration agent sweep failures/timeouts are logged and startup continues (old_terminals.rs:306–318, :351–356). (2) A take validates the allocated directory's dev/inode and canonical path, opens the checkout root O_DIRECTORY|O_NOFOLLOW, then opens the allocated destination and private namespace as separate confined handles (spare_take.rs:295–329, :351–370). Before moving, :142–153 rechecks destination identity and emptiness, enumerates the source and preflights entries; :148–151 orders .git first. The move at :156–174 renames each child from the retained claim directory fd into the retained allocated destination fd, without overwriting. The allocation directory is not replaced. (3) In parallel, spare_checkouts.rs:611–618 opens/verifies the legitimate claim, parks its root under a private trash name, opens/verifies that root and calls remove_opened_tree. checkout_trash.rs:320–349 traverses child directories through retained opened handles. If it opens a child before the take moves that child into the destination, the handle continues to name the moved child. Recursive deletion proceeds through it; the source-name identity check at :374–380 is only after that child's contents were traversed. It can then report that the old source name vanished, but already-deleted content is not restored. No claim-root identity check prevents this movement of descendants out from under an active traversal. (4) Parking the claim makes the take's final unlink of its original claim name fail (spare_take.rs:176–181). That returns an error, so the origin's own merge, configured post-clone command and agent do not run (launch.rs:1904–1913, :1922–1945); this refutes work loss from that origin's later agent/hook. It does not protect an independent existing host-backed session in the allocated directory. Such a borrower is a shipped supported route: an existing-directory create attaches ancestor membership without inheriting preparation (store.rs:3389–3393), and core.rs:12202–12217 explicitly permits borrowers to use incomplete contents while restricting Ready only for the origin. That host-backed session survives migration. It can write new files or Git work into an already-moved child while cleanup still traverses that child, and those writes are ordinary user-owned checkout work, not replacements under .farhelm-spares. A host-backed tab is another possible surviving writer; old_terminals.rs:399–401 skips its launch record during old-tab cleanup. The finding does not require admitting a new client during startup: the borrower can already be running before the update.  Historical/attribution checks: spare_take introduction 1d2ff45e4e5a2de2a6ff9bcc1aac9a9eba647199 predates terminal hosts. Its diff to the reviewed revision changes Git flags, ancestry checking and launch-file enum handling, not the relevant opened handles, .git-first moves or unlink ordering, establishing an older tmux shim with this shape. The predecessor core.rs:6433–6438 already runs migration then unconditionally sets no_server_after_startup. Predecessor tmux.rs:3041–3042 sets presence absent; :2534–2542 and :2983 synthesize NoServer, and :4907–4923 returns an empty pane map. Predecessor core.rs:8173–8188 therefore already omitted protection for old claims. Do not attribute a new regression solely to the assigned :7843 simplification; forward this migration-specific route to the parent for cross-group ownership.  Contract and policy: SPEC.md, Managed checkouts, :1748–1752 says 'Startup removes leftover building and claimed directories except claims still in a live launch's clone stage' (straight-apostrophe spelling in the pinned source); SPEC_impl.md:3965–3969 retains a still-live NotStarted/clone claim and says failed or uncertain liveness observations retain possible claims. SPEC.md, Terminal experience, :3014–3016 says 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running.' The isolated legitimate-claim cleanup remains a policy ambiguity: that broad migration-ended rule does not expressly say whether it overrides the specific live-claim retention rule. Source/contracts alone cannot settle that authorial intent; maintainer clarification of that override would settle it. It is not sufficient to cite SPEC.md:1753–1755's replaced/out-of-band-spare rule: this is a legitimate live claim, and borrower writes after movement are outside the private spare namespace. Nor does permission to leave an old process running or start another expressly accept deleting work of a retained host-backed borrower. Parent's g109/g112 reports concern the surviving-old-agent fallback, not this traversal route.  Suggested bucket: highest for the established opened-handle/borrower work-loss route; other/high only for isolated preparation failure when no other session writes moved contents. Could-be-highest: yes; original work-loss hypothesis was narrowed, initially lowered, then restored for this distinct borrower route. Confidence: source-supported concurrency route, not observed execution; the exact scheduling requires cleanup to open a child before movement and a retained writer to act before that traversal ends. Rarity does not lower the consequence. proposed_drop: false for the migration issue; no parent policy drop accepted. The claim that this assigned patch newly introduces it is refuted by predecessor equivalence, which is an attribution correction, not a refutation of the route. possible_cover: parent reports g109/g112 cover accepted old-agent fallback but not spare sweep; no queued findings or excluded metadata searched. No runtime tests, builds or reproductions performed. A fix would preserve uncertain legacy claim protection until cleanup is known safe, or establish exclusion/ownership that prevents a remover following a concurrently moved subtree; the existing namespace and destination identity checks alone do not provide that exclusion.
+Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Attribution: the same behavior already exists in its
+immediate predecessor dbfc69751215dbf15e1d31d5bed73c3754c4ebc4 (the old-terminal migration); the assigned driver-removal
+patch preserves it. TLDR: after migration fails to stop an old checkout preparation, startup can remove its still-live
+spare claim. Cleanup can keep traversing a directory after the old shim moves it into the allocated checkout, so work
+written there by another surviving session can be deleted. This restores the original possible work-loss consequence on
+a narrower, source-established route; it is not a claim that the allocated checkout root itself is recursively selected
+by pathname. Details and exact ordering: (1) core.rs:7843 marks every old-kind row not live regardless of teardown
+success, and :8065–8070 sends that snapshot to repo_cache::sweep. repo_cache.rs:120–138 takes only the repository cache
+lock; spare_take.rs:38–40 explicitly takes no such lock, so it does not exclude an ongoing take. Migration agent sweep
+failures/timeouts are logged and startup continues (old_terminals.rs:306–318, :351–356). (2) A take validates the
+allocated directory's dev/inode and canonical path, opens the checkout root O_DIRECTORY|O_NOFOLLOW, then opens the
+allocated destination and private namespace as separate confined handles (spare_take.rs:295–329, :351–370). Before
+moving, :142–153 rechecks destination identity and emptiness, enumerates the source and preflights entries; :148–151
+orders .git first. The move at :156–174 renames each child from the retained claim directory fd into the retained
+allocated destination fd, without overwriting. The allocation directory is not replaced. (3) In parallel,
+spare_checkouts.rs:611–618 opens/verifies the legitimate claim, parks its root under a private trash name,
+opens/verifies that root and calls remove_opened_tree. checkout_trash.rs:320–349 traverses child directories through
+retained opened handles. If it opens a child before the take moves that child into the destination, the handle continues
+to name the moved child. Recursive deletion proceeds through it; the source-name identity check at :374–380 is only
+after that child's contents were traversed. It can then report that the old source name vanished, but already-deleted
+content is not restored. No claim-root identity check prevents this movement of descendants out from under an active
+traversal. (4) Parking the claim makes the take's final unlink of its original claim name fail (spare_take.rs:176–181).
+That returns an error, so the origin's own merge, configured post-clone command and agent do not run
+(launch.rs:1904–1913, :1922–1945); this refutes work loss from that origin's later agent/hook. It does not protect an
+independent existing host-backed session in the allocated directory. Such a borrower is a shipped supported route: an
+existing-directory create attaches ancestor membership without inheriting preparation (store.rs:3389–3393), and
+core.rs:12202–12217 explicitly permits borrowers to use incomplete contents while restricting Ready only for the origin.
+That host-backed session survives migration. It can write new files or Git work into an already-moved child while
+cleanup still traverses that child, and those writes are ordinary user-owned checkout work, not replacements under
+.farhelm-spares. A host-backed tab is another possible surviving writer; old_terminals.rs:399–401 skips its launch
+record during old-tab cleanup. The finding does not require admitting a new client during startup: the borrower can
+already be running before the update. Historical/attribution checks: spare_take introduction
+1d2ff45e4e5a2de2a6ff9bcc1aac9a9eba647199 predates terminal hosts. Its diff to the reviewed revision changes Git flags,
+ancestry checking and launch-file enum handling, not the relevant opened handles, .git-first moves or unlink ordering,
+establishing an older tmux shim with this shape. The predecessor core.rs:6433–6438 already runs migration then
+unconditionally sets no_server_after_startup. Predecessor tmux.rs:3041–3042 sets presence absent; :2534–2542 and :2983
+synthesize NoServer, and :4907–4923 returns an empty pane map. Predecessor core.rs:8173–8188 therefore already omitted
+protection for old claims. Do not attribute a new regression solely to the assigned :7843 simplification; forward this
+migration-specific route to the parent for cross-group ownership. Contract and policy: SPEC.md, Managed checkouts,
+:1748–1752 says 'Startup removes leftover building and claimed directories except claims still in a live launch's clone
+stage' (straight-apostrophe spelling in the pinned source); SPEC_impl.md:3965–3969 retains a still-live NotStarted/clone
+claim and says failed or uncertain liveness observations retain possible claims. SPEC.md, Terminal experience,
+:3014–3016 says 'A failure to end the server or to stop what ran there is logged and never stops the supervisor from
+starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent
+beside one still running.' The isolated legitimate-claim cleanup remains a policy ambiguity: that broad migration-ended
+rule does not expressly say whether it overrides the specific live-claim retention rule. Source/contracts alone cannot
+settle that authorial intent; maintainer clarification of that override would settle it. It is not sufficient to cite
+SPEC.md:1753–1755's replaced/out-of-band-spare rule: this is a legitimate live claim, and borrower writes after movement
+are outside the private spare namespace. Nor does permission to leave an old process running or start another expressly
+accept deleting work of a retained host-backed borrower. Parent's g109/g112 reports concern the surviving-old-agent
+fallback, not this traversal route. Suggested bucket: highest for the established opened-handle/borrower work-loss
+route; other/high only for isolated preparation failure when no other session writes moved contents. Could-be-highest:
+yes; original work-loss hypothesis was narrowed, initially lowered, then restored for this distinct borrower route.
+Confidence: source-supported concurrency route, not observed execution; the exact scheduling requires cleanup to open a
+child before movement and a retained writer to act before that traversal ends. Rarity does not lower the consequence.
+proposed_drop: false for the migration issue; no parent policy drop accepted. The claim that this assigned patch newly
+introduces it is refuted by predecessor equivalence, which is an attribution correction, not a refutation of the route.
+possible_cover: parent reports g109/g112 cover accepted old-agent fallback but not spare sweep; no queued findings or
+excluded metadata searched. No runtime tests, builds or reproductions performed. A fix would preserve uncertain legacy
+claim protection until cleanup is known safe, or establish exclusion/ownership that prevents a remover following a
+concurrently moved subtree; the existing namespace and destination identity checks alone do not provide that exclusion.
 
 Returned proposal (claims-072, event 13): **filtered**, suggested bucket **highest**.
 
-The conditional borrower-work-loss route is supported by source and is in range through dbfc6975, rather than newly introduced by 1ed482d. The current older-release-plus-rare-condition filter appears to cover the whole named migration route, including its work-loss consequence. This is a proposed filter disposition requiring an independent drop check, not an accepted dismissal.
+The conditional borrower-work-loss route is supported by source and is in range through dbfc6975, rather than newly
+introduced by 1ed482d. The current older-release-plus-rare-condition filter appears to cover the whole named migration
+route, including its work-loss consequence. This is a proposed filter disposition requiring an independent drop check,
+not an accepted dismissal.
 
-Original stronger consequence: Initial hypothesis: deleting user-owned work in an allocated checkout. The initial blanket confinement/lowering and replacement-rule policy drop were withdrawn. The origin's own later hook/agent loss is refuted by final-unlink failure, but the latest record restores highest through an independent retained borrower writing a moved subtree. Attribution to 1ed482d alone was withdrawn; dbfc6975 introduces the relevant migration within the whole range.
+Original stronger consequence: Initial hypothesis: deleting user-owned work in an allocated checkout. The initial
+blanket confinement/lowering and replacement-rule policy drop were withdrawn. The origin's own later hook/agent loss is
+refuted by final-unlink failure, but the latest record restores highest through an independent retained borrower writing
+a moved subtree. Attribution to 1ed482d alone was withdrawn; dbfc6975 introduces the relevant migration within the whole
+range.
 
-Unresolved premise or limitation: No missing shipped-code premise was found for the conditional borrower route. Runtime occurrence/frequency is unobserved. Independent adjudication is required before filtering this highest-consequence claim; if it considers moved-subtree deletion a separate security/trust-boundary consequence, the filter must not apply.
+Unresolved premise or limitation: No missing shipped-code premise was found for the conditional borrower route. Runtime
+occurrence/frequency is unobserved. Independent adjudication is required before filtering this highest-consequence
+claim; if it considers moved-subtree deletion a separate security/trust-boundary consequence, the filter must not apply.
 
-Proposed basis: Apply the exact current older-release-plus-rare-condition filter only after the independent drop consultation agrees. Preserve the source route, highest consequence, prior withdrawals and migration attribution in that register. Do not use the general retirement acceptance or replaced-spare acceptance as substitute coverage.
+Proposed basis: Apply the exact current older-release-plus-rare-condition filter only after the independent drop
+consultation agrees. Preserve the source route, highest consequence, prior withdrawals and migration attribution in that
+register. Do not use the general retirement acceptance or replaced-spare acceptance as substitute coverage.
 
-Existing parent disposition (event 13): under-investigation. Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it.
+Existing parent disposition (event 13): under-investigation. Record durably acknowledged; parent source/contract
+validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This
+preserves the claim and uncertainty without accepting, dropping or lowering it.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g111 record](records/review-through-00de0b6c/groups/g111.json). Record ID: `l1`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g111 record](records/review-through-00de0b6c/groups/g111.json). Record ID: `l1`.

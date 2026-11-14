@@ -54,7 +54,9 @@
     "recommendation": "filtered",
     "bucket": "other",
     "underlying_key": "restart-success-retired-before-mounted-observer",
-    "aliases": ["g089/l1 (same f560058 stale-response route; this record also includes the earlier eligible-new-listing route)"],
+    "aliases": [
+      "g089/l1 (same f560058 stale-response route; this record also includes the earlier eligible-new-listing route)"
+    ],
     "target_queue_file": null,
     "why": "The conditional missing-terminal mechanism is source-supported. Its whole established consequence is a temporary incorrect recovery card, repaired by independent live detail or ordinary reopening. The rare self-correcting display filter applies; rarity alone is not the basis.",
     "checks": [

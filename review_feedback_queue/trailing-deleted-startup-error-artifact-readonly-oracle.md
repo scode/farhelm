@@ -4,13 +4,20 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Source-confirmed review record: deleting a retired tmux fixture also removes the regression check that read-only startup leaves an already-failed launch's files alone. The surviving read-only cleanup test exercises periodic reconciliation; owning-startup tests cannot catch a startup-only write-authority regression. This is test coverage, not an established product cleanup error.
+Source-confirmed review record: deleting a retired tmux fixture also removes the regression check that read-only startup
+leaves an already-failed launch's files alone. The surviving read-only cleanup test exercises periodic reconciliation;
+owning-startup tests cannot catch a startup-only write-authority regression. This is test coverage, not an established
+product cleanup error.
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g109/l5`.
 
@@ -20,19 +27,71 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 14 (finding, open):
 
-Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: deleting a retired tmux fixture also removes the regression check that read-only startup leaves an already-failed launch's files alone. The surviving read-only cleanup test exercises periodic reconciliation; owning-startup tests cannot catch a startup-only write-authority regression. This is test coverage, not an established product cleanup error. Details: deleted reload_restores_error_pane_and_gates_artifact_cleanup is parent core.rs:22498-22644. It creates a durable Error row and launch spec/sentinel. The read-only reload at parent :22570-22578 passes false; :22607-22614 asserts both files survive. The owning reload at :22616-22624 passes true; :22629-22642 requires unchanged Error plus both files removed. The pane/Attach portion is obsolete after retirement, but the artifact-ownership assertions remain required by retained core.rs:7008-7022, whose comment explicitly says a read-only reload must not remove files. That production gate remains correct. Retained-test comparison: generation_zero_error_cleanup_preserves_create_replay (:37161-37251) covers same-boot/reboot/already-error startup cleanup, but :37221 passes true. reconciliation_error_cleanup_preserves_replay_and_read_only_artifacts (:37254-37309) tests false/true authority through reconcile_for_test, not reload. Removing only reload's may_write condition leaves the separate observer test unaffected. a_supervisor_without_the_state_dir_claim_reconciles_nothing_durably (:27191-27364) inspects a Running row, host identity and pending checkout archive, with no Error-row launch artifacts. Host reload fixtures at core/tests/host_terminals.rs:1787,1844,1901 also pass true. All supervisor-source searches for read-only reload, claimless sentinel/artifacts and direct reload callers found no replacement false-authority/Error-artifact fixture. Tip check: every direct reload_sessions call in 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db core.rs still passes true, while the read-only artifact test at tip :35352 still invokes periodic reconciliation. The later host migration does not restore this startup oracle. Suggested fix: retain the generic Error-row/files setup as a terminal-independent reload test, require artifacts survive false authority, then require cleanup by true authority; it needs no tmux or host fixture. Contract: state-directory write-authority fencing and the startup Error branch's explicit ownership invariant; the supplied test-authoring checklist requires observing the mechanism under test. Suggested bucket: other/test quality. Could-be-highest: no established direct security or user-work-loss route in the test deletion. A hypothetical future ownership regression could remove another owner's launch evidence, but no such current production failure is alleged. Confidence: confirmed source/fixture comparison, not execution or mutation testing. proposed_drop: false. possible_cover: none in supplied neighbour records; g108's removed create, failed-Restart and lone-tab oracles concern different mechanisms. Caveat: general ownership fencing, periodic read-only cleanup and owning startup cleanup still have meaningful tests; this is narrowly the lost startup/Error-artifact combination. No tests, builds, reproductions or checkout changes. Revision adds exact parent coordinates after reading the full deleted assertion block; original consequence and limits preserved. l5 is a new substantive discovery, requiring another later pass under the charter; its lead is closed.
+Reviewed commit: dbfc69751215dbf15e1d31d5bed73c3754c4ebc4. TLDR: deleting a retired tmux fixture also removes the
+regression check that read-only startup leaves an already-failed launch's files alone. The surviving read-only cleanup
+test exercises periodic reconciliation; owning-startup tests cannot catch a startup-only write-authority regression.
+This is test coverage, not an established product cleanup error. Details: deleted
+reload_restores_error_pane_and_gates_artifact_cleanup is parent core.rs:22498-22644. It creates a durable Error row and
+launch spec/sentinel. The read-only reload at parent :22570-22578 passes false; :22607-22614 asserts both files survive.
+The owning reload at :22616-22624 passes true; :22629-22642 requires unchanged Error plus both files removed. The
+pane/Attach portion is obsolete after retirement, but the artifact-ownership assertions remain required by retained
+core.rs:7008-7022, whose comment explicitly says a read-only reload must not remove files. That production gate remains
+correct. Retained-test comparison: generation_zero_error_cleanup_preserves_create_replay (:37161-37251) covers
+same-boot/reboot/already-error startup cleanup, but :37221 passes true.
+reconciliation_error_cleanup_preserves_replay_and_read_only_artifacts (:37254-37309) tests false/true authority through
+reconcile_for_test, not reload. Removing only reload's may_write condition leaves the separate observer test unaffected.
+a_supervisor_without_the_state_dir_claim_reconciles_nothing_durably (:27191-27364) inspects a Running row, host identity
+and pending checkout archive, with no Error-row launch artifacts. Host reload fixtures at
+core/tests/host_terminals.rs:1787,1844,1901 also pass true. All supervisor-source searches for read-only reload,
+claimless sentinel/artifacts and direct reload callers found no replacement false-authority/Error-artifact fixture. Tip
+check: every direct reload_sessions call in 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db core.rs still passes true, while
+the read-only artifact test at tip :35352 still invokes periodic reconciliation. The later host migration does not
+restore this startup oracle. Suggested fix: retain the generic Error-row/files setup as a terminal-independent reload
+test, require artifacts survive false authority, then require cleanup by true authority; it needs no tmux or host
+fixture. Contract: state-directory write-authority fencing and the startup Error branch's explicit ownership invariant;
+the supplied test-authoring checklist requires observing the mechanism under test. Suggested bucket: other/test quality.
+Could-be-highest: no established direct security or user-work-loss route in the test deletion. A hypothetical future
+ownership regression could remove another owner's launch evidence, but no such current production failure is alleged.
+Confidence: confirmed source/fixture comparison, not execution or mutation testing. proposed_drop: false.
+possible_cover: none in supplied neighbour records; g108's removed create, failed-Restart and lone-tab oracles concern
+different mechanisms. Caveat: general ownership fencing, periodic read-only cleanup and owning startup cleanup still
+have meaningful tests; this is narrowly the lost startup/Error-artifact combination. No tests, builds, reproductions or
+checkout changes. Revision adds exact parent coordinates after reading the full deleted assertion block; original
+consequence and limits preserved. l5 is a new substantive discovery, requiring another later pass under the charter; its
+lead is closed.
 
 Returned proposal (claims-071, event 14): **retain-verified**, suggested bucket **other**.
 
-The deletion removes a useful startup-only authority oracle. Retained tests separately cover owning startup and read-only periodic reconciliation, leaving this combination untested. Production gating remains correct.
+The deletion removes a useful startup-only authority oracle. Retained tests separately cover owning startup and
+read-only periodic reconciliation, leaving this combination untested. Production gating remains correct.
 
-Original stronger consequence: Lost regression coverage for startup removing another owner's failed-launch artifacts. This is a test-quality defect; hypothetical future authority violations were never established as a current production consequence.
+Original stronger consequence: Lost regression coverage for startup removing another owner's failed-launch artifacts.
+This is a test-quality defect; hypothetical future authority violations were never established as a current production
+consequence.
 
 Unresolved premise or limitation: No missing premise stated in this returned proposal.
 
-Proposed basis: Record the narrow missing startup/Error/read-only combination, preserving the surviving broad ownership and periodic cleanup coverage.
+Proposed basis: Record the narrow missing startup/Error/read-only combination, preserving the surviving broad ownership
+and periodic cleanup coverage.
 
-Existing parent disposition (event 14): verified. Parent explicitly accepted named retain-verified proposal from claims-071 after inspecting it. The deletion removes a useful startup-only authority oracle. Retained tests separately cover owning startup and read-only periodic reconciliation, leaving this combination untested. Production gating remains correct. Record the narrow missing startup/Error/read-only combination, preserving the surviving broad ownership and periodic cleanup coverage. Checked source/results: ["dbfc69751215dbf15e1d31d5bed73c3754c4ebc4^:core.rs:22498-22644 creates an Error row/spec/sentinel, invokes reload with false at :22570-22578 and asserts preservation at :22607-22614, then invokes true and asserts cleanup without outcome change at :22616-22642.","Reviewed core.rs:7008-7022 retains the explicit read-only ownership condition. :37161-37251 tests startup only with true at :37221; :37254-37309 tests false/true through reconcile_for_test, a different entry path.","Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs direct reload_sessions calls all pass true; :35352 remains the periodic read-only artifact test. This is source comparison, not mutation testing or an observed false pass."] Current coverage/results: ["Both specifications and searches of empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md supply no exact replacement or accepted omission. The old-terminal test migration plan has landed; it is not an unlanded fix. General state-directory ownership and periodic cleanup coverage do not replace the startup/Error-artifact oracle. FILTER.md has no test-coverage omission filter."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "Lost regression coverage for startup removing another owner's failed-launch artifacts. This is a test-quality defect; hypothetical future authority violations were never established as a current production consequence."; null.
+Existing parent disposition (event 14): verified. Parent explicitly accepted named retain-verified proposal from
+claims-071 after inspecting it. The deletion removes a useful startup-only authority oracle. Retained tests separately
+cover owning startup and read-only periodic reconciliation, leaving this combination untested. Production gating remains
+correct. Record the narrow missing startup/Error/read-only combination, preserving the surviving broad ownership and
+periodic cleanup coverage. Checked source/results: ["dbfc69751215dbf15e1d31d5bed73c3754c4ebc4^:core.rs:22498-22644
+creates an Error row/spec/sentinel, invokes reload with false at :22570-22578 and asserts preservation at :22607-22614,
+then invokes true and asserts cleanup without outcome change at :22616-22642.","Reviewed core.rs:7008-7022 retains the
+explicit read-only ownership condition. :37161-37251 tests startup only with true at :37221; :37254-37309 tests
+false/true through reconcile_for_test, a different entry path.","Pinned tip
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs direct reload_sessions calls all pass true; :35352 remains the periodic
+read-only artifact test. This is source comparison, not mutation testing or an observed false pass."] Current
+coverage/results: ["Both specifications and searches of empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active
+TRIAGE_OUTCOMES.md supply no exact replacement or accepted omission. The old-terminal test migration plan has landed; it
+is not an unlanded fix. General state-directory ownership and periodic cleanup coverage do not replace the
+startup/Error-artifact oracle. FILTER.md has no test-coverage omission filter."] Exact cited cover: [] Original stronger
+consequence and missing premise remain preserved: "Lost regression coverage for startup removing another owner's
+failed-launch artifacts. This is a test-quality defect; hypothetical future authority violations were never established
+as a current production consequence."; null.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g109 record](records/review-through-00de0b6c/groups/g109.json). Record ID: `l5`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g109 record](records/review-through-00de0b6c/groups/g109.json). Record ID: `l5`.

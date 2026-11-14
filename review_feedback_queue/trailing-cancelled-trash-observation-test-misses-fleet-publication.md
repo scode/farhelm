@@ -8,9 +8,13 @@ Source-confirmed review record: The cancellation test does not assert its commit
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g030/c5`.
 
@@ -23,28 +27,104 @@ Latest reviewer record, event 12 (finding, open):
 Reviewed commit: 06d4b68f3a9e913f47cd426fedee5946a4eed77b
 
 ## TLDR
-The changed cancellation test can pass when cancelling a Trash read loses the event that tells other windows to refresh. It checks the stored notice and new per-host counter, but not the separate fleet event. This is a test-quality finding; the current production code publishes both correctly.
+
+The changed cancellation test can pass when cancelling a Trash read loses the event that tells other windows to refresh.
+It checks the stored notice and new per-host counter, but not the separate fleet event. This is a test-quality finding;
+the current production code publishes both correctly.
 
 ## Details
-notices.rs:700–742 deliberately blocks SQLite, polls observe_trash once so its owned closure receives the guards, drops the observer future at :719, releases SQLite and waits for the guards before asserting the notice count. This commit adds only the :737–741 epoch == 1 assertion, with the message 'cancellation cannot lose the committed observation's wake'. TrashRequests::changed at :107–114 only changes its private map; it does not publish a fleet event. FleetEvents::bump in feed.rs:143 onward is the separate watch-channel publication that prompts connected clients to reread. observe_trash at notices.rs:254–279 currently calls both changed(host) and manager.events().bump() inside the owned database closure, which is correct.
 
-The specific competing regression is to leave the notice write and changed(host) in that closure but publish the changed-only fleet bump after the awaited Db::call returns. Normal completed reads would still publish the bump. The cancellation test would still observe its row, epoch and retained guards, yet dropping its observer would suppress the bump. The neighbouring forwarded_lists_and_delete_receipts_drive_changed_only_notices_and_errors test at :824–948 does assert event revisions for ordinary completed HTTP requests; it does not cancel an observation and would not distinguish this relocation. The fixture's own ready/guard waits and notice read do not assert or consume a required bump. Capture and assert the fleet revision for this cancelled observation, or use FleetEvents::observe_bumps to verify that the event occurs with the epoch already advanced inside owned work.
+notices.rs:700–742 deliberately blocks SQLite, polls observe_trash once so its owned closure receives the guards, drops
+the observer future at :719, releases SQLite and waits for the guards before asserting the notice count. This commit
+adds only the :737–741 epoch == 1 assertion, with the message 'cancellation cannot lose the committed observation's
+wake'. TrashRequests::changed at :107–114 only changes its private map; it does not publish a fleet event.
+FleetEvents::bump in feed.rs:143 onward is the separate watch-channel publication that prompts connected clients to
+reread. observe_trash at notices.rs:254–279 currently calls both changed(host) and manager.events().bump() inside the
+owned database closure, which is correct.
 
-Contract: SPEC_impl.md, Archived-checkout trash, at :4591–4599 says started blocking work owns both gates and its changed-only fleet invalidation through commit even if the HTTP reader is cancelled. Its :4538–4543 couples the per-host epoch to the existing fleet wake; an epoch value alone is not publication. Attribution across the whole pinned range: git log for notices.rs over exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db shows only 06d4b68f3a9e913f47cd426fedee5946a4eed77b. The cancellation/guard test existed before the range; this patch newly adds the epoch assertion and its wake guarantee message without checking that new epoch's fleet-publication pair. The finding is bounded to the changed assertion's claimed sensitivity, not a claim that every older test responsibility was introduced here. Source search at the pinned tip found this cancellation-specific test, its same epoch assertions and the adjacent normal-request revision checks; no cancellation-specific fleet-wake assertion was found.
+The specific competing regression is to leave the notice write and changed(host) in that closure but publish the
+changed-only fleet bump after the awaited Db::call returns. Normal completed reads would still publish the bump. The
+cancellation test would still observe its row, epoch and retained guards, yet dropping its observer would suppress the
+bump. The neighbouring forwarded_lists_and_delete_receipts_drive_changed_only_notices_and_errors test at :824–948 does
+assert event revisions for ordinary completed HTTP requests; it does not cancel an observation and would not distinguish
+this relocation. The fixture's own ready/guard waits and notice read do not assert or consume a required bump. Capture
+and assert the fleet revision for this cancelled observation, or use FleetEvents::observe_bumps to verify that the event
+occurs with the epoch already advanced inside owned work.
 
-Suggested bucket: other/test quality. Confidence: confirmed source/assertion analysis; no mutant, reproduction, test or runtime behavior was executed. Could-be-highest: no; this establishes a test sensitivity gap and potential delayed refresh if a regression were introduced, not a current security or loss-of-work route. proposed_drop: false. possible_cover: the adjacent normal-request event check and g017/c1's different JSON-golden gap are explicitly distinct; no forbidden coverage sources searched. Remaining premise: none for the bounded test-oracle claim. Original c5 lead consequence and uncertainty history remain retained; no current production lost wake is alleged.
+Contract: SPEC_impl.md, Archived-checkout trash, at :4591–4599 says started blocking work owns both gates and its
+changed-only fleet invalidation through commit even if the HTTP reader is cancelled. Its :4538–4543 couples the per-host
+epoch to the existing fleet wake; an epoch value alone is not publication. Attribution across the whole pinned range:
+git log for notices.rs over exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db shows only 06d4b68f3a9e913f47cd426fedee5946a4eed77b. The cancellation/guard
+test existed before the range; this patch newly adds the epoch assertion and its wake guarantee message without checking
+that new epoch's fleet-publication pair. The finding is bounded to the changed assertion's claimed sensitivity, not a
+claim that every older test responsibility was introduced here. Source search at the pinned tip found this
+cancellation-specific test, its same epoch assertions and the adjacent normal-request revision checks; no
+cancellation-specific fleet-wake assertion was found.
+
+Suggested bucket: other/test quality. Confidence: confirmed source/assertion analysis; no mutant, reproduction, test or
+runtime behavior was executed. Could-be-highest: no; this establishes a test sensitivity gap and potential delayed
+refresh if a regression were introduced, not a current security or loss-of-work route. proposed_drop: false.
+possible_cover: the adjacent normal-request event check and g017/c1's different JSON-golden gap are explicitly distinct;
+no forbidden coverage sources searched. Remaining premise: none for the bounded test-oracle claim. Original c5 lead
+consequence and uncertainty history remain retained; no current production lost wake is alleged.
 
 Returned proposal (claims-017, event 12): **retain-verified**, suggested bucket **other**.
 
-The changed assertion checks the epoch but does not witness the separate fleet publication its message promises. Source establishes the bounded test-sensitivity gap; it does not establish a current production lost wake.
+The changed assertion checks the epoch but does not witness the separate fleet publication its message promises. Source
+establishes the bounded test-sensitivity gap; it does not establish a current production lost wake.
 
-Original stronger consequence: From event 11 onward this was other/test quality: a competing regression could lose the fleet wake after a cancelled Trash observation while the test passes. Event 12 confirms the source-level gap and explicitly preserves correct current production behavior; no security or user-work loss route was alleged or lowered.
+Original stronger consequence: From event 11 onward this was other/test quality: a competing regression could lose the
+fleet wake after a cancelled Trash observation while the test passes. Event 12 confirms the source-level gap and
+explicitly preserves correct current production behavior; no security or user-work loss route was alleged or lowered.
 
-Unresolved premise or limitation: None for the bounded source-level assertion gap. A current production bug or measured mutant survival would require additional evidence; neither is claimed.
+Unresolved premise or limitation: None for the bounded source-level assertion gap. A current production bug or measured
+mutant survival would require additional evidence; neither is claimed.
 
-Proposed basis: Retain one other/test-quality finding. Describe the cancelled future, the separate epoch and watch publication, the specific undetected relocation and the in-range assertion change. Keep source analysis distinct from runtime reproduction.
+Proposed basis: Retain one other/test-quality finding. Describe the cancelled future, the separate epoch and watch
+publication, the specific undetected relocation and the in-range assertion change. Keep source analysis distinct from
+runtime reproduction.
 
-Existing parent disposition (event 12): verified. Parent explicitly accepted named retain-verified proposal from claims-017 after inspecting it. The changed assertion checks the epoch but does not witness the separate fleet publication its message promises. Source establishes the bounded test-sensitivity gap; it does not establish a current production lost wake. Retain one other/test-quality finding. Describe the cancelled future, the separate epoch and watch publication, the specific undetected relocation and the in-range assertion change. Keep source analysis distinct from runtime reproduction. Checked source/results: ["At 06d4b68f3a9e913f47cd426fedee5946a4eed77b, notices.rs:700-742 blocks SQLite, polls observe_trash, drops the observer at 719, waits for both guards, then checks the notice row and epoch only. The new 737-741 assertion says cancellation cannot lose the committed observation's wake but reads no fleet revision or bump witness.","At that revision, notices.rs:107-112 increments only the private epoch map. feed.rs:149-159 separately advances the watch revision. notices.rs:254-275 correctly publishes both in the database closure today. Relocating only the changed-only bump after the awaited database call would preserve the cancelled test's row/epoch/guard observations while cancellation suppresses publication. This is a source counterexample, not an executed mutant.","At that revision, notices.rs:869-909 checks fleet revisions for completed HTTP requests. These requests are awaited, so they do not distinguish the described relocation. At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, targeted searches found the same cancellation test and ordinary revision tests; observe_bumps call sites belong to other host/preferences behavior, with none in notices.rs.","git log over exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db lists only 06d4b68f3a9e913f47cd426fedee5946a4eed77b for notices.rs. Its diff adds the epoch/wake assertion to the older cancellation test. Attribution is to that changed assertion's claimed coverage; the older absence of a cancellation-specific bump assertion is not falsely claimed to have originated here.","At 06d4b68f3a9e913f47cd426fedee5946a4eed77b, SPEC_impl.md:4538-4543 pairs epoch publication with the fleet wake; 4591-4599 requires started blocking work to own changed-only invalidation despite HTTP cancellation. No runtime work was performed."] Current coverage/results: ["Current SPEC.md's archived-trash and notification-bell rules and SPEC_impl.md:3945-4110 were checked. SPEC_impl.md:4048-4053 pairs epoch and wake, and 4101-4110 retains cancellation-safe fleet invalidation. These require the behavior; they do not accept the missing regression oracle.","TODO.md Planned is empty and plans/queue/INDEX.md has no unlanded entries. Stored bell-trash-reads.md acceptance/outline describes the landed epoch work and ordinary cross-window checks, not an outstanding cancellation-publication oracle fix.","BUGS.md and active TRIAGE_OUTCOMES.md were searched. TRIAGE_OUTCOMES.md:1362-1372 discards trash-failed-host-refresh-test-lacks-application-witness.md, whose browser response-application witness is a different trigger, consequence and test scope; it does not discard cancellation-owned fleet publication coverage.","Queue INDEX and matching files were checked. trash-failed-host-refresh-test-lacks-application-witness.md and trash-read-eligibility-can-remain-cached.md concern browser refresh/eligibility; unmeasured-notices-can-be-marked-read.md, large-notice-history-exceeds-mark-budget.md and notice-retry-error-hides-clear-failure.md concern acknowledgement/display/API limits. None has this root. No exact queue cover or useful same-root extension found; archive not read.","FILTER.md's rare self-correcting glitch filter does not cover a regression-test oracle defect. No complete filter boundary matches."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "From event 11 onward this was other/test quality: a competing regression could lose the fleet wake after a cancelled Trash observation while the test passes. Event 12 confirms the source-level gap and explicitly preserves correct current production behavior; no security or user-work loss route was alleged or lowered."; "None for the bounded source-level assertion gap. A current production bug or measured mutant survival would require additional evidence; neither is claimed.".
+Existing parent disposition (event 12): verified. Parent explicitly accepted named retain-verified proposal from
+claims-017 after inspecting it. The changed assertion checks the epoch but does not witness the separate fleet
+publication its message promises. Source establishes the bounded test-sensitivity gap; it does not establish a current
+production lost wake. Retain one other/test-quality finding. Describe the cancelled future, the separate epoch and watch
+publication, the specific undetected relocation and the in-range assertion change. Keep source analysis distinct from
+runtime reproduction. Checked source/results: ["At 06d4b68f3a9e913f47cd426fedee5946a4eed77b, notices.rs:700-742 blocks
+SQLite, polls observe_trash, drops the observer at 719, waits for both guards, then checks the notice row and epoch
+only. The new 737-741 assertion says cancellation cannot lose the committed observation's wake but reads no fleet
+revision or bump witness.","At that revision, notices.rs:107-112 increments only the private epoch map. feed.rs:149-159
+separately advances the watch revision. notices.rs:254-275 correctly publishes both in the database closure today.
+Relocating only the changed-only bump after the awaited database call would preserve the cancelled test's
+row/epoch/guard observations while cancellation suppresses publication. This is a source counterexample, not an executed
+mutant.","At that revision, notices.rs:869-909 checks fleet revisions for completed HTTP requests. These requests are
+awaited, so they do not distinguish the described relocation. At pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db,
+targeted searches found the same cancellation test and ordinary revision tests; observe_bumps call sites belong to other
+host/preferences behavior, with none in notices.rs.","git log over exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a
+through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db lists only 06d4b68f3a9e913f47cd426fedee5946a4eed77b for
+notices.rs. Its diff adds the epoch/wake assertion to the older cancellation test. Attribution is to that changed
+assertion's claimed coverage; the older absence of a cancellation-specific bump assertion is not falsely claimed to have
+originated here.","At 06d4b68f3a9e913f47cd426fedee5946a4eed77b, SPEC_impl.md:4538-4543 pairs epoch publication with the
+fleet wake; 4591-4599 requires started blocking work to own changed-only invalidation despite HTTP cancellation. No
+runtime work was performed."] Current coverage/results: ["Current SPEC.md's archived-trash and notification-bell rules
+and SPEC_impl.md:3945-4110 were checked. SPEC_impl.md:4048-4053 pairs epoch and wake, and 4101-4110 retains
+cancellation-safe fleet invalidation. These require the behavior; they do not accept the missing regression
+oracle.","TODO.md Planned is empty and plans/queue/INDEX.md has no unlanded entries. Stored bell-trash-reads.md
+acceptance/outline describes the landed epoch work and ordinary cross-window checks, not an outstanding
+cancellation-publication oracle fix.","BUGS.md and active TRIAGE_OUTCOMES.md were searched. TRIAGE_OUTCOMES.md:1362-1372
+discards trash-failed-host-refresh-test-lacks-application-witness.md, whose browser response-application witness is a
+different trigger, consequence and test scope; it does not discard cancellation-owned fleet publication
+coverage.","Queue INDEX and matching files were checked. trash-failed-host-refresh-test-lacks-application-witness.md and
+trash-read-eligibility-can-remain-cached.md concern browser refresh/eligibility;
+unmeasured-notices-can-be-marked-read.md, large-notice-history-exceeds-mark-budget.md and
+notice-retry-error-hides-clear-failure.md concern acknowledgement/display/API limits. None has this root. No exact queue
+cover or useful same-root extension found; archive not read.","FILTER.md's rare self-correcting glitch filter does not
+cover a regression-test oracle defect. No complete filter boundary matches."] Exact cited cover: [] Original stronger
+consequence and missing premise remain preserved: "From event 11 onward this was other/test quality: a competing
+regression could lose the fleet wake after a cancelled Trash observation while the test passes. Event 12 confirms the
+source-level gap and explicitly preserves correct current production behavior; no security or user-work loss route was
+alleged or lowered."; "None for the bounded source-level assertion gap. A current production bug or measured mutant
+survival would require additional evidence; neither is claimed.".
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g030 record](records/review-through-00de0b6c/groups/g030.json). Record ID: `c5`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g030 record](records/review-through-00de0b6c/groups/g030.json). Record ID: `c5`.

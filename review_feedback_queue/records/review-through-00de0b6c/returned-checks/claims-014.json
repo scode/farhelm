@@ -148,8 +148,14 @@
       "FILTER.md": "No filter used; no destructive cross-opening route dismissed as a timing glitch."
     },
     "exact_cover_quotes": [
-      {"source": "review_feedback_queue/sandbox-lifecycle-questions-lack-opening-guards.md, TLDR", "quote": "Sandbox lifecycle questions lack the required opening-token and operation-claim ownership. Same-dialog Cancel and Submit before redraw is product-accepted when its destructive guards hold; a stronger obsolete-opening loss route remains unverified."},
-      {"source": "review_feedback_queue/sandbox-lifecycle-questions-lack-opening-guards.md, Details", "quote": "Stronger obsolete-opening substitution remains unverified after investigation: matching Dioxus source resolves current mounted listeners, and no complete shipped cross-opening/element-ID sequence was established."}
+      {
+        "source": "review_feedback_queue/sandbox-lifecycle-questions-lack-opening-guards.md, TLDR",
+        "quote": "Sandbox lifecycle questions lack the required opening-token and operation-claim ownership. Same-dialog Cancel and Submit before redraw is product-accepted when its destructive guards hold; a stronger obsolete-opening loss route remains unverified."
+      },
+      {
+        "source": "review_feedback_queue/sandbox-lifecycle-questions-lack-opening-guards.md, Details",
+        "quote": "Stronger obsolete-opening substitution remains unverified after investigation: matching Dioxus source resolves current mounted listeners, and no complete shipped cross-opening/element-ID sequence was established."
+      }
     ],
     "missing_premise": "The full shipped event/element-identity ordering that makes an old affirmative answer consume a later opening and terminate user-owned work remains unestablished. This is retained uncertainty, not a global refutation.",
     "original_stronger_consequence": "An old Stop and suspend answer could consume a later lifecycle question's live claim and stop processes under cancelled consent. Initial cross-selected-session termination was narrowed by the keyed-view check. The corrected mandatory-patch-packet caveat is superseded, while this possible process-loss route remains unresolved.",

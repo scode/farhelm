@@ -1,5 +1,32 @@
 [
- {"key":"g058/c2","line":16,"disposition":"duplicate","group":"podman-owned-image-rm-default-prunes-user-base","bucket":"highest","recording":"supporting-provenance","needs_independent_drop_check":false,"reason":"Parent read full claims037 in separate058 and059/060 outputs after clipped combined output. Same already-retained061l8 root: explicit owned-target labels/nonforcing rm do not constrain default dangling-parent pruning. Valid untagged local user base by ID, committed owned descendants, no protecting name/container/other-image/copy establish conditional sole-copy user-work loss, highest; no runtime harm claimed. Preserve independent Podman4.9.3 source and specification prohibitions, later tip unchanged. This retention/alias does NOT accept c2's earlier separate cross-provider bookkeeping/clobber refutations; those remain in the final independent register. Exact source/coverage/caveats are claims037 and retained061l8 manual014."},
- {"key":"g025/f10","line":30,"disposition":"excluded","group":"shared-environment-label-callers-retain-peer-escaping","bucket":"other","recording":"none","needs_independent_drop_check":false,"reason":"Parent read full turn5 reply, complete audit and actual event30. The new shared label is raw display data, but the complete named caller search shows row DetailPart::peer/display_peer, session view display_peer, settings resource display_peer, and bulk PeerText rendered by escaped SessionHostName. No extra missed rendering boundary on these actual consumers. Distinct086l4 create-form consumer remains retained and is not refuted or treated as novelty. This candidate alleges only misleading display, no concrete wrong-host mutation, credentials or user-work route; no policy/filter dismissal. Source-only, no universal caller or runtime claim."},
- {"key":"g025/f6","line":31,"disposition":"excluded","group":"test-premises-captured-history-retired-admission-recipe-remount","bucket":"other","recording":"none","needs_independent_drop_check":false,"reason":"Parent read actual revised event31, full turn5 reply and complete audit. Preserve all earlier explicit fixture/eviction/adoption/bookkeeping/schema/remount/silent-peer refutations accepted at22. New claimed heartbeat analogue is source-refuted by actual ordinary SSH history fixture and Local retired-test fixture; neither satisfies the manager's environment-provider-only heartbeat opt-in. Silent peer retains one read across the caller signal and rejects early EOF/frames before bounded post-request observation, so no read is discarded at the signal. New recipe acquisitions remain under try with independent owned cleanup. Correct production code alone is not the test-oracle proof. No catastrophic tooling/product work-loss claim or runtime pass inferred; distinct environment heartbeat and pre-try cleanup findings remain retained."}
+  {
+    "key": "g058/c2",
+    "line": 16,
+    "disposition": "duplicate",
+    "group": "podman-owned-image-rm-default-prunes-user-base",
+    "bucket": "highest",
+    "recording": "supporting-provenance",
+    "needs_independent_drop_check": false,
+    "reason": "Parent read full claims037 in separate058 and059/060 outputs after clipped combined output. Same already-retained061l8 root: explicit owned-target labels/nonforcing rm do not constrain default dangling-parent pruning. Valid untagged local user base by ID, committed owned descendants, no protecting name/container/other-image/copy establish conditional sole-copy user-work loss, highest; no runtime harm claimed. Preserve independent Podman4.9.3 source and specification prohibitions, later tip unchanged. This retention/alias does NOT accept c2's earlier separate cross-provider bookkeeping/clobber refutations; those remain in the final independent register. Exact source/coverage/caveats are claims037 and retained061l8 manual014."
+  },
+  {
+    "key": "g025/f10",
+    "line": 30,
+    "disposition": "excluded",
+    "group": "shared-environment-label-callers-retain-peer-escaping",
+    "bucket": "other",
+    "recording": "none",
+    "needs_independent_drop_check": false,
+    "reason": "Parent read full turn5 reply, complete audit and actual event30. The new shared label is raw display data, but the complete named caller search shows row DetailPart::peer/display_peer, session view display_peer, settings resource display_peer, and bulk PeerText rendered by escaped SessionHostName. No extra missed rendering boundary on these actual consumers. Distinct086l4 create-form consumer remains retained and is not refuted or treated as novelty. This candidate alleges only misleading display, no concrete wrong-host mutation, credentials or user-work route; no policy/filter dismissal. Source-only, no universal caller or runtime claim."
+  },
+  {
+    "key": "g025/f6",
+    "line": 31,
+    "disposition": "excluded",
+    "group": "test-premises-captured-history-retired-admission-recipe-remount",
+    "bucket": "other",
+    "recording": "none",
+    "needs_independent_drop_check": false,
+    "reason": "Parent read actual revised event31, full turn5 reply and complete audit. Preserve all earlier explicit fixture/eviction/adoption/bookkeeping/schema/remount/silent-peer refutations accepted at22. New claimed heartbeat analogue is source-refuted by actual ordinary SSH history fixture and Local retired-test fixture; neither satisfies the manager's environment-provider-only heartbeat opt-in. Silent peer retains one read across the caller signal and rejects early EOF/frames before bounded post-request observation, so no read is discarded at the signal. New recipe acquisitions remain under try with independent owned cleanup. Correct production code alone is not the test-oracle proof. No catastrophic tooling/product work-loss claim or runtime pass inferred; distinct environment heartbeat and pre-try cleanup findings remain retained."
+  }
 ]

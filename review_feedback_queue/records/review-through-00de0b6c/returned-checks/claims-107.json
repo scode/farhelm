@@ -57,9 +57,18 @@
       "FILTER.md": "No filter needed; this ordinary upgrade consequence is accepted by specification, not by an extra rare-condition filter."
     },
     "exact_cover_quotes": [
-      {"source": "SPEC.md:3000-3002 (recording-time main)", "quote": "A supervisor that finds that\n  tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux\n  program."},
-      {"source": "SPEC.md:3003-3008 (recording-time main)", "quote": "one whose agent had already ended keeps its outcome, but its terminal's\n  last screen, which lived in the server, is gone; old tabs are closed."},
-      {"source": "SPEC.md:3007-3008 (recording-time main)", "quote": "A session whose agent or tabs already run in\n  terminal hosts keeps them."}
+      {
+        "source": "SPEC.md:3000-3002 (recording-time main)",
+        "quote": "A supervisor that finds that\n  tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux\n  program."
+      },
+      {
+        "source": "SPEC.md:3003-3008 (recording-time main)",
+        "quote": "one whose agent had already ended keeps its outcome, but its terminal's\n  last screen, which lived in the server, is gone; old tabs are closed."
+      },
+      {
+        "source": "SPEC.md:3007-3008 (recording-time main)",
+        "quote": "A session whose agent or tabs already run in\n  terminal hosts keeps them."
+      }
     ],
     "missing_premise": null,
     "original_stronger_consequence": "An upgrade ends running user-owned programs in old terminals and discards their screen and scrollback. Highest remains the consequence bucket even though the specification accepts it.",
@@ -184,9 +193,18 @@
       "FILTER.md": "No rare-upgrade-condition filter applied; this is direct explicit specification acceptance."
     },
     "exact_cover_quotes": [
-      {"source": "SPEC.md:3000-3002 (recording-time main)", "quote": "A supervisor that finds that\n  tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux\n  program."},
-      {"source": "SPEC.md:3003-3008 (recording-time main)", "quote": "one whose agent had already ended keeps its outcome, but its terminal's\n  last screen, which lived in the server, is gone; old tabs are closed."},
-      {"source": "SPEC.md:3007-3008 (recording-time main)", "quote": "A session whose agent or tabs already run in\n  terminal hosts keeps them."}
+      {
+        "source": "SPEC.md:3000-3002 (recording-time main)",
+        "quote": "A supervisor that finds that\n  tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux\n  program."
+      },
+      {
+        "source": "SPEC.md:3003-3008 (recording-time main)",
+        "quote": "one whose agent had already ended keeps its outcome, but its terminal's\n  last screen, which lived in the server, is gone; old tabs are closed."
+      },
+      {
+        "source": "SPEC.md:3007-3008 (recording-time main)",
+        "quote": "A session whose agent or tabs already run in\n  terminal hosts keeps them."
+      }
     ],
     "missing_premise": null,
     "original_stronger_consequence": "An upgrade ends user programs still in old tmux terminals, loses their retained terminal contents and prevents viewing those contents afterward. Acceptance does not authorize harming surviving terminal hosts or unrelated processes.",

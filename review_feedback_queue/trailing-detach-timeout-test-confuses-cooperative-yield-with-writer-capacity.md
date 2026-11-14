@@ -8,9 +8,13 @@ Source-confirmed review record: The detach timeout test yields before establishi
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g076/l1`.
 
@@ -25,36 +29,121 @@ Latest reviewer record, event 7 (finding, open):
 Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e
 
 ## TLDR
-The rewritten terminal teardown test can pass without exercising the timeout that keeps a stuck host connection from holding a terminal socket open. Removing that timeout can therefore go undetected by the test named for it. This is a test-evidence defect; no shipped teardown failure is established here.
+
+The rewritten terminal teardown test can pass without exercising the timeout that keeps a stuck host connection from
+holding a terminal socket open. Removing that timeout can therefore go undetected by the test named for it. This is a
+test-evidence defect; no shipped teardown failure is established here.
 
 ## Details
-The required boundary is explicit at terminal.rs:1116-1122: the peer stops reading, input fills the bounded writer queue, detach_bounded must return at its grace, and only after that may the released peer receive the independently owned Detach. Eventual notification alone does not establish the timeout or survival across caller timeout. At :1183-1195 the changed loop polls send_grid_input once and calls every Pending writer backpressure; :1197-1204 never checks capacity or elapsed virtual grace.
 
-Synthesis verified the exact dependency and polling scope. Cargo.lock pins Tokio 1.53.2. farhelm-testtrace-macros/src/lib.rs:248-259 selects CurrentThread for this start_paused test. farhelm-testtrace/src/lib.rs:995-1013 and :1126-1142 create a fresh ordinary runtime and block_on the test body. Tokio runtime/scheduler/current_thread/mod.rs:180-253 creates/takes that runtime's scheduler core; :815-834 wraps each root-future poll in coop::budget. task/coop/mod.rs:105-155 gives that outer poll 128 units and restores the previous budget only when the outer closure returns. terminal.rs:1191-1194 uses std::future::poll_fn and calls Future::poll directly; it neither creates a fresh Tokio task nor calls budget/unconstrained. An inner Pending is converted into Ready(true), so this manual poll does not itself leave the ordinary root cooperative scope.
+The required boundary is explicit at terminal.rs:1116-1122: the peer stops reading, input fills the bounded writer
+queue, detach_bounded must return at its grace, and only after that may the released peer receive the independently
+owned Detach. Eventual notification alone does not establish the timeout or survival across caller timeout. At
+:1183-1195 the changed loop polls send_grid_input once and calls every Pending writer backpressure; :1197-1204 never
+checks capacity or elapsed virtual grace.
 
-Attach consumes budget in that same scope: client.rs:2990-2992 successfully polls its oneshot receiver; Tokio sync/oneshot.rs:1317-1334 calls poll_proceed and made_progress on successful receipt. The success return through client.rs:4054-4069 and :3975-3976 has no subsequent await or scope reset before terminal.rs:1183-1194. start_grid_flow uses a synchronous gauge mutex, creates a false watch and starts an observer; it does not renew cooperative budget (client.rs:861-898,4155-4178). Thus at most 127 units remain for the input poll.
+Synthesis verified the exact dependency and polling scope. Cargo.lock pins Tokio 1.53.2.
+farhelm-testtrace-macros/src/lib.rs:248-259 selects CurrentThread for this start_paused test.
+farhelm-testtrace/src/lib.rs:995-1013 and :1126-1142 create a fresh ordinary runtime and block_on the test body. Tokio
+runtime/scheduler/current_thread/mod.rs:180-253 creates/takes that runtime's scheduler core; :815-834 wraps each
+root-future poll in coop::budget. task/coop/mod.rs:105-155 gives that outer poll 128 units and restores the previous
+budget only when the outer closure returns. terminal.rs:1191-1194 uses std::future::poll_fn and calls Future::poll
+directly; it neither creates a fresh Tokio task nor calls budget/unconstrained. An inner Pending is converted into
+Ready(true), so this manual poll does not itself leave the ordinary root cooperative scope.
 
-Every completed input iteration consumes two units: client.rs:4111-4134 acquires terminals.lock(), drops its guard, then awaits writer_tx.send(). Tokio's mutex uses semaphore acquire (sync/mutex.rs:434-455,655-663), bounded mpsc send reserves another semaphore permit (sync/mpsc/bounded.rs:816-824,1116-1119,1272-1307), and each successful semaphore Acquire consumes one unit (sync/batch_semaphore.rs:617-662). poll_proceed returns Pending at exhaustion (task/coop/mod.rs:291-365). The queue is 64 slots (client.rs:173,1779).
+Attach consumes budget in that same scope: client.rs:2990-2992 successfully polls its oneshot receiver; Tokio
+sync/oneshot.rs:1317-1334 calls poll_proceed and made_progress on successful receipt. The success return through
+client.rs:4054-4069 and :3975-3976 has no subsequent await or scope reset before terminal.rs:1183-1194. start_grid_flow
+uses a synchronous gauge mutex, creates a false watch and starts an observer; it does not renew cooperative budget
+(client.rs:861-898,4155-4178). Thus at most 127 units remain for the input poll.
 
-Concrete source route: let the normal successful Attach resume its caller in a root poll with a full initial budget. The oneshot success leaves 127. With uncontended terminals.lock() and an initially empty writer queue, 63 complete input sends consume 126 units, the next mutex acquisition consumes the last unit, its guard is dropped, and the following mpsc send returns cooperative Pending without even testing/acquiring the still-available queue capacity. At most 63 of 64 slots hold input. The queue is initially empty on this fixture route: the peer must have consumed Attach before answering it; the plain start constructor enables neither heartbeat nor agent upcalls (client.rs:1613-1667), and this peer sends no grid events, so the false, empty gauge sends no pause (client.rs:861-898). This is a current-thread runtime: no writer task runs concurrently inside the one uninterrupted root poll. If earlier work used more budget, the same cooperative limit can be reached after fewer sends. No queue pressure is proved by this Pending.
+Every completed input iteration consumes two units: client.rs:4111-4134 acquires terminals.lock(), drops its guard, then
+awaits writer_tx.send(). Tokio's mutex uses semaphore acquire (sync/mutex.rs:434-455,655-663), bounded mpsc send
+reserves another semaphore permit (sync/mpsc/bounded.rs:816-824,1116-1119,1272-1307), and each successful semaphore
+Acquire consumes one unit (sync/batch_semaphore.rs:617-662). poll_proceed returns Pending at exhaustion
+(task/coop/mod.rs:291-365). The queue is 64 slots (client.rs:173,1779).
 
-The subsequent client.detach removes the local terminal and awaits release_upstream's separately spawned enqueue (client.rs:4088-4090,2499-2519). Once the root yields, that task has spare queue capacity, and the writer can free more. Detach can therefore be enqueued and return before the five-second grace, while the peer is still waiting for release_rx. The test then releases that peer and observes eventual Detach, satisfying its assertions despite never observing the caller-timeout boundary. The relevant distinction is writer-queue capacity versus cooperative scheduler budget, not synthetic output-queue overflow or production gauge accounting.
+Concrete source route: let the normal successful Attach resume its caller in a root poll with a full initial budget. The
+oneshot success leaves 127. With uncontended terminals.lock() and an initially empty writer queue, 63 complete input
+sends consume 126 units, the next mutex acquisition consumes the last unit, its guard is dropped, and the following mpsc
+send returns cooperative Pending without even testing/acquiring the still-available queue capacity. At most 63 of 64
+slots hold input. The queue is initially empty on this fixture route: the peer must have consumed Attach before
+answering it; the plain start constructor enables neither heartbeat nor agent upcalls (client.rs:1613-1667), and this
+peer sends no grid events, so the false, empty gauge sends no pause (client.rs:861-898). This is a current-thread
+runtime: no writer task runs concurrently inside the one uninterrupted root poll. If earlier work used more budget, the
+same cooperative limit can be reached after fewer sends. No queue pressure is proved by this Pending.
 
-A repair should establish an actually blocked independent Detach enqueue, assert that the local helper returns at the virtual grace before releasing the peer, and then assert that the peer receives the notification despite the caller timeout. Explicit capacity reservation/inspection is preferable to interpreting an arbitrary Pending.
+The subsequent client.detach removes the local terminal and awaits release_upstream's separately spawned enqueue
+(client.rs:4088-4090,2499-2519). Once the root yields, that task has spare queue capacity, and the writer can free more.
+Detach can therefore be enqueued and return before the five-second grace, while the peer is still waiting for
+release_rx. The test then releases that peer and observes eventual Detach, satisfying its assertions despite never
+observing the caller-timeout boundary. The relevant distinction is writer-queue capacity versus cooperative scheduler
+budget, not synthetic output-queue overflow or production gauge accounting.
 
-Suggested bucket: other (maintainer test coverage). Confidence: confirmed by source and pinned-dependency contracts, not runtime observation. proposed_drop: false. possible_cover: none; excluded coverage sources were not searched. Could-be-highest: no; no shipped security or user-owned-work loss route is established. Caveats: the previous send_input version also assumed Pending meant capacity pressure, but acquired one semaphore per chunk rather than two; the rewritten loop reaches the cooperative limit at or before filling the 64-slot queue. The concrete route above is source-derived and is not a measured scheduling trace. Exact observed frame count, elapsed time, and mutation-test results remain unavailable because no runtime reproduction was requested or performed; none is needed to establish the missing fixture assertion.
+A repair should establish an actually blocked independent Detach enqueue, assert that the local helper returns at the
+virtual grace before releasing the peer, and then assert that the peer receives the notification despite the caller
+timeout. Explicit capacity reservation/inspection is preferable to interpreting an arbitrary Pending.
+
+Suggested bucket: other (maintainer test coverage). Confidence: confirmed by source and pinned-dependency contracts, not
+runtime observation. proposed_drop: false. possible_cover: none; excluded coverage sources were not searched.
+Could-be-highest: no; no shipped security or user-owned-work loss route is established. Caveats: the previous send_input
+version also assumed Pending meant capacity pressure, but acquired one semaphore per chunk rather than two; the
+rewritten loop reaches the cooperative limit at or before filling the 64-slot queue. The concrete route above is
+source-derived and is not a measured scheduling trace. Exact observed frame count, elapsed time, and mutation-test
+results remain unavailable because no runtime reproduction was requested or performed; none is needed to establish the
+missing fixture assertion.
 
 Returned proposal (claims-048, event 7): **retain-verified**, suggested bucket **other**.
 
-The changed test treats any Pending from its manually polled input loop as full writer capacity and never asserts elapsed teardown grace. Pinned cooperative accounting supplies a concrete source route yielding with capacity remaining, so eventual Detach alone does not establish timeout coverage.
+The changed test treats any Pending from its manually polled input loop as full writer capacity and never asserts
+elapsed teardown grace. Pinned cooperative accounting supplies a concrete source route yielding with capacity remaining,
+so eventual Detach alone does not establish timeout coverage.
 
-Original stronger consequence: The timeout that prevents a stuck host connection holding a terminal socket open can be removed without this named test proving that regression. This is lost maintainer test sensitivity; no shipped teardown defect, security harm or user-owned-work loss is established. Earlier source revisions distinguished cooperative yielding from actual writer pressure; that distinction remains intact.
+Original stronger consequence: The timeout that prevents a stuck host connection holding a terminal socket open can be
+removed without this named test proving that regression. This is lost maintainer test sensitivity; no shipped teardown
+defect, security harm or user-owned-work loss is established. Earlier source revisions distinguished cooperative
+yielding from actual writer pressure; that distinction remains intact.
 
-Unresolved premise or limitation: No missing premise for the absent capacity/grace witness. Exact dynamic frame count, elapsed time and timeout-removal mutation behavior remain unmeasured because no reproduction or tests were authorized.
+Unresolved premise or limitation: No missing premise for the absent capacity/grace witness. Exact dynamic frame count,
+elapsed time and timeout-removal mutation behavior remain unmeasured because no reproduction or tests were authorized.
 
-Proposed basis: Retain source-confirmed test-evidence defect. Production gauge tests and the two correctly witnessed Resize writer tests do not cover this distinct input-writer timeout fixture.
+Proposed basis: Retain source-confirmed test-evidence defect. Production gauge tests and the two correctly witnessed
+Resize writer tests do not cover this distinct input-writer timeout fixture.
 
-Existing parent disposition (event 7): verified. Parent explicitly accepted named retain-verified proposal from claims-048 after inspecting it. The changed test treats any Pending from its manually polled input loop as full writer capacity and never asserts elapsed teardown grace. Pinned cooperative accounting supplies a concrete source route yielding with capacity remaining, so eventual Detach alone does not establish timeout coverage. Retain source-confirmed test-evidence defect. Production gauge tests and the two correctly witnessed Resize writer tests do not cover this distinct input-writer timeout fixture. Checked source/results: ["f560058da19e02716e6f943883a9508b447aff4e terminal.rs:1116-1122 promises blocked-writer timeout survival; :1183-1204 polls input once, equates Pending with pressure, calls detach_bounded, then releases the peer without checking capacity or elapsed grace.","The commit diff replaces one send_input over eight MiB with a loop of send_grid_input. client.rs:4111-4134 acquires the terminal mutex and bounded sender for each message; :2989-2992 successfully awaits the Attach reply's oneshot first.","That hash Cargo.lock:6278-6281 pins Tokio 1.53.2. Its local primary sources task/coop/mod.rs:105-155 give a root poll 128 units; sync/batch_semaphore.rs:617-662 charges a successful Acquire, and sync/oneshot.rs:1317-1334 charges successful receive. mutex.rs:434-455 and mpsc/bounded.rs:1272-1307 use semaphore acquisition.","testtrace-macros/src/lib.rs:248-259 selects CurrentThread, and Tokio runtime/scheduler/current_thread/mod.rs:815-834 budgets the root future poll. The direct Future::poll inside poll_fn does not create another task or renew budget. At most 127 units remain after the reply, allowing at most 63 complete two-acquire sends before yielding, short of the 64-slot queue.","client.rs:2499-2519 independently spawns the Detach enqueue. Once the root yields it can enqueue with spare capacity, so the asserted eventual peer notification can occur without a caller timeout. This is a conditional source route, not a measured scheduler trace or mutation-test result.","The inherited test also lacked an elapsed-grace assertion, but the in-range loop rewrite adds the second acquisition per frame and destroys the source argument that the first Pending fills the queue. Suggested repair: establish an actually blocked independent enqueue, assert grace elapsed before releasing the peer, then observe surviving Detach."] Current coverage/results: ["SPEC.md terminal/responsiveness searches and SPEC_impl.md:2957-2982 / :3101-3146 specify bounded, isolated flow and the 64-frame writer. Neither accepts a regression test that omits its stated timeout boundary.","TODO.md Planned is empty. Searched all plans/queue for detach, timeout, writer, backpressure and cooperative budget; no unlanded plan repairs this test oracle. BUGS.md's SSH provisioning hang is unrelated.","Read INDEX.md and searched queue/active TRIAGE_OUTCOMES.md for ordinary_detach_wait, detach_bounded, stalled writer and cooperative budget: no exact existing item. Other timeout/writer-test items involve different fixtures and mechanisms. No FILTER.md boundary covers this test-evidence defect."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "The timeout that prevents a stuck host connection holding a terminal socket open can be removed without this named test proving that regression. This is lost maintainer test sensitivity; no shipped teardown defect, security harm or user-owned-work loss is established. Earlier source revisions distinguished cooperative yielding from actual writer pressure; that distinction remains intact."; "No missing premise for the absent capacity/grace witness. Exact dynamic frame count, elapsed time and timeout-removal mutation behavior remain unmeasured because no reproduction or tests were authorized.".
+Existing parent disposition (event 7): verified. Parent explicitly accepted named retain-verified proposal from
+claims-048 after inspecting it. The changed test treats any Pending from its manually polled input loop as full writer
+capacity and never asserts elapsed teardown grace. Pinned cooperative accounting supplies a concrete source route
+yielding with capacity remaining, so eventual Detach alone does not establish timeout coverage. Retain source-confirmed
+test-evidence defect. Production gauge tests and the two correctly witnessed Resize writer tests do not cover this
+distinct input-writer timeout fixture. Checked source/results: ["f560058da19e02716e6f943883a9508b447aff4e
+terminal.rs:1116-1122 promises blocked-writer timeout survival; :1183-1204 polls input once, equates Pending with
+pressure, calls detach_bounded, then releases the peer without checking capacity or elapsed grace.","The commit diff
+replaces one send_input over eight MiB with a loop of send_grid_input. client.rs:4111-4134 acquires the terminal mutex
+and bounded sender for each message; :2989-2992 successfully awaits the Attach reply's oneshot first.","That hash
+Cargo.lock:6278-6281 pins Tokio 1.53.2. Its local primary sources task/coop/mod.rs:105-155 give a root poll 128 units;
+sync/batch_semaphore.rs:617-662 charges a successful Acquire, and sync/oneshot.rs:1317-1334 charges successful receive.
+mutex.rs:434-455 and mpsc/bounded.rs:1272-1307 use semaphore acquisition.","testtrace-macros/src/lib.rs:248-259 selects
+CurrentThread, and Tokio runtime/scheduler/current_thread/mod.rs:815-834 budgets the root future poll. The direct
+Future::poll inside poll_fn does not create another task or renew budget. At most 127 units remain after the reply,
+allowing at most 63 complete two-acquire sends before yielding, short of the 64-slot queue.","client.rs:2499-2519
+independently spawns the Detach enqueue. Once the root yields it can enqueue with spare capacity, so the asserted
+eventual peer notification can occur without a caller timeout. This is a conditional source route, not a measured
+scheduler trace or mutation-test result.","The inherited test also lacked an elapsed-grace assertion, but the in-range
+loop rewrite adds the second acquisition per frame and destroys the source argument that the first Pending fills the
+queue. Suggested repair: establish an actually blocked independent enqueue, assert grace elapsed before releasing the
+peer, then observe surviving Detach."] Current coverage/results: ["SPEC.md terminal/responsiveness searches and
+SPEC_impl.md:2957-2982 / :3101-3146 specify bounded, isolated flow and the 64-frame writer. Neither accepts a regression
+test that omits its stated timeout boundary.","TODO.md Planned is empty. Searched all plans/queue for detach, timeout,
+writer, backpressure and cooperative budget; no unlanded plan repairs this test oracle. BUGS.md's SSH provisioning hang
+is unrelated.","Read INDEX.md and searched queue/active TRIAGE_OUTCOMES.md for ordinary_detach_wait, detach_bounded,
+stalled writer and cooperative budget: no exact existing item. Other timeout/writer-test items involve different
+fixtures and mechanisms. No FILTER.md boundary covers this test-evidence defect."] Exact cited cover: [] Original
+stronger consequence and missing premise remain preserved: "The timeout that prevents a stuck host connection holding a
+terminal socket open can be removed without this named test proving that regression. This is lost maintainer test
+sensitivity; no shipped teardown defect, security harm or user-owned-work loss is established. Earlier source revisions
+distinguished cooperative yielding from actual writer pressure; that distinction remains intact."; "No missing premise
+for the absent capacity/grace witness. Exact dynamic frame count, elapsed time and timeout-removal mutation behavior
+remain unmeasured because no reproduction or tests were authorized.".
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g076 record](records/review-through-00de0b6c/groups/g076.json). Record ID: `l1`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g076 record](records/review-through-00de0b6c/groups/g076.json). Record ID: `l1`.

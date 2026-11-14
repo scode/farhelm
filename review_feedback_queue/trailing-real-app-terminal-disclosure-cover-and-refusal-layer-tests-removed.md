@@ -4,13 +4,31 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Unverified collection: deleting this suite removes browser checks that real Farhelm overlays prevent undisclosed link actions and keep the refusal readable, while destructive confirmation text stays above that refusal. Synthetic marked divs cannot verify production cover markup or CSS layers, so losing those checks remains relevant after old terminals are retired. One underlying coverage regression has two provenance IDs: g174/l1 (clipped disclosures and common helpers) and g176/l2 (production overlay cases and layer/marker enumeration); retain both IDs and combine in parent synthesis rather than count a new discovery. Source: deleted parent terminal-link-clicks.spec.ts:121-192 checks a clipped file hover across redraw, modal isolation and later fitting activation; :803-982 checks actual approval and production tunnel-notice geometry, covered file/web actions, plain URL exceptions, readable refusal and positive controls; :1183-1290 arms the actual quick-launch pill or suggestions between press and release; :1300-1373 probes painted confirmation/refusal order in both opening orders; :1398-1468 enumerates rendered production data-link-cover surfaces and compares layers, including the converse check for unmarked high-layer surfaces. These latter cases were independently reported as g176/l2 and their cited parent bodies have now been read. Contracts at deletion SPEC_impl.md:4073-4077 and tip SPEC_impl.md:3585-3604 require declarative production markers and a browser check of refusal layers. Tip retained grid-attach.spec.ts:1100-1125 and1454-1497 explicitly manufacture marked divs with hardcoded z-ind
+Unverified collection: deleting this suite removes browser checks that real Farhelm overlays prevent undisclosed link
+actions and keep the refusal readable, while destructive confirmation text stays above that refusal. Synthetic marked
+divs cannot verify production cover markup or CSS layers, so losing those checks remains relevant after old terminals
+are retired. One underlying coverage regression has two provenance IDs: g174/l1 (clipped disclosures and common helpers)
+and g176/l2 (production overlay cases and layer/marker enumeration); retain both IDs and combine in parent synthesis
+rather than count a new discovery. Source: deleted parent terminal-link-clicks.spec.ts:121-192 checks a clipped file
+hover across redraw, modal isolation and later fitting activation; :803-982 checks actual approval and production
+tunnel-notice geometry, covered file/web actions, plain URL exceptions, readable refusal and positive controls;
+:1183-1290 arms the actual quick-launch pill or suggestions between press and release; :1300-1373 probes painted
+confirmation/refusal order in both opening orders; :1398-1468 enumerates rendered production data-link-cover surfaces
+and compares layers, including the converse check for unmarked high-layer surfaces. These latter cases were
+independently reported as g176/l2 and their cited parent bodies have now been read. Contracts at deletion
+SPEC_impl.md:4073-4077 and tip SPEC_impl.md:3585-3604 require declarative production markers and a browser check of
+refusal layers. Tip retained grid-attach.spec.ts:1100-1125 and1454-1497 explicitly manufacture marked divs with
+hardcoded z-ind
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g174/l1`, `g176/l2`.
 
@@ -20,21 +38,80 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 10 (finding, open):
 
-Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: deleting this suite removes browser checks that real Farhelm overlays prevent undisclosed link actions and keep the refusal readable, while destructive confirmation text stays above that refusal. Synthetic marked divs cannot verify production cover markup or CSS layers, so losing those checks remains relevant after old terminals are retired. One underlying coverage regression has two provenance IDs: g174/l1 (clipped disclosures and common helpers) and g176/l2 (production overlay cases and layer/marker enumeration); retain both IDs and combine in parent synthesis rather than count a new discovery. Source: deleted parent terminal-link-clicks.spec.ts:121-192 checks a clipped file hover across redraw, modal isolation and later fitting activation; :803-982 checks actual approval and production tunnel-notice geometry, covered file/web actions, plain URL exceptions, readable refusal and positive controls; :1183-1290 arms the actual quick-launch pill or suggestions between press and release; :1300-1373 probes painted confirmation/refusal order in both opening orders; :1398-1468 enumerates rendered production data-link-cover surfaces and compares layers, including the converse check for unmarked high-layer surfaces. These latter cases were independently reported as g176/l2 and their cited parent bodies have now been read. Contracts at deletion SPEC_impl.md:4073-4077 and tip SPEC_impl.md:3585-3604 require declarative production markers and a browser check of refusal layers. Tip retained grid-attach.spec.ts:1100-1125 and1454-1497 explicitly manufacture marked divs with hardcoded z-index45, then assert message text and absent requests/opens. They do not render production overlay controls, check the raised refusal's painted order, or check header consequence readability. Tip app.css:1763-1799 still carries the shared layer51 refusal, inert/modal downgrade and header-confirm downgrade, so removal of xterm.js does not remove what the tests guarded. Pinned-tree grep for data-link-cover, disclosure-refusal and full-file/link refusal text locates no replacement actual-app assertion; retained terminal-files JS tests use stub geometry and cannot establish CSS/markup wiring. Suggested bucket: other (test-only regression, not a demonstrated current production failure). Confidence: confirmed by source/contract analysis at the deletion revision and pinned tip; no runtime behavior observed. proposed_drop: false. Could-be-highest: no established shipped security or loss-of-work route; loss of tests alone is not highest. possible_cover: g176/l2 supplied by caller; no prohibited coverage sources searched. Caveats: existing synthetic/JS checks still cover admission logic, and current source retains the intended-looking layers. The deleted test fixture used xterm-specific display injection, so restoring these useful checks requires grid-based placement; that fixture portability issue does not refute their shared-contract value. Earlier wording that the synthetic covers were unstyled was imprecise: they have inline geometry and hardcoded layer45, but use no production cover markup or styles.
+Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513; checked through pinned tip
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: deleting this suite removes browser checks that real Farhelm overlays
+prevent undisclosed link actions and keep the refusal readable, while destructive confirmation text stays above that
+refusal. Synthetic marked divs cannot verify production cover markup or CSS layers, so losing those checks remains
+relevant after old terminals are retired. One underlying coverage regression has two provenance IDs: g174/l1 (clipped
+disclosures and common helpers) and g176/l2 (production overlay cases and layer/marker enumeration); retain both IDs and
+combine in parent synthesis rather than count a new discovery. Source: deleted parent
+terminal-link-clicks.spec.ts:121-192 checks a clipped file hover across redraw, modal isolation and later fitting
+activation; :803-982 checks actual approval and production tunnel-notice geometry, covered file/web actions, plain URL
+exceptions, readable refusal and positive controls; :1183-1290 arms the actual quick-launch pill or suggestions between
+press and release; :1300-1373 probes painted confirmation/refusal order in both opening orders; :1398-1468 enumerates
+rendered production data-link-cover surfaces and compares layers, including the converse check for unmarked high-layer
+surfaces. These latter cases were independently reported as g176/l2 and their cited parent bodies have now been read.
+Contracts at deletion SPEC_impl.md:4073-4077 and tip SPEC_impl.md:3585-3604 require declarative production markers and a
+browser check of refusal layers. Tip retained grid-attach.spec.ts:1100-1125 and1454-1497 explicitly manufacture marked
+divs with hardcoded z-index45, then assert message text and absent requests/opens. They do not render production overlay
+controls, check the raised refusal's painted order, or check header consequence readability. Tip app.css:1763-1799 still
+carries the shared layer51 refusal, inert/modal downgrade and header-confirm downgrade, so removal of xterm.js does not
+remove what the tests guarded. Pinned-tree grep for data-link-cover, disclosure-refusal and full-file/link refusal text
+locates no replacement actual-app assertion; retained terminal-files JS tests use stub geometry and cannot establish
+CSS/markup wiring. Suggested bucket: other (test-only regression, not a demonstrated current production failure).
+Confidence: confirmed by source/contract analysis at the deletion revision and pinned tip; no runtime behavior observed.
+proposed_drop: false. Could-be-highest: no established shipped security or loss-of-work route; loss of tests alone is
+not highest. possible_cover: g176/l2 supplied by caller; no prohibited coverage sources searched. Caveats: existing
+synthetic/JS checks still cover admission logic, and current source retains the intended-looking layers. The deleted
+test fixture used xterm-specific display injection, so restoring these useful checks requires grid-based placement; that
+fixture portability issue does not refute their shared-contract value. Earlier wording that the synthetic covers were
+unstyled was imprecise: they have inline geometry and hardcoded layer45, but use no production cover markup or styles.
 
 Returned proposal (claims-109, event 10): **retain-verified**, suggested bucket **other**.
 
-The deleted suite checked production cover markup, clipping, refusal layering and confirmation paint order. The retained grid tests inject marked divs with a fixed layer and inspect text/request refusal. That leaves a distinct surviving integration-test gap.
+The deleted suite checked production cover markup, clipping, refusal layering and confirmation paint order. The retained
+grid tests inject marked divs with a fixed layer and inspect text/request refusal. That leaves a distinct surviving
+integration-test gap.
 
-Original stronger consequence: Initial finding concerned refusal readability; latest combines caller-supplied g176/l2 admission, quick-launch press/release, production-marker enumeration and header-confirmation coverage. Synthetic covers were initially called unstyled; latest correctly preserves their inline geometry/z-index while distinguishing production styles. Existing synthetic and JS admission tests remain useful.
+Original stronger consequence: Initial finding concerned refusal readability; latest combines caller-supplied g176/l2
+admission, quick-launch press/release, production-marker enumeration and header-confirmation coverage. Synthetic covers
+were initially called unstyled; latest correctly preserves their inline geometry/z-index while distinguishing production
+styles. Existing synthetic and JS admission tests remain useful.
 
-Unresolved premise or limitation: No current unsafe activation, concealed destructive warning or production refusal failure is established. The old fixture's xterm display injection must be ported to grid placement.
+Unresolved premise or limitation: No current unsafe activation, concealed destructive warning or production refusal
+failure is established. The old fixture's xterm display injection must be ported to grid placement.
 
-Proposed basis: Retain one shared test-gap item with both provenance IDs. Existing production layering feedback is related context, not exact coverage or the same root.
+Proposed basis: Retain one shared test-gap item with both provenance IDs. Existing production layering feedback is
+related context, not exact coverage or the same root.
 
-Existing parent disposition (event 10): verified. Parent explicitly accepted named retain-verified proposal from claims-109 after inspecting it. The deleted suite checked production cover markup, clipping, refusal layering and confirmation paint order. The retained grid tests inject marked divs with a fixed layer and inspect text/request refusal. That leaves a distinct surviving integration-test gap. Retain one shared test-gap item with both provenance IDs. Existing production layering feedback is related context, not exact coverage or the same root. Checked source/results: ["647f0227^:e2e/tests/terminal-link-clicks.spec.ts:121-192 checks clipped disclosure, redraw, modal isolation, layers and later fitting activation; :803-865 checks a real approval against file transfer; :1300-1373 compares intersecting confirmation/refusal paint order; :1398-1468 enumerates actual rendered markers and unmarked high-layer surfaces.","00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:e2e/grid-client/grid-attach.spec.ts:1100-1125,1454-1497 creates synthetic divs with z-index45 and checks text plus absent requests/opens, without production overlay markup or painted-layer assertions.","647f0227:SPEC_impl.md:4060-4088 and current SPEC_impl.md:3583-3607 retain declarative covers and a browser layer-check contract. Tip terminal-files.test.js:680-750 uses stub geometry and tests lifetime/admission, not CSS.","Pinned-tip grep for data-link-cover found the two synthetic cases and unrelated tunnel-preview fixture markup, not a replacement production-layer oracle."] Current coverage/results: ["SPEC.md Terminal experience and SPEC_impl.md:3583-3607 require disclosed/admitted clicks and readable refusal; no accepted test omission found.","TODO.md Planned empty; plans/queue/INDEX.md empty. Landed approval-cards-fit references the deleted suite as validation context, not future replacement work.","Read header-confirmation-lowers-link-refusal.md: it records a production lowering ambiguity, not deletion of production-cover testing. No exact BUGS.md or active TRIAGE_OUTCOMES.md match. FILTER.md does not cover lost integration assertions."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "Initial finding concerned refusal readability; latest combines caller-supplied g176/l2 admission, quick-launch press/release, production-marker enumeration and header-confirmation coverage. Synthetic covers were initially called unstyled; latest correctly preserves their inline geometry/z-index while distinguishing production styles. Existing synthetic and JS admission tests remain useful."; "No current unsafe activation, concealed destructive warning or production refusal failure is established. The old fixture's xterm display injection must be ported to grid placement.".
+Existing parent disposition (event 10): verified. Parent explicitly accepted named retain-verified proposal from
+claims-109 after inspecting it. The deleted suite checked production cover markup, clipping, refusal layering and
+confirmation paint order. The retained grid tests inject marked divs with a fixed layer and inspect text/request
+refusal. That leaves a distinct surviving integration-test gap. Retain one shared test-gap item with both provenance
+IDs. Existing production layering feedback is related context, not exact coverage or the same root. Checked
+source/results: ["647f0227^:e2e/tests/terminal-link-clicks.spec.ts:121-192 checks clipped disclosure, redraw, modal
+isolation, layers and later fitting activation; :803-865 checks a real approval against file transfer; :1300-1373
+compares intersecting confirmation/refusal paint order; :1398-1468 enumerates actual rendered markers and unmarked
+high-layer surfaces.","00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:e2e/grid-client/grid-attach.spec.ts:1100-1125,1454-1497
+creates synthetic divs with z-index45 and checks text plus absent requests/opens, without production overlay markup or
+painted-layer assertions.","647f0227:SPEC_impl.md:4060-4088 and current SPEC_impl.md:3583-3607 retain declarative covers
+and a browser layer-check contract. Tip terminal-files.test.js:680-750 uses stub geometry and tests lifetime/admission,
+not CSS.","Pinned-tip grep for data-link-cover found the two synthetic cases and unrelated tunnel-preview fixture
+markup, not a replacement production-layer oracle."] Current coverage/results: ["SPEC.md Terminal experience and
+SPEC_impl.md:3583-3607 require disclosed/admitted clicks and readable refusal; no accepted test omission
+found.","TODO.md Planned empty; plans/queue/INDEX.md empty. Landed approval-cards-fit references the deleted suite as
+validation context, not future replacement work.","Read header-confirmation-lowers-link-refusal.md: it records a
+production lowering ambiguity, not deletion of production-cover testing. No exact BUGS.md or active TRIAGE_OUTCOMES.md
+match. FILTER.md does not cover lost integration assertions."] Exact cited cover: [] Original stronger consequence and
+missing premise remain preserved: "Initial finding concerned refusal readability; latest combines caller-supplied
+g176/l2 admission, quick-launch press/release, production-marker enumeration and header-confirmation coverage. Synthetic
+covers were initially called unstyled; latest correctly preserves their inline geometry/z-index while distinguishing
+production styles. Existing synthetic and JS admission tests remain useful."; "No current unsafe activation, concealed
+destructive warning or production refusal failure is established. The old fixture's xterm display injection must be
+ported to grid placement.".
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g174 record](records/review-through-00de0b6c/groups/g174.json). Record ID: `l1`.
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g174 record](records/review-through-00de0b6c/groups/g174.json). Record ID: `l1`.
 
 ### g176/l2
 
@@ -44,33 +121,104 @@ Latest reviewer record, event 15 (finding, open):
 
 Reviewed commit: 647f0227b7f5b6c5fe443b2d5f0c4a20de0d5513.
 
-TLDR: Removing this entire browser test file loses the checks that real approval cards, tunnel notices and quick-launch surfaces keep link destinations protected and refusal explanations readable. The remaining synthetic-cover tests cannot detect a missing marker or a wrong layer on the actual interface.
+TLDR: Removing this entire browser test file loses the checks that real approval cards, tunnel notices and quick-launch
+surfaces keep link destinations protected and refusal explanations readable. The remaining synthetic-cover tests cannot
+detect a missing marker or a wrong layer on the actual interface.
 
-Details: Assigned patch 00831-001.patch:1-694 removes real-surface overlap/refusal tests, the launch-pill and overflowing-suggestions tests, both Delete-confirmation opening orders, and the final test enumerating every visible marked cover's layer. These guarantees remain shared by new terminals, not only the retired xterm test fixture: SPEC_impl.md:1967-1969 says links, hover checks, downloads and tunnels are shared, and its Session-host file reads section at 4060-4074 says "every surface that draws at or above the hover's layer and can overlap it carries a `data-link-cover` marker in its own markup" and "a browser test checks the explanation's layer against every marked surface it can render." Surviving tests e2e/grid-client/grid-attach.spec.ts:1408-1434 and 1763-1805 inject their own div with both marker and z-index:45. They establish the common gate but cannot fail if production launch_sequence.rs:752/774, approvals.rs:229 or tunnels.rs:466 loses its marker, or app.css:1793-1801 no longer raises refusals and lowers them beneath a real destructive confirmation. The static harness page at grid-attach.spec.ts:151-188 contains neither the production overlay components nor header confirmation layout. Pinned-tree searches for data-link-cover, disclosure-refusal, cover/refusal and confirmation/refusal assertions found no remaining real-overlay browser checks. Port the geometry/layer assertions to grid helper input in the real-stack browser suite before removing the xterm-driven versions.
+Details: Assigned patch 00831-001.patch:1-694 removes real-surface overlap/refusal tests, the launch-pill and
+overflowing-suggestions tests, both Delete-confirmation opening orders, and the final test enumerating every visible
+marked cover's layer. These guarantees remain shared by new terminals, not only the retired xterm test fixture:
+SPEC_impl.md:1967-1969 says links, hover checks, downloads and tunnels are shared, and its Session-host file reads
+section at 4060-4074 says "every surface that draws at or above the hover's layer and can overlap it carries a
+`data-link-cover` marker in its own markup" and "a browser test checks the explanation's layer against every marked
+surface it can render." Surviving tests e2e/grid-client/grid-attach.spec.ts:1408-1434 and 1763-1805 inject their own div
+with both marker and z-index:45. They establish the common gate but cannot fail if production
+launch_sequence.rs:752/774, approvals.rs:229 or tunnels.rs:466 loses its marker, or app.css:1793-1801 no longer raises
+refusals and lowers them beneath a real destructive confirmation. The static harness page at grid-attach.spec.ts:151-188
+contains neither the production overlay components nor header confirmation layout. Pinned-tree searches for
+data-link-cover, disclosure-refusal, cover/refusal and confirmation/refusal assertions found no remaining real-overlay
+browser checks. Port the geometry/layer assertions to grid helper input in the real-stack browser suite before removing
+the xterm-driven versions.
 
-Suggested bucket: other; confidence: confirmed regression-coverage loss by source/contract analysis, no runtime execution. proposed_drop: false. possible_cover: none (excluded coverage sources not read). Could-be-highest: no established current security or data-loss route from the deletion alone; the existing production markers/layers appear present. Caveats: common admission behavior retains synthetic browser and JS tests; this is missing production wiring and paint-order coverage, not a claim that current links bypass admission or that current warnings are hidden.
+Suggested bucket: other; confidence: confirmed regression-coverage loss by source/contract analysis, no runtime
+execution. proposed_drop: false. possible_cover: none (excluded coverage sources not read). Could-be-highest: no
+established current security or data-loss route from the deletion alone; the existing production markers/layers appear
+present. Caveats: common admission behavior retains synthetic browser and JS tests; this is missing production wiring
+and paint-order coverage, not a claim that current links bypass admission or that current warnings are hidden.
 
-Reference refinement: the removed layer-enumeration test begins at parent terminal-link-clicks.spec.ts:1398; the real-cover cases begin at 803, tunnel paint probes use helper 775, quick-launch cases begin at 1183, and destructive-confirmation cases at 1300. Production CSS at app.css:1793-1801 and its ladder at 2231-2271 still implements these protections, so this finding is solely their lost regression coverage.
+Reference refinement: the removed layer-enumeration test begins at parent terminal-link-clicks.spec.ts:1398; the
+real-cover cases begin at 803, tunnel paint probes use helper 775, quick-launch cases begin at 1183, and
+destructive-confirmation cases at 1300. Production CSS at app.css:1793-1801 and its ladder at 2231-2271 still implements
+these protections, so this finding is solely their lost regression coverage.
 
-Synthesis turn 2 — surviving gap through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: searched the entire retained e2e tree, including real-stack tests, grid-client suites and docs/media suites, for destination/notice selectors, cover markers, disclosure-refusal, overlap and paint/layer assertions. Inspected concrete surviving witnesses: grid-attach.spec.ts:1099-1125 and 1453-1498 still inject their own marked z-index:45 divs and assert refusal text/no transfer or opener calls; terminal-files.spec.ts:210-265 and 340-415 checks stat refusals, successful download, normal notice position/fade and disappearing-file failure, not clipping/covering/refusal layers; docs-shots/visual-review.spec.ts:475-540 checks unclipped ready/not-found hovers and mismatch content before screenshot, without a covered activation/refusal or destructive confirmation. terminal-files.test.js:682-756 simulates scrollHeight/rectangles and asserts outcome strings, without CSS paint. No retained browser witness found for production overlay markers, refusal paint above real covers or warning paint above refusal.
+Synthesis turn 2 — surviving gap through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db: searched the entire
+retained e2e tree, including real-stack tests, grid-client suites and docs/media suites, for destination/notice
+selectors, cover markers, disclosure-refusal, overlap and paint/layer assertions. Inspected concrete surviving
+witnesses: grid-attach.spec.ts:1099-1125 and 1453-1498 still inject their own marked z-index:45 divs and assert refusal
+text/no transfer or opener calls; terminal-files.spec.ts:210-265 and 340-415 checks stat refusals, successful download,
+normal notice position/fade and disappearing-file failure, not clipping/covering/refusal layers;
+docs-shots/visual-review.spec.ts:475-540 checks unclipped ready/not-found hovers and mismatch content before screenshot,
+without a covered activation/refusal or destructive confirmation. terminal-files.test.js:682-756 simulates
+scrollHeight/rectangles and asserts outcome strings, without CSS paint. No retained browser witness found for production
+overlay markers, refusal paint above real covers or warning paint above refusal.
 
-The live production contract is unchanged at tip SPEC_impl.md:3584-3596: every overlapping surface at the preview layer marks itself; the refusal sits above every cover except trash; a browser test checks its layer against every rendered marked surface. Production markers still exist at approvals.rs:229, launch_sequence.rs:752/774, tunnels.rs:464/631/932; app.css:1791 raises disclosure refusal to 51, 1795-1799 lowers it for inert content and real header confirmation, and 2229-2271 retains the layer ladder. This is therefore a missing regression witness, not evidence that production is already mislayered.
+The live production contract is unchanged at tip SPEC_impl.md:3584-3596: every overlapping surface at the preview layer
+marks itself; the refusal sits above every cover except trash; a browser test checks its layer against every rendered
+marked surface. Production markers still exist at approvals.rs:229, launch_sequence.rs:752/774, tunnels.rs:464/631/932;
+app.css:1791 raises disclosure refusal to 51, 1795-1799 lowers it for inert content and real header confirmation, and
+2229-2271 retains the layer ladder. This is therefore a missing regression witness, not evidence that production is
+already mislayered.
 
-Meaningful competing regressions a replacement must distinguish: (1) remove data-link-cover from the real quick-launch suggestions child that extends outside its marked parent: the common algorithm and injected-cover tests still pass, but a destination hidden only by that child can open/download. A real-app witness must prove pointer/link identity, actual child/disclosure overlap but no parent overlap, no transfer/open on both file and OSC web activation, then successful same-target activation after canceling the cover. (2) lower the disclosure-refusal rule below the real tunnel notice, or remove the header-confirm lowering selector: refusal strings remain correct and all synthetic text assertions still pass, but either the refusal is unreadable or it paints over the destructive consequence. Witness actual intersecting rectangles and relative paint order via elementsFromPoint with pointer-transparent notice temporarily included; cover both confirmation-before-refusal and refusal-before-confirmation, and fresh-hover recovery. Clipped-window refusal readability is complementary scope supplied by g174/l1 (original patch lines 121-192 and 621-774); reconcile g176/l2 and g174/l1 as one missing production-wiring/readability/layer regression while retaining both IDs and each original scope. This is corroboration, not new discovery. Original consequences and suggested bucket other retained; confidence confirmed source-only; proposed_drop false; possible_cover none; could-be-highest no established current product harm; no reproduction or mutation was performed.
+Meaningful competing regressions a replacement must distinguish: (1) remove data-link-cover from the real quick-launch
+suggestions child that extends outside its marked parent: the common algorithm and injected-cover tests still pass, but
+a destination hidden only by that child can open/download. A real-app witness must prove pointer/link identity, actual
+child/disclosure overlap but no parent overlap, no transfer/open on both file and OSC web activation, then successful
+same-target activation after canceling the cover. (2) lower the disclosure-refusal rule below the real tunnel notice, or
+remove the header-confirm lowering selector: refusal strings remain correct and all synthetic text assertions still
+pass, but either the refusal is unreadable or it paints over the destructive consequence. Witness actual intersecting
+rectangles and relative paint order via elementsFromPoint with pointer-transparent notice temporarily included; cover
+both confirmation-before-refusal and refusal-before-confirmation, and fresh-hover recovery. Clipped-window refusal
+readability is complementary scope supplied by g174/l1 (original patch lines 121-192 and 621-774); reconcile g176/l2 and
+g174/l1 as one missing production-wiring/readability/layer regression while retaining both IDs and each original scope.
+This is corroboration, not new discovery. Original consequences and suggested bucket other retained; confidence
+confirmed source-only; proposed_drop false; possible_cover none; could-be-highest no established current product harm;
+no reproduction or mutation was performed.
 
-Additional synthesis premise checks: tip terminal-files.js:33-50 enumerates only rendered data-link-cover elements and takes each own getBoundingClientRect; admitDisclosure:485-490 uses those rectangles at activation. The missing-child-marker competing regression is therefore concrete, not an assumed DOM heuristic. Actual production source at launch_sequence.rs:742-781 documents and renders the overflowing child marker, approvals.rs:216-238 marks the scrolling region, tunnels.rs:455-475 marks the notice, and tooltip.js:373-412 marks tip and pointer. Enumerating all retained spec/config paths found browser suites only under e2e; the earlier entire-e2e search therefore included the retained screenshot/media suites too. tooltip-coverage.spec.ts:229-265 z-index probes test missing hover text and editor attributes, not refusal paint. Searches of media suites and JS CSS tests found no production refusal-layer witness. These checks strengthen l2 without adding a new finding or altering the original consequence/bucket.
+Additional synthesis premise checks: tip terminal-files.js:33-50 enumerates only rendered data-link-cover elements and
+takes each own getBoundingClientRect; admitDisclosure:485-490 uses those rectangles at activation. The
+missing-child-marker competing regression is therefore concrete, not an assumed DOM heuristic. Actual production source
+at launch_sequence.rs:742-781 documents and renders the overflowing child marker, approvals.rs:216-238 marks the
+scrolling region, tunnels.rs:455-475 marks the notice, and tooltip.js:373-412 marks tip and pointer. Enumerating all
+retained spec/config paths found browser suites only under e2e; the earlier entire-e2e search therefore included the
+retained screenshot/media suites too. tooltip-coverage.spec.ts:229-265 z-index probes test missing hover text and editor
+attributes, not refusal paint. Searches of media suites and JS CSS tests found no production refusal-layer witness.
+These checks strengthen l2 without adding a new finding or altering the original consequence/bucket.
 
 Returned proposal (claims-110, event 15): **retain-verified**, suggested bucket **other**.
 
-The deleted real-interface witnesses exercise production cover markup and relative paint order. Retained synthetic-cover tests supply their own markers and layers, so they cannot detect the named production-wiring regressions. This is a test-sensitivity defect, not a demonstrated current link-admission bypass.
+The deleted real-interface witnesses exercise production cover markup and relative paint order. Retained synthetic-cover
+tests supply their own markers and layers, so they cannot detect the named production-wiring regressions. This is a
+test-sensitivity defect, not a demonstrated current link-admission bypass.
 
-Original stronger consequence: Removing real approval-card, tunnel-notice, launch-pill/overflowing-suggestion and destructive-confirmation tests loses protection against hidden destinations and unreadable refusals. Synthetic algorithm tests cannot catch missing production markers or incorrect production paint order. Latest history also requests reconciliation with g174/l1's clipped-window scope; that record was not supplied here and is not independently classified as an alias.
+Original stronger consequence: Removing real approval-card, tunnel-notice, launch-pill/overflowing-suggestion and
+destructive-confirmation tests loses protection against hidden destinations and unreadable refusals. Synthetic algorithm
+tests cannot catch missing production markers or incorrect production paint order. Latest history also requests
+reconciliation with g174/l1's clipped-window scope; that record was not supplied here and is not independently
+classified as an alias.
 
-Unresolved premise or limitation: No current production admission bypass or concealed-warning layout was reproduced. Highest would need a concrete shipped security/work-loss route; the established consequence is missing maintainer regression protection.
+Unresolved premise or limitation: No current production admission bypass or concealed-warning layout was reproduced.
+Highest would need a concrete shipped security/work-loss route; the established consequence is missing maintainer
+regression protection.
 
-Proposed basis: Record the production-markup/layer witness loss as other, retaining the original real-cover scope, both destructive-confirmation orders, and the limitation that production correctness itself was not disproved. Parent can reconcile g174/l1 separately without discarding complementary scope.
+Proposed basis: Record the production-markup/layer witness loss as other, retaining the original real-cover scope, both
+destructive-confirmation orders, and the limitation that production correctness itself was not disproved. Parent can
+reconcile g174/l1 separately without discarding complementary scope.
 
-Existing parent disposition (event 15): duplicate. Parent read full109/110: same deleted production-cover/layer browser witnesses, same surviving useful synthetic z45 marked divs lacking actual production markup/paint order. Canonical174l1 retained; preserve clipped disclosure/readmission, real approval/quick-launch marker enumeration and both intersecting header-confirmation/refusal orders. No current unsafe activation/hidden destructive consent alleged. One integration-test-protection item with both scopes/provenance.
+Existing parent disposition (event 15): duplicate. Parent read full109/110: same deleted production-cover/layer browser
+witnesses, same surviving useful synthetic z45 marked divs lacking actual production markup/paint order. Canonical174l1
+retained; preserve clipped disclosure/readmission, real approval/quick-launch marker enumeration and both intersecting
+header-confirmation/refusal orders. No current unsafe activation/hidden destructive consent alleged. One
+integration-test-protection item with both scopes/provenance.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g176 record](records/review-through-00de0b6c/groups/g176.json). Record ID: `l2`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g176 record](records/review-through-00de0b6c/groups/g176.json). Record ID: `l2`.

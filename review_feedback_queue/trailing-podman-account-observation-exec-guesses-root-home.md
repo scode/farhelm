@@ -4,13 +4,31 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Source-confirmed review record: a custom container base without /root cannot build even when its selected login account has a usable home and meets the documented requirements. Lookup fails before Farhelm can resolve that account. Source: software selects the custom reference/user without managed bootstrap (build.rs:142-150), then calls login (:151). login executes getent through self.script with root_user (:65-73), whose home is hard-coded /root (:411-417). RemoteRoute::container_argv converts that guess into podman exec --user 0 --workdir /root and HOME (access.rs:193-230). No preceding custom-image step establishes /root: pull_base only pulls/inspects, and helper starts /sbin/init. The actual selected user's readiness check runs afterward (:152-159). SPEC.md:471-475 requires systemd, passwordless sudo, Ubuntu/Debian apt, bash, curl and git; SPEC_impl.md:6552-6559 imposes the same readiness contract. Neither requires root's home to be /root or that directory to exist. A custom image may satisfy those requirements with the selected user's home elsewhere and no /root. A neutral directory such as / is sufficient for observing passwd; use the observed selected account home only for that account's setup. External primary source checks, not a local run: Podman documentation defines --workdir as the exec cwd (https://docs.podman.io/en/stable/markdown/podman-exec.1.html). Podman v4.9.3 passes WorkDir into ExecOptions.Cwd at container_exec.go:1012-1025 (https://github.com/containers/podman/blob/v4.9.3/libpod/container_exec.go#L1012-L1025), then assigns it to the OCI process without creating it at oci_conmon_exec
+Source-confirmed review record: a custom container base without /root cannot build even when its selected login account
+has a usable home and meets the documented requirements. Lookup fails before Farhelm can resolve that account. Source:
+software selects the custom reference/user without managed bootstrap (build.rs:142-150), then calls login (:151). login
+executes getent through self.script with root_user (:65-73), whose home is hard-coded /root (:411-417).
+RemoteRoute::container_argv converts that guess into podman exec --user 0 --workdir /root and HOME (access.rs:193-230).
+No preceding custom-image step establishes /root: pull_base only pulls/inspects, and helper starts /sbin/init. The
+actual selected user's readiness check runs afterward (:152-159). SPEC.md:471-475 requires systemd, passwordless sudo,
+Ubuntu/Debian apt, bash, curl and git; SPEC_impl.md:6552-6559 imposes the same readiness contract. Neither requires
+root's home to be /root or that directory to exist. A custom image may satisfy those requirements with the selected
+user's home elsewhere and no /root. A neutral directory such as / is sufficient for observing passwd; use the observed
+selected account home only for that account's setup. External primary source checks, not a local run: Podman
+documentation defines --workdir as the exec cwd (https://docs.podman.io/en/stable/markdown/podman-exec.1.html). Podman
+v4.9.3 passes WorkDir into ExecOptions.Cwd at container_exec.go:1012-1025
+(https://github.com/containers/podman/blob/v4.9.3/libpod/container_exec.go#L1012-L1025), then assigns it to the OCI
+process without creating it at oci_conmon_exec
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g061/l6`.
 
@@ -20,19 +38,78 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 21 (finding, open):
 
-Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; new assigned build.rs implementation remains unchanged through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Discovery pass 1. TLDR: a custom container base without /root cannot build even when its selected login account has a usable home and meets the documented requirements. Lookup fails before Farhelm can resolve that account. Source: software selects the custom reference/user without managed bootstrap (build.rs:142-150), then calls login (:151). login executes getent through self.script with root_user (:65-73), whose home is hard-coded /root (:411-417). RemoteRoute::container_argv converts that guess into podman exec --user 0 --workdir /root and HOME (access.rs:193-230). No preceding custom-image step establishes /root: pull_base only pulls/inspects, and helper starts /sbin/init. The actual selected user's readiness check runs afterward (:152-159). SPEC.md:471-475 requires systemd, passwordless sudo, Ubuntu/Debian apt, bash, curl and git; SPEC_impl.md:6552-6559 imposes the same readiness contract. Neither requires root's home to be /root or that directory to exist. A custom image may satisfy those requirements with the selected user's home elsewhere and no /root. A neutral directory such as / is sufficient for observing passwd; use the observed selected account home only for that account's setup. External primary source checks, not a local run: Podman documentation defines --workdir as the exec cwd (https://docs.podman.io/en/stable/markdown/podman-exec.1.html). Podman v4.9.3 passes WorkDir into ExecOptions.Cwd at container_exec.go:1012-1025 (https://github.com/containers/podman/blob/v4.9.3/libpod/container_exec.go#L1012-L1025), then assigns it to the OCI process without creating it at oci_conmon_exec_common.go:648-650 (https://github.com/containers/podman/blob/v4.9.3/libpod/oci_conmon_exec_common.go#L648-L650). crun 1.14's exec_process_entrypoint selects process cwd and attempts chdir at container.c:3016-3018; if still unsuccessful it fails at :3132-3133 before execv at :3175 (https://github.com/containers/crun/blob/1.14/src/libcrun/container.c#L3132-L3133). This directly settles the missing-directory runtime premise without reproduction. The upstream missing-workdir report is consistent supplementary evidence, not an execution observed here (https://github.com/containers/crun/issues/1823). Suggested bucket: other/custom-base compatibility, unchanged from the lead; no prevalence or measured impact claim. Confidence: confirmed source/contract and supported exec semantics. proposed_drop: false. possible_cover: none in supplied neighbour records; no prohibited coverage sources searched. Could-be-highest: no security/user-work loss route; this blocks a new build with ordinary helper cleanup. Caveat: managed Ubuntu normally contains /root and custom images retaining it are unaffected. No claim that every custom base fails, or that an already usable environment loses files. A cached artifact can avoid a new lookup, but no cached artifact is assumed in this failing new-build route. Original custom-base failure consequence preserved; no priority lowering. No runtime test, build, reproduction or live-install action performed.
+Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; new assigned build.rs implementation remains unchanged
+through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Discovery pass 1. TLDR: a custom container base without
+/root cannot build even when its selected login account has a usable home and meets the documented requirements. Lookup
+fails before Farhelm can resolve that account. Source: software selects the custom reference/user without managed
+bootstrap (build.rs:142-150), then calls login (:151). login executes getent through self.script with root_user
+(:65-73), whose home is hard-coded /root (:411-417). RemoteRoute::container_argv converts that guess into podman exec
+--user 0 --workdir /root and HOME (access.rs:193-230). No preceding custom-image step establishes /root: pull_base only
+pulls/inspects, and helper starts /sbin/init. The actual selected user's readiness check runs afterward (:152-159).
+SPEC.md:471-475 requires systemd, passwordless sudo, Ubuntu/Debian apt, bash, curl and git; SPEC_impl.md:6552-6559
+imposes the same readiness contract. Neither requires root's home to be /root or that directory to exist. A custom image
+may satisfy those requirements with the selected user's home elsewhere and no /root. A neutral directory such as / is
+sufficient for observing passwd; use the observed selected account home only for that account's setup. External primary
+source checks, not a local run: Podman documentation defines --workdir as the exec cwd
+(https://docs.podman.io/en/stable/markdown/podman-exec.1.html). Podman v4.9.3 passes WorkDir into ExecOptions.Cwd at
+container_exec.go:1012-1025 (https://github.com/containers/podman/blob/v4.9.3/libpod/container_exec.go#L1012-L1025),
+then assigns it to the OCI process without creating it at oci_conmon_exec_common.go:648-650
+(https://github.com/containers/podman/blob/v4.9.3/libpod/oci_conmon_exec_common.go#L648-L650). crun 1.14's
+exec_process_entrypoint selects process cwd and attempts chdir at container.c:3016-3018; if still unsuccessful it fails
+at :3132-3133 before execv at :3175 (https://github.com/containers/crun/blob/1.14/src/libcrun/container.c#L3132-L3133).
+This directly settles the missing-directory runtime premise without reproduction. The upstream missing-workdir report is
+consistent supplementary evidence, not an execution observed here (https://github.com/containers/crun/issues/1823).
+Suggested bucket: other/custom-base compatibility, unchanged from the lead; no prevalence or measured impact claim.
+Confidence: confirmed source/contract and supported exec semantics. proposed_drop: false. possible_cover: none in
+supplied neighbour records; no prohibited coverage sources searched. Could-be-highest: no security/user-work loss route;
+this blocks a new build with ordinary helper cleanup. Caveat: managed Ubuntu normally contains /root and custom images
+retaining it are unaffected. No claim that every custom base fails, or that an already usable environment loses files. A
+cached artifact can avoid a new lookup, but no cached artifact is assumed in this failing new-build route. Original
+custom-base failure consequence preserved; no priority lowering. No runtime test, build, reproduction or live-install
+action performed.
 
 Returned proposal (claims-039, event 21): **retain-verified**, suggested bucket **other**.
 
-A supported custom base without /root fails privileged passwd lookup before the selected account can be resolved. The documented base contract does not require /root.
+A supported custom base without /root fails privileged passwd lookup before the selected account can be resolved. The
+documented base contract does not require /root.
 
-Original stronger consequence: A custom base satisfying the documented requirements cannot build if /root is absent, even with a usable selected login home elsewhere. Suggested other from the initial lead onward; no universal custom-base failure or work loss was asserted.
+Original stronger consequence: A custom base satisfying the documented requirements cannot build if /root is absent,
+even with a usable selected login home elsewhere. Suggested other from the initial lead onward; no universal custom-base
+failure or work loss was asserted.
 
-Unresolved premise or limitation: None for the conditional missing-/root source route on the checked supported exec implementation. Prevalence and observed user impact are unmeasured.
+Unresolved premise or limitation: None for the conditional missing-/root source route on the checked supported exec
+implementation. Prevalence and observed user impact are unmeasured.
 
-Proposed basis: Retain other for conditional custom-base compatibility failure; use a neutral guaranteed directory for privileged account observation rather than expanding the product prerequisites.
+Proposed basis: Retain other for conditional custom-base compatibility failure; use a neutral guaranteed directory for
+privileged account observation rather than expanding the product prerequisites.
 
-Existing parent disposition (event 21): verified. Parent explicitly accepted named retain-verified proposal from claims-039 after inspecting it. A supported custom base without /root fails privileged passwd lookup before the selected account can be resolved. The documented base contract does not require /root. Retain other for conditional custom-base compatibility failure; use a neutral guaranteed directory for privileged account observation rather than expanding the product prerequisites. Checked source/results: ["56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/build.rs:142-151 selects the custom reference/user, starts helper and calls login without managed bootstrap; 65-73 uses root_user; 411-417 hardcodes its home to /root. The selected account's actual readiness check follows at 152-159.","Same revision: access.rs:193-230 lowers user.home to podman exec --workdir and HOME. pull_base:808-837 only pulls/inspects; it does not establish /root.","Primary upstream checks: https://github.com/containers/podman/blob/v4.9.3/libpod/container_exec.go#L1012-L1025 maps WorkDir to Cwd; https://github.com/containers/podman/blob/v4.9.3/libpod/oci_conmon_exec_common.go#L648-L650 places it in the OCI process; https://github.com/containers/crun/blob/1.14/src/libcrun/container.c#L3132-L3133 fails an unsuccessful chdir before exec. No reproduction was run.","build.rs is unchanged from its introduction to reviewed tip. Managed Ubuntu and custom bases retaining /root are unaffected; a cached artifact may postpone lookup. No existing environment file loss is claimed."] Current coverage/results: ["Current SPEC.md:450-483 and SPEC_impl.md:6073-6079 require systemd, passwordless sudo, Debian/Ubuntu apt and build tools, with a selected login user; neither requires root's /root directory. Historical SPEC_impl.md:6552-6559 has the same boundary.","TODO Planned empty; no matching BUGS or active TRIAGE_OUTCOMES decision. No unlanded plan adds a neutral privileged lookup directory or otherwise removes this prerequisite. Landed podman-environments plan is not future coverage.","Full INDEX.md and matching image-inspection-inherits-keep-id-account.md and inspector-workdir-hides-missing-home.md read. They concern retired supervisor-side account synthesis/implicit WORKDIR creation, not helm-side privileged exec guessing /root. No exact queue alias or useful extension to those different roots.","No FILTER.md match: a valid custom-base build repeatedly fails until the base or implementation changes; rarity alone is insufficient."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "A custom base satisfying the documented requirements cannot build if /root is absent, even with a usable selected login home elsewhere. Suggested other from the initial lead onward; no universal custom-base failure or work loss was asserted."; "None for the conditional missing-/root source route on the checked supported exec implementation. Prevalence and observed user impact are unmeasured.".
+Existing parent disposition (event 21): verified. Parent explicitly accepted named retain-verified proposal from
+claims-039 after inspecting it. A supported custom base without /root fails privileged passwd lookup before the selected
+account can be resolved. The documented base contract does not require /root. Retain other for conditional custom-base
+compatibility failure; use a neutral guaranteed directory for privileged account observation rather than expanding the
+product prerequisites. Checked source/results:
+["56659839785691f76da3af5d8f51b511cff4ba8b:environment/podman/build.rs:142-151 selects the custom reference/user, starts
+helper and calls login without managed bootstrap; 65-73 uses root_user; 411-417 hardcodes its home to /root. The
+selected account's actual readiness check follows at 152-159.","Same revision: access.rs:193-230 lowers user.home to
+podman exec --workdir and HOME. pull_base:808-837 only pulls/inspects; it does not establish /root.","Primary upstream
+checks: https://github.com/containers/podman/blob/v4.9.3/libpod/container_exec.go#L1012-L1025 maps WorkDir to Cwd;
+https://github.com/containers/podman/blob/v4.9.3/libpod/oci_conmon_exec_common.go#L648-L650 places it in the OCI
+process; https://github.com/containers/crun/blob/1.14/src/libcrun/container.c#L3132-L3133 fails an unsuccessful chdir
+before exec. No reproduction was run.","build.rs is unchanged from its introduction to reviewed tip. Managed Ubuntu and
+custom bases retaining /root are unaffected; a cached artifact may postpone lookup. No existing environment file loss is
+claimed."] Current coverage/results: ["Current SPEC.md:450-483 and SPEC_impl.md:6073-6079 require systemd, passwordless
+sudo, Debian/Ubuntu apt and build tools, with a selected login user; neither requires root's /root directory. Historical
+SPEC_impl.md:6552-6559 has the same boundary.","TODO Planned empty; no matching BUGS or active TRIAGE_OUTCOMES decision.
+No unlanded plan adds a neutral privileged lookup directory or otherwise removes this prerequisite. Landed
+podman-environments plan is not future coverage.","Full INDEX.md and matching
+image-inspection-inherits-keep-id-account.md and inspector-workdir-hides-missing-home.md read. They concern retired
+supervisor-side account synthesis/implicit WORKDIR creation, not helm-side privileged exec guessing /root. No exact
+queue alias or useful extension to those different roots.","No FILTER.md match: a valid custom-base build repeatedly
+fails until the base or implementation changes; rarity alone is insufficient."] Exact cited cover: [] Original stronger
+consequence and missing premise remain preserved: "A custom base satisfying the documented requirements cannot build if
+/root is absent, even with a usable selected login home elsewhere. Suggested other from the initial lead onward; no
+universal custom-base failure or work loss was asserted."; "None for the conditional missing-/root source route on the
+checked supported exec implementation. Prevalence and observed user impact are unmeasured.".
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g061 record](records/review-through-00de0b6c/groups/g061.json). Record ID: `l6`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g061 record](records/review-through-00de0b6c/groups/g061.json). Record ID: `l6`.

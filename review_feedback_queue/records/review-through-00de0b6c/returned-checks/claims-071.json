@@ -39,9 +39,16 @@
     "aliases": [],
     "target_queue_file": null,
     "why": "A real reboot has already ended the agent; the notice is specifically for an agent this release ended while it was live. The source ordering matches that distinction.",
-    "checks": ["dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:core.rs:6869-6888 commits boot reconciliation and updates live rows to Interrupted before :7100-7114 builds the old-terminal converted set. :7374-7382 emits notices only for that set."],
-    "coverage_checked": ["SPEC.md:2998-3010 and SPEC_impl.md:2780-2823 distinguish live old agents this startup converts from agents already ended. Searches of both specifications, empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no separate obligation to notify a true prior reboot. No filter needed."],
-    "exact_cover_quotes": ["SPEC.md:2808-2809: Each session whose agent was still launching, running or being stopped in an old terminal when a supervisor's start ended it gets one notice instead, at that start", "SPEC.md:2813: A session whose agent had already ended, or that lost only old tabs, gets none."],
+    "checks": [
+      "dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:core.rs:6869-6888 commits boot reconciliation and updates live rows to Interrupted before :7100-7114 builds the old-terminal converted set. :7374-7382 emits notices only for that set."
+    ],
+    "coverage_checked": [
+      "SPEC.md:2998-3010 and SPEC_impl.md:2780-2823 distinguish live old agents this startup converts from agents already ended. Searches of both specifications, empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no separate obligation to notify a true prior reboot. No filter needed."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:2808-2809: Each session whose agent was still launching, running or being stopped in an old terminal when a supervisor's start ended it gets one notice instead, at that start",
+      "SPEC.md:2813: A session whose agent had already ended, or that lost only old tabs, gets none."
+    ],
     "missing_premise": null,
     "original_stronger_consequence": "Missing old-terminal notice for a session first loaded after reboot; no surviving process or user-work-loss route was alleged. Failed boot-ID reads are outside this claim.",
     "needs_independent_drop_check": false,
@@ -61,8 +68,12 @@
       "Same revision launch_artifacts.rs:299-333 settles generation-zero sentinel evidence before removal and retains artifacts on preservation failure; :491-502 removes status/spec/waypoint but explicitly retains the host record.",
       "store.rs:386-392 declares address retention for TerminalEnded. At 1ed482dde220452e424973faf38a5e1318986333, host_handover.rs:994-1004 permits superseded-host retirement only for Host rows, so old-row conversion is not that authority."
     ],
-    "coverage_checked": ["Current SPEC_impl.md:2780-2823 explicitly gives sentinel error precedence and requires recorded-address retention. Searches of both specifications, empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no independent exact item; retired-terminal plans are landed, not future coverage. No filter needed."],
-    "exact_cover_quotes": ["SPEC_impl.md:2803-2804: Its `terminal_address` stays as stored, because the reservation settlement reads a recorded one as evidence that the launch happened."],
+    "coverage_checked": [
+      "Current SPEC_impl.md:2780-2823 explicitly gives sentinel error precedence and requires recorded-address retention. Searches of both specifications, empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no independent exact item; retired-terminal plans are landed, not future coverage. No filter needed."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:2803-2804: Its `terminal_address` stays as stored, because the reservation settlement reads a recorded one as evidence that the launch happened."
+    ],
     "missing_premise": "A launch with no recorded address, sentinel, report or remaining scope can still be unproven; the claim does not establish every reservation failure mode.",
     "original_stronger_consequence": "Overwriting direct launch failure or removing accepted-create replay evidence; later checked concern that cleanup could discard an outstanding host handle was also refuted. No current work-loss route was established.",
     "needs_independent_drop_check": true,
@@ -82,7 +93,9 @@
       "Reviewed core.rs:7008-7022 retains the explicit read-only ownership condition. :37161-37251 tests startup only with true at :37221; :37254-37309 tests false/true through reconcile_for_test, a different entry path.",
       "Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs direct reload_sessions calls all pass true; :35352 remains the periodic read-only artifact test. This is source comparison, not mutation testing or an observed false pass."
     ],
-    "coverage_checked": ["Both specifications and searches of empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md supply no exact replacement or accepted omission. The old-terminal test migration plan has landed; it is not an unlanded fix. General state-directory ownership and periodic cleanup coverage do not replace the startup/Error-artifact oracle. FILTER.md has no test-coverage omission filter."],
+    "coverage_checked": [
+      "Both specifications and searches of empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md supply no exact replacement or accepted omission. The old-terminal test migration plan has landed; it is not an unlanded fix. General state-directory ownership and periodic cleanup coverage do not replace the startup/Error-artifact oracle. FILTER.md has no test-coverage omission filter."
+    ],
     "exact_cover_quotes": [],
     "missing_premise": null,
     "original_stronger_consequence": "Lost regression coverage for startup removing another owner's failed-launch artifacts. This is a test-quality defect; hypothetical future authority violations were never established as a current production consequence.",
@@ -103,7 +116,9 @@
       "sweep.rs:805-807 worker only enumerates; :969-995 only polls identities; :1133-1213 signals synchronously between awaits. :774-779's destructor only sends identity-validated SIGCONT to previously recorded processes as the future drops.",
       "scope.rs:1119-1128's independent worker reads cgroup.procs only. Targeted spawn_blocking/tokio::spawn search in sweep.rs, procs.rs and scope.rs finds only those production workers (the other scope spawn is test code). :1229-1232 uses generation-specific old-agent scope names."
     ],
-    "coverage_checked": ["SPEC_impl.md:2780-2823 accepts unfinished old cleanup but does not need to waive the alleged continued marker-signal task. Searches of both specs, empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact late-marker-sweep item. No filter is used; c2's owner misattribution is a different mechanism."],
+    "coverage_checked": [
+      "SPEC_impl.md:2780-2823 accepts unfinished old cleanup but does not need to waive the alleged continued marker-signal task. Searches of both specs, empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no exact late-marker-sweep item. No filter is used; c2's owner misattribution is a different mechanism."
+    ],
     "exact_cover_quotes": [],
     "missing_premise": null,
     "original_stronger_consequence": "After timeout, an independently continuing retirement sweep could discover and kill the replacement agent by its reused session/agent markers, losing user-owned work. That route was withdrawn after the worker/cancellation check.",
@@ -119,9 +134,16 @@
     "aliases": ["g099/f1 (history-supplied possible alias)", "g053/f1 (history-supplied possible alias)"],
     "target_queue_file": null,
     "why": "Loss of old-terminal scrollback on Restart is an explicit product decision. Preserve the potential user-owned-output consequence and require independent agreement before omitting it.",
-    "checks": ["1ed482dde220452e424973faf38a5e1318986333:core.rs:4007-4016 retains a host-only seed; the old tmux seed machinery is removed. Host restart defaults to an empty seed when no old terminal remains (host_restart.rs:216-220)."],
-    "coverage_checked": ["Current SPEC.md:2998-3010 expressly says Restart/Clone/Replace of retired old terminals starts empty, including already-ended agents whose old final screen disappears. SPEC_impl.md:2780-2823 confirms intentional retirement. Searches of empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no additional exact coverage; the retirement plan is landed. No filter required."],
-    "exact_cover_quotes": ["SPEC.md:3010: Restart, Clone and Replace start such a session in a new, empty terminal.", "SPEC.md:3003-3004: one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone"],
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:core.rs:4007-4016 retains a host-only seed; the old tmux seed machinery is removed. Host restart defaults to an empty seed when no old terminal remains (host_restart.rs:216-220)."
+    ],
+    "coverage_checked": [
+      "Current SPEC.md:2998-3010 expressly says Restart/Clone/Replace of retired old terminals starts empty, including already-ended agents whose old final screen disappears. SPEC_impl.md:2780-2823 confirms intentional retirement. Searches of empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no additional exact coverage; the retirement plan is landed. No filter required."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:3010: Restart, Clone and Replace start such a session in a new, empty terminal.",
+      "SPEC.md:3003-3004: one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone"
+    ],
     "missing_premise": null,
     "original_stronger_consequence": "Restart loses retained old tmux output, potentially user-owned work. Acceptance concerns intentional retirement/history loss only, not generic survival guidance or an omitted warning.",
     "needs_independent_drop_check": true,
@@ -136,8 +158,12 @@
     "aliases": [],
     "target_queue_file": null,
     "why": "The flag removal preserves cross-process exclusivity and all startup authority gates. Same-process claim sharing is deliberate and unchanged.",
-    "checks": ["1ed482dde220452e424973faf38a5e1318986333:core.rs:1343-1374 canonicalizes the path, reuses a process-local Arc and uses exclusive try_lock for a new claim; another process yields None. :6116-6117 gates store migration, :6134-6138 gates identity writes, :6147-6151 gates old-server ending and :6168-6184 passes ownership into reconciliation. :1276-1291 explains intentional in-process sharing and separate serving exclusion."],
-    "coverage_checked": ["Both specifications were searched for state-directory claims/read-only authority; SPEC_impl.md:2787 requires ownership for old-server cleanup. Empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md have no exact flag-removal defect or accepted violation. Source refutation needs no filter or waiver."],
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:core.rs:1343-1374 canonicalizes the path, reuses a process-local Arc and uses exclusive try_lock for a new claim; another process yields None. :6116-6117 gates store migration, :6134-6138 gates identity writes, :6147-6151 gates old-server ending and :6168-6184 passes ownership into reconciliation. :1276-1291 explains intentional in-process sharing and separate serving exclusion."
+    ],
+    "coverage_checked": [
+      "Both specifications were searched for state-directory claims/read-only authority; SPEC_impl.md:2787 requires ownership for old-server cleanup. Empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md have no exact flag-removal defect or accepted violation. Source refutation needs no filter or waiver."
+    ],
     "exact_cover_quotes": [],
     "missing_premise": null,
     "original_stronger_consequence": "Startup might migrate another process's database or terminate its healthy terminals after the fresh/reused flag is removed, potentially losing processes/work or breaking its incumbent. The specific source route is refuted.",
@@ -158,7 +184,9 @@
       "launch_artifacts.rs:63-76 only gates on Owned/dead and reads screen_tail; :97-102 discards blank lines before choosing the last nonblank rows. Final exit proves output order, not that promoted history originated in this launch.",
       "6e423e30068b62c6cfa276c6d720ee35bb70387a:launch_artifacts.rs:52-95 already has the same host rationale and final-screen read without the launch fence; :98-106 uses that fence only after the host arm returns. Base host_restart.rs:445,512,575,687 already spawns, confirms, publishes and reads inherited host history. The complete base-to-tip grid/resize.rs diff is empty. Range log/diff shows no introduction of these host-seeding or height-promotion mechanisms."
     ],
-    "coverage_checked": ["SPEC.md:2890-2894 forbids excerpts without safe attribution; SPEC_impl.md:2658-2667 makes the contradicted blank-screen rationale, which is not explicit acceptance of contamination. Empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md have no exact item. Landed tmux cleanup plans supply no unlanded coverage. FILTER.md rare-diagnostic coverage is ambiguous because the excerpt is stored durably; no filter applied."],
+    "coverage_checked": [
+      "SPEC.md:2890-2894 forbids excerpts without safe attribution; SPEC_impl.md:2658-2667 makes the contradicted blank-screen rationale, which is not explicit acceptance of contamination. Empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md have no exact item. Landed tmux cleanup plans supply no unlanded coverage. FILTER.md rare-diagnostic coverage is ambiguous because the excerpt is stored durably; no filter applied."
+    ],
     "exact_cover_quotes": [],
     "missing_premise": "Parent may hold a separate in-range introduction under the history-supplied aliases; that evidence was not assigned. This result establishes only that the named fence deletion did not introduce the host route and the relevant source existed at the range base.",
     "original_stronger_consequence": "An earlier run's output can be attached to a new launch's durable failure detail after inherited history is promoted by a resize. No security or user-work-loss consequence was claimed. The earlier universal provenance dismissal is withdrawn; only the narrow deletion-attribution refutation survives.",
@@ -174,9 +202,15 @@
     "aliases": [],
     "target_queue_file": null,
     "why": "The narrower running-version sweep has a replacement owner for old tmux staging files. Failures intentionally keep the files so a later startup can still reach the old server.",
-    "checks": ["1ed482dde220452e424973faf38a5e1318986333:core.rs:4068-4102 narrows that helper and names the new owner; :6147-6151 invokes old-server ending under ownership. dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:old_terminals.rs:179-189,240-251 invokes cleanup on absence or confirmed ending; :423-447 lists and removes config staging files as well as socket/config."],
-    "coverage_checked": ["Current SPEC_impl.md:2786-2792 explicitly specifies both replacement cleanup and the failure residual. Searches of both specs, empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no separate exact finding. The retirement plan has landed; no filter needed."],
-    "exact_cover_quotes": ["SPEC_impl.md:2790-2791: Any other failure is logged and the files are left, so a later start can still reach the server"],
+    "checks": [
+      "1ed482dde220452e424973faf38a5e1318986333:core.rs:4068-4102 narrows that helper and names the new owner; :6147-6151 invokes old-server ending under ownership. dbfc69751215dbf15e1d31d5bed73c3754c4ebc4:old_terminals.rs:179-189,240-251 invokes cleanup on absence or confirmed ending; :423-447 lists and removes config staging files as well as socket/config."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:2786-2792 explicitly specifies both replacement cleanup and the failure residual. Searches of both specs, empty TODO Planned, plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no separate exact finding. The retirement plan has landed; no filter needed."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:2790-2791: Any other failure is logged and the files are left, so a later start can still reach the server"
+    ],
     "missing_premise": null,
     "original_stronger_consequence": "Old tmux configuration staging files might lose their cleanup owner and remain indefinitely. No credential or user-work-loss route was established; this is not proof that every individual cleanup attempt succeeds.",
     "needs_independent_drop_check": false,

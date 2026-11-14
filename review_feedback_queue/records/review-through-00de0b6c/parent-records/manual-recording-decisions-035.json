@@ -1,3 +1,12 @@
 [
- {"key":"g072/c1","line":20,"disposition":"excluded","group":"selected-above-handoff-floor-legacy-target-missing-tmux-launch-advice","bucket":"other","recording":"explicit-installer-policy","needs_independent_drop_check":false,"reason":"Actual latest owner record isevent20, fullyread again after034stale-lineguardrefusedevent19.034alreadyapplied071f5alone; do not rerun that entry. Parentaccepts exact reviewedinstaller-specific no-looking/naming/no-tmux-advice policy and suppliedcriterionacrosstargetselection, as reasoned034. Preserve realabove-handoff-floorv0.35startuprefusal/removedadvancewarning/oldappactionableremedy, falseuniversalhandoffinferencewithdrawn. Selectedversion/lockedinstallcontractpromisesnotargetawareprerequisiteadvice; outputtests assertonlycurrentreport anddonotclaimoldapppreflightpasses. Matchingadvicecases deliberatelyretired, no independentcurrenttestdefect. Botholdproposalbases/exactnewpolicyandconditionalconsequencestayinthecompleteregister; no security/worklosslowering orruntimeobservation."}
+  {
+    "key": "g072/c1",
+    "line": 20,
+    "disposition": "excluded",
+    "group": "selected-above-handoff-floor-legacy-target-missing-tmux-launch-advice",
+    "bucket": "other",
+    "recording": "explicit-installer-policy",
+    "needs_independent_drop_check": false,
+    "reason": "Actual latest owner record isevent20, fullyread again after034stale-lineguardrefusedevent19.034alreadyapplied071f5alone; do not rerun that entry. Parentaccepts exact reviewedinstaller-specific no-looking/naming/no-tmux-advice policy and suppliedcriterionacrosstargetselection, as reasoned034. Preserve realabove-handoff-floorv0.35startuprefusal/removedadvancewarning/oldappactionableremedy, falseuniversalhandoffinferencewithdrawn. Selectedversion/lockedinstallcontractpromisesnotargetawareprerequisiteadvice; outputtests assertonlycurrentreport anddonotclaimoldapppreflightpasses. Matchingadvicecases deliberatelyretired, no independentcurrenttestdefect. Botholdproposalbases/exactnewpolicyandconditionalconsequencestayinthecompleteregister; no security/worklosslowering orruntimeobservation."
+  }
 ]

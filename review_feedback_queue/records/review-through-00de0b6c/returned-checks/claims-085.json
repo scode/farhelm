@@ -8,9 +8,19 @@
     "aliases": [],
     "target_queue_file": null,
     "why": "The hypothesized route through the retired session identity is source-refuted. This says nothing about another active session's authority or general provider isolation.",
-    "checks": ["04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-supervisor/src/service/downloads.rs:54-66 loads the requested session and checks require_active_launch before resolving its path; stat:189-193 and start:217 use it.", "Same revision service/core.rs:3729-3738 refuses container::is_retired; container.rs:18-22 derives retirement from stored launch intent. service/terminals.rs:904-912 checks the same gate before terminal selection. No runtime observation."],
-    "coverage_checked": ["Current SPEC_impl.md:3513-3614 and 8313-8326 explicitly retire outside-supervisor sessions and remove their confinement adapter with terminal access; SPEC.md:3074-3168 describes ordinary file authority, not a bypass.", "TODO.md:25 Planned is empty; plans/queue/INDEX.md has no unlanded entries. Retained podman-environments.md:278-295 agrees with retirement but is not active plan coverage.", "BUGS.md has only the SSH-helper install hang. Targeted INDEX/active TRIAGE_OUTCOMES searches found no exact retired-session file-authority claim. No archive read. FILTER has no applicable security exclusion."],
-    "exact_cover_quotes": ["SPEC_impl.md:8318: A retired session supports Delete only.", "SPEC_impl.md:3611-3613: Container environments use these ordinary file rules against their in-container supervisor. The earlier checkout-confinement browser adapter and supervisor checks belong to the retired supervisor-outside model and are removed with its terminal access."],
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:crates/farhelm-supervisor/src/service/downloads.rs:54-66 loads the requested session and checks require_active_launch before resolving its path; stat:189-193 and start:217 use it.",
+      "Same revision service/core.rs:3729-3738 refuses container::is_retired; container.rs:18-22 derives retirement from stored launch intent. service/terminals.rs:904-912 checks the same gate before terminal selection. No runtime observation."
+    ],
+    "coverage_checked": [
+      "Current SPEC_impl.md:3513-3614 and 8313-8326 explicitly retire outside-supervisor sessions and remove their confinement adapter with terminal access; SPEC.md:3074-3168 describes ordinary file authority, not a bypass.",
+      "TODO.md:25 Planned is empty; plans/queue/INDEX.md has no unlanded entries. Retained podman-environments.md:278-295 agrees with retirement but is not active plan coverage.",
+      "BUGS.md has only the SSH-helper install hang. Targeted INDEX/active TRIAGE_OUTCOMES searches found no exact retired-session file-authority claim. No archive read. FILTER has no applicable security exclusion."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:8318: A retired session supports Delete only.",
+      "SPEC_impl.md:3611-3613: Container environments use these ordinary file rules against their in-container supervisor. The earlier checkout-confinement browser adapter and supervisor checks belong to the retired supervisor-outside model and are removed with its terminal access."
+    ],
     "missing_premise": "Original exposure would require a retired session's file/terminal operation to pass the stored-launch gate; the checked routes refuse it.",
     "original_stronger_consequence": "Removing browser admission could expose outside-host files through retired supervisor-outside container sessions, a filesystem security-boundary bypass.",
     "needs_independent_drop_check": true,
@@ -25,9 +35,16 @@
     "aliases": [],
     "target_queue_file": null,
     "why": "The removed policy arguments were already fixed by the grid caller's conditions; their removal does not admit ordinary or forced-selection presses.",
-    "checks": ["f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-terminal.js:1768-1777 calculates tracking/forced, restricts pressed links to button zero, and calls linkPress only for tracking && !forced && link. terminal.js:4338-4343 delegates the remaining policy; terminal-links.js:171-173 checks primary/web/intercept. Source only."],
-    "coverage_checked": ["SPEC.md:3076-3084 and SPEC_impl.md:1770-1786 require the checked caller boundary. TODO Planned empty; plans/queue/INDEX empty; BUGS has no matching item.", "Targeted INDEX and active TRIAGE_OUTCOMES searches found no exact ordinary/forced press regression. Read secondary-button-erases-intercepted-primary-ownership.md: its second-button replacement trigger is different. FILTER not needed for refutation."],
-    "exact_cover_quotes": ["SPEC_impl.md:1780-1781: Under mouse reporting the grid asks terminal.js's `linkPress` about a primary press on a link, without the forcing modifier held, before reporting it"],
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-terminal.js:1768-1777 calculates tracking/forced, restricts pressed links to button zero, and calls linkPress only for tracking && !forced && link. terminal.js:4338-4343 delegates the remaining policy; terminal-links.js:171-173 checks primary/web/intercept. Source only."
+    ],
+    "coverage_checked": [
+      "SPEC.md:3076-3084 and SPEC_impl.md:1770-1786 require the checked caller boundary. TODO Planned empty; plans/queue/INDEX empty; BUGS has no matching item.",
+      "Targeted INDEX and active TRIAGE_OUTCOMES searches found no exact ordinary/forced press regression. Read secondary-button-erases-intercepted-primary-ownership.md: its second-button replacement trigger is different. FILTER not needed for refutation."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:1780-1781: Under mouse reporting the grid asks terminal.js's `linkPress` about a primary press on a link, without the forcing modifier held, before reporting it"
+    ],
     "missing_premise": "A caller invoking this policy outside its tracking/non-forced primary-link boundary was not found in the checked route.",
     "original_stronger_consequence": "Removing tracking/forced checks might steal ordinary clicks or forced local selections; suspected high input/selection impact, no established loss of work.",
     "needs_independent_drop_check": false,
@@ -42,9 +59,17 @@
     "aliases": [],
     "target_queue_file": null,
     "why": "The specific deletion-induced absence of gesture admission is refuted by replacement guards. This is not a certification of all grid input sequences or failed-mount cleanup.",
-    "checks": ["f560058da19e02716e6f943883a9508b447aff4e:grid-terminal.js:1651-1656 permanently clears an observed excursion's link; :1687-1694 requires primary release, jitter bound, same hovered link, current evidence and coverage. :2039-2040 compares release event identity. :1754-1758 stops the gesture and both document listeners; freeze:2080-2084/dispose:2123 call it.", "Same revision terminal.js:958,1010,1043-1050,1103-1104 consumes click admission; terminal-files.js:587-606 independently requires a ready current hover, unchanged range text, printed-path recognition and disclosure before transfer. Structured mouse sends retain withheld checks at grid-terminal.js:1657-1659,1670,1792. git grep over pinned assets/js-tests found no deleted createLinkGesture/suppressMouseReport references. Source only."],
-    "coverage_checked": ["SPEC.md:3074-3084 requires drag refusal, not acceptance of accidental activation; SPEC_impl.md:1770-1800,3513-3614 describes the replacement. Planned empty; no unlanded plan INDEX entries; BUGS has no matching issue.", "Read existing secondary-button-erases-intercepted-primary-ownership.md in full: it concerns a second reporting press replacing withheld ownership, not loss of the deleted helper's observed-excursion or release admission. No exact alias or extension established. Read container redraw/publication queue items: different asynchronous admission triggers. Active ledger search found no exact match. FILTER cannot exclude security consequences."],
-    "exact_cover_quotes": ["SPEC.md:3074-3075: Dragging across a terminal link never opens its target, downloads a file or opens a saved file, including while a program has mouse reporting on. Small pointer jitter still counts as a click."],
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:grid-terminal.js:1651-1656 permanently clears an observed excursion's link; :1687-1694 requires primary release, jitter bound, same hovered link, current evidence and coverage. :2039-2040 compares release event identity. :1754-1758 stops the gesture and both document listeners; freeze:2080-2084/dispose:2123 call it.",
+      "Same revision terminal.js:958,1010,1043-1050,1103-1104 consumes click admission; terminal-files.js:587-606 independently requires a ready current hover, unchanged range text, printed-path recognition and disclosure before transfer. Structured mouse sends retain withheld checks at grid-terminal.js:1657-1659,1670,1792. git grep over pinned assets/js-tests found no deleted createLinkGesture/suppressMouseReport references. Source only."
+    ],
+    "coverage_checked": [
+      "SPEC.md:3074-3084 requires drag refusal, not acceptance of accidental activation; SPEC_impl.md:1770-1800,3513-3614 describes the replacement. Planned empty; no unlanded plan INDEX entries; BUGS has no matching issue.",
+      "Read existing secondary-button-erases-intercepted-primary-ownership.md in full: it concerns a second reporting press replacing withheld ownership, not loss of the deleted helper's observed-excursion or release admission. No exact alias or extension established. Read container redraw/publication queue items: different asynchronous admission triggers. Active ledger search found no exact match. FILTER cannot exclude security consequences."
+    ],
+    "exact_cover_quotes": [
+      "SPEC.md:3074-3075: Dragging across a terminal link never opens its target, downloads a file or opens a saved file, including while a program has mouse reporting on. Small pointer jitter still counts as a click."
+    ],
     "missing_premise": "An unintended activation bypassing these replacement guards is not established. Unobserved movement and other grid sequences are outside this narrow refutation.",
     "original_stronger_consequence": "Deleting gesture/reset/report helpers could let a reporting-program drag, away-and-back excursion or listener gap activate a download, saved-file opening or tunnel; unintended opening could cross explicit activation authority.",
     "needs_independent_drop_check": true,
@@ -59,9 +84,17 @@
     "aliases": [],
     "target_queue_file": null,
     "why": "The supported terminal supplies native link-line evidence and native ranges; it has no remaining dependency on the removed xterm adapter. Failed creation remains a separate test-fidelity finding.",
-    "checks": ["f560058da19e02716e6f943883a9508b447aff4e:terminal.js:945-950 reads grid.linkLines after creation; :1030-1048 uses found.ranges for OSC disclosure; :1085-1104 uses native path ranges. grid-buffer.js:617-639 returns fresh characters, widths and integer tags including zero; :660-678 builds linkLines from source rows.", "git grep at f560058d over assets/js-tests found no xtermLines/fromXtermRange/XtermFileLinksAddon references. terminal.js:4313 mounts the grid. Normal onDispose:4350 does not prove constructor rollback; l2 remains distinct. Source only."],
-    "coverage_checked": ["SPEC.md:3084-3107 requires mismatch disclosures and accepts bounded comparison limitations; SPEC_impl.md:1787-1800 explicitly supplies grid-native tagged link lines. No specification acceptance of losing disclosures was used.", "TODO Planned empty; plans/queue/INDEX empty. Retained tmux-end-old-terminals.md:125-132 describes deletion of adapters but is not active coverage. BUGS, targeted queue INDEX and active ledger searches found no exact missing-adapter issue; related redraw/publication queue files have different triggers. FILTER lacks a security exclusion."],
-    "exact_cover_quotes": ["SPEC_impl.md:1791-1792: which the grid offers directly (`grid-buffer.js`'s `linkLines`). The text is joined by `linkHoverText` from the cells' hyperlink tags."],
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:terminal.js:945-950 reads grid.linkLines after creation; :1030-1048 uses found.ranges for OSC disclosure; :1085-1104 uses native path ranges. grid-buffer.js:617-639 returns fresh characters, widths and integer tags including zero; :660-678 builds linkLines from source rows.",
+      "git grep at f560058d over assets/js-tests found no xtermLines/fromXtermRange/XtermFileLinksAddon references. terminal.js:4313 mounts the grid. Normal onDispose:4350 does not prove constructor rollback; l2 remains distinct. Source only."
+    ],
+    "coverage_checked": [
+      "SPEC.md:3084-3107 requires mismatch disclosures and accepts bounded comparison limitations; SPEC_impl.md:1787-1800 explicitly supplies grid-native tagged link lines. No specification acceptance of losing disclosures was used.",
+      "TODO Planned empty; plans/queue/INDEX empty. Retained tmux-end-old-terminals.md:125-132 describes deletion of adapters but is not active coverage. BUGS, targeted queue INDEX and active ledger searches found no exact missing-adapter issue; related redraw/publication queue files have different triggers. FILTER lacks a security exclusion."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:1791-1792: which the grid offers directly (`grid-buffer.js`'s `linkLines`). The text is joined by `linkHoverText` from the cells' hyperlink tags."
+    ],
     "missing_premise": "No supported terminal still requiring xterm line/range conversion was found; no universal claim about warning algorithms or rollback follows.",
     "original_stronger_consequence": "Adapter/test removal could disable multirow deceptive-link warnings or stale-file evidence, potentially losing a security disclosure if a supported terminal still needed it.",
     "needs_independent_drop_check": true,
@@ -76,8 +109,14 @@
     "aliases": ["g136/l1"],
     "target_queue_file": null,
     "why": "Same changed fixture, failed-mount assertion and production accessor as g136/l1. Consolidate into that retained finding without losing attribution or caveats.",
-    "checks": ["f560058da19e02716e6f943883a9508b447aff4e:terminal-files.test.js:615-678 claims the grid hosting shape but always constructs host and safely reads host.element; :834-848 asserts disposal before component existence. terminal.js:945-950 instead dereferences getGrid().element; :4302-4313 binds it to created before assignment; :4356-4358 disposes on create failure. terminal-files.js:641-645 calls clearHover, whose :467 invokes the throwing getter.", "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:terminal.js:1194-1215,5981-6044 already has the unsafe getter/catch; this production weakness is pre-range. In-range defect is the rewritten test premise. Pinned tip retains both getter and test. No runtime execution."],
-    "coverage_checked": ["SPEC.md Terminal experience and SPEC_impl.md Session-host file reads describe ordinary disposal/admission, not acceptance of a falsely modeled failed mount. TODO Planned empty; plans/queue/INDEX empty; BUGS has no match.", "Targeted queue INDEX/active ledger searches for failed mount, absent component, disposal and recognition found no exact item. changed-file-hover-test-clicks-before-stat-readiness.md concerns a different readiness oracle. FILTER's rare-diagnostic rule does not cover the whole test-fidelity consequence; constructor failure frequency is also unestablished."],
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:terminal-files.test.js:615-678 claims the grid hosting shape but always constructs host and safely reads host.element; :834-848 asserts disposal before component existence. terminal.js:945-950 instead dereferences getGrid().element; :4302-4313 binds it to created before assignment; :4356-4358 disposes on create failure. terminal-files.js:641-645 calls clearHover, whose :467 invokes the throwing getter.",
+      "Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:terminal.js:1194-1215,5981-6044 already has the unsafe getter/catch; this production weakness is pre-range. In-range defect is the rewritten test premise. Pinned tip retains both getter and test. No runtime execution."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience and SPEC_impl.md Session-host file reads describe ordinary disposal/admission, not acceptance of a falsely modeled failed mount. TODO Planned empty; plans/queue/INDEX empty; BUGS has no match.",
+      "Targeted queue INDEX/active ledger searches for failed mount, absent component, disposal and recognition found no exact item. changed-file-hover-test-clicks-before-stat-readiness.md concerns a different readiness oracle. FILTER's rare-diagnostic rule does not cover the whole test-fidelity consequence; constructor failure frequency is also unestablished."
+    ],
     "exact_cover_quotes": [],
     "missing_premise": "None for the test mismatch and conditional masking. Additional leak, retry failure, permanent inability to mount, security or lost user work is not established.",
     "original_stronger_consequence": "Useful terminal startup diagnosis may be masked; early notes considered high startup impact depending on provenance/trigger. Later source checks establish other for the in-range test gap, with no highest route alleged.",
@@ -93,8 +132,14 @@
     "aliases": [],
     "target_queue_file": null,
     "why": "The intermediate test explicitly claims synchronous recognition but only checks eventual callback output. Its later deletion is material disposition context, not a source refutation of the historical test defect.",
-    "checks": ["04d85f0c98a9b635709d00b056719a0baa7fd3fc:terminal-files.test.js:398-413 promises synchronous recognition, installs a throwing request stub, then awaits new Promise(resolve => provider.provideLinks(1, resolve)) before comparing paths. There is no before-return callback witness. The stub covers no host request, not callback timing.", "Same revision terminal-files.js:672-677 actually calls back synchronously; no production scheduling regression is alleged. Full-range path history contains 04d85f0c and f560058d only; f560058d's diff deletes this test and XtermFileLinksAddon. Absent at pinned tip; no runtime execution."],
-    "coverage_checked": ["SPEC.md:3140 requires immediate hover feedback; SPEC_impl.md:3578-3582 preserves synchronous neighboring evidence re-recognition, not a new universal provider promise. Neither accepts the test's blind oracle.", "Planned empty; plans/queue/INDEX empty; retained xterm-removal plans describe the already-landed deletion, not an unlanded fix. BUGS has no match. Queue INDEX/active ledger searches for callback timing, recognition and file-link tests found no exact item; changed-file-hover-test-clicks-before-stat-readiness.md is a separate test. FILTER does not cover an inaccurate timing oracle as merely a rare diagnostic."],
+    "checks": [
+      "04d85f0c98a9b635709d00b056719a0baa7fd3fc:terminal-files.test.js:398-413 promises synchronous recognition, installs a throwing request stub, then awaits new Promise(resolve => provider.provideLinks(1, resolve)) before comparing paths. There is no before-return callback witness. The stub covers no host request, not callback timing.",
+      "Same revision terminal-files.js:672-677 actually calls back synchronously; no production scheduling regression is alleged. Full-range path history contains 04d85f0c and f560058d only; f560058d's diff deletes this test and XtermFileLinksAddon. Absent at pinned tip; no runtime execution."
+    ],
+    "coverage_checked": [
+      "SPEC.md:3140 requires immediate hover feedback; SPEC_impl.md:3578-3582 preserves synchronous neighboring evidence re-recognition, not a new universal provider promise. Neither accepts the test's blind oracle.",
+      "Planned empty; plans/queue/INDEX empty; retained xterm-removal plans describe the already-landed deletion, not an unlanded fix. BUGS has no match. Queue INDEX/active ledger searches for callback timing, recognition and file-link tests found no exact item; changed-file-hover-test-clicks-before-stat-readiness.md is a separate test. FILTER does not cover an inaccurate timing oracle as merely a rare diagnostic."
+    ],
     "exact_cover_quotes": [],
     "missing_premise": "None for the historical test-oracle gap. It no longer exists at the final tip, and no surviving product timing failure is claimed.",
     "original_stronger_consequence": "A test claiming immediate recognition would miss an asynchronous no-request callback regression; other/test accuracy only, never a security or loss-of-work claim.",
@@ -110,9 +155,15 @@
     "aliases": [],
     "target_queue_file": null,
     "why": "The same paragraph explicitly gives native remote Meta-click consent to Rust before saying ordinary links do not confirm. The considered false claim is not established in context.",
-    "checks": ["f560058da19e02716e6f943883a9508b447aff4e:terminal-links.js:21-25 distinguishes ordinary opening from native tunnel intent and Rust-owned consent. :153-158 dispatches tunnel versus raw opening without implementing consent here. Source/comment check only."],
-    "coverage_checked": ["SPEC.md:3076-3077 requires ordinary unprompted opening; :3115-3120 requires first-tunnel consent, consistent with the full paragraph. SPEC_impl Links in terminals supplies ordinary click ownership. Planned and unlanded-plan INDEX empty; BUGS/targeted queue INDEX/active ledger searches have no exact comment issue. No filter relied upon."],
-    "exact_cover_quotes": ["Reviewed terminal-links.js:22-23: Native remote Meta-click instead hands an explicit tunnel intent to Rust, which owns consent and the async request."],
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:terminal-links.js:21-25 distinguishes ordinary opening from native tunnel intent and Rust-owned consent. :153-158 dispatches tunnel versus raw opening without implementing consent here. Source/comment check only."
+    ],
+    "coverage_checked": [
+      "SPEC.md:3076-3077 requires ordinary unprompted opening; :3115-3120 requires first-tunnel consent, consistent with the full paragraph. SPEC_impl Links in terminals supplies ordinary click ownership. Planned and unlanded-plan INDEX empty; BUGS/targeted queue INDEX/active ledger searches have no exact comment issue. No filter relied upon."
+    ],
+    "exact_cover_quotes": [
+      "Reviewed terminal-links.js:22-23: Native remote Meta-click instead hands an explicit tunnel intent to Rust, which owns consent and the async request."
+    ],
     "missing_premise": "The suspected statement would need the immediately preceding native-consent distinction to be omitted or ignored.",
     "original_stronger_consequence": "Source comment might misdescribe native Cmd-click consent; documentation accuracy only, with no user authorization crossing established.",
     "needs_independent_drop_check": false,
@@ -127,8 +178,12 @@
     "aliases": [],
     "target_queue_file": null,
     "why": "The revised test expressly assumes the grid denied click admission. Its click true/false comparison tests that declared predicate boundary rather than claiming to drive a gesture.",
-    "checks": ["f560058da19e02716e6f943883a9508b447aff4e:terminal-tunnels.test.js:55-63 says 'A drag the grid did not admit as a click', titles the test 'a release not admitted as a click never tunnels', and proves a qualifying offer tunnels with click:true but refuses click:false. Source only."],
-    "coverage_checked": ["SPEC.md:3074-3075 and tunnel paragraphs require drag refusal; SPEC_impl Links in terminals gives grid click admission ownership. Neither creates an unstated integration-test claim. Planned and unlanded-plan INDEX empty; BUGS, targeted queue INDEX and active ledger searches have no exact description/predicate issue. Related secondary-button queue item has a different shipped input route. FILTER unnecessary."],
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:terminal-tunnels.test.js:55-63 says 'A drag the grid did not admit as a click', titles the test 'a release not admitted as a click never tunnels', and proves a qualifying offer tunnels with click:true but refuses click:false. Source only."
+    ],
+    "coverage_checked": [
+      "SPEC.md:3074-3075 and tunnel paragraphs require drag refusal; SPEC_impl Links in terminals gives grid click admission ownership. Neither creates an unstated integration-test claim. Planned and unlanded-plan INDEX empty; BUGS, targeted queue INDEX and active ledger searches have no exact description/predicate issue. Related secondary-button queue item has a different shipped input route. FILTER unnecessary."
+    ],
     "exact_cover_quotes": ["Reviewed terminal-tunnels.test.js:55: A drag the grid did not admit as a click"],
     "missing_premise": "No statement in this test claims the click:false fixture exercises the grid's physical gesture recognition.",
     "original_stronger_consequence": "Replacing a gesture helper test might misleadingly claim actual grid drag coverage; other/test-description concern only. Separate c3 opening-authority hypothesis is preserved.",
@@ -144,8 +199,13 @@
     "aliases": [],
     "target_queue_file": null,
     "why": "The one-row accounting observation predates the entire range, and the sole in-range terminal-links patch leaves that common helper unchanged. No deletion-induced broadening was established.",
-    "checks": ["6e423e30068b62c6cfa276c6d720ee35bb70387a:terminal-links.js:558-576 already states a 128-row span, rejects only end.abs-start.abs >128, iterates inclusively and caps 8192 characters. f560058da19e02716e6f943883a9508b447aff4e:499-517 retains the same helper.", "Full-range terminal-links.js history identifies only f560058d; the reviewed diff removes the following xterm adapter and changes renderer prose, not this bound. Source only; no independent range-bound audit performed."],
-    "coverage_checked": ["SPEC_impl.md:3567 and :1793 bound related recognition/joining to 128 rows, but do not establish new in-range provenance for this unchanged helper. SPEC.md Terminal experience gives general evidence rules. Planned/unlanded-plan INDEX empty; BUGS and targeted queue INDEX/active ledger searches found no exact 129-row issue. No filter used."],
+    "checks": [
+      "6e423e30068b62c6cfa276c6d720ee35bb70387a:terminal-links.js:558-576 already states a 128-row span, rejects only end.abs-start.abs >128, iterates inclusively and caps 8192 characters. f560058da19e02716e6f943883a9508b447aff4e:499-517 retains the same helper.",
+      "Full-range terminal-links.js history identifies only f560058d; the reviewed diff removes the following xterm adapter and changes renderer prose, not this bound. Source only; no independent range-bound audit performed."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:3567 and :1793 bound related recognition/joining to 128 rows, but do not establish new in-range provenance for this unchanged helper. SPEC.md Terminal experience gives general evidence rules. Planned/unlanded-plan INDEX empty; BUGS and targeted queue INDEX/active ledger searches found no exact 129-row issue. No filter used."
+    ],
     "exact_cover_quotes": [],
     "missing_premise": "An in-range introduction or deletion-induced change in use of this common bound was not established.",
     "original_stronger_consequence": "Finite span accounting permits an inclusive 129-row range despite a 128-row-span comment; no security or user-work-loss route alleged.",
@@ -161,9 +221,16 @@
     "aliases": [],
     "target_queue_file": null,
     "why": "The deleted adapter/provider-identity tests target a removed class. The replacement provider retains the considered recognition and scheme boundary; no active-adapter loss of coverage is established.",
-    "checks": ["f560058da19e02716e6f943883a9508b447aff4e diff deletes XtermFileLinksAddon and the immediate recognition/real-xterm OSC-provider identity tests. terminal.js:1029-1059 classifies OSC via oscTarget and makes other schemes inert; :1108-1115 offers OSC/text/path results synchronously without stat.", "Same revision terminal-files.test.js:195-261,294-375 retains direct recognition, OSC allowlist and range tests. git grep found no XtermFileLinksAddon in pinned assets/tests. This refutes the considered active-adapter deletion concern, not l3's historical timing-blind oracle. Source only."],
-    "coverage_checked": ["SPEC_impl.md:3564-3587 specifies direct grid-hosted FileLinks after OSC/text links and explicit scheme handling; SPEC.md file-link paragraphs preserve the boundary. Planned/unlanded-plan INDEX empty; retained tmux-end-old-terminals.md:125-132 concerns already-landed retirement. BUGS, queue INDEX and active ledger searches found no exact adapter-deletion item. No filter used."],
-    "exact_cover_quotes": ["SPEC_impl.md:3564-3566: `terminal-files.js` supplies conservative token recognition and the terminal-owned file links (`FileLinks`), which the grid hosts directly (terminal.js's `createGridLinks`), after OSC 8 and printed web links in the order a line's links are offered."],
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e diff deletes XtermFileLinksAddon and the immediate recognition/real-xterm OSC-provider identity tests. terminal.js:1029-1059 classifies OSC via oscTarget and makes other schemes inert; :1108-1115 offers OSC/text/path results synchronously without stat.",
+      "Same revision terminal-files.test.js:195-261,294-375 retains direct recognition, OSC allowlist and range tests. git grep found no XtermFileLinksAddon in pinned assets/tests. This refutes the considered active-adapter deletion concern, not l3's historical timing-blind oracle. Source only."
+    ],
+    "coverage_checked": [
+      "SPEC_impl.md:3564-3587 specifies direct grid-hosted FileLinks after OSC/text links and explicit scheme handling; SPEC.md file-link paragraphs preserve the boundary. Planned/unlanded-plan INDEX empty; retained tmux-end-old-terminals.md:125-132 concerns already-landed retirement. BUGS, queue INDEX and active ledger searches found no exact adapter-deletion item. No filter used."
+    ],
+    "exact_cover_quotes": [
+      "SPEC_impl.md:3564-3566: `terminal-files.js` supplies conservative token recognition and the terminal-owned file links (`FileLinks`), which the grid hosts directly (terminal.js's `createGridLinks`), after OSC 8 and printed web links in the order a line's links are offered."
+    ],
     "missing_premise": "No surviving xterm adapter contract needing those identity tests was found. Full grid integration coverage is not certified.",
     "original_stronger_consequence": "Deleting recognition/native OSC-provider preservation tests could allow file-link regressions; considered test coverage issue, no shipped security or loss-of-work route established.",
     "needs_independent_drop_check": false,
@@ -178,8 +245,14 @@
     "aliases": [],
     "target_queue_file": null,
     "why": "The replacement reads changed rows afresh and the separate cell fixture preserves wrap/suffix-growth discrimination. The suspected stale fixture or lost wrap oracle is refuted.",
-    "checks": ["f560058da19e02716e6f943883a9508b447aff4e:terminal-files.test.js:287-291 reads rows[abs] per call; :671-678 exposes host.lines through a getter and setLines; :755-781 changes a continuation then empties the same array. terminal-files.js:587-595 rereads view.lines and compares linkRangeText before transfer.", "Same test file:788-819 retains wrapped/hard-cut cell fixtures, proves old rectangle text survives suffix growth while recognition changes, checks refusal, then restored admission in browser/native modes. linkRangeText:499-515 reads explicit ranges without consulting wrapped. OSC-style hover has link=null intentionally. Source only."],
-    "coverage_checked": ["SPEC.md:3141-3146 requires changed-text permission withdrawal; SPEC_impl.md:3578-3604 requires fresh evidence and printed-path recognition, consistent with the retained oracles. Planned/unlanded-plan INDEX empty; BUGS has no match.", "Read changed-file-hover-test-clicks-before-stat-readiness.md: different browser readiness race, no exact coverage. Read container-redraw-discards-hover.md and container-path-publication-keeps-stale-cut.md: different asynchronous provider consequences. Active ledger search has no exact fixture issue. FILTER unnecessary."],
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:terminal-files.test.js:287-291 reads rows[abs] per call; :671-678 exposes host.lines through a getter and setLines; :755-781 changes a continuation then empties the same array. terminal-files.js:587-595 rereads view.lines and compares linkRangeText before transfer.",
+      "Same test file:788-819 retains wrapped/hard-cut cell fixtures, proves old rectangle text survives suffix growth while recognition changes, checks refusal, then restored admission in browser/native modes. linkRangeText:499-515 reads explicit ranges without consulting wrapped. OSC-style hover has link=null intentionally. Source only."
+    ],
+    "coverage_checked": [
+      "SPEC.md:3141-3146 requires changed-text permission withdrawal; SPEC_impl.md:3578-3604 requires fresh evidence and printed-path recognition, consistent with the retained oracles. Planned/unlanded-plan INDEX empty; BUGS has no match.",
+      "Read changed-file-hover-test-clicks-before-stat-readiness.md: different browser readiness race, no exact coverage. Read container-redraw-discards-hover.md and container-path-publication-keeps-stale-cut.md: different asynchronous provider consequences. Active ledger search has no exact fixture issue. FILTER unnecessary."
+    ],
     "exact_cover_quotes": [],
     "missing_premise": "No stale row capture or deletion of the separate wrap/suffix evidence was found. Real renderer geometry remains integration coverage.",
     "original_stronger_consequence": "Replacing buffer fixtures with stringLines might weaken changed-text safety tests; considered test fidelity issue only, no incorrect shipped transfer route established.",
@@ -195,8 +268,14 @@
     "aliases": ["g135/l2"],
     "target_queue_file": null,
     "why": "The changed test claims production failed-mount coverage while substituting an accessor that succeeds in the exact absent-component state where production throws. This test defect is in-range and persists at the pinned tip.",
-    "checks": ["f560058da19e02716e6f943883a9508b447aff4e:terminal-files.test.js:615-678 always constructs host and returns host.element; :834-848 explicitly claims failed mounts dispose safely. terminal.js:945-950 uses getGrid().element; :4302-4313 binds getGrid to unassigned created; :4356-4358 calls gridLinks.dispose before throw err. Its dispose:1121-1125 invokes FileLinks.dispose; terminal-files.js:641-645 calls clearHover, whose :467 getter evaluation throws before optional chaining can protect the absent element.", "Same revision terminal.js:4698-4743 rolls back outer state and displays the replacement error. Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:terminal.js:1194-1215,5981-6044 already has this production structure: the product diagnostic bug is pre-range. 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains getter, catch and changed test at the same lines. Source only, not reproduced."],
-    "coverage_checked": ["SPEC.md Terminal experience and SPEC_impl.md:3513-3614 require normal terminal/file behavior but do not accept false lifecycle coverage. The reviewed createGridSurface comment:4288-4292 promises disposal even if the component never exists; this is source contract evidence, not external coverage.", "TODO.md:25 Planned empty; plans/queue/INDEX has no unlanded entries. Retained removal plans do not specifically fix absent-component accessor/test fidelity. BUGS has only SSH-helper hang. Targeted queue INDEX and active ledger searches found no failed-grid-mount/absent-component oracle item; changed-file-hover-test-clicks-before-stat-readiness.md is a different test trigger. FILTER's rare-diagnostic rule does not encompass inaccurate lifecycle test coverage, and creation-failure rarity is unestablished. No archive read."],
+    "checks": [
+      "f560058da19e02716e6f943883a9508b447aff4e:terminal-files.test.js:615-678 always constructs host and returns host.element; :834-848 explicitly claims failed mounts dispose safely. terminal.js:945-950 uses getGrid().element; :4302-4313 binds getGrid to unassigned created; :4356-4358 calls gridLinks.dispose before throw err. Its dispose:1121-1125 invokes FileLinks.dispose; terminal-files.js:641-645 calls clearHover, whose :467 getter evaluation throws before optional chaining can protect the absent element.",
+      "Same revision terminal.js:4698-4743 rolls back outer state and displays the replacement error. Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:terminal.js:1194-1215,5981-6044 already has this production structure: the product diagnostic bug is pre-range. 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains getter, catch and changed test at the same lines. Source only, not reproduced."
+    ],
+    "coverage_checked": [
+      "SPEC.md Terminal experience and SPEC_impl.md:3513-3614 require normal terminal/file behavior but do not accept false lifecycle coverage. The reviewed createGridSurface comment:4288-4292 promises disposal even if the component never exists; this is source contract evidence, not external coverage.",
+      "TODO.md:25 Planned empty; plans/queue/INDEX has no unlanded entries. Retained removal plans do not specifically fix absent-component accessor/test fidelity. BUGS has only SSH-helper hang. Targeted queue INDEX and active ledger searches found no failed-grid-mount/absent-component oracle item; changed-file-hover-test-clicks-before-stat-readiness.md is a different test trigger. FILTER's rare-diagnostic rule does not encompass inaccurate lifecycle test coverage, and creation-failure rarity is unestablished. No archive read."
+    ],
     "exact_cover_quotes": [],
     "missing_premise": "None for the fixture mismatch or conditional diagnostic replacement. No additional resource leak, failed retry, permanent mount failure, security impact or loss of user work is established; a constructor failure already prevents that mount.",
     "original_stronger_consequence": "Cleanup can replace the useful startup exception with an undefined-component TypeError while the repurposed failed-mount test passes. The retained claim is ineffective lifecycle coverage plus conditional masked diagnosis, other; no highest consequence was alleged.",

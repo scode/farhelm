@@ -4,13 +4,30 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Source-confirmed review record: Developers consulting the implementation specification's testing overview are told the supervisor tests start real terminal hosts from a built product binary, although this change makes the unit tests use their own executable specifically because they have no product binary. This is a distinct inaccurate test-architecture explanation, not a runtime defect or a missing test oracle. Source: the complete Testing section at this revision is a workspace-wide account covering browser, Rust integration, terminal-host, emulator, property and JS tests; its terminal-host bullet at 8646–8654 says, "The supervisor's side starts real hosts from the built `farhelm`, never inside a test process, since a host forks". It does not restrict that claim to the Rust e2e harness or name the new unit-test exception. The assigned changed paragraph at 2311–2318 instead says, "The supervisor crate's own unit tests have no `farhelm`, so their test binary is its own host program" and describes the loader initializer. hosts/test_program.rs 1–38 and 42–46 confirms this is a fresh exec of the unit-test binary before libtest main, and service/core.rs 20551–20565 supplies that path through host_seams. Attribution: the commit adds hosts/test_program.rs and host_seams, replaces the old unit-test tmux helper calls, and replaces the former SPEC_impl.md statement that unit tests have no host-starting binary and use old terminals. The previous Testing summary's built-farhelm account therefore becomes incomplete/incorrect for newly added real unit-test hosts in this commit; this is not a claim that runtime behavio
+Source-confirmed review record: Developers consulting the implementation specification's testing overview are told the
+supervisor tests start real terminal hosts from a built product binary, although this change makes the unit tests use
+their own executable specifically because they have no product binary. This is a distinct inaccurate test-architecture
+explanation, not a runtime defect or a missing test oracle. Source: the complete Testing section at this revision is a
+workspace-wide account covering browser, Rust integration, terminal-host, emulator, property and JS tests; its
+terminal-host bullet at 8646–8654 says, "The supervisor's side starts real hosts from the built `farhelm`, never inside
+a test process, since a host forks". It does not restrict that claim to the Rust e2e harness or name the new unit-test
+exception. The assigned changed paragraph at 2311–2318 instead says, "The supervisor crate's own unit tests have no
+`farhelm`, so their test binary is its own host program" and describes the loader initializer. hosts/test_program.rs
+1–38 and 42–46 confirms this is a fresh exec of the unit-test binary before libtest main, and service/core.rs
+20551–20565 supplies that path through host_seams. Attribution: the commit adds hosts/test_program.rs and host_seams,
+replaces the old unit-test tmux helper calls, and replaces the former SPEC_impl.md statement that unit tests have no
+host-starting binary and use old terminals. The previous Testing summary's built-farhelm account therefore becomes
+incomplete/incorrect for newly added real unit-test hosts in this commit; this is not a claim that runtime behavio
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g003/f4`.
 
@@ -20,19 +37,63 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 10 (finding, open):
 
-Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: Developers consulting the implementation specification's testing overview are told the supervisor tests start real terminal hosts from a built product binary, although this change makes the unit tests use their own executable specifically because they have no product binary. This is a distinct inaccurate test-architecture explanation, not a runtime defect or a missing test oracle. Source: the complete Testing section at this revision is a workspace-wide account covering browser, Rust integration, terminal-host, emulator, property and JS tests; its terminal-host bullet at 8646–8654 says, "The supervisor's side starts real hosts from the built `farhelm`, never inside a test process, since a host forks". It does not restrict that claim to the Rust e2e harness or name the new unit-test exception. The assigned changed paragraph at 2311–2318 instead says, "The supervisor crate's own unit tests have no `farhelm`, so their test binary is its own host program" and describes the loader initializer. hosts/test_program.rs 1–38 and 42–46 confirms this is a fresh exec of the unit-test binary before libtest main, and service/core.rs 20551–20565 supplies that path through host_seams. Attribution: the commit adds hosts/test_program.rs and host_seams, replaces the old unit-test tmux helper calls, and replaces the former SPEC_impl.md statement that unit tests have no host-starting binary and use old terminals. The previous Testing summary's built-farhelm account therefore becomes incomplete/incorrect for newly added real unit-test hosts in this commit; this is not a claim that runtime behavior predates the reviewed change or pinned range. Later-tip check: SPEC_impl.md at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the unit-test-binary explanation at 2166ff and the unqualified built-farhelm statement at 8190. Suggested bucket: other, internal documentation accuracy. Confidence: confirmed by per-commit diff, complete surrounding Testing text and pinned source; not observed execution. proposed_drop: false. possible_cover: none in supplied exact neighbour records; no prohibited coverage sources searched. Could-be-highest: false; no security or loss-of-work route. Fix direction: identify the e2e product binary and the glibc Linux unit-test executable separately in the testing overview, retaining the important separate-process/single-threaded host-start boundary. Caveat: the statement that hosts are not forked inside a running test process remains correct; this finding concerns only the falsely general executable account, and production correctness does not refute it. No tests, builds or reproductions run. This closes f4's scope and later-repair leads under the original ID.
+Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: Developers consulting the implementation
+specification's testing overview are told the supervisor tests start real terminal hosts from a built product binary,
+although this change makes the unit tests use their own executable specifically because they have no product binary.
+This is a distinct inaccurate test-architecture explanation, not a runtime defect or a missing test oracle. Source: the
+complete Testing section at this revision is a workspace-wide account covering browser, Rust integration, terminal-host,
+emulator, property and JS tests; its terminal-host bullet at 8646–8654 says, "The supervisor's side starts real hosts
+from the built `farhelm`, never inside a test process, since a host forks". It does not restrict that claim to the Rust
+e2e harness or name the new unit-test exception. The assigned changed paragraph at 2311–2318 instead says, "The
+supervisor crate's own unit tests have no `farhelm`, so their test binary is its own host program" and describes the
+loader initializer. hosts/test_program.rs 1–38 and 42–46 confirms this is a fresh exec of the unit-test binary before
+libtest main, and service/core.rs 20551–20565 supplies that path through host_seams. Attribution: the commit adds
+hosts/test_program.rs and host_seams, replaces the old unit-test tmux helper calls, and replaces the former SPEC_impl.md
+statement that unit tests have no host-starting binary and use old terminals. The previous Testing summary's
+built-farhelm account therefore becomes incomplete/incorrect for newly added real unit-test hosts in this commit; this
+is not a claim that runtime behavior predates the reviewed change or pinned range. Later-tip check: SPEC_impl.md at
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains the unit-test-binary explanation at 2166ff and the unqualified
+built-farhelm statement at 8190. Suggested bucket: other, internal documentation accuracy. Confidence: confirmed by
+per-commit diff, complete surrounding Testing text and pinned source; not observed execution. proposed_drop: false.
+possible_cover: none in supplied exact neighbour records; no prohibited coverage sources searched. Could-be-highest:
+false; no security or loss-of-work route. Fix direction: identify the e2e product binary and the glibc Linux unit-test
+executable separately in the testing overview, retaining the important separate-process/single-threaded host-start
+boundary. Caveat: the statement that hosts are not forked inside a running test process remains correct; this finding
+concerns only the falsely general executable account, and production correctness does not refute it. No tests, builds or
+reproductions run. This closes f4's scope and later-repair leads under the original ID.
 
 Returned proposal (claims-002, event 10): **retain-verified**, suggested bucket **other**.
 
-The testing overview gives an unqualified executable account that conflicts with the newly introduced supervisor unit-test host executable. Correct separate-process behavior does not repair the documentation error.
+The testing overview gives an unqualified executable account that conflicts with the newly introduced supervisor
+unit-test host executable. Correct separate-process behavior does not repair the documentation error.
 
-Original stronger consequence: Misleading internal test-architecture map only; the separate-process/single-threaded host boundary remains correct. No security or loss-of-work consequence was alleged.
+Original stronger consequence: Misleading internal test-architecture map only; the separate-process/single-threaded host
+boundary remains correct. No security or loss-of-work consequence was alleged.
 
 Unresolved premise or limitation: No missing premise stated in this returned proposal.
 
-Proposed basis: Retain the bounded documentation defect, identifying the glibc Linux unit-test exception without alleging production failure.
+Proposed basis: Retain the bounded documentation defect, identifying the glibc Linux unit-test exception without
+alleging production failure.
 
-Existing parent disposition (event 10): verified. Parent explicitly accepted named retain-verified proposal from claims-002 after inspecting it. The testing overview gives an unqualified executable account that conflicts with the newly introduced supervisor unit-test host executable. Correct separate-process behavior does not repair the documentation error. Retain the bounded documentation defect, identifying the glibc Linux unit-test exception without alleging production failure. Checked source/results: ["At 70bc66a9f285cc2a9984924f389834d118b7cfdc, crates/farhelm-supervisor/src/hosts/test_program.rs:1-46 explains and selects current_exe(), then dispatches the host entry before libtest starts threads. This is a fresh executable invocation, not a host fork inside an executing test.","At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, SPEC_impl.md:2160-2174 explicitly distinguishes the e2e product binary and unit-test binary. Its complete Testing section at :8159-8203 covers workspace testing generally, while :8190 still says the supervisor's side uses the built farhelm without naming the unit-test exception.","The finding concerns the new real-host unit tests introduced by 70bc66a9, not the age of the pre-existing overview sentence. No runtime defect or test failure was observed."] Current coverage/results: ["Current SPEC_impl.md retains both conflicting statements. SPEC.md contains no acceptance of inaccurate testing architecture documentation.","TODO.md Planned is empty. Exact executable/unit-test/real-host searches across plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found no item covering this explanation. The broad tmux docs cleanup plan is recorded landed in plans/REPORTS.md:32, and the statement remains.","FILTER.md does not cover a persistent authoritative architecture error merely because it is documentation. No rare runtime trigger is involved."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "Misleading internal test-architecture map only; the separate-process/single-threaded host boundary remains correct. No security or loss-of-work consequence was alleged."; null.
+Existing parent disposition (event 10): verified. Parent explicitly accepted named retain-verified proposal from
+claims-002 after inspecting it. The testing overview gives an unqualified executable account that conflicts with the
+newly introduced supervisor unit-test host executable. Correct separate-process behavior does not repair the
+documentation error. Retain the bounded documentation defect, identifying the glibc Linux unit-test exception without
+alleging production failure. Checked source/results: ["At 70bc66a9f285cc2a9984924f389834d118b7cfdc,
+crates/farhelm-supervisor/src/hosts/test_program.rs:1-46 explains and selects current_exe(), then dispatches the host
+entry before libtest starts threads. This is a fresh executable invocation, not a host fork inside an executing
+test.","At 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db, SPEC_impl.md:2160-2174 explicitly distinguishes the e2e product
+binary and unit-test binary. Its complete Testing section at :8159-8203 covers workspace testing generally, while :8190
+still says the supervisor's side uses the built farhelm without naming the unit-test exception.","The finding concerns
+the new real-host unit tests introduced by 70bc66a9, not the age of the pre-existing overview sentence. No runtime
+defect or test failure was observed."] Current coverage/results: ["Current SPEC_impl.md retains both conflicting
+statements. SPEC.md contains no acceptance of inaccurate testing architecture documentation.","TODO.md Planned is empty.
+Exact executable/unit-test/real-host searches across plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md found
+no item covering this explanation. The broad tmux docs cleanup plan is recorded landed in plans/REPORTS.md:32, and the
+statement remains.","FILTER.md does not cover a persistent authoritative architecture error merely because it is
+documentation. No rare runtime trigger is involved."] Exact cited cover: [] Original stronger consequence and missing
+premise remain preserved: "Misleading internal test-architecture map only; the separate-process/single-threaded host
+boundary remains correct. No security or loss-of-work consequence was alleged."; null.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g003 record](records/review-through-00de0b6c/groups/g003.json). Record ID: `f4`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g003 record](records/review-through-00de0b6c/groups/g003.json). Record ID: `f4`.

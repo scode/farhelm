@@ -1,3 +1,11 @@
 [
-  {"id":"g067","turn":6,"offset":23,"state":"complete","verdict":"final-discovery-empty","discovery":{"new_verified":[],"new_unverified":[],"empty":true},"reason":"Parent read complete delta reply and independently refreshed complete delivery audit: 1691 mandatory lines, no missing/rejected packets, unfinished calls or unrecognized kinds. Actual event delta is empty at line23. Reviewer searched status/deletion proofs, row-backed refusal, command dispatch, private input and kept-session return beyond known issues, expressly no new verified/UAI/open lead. Latest manager input was synthesized and l5 productive discovery followed by this separate empty search. Source-only; no runtime inference."}
+  {
+    "id": "g067",
+    "turn": 6,
+    "offset": 23,
+    "state": "complete",
+    "verdict": "final-discovery-empty",
+    "discovery": { "new_verified": [], "new_unverified": [], "empty": true },
+    "reason": "Parent read complete delta reply and independently refreshed complete delivery audit: 1691 mandatory lines, no missing/rejected packets, unfinished calls or unrecognized kinds. Actual event delta is empty at line23. Reviewer searched status/deletion proofs, row-backed refusal, command dispatch, private input and kept-session return beyond known issues, expressly no new verified/UAI/open lead. Latest manager input was synthesized and l5 productive discovery followed by this separate empty search. Source-only; no runtime inference."
+  }
 ]

@@ -1,4 +1,19 @@
 [
-  {"id":"g052","turn":8,"offset":21,"state":"complete","verdict":"final-discovery-empty","discovery":{"new_verified":[],"new_unverified":[],"empty":true},"reason":"Parent read complete turn8reply and zeroeventdelta, complete1441line supportedaudit,zero gaps/rejections/unfinished/unrecognized. Separate search after020l8interface synthesis checkederrorsemantics,deletiondefaults,templateplacement/decoding,environmentviews,retiredcontainerdecoding,approvalclassification. Explicit no newverified/unverified finding and no opensourcelead. Prior c3 investigatedauthorityuncertainty remains unchanged. No later relevant input pending; finalempty condition met."},
-  {"id":"g073","turn":4,"offset":8,"state":"complete","verdict":"recording-only-revision-complete","reason":"Parent read full reply/event8 and complete1014line supportedaudit,zero gaps/rejections/unfinished/unrecognized. Sole continuation records already reviewedc3 evidence as boundedotherfinding, preserving originaldrop/caveats, no disagreement,newsource,scope,search or discovery. The prior finalemptydiscovery already considered this exact candidate; this is the allowed recording-only append after review completion, not late integration evidence. Finalreport mustrenderafter actualturn4; discovery history remainsunchanged."}
+  {
+    "id": "g052",
+    "turn": 8,
+    "offset": 21,
+    "state": "complete",
+    "verdict": "final-discovery-empty",
+    "discovery": { "new_verified": [], "new_unverified": [], "empty": true },
+    "reason": "Parent read complete turn8reply and zeroeventdelta, complete1441line supportedaudit,zero gaps/rejections/unfinished/unrecognized. Separate search after020l8interface synthesis checkederrorsemantics,deletiondefaults,templateplacement/decoding,environmentviews,retiredcontainerdecoding,approvalclassification. Explicit no newverified/unverified finding and no opensourcelead. Prior c3 investigatedauthorityuncertainty remains unchanged. No later relevant input pending; finalempty condition met."
+  },
+  {
+    "id": "g073",
+    "turn": 4,
+    "offset": 8,
+    "state": "complete",
+    "verdict": "recording-only-revision-complete",
+    "reason": "Parent read full reply/event8 and complete1014line supportedaudit,zero gaps/rejections/unfinished/unrecognized. Sole continuation records already reviewedc3 evidence as boundedotherfinding, preserving originaldrop/caveats, no disagreement,newsource,scope,search or discovery. The prior finalemptydiscovery already considered this exact candidate; this is the allowed recording-only append after review completion, not late integration evidence. Finalreport mustrenderafter actualturn4; discovery history remainsunchanged."
+  }
 ]

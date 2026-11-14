@@ -4,13 +4,19 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Source-confirmed review record: The changed test comment gives future maintainers the wrong explanation of the grid's cursor ownership. The test still protects a valid helper invariant, but that does not make its newly grid-specific explanation accurate.
+Source-confirmed review record: The changed test comment gives future maintainers the wrong explanation of the grid's
+cursor ownership. The test still protects a valid helper invariant, but that does not make its newly grid-specific
+explanation accurate.
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g136/c3`.
 
@@ -20,19 +26,93 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 10 (finding, open):
 
-Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The changed test comment gives future maintainers the wrong explanation of the grid's cursor ownership. The test still protects a valid helper invariant, but that does not make its newly grid-specific explanation accurate. Details: the assigned patch changes the comment's subject from xterm to the grid at terminal-files.test.js:577-578: 'The grid's cursor accessors write to its current link, not necessarily the object that carries them.' (ASCII apostrophe in source.) The grid implementation in assets/grid-terminal.js:1384-1404 stores pointerCursor in the decorated link's own closure, and at 1402 updates the visible element only if hoverLink === link. An accessor on a retired link does not redirect to whichever unrelated link is now current. The test at 580-596 instead models the old hazard with a setter writing a reassigned external cursor object. It remains a legitimate stronger isolated test of FileLinks' no-deferred-cursor-write invariant, but its mock must be described as that defensive contract rather than the actual grid accessor mechanism. Contract: SPEC_impl.md, Session-host file reads, says: 'Teardown never writes cursor decorations: by then another link may be the hovered one, and the cursor is that link's to set.' The exact source uses an apostrophe at link's. FileLinks.leave/clearHover at assets/terminal-files.js:447-469 writes synchronously on leave and defers only abort/hide. Preserve c3's original consequence and earlier assessment: the fixture is stricter than the production grid and no runtime cursor corruption or security/loss-of-work route is established; the separate post-callback restoration test at 481-505 also remains a defensive helper test. This revision supersedes c3's proposed drop only for the newly false grid-specific documentation. Earlier reason that the test checks a valid helper invariant refutes a test-oracle defect, not this distinct documentation defect. Suggested fix: explain that the mock deliberately makes stale setter writes observable to pin the FileLinks contract, and name the grid's current-link guard accurately. Suggested bucket: other (documentation accuracy, no observed product malfunction). Confidence: confirmed from the assigned changed comment, test fixture and production guarded setter; no runtime execution or reproduction. proposed_drop: false for the documentation defect. possible_cover: none; the quoted specification accepts the helper invariant, not the incorrect statement about grid setters. Could-be-highest: false on this established consequence. No existing candidate event was removed; the original stricter-fixture rationale remains valid only for the separate test-oracle concern. Discovery source recheck: terminal-files.test.js:577-596, grid-terminal.js:1384-1421 and SPEC_impl.md:3667-3684 directly confirm the distinction. The assigned patch changes the subject from xterm to the grid, so the inaccurate attribution is introduced by this assigned commit; it is not a defect independently sought in the retired implementation. Later-range history and endpoint checks from synthesis establish no subsequent repair to this test through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. The discovery is a reclassification of existing candidate c3, not a second occurrence or a newly found runtime bug.
+Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: The changed test comment gives future maintainers the
+wrong explanation of the grid's cursor ownership. The test still protects a valid helper invariant, but that does not
+make its newly grid-specific explanation accurate. Details: the assigned patch changes the comment's subject from xterm
+to the grid at terminal-files.test.js:577-578: 'The grid's cursor accessors write to its current link, not necessarily
+the object that carries them.' (ASCII apostrophe in source.) The grid implementation in
+assets/grid-terminal.js:1384-1404 stores pointerCursor in the decorated link's own closure, and at 1402 updates the
+visible element only if hoverLink === link. An accessor on a retired link does not redirect to whichever unrelated link
+is now current. The test at 580-596 instead models the old hazard with a setter writing a reassigned external cursor
+object. It remains a legitimate stronger isolated test of FileLinks' no-deferred-cursor-write invariant, but its mock
+must be described as that defensive contract rather than the actual grid accessor mechanism. Contract: SPEC_impl.md,
+Session-host file reads, says: 'Teardown never writes cursor decorations: by then another link may be the hovered one,
+and the cursor is that link's to set.' The exact source uses an apostrophe at link's. FileLinks.leave/clearHover at
+assets/terminal-files.js:447-469 writes synchronously on leave and defers only abort/hide. Preserve c3's original
+consequence and earlier assessment: the fixture is stricter than the production grid and no runtime cursor corruption or
+security/loss-of-work route is established; the separate post-callback restoration test at 481-505 also remains a
+defensive helper test. This revision supersedes c3's proposed drop only for the newly false grid-specific documentation.
+Earlier reason that the test checks a valid helper invariant refutes a test-oracle defect, not this distinct
+documentation defect. Suggested fix: explain that the mock deliberately makes stale setter writes observable to pin the
+FileLinks contract, and name the grid's current-link guard accurately. Suggested bucket: other (documentation accuracy,
+no observed product malfunction). Confidence: confirmed from the assigned changed comment, test fixture and production
+guarded setter; no runtime execution or reproduction. proposed_drop: false for the documentation defect. possible_cover:
+none; the quoted specification accepts the helper invariant, not the incorrect statement about grid setters.
+Could-be-highest: false on this established consequence. No existing candidate event was removed; the original
+stricter-fixture rationale remains valid only for the separate test-oracle concern. Discovery source recheck:
+terminal-files.test.js:577-596, grid-terminal.js:1384-1421 and SPEC_impl.md:3667-3684 directly confirm the distinction.
+The assigned patch changes the subject from xterm to the grid, so the inaccurate attribution is introduced by this
+assigned commit; it is not a defect independently sought in the retired implementation. Later-range history and endpoint
+checks from synthesis establish no subsequent repair to this test through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. The
+discovery is a reclassification of existing candidate c3, not a second occurrence or a newly found runtime bug.
 
 Returned proposal (claims-086, event 10): **retain-verified**, suggested bucket **other**.
 
-The changed test comment incorrectly describes the shipped grid's cursor ownership. The stronger isolated fixture remains valid; its validity does not establish the comment's claim about production setters.
+The changed test comment incorrectly describes the shipped grid's cursor ownership. The stronger isolated fixture
+remains valid; its validity does not establish the comment's claim about production setters.
 
-Original stronger consequence: Line 5 considered whether retaining the retired renderer's cursor-setter model made the test substantively incorrect, then proposed dropping that test-oracle concern because the fixture checks an independent helper invariant. It already noted that the comment overstates the grid hazard. Lines 9-10 retain only the introduced false grid-specific explanation. Neither the earlier concern nor the latest claim establishes product cursor corruption, security impact or loss of work; the separate restoration test remains a valid defensive helper test.
+Original stronger consequence: Line 5 considered whether retaining the retired renderer's cursor-setter model made the
+test substantively incorrect, then proposed dropping that test-oracle concern because the fixture checks an independent
+helper invariant. It already noted that the comment overstates the grid hazard. Lines 9-10 retain only the introduced
+false grid-specific explanation. Neither the earlier concern nor the latest claim establishes product cursor corruption,
+security impact or loss of work; the separate restoration test remains a valid defensive helper test.
 
 Unresolved premise or limitation: No missing premise stated in this returned proposal.
 
-Proposed basis: Retain the source-confirmed documentation defect as other. Preserve the earlier test-oracle refutation and proposed drop as a narrower historical disposition, not as coverage for the inaccurate comment. No exact named-claim or existing-queue alias found.
+Proposed basis: Retain the source-confirmed documentation defect as other. Preserve the earlier test-oracle refutation
+and proposed drop as a narrower historical disposition, not as coverage for the inaccurate comment. No exact named-claim
+or existing-queue alias found.
 
-Existing parent disposition (event 10): verified. Parent explicitly accepted named retain-verified proposal from claims-086 after inspecting it. The changed test comment incorrectly describes the shipped grid's cursor ownership. The stronger isolated fixture remains valid; its validity does not establish the comment's claim about production setters. Retain the source-confirmed documentation defect as other. Preserve the earlier test-oracle refutation and proposed drop as a narrower historical disposition, not as coverage for the inaccurate comment. No exact named-claim or existing-queue alias found. Checked source/results: ["f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/js-tests/terminal-files.test.js:577-596 says grid accessors can write another current link, and models that hazard with a setter closing over a reassigned external cursor object.","f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-terminal.js:1384-1404 instead closes over the decorated link's own pointerCursor and touches the visible cursor only when hoverLink === link. Lines 1407-1421 install accessors before calling hover. A retired link's setter cannot redirect to an unrelated current link through this code.","The f560058da19e02716e6f943883a9508b447aff4e patch changes the comment's subject from xterm to the grid. This inaccurate production attribution is introduced inside the review range.","00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-ui/js-tests/terminal-files.test.js:577-596 retains the comment and fixture; its assets/grid-terminal.js:1382-1418 retains the guarded setter and accessor-before-hover ordering.","f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal-files.js:441-469 clears cursor admission synchronously on leave and reserves deferred teardown for abort, timers and disclosure. SPEC_impl.md:3673-3674 at that revision explicitly requires no teardown cursor writes. The fixture and the separate restoration test at terminal-files.test.js:481-505 can therefore remain defensive helper-contract tests.","Source inspection only. No runtime cursor corruption, security consequence or loss of user-owned work was demonstrated or claimed in the supplied history."] Current coverage/results: ["Current SPEC.md terminal file-path paragraph (:3130-3168) and SPEC_impl.md, Session-host file reads (:3514-3614), searched and matching paragraphs read: they define file-link recognition and cursor/teardown contracts, but do not accept an incorrect description of grid setters.","TODO.md Planned bucket (:25-26) is empty. BUGS.md contains only the SSH-helper provisioning hang, unrelated to these claims.","plans/queue searched for cursor, teardown, FileLinks, terminal-files, cut paths, file links and comments. The potential tmux comment-sweep match in tmux-drop-from-docs.md:68-74,87-99 is broad, and plans/REPORTS.md:32 records that plan already landed. tmux-end-old-terminals also landed (:29). Neither supplies an unlanded exact repair of this surviving grid-attribution error.","INDEX.md and queue Markdown searched for the actual setter, teardown, fixture, cut-path and file-link claims. transition-accessor-comment.md was read: it concerns Transition::pane in a supervisor store test, a different underlying defect. changed-file-hover-test-clicks-before-stat-readiness.md and joined-link-spec-omits-cursor-tail-exception.md were also read; their readiness and hyperlink-comparison contracts do not cover this comment. Other file-hover/container matches concern admission or redraw behavior, not this setter explanation.","Active TRIAGE_OUTCOMES.md searched for cursor, teardown, terminal files, file links, accessors, comments and vacuity; no matching decision. Archive not read.","FILTER.md read in full. No filter's entire boundary matches a persistent inaccurate source comment; the rare diagnostic/display filter does not apply."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "Line 5 considered whether retaining the retired renderer's cursor-setter model made the test substantively incorrect, then proposed dropping that test-oracle concern because the fixture checks an independent helper invariant. It already noted that the comment overstates the grid hazard. Lines 9-10 retain only the introduced false grid-specific explanation. Neither the earlier concern nor the latest claim establishes product cursor corruption, security impact or loss of work; the separate restoration test remains a valid defensive helper test."; null.
+Existing parent disposition (event 10): verified. Parent explicitly accepted named retain-verified proposal from
+claims-086 after inspecting it. The changed test comment incorrectly describes the shipped grid's cursor ownership. The
+stronger isolated fixture remains valid; its validity does not establish the comment's claim about production setters.
+Retain the source-confirmed documentation defect as other. Preserve the earlier test-oracle refutation and proposed drop
+as a narrower historical disposition, not as coverage for the inaccurate comment. No exact named-claim or existing-queue
+alias found. Checked source/results:
+["f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/js-tests/terminal-files.test.js:577-596 says grid accessors
+can write another current link, and models that hazard with a setter closing over a reassigned external cursor
+object.","f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/grid-terminal.js:1384-1404 instead closes
+over the decorated link's own pointerCursor and touches the visible cursor only when hoverLink === link. Lines 1407-1421
+install accessors before calling hover. A retired link's setter cannot redirect to an unrelated current link through
+this code.","The f560058da19e02716e6f943883a9508b447aff4e patch changes the comment's subject from xterm to the grid.
+This inaccurate production attribution is introduced inside the review
+range.","00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:crates/farhelm-ui/js-tests/terminal-files.test.js:577-596 retains the
+comment and fixture; its assets/grid-terminal.js:1382-1418 retains the guarded setter and accessor-before-hover
+ordering.","f560058da19e02716e6f943883a9508b447aff4e:crates/farhelm-ui/assets/terminal-files.js:441-469 clears cursor
+admission synchronously on leave and reserves deferred teardown for abort, timers and disclosure. SPEC_impl.md:3673-3674
+at that revision explicitly requires no teardown cursor writes. The fixture and the separate restoration test at
+terminal-files.test.js:481-505 can therefore remain defensive helper-contract tests.","Source inspection only. No
+runtime cursor corruption, security consequence or loss of user-owned work was demonstrated or claimed in the supplied
+history."] Current coverage/results: ["Current SPEC.md terminal file-path paragraph (:3130-3168) and SPEC_impl.md,
+Session-host file reads (:3514-3614), searched and matching paragraphs read: they define file-link recognition and
+cursor/teardown contracts, but do not accept an incorrect description of grid setters.","TODO.md Planned bucket (:25-26)
+is empty. BUGS.md contains only the SSH-helper provisioning hang, unrelated to these claims.","plans/queue searched for
+cursor, teardown, FileLinks, terminal-files, cut paths, file links and comments. The potential tmux comment-sweep match
+in tmux-drop-from-docs.md:68-74,87-99 is broad, and plans/REPORTS.md:32 records that plan already landed.
+tmux-end-old-terminals also landed (:29). Neither supplies an unlanded exact repair of this surviving grid-attribution
+error.","INDEX.md and queue Markdown searched for the actual setter, teardown, fixture, cut-path and file-link claims.
+transition-accessor-comment.md was read: it concerns Transition::pane in a supervisor store test, a different underlying
+defect. changed-file-hover-test-clicks-before-stat-readiness.md and joined-link-spec-omits-cursor-tail-exception.md were
+also read; their readiness and hyperlink-comparison contracts do not cover this comment. Other file-hover/container
+matches concern admission or redraw behavior, not this setter explanation.","Active TRIAGE_OUTCOMES.md searched for
+cursor, teardown, terminal files, file links, accessors, comments and vacuity; no matching decision. Archive not
+read.","FILTER.md read in full. No filter's entire boundary matches a persistent inaccurate source comment; the rare
+diagnostic/display filter does not apply."] Exact cited cover: [] Original stronger consequence and missing premise
+remain preserved: "Line 5 considered whether retaining the retired renderer's cursor-setter model made the test
+substantively incorrect, then proposed dropping that test-oracle concern because the fixture checks an independent
+helper invariant. It already noted that the comment overstates the grid hazard. Lines 9-10 retain only the introduced
+false grid-specific explanation. Neither the earlier concern nor the latest claim establishes product cursor corruption,
+security impact or loss of work; the separate restoration test remains a valid defensive helper test."; null.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g136 record](records/review-through-00de0b6c/groups/g136.json). Record ID: `c3`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g136 record](records/review-through-00de0b6c/groups/g136.json). Record ID: `c3`.

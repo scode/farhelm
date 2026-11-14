@@ -1,3 +1,12 @@
 [
- {"key":"g067/l5","line":23,"disposition":"verified","group":"podman-lost-session-create-test-misses-presend-store-witness","bucket":"other","recording":"new","needs_independent_drop_check":false,"reason":"Parentreadallprimary21-23/directtest240-346/fake45-90, thenfullfreshfocused130result. New566testcommentpromisesselectedlogin/installfacts/pendingmarkeratomicdurabilitybeforesend, butobservesabsentbeforewholecreate andsavedafterreturn; sendhelperoracleoffandonlybuilderstate, actualrunpathdoesnotreadsessionadmission. Concreteawaitrun→persist→processresultcounterpartpassesretry/count/postreturnassertionsyetviolatespresendcontract. Productioncurrentlycorrectordernotrefutation. Fileintroduced566/unchangedtip. BothSPECcontractsrequireboundary; Planned/unlandedindexempty, BUGS/queue/activeledgernoexactcover, existingrebuildorderpersistenceitemdifferentresource/fake. NoentireFILTERmatch. Retainothernarrowtestassurance, no actualcrash/orphan/userworkfailureorunrunmutationclaim. Allfocusedcoverage/caveats retainedinclaims130result."}
+  {
+    "key": "g067/l5",
+    "line": 23,
+    "disposition": "verified",
+    "group": "podman-lost-session-create-test-misses-presend-store-witness",
+    "bucket": "other",
+    "recording": "new",
+    "needs_independent_drop_check": false,
+    "reason": "Parentreadallprimary21-23/directtest240-346/fake45-90, thenfullfreshfocused130result. New566testcommentpromisesselectedlogin/installfacts/pendingmarkeratomicdurabilitybeforesend, butobservesabsentbeforewholecreate andsavedafterreturn; sendhelperoracleoffandonlybuilderstate, actualrunpathdoesnotreadsessionadmission. Concreteawaitrun→persist→processresultcounterpartpassesretry/count/postreturnassertionsyetviolatespresendcontract. Productioncurrentlycorrectordernotrefutation. Fileintroduced566/unchangedtip. BothSPECcontractsrequireboundary; Planned/unlandedindexempty, BUGS/queue/activeledgernoexactcover, existingrebuildorderpersistenceitemdifferentresource/fake. NoentireFILTERmatch. Retainothernarrowtestassurance, no actualcrash/orphan/userworkfailureorunrunmutationclaim. Allfocusedcoverage/caveats retainedinclaims130result."
+  }
 ]

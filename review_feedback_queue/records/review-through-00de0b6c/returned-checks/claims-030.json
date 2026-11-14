@@ -54,8 +54,14 @@
       "FILTER.md": "Not used; exact specification acceptance is sufficient."
     },
     "exact_cover_quotes": [
-      {"source": "SPEC.md:212-215 at recording-time main", "quote": "Uninstall has no tmux step of its own: stopping the supervisor's service ends whatever still runs under it, an earlier release's private tmux server included, but one that outlived a supervisor stopped before uninstall (on a host never updated to a release that ends it at startup, say) keeps running, which the maintainer accepted on 2026-11-11."},
-      {"source": "SPEC_impl.md:7824-7827 at recording-time main", "quote": "Uninstall has no tmux step: a private tmux server that outlived a supervisor stopped before uninstall (a host never updated to a release that ends it at startup, or one whose startup ending failed and whose supervisor was later stopped) keeps running. The maintainer accepted that residual on 2026-11-11 when the step was removed."}
+      {
+        "source": "SPEC.md:212-215 at recording-time main",
+        "quote": "Uninstall has no tmux step of its own: stopping the supervisor's service ends whatever still runs under it, an earlier release's private tmux server included, but one that outlived a supervisor stopped before uninstall (on a host never updated to a release that ends it at startup, say) keeps running, which the maintainer accepted on 2026-11-11."
+      },
+      {
+        "source": "SPEC_impl.md:7824-7827 at recording-time main",
+        "quote": "Uninstall has no tmux step: a private tmux server that outlived a supervisor stopped before uninstall (a host never updated to a release that ends it at startup, or one whose startup ending failed and whose supervisor was later stopped) keeps running. The maintainer accepted that residual on 2026-11-11 when the step was removed."
+      }
     ],
     "missing_premise": null,
     "original_stronger_consequence": "Uninstall can leave an old private tmux server and its jobs running after its supervisor was stopped earlier; deleting its regression test raised a lifecycle-coverage concern. Earlier records did not establish destruction of work or security harm.",
@@ -176,8 +182,14 @@
       "FILTER.md": "Not used; exact spec acceptance governs."
     },
     "exact_cover_quotes": [
-      {"source": "SPEC.md:212-215 at recording-time main", "quote": "Uninstall has no tmux step of its own: stopping the supervisor's service ends whatever still runs under it, an earlier release's private tmux server included, but one that outlived a supervisor stopped before uninstall (on a host never updated to a release that ends it at startup, say) keeps running, which the maintainer accepted on 2026-11-11."},
-      {"source": "SPEC_impl.md:7824-7827 at recording-time main", "quote": "Uninstall has no tmux step: a private tmux server that outlived a supervisor stopped before uninstall (a host never updated to a release that ends it at startup, or one whose startup ending failed and whose supervisor was later stopped) keeps running. The maintainer accepted that residual on 2026-11-11 when the step was removed."}
+      {
+        "source": "SPEC.md:212-215 at recording-time main",
+        "quote": "Uninstall has no tmux step of its own: stopping the supervisor's service ends whatever still runs under it, an earlier release's private tmux server included, but one that outlived a supervisor stopped before uninstall (on a host never updated to a release that ends it at startup, say) keeps running, which the maintainer accepted on 2026-11-11."
+      },
+      {
+        "source": "SPEC_impl.md:7824-7827 at recording-time main",
+        "quote": "Uninstall has no tmux step: a private tmux server that outlived a supervisor stopped before uninstall (a host never updated to a release that ends it at startup, or one whose startup ending failed and whose supervisor was later stopped) keeps running. The maintainer accepted that residual on 2026-11-11 when the step was removed."
+      }
     ],
     "missing_premise": null,
     "original_stronger_consequence": "Uninstall can leave an earlier private tmux server and its jobs alive after removing the installation directory. No security or loss-of-work route was established; continued jobs are the residual, not their destruction. Earlier caveats about terminal-host termination remain.",
@@ -210,8 +222,14 @@
       "FILTER.md": "No filter used. Persistent broken executable/restart behavior would not satisfy the rare transient-diagnostic filter."
     },
     "exact_cover_quotes": [
-      {"source": "SPEC.md:5330-5337 at recording-time main", "quote": "Every other way a host can end up with a supervisor works on a best-effort basis, mainly for people working on Farhelm itself: a supervisor started by hand with `farhelm supervisor run`, one installed with `install.sh`, one run by a unit the user wrote or changed with drop-ins, one at paths other than the layout setup installs, or a host provisioning does not target. Do not spend significant complexity making setup or Update detect, adapt to, coexist with, or preserve such setups; refusing with a clear message is enough."},
-      {"source": "SPEC.md:5335-5337 at recording-time main", "quote": "Setup and Update may treat the layout they install as their own, including re-applying their background-service settings and, on Linux, start at boot and linger, on every run. The rules above about shared directories and unrelated host configuration still hold."}
+      {
+        "source": "SPEC.md:5330-5337 at recording-time main",
+        "quote": "Every other way a host can end up with a supervisor works on a best-effort basis, mainly for people working on Farhelm itself: a supervisor started by hand with `farhelm supervisor run`, one installed with `install.sh`, one run by a unit the user wrote or changed with drop-ins, one at paths other than the layout setup installs, or a host provisioning does not target. Do not spend significant complexity making setup or Update detect, adapt to, coexist with, or preserve such setups; refusing with a clear message is enough."
+      },
+      {
+        "source": "SPEC.md:5335-5337 at recording-time main",
+        "quote": "Setup and Update may treat the layout they install as their own, including re-applying their background-service settings and, on Linux, start at boot and linger, on every run. The rules above about shared directories and unrelated host configuration still hold."
+      }
     ],
     "missing_premise": "No supported setup path placing Farhelm itself at private lib/tmux was established. Breaking later connections/restarts is supported for the custom layout; additional loss of sessions or other user work remains unestablished.",
     "original_stronger_consequence": "Update can remove the executable it just installed, breaking later connections and restarts; the initial lead contemplated highest if a further user-work loss route existed. Later records preserve the source-real collision and propose only the nonstandard-layout exclusion.",

@@ -24,9 +24,18 @@
       "FILTER.md": "No full match. Manual recovery and possible loss of normal access exceed the rare self-correcting/diagnostic filter. No upgrade prerequisite is shown."
     },
     "exact_cover_quotes": [
-      {"source": "SPEC_impl.md:5187-5189 (24bc058066fd57848e788b465719b0e6da2f98f7); reviewed 56659839785691f76da3af5d8f51b511cff4ba8b:5670-5672", "quote": "every ordinary read-write connection selects `synchronous=NORMAL` only after reading an actual WAL mode and otherwise retains FULL. This accepts losing the last commits on an OS crash or power loss without weakening database consistency; process crashes preserve commits."},
-      {"source": "SPEC_impl.md:6301-6305; reviewed 56659839785691f76da3af5d8f51b511cff4ba8b:6682-6685", "quote": "A row with neither a saved ID nor an outstanding create is removed without looking up its name or deleting any sandbox or snapshots. The API-key requirement still applies. A legacy row or a power loss that lost both records cannot recover by name: remove that host entry, then handle the leftover explicitly."},
-      {"source": "SPEC.md:4831-4832", "quote": "Container sessions follow Sandbox sessions' ownership, launch cleanup, Clone, Restart, Replace, Delete and visibility contracts."}
+      {
+        "source": "SPEC_impl.md:5187-5189 (24bc058066fd57848e788b465719b0e6da2f98f7); reviewed 56659839785691f76da3af5d8f51b511cff4ba8b:5670-5672",
+        "quote": "every ordinary read-write connection selects `synchronous=NORMAL` only after reading an actual WAL mode and otherwise retains FULL. This accepts losing the last commits on an OS crash or power loss without weakening database consistency; process crashes preserve commits."
+      },
+      {
+        "source": "SPEC_impl.md:6301-6305; reviewed 56659839785691f76da3af5d8f51b511cff4ba8b:6682-6685",
+        "quote": "A row with neither a saved ID nor an outstanding create is removed without looking up its name or deleting any sandbox or snapshots. The API-key requirement still applies. A legacy row or a power loss that lost both records cannot recover by name: remove that host entry, then handle the leftover explicitly."
+      },
+      {
+        "source": "SPEC.md:4831-4832",
+        "quote": "Container sessions follow Sandbox sessions' ownership, launch cleanup, Clone, Restart, Replace, Delete and visibility contracts."
+      }
     ],
     "missing_premise": "No missing premise for accepted ownership tail rollback. Permanent loss of user work or erroneous deletion remains unestablished; loss of registry access may require manual recovery. The parent must independently check coverage and any lowering from potential highest.",
     "original_stronger_consequence": "A surviving container containing user processes/work could become untracked or unavailable through ordinary host/session views; the first lead also considered erroneous deletion, which subsequent source checks did not establish. The integrated caller supersedes the earlier storage-only missing-caller rationale. This durability proposal does not refute the separately mentioned earlier-approval/retarget credential claim or recursive image pruning.",

@@ -4,13 +4,22 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Source-confirmed review record: a sandbox or container deletion can fail, show its error and Retry control, and then be retried automatically without the user choosing Retry; its displayed failure can disappear or change. Suggested bucket: other (retry-policy and diagnostic correctness, without established additional material harm). Confidence: confirmed by source and concurrency analysis, not observed execution. could-be-highest: no; this concerns already-authorized destruction of permanently sealed resources, not broader or newly unauthorized work loss. proposed_drop: false. possible_cover: none.
+Source-confirmed review record: a sandbox or container deletion can fail, show its error and Retry control, and then be
+retried automatically without the user choosing Retry; its displayed failure can disappear or change. Suggested bucket:
+other (retry-policy and diagnostic correctness, without established additional material harm). Confidence: confirmed by
+source and concurrency analysis, not observed execution. could-be-highest: no; this concerns already-authorized
+destruction of permanently sealed resources, not broader or newly unauthorized work loss. proposed_drop: false.
+possible_cover: none.
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g028/l3`.
 
@@ -20,19 +29,107 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 11 (finding, open):
 
-Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998. TLDR: a sandbox or container deletion can fail, show its error and Retry control, and then be retried automatically without the user choosing Retry; its displayed failure can disappear or change. Suggested bucket: other (retry-policy and diagnostic correctness, without established additional material harm). Confidence: confirmed by source and concurrency analysis, not observed execution. could-be-highest: no; this concerns already-authorized destruction of permanently sealed resources, not broader or newly unauthorized work loss. proposed_drop: false. possible_cover: none. Details: the sole automatic finisher is sandbox.rs:344-359, started by lib.rs:2519-2521. It wakes on note_sealed or a 10-second timer, obtains a Vec of currently Pending host IDs at 351 and sequentially awaits finish_seal at 352. A direct last-session Delete invokes finish_seal_locked at 257-260; explicit Retry invokes it through finish_seal at 321-327. finish_seal_locked marks Pending at 298, awaits cleanup at 299 and writes Failed on an error at 300-303. Hence a direct attempt's Pending entry is visible while its provisioning lock is still held. In a two-host snapshot [A,B], the finisher can await A while direct cleanup of B finishes with Failed; when A settles, B's lock is free. finish_seal at 281-287 tests only that lock and never rechecks Pending. sealed_attempt at manager.rs:2628-2633 then overwrites Failed with Pending and destruction runs again. manager.rs:2709-2718 filters failures only at snapshot creation. note_sealed at 2610-2619 preserves an existing Failed record but cannot retract an ID already in the Vec. ProvisionLockGuard at manager.rs:932-955 and try_host_provision_lock at 2756-2772 implement exclusion only, with no seal-state interaction. No overlapping destruction is needed; eligibility becomes stale between completed attempts. Failure premise: hosts.rs:1537-1545 releases the connection hold and returns provider failure without deleting the row; the sandbox wrapper then records the failure at 300-303. Tensorlake destroy delegates to delete_binding (tensorlake/hosts.rs:332-336), which can return failures for missing key (555-562), termination (610-612) or snapshot cleanup (615-633). Podman destroy propagates remove_container failure (environment/podman.rs:1292-1333); that operation checks ownership, rm success and confirmed absence at 400-414. Neither provider settles the manager seal map or prevents future calls. Actual failure display comes from manager.rs:2183-2187 and 2214-2224 overriding host state with the seal record; sealed_state at 2669-2679 projects Failed(reason) to Deleting with that reason. Therefore clearing Failed can remove the visible reason, and a successful unsolicited retry can remove the row. Contract: sandbox.rs:274-277 promises the failure record 'keeps the finisher from retrying it until the user's Retry.' SPEC_impl.md Environment Delete and the seal, 6641-6646, requires retaining that failure and Retry independently of connection state. Fix direction: distinguish automatic Pending admission from explicit Retry and recheck/claim Pending after acquiring the provisioning lock; skip Failed or removed snapshot entries. Also retain ordering through outcome settlement: hosts::finish_sealed_environment consumes the lock guard and releases it on return before finish_seal_locked writes sealed_outcome, so an eligibility check alone must not race an earlier attempt's still-unsettled result. In-range status: git log for sandbox.rs/manager.rs/hosts.rs from this revision to inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db shows only f560058da19e02716e6f943883a9508b447aff4e, removing two unrelated manager test-fixture fields. The relevant core is unchanged. No later commits touch environment/podman.rs or tensorlake/hosts.rs in that interval. Crossinput reconciliation: parent-provided g027/l4 concerns ordinary Hosts removal through hosts.rs:1393-1401 and 1422-1437 returning directly from forget_host_locked, whose provider-error branch at 1537-1545 does not settle sealed_outcome. That omission leaves an older Failed reason or leaves Pending current, without needing a stale snapshot. l3 instead assumes correct Failed settlement and still demonstrates automatic retry from an older Vec. They are separate causes/provenance. A Pending recheck alone cannot fix g027/l4's still-Pending record; a shared failure-settling wrapper alone cannot fix l3's stale eligibility. A coordinated fix can share cleanup settlement but must also gate automatic admission under the lock and order result publication. g027/l4 is not adopted as a new local finding or disposed of here. Caveats: the two-host schedule or equivalent concurrent direct/automatic scheduling is required; ordinary single-host sequential failure remains held for Retry. The original consequence and bucket are unchanged. No runtime tests, reproduction or execution observation; all checks are pinned source/contract reads.
+Reviewed commit: 222bf6253bcd168db04bcbb1df20180c88306998. TLDR: a sandbox or container deletion can fail, show its
+error and Retry control, and then be retried automatically without the user choosing Retry; its displayed failure can
+disappear or change. Suggested bucket: other (retry-policy and diagnostic correctness, without established additional
+material harm). Confidence: confirmed by source and concurrency analysis, not observed execution. could-be-highest: no;
+this concerns already-authorized destruction of permanently sealed resources, not broader or newly unauthorized work
+loss. proposed_drop: false. possible_cover: none. Details: the sole automatic finisher is sandbox.rs:344-359, started by
+lib.rs:2519-2521. It wakes on note_sealed or a 10-second timer, obtains a Vec of currently Pending host IDs at 351 and
+sequentially awaits finish_seal at 352. A direct last-session Delete invokes finish_seal_locked at 257-260; explicit
+Retry invokes it through finish_seal at 321-327. finish_seal_locked marks Pending at 298, awaits cleanup at 299 and
+writes Failed on an error at 300-303. Hence a direct attempt's Pending entry is visible while its provisioning lock is
+still held. In a two-host snapshot [A,B], the finisher can await A while direct cleanup of B finishes with Failed; when
+A settles, B's lock is free. finish_seal at 281-287 tests only that lock and never rechecks Pending. sealed_attempt at
+manager.rs:2628-2633 then overwrites Failed with Pending and destruction runs again. manager.rs:2709-2718 filters
+failures only at snapshot creation. note_sealed at 2610-2619 preserves an existing Failed record but cannot retract an
+ID already in the Vec. ProvisionLockGuard at manager.rs:932-955 and try_host_provision_lock at 2756-2772 implement
+exclusion only, with no seal-state interaction. No overlapping destruction is needed; eligibility becomes stale between
+completed attempts. Failure premise: hosts.rs:1537-1545 releases the connection hold and returns provider failure
+without deleting the row; the sandbox wrapper then records the failure at 300-303. Tensorlake destroy delegates to
+delete_binding (tensorlake/hosts.rs:332-336), which can return failures for missing key (555-562), termination (610-612)
+or snapshot cleanup (615-633). Podman destroy propagates remove_container failure (environment/podman.rs:1292-1333);
+that operation checks ownership, rm success and confirmed absence at 400-414. Neither provider settles the manager seal
+map or prevents future calls. Actual failure display comes from manager.rs:2183-2187 and 2214-2224 overriding host state
+with the seal record; sealed_state at 2669-2679 projects Failed(reason) to Deleting with that reason. Therefore clearing
+Failed can remove the visible reason, and a successful unsolicited retry can remove the row. Contract:
+sandbox.rs:274-277 promises the failure record 'keeps the finisher from retrying it until the user's Retry.'
+SPEC_impl.md Environment Delete and the seal, 6641-6646, requires retaining that failure and Retry independently of
+connection state. Fix direction: distinguish automatic Pending admission from explicit Retry and recheck/claim Pending
+after acquiring the provisioning lock; skip Failed or removed snapshot entries. Also retain ordering through outcome
+settlement: hosts::finish_sealed_environment consumes the lock guard and releases it on return before finish_seal_locked
+writes sealed_outcome, so an eligibility check alone must not race an earlier attempt's still-unsettled result. In-range
+status: git log for sandbox.rs/manager.rs/hosts.rs from this revision to inclusive
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db shows only f560058da19e02716e6f943883a9508b447aff4e, removing two unrelated
+manager test-fixture fields. The relevant core is unchanged. No later commits touch environment/podman.rs or
+tensorlake/hosts.rs in that interval. Crossinput reconciliation: parent-provided g027/l4 concerns ordinary Hosts removal
+through hosts.rs:1393-1401 and 1422-1437 returning directly from forget_host_locked, whose provider-error branch at
+1537-1545 does not settle sealed_outcome. That omission leaves an older Failed reason or leaves Pending current, without
+needing a stale snapshot. l3 instead assumes correct Failed settlement and still demonstrates automatic retry from an
+older Vec. They are separate causes/provenance. A Pending recheck alone cannot fix g027/l4's still-Pending record; a
+shared failure-settling wrapper alone cannot fix l3's stale eligibility. A coordinated fix can share cleanup settlement
+but must also gate automatic admission under the lock and order result publication. g027/l4 is not adopted as a new
+local finding or disposed of here. Caveats: the two-host schedule or equivalent concurrent direct/automatic scheduling
+is required; ordinary single-host sequential failure remains held for Retry. The original consequence and bucket are
+unchanged. No runtime tests, reproduction or execution observation; all checks are pinned source/contract reads.
 
 Returned proposal (claims-016, event 11): **retain-verified**, suggested bucket **other**.
 
-The automatic finisher can consume an old Pending snapshot after the direct attempt records Failed. Mutual exclusion does not revalidate eligibility. This establishes an unsolicited retry and replacement or loss of its failure display, conditionally by source; no runtime occurrence was observed. Destruction of this permanently sealed environment was already authorized, so no additional user-work loss is established.
+The automatic finisher can consume an old Pending snapshot after the direct attempt records Failed. Mutual exclusion
+does not revalidate eligibility. This establishes an unsolicited retry and replacement or loss of its failure display,
+conditionally by source; no runtime occurrence was observed. Destruction of this permanently sealed environment was
+already authorized, so no additional user-work loss is established.
 
-Original stronger consequence: The histories consistently alleged unexpected automatic retry and a disappearing or changed failure/Retry display. They explicitly denied newly unauthorized destruction or additional work loss; no highest consequence was withdrawn or lowered.
+Original stronger consequence: The histories consistently alleged unexpected automatic retry and a disappearing or
+changed failure/Retry display. They explicitly denied newly unauthorized destruction or additional work loss; no highest
+consequence was withdrawn or lowered.
 
-Unresolved premise or limitation: No missing premise for the conditional control-flow claim. Actual provider failure and the stated scheduling interleaving were not reproduced; frequency and additional material harm remain unmeasured.
+Unresolved premise or limitation: No missing premise for the conditional control-flow claim. Actual provider failure and
+the stated scheduling interleaving were not reproduced; frequency and additional material harm remain unmeasured.
 
-Proposed basis: Record the narrow retry-policy and diagnostic defect, with the two-host or equivalent scheduling condition and already-authorized-destruction limitation. Fix automatic admission under the provisioning lock and order eligibility with result publication.
+Proposed basis: Record the narrow retry-policy and diagnostic defect, with the two-host or equivalent scheduling
+condition and already-authorized-destruction limitation. Fix automatic admission under the provisioning lock and order
+eligibility with result publication.
 
-Existing parent disposition (event 11): verified. Parent explicitly accepted named retain-verified proposal from claims-016 after inspecting it. The automatic finisher can consume an old Pending snapshot after the direct attempt records Failed. Mutual exclusion does not revalidate eligibility. This establishes an unsolicited retry and replacement or loss of its failure display, conditionally by source; no runtime occurrence was observed. Destruction of this permanently sealed environment was already authorized, so no additional user-work loss is established. Record the narrow retry-policy and diagnostic defect, with the two-host or equivalent scheduling condition and already-authorized-destruction limitation. Fix automatic admission under the provisioning lock and order eligibility with result publication. Checked source/results: ["222bf6253bcd168db04bcbb1df20180c88306998:crates/farhelm-helm/src/sessions/sandbox.rs:257-260,281-304,344-359: direct Delete writes Pending before awaited cleanup and Failed afterward; the finisher snapshots Pending IDs then awaits each sequentially; finish_seal acquires a provisioning lock but does not inspect current seal state.","Same revision:crates/farhelm-helm/src/manager.rs:2610-2619,2628-2651,2669-2679,2711-2718: note_sealed preserves Failed, but sealed_attempt overwrites it with Pending; sealed_pending filters only while constructing its Vec; Failed supplies the displayed reason.","Same revision:crates/farhelm-helm/src/hosts.rs:1450-1471,1506-1545: the provider-error branch returns while retaining the host and releasing its hold. The provisioning guard is passed by value into cleanup, so outcome settlement outside that call also needs ordering with subsequent admission.","A two-host snapshot [A,B] supplies the schedule: automatic cleanup waits for A while a direct B attempt changes Pending to Failed; B's freed lock then permits the old snapshot to attempt B again. No overlapping provider attempts are required. A normal sequential single-host failure remains excluded from new snapshots.","git log 222bf625..00de0b6 for sandbox.rs, manager.rs and hosts.rs returns only f560058da19e02716e6f943883a9508b447aff4e, whose relevant change removes unrelated test-fixture fields. No repair in the reviewed interval was identified.","The supplied adjacent g027/l4 describes missing failure settlement in ordinary Hosts removal. hosts.rs:1393-1401,1422-1437 directly await forget_host_locked, unlike sandbox.rs's wrapper. That is a different cause; correct settlement alone does not fix stale automatic admission. No exact alias is proposed."] Current coverage/results: ["SPEC.md:1509-1548 and SPEC_impl.md:6106-6158 (current recording main): destruction after observing a seal is intended, but the failure and Retry must remain visible. The general automatic-finishing language does not explicitly accept retrying a correctly settled Failed record from an older Vec. At reviewed 222bf625, SPEC_impl.md:6639-6649 states the same failure-retention contract.","TODO.md:24-27: Planned is empty. Searches of plans/queue for finisher, sealed, failed destruction and retry-delete found the environment-agent-operations design; plans/REPORTS.md:28 marks that plan landed. No unlanded repair of stale admission was found.","BUGS.md has only the SSH-transfer helper hang, unrelated to seal eligibility. Searches of review_feedback_queue/INDEX.md and matching queue text found no seal-finisher item. Active TRIAGE_OUTCOMES.md has no matching seal failure/retry decision; the archive was not read.","FILTER.md: the rare-glitch filter does not clearly cover the whole consequence, because the stale entry performs another provider destruction rather than only losing a diagnostic. Other filters' required triggers do not match. Retain rather than extend a filter by analogy."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "The histories consistently alleged unexpected automatic retry and a disappearing or changed failure/Retry display. They explicitly denied newly unauthorized destruction or additional work loss; no highest consequence was withdrawn or lowered."; "No missing premise for the conditional control-flow claim. Actual provider failure and the stated scheduling interleaving were not reproduced; frequency and additional material harm remain unmeasured.".
+Existing parent disposition (event 11): verified. Parent explicitly accepted named retain-verified proposal from
+claims-016 after inspecting it. The automatic finisher can consume an old Pending snapshot after the direct attempt
+records Failed. Mutual exclusion does not revalidate eligibility. This establishes an unsolicited retry and replacement
+or loss of its failure display, conditionally by source; no runtime occurrence was observed. Destruction of this
+permanently sealed environment was already authorized, so no additional user-work loss is established. Record the narrow
+retry-policy and diagnostic defect, with the two-host or equivalent scheduling condition and
+already-authorized-destruction limitation. Fix automatic admission under the provisioning lock and order eligibility
+with result publication. Checked source/results:
+["222bf6253bcd168db04bcbb1df20180c88306998:crates/farhelm-helm/src/sessions/sandbox.rs:257-260,281-304,344-359: direct
+Delete writes Pending before awaited cleanup and Failed afterward; the finisher snapshots Pending IDs then awaits each
+sequentially; finish_seal acquires a provisioning lock but does not inspect current seal state.","Same
+revision:crates/farhelm-helm/src/manager.rs:2610-2619,2628-2651,2669-2679,2711-2718: note_sealed preserves Failed, but
+sealed_attempt overwrites it with Pending; sealed_pending filters only while constructing its Vec; Failed supplies the
+displayed reason.","Same revision:crates/farhelm-helm/src/hosts.rs:1450-1471,1506-1545: the provider-error branch
+returns while retaining the host and releasing its hold. The provisioning guard is passed by value into cleanup, so
+outcome settlement outside that call also needs ordering with subsequent admission.","A two-host snapshot [A,B] supplies
+the schedule: automatic cleanup waits for A while a direct B attempt changes Pending to Failed; B's freed lock then
+permits the old snapshot to attempt B again. No overlapping provider attempts are required. A normal sequential
+single-host failure remains excluded from new snapshots.","git log 222bf625..00de0b6 for sandbox.rs, manager.rs and
+hosts.rs returns only f560058da19e02716e6f943883a9508b447aff4e, whose relevant change removes unrelated test-fixture
+fields. No repair in the reviewed interval was identified.","The supplied adjacent g027/l4 describes missing failure
+settlement in ordinary Hosts removal. hosts.rs:1393-1401,1422-1437 directly await forget_host_locked, unlike
+sandbox.rs's wrapper. That is a different cause; correct settlement alone does not fix stale automatic admission. No
+exact alias is proposed."] Current coverage/results: ["SPEC.md:1509-1548 and SPEC_impl.md:6106-6158 (current recording
+main): destruction after observing a seal is intended, but the failure and Retry must remain visible. The general
+automatic-finishing language does not explicitly accept retrying a correctly settled Failed record from an older Vec. At
+reviewed 222bf625, SPEC_impl.md:6639-6649 states the same failure-retention contract.","TODO.md:24-27: Planned is empty.
+Searches of plans/queue for finisher, sealed, failed destruction and retry-delete found the environment-agent-operations
+design; plans/REPORTS.md:28 marks that plan landed. No unlanded repair of stale admission was found.","BUGS.md has only
+the SSH-transfer helper hang, unrelated to seal eligibility. Searches of review_feedback_queue/INDEX.md and matching
+queue text found no seal-finisher item. Active TRIAGE_OUTCOMES.md has no matching seal failure/retry decision; the
+archive was not read.","FILTER.md: the rare-glitch filter does not clearly cover the whole consequence, because the
+stale entry performs another provider destruction rather than only losing a diagnostic. Other filters' required triggers
+do not match. Retain rather than extend a filter by analogy."] Exact cited cover: [] Original stronger consequence and
+missing premise remain preserved: "The histories consistently alleged unexpected automatic retry and a disappearing or
+changed failure/Retry display. They explicitly denied newly unauthorized destruction or additional work loss; no highest
+consequence was withdrawn or lowered."; "No missing premise for the conditional control-flow claim. Actual provider
+failure and the stated scheduling interleaving were not reproduced; frequency and additional material harm remain
+unmeasured.".
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g028 record](records/review-through-00de0b6c/groups/g028.json). Record ID: `l3`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g028 record](records/review-through-00de0b6c/groups/g028.json). Record ID: `l3`.

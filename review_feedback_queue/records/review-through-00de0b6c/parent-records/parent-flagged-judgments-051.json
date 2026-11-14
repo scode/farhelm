@@ -1,4 +1,16 @@
 [
- {"key":"g078/c3","proposal":"claim-checks/claims-051/result.json","parent_proposal":"source-refuted-zero-remaining-kept-notice-production-producer","final_independent_gate":"required-by-conservative-destructive-result-flag","reason":"Parent read full051. Defensive zero formatter exists, but sole actual consumer needs Session/Some(count), and supervisor produces Deleted/Others only for positive SQL count; zero seals and returns no count. Oversize conversion saturates, not zero-wrap. Same-host count-less success/Gone or accepted deletion/absence host read retires stale count. Separate briefly positive two-window snapshot is explicitly accepted, not permission for zero. Refute exact zero producer reachability, not arbitrary malformed future peer input or c2 stale rationale. Original informational/no established work loss preserved under conservative gate."},
- {"key":"g078/c4","proposal":"claim-checks/claims-051/result.json","parent_proposal":"source-refuted-row-consequence-title-ellipsis-shrink-path-only","final_independent_gate":"required-before-original-unseen-destructive-consent-drop","reason":"Full051 consequence is a separate nonshrinking element; nowrap/overflow-hidden/ellipsis apply only to title. Column menu and flyout retain viewport-relative maxheight/vertical scrolling; header separately wraps its consequence. This refutes named title-ellipsis/shrink truncation, not every native viewport/keyboard/screen-reader layout. No visual execution or supported still-hidden-warning/usable-confirmation geometry established. Preserve original potential beyond-warning destruction and c2 factual rationale as separate; no scrolling filter assumed without actual reachable layout proof."}
+  {
+    "key": "g078/c3",
+    "proposal": "claim-checks/claims-051/result.json",
+    "parent_proposal": "source-refuted-zero-remaining-kept-notice-production-producer",
+    "final_independent_gate": "required-by-conservative-destructive-result-flag",
+    "reason": "Parent read full051. Defensive zero formatter exists, but sole actual consumer needs Session/Some(count), and supervisor produces Deleted/Others only for positive SQL count; zero seals and returns no count. Oversize conversion saturates, not zero-wrap. Same-host count-less success/Gone or accepted deletion/absence host read retires stale count. Separate briefly positive two-window snapshot is explicitly accepted, not permission for zero. Refute exact zero producer reachability, not arbitrary malformed future peer input or c2 stale rationale. Original informational/no established work loss preserved under conservative gate."
+  },
+  {
+    "key": "g078/c4",
+    "proposal": "claim-checks/claims-051/result.json",
+    "parent_proposal": "source-refuted-row-consequence-title-ellipsis-shrink-path-only",
+    "final_independent_gate": "required-before-original-unseen-destructive-consent-drop",
+    "reason": "Full051 consequence is a separate nonshrinking element; nowrap/overflow-hidden/ellipsis apply only to title. Column menu and flyout retain viewport-relative maxheight/vertical scrolling; header separately wraps its consequence. This refutes named title-ellipsis/shrink truncation, not every native viewport/keyboard/screen-reader layout. No visual execution or supported still-hidden-warning/usable-confirmation geometry established. Preserve original potential beyond-warning destruction and c2 factual rationale as separate; no scrolling filter assumed without actual reachable layout proof."
+  }
 ]

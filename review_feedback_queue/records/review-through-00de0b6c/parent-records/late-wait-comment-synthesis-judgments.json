@@ -1,10 +1,14 @@
 [
   {
-    "id": "g005", "turn": 5, "offset": 14,
+    "id": "g005",
+    "turn": 5,
+    "offset": 14,
     "reason": "Parent read the full turn reply and all added event14 text; supported audit complete,626 mandatory lines,zero gaps/rejections/unfinished/unrecognized. The existing specification deadline-model disagreement and g020/l7's new unconditional caller-comment ordering claim require distinct corrections; retain both. All timer origins, awaited registration, normal-order caveats and original no-minimum-wait correction are explicit. No open lead or new unrelated finding. Current named interface synthesis is verified; separate discovery is required."
   },
   {
-    "id": "g018", "turn": 5, "offset": 16,
+    "id": "g018",
+    "turn": 5,
+    "offset": 16,
     "reason": "Parent read the full reply and all events13-16 including new lead, corroboration, attribution completion and guide-refutation clarification. Supported audit complete,1497 mandatory lines,zero gaps/rejections/unfinished/unrecognized. Candidatef5 corroborates exact g020/l7 without a new defect; existingf4 only refutes its narrow guide-exception hypothesis. Both timing-documentation defects remain independent of that refutation. No substantive open lead. Separate discovery is required after this late input."
   }
 ]

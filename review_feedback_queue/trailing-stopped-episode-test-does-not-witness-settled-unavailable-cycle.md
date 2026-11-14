@@ -4,13 +4,31 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Source-confirmed review record: The new automatic-start regression test can pass without establishing that the failed start episode survives a completed unavailable-status connection cycle. A reset at that settled failure boundary could therefore escape the test. This is a test-oracle gap, not a claimed product failure. Source: stopped_autostart_is_owned_once_and_retains_failure_across_unanswered_reads (:13282-13338) switches provider reads to StatusUnanswered, waits for only two provider invocations (:13314-13316), then restores Stopped and calls Retry (:13317-13318). sandbox_fixture constructs a Tensorlake host with Cadence::default (:13037-13077); default connect_backoff has six waits and seven total attempts (:116-123,237-244). The scripted failed resume calls release_hold(host,true) (:13014), requesting an active retry window. In connect_phase (:3951-4020), individual AttemptOutcome::Failed values stay in the inner ladder; only after all seven failures does the outer actor receive Failed and execute its retention boundary (:3812-3817). A retry nudge during that ladder instead returns Interrupted (:3971-3977,3998-4001), never entering the Failed arm. Thus two unanswered observations can be the first two attempts of a single active cycle, after which the test itself interrupts it. source.status counts invocation before cloning its answer (:12979-12981); wait_for_checks watches only that count (:12912-12916), not outer failure settlement. The first start_failed publication occurs in the Stopped select result arm (:3883-3889); the release's fresh-window nudge and next row reload/connection attempt are se
+Source-confirmed review record: The new automatic-start regression test can pass without establishing that the failed
+start episode survives a completed unavailable-status connection cycle. A reset at that settled failure boundary could
+therefore escape the test. This is a test-oracle gap, not a claimed product failure. Source:
+stopped_autostart_is_owned_once_and_retains_failure_across_unanswered_reads (:13282-13338) switches provider reads to
+StatusUnanswered, waits for only two provider invocations (:13314-13316), then restores Stopped and calls Retry
+(:13317-13318). sandbox_fixture constructs a Tensorlake host with Cadence::default (:13037-13077); default
+connect_backoff has six waits and seven total attempts (:116-123,237-244). The scripted failed resume calls
+release_hold(host,true) (:13014), requesting an active retry window. In connect_phase (:3951-4020), individual
+AttemptOutcome::Failed values stay in the inner ladder; only after all seven failures does the outer actor receive
+Failed and execute its retention boundary (:3812-3817). A retry nudge during that ladder instead returns Interrupted
+(:3971-3977,3998-4001), never entering the Failed arm. Thus two unanswered observations can be the first two attempts of
+a single active cycle, after which the test itself interrupts it. source.status counts invocation before cloning its
+answer (:12979-12981); wait_for_checks watches only that count (:12912-12916), not outer failure settlement. The first
+start_failed publication occurs in the Stopped select result arm (:3883-3889); the release's fresh-window nudge and next
+row reload/connection attempt are se
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g024/l1`.
 
@@ -20,19 +38,77 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 16 (finding, open):
 
-Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; unchanged test sequence confirmed at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:13524-13559. TLDR: The new automatic-start regression test can pass without establishing that the failed start episode survives a completed unavailable-status connection cycle. A reset at that settled failure boundary could therefore escape the test. This is a test-oracle gap, not a claimed product failure. Source: stopped_autostart_is_owned_once_and_retains_failure_across_unanswered_reads (:13282-13338) switches provider reads to StatusUnanswered, waits for only two provider invocations (:13314-13316), then restores Stopped and calls Retry (:13317-13318). sandbox_fixture constructs a Tensorlake host with Cadence::default (:13037-13077); default connect_backoff has six waits and seven total attempts (:116-123,237-244). The scripted failed resume calls release_hold(host,true) (:13014), requesting an active retry window. In connect_phase (:3951-4020), individual AttemptOutcome::Failed values stay in the inner ladder; only after all seven failures does the outer actor receive Failed and execute its retention boundary (:3812-3817). A retry nudge during that ladder instead returns Interrupted (:3971-3977,3998-4001), never entering the Failed arm. Thus two unanswered observations can be the first two attempts of a single active cycle, after which the test itself interrupts it. source.status counts invocation before cloning its answer (:12979-12981); wait_for_checks watches only that count (:12912-12916), not outer failure settlement. The first start_failed publication occurs in the Stopped select result arm (:3883-3889); the release's fresh-window nudge and next row reload/connection attempt are separate scheduling boundaries, so the test can install its unanswered answer before the post-release active attempt. No invariant forces a completed Failed cycle before the two-count threshold. Competing mechanism: erroneously clearing StoppedEpisode only in the outer AttemptOutcome::Failed arm would still allow preservation across the two inner errors and the later Stopped assertion on this admitted interleaving, while rearming starts after an actual unavailable cycle in production. The test's current docstring/intent is one owned start with failure retained across unanswered reads; observing only inner read counts does not establish the outer state transition that enforces continued episode ownership. Require a settled Unreachable result for this host before restoring Stopped (or use an explicitly one-attempt cadence and observe its settled failure), then assert one start and retained failure. Keep the independent hold/self-deadlock and Suspended-reset checks. Contract: supplied Test authoring review requires establishing the fixture premise and an observable distinguishing competing mechanisms. Production state machine currently retains stopped state correctly; that does not refute the missing test premise. Suggested bucket: other (maintainer regression assurance). Could-be-highest: false; no user runtime harm is claimed. Confidence: confirmed source-level oracle ambiguity; actual task scheduling/frequency not observed and no mutation/reproduction was run. proposed_drop: false. possible_cover: none; neighbour browser readiness findings concern different tests. Revision closes the lead: fixture type, cadence, fresh-window release, count ordering and inner/outer failure routing were checked. Caveat: some schedules may already reach a settled failure, but the test does not require that ordering, so this is not a claim that every execution omits it.
+Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b; unchanged test sequence confirmed at pinned tip
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:13524-13559. TLDR: The new automatic-start regression test can pass without
+establishing that the failed start episode survives a completed unavailable-status connection cycle. A reset at that
+settled failure boundary could therefore escape the test. This is a test-oracle gap, not a claimed product failure.
+Source: stopped_autostart_is_owned_once_and_retains_failure_across_unanswered_reads (:13282-13338) switches provider
+reads to StatusUnanswered, waits for only two provider invocations (:13314-13316), then restores Stopped and calls Retry
+(:13317-13318). sandbox_fixture constructs a Tensorlake host with Cadence::default (:13037-13077); default
+connect_backoff has six waits and seven total attempts (:116-123,237-244). The scripted failed resume calls
+release_hold(host,true) (:13014), requesting an active retry window. In connect_phase (:3951-4020), individual
+AttemptOutcome::Failed values stay in the inner ladder; only after all seven failures does the outer actor receive
+Failed and execute its retention boundary (:3812-3817). A retry nudge during that ladder instead returns Interrupted
+(:3971-3977,3998-4001), never entering the Failed arm. Thus two unanswered observations can be the first two attempts of
+a single active cycle, after which the test itself interrupts it. source.status counts invocation before cloning its
+answer (:12979-12981); wait_for_checks watches only that count (:12912-12916), not outer failure settlement. The first
+start_failed publication occurs in the Stopped select result arm (:3883-3889); the release's fresh-window nudge and next
+row reload/connection attempt are separate scheduling boundaries, so the test can install its unanswered answer before
+the post-release active attempt. No invariant forces a completed Failed cycle before the two-count threshold. Competing
+mechanism: erroneously clearing StoppedEpisode only in the outer AttemptOutcome::Failed arm would still allow
+preservation across the two inner errors and the later Stopped assertion on this admitted interleaving, while rearming
+starts after an actual unavailable cycle in production. The test's current docstring/intent is one owned start with
+failure retained across unanswered reads; observing only inner read counts does not establish the outer state transition
+that enforces continued episode ownership. Require a settled Unreachable result for this host before restoring Stopped
+(or use an explicitly one-attempt cadence and observe its settled failure), then assert one start and retained failure.
+Keep the independent hold/self-deadlock and Suspended-reset checks. Contract: supplied Test authoring review requires
+establishing the fixture premise and an observable distinguishing competing mechanisms. Production state machine
+currently retains stopped state correctly; that does not refute the missing test premise. Suggested bucket: other
+(maintainer regression assurance). Could-be-highest: false; no user runtime harm is claimed. Confidence: confirmed
+source-level oracle ambiguity; actual task scheduling/frequency not observed and no mutation/reproduction was run.
+proposed_drop: false. possible_cover: none; neighbour browser readiness findings concern different tests. Revision
+closes the lead: fixture type, cadence, fresh-window release, count ordering and inner/outer failure routing were
+checked. Caveat: some schedules may already reach a settled failure, but the test does not require that ordering, so
+this is not a claim that every execution omits it.
 
 Returned proposal (claims-013, event 16): **retain-verified**, suggested bucket **other**.
 
-Two provider observations do not require completion of the active seven-attempt cycle. The test can interrupt the cycle before the outer Failed arm, so it cannot prove retention specifically across that settlement boundary.
+Two provider observations do not require completion of the active seven-attempt cycle. The test can interrupt the cycle
+before the outer Failed arm, so it cannot prove retention specifically across that settlement boundary.
 
-Original stronger consequence: No product failure or highest consequence was asserted. The initial lead's fixture, cadence and settlement questions were resolved by source.
+Original stronger consequence: No product failure or highest consequence was asserted. The initial lead's fixture,
+cadence and settlement questions were resolved by source.
 
-Unresolved premise or limitation: No runtime schedule or frequency was measured. The established defect is that the test does not require the distinguishing outer settlement, not that every run avoids it or that production currently resets incorrectly.
+Unresolved premise or limitation: No runtime schedule or frequency was measured. The established defect is that the test
+does not require the distinguishing outer settlement, not that every run avoids it or that production currently resets
+incorrectly.
 
-Proposed basis: Retain as a narrow test-oracle gap. Require a settled unavailable result before restoring Stopped, or an explicitly single-attempt fixture plus a settlement witness. Do not describe production retention as broken.
+Proposed basis: Retain as a narrow test-oracle gap. Require a settled unavailable result before restoring Stopped, or an
+explicitly single-attempt fixture plus a settlement witness. Do not describe production retention as broken.
 
-Existing parent disposition (event 16): verified. Parent explicitly accepted named retain-verified proposal from claims-013 after inspecting it. Two provider observations do not require completion of the active seven-attempt cycle. The test can interrupt the cycle before the outer Failed arm, so it cannot prove retention specifically across that settlement boundary. Retain as a narrow test-oracle gap. Require a settled unavailable result before restoring Stopped, or an explicitly single-attempt fixture plus a settlement witness. Do not describe production retention as broken. Checked source/results: ["56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/manager.rs:13282-13338 installs unanswered status, awaits only checked+2, restores Stopped and sends Retry. The same sequence remains at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:13524-13559.","5665983 manager.rs:12912-12916 waits on invocation count; :12979-12981 records an invocation, not outer failure. :13014 releases the scripted start hold with fresh_window=true; :13037-13077 builds a Tensorlake fixture with Cadence::default.","Same revision :116-123,237-244 sets six backoff waits; :3951-4020 retains individual Failed outcomes inside the ladder and turns nudges into Interrupted. Only the outer :3812-3817 publishes Unreachable. The first failed-start publication at :3883-3889 is separate from that later connection settlement. No mutation or reproduction was run."] Current coverage/results: ["SPEC.md Container sessions:4857-4865 and SPEC_impl.md Environment rows/provider state:5972-5981 and ownership:6160-6165 state the one-attempt/explicit-Resume policy. They do not accept incomplete regression assurance.","TODO.md Planned is empty. Searched BUGS.md, plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for unanswered reads, stopped autostart, settled failure and episode tests; no exact cover found.","Existing suspended-plan-test-erases-its-suspension-premise concerns a different fixture and setup guard. Browser readiness findings do not cover this actor test. No FILTER.md boundary covers this ordinary test-oracle omission."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "No product failure or highest consequence was asserted. The initial lead's fixture, cadence and settlement questions were resolved by source."; "No runtime schedule or frequency was measured. The established defect is that the test does not require the distinguishing outer settlement, not that every run avoids it or that production currently resets incorrectly.".
+Existing parent disposition (event 16): verified. Parent explicitly accepted named retain-verified proposal from
+claims-013 after inspecting it. Two provider observations do not require completion of the active seven-attempt cycle.
+The test can interrupt the cycle before the outer Failed arm, so it cannot prove retention specifically across that
+settlement boundary. Retain as a narrow test-oracle gap. Require a settled unavailable result before restoring Stopped,
+or an explicitly single-attempt fixture plus a settlement witness. Do not describe production retention as broken.
+Checked source/results: ["56659839785691f76da3af5d8f51b511cff4ba8b:crates/farhelm-helm/src/manager.rs:13282-13338
+installs unanswered status, awaits only checked+2, restores Stopped and sends Retry. The same sequence remains at
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:13524-13559.","5665983 manager.rs:12912-12916 waits on invocation count;
+:12979-12981 records an invocation, not outer failure. :13014 releases the scripted start hold with fresh_window=true;
+:13037-13077 builds a Tensorlake fixture with Cadence::default.","Same revision :116-123,237-244 sets six backoff waits;
+:3951-4020 retains individual Failed outcomes inside the ladder and turns nudges into Interrupted. Only the outer
+:3812-3817 publishes Unreachable. The first failed-start publication at :3883-3889 is separate from that later
+connection settlement. No mutation or reproduction was run."] Current coverage/results: ["SPEC.md Container
+sessions:4857-4865 and SPEC_impl.md Environment rows/provider state:5972-5981 and ownership:6160-6165 state the
+one-attempt/explicit-Resume policy. They do not accept incomplete regression assurance.","TODO.md Planned is empty.
+Searched BUGS.md, plans/queue, INDEX.md and active TRIAGE_OUTCOMES.md for unanswered reads, stopped autostart, settled
+failure and episode tests; no exact cover found.","Existing suspended-plan-test-erases-its-suspension-premise concerns a
+different fixture and setup guard. Browser readiness findings do not cover this actor test. No FILTER.md boundary covers
+this ordinary test-oracle omission."] Exact cited cover: [] Original stronger consequence and missing premise remain
+preserved: "No product failure or highest consequence was asserted. The initial lead's fixture, cadence and settlement
+questions were resolved by source."; "No runtime schedule or frequency was measured. The established defect is that the
+test does not require the distinguishing outer settlement, not that every run avoids it or that production currently
+resets incorrectly.".
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g024 record](records/review-through-00de0b6c/groups/g024.json). Record ID: `l1`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g024 record](records/review-through-00de0b6c/groups/g024.json). Record ID: `l1`.

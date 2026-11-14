@@ -1,3 +1,9 @@
 [
- {"key":"g053/l2","proposal":"claim-checks/claims-034/result.json","parent_proposal":"retain-highest-and-reconcile-raw-legacy-paste-canonical","final_independent_gate":"required-for-any-original-dropping-or-lowering","reason":"Parent read full034 and complete053c1 in033. Protocol corroboration matches same successful escaped-control Text interpretation, not malformed-input failure. Global old-page interlocks separately checked032l6, original196 owns whole chain; preserve fresh unknown-kind surface, complete small single-message valid JSON, no legacy paste wrapper, source-only/no executed command or observed loss. Exact alias requires canonical196 preserving all these conditions and security boundary; no general reload or upgrade filter acceptance. New interface evidence already part of earlier196 synthesis, compare actual sent-input record before any redundant reopening."}
+  {
+    "key": "g053/l2",
+    "proposal": "claim-checks/claims-034/result.json",
+    "parent_proposal": "retain-highest-and-reconcile-raw-legacy-paste-canonical",
+    "final_independent_gate": "required-for-any-original-dropping-or-lowering",
+    "reason": "Parent read full034 and complete053c1 in033. Protocol corroboration matches same successful escaped-control Text interpretation, not malformed-input failure. Global old-page interlocks separately checked032l6, original196 owns whole chain; preserve fresh unknown-kind surface, complete small single-message valid JSON, no legacy paste wrapper, source-only/no executed command or observed loss. Exact alias requires canonical196 preserving all these conditions and security boundary; no general reload or upgrade filter acceptance. New interface evidence already part of earlier196 synthesis, compare actual sent-input record before any redundant reopening."
+  }
 ]

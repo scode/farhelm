@@ -4,13 +4,30 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Unverified collection: a failed session Delete can leave no explanation if the user switches sessions after its reply is handled but before the follow-up confirmation is admitted. Nothing was deleted, but the failure reason and offered next step disappear. This synthesis supplies a supported navigation sequence rather than relying only on the two unchecked branches. Source sequence: (1) Open environment session A and confirm its Session-scope header Delete. It is list-owned, so navigation remains supported during the request. (2) The request receives Unasked while A is still selected. list/view.rs:3022-3034 releases the pending/held claim, and the HeaderQuestion branch at :3052-3054 removes A's error and publishes warned_delete=A. All this is one synchronous completion; no input is assumed to interrupt those statements. (3) The completion changes rendered pending/deleting state. On desktop, its render is sent to the browser while the A effect that consumes warned_delete is deferred. A plain row click selecting B can be delivered before that effect runs. This shipped opening path is list/view.rs:4011-4020, which explicitly ignores pending session writes and synchronously calls on_open; lib.rs:2174-2176 writes the parent selection. No modal bars the click: the Delete request is pending/completed, and the returned warned confirmation has not been opened. (4) The keyed SessionView at lib.rs:2272-2282 replaces A with B. A's queued consumer is discarded with its scope. B's initial effect at session_view.rs:784-793 takes and clears warned_delete=A, then rejects the mismatched operation_id without restor
+Unverified collection: a failed session Delete can leave no explanation if the user switches sessions after its reply is
+handled but before the follow-up confirmation is admitted. Nothing was deleted, but the failure reason and offered next
+step disappear. This synthesis supplies a supported navigation sequence rather than relying only on the two unchecked
+branches. Source sequence: (1) Open environment session A and confirm its Session-scope header Delete. It is list-owned,
+so navigation remains supported during the request. (2) The request receives Unasked while A is still selected.
+list/view.rs:3022-3034 releases the pending/held claim, and the HeaderQuestion branch at :3052-3054 removes A's error
+and publishes warned_delete=A. All this is one synchronous completion; no input is assumed to interrupt those
+statements. (3) The completion changes rendered pending/deleting state. On desktop, its render is sent to the browser
+while the A effect that consumes warned_delete is deferred. A plain row click selecting B can be delivered before that
+effect runs. This shipped opening path is list/view.rs:4011-4020, which explicitly ignores pending session writes and
+synchronously calls on_open; lib.rs:2174-2176 writes the parent selection. No modal bars the click: the Delete request
+is pending/completed, and the returned warned confirmation has not been opened. (4) The keyed SessionView at
+lib.rs:2272-2282 replaces A with B. A's queued consumer is discarded with its scope. B's initial effect at
+session_view.rs:784-793 takes and clears warned_delete=A, then rejects the mismatched operation_id without restor
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g036/l2`, `g088/l3`.
 
@@ -20,29 +37,101 @@ Confidence: Unverified collection; recording proposals and any disagreement rema
 
 Latest reviewer record, event 8 (finding, open):
 
-Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: a failed session Delete can leave no explanation if the user switches sessions after its reply is handled but before the follow-up confirmation is admitted. Nothing was deleted, but the failure reason and offered next step disappear. This synthesis supplies a supported navigation sequence rather than relying only on the two unchecked branches.
+Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa. TLDR: a failed session Delete can leave no explanation if the
+user switches sessions after its reply is handled but before the follow-up confirmation is admitted. Nothing was
+deleted, but the failure reason and offered next step disappear. This synthesis supplies a supported navigation sequence
+rather than relying only on the two unchecked branches.
 
-Source sequence: (1) Open environment session A and confirm its Session-scope header Delete. It is list-owned, so navigation remains supported during the request. (2) The request receives Unasked while A is still selected. list/view.rs:3022-3034 releases the pending/held claim, and the HeaderQuestion branch at :3052-3054 removes A's error and publishes warned_delete=A. All this is one synchronous completion; no input is assumed to interrupt those statements. (3) The completion changes rendered pending/deleting state. On desktop, its render is sent to the browser while the A effect that consumes warned_delete is deferred. A plain row click selecting B can be delivered before that effect runs. This shipped opening path is list/view.rs:4011-4020, which explicitly ignores pending session writes and synchronously calls on_open; lib.rs:2174-2176 writes the parent selection. No modal bars the click: the Delete request is pending/completed, and the returned warned confirmation has not been opened. (4) The keyed SessionView at lib.rs:2272-2282 replaces A with B. A's queued consumer is discarded with its scope. B's initial effect at session_view.rs:784-793 takes and clears warned_delete=A, then rejects the mismatched operation_id without restoring A's error. A is still listed, and reopening it has neither that source error nor the consumed offer.
+Source sequence: (1) Open environment session A and confirm its Session-scope header Delete. It is list-owned, so
+navigation remains supported during the request. (2) The request receives Unasked while A is still selected.
+list/view.rs:3022-3034 releases the pending/held claim, and the HeaderQuestion branch at :3052-3054 removes A's error
+and publishes warned_delete=A. All this is one synchronous completion; no input is assumed to interrupt those
+statements. (3) The completion changes rendered pending/deleting state. On desktop, its render is sent to the browser
+while the A effect that consumes warned_delete is deferred. A plain row click selecting B can be delivered before that
+effect runs. This shipped opening path is list/view.rs:4011-4020, which explicitly ignores pending session writes and
+synchronously calls on_open; lib.rs:2174-2176 writes the parent selection. No modal bars the click: the Delete request
+is pending/completed, and the returned warned confirmation has not been opened. (4) The keyed SessionView at
+lib.rs:2272-2282 replaces A with B. A's queued consumer is discarded with its scope. B's initial effect at
+session_view.rs:784-793 takes and clears warned_delete=A, then rejects the mismatched operation_id without restoring A's
+error. A is still listed, and reopening it has neither that source error nor the consumed offer.
 
-Pinned scheduling evidence, not an executed reproduction: Cargo.lock pins Dioxus core/hooks/desktop 0.7.10. Desktop webview.rs:537-590 sends DOM edits and returns while poll_edits_flushed is pending; event delivery at :43-84 and :190-194 directly calls runtime.handle_event and does not first drain queued effects. use_effect.rs:15-47 queues the handoff callback; virtual_dom.rs:493-537 and :599-624 processes dirty scopes/tasks before effects, while runtime.rs:179-205 drops queued effects when A's scope is removed. Therefore a normal B row event delivered in that render-delivery interval updates the parent before A consumes the offer. This is an admitted single-GUI event sequence, not an invented API control or input between synchronous completion statements. It requires timing but neither a second fault nor a failed detail read.
+Pinned scheduling evidence, not an executed reproduction: Cargo.lock pins Dioxus core/hooks/desktop 0.7.10. Desktop
+webview.rs:537-590 sends DOM edits and returns while poll_edits_flushed is pending; event delivery at :43-84 and
+:190-194 directly calls runtime.handle_event and does not first drain queued effects. use_effect.rs:15-47 queues the
+handoff callback; virtual_dom.rs:493-537 and :599-624 processes dirty scopes/tasks before effects, while
+runtime.rs:179-205 drops queued effects when A's scope is removed. Therefore a normal B row event delivered in that
+render-delivery interval updates the parent before A consumes the offer. This is an admitted single-GUI event sequence,
+not an invented API control or input between synchronous completion statements. It requires timing but neither a second
+fault nor a failed detail read.
 
-The original secondary consequence, a competing source action claiming A before handoff, is preserved as an additional possible branch: the completion releases held at view.rs:3024, while the consumer later calls SessionGate.claim_guard, which checks the shared held/questions state (session_ops.rs:163-179, :287-291). An intervening source question could make that claim fail and discard the offer. This synthesis does not rely on that branch, because a newer explicit action may independently supersede source error presentation. The ordinary path where the user already selected B BEFORE reply handling is safe: unasked_follow_up picks Error and retains Delete's reason. Different-source completions overwriting the single slot also remain insufficient on their own; only the selected source gets the HeaderQuestion branch.
+The original secondary consequence, a competing source action claiming A before handoff, is preserved as an additional
+possible branch: the completion releases held at view.rs:3024, while the consumer later calls SessionGate.claim_guard,
+which checks the shared held/questions state (session_ops.rs:163-179, :287-291). An intervening source question could
+make that claim fail and discard the offer. This synthesis does not rely on that branch, because a newer explicit action
+may independently supersede source error presentation. The ordinary path where the user already selected B BEFORE reply
+handling is safe: unasked_follow_up picks Error and retains Delete's reason. Different-source completions overwriting
+the single slot also remain insufficient on their own; only the selected source gets the HeaderQuestion branch.
 
-Contract: SPEC.md Lifecycle operations says 'Actions and their results survive switching sessions. A failure, unknown outcome or partial result appears on the source session’s row and at the top when it is opened again.' Sandbox sessions requires an unanswered request to decide nothing and offer a separately warned whole-environment Delete. Keep the source error until the matching view actually admits the question, or restore a source error when delivery is abandoned. Suggested bucket: other, unchanged (lost disclosure/retry guidance, no destroyed work). Could-be-highest: no established route; the lost handoff sends no destructive request. Confidence: confirmed source/contract event sequence, not observed execution. proposed_drop: false. possible_cover: none; no coverage sources searched. Caveats: the matching idle view normally admits the question; unselected completions retain their error; the confirmed route is navigation during deferred delivery, not arbitrary concurrent overwrite. No missing source premise for that route; actual incidence unmeasured. No tests or reproductions run.
+Contract: SPEC.md Lifecycle operations says 'Actions and their results survive switching sessions. A failure, unknown
+outcome or partial result appears on the source session’s row and at the top when it is opened again.' Sandbox sessions
+requires an unanswered request to decide nothing and offer a separately warned whole-environment Delete. Keep the source
+error until the matching view actually admits the question, or restore a source error when delivery is abandoned.
+Suggested bucket: other, unchanged (lost disclosure/retry guidance, no destroyed work). Could-be-highest: no established
+route; the lost handoff sends no destructive request. Confidence: confirmed source/contract event sequence, not observed
+execution. proposed_drop: false. possible_cover: none; no coverage sources searched. Caveats: the matching idle view
+normally admits the question; unselected completions retain their error; the confirmed route is navigation during
+deferred delivery, not arbitrary concurrent overwrite. No missing source premise for that route; actual incidence
+unmeasured. No tests or reproductions run.
 
 Returned proposal (claims-021, event 8): **filtered**, suggested bucket **other**.
 
-The supported deferred-navigation handoff can lose a failed Delete's explanation and follow-up offer. Nothing destructive is sent by that loss. The complete established consequence is a lost diagnostic/retry explanation under a narrow scheduling window, which the rare diagnostic filter explicitly covers.
+The supported deferred-navigation handoff can lose a failed Delete's explanation and follow-up offer. Nothing
+destructive is sent by that loss. The complete established consequence is a lost diagnostic/retry explanation under a
+narrow scheduling window, which the rare diagnostic filter explicitly covers.
 
-Original stronger consequence: Failed Delete loses its explanation/whole-environment offer after navigation or a competing claim. Initial simultaneous-different-source overwrite alone was narrowed as insufficient. No deletion or user-work loss was asserted.
+Original stronger consequence: Failed Delete loses its explanation/whole-environment offer after navigation or a
+competing claim. Initial simultaneous-different-source overwrite alone was narrowed as insufficient. No deletion or
+user-work loss was asserted.
 
-Unresolved premise or limitation: Actual timing/incidence was not observed. A stronger consequence involving a sent whole-environment request or lost work is not supported by this route and is not included in the proposed filter.
+Unresolved premise or limitation: Actual timing/incidence was not observed. A stronger consequence involving a sent
+whole-environment request or lost work is not supported by this route and is not included in the proposed filter.
 
-Proposed basis: Proposed filter of the named lost-diagnostic consequence only. This is not permission to waive destructive confirmation or any other Delete guard.
+Proposed basis: Proposed filter of the named lost-diagnostic consequence only. This is not permission to waive
+destructive confirmation or any other Delete guard.
 
-Existing parent disposition (event 8): rejected. Parent explicitly accepted named filtered proposal from claims-021 after inspecting it. The supported deferred-navigation handoff can lose a failed Delete's explanation and follow-up offer. Nothing destructive is sent by that loss. The complete established consequence is a lost diagnostic/retry explanation under a narrow scheduling window, which the rare diagnostic filter explicitly covers. Proposed filter of the named lost-diagnostic consequence only. This is not permission to waive destructive confirmation or any other Delete guard. Checked source/results: ["2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:crates/farhelm-ui/src/list/view.rs:3022-3057 releases the source claim, selects HeaderQuestion only while that source is selected, then removes its error and publishes warned_delete. session_view.rs:784-793 clears the offer before checking identity/claim and supplies no failure fallback.","Same revision:list/view.rs:4011-4020 allows ordinary row navigation; lib.rs:2174-2176 changes selection and :2272-2282 keys SessionView by source. Replacing A with B can therefore discard A's queued effect; B can consume and reject A's offer. Dioxus 0.7.10 desktop webview.rs:43-84,190-194 dispatches events directly, :537-590 waits for edit delivery; core runtime.rs:179-205 removes queued effects with the old scope. Source supports the conditional admitted navigation sequence; no execution occurred.","Unselected completion already takes Error (list/view.rs:927-942). Different-source completions alone do not establish overwrite. The alternative claim-before-consumption branch is not needed and remains qualified because a newer explicit action may supersede error presentation."] Current coverage/results: ["SPEC.md:1901-1905 requires durable source result presentation; :1532-1547 and SPEC_impl.md:6140-6145 require separately warned whole-environment fallback. These do not accept losing the explanation.","Planned and unlanded-plan index are empty; BUGS has no matching exception. INDEX.md and active ledger searches found no warned_delete handoff item. sandbox-row-menu-owns-transient-lifecycle-state.md was read; its transient row Controls owner is different from this page-owned header handoff.","FILTER.md Rare, self-correcting glitches and imprecise diagnostics matches the narrow delivery/navigation interval and lost error/next-step explanation. Retrying ordinary Delete can offer the guarded fallback again. No silent deletion, wrong target, false success, durable wrong record, security breach or user-work loss is established."] Exact cited cover: ["FILTER.md: The trigger is rare: a narrow timing window, a crash or interruption at a specific point, or an input the shipped clients never send.","FILTER.md: The whole consequence is one of ... an error message, log line or other diagnostic that is imprecise, misleading, missing detail, or lost."] Original stronger consequence and missing premise remain preserved: "Failed Delete loses its explanation/whole-environment offer after navigation or a competing claim. Initial simultaneous-different-source overwrite alone was narrowed as insufficient. No deletion or user-work loss was asserted."; "Actual timing/incidence was not observed. A stronger consequence involving a sent whole-environment request or lost work is not supported by this route and is not included in the proposed filter.".
+Existing parent disposition (event 8): rejected. Parent explicitly accepted named filtered proposal from claims-021
+after inspecting it. The supported deferred-navigation handoff can lose a failed Delete's explanation and follow-up
+offer. Nothing destructive is sent by that loss. The complete established consequence is a lost diagnostic/retry
+explanation under a narrow scheduling window, which the rare diagnostic filter explicitly covers. Proposed filter of the
+named lost-diagnostic consequence only. This is not permission to waive destructive confirmation or any other Delete
+guard. Checked source/results: ["2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa:crates/farhelm-ui/src/list/view.rs:3022-3057
+releases the source claim, selects HeaderQuestion only while that source is selected, then removes its error and
+publishes warned_delete. session_view.rs:784-793 clears the offer before checking identity/claim and supplies no failure
+fallback.","Same revision:list/view.rs:4011-4020 allows ordinary row navigation; lib.rs:2174-2176 changes selection and
+:2272-2282 keys SessionView by source. Replacing A with B can therefore discard A's queued effect; B can consume and
+reject A's offer. Dioxus 0.7.10 desktop webview.rs:43-84,190-194 dispatches events directly, :537-590 waits for edit
+delivery; core runtime.rs:179-205 removes queued effects with the old scope. Source supports the conditional admitted
+navigation sequence; no execution occurred.","Unselected completion already takes Error (list/view.rs:927-942).
+Different-source completions alone do not establish overwrite. The alternative claim-before-consumption branch is not
+needed and remains qualified because a newer explicit action may supersede error presentation."] Current
+coverage/results: ["SPEC.md:1901-1905 requires durable source result presentation; :1532-1547 and SPEC_impl.md:6140-6145
+require separately warned whole-environment fallback. These do not accept losing the explanation.","Planned and
+unlanded-plan index are empty; BUGS has no matching exception. INDEX.md and active ledger searches found no
+warned_delete handoff item. sandbox-row-menu-owns-transient-lifecycle-state.md was read; its transient row Controls
+owner is different from this page-owned header handoff.","FILTER.md Rare, self-correcting glitches and imprecise
+diagnostics matches the narrow delivery/navigation interval and lost error/next-step explanation. Retrying ordinary
+Delete can offer the guarded fallback again. No silent deletion, wrong target, false success, durable wrong record,
+security breach or user-work loss is established."] Exact cited cover: ["FILTER.md: The trigger is rare: a narrow timing
+window, a crash or interruption at a specific point, or an input the shipped clients never send.","FILTER.md: The whole
+consequence is one of ... an error message, log line or other diagnostic that is imprecise, misleading, missing detail,
+or lost."] Original stronger consequence and missing premise remain preserved: "Failed Delete loses its
+explanation/whole-environment offer after navigation or a competing claim. Initial simultaneous-different-source
+overwrite alone was narrowed as insufficient. No deletion or user-work loss was asserted."; "Actual timing/incidence was
+not observed. A stronger consequence involving a sent whole-environment request or lost work is not supported by this
+route and is not included in the proposed filter.".
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g036 record](records/review-through-00de0b6c/groups/g036.json). Record ID: `l2`.
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g036 record](records/review-through-00de0b6c/groups/g036.json). Record ID: `l2`.
 
 ### g088/l3
 
@@ -50,19 +139,59 @@ Confidence: Unverified collection; recording proposals and any disagreement rema
 
 Latest reviewer record, event 16 (finding, open):
 
-Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa; persistence checked through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: when Delete cannot ask an environment's Farhelm, navigating away between its reply and the follow-up question can leave the session undeleted with no explanation. Details: list/view.rs:3022-3034 releases the Delete claim and chooses HeaderQuestion if the source is selected at that instant. :3052-3054 removes the persistent error and publishes only the source ID; the alternate Error branch :3056-3057 otherwise keeps the refusal on the row. The new SessionView effect :784-793 clears warned_delete before checking that it names this keyed view and before claiming it. If navigation replaces the view before effect consumption, the replacement view consumes the mismatched ID and opens nothing. If another action has claimed the same source first, the same-view effect also consumes without opening. The handoff carries no refusal text (session_ops.rs:135-141), so the removed error cannot be reconstructed. Exact drop point: operations.warned_delete.set(None) precedes both checks. Cancelling the late question is appropriate; discarding the failed operation's only explanation is the defect. Original consequence retained: Delete changes nothing and loses both its warned follow-up and refusal feedback. A source still selected until consumption, with no intervening claim, correctly gets the question. Contract: SPEC_impl.md:1157-1164 requires settlement to record failures/unknown outcomes/partial results while preserving the user's navigation. Caller docs at list/view.rs:920-926 explicitly say a header no longer showing the session cannot ask, 'so the reason goes on the row'; :940-941 implements that fallback only at reply time, not consumption. The new effect's :781-783 comment deliberately drops gone-view handovers but supplies no failure-recording exception. Additional source checks resolved: list/view.rs:3004-3014 publishes delete notices only for successes and does nothing for Err, so there is no parallel durable notice for this refusal. The listing refresh at :3060-3065 can show the session remains but cannot restore this request's discarded reason. At pinned tip session_view.rs:773-783 still clears before matching/claiming, and list/view.rs:3015-3021 still removes error before setting the ID-only handoff. The in-range path history after the reviewed commit contains only dbfc6975, f560058 and 61e6323 edits for these files; pinned-tip source establishes no repair. Suggested bucket: other, narrow diagnostics/outcome-retention defect. Confidence: confirmed conditional source route; no observed occurrence or reproduction. proposed_drop: false. Could-be-highest: no security or work-loss route; nothing was deleted and wider Delete is never sent. possible_cover: none in supplied exact neighbour context; no prohibited coverage sources searched. Caveats: navigation before the completion's selected check correctly selects Error; this gap is after HeaderQuestion publication but before its effect consumption. Runtime frequency is unmeasured. Fix direction: keep the refusal until the target header successfully admits the question, or restore a row error when the one-shot handoff is discarded or cannot claim. No runtime tests, builds or reproductions. No readily checkable missing premise or open lead remains.
+Reviewed commit: 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa; persistence checked through
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: when Delete cannot ask an environment's Farhelm, navigating away between
+its reply and the follow-up question can leave the session undeleted with no explanation. Details:
+list/view.rs:3022-3034 releases the Delete claim and chooses HeaderQuestion if the source is selected at that instant.
+:3052-3054 removes the persistent error and publishes only the source ID; the alternate Error branch :3056-3057
+otherwise keeps the refusal on the row. The new SessionView effect :784-793 clears warned_delete before checking that it
+names this keyed view and before claiming it. If navigation replaces the view before effect consumption, the replacement
+view consumes the mismatched ID and opens nothing. If another action has claimed the same source first, the same-view
+effect also consumes without opening. The handoff carries no refusal text (session_ops.rs:135-141), so the removed error
+cannot be reconstructed. Exact drop point: operations.warned_delete.set(None) precedes both checks. Cancelling the late
+question is appropriate; discarding the failed operation's only explanation is the defect. Original consequence
+retained: Delete changes nothing and loses both its warned follow-up and refusal feedback. A source still selected until
+consumption, with no intervening claim, correctly gets the question. Contract: SPEC_impl.md:1157-1164 requires
+settlement to record failures/unknown outcomes/partial results while preserving the user's navigation. Caller docs at
+list/view.rs:920-926 explicitly say a header no longer showing the session cannot ask, 'so the reason goes on the row';
+:940-941 implements that fallback only at reply time, not consumption. The new effect's :781-783 comment deliberately
+drops gone-view handovers but supplies no failure-recording exception. Additional source checks resolved:
+list/view.rs:3004-3014 publishes delete notices only for successes and does nothing for Err, so there is no parallel
+durable notice for this refusal. The listing refresh at :3060-3065 can show the session remains but cannot restore this
+request's discarded reason. At pinned tip session_view.rs:773-783 still clears before matching/claiming, and
+list/view.rs:3015-3021 still removes error before setting the ID-only handoff. The in-range path history after the
+reviewed commit contains only dbfc6975, f560058 and 61e6323 edits for these files; pinned-tip source establishes no
+repair. Suggested bucket: other, narrow diagnostics/outcome-retention defect. Confidence: confirmed conditional source
+route; no observed occurrence or reproduction. proposed_drop: false. Could-be-highest: no security or work-loss route;
+nothing was deleted and wider Delete is never sent. possible_cover: none in supplied exact neighbour context; no
+prohibited coverage sources searched. Caveats: navigation before the completion's selected check correctly selects
+Error; this gap is after HeaderQuestion publication but before its effect consumption. Runtime frequency is unmeasured.
+Fix direction: keep the refusal until the target header successfully admits the question, or restore a row error when
+the one-shot handoff is discarded or cannot claim. No runtime tests, builds or reproductions. No readily checkable
+missing premise or open lead remains.
 
 Returned proposal (claims-058, event 16): **filtered**, suggested bucket **other**.
 
-The lost-refusal mechanism is source-supported, but its entire consequence is a lost diagnostic for a Delete that changed nothing. It requires a narrow publication-to-effect navigation/claim ordering and fully matches the rare lost-diagnostic filter.
+The lost-refusal mechanism is source-supported, but its entire consequence is a lost diagnostic for a Delete that
+changed nothing. It requires a narrow publication-to-effect navigation/claim ordering and fully matches the rare
+lost-diagnostic filter.
 
-Original stronger consequence: Delete remains undone while both its follow-up question and only refusal explanation disappear. Initial other-or-high was narrowed to other diagnostics after investigation, without any security or user-work-loss claim.
+Original stronger consequence: Delete remains undone while both its follow-up question and only refusal explanation
+disappear. Initial other-or-high was narrowed to other diagnostics after investigation, without any security or
+user-work-loss claim.
 
-Unresolved premise or limitation: The publication/navigation/effect schedule is conditional and its frequency unmeasured; the source route itself is established. No destructive consequence was alleged.
+Unresolved premise or limitation: The publication/navigation/effect schedule is conditional and its frequency
+unmeasured; the source route itself is established. No destructive consequence was alleged.
 
-Proposed basis: Apply the complete rare lost-diagnostic filter. Do not use cancellation of the late question alone as specification acceptance of losing its refusal reason.
+Proposed basis: Apply the complete rare lost-diagnostic filter. Do not use cancellation of the late question alone as
+specification acceptance of losing its refusal reason.
 
-Existing parent disposition (event 16): duplicate. Parent read full claims058 and prior g036/l2. Same2ef10815 ID-only warned_delete publication removes persistent refusal before destination-view admission. Narrow publication/navigation/effect interval can discard only failed Delete's reason/offer; unselected completion already preserves Error. Nothing destructive sent, false success, security or work loss. Full FILTER rare lost-diagnostic boundary matches and does not waive whole-environment consent. Preserve unresolved timing and limited competing-claim variant, exact navigation-only established route and all prior source checks under canonical filtered group.
+Existing parent disposition (event 16): duplicate. Parent read full claims058 and prior g036/l2. Same2ef10815 ID-only
+warned_delete publication removes persistent refusal before destination-view admission. Narrow
+publication/navigation/effect interval can discard only failed Delete's reason/offer; unselected completion already
+preserves Error. Nothing destructive sent, false success, security or work loss. Full FILTER rare lost-diagnostic
+boundary matches and does not waive whole-environment consent. Preserve unresolved timing and limited competing-claim
+variant, exact navigation-only established route and all prior source checks under canonical filtered group.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g088 record](records/review-through-00de0b6c/groups/g088.json). Record ID: `l3`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g088 record](records/review-through-00de0b6c/groups/g088.json). Record ID: `l3`.

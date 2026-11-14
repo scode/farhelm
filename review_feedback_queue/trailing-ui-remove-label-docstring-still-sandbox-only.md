@@ -4,13 +4,31 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Source-confirmed review record: the generalized removal-label helper tells maintainers every machine-deleting host is labelled Delete sandbox, although Podman hosts are correctly labelled Delete container. This is narrow source-documentation drift, not wrong production consent/deletion. Exact source: hosts.rs:3718-3719 says the item is Delete sandbox for a host whose removal deletes its machine and Remove for one only forgotten. The newly changed remove_label:3720-3724 dispatches by provider. environment_ui.rs:75-79 maps Tensorlake to Delete sandbox and Podman to Delete container; HostKind::removal_deletes_machine at UI lib.rs:987-990 is true for both. The old two-way explanation now contradicts the helper's contract and could mislead a maintainer preserving its vocabulary. SPEC_impl.md Disposable environments requires provider wording in the exhaustive UI module; the implementation correctly follows that boundary and the docs should describe provider-specific whole-environment labels. Suggested fix: describe provider-specific deletion labels versus ordinary Remove, without restoring the old sandbox-only implementation. Suggested bucket other (source documentation accuracy). Confidence confirmed source comparison, no execution. proposed_drop false. possible_cover none. Could-be-highest false; no security, authorization or work-loss consequence is alleged. Whole-range attribution: exclusive base hosts.rs:3663-3671 has the same two-way prose with the bool helper that literally returns Delete sandbox for every true input; base lib.rs:966-970 has only Tensorlake returning true. Thus that contract was accurate
+Source-confirmed review record: the generalized removal-label helper tells maintainers every machine-deleting host is
+labelled Delete sandbox, although Podman hosts are correctly labelled Delete container. This is narrow
+source-documentation drift, not wrong production consent/deletion. Exact source: hosts.rs:3718-3719 says the item is
+Delete sandbox for a host whose removal deletes its machine and Remove for one only forgotten. The newly changed
+remove_label:3720-3724 dispatches by provider. environment_ui.rs:75-79 maps Tensorlake to Delete sandbox and Podman to
+Delete container; HostKind::removal_deletes_machine at UI lib.rs:987-990 is true for both. The old two-way explanation
+now contradicts the helper's contract and could mislead a maintainer preserving its vocabulary. SPEC_impl.md Disposable
+environments requires provider wording in the exhaustive UI module; the implementation correctly follows that boundary
+and the docs should describe provider-specific whole-environment labels. Suggested fix: describe provider-specific
+deletion labels versus ordinary Remove, without restoring the old sandbox-only implementation. Suggested bucket other
+(source documentation accuracy). Confidence confirmed source comparison, no execution. proposed_drop false.
+possible_cover none. Could-be-highest false; no security, authorization or work-loss consequence is alleged. Whole-range
+attribution: exclusive base hosts.rs:3663-3671 has the same two-way prose with the bool helper that literally returns
+Delete sandbox for every true input; base lib.rs:966-970 has only Tensorlake returning true. Thus that contract was
+accurate
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g031/f10`.
 
@@ -20,19 +38,58 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 28 (finding, open):
 
-Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462; persists at tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the generalized removal-label helper tells maintainers every machine-deleting host is labelled Delete sandbox, although Podman hosts are correctly labelled Delete container. This is narrow source-documentation drift, not wrong production consent/deletion. Exact source: hosts.rs:3718-3719 says the item is Delete sandbox for a host whose removal deletes its machine and Remove for one only forgotten. The newly changed remove_label:3720-3724 dispatches by provider. environment_ui.rs:75-79 maps Tensorlake to Delete sandbox and Podman to Delete container; HostKind::removal_deletes_machine at UI lib.rs:987-990 is true for both. The old two-way explanation now contradicts the helper's contract and could mislead a maintainer preserving its vocabulary. SPEC_impl.md Disposable environments requires provider wording in the exhaustive UI module; the implementation correctly follows that boundary and the docs should describe provider-specific whole-environment labels. Suggested fix: describe provider-specific deletion labels versus ordinary Remove, without restoring the old sandbox-only implementation. Suggested bucket other (source documentation accuracy). Confidence confirmed source comparison, no execution. proposed_drop false. possible_cover none. Could-be-highest false; no security, authorization or work-loss consequence is alleged. Whole-range attribution: exclusive base hosts.rs:3663-3671 has the same two-way prose with the bool helper that literally returns Delete sandbox for every true input; base lib.rs:966-970 has only Tensorlake returning true. Thus that contract was accurate at base. The assigned 350a4b33 patch replaces this helper and calls with provider-based wording, making the retained docs inaccurate; pre-existing text is not a pre-range defect here. Later check: tip hosts.rs:3801-3806 retains identical prose/provider dispatch, and later assigned changes do not touch this helper. No in-range repair found. All readily checkable premises settled. Original documentation-only consequence preserved; this finding is independent of f1 progress wording and g024/c4 backend refusal wording, which actually render the wrong noun.
+Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462; persists at tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.
+TLDR: the generalized removal-label helper tells maintainers every machine-deleting host is labelled Delete sandbox,
+although Podman hosts are correctly labelled Delete container. This is narrow source-documentation drift, not wrong
+production consent/deletion. Exact source: hosts.rs:3718-3719 says the item is Delete sandbox for a host whose removal
+deletes its machine and Remove for one only forgotten. The newly changed remove_label:3720-3724 dispatches by provider.
+environment_ui.rs:75-79 maps Tensorlake to Delete sandbox and Podman to Delete container;
+HostKind::removal_deletes_machine at UI lib.rs:987-990 is true for both. The old two-way explanation now contradicts the
+helper's contract and could mislead a maintainer preserving its vocabulary. SPEC_impl.md Disposable environments
+requires provider wording in the exhaustive UI module; the implementation correctly follows that boundary and the docs
+should describe provider-specific whole-environment labels. Suggested fix: describe provider-specific deletion labels
+versus ordinary Remove, without restoring the old sandbox-only implementation. Suggested bucket other (source
+documentation accuracy). Confidence confirmed source comparison, no execution. proposed_drop false. possible_cover none.
+Could-be-highest false; no security, authorization or work-loss consequence is alleged. Whole-range attribution:
+exclusive base hosts.rs:3663-3671 has the same two-way prose with the bool helper that literally returns Delete sandbox
+for every true input; base lib.rs:966-970 has only Tensorlake returning true. Thus that contract was accurate at base.
+The assigned 350a4b33 patch replaces this helper and calls with provider-based wording, making the retained docs
+inaccurate; pre-existing text is not a pre-range defect here. Later check: tip hosts.rs:3801-3806 retains identical
+prose/provider dispatch, and later assigned changes do not touch this helper. No in-range repair found. All readily
+checkable premises settled. Original documentation-only consequence preserved; this finding is independent of f1
+progress wording and g024/c4 backend refusal wording, which actually render the wrong noun.
 
 Returned proposal (claims-018, event 28): **retain-verified**, suggested bucket **other**.
 
-The helper's docstring still promises Delete sandbox for every machine-deleting host, but its new provider dispatch correctly returns Delete container for Podman. Source comments are in scope.
+The helper's docstring still promises Delete sandbox for every machine-deleting host, but its new provider dispatch
+correctly returns Delete container for Podman. Source comments are in scope.
 
-Original stronger consequence: Maintainers can be misled about the provider-specific removal vocabulary. No wrong production consent/deletion, security or work-loss route was alleged.
+Original stronger consequence: Maintainers can be misled about the provider-specific removal vocabulary. No wrong
+production consent/deletion, security or work-loss route was alleged.
 
 Unresolved premise or limitation: No missing premise stated in this returned proposal.
 
-Proposed basis: Retain a documentation-only finding. Keep it separate from f1's actual rendered wording errors; correcting this docstring does not repair those callers.
+Proposed basis: Retain a documentation-only finding. Keep it separate from f1's actual rendered wording errors;
+correcting this docstring does not repair those callers.
 
-Existing parent disposition (event 28): verified. Parent explicitly accepted named retain-verified proposal from claims-018 after inspecting it. The helper's docstring still promises Delete sandbox for every machine-deleting host, but its new provider dispatch correctly returns Delete container for Podman. Source comments are in scope. Retain a documentation-only finding. Keep it separate from f1's actual rendered wording errors; correcting this docstring does not repair those callers. Checked source/results: ["Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:UI hosts.rs:3663-3671 has the same prose beside a bool helper that literally returns Delete sandbox for true; base lib.rs:966-970 makes only Tensorlake machine-deleting.","350a4b33b6d4476f4a78e43cea124bc2b828f462:UI hosts.rs:3718-3724 retains that prose while dispatching by provider. environment_ui.rs:75-79 maps Podman to Delete container, and lib.rs:987-990 makes both providers machine-deleting.","Tip hosts.rs:3801-3806 retains the mismatch; hosts.rs has no diff after 222bf625. This is documentation drift introduced by widening the helper's domain, not a claim of incorrect production consent or deletion. Source only."] Current coverage/results: ["SPEC_impl.md Disposable environments:5929-5943 requires provider-owned wording; the implementation follows it and the helper prose no longer describes that contract. SPEC.md Container sessions:4848 names Delete container; no acceptance of misleading internal documentation.","TODO.md Planned and plans/queue/INDEX.md are empty. BUGS.md is unrelated. INDEX.md, queue content and active TRIAGE_OUTCOMES.md searches for remove_label and sandbox-only removal documentation found no exact item.","FILTER.md has no boundary for this ordinary source-docstring contradiction."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "Maintainers can be misled about the provider-specific removal vocabulary. No wrong production consent/deletion, security or work-loss route was alleged."; null.
+Existing parent disposition (event 28): verified. Parent explicitly accepted named retain-verified proposal from
+claims-018 after inspecting it. The helper's docstring still promises Delete sandbox for every machine-deleting host,
+but its new provider dispatch correctly returns Delete container for Podman. Source comments are in scope. Retain a
+documentation-only finding. Keep it separate from f1's actual rendered wording errors; correcting this docstring does
+not repair those callers. Checked source/results: ["Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:UI
+hosts.rs:3663-3671 has the same prose beside a bool helper that literally returns Delete sandbox for true; base
+lib.rs:966-970 makes only Tensorlake machine-deleting.","350a4b33b6d4476f4a78e43cea124bc2b828f462:UI hosts.rs:3718-3724
+retains that prose while dispatching by provider. environment_ui.rs:75-79 maps Podman to Delete container, and
+lib.rs:987-990 makes both providers machine-deleting.","Tip hosts.rs:3801-3806 retains the mismatch; hosts.rs has no
+diff after 222bf625. This is documentation drift introduced by widening the helper's domain, not a claim of incorrect
+production consent or deletion. Source only."] Current coverage/results: ["SPEC_impl.md Disposable
+environments:5929-5943 requires provider-owned wording; the implementation follows it and the helper prose no longer
+describes that contract. SPEC.md Container sessions:4848 names Delete container; no acceptance of misleading internal
+documentation.","TODO.md Planned and plans/queue/INDEX.md are empty. BUGS.md is unrelated. INDEX.md, queue content and
+active TRIAGE_OUTCOMES.md searches for remove_label and sandbox-only removal documentation found no exact
+item.","FILTER.md has no boundary for this ordinary source-docstring contradiction."] Exact cited cover: [] Original
+stronger consequence and missing premise remain preserved: "Maintainers can be misled about the provider-specific
+removal vocabulary. No wrong production consent/deletion, security or work-loss route was alleged."; null.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g031 record](records/review-through-00de0b6c/groups/g031.json). Record ID: `f10`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g031 record](records/review-through-00de0b6c/groups/g031.json). Record ID: `f10`.

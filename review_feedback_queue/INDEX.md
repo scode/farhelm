@@ -6,7 +6,10 @@ Each file identifies its reviewed commit, confidence, caveats, and provenance fo
 review at `bd8d5d76439f8f36bbc2637b44d7ba4026b65675` have not all been reassessed against later product changes; that
 review also had known coverage gaps. An entry records an open finding, not a clean verdict for the surrounding code.
 
-Collection record for the abbreviated review through `00de0b6c`: [complete findings, candidates, withdrawals, leads and returned proposals](records/review-through-00de0b6c/README.md). This record is bookkeeping, not an additional feedback item. Provisional buckets preserve unresolved stronger consequences.
+Collection record for the abbreviated review through `00de0b6c`:
+[complete findings, candidates, withdrawals, leads and returned proposals](records/review-through-00de0b6c/README.md).
+This record is bookkeeping, not an additional feedback item. Provisional buckets preserve unresolved stronger
+consequences.
 
 ## Highest priority: security or data loss
 
@@ -14,131 +17,257 @@ Collection record for the abbreviated review through `00de0b6c`: [complete findi
   can receive a previously used custom browser helm port and expose its retained device credential to remote HTML in the
   same browser profile. The default helm port and embedded desktop credentials are outside this conditional route.
 
-- [`trailing-update-survival-reassurance-omits-old-terminal-retirement.md`](trailing-update-survival-reassurance-omits-old-terminal-retirement.md) — Blanket update-survival assurance includes the update that ends old terminals (proposed drop). Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-update-survival-reassurance-omits-old-terminal-retirement.md`](trailing-update-survival-reassurance-omits-old-terminal-retirement.md)
+  — Blanket update-survival assurance includes the update that ends old terminals (proposed drop). Abbreviated
+  collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-failed-initial-environment-launch-discards-started-agent-after-lost-create-reply.md`](trailing-failed-initial-environment-launch-discards-started-agent-after-lost-create-reply.md) — Proposed drop retained: cleanup may destroy only the initial launch's new resource. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-failed-initial-environment-launch-discards-started-agent-after-lost-create-reply.md`](trailing-failed-initial-environment-launch-discards-started-agent-after-lost-create-reply.md)
+  — Proposed drop retained: cleanup may destroy only the initial launch's new resource. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-update-survival-reassurance-restored-during-old-terminal-retirement.md`](trailing-update-survival-reassurance-restored-during-old-terminal-retirement.md) — Update-survival promise omits the explicitly accepted old-terminal migration. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-update-survival-reassurance-restored-during-old-terminal-retirement.md`](trailing-update-survival-reassurance-restored-during-old-terminal-retirement.md)
+  — Update-survival promise omits the explicitly accepted old-terminal migration. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-old-terminal-retirement-commits-ended-after-unconfirmed-stop.md`](trailing-old-terminal-retirement-commits-ended-after-unconfirmed-stop.md) — proposed drop: retirement permits residual agents beside later runs. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-old-terminal-retirement-commits-ended-after-unconfirmed-stop.md`](trailing-old-terminal-retirement-commits-ended-after-unconfirmed-stop.md)
+  — proposed drop: retirement permits residual agents beside later runs. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-old-terminal-survivor-interrupted-restart-false-stop-warning.md`](trailing-old-terminal-survivor-interrupted-restart-false-stop-warning.md) — supplied duplicate: interrupted Restart confirmation understates cleanup. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-old-terminal-survivor-interrupted-restart-false-stop-warning.md`](trailing-old-terminal-survivor-interrupted-restart-false-stop-warning.md)
+  — supplied duplicate: interrupted Restart confirmation understates cleanup. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-old-terminal-survivor-nothing-alive-delete-authority-gap.md`](trailing-old-terminal-survivor-nothing-alive-delete-authority-gap.md) — Hidden old-tab and old-agent Deletes share the no-live authority gap. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-old-terminal-survivor-nothing-alive-delete-authority-gap.md`](trailing-old-terminal-survivor-nothing-alive-delete-authority-gap.md)
+  — Hidden old-tab and old-agent Deletes share the no-live authority gap. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-upgrade-intentionally-ends-old-private-terminals-and-history.md`](trailing-upgrade-intentionally-ends-old-private-terminals-and-history.md) — Proposed drop: ending old terminals is explicitly specified. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-upgrade-intentionally-ends-old-private-terminals-and-history.md`](trailing-upgrade-intentionally-ends-old-private-terminals-and-history.md)
+  — Proposed drop: ending old terminals is explicitly specified. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
 
-- [`trailing-legacy-browser-binary-input-reinterpreted-as-grid-json.md`](trailing-legacy-browser-binary-input-reinterpreted-as-grid-json.md) — An old page can turn a literal JSON paste into unbracketed terminal commands. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-legacy-browser-binary-input-reinterpreted-as-grid-json.md`](trailing-legacy-browser-binary-input-reinterpreted-as-grid-json.md)
+  — An old page can turn a literal JSON paste into unbracketed terminal commands. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-old-terminal-startup-failure-versus-restart-reap.md`](trailing-old-terminal-startup-failure-versus-restart-reap.md) — Unverified after investigation: accepted duplicate-agent risk lacks a complete ordinary Restart route. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-old-terminal-startup-failure-versus-restart-reap.md`](trailing-old-terminal-startup-failure-versus-restart-reap.md)
+  — Unverified after investigation: accepted duplicate-agent risk lacks a complete ordinary Restart route. Abbreviated
+  collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-old-page-raw-json-paste-grid-control.md`](trailing-old-page-raw-json-paste-grid-control.md) — The HTTP defaults still reach an interactive old raw-paste surface after build skew. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-old-page-raw-json-paste-grid-control.md`](trailing-old-page-raw-json-paste-grid-control.md) — The HTTP
+  defaults still reach an interactive old raw-paste surface after build skew. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-container-place-retarget-authority-is-unverified-after-investigation.md`](trailing-container-place-retarget-authority-is-unverified-after-investigation.md) — Container-place retarget authority is unverified after investigation. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-container-place-retarget-authority-is-unverified-after-investigation.md`](trailing-container-place-retarget-authority-is-unverified-after-investigation.md)
+  — Container-place retarget authority is unverified after investigation. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-sandbox-stop-rendered-destructive-guards-refresh-before-dispatch.md`](trailing-sandbox-stop-rendered-destructive-guards-refresh-before-dispatch.md) — Container launches newly expose the existing rendered Stop guard race. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-sandbox-stop-rendered-destructive-guards-refresh-before-dispatch.md`](trailing-sandbox-stop-rendered-destructive-guards-refresh-before-dispatch.md)
+  — Container launches newly expose the existing rendered Stop guard race. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-agent-environment-target-history-admission-lacks-origin.md`](trailing-agent-environment-target-history-admission-lacks-origin.md) — Approved command authority is preserved; agent history effects are confirmed elsewhere. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-agent-environment-target-history-admission-lacks-origin.md`](trailing-agent-environment-target-history-admission-lacks-origin.md)
+  — Approved command authority is preserved; agent history effects are confirmed elsewhere. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-ui-host-retry-selects-delete-from-live-phase.md`](trailing-ui-host-retry-selects-delete-from-live-phase.md) — Retry promises a connection attempt but retries environment destruction. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-ui-host-retry-selects-delete-from-live-phase.md`](trailing-ui-host-retry-selects-delete-from-live-phase.md)
+  — Retry promises a connection attempt but retries environment destruction. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-update-interrupted-restart-confirmation-denies-survivor-cleanup.md`](trailing-update-interrupted-restart-confirmation-denies-survivor-cleanup.md) — Interrupted restart promises nothing remains before reaping surviving work. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-update-interrupted-restart-confirmation-denies-survivor-cleanup.md`](trailing-update-interrupted-restart-confirmation-denies-survivor-cleanup.md)
+  — Interrupted restart promises nothing remains before reaping surviving work. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-legacy-xterm-raw-paste-decoded-as-grid-input.md`](trailing-legacy-xterm-raw-paste-decoded-as-grid-input.md) — Old-page GUI interlocks do not block the supplied JSON paste reinterpretation. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-legacy-xterm-raw-paste-decoded-as-grid-input.md`](trailing-legacy-xterm-raw-paste-decoded-as-grid-input.md)
+  — Old-page GUI interlocks do not block the supplied JSON paste reinterpretation. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-old-terminal-cleanup-failure-publishes-ended-state-and-allows-restart.md`](trailing-old-terminal-cleanup-failure-publishes-ended-state-and-allows-restart.md) — Cleanup-failure risk predates the removed GUI warning. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-old-terminal-cleanup-failure-publishes-ended-state-and-allows-restart.md`](trailing-old-terminal-cleanup-failure-publishes-ended-state-and-allows-restart.md)
+  — Cleanup-failure risk predates the removed GUI warning. Abbreviated collection; confidence, proposed dismissals and
+  unresolved consequences are preserved in the entry.
 
-- [`trailing-warned-whole-environment-delete-includes-unmarked-peers.md`](trailing-warned-whole-environment-delete-includes-unmarked-peers.md) — Whole-environment bulk Delete intentionally destroys unmarked peers. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-warned-whole-environment-delete-includes-unmarked-peers.md`](trailing-warned-whole-environment-delete-includes-unmarked-peers.md)
+  — Whole-environment bulk Delete intentionally destroys unmarked peers. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-a-fixed-container-creation-card-can-authorize-execution-and-credentials-on-another-machine.md`](trailing-a-fixed-container-creation-card-can-authorize-execution-and-credentials-on-another-machine.md) — A fixed container-creation card can authorize execution and credentials on another machine. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-a-fixed-container-creation-card-can-authorize-execution-and-credentials-on-another-machine.md`](trailing-a-fixed-container-creation-card-can-authorize-execution-and-credentials-on-another-machine.md)
+  — A fixed container-creation card can authorize execution and credentials on another machine. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-fresh-environment-launch-ambiguous-create-cleanup.md`](trailing-fresh-environment-launch-ambiguous-create-cleanup.md) — Failed initial launch may destroy work started by a lost create reply (explicitly accepted). Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-fresh-environment-launch-ambiguous-create-cleanup.md`](trailing-fresh-environment-launch-ambiguous-create-cleanup.md)
+  — Failed initial launch may destroy work started by a lost create reply (explicitly accepted). Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-provisioning-legacy-private-tmux-orphan-after-offline-uninstall.md`](trailing-provisioning-legacy-private-tmux-orphan-after-offline-uninstall.md) — Uninstall no longer ends an already-detached legacy tmux server. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-provisioning-legacy-private-tmux-orphan-after-offline-uninstall.md`](trailing-provisioning-legacy-private-tmux-orphan-after-offline-uninstall.md)
+  — Uninstall no longer ends an already-detached legacy tmux server. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-raster-default-native-opening-policy.md`](trailing-raster-default-native-opening-policy.md) — Raster default and warning exemption are the dated product policy. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-raster-default-native-opening-policy.md`](trailing-raster-default-native-opening-policy.md) — Raster
+  default and warning exemption are the dated product policy. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
 
-- [`trailing-environment-endpoint-authority-needs-reconciliation-with-logical-entry-consent.md`](trailing-environment-endpoint-authority-needs-reconciliation-with-logical-entry-consent.md) — Environment endpoint authority needs reconciliation with logical-entry consent. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-environment-endpoint-authority-needs-reconciliation-with-logical-entry-consent.md`](trailing-environment-endpoint-authority-needs-reconciliation-with-logical-entry-consent.md)
+  — Environment endpoint authority needs reconciliation with logical-entry consent. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-legacy-byte-browser-paste-reinterpreted-as-grid-input.md`](trailing-legacy-byte-browser-paste-reinterpreted-as-grid-input.md) — Old-page stream fallback can reinterpret a literal paste as grid input. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-legacy-byte-browser-paste-reinterpreted-as-grid-input.md`](trailing-legacy-byte-browser-paste-reinterpreted-as-grid-input.md)
+  — Old-page stream fallback can reinterpret a literal paste as grid input. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-deliberate-old-tmux-terminal-retirement.md`](trailing-deliberate-old-tmux-terminal-retirement.md) — Old terminal contents and running jobs are deliberately retired. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-deliberate-old-tmux-terminal-retirement.md`](trailing-deliberate-old-tmux-terminal-retirement.md) — Old
+  terminal contents and running jobs are deliberately retired. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
 
-- [`trailing-old-page-raw-json-paste-reinterpreted-as-grid-text.md`](trailing-old-page-raw-json-paste-reinterpreted-as-grid-text.md) — Incoming input-reinterpretation lead is incorporated into c1. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-old-page-raw-json-paste-reinterpreted-as-grid-text.md`](trailing-old-page-raw-json-paste-reinterpreted-as-grid-text.md)
+  — Incoming input-reinterpretation lead is incorporated into c1. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-podman-owned-image-rm-default-prunes-user-base.md`](trailing-podman-owned-image-rm-default-prunes-user-base.md) — Owned-image cleanup can prune an untagged user-owned base. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-podman-owned-image-rm-default-prunes-user-base.md`](trailing-podman-owned-image-rm-default-prunes-user-base.md)
+  — Owned-image cleanup can prune an untagged user-owned base. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
 
-- [`trailing-podman-owned-image-removal-recursively-prunes-user-base.md`](trailing-podman-owned-image-removal-recursively-prunes-user-base.md) — Provider image cleanup can recursively prune a user-owned base. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-podman-owned-image-removal-recursively-prunes-user-base.md`](trailing-podman-owned-image-removal-recursively-prunes-user-base.md)
+  — Provider image cleanup can recursively prune a user-owned base. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-old-terminal-migration-unconditional-session-survival-assurance.md`](trailing-old-terminal-migration-unconditional-session-survival-assurance.md) — Installer survival assurance can lead users to leave work in terminals this update ends. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-old-terminal-migration-unconditional-session-survival-assurance.md`](trailing-old-terminal-migration-unconditional-session-survival-assurance.md)
+  — Installer survival assurance can lead users to leave work in terminals this update ends. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-grid-protocol-77-legacy-raw-json-paste-reinterpretation.md`](trailing-grid-protocol-77-legacy-raw-json-paste-reinterpretation.md) — Old raw-byte pages can reinterpret a literal JSON paste as grid text input. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-grid-protocol-77-legacy-raw-json-paste-reinterpretation.md`](trailing-grid-protocol-77-legacy-raw-json-paste-reinterpretation.md)
+  — Old raw-byte pages can reinterpret a literal JSON paste as grid text input. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-legacy-page-raw-json-reinterpreted-as-grid-input.md`](trailing-legacy-page-raw-json-reinterpreted-as-grid-input.md) — Removed stream-kind negotiation matches protocol 77. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-legacy-page-raw-json-reinterpreted-as-grid-input.md`](trailing-legacy-page-raw-json-reinterpreted-as-grid-input.md)
+  — Removed stream-kind negotiation matches protocol 77. Abbreviated collection; confidence, proposed dismissals and
+  unresolved consequences are preserved in the entry.
 
-- [`trailing-fresh-environment-ambiguous-create-cleanup.md`](trailing-fresh-environment-ambiguous-create-cleanup.md) — Ambiguous environment launches can duplicate resources or discard a started agent (specification acceptance proposed). Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-fresh-environment-ambiguous-create-cleanup.md`](trailing-fresh-environment-ambiguous-create-cleanup.md) —
+  Ambiguous environment launches can duplicate resources or discard a started agent (specification acceptance proposed).
+  Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-legacy-unknown-kind-page-raw-json-paste-to-grid-input.md`](trailing-legacy-unknown-kind-page-raw-json-paste-to-grid-input.md) — Old-page caller guards permit the interactive unknown-kind mount in g196/l1. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-legacy-unknown-kind-page-raw-json-paste-to-grid-input.md`](trailing-legacy-unknown-kind-page-raw-json-paste-to-grid-input.md)
+  — Old-page caller guards permit the interactive unknown-kind mount in g196/l1. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-old-terminal-migration-omits-live-spare-claim-protection-moved-child-removal.md`](trailing-old-terminal-migration-omits-live-spare-claim-protection-moved-child-removal.md) — Migration can remove moved checkout work through an unprotected live spare claim. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-old-terminal-migration-omits-live-spare-claim-protection-moved-child-removal.md`](trailing-old-terminal-migration-omits-live-spare-claim-protection-moved-child-removal.md)
+  — Migration can remove moved checkout work through an unprotected live spare claim. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-intentional-legacy-tmux-retirement-process-history-loss.md`](trailing-intentional-legacy-tmux-retirement-process-history-loss.md) — Intentional legacy terminal retirement remains a specification-based drop proposal. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-intentional-legacy-tmux-retirement-process-history-loss.md`](trailing-intentional-legacy-tmux-retirement-process-history-loss.md)
+  — Intentional legacy terminal retirement remains a specification-based drop proposal. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-legacy-tmux-pane-owner-pid-reuse-marker-sweep.md`](trailing-legacy-tmux-pane-owner-pid-reuse-marker-sweep.md) — Pane-owner PID reuse can select a new host tab; bounded-race acceptance needs independent check. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-legacy-tmux-pane-owner-pid-reuse-marker-sweep.md`](trailing-legacy-tmux-pane-owner-pid-reuse-marker-sweep.md)
+  — Pane-owner PID reuse can select a new host tab; bounded-race acceptance needs independent check. Abbreviated
+  collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-intentional-retirement-of-old-private-tmux-terminals.md`](trailing-intentional-retirement-of-old-private-tmux-terminals.md) — old tmux terminal retirement loses retained history and ends programs, explicitly accepted. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-intentional-retirement-of-old-private-tmux-terminals.md`](trailing-intentional-retirement-of-old-private-tmux-terminals.md)
+  — old tmux terminal retirement loses retained history and ends programs, explicitly accepted. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-removed-lone-legacy-tab-lifecycle-oracles.md`](trailing-removed-lone-legacy-tab-lifecycle-oracles.md) — Deleted lone legacy-tab lifecycle regression oracle overlaps g108/c2. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-removed-lone-legacy-tab-lifecycle-oracles.md`](trailing-removed-lone-legacy-tab-lifecycle-oracles.md) —
+  Deleted lone legacy-tab lifecycle regression oracle overlaps g108/c2. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-old-terminal-snapshot-unvalidated-pane-owner.md`](trailing-old-terminal-snapshot-unvalidated-pane-owner.md) — Snapshot-owner PID reuse can bypass host-tab exclusion. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-old-terminal-snapshot-unvalidated-pane-owner.md`](trailing-old-terminal-snapshot-unvalidated-pane-owner.md)
+  — Snapshot-owner PID reuse can bypass host-tab exclusion. Abbreviated collection; confidence, proposed dismissals and
+  unresolved consequences are preserved in the entry.
 
-- [`trailing-intentional-old-terminal-retirement-history-loss.md`](trailing-intentional-old-terminal-retirement-history-loss.md) — Old tmux terminals lose restart history (specified behavior). Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-intentional-old-terminal-retirement-history-loss.md`](trailing-intentional-old-terminal-retirement-history-loss.md)
+  — Old tmux terminals lose restart history (specified behavior). Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-old-terminal-migration-unprotected-spare-retained-subtree-removal.md`](trailing-old-terminal-migration-unprotected-spare-retained-subtree-removal.md) — Migration can let spare cleanup follow moved directories into a retained checkout. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-old-terminal-migration-unprotected-spare-retained-subtree-removal.md`](trailing-old-terminal-migration-unprotected-spare-retained-subtree-removal.md)
+  — Migration can let spare cleanup follow moved directories into a retained checkout. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-old-terminal-retirement-survivor-duplicate-restart-policy.md`](trailing-old-terminal-retirement-survivor-duplicate-restart-policy.md) — Old-terminal fallback is explicitly accepted; a startup failure alone does not establish duplicate Restart. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-old-terminal-retirement-survivor-duplicate-restart-policy.md`](trailing-old-terminal-retirement-survivor-duplicate-restart-policy.md)
+  — Old-terminal fallback is explicitly accepted; a startup failure alone does not establish duplicate Restart.
+  Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-explicit-old-private-tmux-terminal-retirement.md`](trailing-explicit-old-private-tmux-terminal-retirement.md) — Old tmux terminal access is deliberately removed on upgrade. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-explicit-old-private-tmux-terminal-retirement.md`](trailing-explicit-old-private-tmux-terminal-retirement.md)
+  — Old tmux terminal access is deliberately removed on upgrade. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
 
-- [`trailing-omp-admission-host-fixture-retains-unowned-bare-pgid.md`](trailing-omp-admission-host-fixture-retains-unowned-bare-pgid.md) — Host-backed fixture cleanup can SIGKILL a recycled, unrelated process group. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-omp-admission-host-fixture-retains-unowned-bare-pgid.md`](trailing-omp-admission-host-fixture-retains-unowned-bare-pgid.md)
+  — Host-backed fixture cleanup can SIGKILL a recycled, unrelated process group. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-intentional-old-tmux-terminal-retirement.md`](trailing-intentional-old-tmux-terminal-retirement.md) — Old tmux terminals lose access and work under the explicit migration policy. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-intentional-old-tmux-terminal-retirement.md`](trailing-intentional-old-tmux-terminal-retirement.md) — Old
+  tmux terminals lose access and work under the explicit migration policy. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-natural-detach-unlocks-before-cancelling-unpolled-grid-input.md`](trailing-natural-detach-unlocks-before-cancelling-unpolled-grid-input.md) — Natural detach can leave old viewer input live after replacement admission. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-natural-detach-unlocks-before-cancelling-unpolled-grid-input.md`](trailing-natural-detach-unlocks-before-cancelling-unpolled-grid-input.md)
+  — Natural detach can leave old viewer input live after replacement admission. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-specified-private-tmux-startup-retirement-loss.md`](trailing-specified-private-tmux-startup-retirement-loss.md) — Legacy terminal removal can end running work; specification explicitly accepts it. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-specified-private-tmux-startup-retirement-loss.md`](trailing-specified-private-tmux-startup-retirement-loss.md)
+  — Legacy terminal removal can end running work; specification explicitly accepts it. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-legacy-retirement-nothingalive-delete-surviving-agent-consent.md`](trailing-legacy-retirement-nothingalive-delete-surviving-agent-consent.md) — A surviving old agent can be reaped by a guarded Delete after startup retirement fails. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-legacy-retirement-nothingalive-delete-surviving-agent-consent.md`](trailing-legacy-retirement-nothingalive-delete-surviving-agent-consent.md)
+  — A surviving old agent can be reaped by a guarded Delete after startup retirement fails. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-old-private-tmux-startup-retirement-process-history-loss.md`](trailing-old-private-tmux-startup-retirement-process-history-loss.md) — Retired tmux status and tab discovery follows explicitly accepted process loss. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-old-private-tmux-startup-retirement-process-history-loss.md`](trailing-old-private-tmux-startup-retirement-process-history-loss.md)
+  — Retired tmux status and tab discovery follows explicitly accepted process loss. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-intentional-old-tmux-retirement-process-history-loss-and-failed-cleanup-duplicate.md`](trailing-intentional-old-tmux-retirement-process-history-loss-and-failed-cleanup-duplicate.md) — Retiring old terminals ends their programs and loses their screens and history. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-intentional-old-tmux-retirement-process-history-loss-and-failed-cleanup-duplicate.md`](trailing-intentional-old-tmux-retirement-process-history-loss-and-failed-cleanup-duplicate.md)
+  — Retiring old terminals ends their programs and loses their screens and history. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-intentional-legacy-tmux-retirement-work-history-loss.md`](trailing-intentional-legacy-tmux-retirement-work-history-loss.md) — Retiring legacy tmux terminals destroys their retained output. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-intentional-legacy-tmux-retirement-work-history-loss.md`](trailing-intentional-legacy-tmux-retirement-work-history-loss.md)
+  — Retiring legacy tmux terminals destroys their retained output. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-intentional-startup-retirement-of-private-tmux-work.md`](trailing-intentional-startup-retirement-of-private-tmux-work.md) — upgrade intentionally ends work still in old tmux terminals. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-intentional-startup-retirement-of-private-tmux-work.md`](trailing-intentional-startup-retirement-of-private-tmux-work.md)
+  — upgrade intentionally ends work still in old tmux terminals. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
 
-- [`trailing-restart-seed-history-promoted-into-launch-excerpt.md`](trailing-restart-seed-history-promoted-into-launch-excerpt.md) — Growing a restarted terminal can put inherited history in its launch-error excerpt. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-restart-seed-history-promoted-into-launch-excerpt.md`](trailing-restart-seed-history-promoted-into-launch-excerpt.md)
+  — Growing a restarted terminal can put inherited history in its launch-error excerpt. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-accepted-retirement-of-old-tmux-terminals.md`](trailing-accepted-retirement-of-old-tmux-terminals.md) — Deleting tmux history capture tests adds no further history loss. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-accepted-retirement-of-old-tmux-terminals.md`](trailing-accepted-retirement-of-old-tmux-terminals.md) —
+  Deleting tmux history capture tests adds no further history loss. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-removed-tmux-stale-target-fallback.md`](trailing-removed-tmux-stale-target-fallback.md) — Removing stale-window kill tests does not introduce sibling-target cleanup. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-removed-tmux-stale-target-fallback.md`](trailing-removed-tmux-stale-target-fallback.md) — Removing
+  stale-window kill tests does not introduce sibling-target cleanup. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-delete-trusts-gone-tab-runtime-without-pinned-host-confirmation.md`](trailing-delete-trusts-gone-tab-runtime-without-pinned-host-confirmation.md) — Gone-runtime Delete bypass: unverified after investigation. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-delete-trusts-gone-tab-runtime-without-pinned-host-confirmation.md`](trailing-delete-trusts-gone-tab-runtime-without-pinned-host-confirmation.md)
+  — Gone-runtime Delete bypass: unverified after investigation. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
 
-- [`trailing-intentional-old-tmux-terminal-retirement-and-failed-stop-duplication.md`](trailing-intentional-old-tmux-terminal-retirement-and-failed-stop-duplication.md) — Retiring tmux intentionally ends running legacy terminals. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-intentional-old-tmux-terminal-retirement-and-failed-stop-duplication.md`](trailing-intentional-old-tmux-terminal-retirement-and-failed-stop-duplication.md)
+  — Retiring tmux intentionally ends running legacy terminals. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
 
-- [`trailing-accepted-startup-retirement-of-old-private-tmux-terminals.md`](trailing-accepted-startup-retirement-of-old-private-tmux-terminals.md) — Old terminals and their running work end on upgrade (specification-accepted; proposed drop). Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-accepted-startup-retirement-of-old-private-tmux-terminals.md`](trailing-accepted-startup-retirement-of-old-private-tmux-terminals.md)
+  — Old terminals and their running work end on upgrade (specification-accepted; proposed drop). Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-retired-tmux-restart-does-not-migrate-scrollback.md`](trailing-retired-tmux-restart-does-not-migrate-scrollback.md) — Retirement proposal retained; resized-seed excerpt counterexample verified. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-retired-tmux-restart-does-not-migrate-scrollback.md`](trailing-retired-tmux-restart-does-not-migrate-scrollback.md)
+  — Retirement proposal retained; resized-seed excerpt counterexample verified. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-osc52-classifier-removal-clipboard-read-disclosure.md`](trailing-osc52-classifier-removal-clipboard-read-disclosure.md) — Removing the raw OSC 52 classifier does not expose clipboard reads. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-osc52-classifier-removal-clipboard-read-disclosure.md`](trailing-osc52-classifier-removal-clipboard-read-disclosure.md)
+  — Removing the raw OSC 52 classifier does not expose clipboard reads. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-legacy-page-raw-paste-decoded-as-grid-text-command.md`](trailing-legacy-page-raw-paste-decoded-as-grid-text-command.md) — Old-page paste can reinterpret literal JSON as unbracketed terminal input. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-legacy-page-raw-paste-decoded-as-grid-text-command.md`](trailing-legacy-page-raw-paste-decoded-as-grid-text-command.md)
+  — Old-page paste can reinterpret literal JSON as unbracketed terminal input. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-legacy-browser-grid-json-input-reinterpretation.md`](trailing-legacy-browser-grid-json-input-reinterpretation.md) — Stale xterm pages can reinterpret literal JSON paste as unbracketed input. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-legacy-browser-grid-json-input-reinterpretation.md`](trailing-legacy-browser-grid-json-input-reinterpretation.md)
+  — Stale xterm pages can reinterpret literal JSON paste as unbracketed input. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-grid-only-old-page-raw-paste-decoded-as-gridinput.md`](trailing-grid-only-old-page-raw-paste-decoded-as-gridinput.md) — An old page can interpret pasted JSON as terminal commands. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-grid-only-old-page-raw-paste-decoded-as-gridinput.md`](trailing-grid-only-old-page-raw-paste-decoded-as-gridinput.md)
+  — An old page can interpret pasted JSON as terminal commands. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
 
 ## High priority: material UX degradation
 
@@ -209,65 +338,125 @@ Collection record for the abbreviated review through `00de0b6c`: [complete findi
   Hosts, the user can resume typing while Farhelm checks activity. A late reply can then open a modal question over that
   work and take keyboard focus instead of waiting to be reached.
 
-- [`trailing-agent-host-add-explicit-queued-opening-ignores-moved-on.md`](trailing-agent-host-add-explicit-queued-opening-ignores-moved-on.md) — Queued host-add dialogs still take focus after the user moves on. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-agent-host-add-explicit-queued-opening-ignores-moved-on.md`](trailing-agent-host-add-explicit-queued-opening-ignores-moved-on.md)
+  — Queued host-add dialogs still take focus after the user moves on. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-new-container-proxy-snapshot-capability-cache.md`](trailing-new-container-proxy-snapshot-capability-cache.md) — New containers can permanently inherit a cached host proxy environment. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-new-container-proxy-snapshot-capability-cache.md`](trailing-new-container-proxy-snapshot-capability-cache.md)
+  — New containers can permanently inherit a cached host proxy environment. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-experimental-supervisor-outside-container-sessions-retired-delete-only.md`](trailing-experimental-supervisor-outside-container-sessions-retired-delete-only.md) — Retired container sessions deliberately lose Stop and terminal access. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-experimental-supervisor-outside-container-sessions-retired-delete-only.md`](trailing-experimental-supervisor-outside-container-sessions-retired-delete-only.md)
+  — Retired container sessions deliberately lose Stop and terminal access. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-offline-uninstall-old-private-tmux-survivor.md`](trailing-offline-uninstall-old-private-tmux-survivor.md) — Accepted survivor residual does not establish destructive overreach. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-offline-uninstall-old-private-tmux-survivor.md`](trailing-offline-uninstall-old-private-tmux-survivor.md) —
+  Accepted survivor residual does not establish destructive overreach. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-archive-trash-epoch-lacks-unconditional-fleet-wake.md`](trailing-archive-trash-epoch-lacks-unconditional-fleet-wake.md) — Archive epoch can change without waking other clients. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-archive-trash-epoch-lacks-unconditional-fleet-wake.md`](trailing-archive-trash-epoch-lacks-unconditional-fleet-wake.md)
+  — Archive epoch can change without waking other clients. Abbreviated collection; confidence, proposed dismissals and
+  unresolved consequences are preserved in the entry.
 
-- [`trailing-plain-environment-lifecycle-direction-before-screen-update.md`](trailing-plain-environment-lifecycle-direction-before-screen-update.md) — Opposite lifecycle direction is limited to an accepted input-delivery race. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-plain-environment-lifecycle-direction-before-screen-update.md`](trailing-plain-environment-lifecycle-direction-before-screen-update.md)
+  — Opposite lifecycle direction is limited to an accepted input-delivery race. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-environment-seal-listing-consumption-phase-integration.md`](trailing-environment-seal-listing-consumption-phase-integration.md) — The intermediate sealed-listing change has no helm seal sender yet. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-environment-seal-listing-consumption-phase-integration.md`](trailing-environment-seal-listing-consumption-phase-integration.md)
+  — The intermediate sealed-listing change has no helm seal sender yet. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-container-leftover-delete-registers-global-configuration-save.md`](trailing-container-leftover-delete-registers-global-configuration-save.md) — Container leftover deletion stalls unrelated GUI requests. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-container-leftover-delete-registers-global-configuration-save.md`](trailing-container-leftover-delete-registers-global-configuration-save.md)
+  — Container leftover deletion stalls unrelated GUI requests. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
 
-- [`trailing-restart-success-retired-by-precompletion-stale-listing.md`](trailing-restart-success-retired-by-precompletion-stale-listing.md) — A stale pre-Restart listing can retire success before terminal admission. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-restart-success-retired-by-precompletion-stale-listing.md`](trailing-restart-success-retired-by-precompletion-stale-listing.md)
+  — A stale pre-Restart listing can retire success before terminal admission. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-custom-farhelm-binary-at-private-tmux-path-removed-by-update.md`](trailing-custom-farhelm-binary-at-private-tmux-path-removed-by-update.md) — A custom Farhelm executable at the reserved tmux path collides with cleanup. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-custom-farhelm-binary-at-private-tmux-path-removed-by-update.md`](trailing-custom-farhelm-binary-at-private-tmux-path-removed-by-update.md)
+  — A custom Farhelm executable at the reserved tmux path collides with cleanup. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-environment-unconditional-stdin-option-compatibility.md`](trailing-environment-unconditional-stdin-option-compatibility.md) — Unconditional environment idle limit is specified. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-environment-unconditional-stdin-option-compatibility.md`](trailing-environment-unconditional-stdin-option-compatibility.md)
+  — Unconditional environment idle limit is specified. Abbreviated collection; confidence, proposed dismissals and
+  unresolved consequences are preserved in the entry.
 
-- [`trailing-podman-rebuild-retires-fallback-before-success.md`](trailing-podman-rebuild-retires-fallback-before-success.md) — Failed container Rebuild discards the previous usable images. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-podman-rebuild-retires-fallback-before-success.md`](trailing-podman-rebuild-retires-fallback-before-success.md)
+  — Failed container Rebuild discards the previous usable images. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-recipe-place-status-error-discards-success-and-has-no-retry.md`](trailing-recipe-place-status-error-discards-success-and-has-no-retry.md) — Failed per-place status reads discard controls and lack a direct retry. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-recipe-place-status-error-discards-success-and-has-no-retry.md`](trailing-recipe-place-status-error-discards-success-and-has-no-retry.md)
+  — Failed per-place status reads discard controls and lack a direct retry. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-podman-pending-commit-tag-no-dispatch-crash-never-settles.md`](trailing-podman-pending-commit-tag-no-dispatch-crash-never-settles.md) — Interrupted image capture can permanently block recipe cleanup. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-podman-pending-commit-tag-no-dispatch-crash-never-settles.md`](trailing-podman-pending-commit-tag-no-dispatch-crash-never-settles.md)
+  — Interrupted image capture can permanently block recipe cleanup. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-podman-environment-d-drops-explicit-empty-proxy.md`](trailing-podman-environment-d-drops-explicit-empty-proxy.md) — Empty proxy variables disappear after the container user manager restarts. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-podman-environment-d-drops-explicit-empty-proxy.md`](trailing-podman-environment-d-drops-explicit-empty-proxy.md)
+  — Empty proxy variables disappear after the container user manager restarts. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-podman-leftover-discovery-all-or-nothing-and-row-loss.md`](trailing-podman-leftover-discovery-all-or-nothing-and-row-loss.md) — Failure at an enumerated place suppresses healthy container leftovers. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-podman-leftover-discovery-all-or-nothing-and-row-loss.md`](trailing-podman-leftover-discovery-all-or-nothing-and-row-loss.md)
+  — Failure at an enumerated place suppresses healthy container leftovers. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-podman-ownership-wal-normal-tail-loss.md`](trailing-podman-ownership-wal-normal-tail-loss.md) — Power loss can roll back container ownership before external work. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-podman-ownership-wal-normal-tail-loss.md`](trailing-podman-ownership-wal-normal-tail-loss.md) — Power loss
+  can roll back container ownership before external work. Abbreviated collection; confidence, proposed dismissals and
+  unresolved consequences are preserved in the entry.
 
-- [`trailing-podman-ordinary-wal-tail-loss-of-create-ownership.md`](trailing-podman-ordinary-wal-tail-loss-of-create-ownership.md) — Integrated container ownership keeps the accepted WAL power-loss limit. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-podman-ordinary-wal-tail-loss-of-create-ownership.md`](trailing-podman-ordinary-wal-tail-loss-of-create-ownership.md)
+  — Integrated container ownership keeps the accepted WAL power-loss limit. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-replace-with-accepts-incompatible-environment-recent.md`](trailing-replace-with-accepts-incompatible-environment-recent.md) — Environment Recent leaves Replace with unable to launch. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-replace-with-accepts-incompatible-environment-recent.md`](trailing-replace-with-accepts-incompatible-environment-recent.md)
+  — Environment Recent leaves Replace with unable to launch. Abbreviated collection; confidence, proposed dismissals and
+  unresolved consequences are preserved in the entry.
 
-- [`trailing-replace-with-environment-recent-bypasses-held-placement-admission.md`](trailing-replace-with-environment-recent-bypasses-held-placement-admission.md) — Environment recents can put Replace with into an unlaunchable placement. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-replace-with-environment-recent-bypasses-held-placement-admission.md`](trailing-replace-with-environment-recent-bypasses-held-placement-admission.md)
+  — Environment recents can put Replace with into an unlaunchable placement. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-launcher-feed-restarts-cancel-first-environment-catalog.md`](trailing-launcher-feed-restarts-cancel-first-environment-catalog.md) — Fleet notices can repeatedly cancel the launcher's first recipe read. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-launcher-feed-restarts-cancel-first-environment-catalog.md`](trailing-launcher-feed-restarts-cancel-first-environment-catalog.md)
+  — Fleet notices can repeatedly cancel the launcher's first recipe read. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-restart-retirement-two-filtered-trigger-subsets.md`](trailing-restart-retirement-two-filtered-trigger-subsets.md) — Sidebar retirement can suppress the terminal after a successful Restart. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-restart-retirement-two-filtered-trigger-subsets.md`](trailing-restart-retirement-two-filtered-trigger-subsets.md)
+  — Sidebar retirement can suppress the terminal after a successful Restart. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-retired-container-cli-helper-removal.md`](trailing-retired-container-cli-helper-removal.md) — Retired helpers refuse both old CLI entry and old queued isolation intent. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-retired-container-cli-helper-removal.md`](trailing-retired-container-cli-helper-removal.md) — Retired
+  helpers refuse both old CLI entry and old queued isolation intent. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-startup-treats-old-terminals-as-ended-even-if-ending-the-server-fails.md`](trailing-startup-treats-old-terminals-as-ended-even-if-ending-the-server-fails.md) — Startup treats old terminals as ended even if ending the server fails. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-startup-treats-old-terminals-as-ended-even-if-ending-the-server-fails.md`](trailing-startup-treats-old-terminals-as-ended-even-if-ending-the-server-fails.md)
+  — Startup treats old terminals as ended even if ending the server fails. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-already-polled-displaced-input-handover.md`](trailing-already-polled-displaced-input-handover.md) — Keep unchanged already-polled handover separate from newly delayed natural-detach cancellation. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-already-polled-displaced-input-handover.md`](trailing-already-polled-displaced-input-handover.md) — Keep
+  unchanged already-polled handover separate from newly delayed natural-detach cancellation. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-environment-delete-docs-overstate-admission-timeout-as-decision-bound.md`](trailing-environment-delete-docs-overstate-admission-timeout-as-decision-bound.md) — Delete documentation overstates the admission timeout's decision guarantee. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-environment-delete-docs-overstate-admission-timeout-as-decision-bound.md`](trailing-environment-delete-docs-overstate-admission-timeout-as-decision-bound.md)
+  — Delete documentation overstates the admission timeout's decision guarantee. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-old-terminal-retirement-startup-continues-after-failed-kill.md`](trailing-old-terminal-retirement-startup-continues-after-failed-kill.md) — Failed old-terminal termination still permits Restart. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-old-terminal-retirement-startup-continues-after-failed-kill.md`](trailing-old-terminal-retirement-startup-continues-after-failed-kill.md)
+  — Failed old-terminal termination still permits Restart. Abbreviated collection; confidence, proposed dismissals and
+  unresolved consequences are preserved in the entry.
 
-- [`trailing-old-terminal-startup-cannot-discover-all-legacy-tab-identities.md`](trailing-old-terminal-startup-cannot-discover-all-legacy-tab-identities.md) — Old tab daemons can survive when their tab id is undiscoverable. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-old-terminal-startup-cannot-discover-all-legacy-tab-identities.md`](trailing-old-terminal-startup-cannot-discover-all-legacy-tab-identities.md)
+  — Old tab daemons can survive when their tab id is undiscoverable. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-delete-gone-adopted-tab-host-without-process-confirmation.md`](trailing-delete-gone-adopted-tab-host-without-process-confirmation.md) — Gone-tab Delete bypass is unverified after investigating the shipped producer. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-delete-gone-adopted-tab-host-without-process-confirmation.md`](trailing-delete-gone-adopted-tab-host-without-process-confirmation.md)
+  — Gone-tab Delete bypass is unverified after investigating the shipped producer. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-grid-only-old-page-display-and-malformed-input-detachment.md`](trailing-grid-only-old-page-display-and-malformed-input-detachment.md) — An old open page requires reload after the grid-only update. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+- [`trailing-grid-only-old-page-display-and-malformed-input-detachment.md`](trailing-grid-only-old-page-display-and-malformed-input-detachment.md)
+  — An old open page requires reload after the grid-only update. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -2421,481 +2610,958 @@ Collection record for the abbreviated review through `00de0b6c`: [complete findi
   Playwright status before a hard assertion is recorded, so cleanup failure can replace the primary assertion error;
   step/trace evidence retains it.
 
-- [`trailing-retired-container-delete-treats-podman-lookup-none-as-absence.md`](trailing-retired-container-delete-treats-podman-lookup-none-as-absence.md) — Unverified after investigation: lookup failure exceeds the literal missing-Podman exception. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-wake-budget-inflight-busy-resume.md`](trailing-wake-budget-inflight-busy-resume.md) — Wake contract omits the longer in-flight Resume wait. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-testing-overview-falsely-generalizes-built-farhelm-host-program.md`](trailing-testing-overview-falsely-generalizes-built-farhelm-host-program.md) — Testing overview names the wrong executable for supervisor unit-test hosts. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-environment-agent-launch-specs-disagree-receipt-relative-versus-post-allow-timeout.md`](trailing-environment-agent-launch-specs-disagree-receipt-relative-versus-post-allow-timeout.md) — environment launch contracts describe different effective waits. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-suspended-source-clone-rules-distinguish-agent-authority-from-gui-prefill.md`](trailing-suspended-source-clone-rules-distinguish-agent-authority-from-gui-prefill.md) — suspended-source Clone rules distinguish agent authority from GUI prefill. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-removed-terminal-selector-stale-migration-spec-condition.md`](trailing-removed-terminal-selector-stale-migration-spec-condition.md) — Remove the obsolete condition from the migration contract. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-terminal-startup-best-effort-duplicate-agent-residual.md`](trailing-old-terminal-startup-best-effort-duplicate-agent-residual.md) — Fresh Restart refutes ordinary duplicate-agent inference, not misleading stop consent. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-spec-terminal-switch-point-names-deleted-terminal-type.md`](trailing-spec-terminal-switch-point-names-deleted-terminal-type.md) — Rewritten terminal contract points to the deleted Terminal type. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-terminal-create-refusal-qualified-rollback-wording.md`](trailing-old-terminal-create-refusal-qualified-rollback-wording.md) — Rollback phrase references a policy that already retains allocated checkouts. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-launch-excerpt-inherited-history-provenance.md`](trailing-launch-excerpt-inherited-history-provenance.md) — Pre-existing excerpt contamination; in-range implementation spec repeats a false blank-screen proof. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-spec-shim-container-execution-branch-retired.md`](trailing-spec-shim-container-execution-branch-retired.md) — Launch contract still describes the retired shim container branch. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-shift-enter-unconditional-pty-write-guarantee.md`](trailing-shift-enter-unconditional-pty-write-guarantee.md) — Qualify the grid Shift+Enter single-write guarantee. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-grid-input-font-inline-owner-rationale.md`](trailing-grid-input-font-inline-owner-rationale.md) — The new font-rule explanation assigns the inline font to the wrong element. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-uninstall-accepted-outlived-private-tmux-residual.md`](trailing-uninstall-accepted-outlived-private-tmux-residual.md) — Uninstall can leave an earlier private tmux server running. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-spec-report-discard-on-terminal-disappearance.md`](trailing-spec-report-discard-on-terminal-disappearance.md) — Report-discard contract does not match gone host terminals. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-spec-automatic-tab-reap-omits-failed-close-retry.md`](trailing-spec-automatic-tab-reap-omits-failed-close-retry.md) — Automatic-tab cleanup contract omits failed-close retries. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-delete-recorded-tab-scope-kept-derived-under-unusable-manager.md`](trailing-delete-recorded-tab-scope-kept-derived-under-unusable-manager.md) — Scoped-tab Delete policy gap predates the whole review range. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-http-golden-defaulted-trash-epoch.md`](trailing-http-golden-defaulted-trash-epoch.md) — The new Trash epoch golden fixture cannot detect a defaulted decoder regression. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-http-golden-omits-populated-environment.md`](trailing-http-golden-omits-populated-environment.md) — The new environment host JSON is omitted from every golden contract row. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-agent-launch-placement-docs-obsolete-caller-contract.md`](trailing-agent-launch-placement-docs-obsolete-caller-contract.md) — Placement documentation misstates ordinary-create inputs and links a missing helper. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-agent-environment-guide-key-and-wait-exceptions.md`](trailing-agent-environment-guide-key-and-wait-exceptions.md) — Agent guide explicitly qualifies key and wait advice for environment launches. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-supplied-timing-comment-defect-is-source-confirmed-and-already-owned-by-g020-l7.md`](trailing-supplied-timing-comment-defect-is-source-confirmed-and-already-owned-by-g020-l7.md) — Supplied timing-comment defect is source-confirmed and already owned by g020/l7. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-environment-test-responders-heartbeat-control-decode.md`](trailing-environment-test-responders-heartbeat-control-decode.md) — Environment test responders panic on valid heartbeat frames. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-intermediate-agent-delete-calls-podman-container-sandbox.md`](trailing-intermediate-agent-delete-calls-podman-container-sandbox.md) — Intermediate agent refusal calls a Podman container a sandbox. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-shared-rollback-allowance-does-not-remove-the-refusal-tests-observable-boundaries.md`](trailing-shared-rollback-allowance-does-not-remove-the-refusal-tests-observable-boundaries.md) — Shared rollback allowance does not remove the refusal tests observable boundaries. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-recipe-template-management-refusal-denies-supported-agent-launch-use.md`](trailing-recipe-template-management-refusal-denies-supported-agent-launch-use.md) — Recipe-template refusals still claim agent use is GUI-only. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-generic-lost-reply-remedy-does-not-prescribe-an-unsupported-environment-retry-key.md`](trailing-generic-lost-reply-remedy-does-not-prescribe-an-unsupported-environment-retry-key.md) — Generic lost-reply remedy does not prescribe an unsupported environment retry key. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-agent-environment-missing-local-ssh-key-preflight.md`](trailing-agent-environment-missing-local-ssh-key-preflight.md) — Sandbox agent launches ask for approval before checking the local SSH key. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-environment-history-admits-agent-origin.md`](trailing-environment-history-admits-agent-origin.md) — Agent environment launches enter GUI place-default and recent-history bookkeeping. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-environment-wait-comment-promises-a-relay-ordering-the-budgets-do-not-guarantee.md`](trailing-environment-wait-comment-promises-a-relay-ordering-the-budgets-do-not-guarantee.md) — Environment wait comment promises a relay ordering the budgets do not guarantee. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-environment-create-result-drops-operation-claim-remints-current.md`](trailing-environment-create-result-drops-operation-claim-remints-current.md) — Environment create replies can mark an earlier connection result current. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-module-overview-does-not-independently-require-every-clone-to-name-a-host.md`](trailing-module-overview-does-not-independently-require-every-clone-to-name-a-host.md) — Module overview does not independently require every clone to name a host. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-nonfinal-environment-delete-cache-survivor-oracle.md`](trailing-nonfinal-environment-delete-cache-survivor-oracle.md) — Non-final Delete test accepts clearing every cached session. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-sealed-delete-comment-hold-versus-seal-record.md`](trailing-sealed-delete-comment-hold-versus-seal-record.md) — Deletion test comment wrongly forbids releasing the failed host's connection hold. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-stopped-idle-local-arc-blocks-direct-manager-drop.md`](trailing-stopped-idle-local-arc-blocks-direct-manager-drop.md) — Stopped actors retain strong manager references across idle waits. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-shared-suspended-refusal-retains-tensorlake-noun.md`](trailing-shared-suspended-refusal-retains-tensorlake-noun.md) — Paused-container refusals incorrectly identify a Tensorlake sandbox. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-create-history-current-claim-comment-contradiction.md`](trailing-create-history-current-claim-comment-contradiction.md) — Create routing comment promises history can bypass connection-claim checks. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-stopped-episode-test-does-not-witness-settled-unavailable-cycle.md`](trailing-stopped-episode-test-does-not-witness-settled-unavailable-cycle.md) — Unanswered-status regression test can skip the settled failure boundary. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-host-phase-vocabulary-test-omits-stopped.md`](trailing-host-phase-vocabulary-test-omits-stopped.md) — Phase-consistency test omits new Stopped and Deleting states despite its every-variant promise. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-shared-suspended-view-doc-retains-tensorlake-only-contract.md`](trailing-shared-suspended-view-doc-retains-tensorlake-only-contract.md) — Suspended view documentation retains the known Tensorlake-only vocabulary. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-dial-documentation-incorrectly-exempts-podman-from-the-provider-status-gate.md`](trailing-dial-documentation-incorrectly-exempts-podman-from-the-provider-status-gate.md) — Dial documentation incorrectly exempts Podman from the provider status gate. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-ordinary-tensorlake-add-keeps-source-mutex-through-ssh-readiness.md`](trailing-ordinary-tensorlake-add-keeps-source-mutex-through-ssh-readiness.md) — Ordinary Add retains source exclusion during post-Running SSH readiness. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-wake-browser-stale-suspension-oracle-unattributed-host-read-count.md`](trailing-wake-browser-stale-suspension-oracle-unattributed-host-read-count.md) — The stale-suspension browser test counts unrelated host reads as its readiness oracle. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-browser-native-arrival-latch-bypasses-owned-finally.md`](trailing-browser-native-arrival-latch-bypasses-owned-finally.md) — The wake scenarios' unbounded arrival wait bypasses owned cleanup on timeout. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-ordinary-host-remove-bypasses-sealed-attempt-outcome.md`](trailing-ordinary-host-remove-bypasses-sealed-attempt-outcome.md) — Whole-host Delete does not record sealed deletion failures. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-deleting-extends-the-known-incomplete-backend-phase-test-matrix.md`](trailing-deleting-extends-the-known-incomplete-backend-phase-test-matrix.md) — Deleting extends the known incomplete backend phase-test matrix. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-normal-removal-parks-or-cancels-the-listing-before-clearing-its-seal.md`](trailing-normal-removal-parks-or-cancels-the-listing-before-clearing-its-seal.md) — Normal removal parks or cancels the listing before clearing its seal. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-seal-finisher-stale-pending-snapshot-admission.md`](trailing-seal-finisher-stale-pending-snapshot-admission.md) — Finisher can automatically retry a destruction that already failed. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-delete-freshness-test-docstring-connected-versus-suspended.md`](trailing-delete-freshness-test-docstring-connected-versus-suspended.md) — Delete freshness test describes the opposite retained host state. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-bulk-delete-test-row-disappearance-comment-false-oracle.md`](trailing-bulk-delete-test-row-disappearance-comment-false-oracle.md) — Bulk Delete test comment promises a reply-completion oracle it does not have. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-browser-cleanup-drains-real-api-route-before-request-client-lifetime.md`](trailing-browser-cleanup-drains-real-api-route-before-request-client-lifetime.md) — Draining mocked Deletes can outlive the client needed to clean independent sessions. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-cancelled-trash-observation-test-misses-fleet-publication.md`](trailing-cancelled-trash-observation-test-misses-fleet-publication.md) — The cancellation test does not assert its committed fleet wake. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-ui-host-lifecycle-provider-and-start-wording.md`](trailing-ui-host-lifecycle-provider-and-start-wording.md) — Container lifecycle wording bypasses provider-aware UI text. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-ui-deleting-environment-retains-running-reconnect-promise.md`](trailing-ui-deleting-environment-retains-running-reconnect-promise.md) — Deleting environment can promise its cached session is still running. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-ui-stopped-container-waiting-place-offers-suspend.md`](trailing-ui-stopped-container-waiting-place-offers-suspend.md) — Stopped container offers Suspend when its container host is unavailable. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-ui-host-phase-fixture-omits-stopped-deleting.md`](trailing-ui-host-phase-fixture-omits-stopped-deleting.md) — UI phase-wide regression guards omit the new host phases. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-ui-host-flow-omits-shared-environment-details.md`](trailing-ui-host-flow-omits-shared-environment-details.md) — Unverified after investigation: shared environment detail changes bypass causal anchor projection. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-ui-remove-label-docstring-still-sandbox-only.md`](trailing-ui-remove-label-docstring-still-sandbox-only.md) — Removal-label documentation still promises sandbox wording for containers. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-stopped-waiting-row-menu-order-disagrees-with-render.md`](trailing-stopped-waiting-row-menu-order-disagrees-with-render.md) — A stopped-waiting container row renders an item omitted from keyboard navigation. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-retired-only-bulk-delete-cancel-has-no-focus-target.md`](trailing-retired-only-bulk-delete-cancel-has-no-focus-target.md) — Retired-only bulk Delete cancellation has no rendered focus return. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-retired-delete-only-menu-invalidates-unconditional-rename-rationale.md`](trailing-retired-delete-only-menu-invalidates-unconditional-rename-rationale.md) — Delete-only retirement leaves the separator explanation claiming every row has Rename. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-sidebar-retires-restart-success-before-mounted-observer.md`](trailing-sidebar-retires-restart-success-before-mounted-observer.md) — Sidebar retirement can consume a restart result before the open view observes it. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-warned-delete-handoff-clears-error-before-view-admission.md`](trailing-warned-delete-handoff-clears-error-before-view-admission.md) — A deferred whole-environment Delete offer can lose its failure explanation. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-bulk-cleanup-captures-targets-after-deleting-exclusion.md`](trailing-bulk-cleanup-captures-targets-after-deleting-exclusion.md) — A confirmed bulk target excluded as Deleting keeps its old mark. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-deleting-environment-row-rename-omits-phase-guard.md`](trailing-deleting-environment-row-rename-omits-phase-guard.md) — Rename stays enabled for retained sessions while their environment is being deleted. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-late-environment-delete-count-republished-after-host-absence.md`](trailing-late-environment-delete-count-republished-after-host-absence.md) — A delayed Delete result can leave a destroyed environment described as staying. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-the-nothing-decided-terminology-refutation-does-not-cover-the-stronger-no-change-comment.md`](trailing-the-nothing-decided-terminology-refutation-does-not-cover-the-stronger-no-change-comment.md) — The nothing-decided terminology refutation does not cover the stronger no-change comment. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-environment-delete-expanded-error-false-no-change-comment.md`](trailing-environment-delete-expanded-error-false-no-change-comment.md) — Expanded Delete error handling retains a false no-change explanation. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-settings-container-tensorlake-order-contract.md`](trailing-settings-container-tensorlake-order-contract.md) — Settings regression test enforces the wrong section order. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-retired-container-positive-ui-test-removal.md`](trailing-retired-container-positive-ui-test-removal.md) — Legacy-container replacement and owned-template cleanup preserve their contracts. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-live-recipe-settings-need-an-independent-contract-based-drop-check.md`](trailing-live-recipe-settings-need-an-independent-contract-based-drop-check.md) — Live recipe settings need an independent contract-based drop check. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-environment-wrapper-direct-allow-without-separate-prefix-gate.md`](trailing-environment-wrapper-direct-allow-without-separate-prefix-gate.md) — Environment wrapper bytes are shown and the separate prefix gate does not apply. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-cleanup-status-masks-body-assertion.md`](trailing-cleanup-status-masks-body-assertion.md) — Retirement test can replace its body assertion with a cleanup error. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-retired-supervisor-tmux-pin.md`](trailing-retired-supervisor-tmux-pin.md) — Removing the unit's tmux pin matches the retired runtime contract. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-stopped-provider-state-zero-refusal-ticket.md`](trailing-stopped-provider-state-zero-refusal-ticket.md) — Stopped-environment attach diagnosis is excluded by its own freshness gate. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-sealed-setup-test-overlay-hides-hold-and-run-leak.md`](trailing-sealed-setup-test-overlay-hides-hold-and-run-leak.md) — Sealed-setup regression test cannot observe its claimed no-hold boundary. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-agent-file-size-only-read-consistency-docstring.md`](trailing-agent-file-size-only-read-consistency-docstring.md) — Sensitive-read consistency explanation and same-size limitation predate the full pinned range. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-ordinary-tensorlake-add-outer-source-lock-across-ssh-readiness.md`](trailing-ordinary-tensorlake-add-outer-source-lock-across-ssh-readiness.md) — Ordinary Add holds recipe source exclusion while waiting for SSH. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-prepared-image-inherits-private-tmux-cleanup-exception.md`](trailing-prepared-image-inherits-private-tmux-cleanup-exception.md) — Prepared-snapshot cleanup explicitly excludes bundled-tmux removal. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-provisioning-shared-environment-preparation-progress.md`](trailing-provisioning-shared-environment-preparation-progress.md) — Environment preparation stays on Select the recipe source in launch progress. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-rest-admission-owns-registration-before-the-launch-task-is-spawned.md`](trailing-rest-admission-owns-registration-before-the-launch-task-is-spawned.md) — REST admission owns registration before the launch task is spawned. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-intermediate-reach-test-comment-accurately-names-the-remaining-uninstall-consumer.md`](trailing-intermediate-reach-test-comment-accurately-names-the-remaining-uninstall-consumer.md) — Intermediate reach-test comment accurately names the remaining uninstall consumer. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-provider-preparation-callbacks-await-insertion-before-reporting-phases.md`](trailing-provider-preparation-callbacks-await-insertion-before-reporting-phases.md) — Provider preparation callbacks await insertion before reporting phases. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-provisioning-cleanup-test-misstates-pre-0-18-tmux-ownership.md`](trailing-provisioning-cleanup-test-misstates-pre-0-18-tmux-ownership.md) — Cleanup test misstates legacy tmux ownership. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-uninstall-previously-orphaned-legacy-private-tmux-survives.md`](trailing-uninstall-previously-orphaned-legacy-private-tmux-survives.md) — Deleted retry test concerns only the accepted previously orphaned tmux server. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-ssh-provisioning-test-private-server-coverage-docstring.md`](trailing-ssh-provisioning-test-private-server-coverage-docstring.md) — SSH integration test still claims private-tmux teardown coverage. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-environment-history-obsolete-claim-after-adoption.md`](trailing-environment-history-obsolete-claim-after-adoption.md) — Origin-provenance input confirmed separately from replay authority. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-environment-history-deleted-place-id-reuse.md`](trailing-environment-history-deleted-place-id-reuse.md) — Reusable place intent does not freeze a pending action's endpoint authority. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-clone-protocol-docs-omit-environment-hostless-contract.md`](trailing-clone-protocol-docs-omit-environment-hostless-contract.md) — Clone protocol docs reject the omission required by environment clones. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-interrupted-doc-defines-only-reboot-attribution-after-retirement.md`](trailing-interrupted-doc-defines-only-reboot-attribution-after-retirement.md) — Interruption documentation still claims boot-id change is its only detector. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-environment-provisioning-probe-omits-stdin-watchdog.md`](trailing-environment-provisioning-probe-omits-stdin-watchdog.md) — Environment provisioning probes omit the required stdin deadline. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-podman-dial-kind-advances-before-process-marker.md`](trailing-podman-dial-kind-advances-before-process-marker.md) — Container dial staging disables its process-exit diagnosis. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-atomic-install-failed-cleanup-clears-safe-session-limit-refusal.md`](trailing-atomic-install-failed-cleanup-clears-safe-session-limit-refusal.md) — Failed install cleanup discards the safe session-limit diagnosis. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-uninstall-retains-already-orphaned-legacy-private-tmux-server.md`](trailing-uninstall-retains-already-orphaned-legacy-private-tmux-server.md) — Legacy tmux server may survive uninstall; specification explicitly accepts it. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-podman-literal-image-user-argument-injection.md`](trailing-podman-literal-image-user-argument-injection.md) — Literal input boundary refutation persists through the review tip. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-warning-repair-does-not-cover-implicit-user-base-deletion.md`](trailing-warning-repair-does-not-cover-implicit-user-base-deletion.md) — Warning repair does not cover implicit user-base deletion. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-deletion-ownership-refutation-remains-separate-from-warning-repair.md`](trailing-deletion-ownership-refutation-remains-separate-from-warning-repair.md) — Deletion ownership refutation remains separate from warning repair. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-shared-recipe-container-base-summary-raw-presentation.md`](trailing-shared-recipe-container-base-summary-raw-presentation.md) — Recipe summaries render literal container-base formatting characters. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-tensorlake-add-host-inline-container-recipe-compatibility.md`](trailing-tensorlake-add-host-inline-container-recipe-compatibility.md) — Inline container-recipe Save leaves Tensorlake Add host on an unusable choice. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-recipe-row-deep-clones-global-place-status-matrix.md`](trailing-recipe-row-deep-clones-global-place-status-matrix.md) — Recipe list clones the complete status matrix for every row. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-podman-job-removal-after-last-fleet-invalidation.md`](trailing-podman-job-removal-after-last-fleet-invalidation.md) — Container job completion lacks a final fleet invalidation. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-podman-account-observation-exec-guesses-root-home.md`](trailing-podman-account-observation-exec-guesses-root-home.md) — Custom-image login lookup unnecessarily requires /root. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-podman-ordinary-wal-tail-loss-after-external-create.md`](trailing-podman-ordinary-wal-tail-loss-after-external-create.md) — Power loss can lose a binding after external creation under accepted WAL durability. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-podman-probe-dedup-test-asserts-before-spawned-task.md`](trailing-podman-probe-dedup-test-asserts-before-spawned-task.md) — Probe deduplication test checks its counter before a duplicate task can run. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-podman-proxy-exact-inheritance-test-shared-serializer-oracle.md`](trailing-podman-proxy-exact-inheritance-test-shared-serializer-oracle.md) — Proxy test's shared serializer cannot prove its exact-inheritance claim. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-podman-delete-lifecycle-test-equal-membership-oracle.md`](trailing-podman-delete-lifecycle-test-equal-membership-oracle.md) — Deletion test does not distinguish the membership authority it claims. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-podman-tests-nested-build-module-registration.md`](trailing-podman-tests-nested-build-module-registration.md) — Nested build module registers the Podman tests and validates their namespace. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-podman-test-payload-producer-consumer-tmux-mismatch.md`](trailing-podman-test-payload-producer-consumer-tmux-mismatch.md) — Real-container prerequisites require a payload the producer no longer stages. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-podman-lost-session-create-test-misses-presend-store-witness.md`](trailing-podman-lost-session-create-test-misses-presend-store-witness.md) — Lost-create test does not observe its promised pre-send durability boundary. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-delayed-probe-test-unfenced-initial-feed-consumer.md`](trailing-delayed-probe-test-unfenced-initial-feed-consumer.md) — Fence the initial feed greeting before measuring silent probe invalidation. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-podman-acceptance-fallback-misses-inflight-ssh-bootstrap-storage.md`](trailing-podman-acceptance-fallback-misses-inflight-ssh-bootstrap-storage.md) — Source-verified conditional SSH bootstrap cleanup gap. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-real-container-agent-host-list-oracle-omits-extra-ssh-hosts.md`](trailing-real-container-agent-host-list-oracle-omits-extra-ssh-hosts.md) — Real-container hosts-list test overstates its exact-membership oracle. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-selected-above-handoff-floor-legacy-target-missing-tmux-launch-advice.md`](trailing-selected-above-handoff-floor-legacy-target-missing-tmux-launch-advice.md) — Older-target prerequisite omission has explicit competing installer policy. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-snapshot-preparation-skips-inherited-private-tmux-removal.md`](trailing-snapshot-preparation-skips-inherited-private-tmux-removal.md) — Snapshot tmux retention follows an explicit preparation exception. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-missing-release-entry-test-count-does-not-prove-exact-variant-inventory.md`](trailing-missing-release-entry-test-count-does-not-prove-exact-variant-inventory.md) — Missing-entry fixture premise overstates its inventory check. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-retired-session-tcp-relay-cache-only-admission.md`](trailing-retired-session-tcp-relay-cache-only-admission.md) — Bounded refutation of ordinary retired-session TCP cache bypass. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-detach-timeout-test-confuses-cooperative-yield-with-writer-capacity.md`](trailing-detach-timeout-test-confuses-cooperative-yield-with-writer-capacity.md) — The detach timeout test yields before establishing writer backpressure. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-ui-environment-place-reader-discards-probe-refresh-intent.md`](trailing-ui-environment-place-reader-discards-probe-refresh-intent.md) — Refresh can be silently reduced to a cached read. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-ui-agent-environment-launch-last-session-consequence.md`](trailing-ui-agent-environment-launch-last-session-consequence.md) — Last-session wording matches the later revision's changed deletion contract. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-podman-place-typed-ssh-refusal-reasons-missing-final-ui-escaping.md`](trailing-podman-place-typed-ssh-refusal-reasons-missing-final-ui-escaping.md) — Typed SSH capacity reasons bypass final display escaping. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-ui-shared-sandbox-recipe-choices-omit-resource-sizes.md`](trailing-ui-shared-sandbox-recipe-choices-omit-resource-sizes.md) — Shared sandbox recipe picker omits CPU and memory sizes. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-ui-podman-start-help-overpromises-interrupted-and-restart.md`](trailing-ui-podman-start-help-overpromises-interrupted-and-restart.md) — Container-start explanation promises interrupted status for every session. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-ui-container-leftover-question-missing-answer-focus-handoff.md`](trailing-ui-container-leftover-question-missing-answer-focus-handoff.md) — Container-leftover Delete opens its question without focusing an answer. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-ui-recipe-panel-move-leaves-old-key-location-and-module-map.md`](trailing-ui-recipe-panel-move-leaves-old-key-location-and-module-map.md) — Moved Recipes panel retains guidance for the old Tensorlake layout. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-podman-unregistered-explicit-cleanup-lacks-retained-operation-reason.md`](trailing-podman-unregistered-explicit-cleanup-lacks-retained-operation-reason.md) — Closing Containers loses an unregistered cleanup failure's reason. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-ui-legacy-container-editor-specified-retirement.md`](trailing-ui-legacy-container-editor-specified-retirement.md) — Removing the legacy container editor is specified retirement. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-ui-retained-whole-environment-question-stale-unreachable-rationale.md`](trailing-ui-retained-whole-environment-question-stale-unreachable-rationale.md) — Retained whole-environment warning can misstate current reachability. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-grid-only-removal-leaves-hidden-pane-fitaddon-rationale-stale.md`](trailing-grid-only-removal-leaves-hidden-pane-fitaddon-rationale-stale.md) — Renderer removal leaves hidden-pane rationale pointing at removed FitAddon. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-file-links-failed-grid-mount-fixture-getter-mismatch.md`](trailing-file-links-failed-grid-mount-fixture-getter-mismatch.md) — Rewritten failed-mount test misses the grid hosting failure. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-environment-pending-launch-label-resolves-with-empty-places.md`](trailing-environment-pending-launch-label-resolves-with-empty-places.md) — Container launch progress loses the selected host name. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-container-place-footer-omits-peer-format-escaping.md`](trailing-container-place-footer-omits-peer-format-escaping.md) — Container placement footer renders host formatting characters verbatim. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-agent-clone-wire-docs-unconditional-host-requirement.md`](trailing-agent-clone-wire-docs-unconditional-host-requirement.md) — Clone wire documentation still forbids the new environment clone form. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-agent-create-cwd-help-omits-recipe-home-default.md`](trailing-agent-create-cwd-help-omits-recipe-home-default.md) — Create folder help omits the new recipe launch default. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-replay-reveal-helper-retired-async-write-rationale.md`](trailing-replay-reveal-helper-retired-async-write-rationale.md) — Reveal-wait documentation describes a retired asynchronous write. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-retired-ci-tmux-python-ignore-removed-without-residue-cleanup.md`](trailing-retired-ci-tmux-python-ignore-removed-without-residue-cleanup.md) — Unignoring an older non-self-ignored venv can add generated files to jj changes. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-mac-devbuild-header-retains-removed-local-tmux-requirement.md`](trailing-mac-devbuild-header-retains-removed-local-tmux-requirement.md) — Intermediate Mac devbuild requirements still demand the removed tmux prerequisite. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-desktop-smoke-direct-websocket-comment-overclaims-page-delivery.md`](trailing-desktop-smoke-direct-websocket-comment-overclaims-page-delivery.md) — Direct WebSocket smoke helper overstates its evidence of page delivery. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-podman-payload-cargo-artifact-identity-not-held-through-copy.md`](trailing-podman-payload-cargo-artifact-identity-not-held-through-copy.md) — Shared Cargo output can change before same-source payload packaging. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-deflake-current-driver-downgrades-historical-recorder-required-tmux-policy.md`](trailing-deflake-current-driver-downgrades-historical-recorder-required-tmux-policy.md) — Historical-base deflake runs lose their selected revision's required tmux check. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-legacy-container-delete-conflates-podman-resolution-failure-with-absence.md`](trailing-legacy-container-delete-conflates-podman-resolution-failure-with-absence.md) — unverified after investigation: PATH lookup failure versus Podman absence. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-launch-comment-terminal-host-inherits-tab-marker.md`](trailing-launch-comment-terminal-host-inherits-tab-marker.md) — marker-inheritance documentation wrongly puts tab markers on terminal hosts. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-failed-host-relaunch-warn-scope-error-definitive-rollback.md`](trailing-failed-host-relaunch-warn-scope-error-definitive-rollback.md) — failed-relaunch warning policy and restoration route predate the full range. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-launch-excerpt-full-row-allocation-before-500-byte-trim.md`](trailing-launch-excerpt-full-row-allocation-before-500-byte-trim.md) — Launch-error reduction now allocates full rows before enforcing its tiny result limit. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-deleted-integrated-unmarked-tab-shell-delete-oracle.md`](trailing-deleted-integrated-unmarked-tab-shell-delete-oracle.md) — Unmarked tab-shell cleanup loses its integrated regression oracle. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-checkout-status-borrower-reload-keeps-origin-runtime.md`](trailing-checkout-status-borrower-reload-keeps-origin-runtime.md) — borrower reload fixture retains a competing origin runtime. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-legacy-tmux-retry-refusal-private-launch-artifact-retention.md`](trailing-legacy-tmux-retry-refusal-private-launch-artifact-retention.md) — Tmux-retry refusal defers cleanup of credential-bearing launch input. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-tab-settle-gate-bare-link-out-of-scope.md`](trailing-tab-settle-gate-bare-link-out-of-scope.md) — TabSettleGate retains an unresolved documentation link through the pinned tip. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-restart-definitive-comment-promises-no-external-effects.md`](trailing-restart-definitive-comment-promises-no-external-effects.md) — Definitive-Restart documentation overpromises absence of external effects. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-restart-reply-stale-tab-rediscovery-comment.md`](trailing-restart-reply-stale-tab-rediscovery-comment.md) — Restart reply comment promises a removed tab rediscovery path. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-legacy-retry-refusal-skips-launch-artifact-cleanup.md`](trailing-legacy-retry-refusal-skips-launch-artifact-cleanup.md) — Legacy retry refusal leaves old launch artifacts until later cleanup; proposed specification-based drop. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-lone-surviving-old-tab-loses-its-guard-and-stop-regression-oracles.md`](trailing-lone-surviving-old-tab-loses-its-guard-and-stop-regression-oracles.md) — lone surviving old tab loses its guard and Stop regression oracles. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-failed-spec-test-accepts-an-attempted-host-start-as-never-started.md`](trailing-failed-spec-test-accepts-an-attempted-host-start-as-never-started.md) — failed-spec test accepts an attempted host start as never started. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-failed-restart-loses-the-live-tab-preservation-regression-oracle.md`](trailing-failed-restart-loses-the-live-tab-preservation-regression-oracle.md) — failed Restart loses the live-tab preservation regression oracle. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-deleted-ambiguous-create-test-loses-published-handle-and-pending-intent-oracles.md`](trailing-deleted-ambiguous-create-test-loses-published-handle-and-pending-intent-oracles.md) — deleted ambiguous-create test loses published-handle and pending-intent oracles. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-held-start-documentation-retains-the-retired-uncancelled-tmux-child-lifetime.md`](trailing-held-start-documentation-retains-the-retired-uncancelled-tmux-child-lifetime.md) — held-start documentation retains the retired uncancelled-tmux child lifetime. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-deleted-startup-error-artifact-readonly-oracle.md`](trailing-deleted-startup-error-artifact-readonly-oracle.md) — Deleted reload test loses read-only Error-artifact ownership oracle. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-host-scan-lock-map-forbids-required-host-io.md`](trailing-host-scan-lock-map-forbids-required-host-io.md) — Host-scan lock map forbids the terminal calls its fence must span. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-sentinel-reload-comment-denies-recorded-host-delete-fallback.md`](trailing-sentinel-reload-comment-denies-recorded-host-delete-fallback.md) — Reload comment incorrectly makes the runtime handle Delete's only host ownership record. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-tab-scope-prefix-stale-two-terminal-kinds-docstring.md`](trailing-tab-scope-prefix-stale-two-terminal-kinds-docstring.md) — Tab scope-helper documentation retains a removed two-kind responsibility. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-omp-capture-survives-owner-exit-test-loses-exit-barrier.md`](trailing-omp-capture-survives-owner-exit-test-loses-exit-barrier.md) — Host-backed teardown removes the owner-exit test's exit barrier. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-prompt-recorder-default-off-without-catchup-witness.md`](trailing-prompt-recorder-default-off-without-catchup-witness.md) — Proposed source-based exclusion: examined raw paste-off fixture produces one initial output record. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-terminal-less-host-orphan-doc-asserts-no-survivors.md`](trailing-terminal-less-host-orphan-doc-asserts-no-survivors.md) — Terminal-less test documentation treats host loss as proof no program survives. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-hold-mark-negative-oracle-retained-in-host-terminal-tests.md`](trailing-hold-mark-negative-oracle-retained-in-host-terminal-tests.md) — Host-terminal test module preserves the missing/stale hold-mark oracle. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-late-activity-test-doc-retains-removed-screen-read-await.md`](trailing-late-activity-test-doc-retains-removed-screen-read-await.md) — Late-activity test documents a screen-read await removed by the host migration. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-migration-missing-terminal-lifecycle-docs.md`](trailing-migration-missing-terminal-lifecycle-docs.md) — Migration commit has stale lifecycle docs, corrected by later removal. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-supervisor-clone-doorway-testdoc-universal-host-requirement.md`](trailing-supervisor-clone-doorway-testdoc-universal-host-requirement.md) — Creating-verb test documentation still requires a host for every clone. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-delete-directory-admission-test-observes-only-earlier-agent-fence.md`](trailing-delete-directory-admission-test-observes-only-earlier-agent-fence.md) — Directory-admission test observes the earlier fence, not the blocked directory wait. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-list-reply-doc-prescribes-nonexistent-sentinel-read-failure.md`](trailing-list-reply-doc-prescribes-nonexistent-sentinel-read-failure.md) — Listing error comments falsely claim unreadable launch sentinels fail the request. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-pre-range-grid-first-input-queue-acceptance-wording.md`](trailing-pre-range-grid-first-input-queue-acceptance-wording.md) — Direct grid input call preserves the prior delivery contract. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-deleted-replay-chunk-leaves-connection-doc-reference.md`](trailing-deleted-replay-chunk-leaves-connection-doc-reference.md) — Replay removal leaves a dangling writer-queue documentation link. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-stop-comment-falsely-bans-retaining-original-final-screen.md`](trailing-stop-comment-falsely-bans-retaining-original-final-screen.md) — Stop comment incorrectly says full-screen final frames are never retained. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-busy-host-list-limit-negative-oracle-never-reads-client-output.md`](trailing-busy-host-list-limit-negative-oracle-never-reads-client-output.md) — List-limit test checks an undrained reply cache. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-request-conformance-target-testhost-owner-dropped-at-preparation-return.md`](trailing-request-conformance-target-testhost-owner-dropped-at-preparation-return.md) — Keep the target host alive through conformance observation. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-status-documentation-probe-versus-processed-exit-evidence.md`](trailing-status-documentation-probe-versus-processed-exit-evidence.md) — Status documentation conflates process liveness with processed exit evidence. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-retired-tmux-periodic-warning-contract.md`](trailing-retired-tmux-periodic-warning-contract.md) — Old-terminal warning tests are obsolete under the migration contract. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-test-one-shot-sample-before-host-catch-up.md`](trailing-test-one-shot-sample-before-host-catch-up.md) — Persistence test can skip an uncaught-up host. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-sampler-docs-promise-deleted-capture-failure-reset.md`](trailing-sampler-docs-promise-deleted-capture-failure-reset.md) — Sampler field documentation still promises the deleted capture-failure reset. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-ordinary-path-provider-test-awaits-synchronous-oracle.md`](trailing-ordinary-path-provider-test-awaits-synchronous-oracle.md) — Synchronous-recognition test only asserts eventual callback output. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-terminal-files-cursor-teardown-comment-misattributes-global-setter-to-grid.md`](trailing-terminal-files-cursor-teardown-comment-misattributes-global-setter-to-grid.md) — Cursor teardown comment attributes retired accessor behavior to the grid. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-retired-container-positive-path-test-removal.md`](trailing-retired-container-positive-path-test-removal.md) — Retired container isolation tests were deliberately removed. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-legacy-container-delete-existing-object-removal-oracle-lost.md`](trailing-legacy-container-delete-existing-object-removal-oracle-lost.md) — Legacy Delete loses its existing-container removal oracle. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-upload-ack-priority-regression-oracle-removed.md`](trailing-upload-ack-priority-regression-oracle-removed.md) — Upload credit priority loses its end-to-end regression check. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-refused-delete-live-upload-continuation-oracle-removed.md`](trailing-refused-delete-live-upload-continuation-oracle-removed.md) — Refused Delete loses its in-flight upload preservation oracle. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-deleted-legacy-deep-replay-tail-oracle.md`](trailing-deleted-legacy-deep-replay-tail-oracle.md) — Removing the replay suite loses the legacy replay-tail oracle. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-deleted-signal-legacy-two-client-shutdown-oracle.md`](trailing-deleted-signal-legacy-two-client-shutdown-oracle.md) — Stop-test migration removes the signal-to-legacy-client teardown oracle. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-deleted-raw-pty-cursor-control-sequence-oracle.md`](trailing-deleted-raw-pty-cursor-control-sequence-oracle.md) — The deleted raw-input test leaves cursor/control-sequence delivery without its end-to-end oracle. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-removed-live-alternate-screen-reattach-oracle.md`](trailing-removed-live-alternate-screen-reattach-oracle.md) — The live alternate-screen reattach oracle was deleted without a host replacement. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-removed-serving-legacy-binary-final-output-oracle.md`](trailing-removed-serving-legacy-binary-final-output-oracle.md) — Deleting the immediate-exit test loses the real-ticker legacy final-output oracle. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-removed-completed-keyed-create-reboot-replay-oracle.md`](trailing-removed-completed-keyed-create-reboot-replay-oracle.md) — Deleting the kind test also removes the completed-create reboot retry oracle. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-stopped-altscreen-test-comment-claims-inactive-buffer-erasure.md`](trailing-stopped-altscreen-test-comment-claims-inactive-buffer-erasure.md) — Correct the stopped alternate-screen test's emulator-retention explanation. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-server-guard-loses-directory-in-consumed-restart.md`](trailing-old-server-guard-loses-directory-in-consumed-restart.md) — Restart failure deletes the tmux socket before the explicit server guard runs. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-flood-fixture-false-child-exit-terminal-lifetime-rationale.md`](trailing-flood-fixture-false-child-exit-terminal-lifetime-rationale.md) — Flood fixture docs incorrectly say program exit ends its terminal. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-rust-worker-trims-explicit-payload-directory.md`](trailing-rust-worker-trims-explicit-payload-directory.md) — Archive packer changes an accepted explicit payload directory. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-docs-stop-callout-overpromises-descendant-cleanup.md`](trailing-docs-stop-callout-overpromises-descendant-cleanup.md) — Exclusive range base already contains the broad Stop claim and conflicting cleanup caveat. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-capture-terminaltext-stale-no-row-dom-rationale.md`](trailing-capture-terminaltext-stale-no-row-dom-rationale.md) — Update the terminal target helper's obsolete no-row-DOM rationale. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-terminal-startup-filesystem-cleanup-outside-deadline.md`](trailing-old-terminal-startup-filesystem-cleanup-outside-deadline.md) — Old-terminal file cleanup runs outside its startup deadline. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-migrated-seal-constraint-test-accepts-duplicate-metadata-key.md`](trailing-migrated-seal-constraint-test-accepts-duplicate-metadata-key.md) — Migrated seal CHECK assertion accepts a duplicate-key failure. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-outcome-backfill-comment-falsely-promises-live-probe-after-legacy-retirement.md`](trailing-outcome-backfill-comment-falsely-promises-live-probe-after-legacy-retirement.md) — Outcome-backfill comment promises live reconciliation that legacy rows no longer receive. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-647f022-old-terminal-process-compatibility-oracle-deletion.md`](trailing-647f022-old-terminal-process-compatibility-oracle-deletion.md) — Old-terminal process wiring gap is historical after later source retirement. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-647f022-pre-reap-tab-live-only-attach-oracle-not-ported.md`](trailing-647f022-pre-reap-tab-live-only-attach-oracle-not-ported.md) — Dead-but-unreaped tab refusal gap remains applicable to host tabs at tip. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-70bc66a-host-size-wait-comment-denies-public-status-size.md`](trailing-70bc66a-host-size-wait-comment-denies-public-status-size.md) — Resize wait comment gives a false synchronization rationale. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-647f022-old-to-host-migration-integration-oracle-deletion.md`](trailing-647f022-old-to-host-migration-integration-oracle-deletion.md) — Migration regression coverage was removed before its behavior retired. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-647f022-stale-connection-pause-oracle-restored-f560058.md`](trailing-647f022-stale-connection-pause-oracle-restored-f560058.md) — Stale-owner pause coverage lost at 647f022 is restored at f560058. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-mixed-session-regression-coverage-disappears-before-legacy-serving-retires.md`](trailing-mixed-session-regression-coverage-disappears-before-legacy-serving-retires.md) — Mixed-session regression coverage disappears before legacy serving retires. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-legacy-forced-pause-mode-restoration-oracles-disappear-before-legacy-serving-retires.md`](trailing-legacy-forced-pause-mode-restoration-oracles-disappear-before-legacy-serving-retires.md) — Legacy forced-pause mode-restoration oracles disappear before legacy serving retires. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-legacy-stalled-viewer-rss-regression-check-is-removed-before-legacy-serving-retires.md`](trailing-legacy-stalled-viewer-rss-regression-check-is-removed-before-legacy-serving-retires.md) — Legacy stalled-viewer RSS regression check is removed before legacy serving retires. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-647f0227-removes-supported-tmux-pending-cleanup-request-oracles.md`](trailing-647f0227-removes-supported-tmux-pending-cleanup-request-oracles.md) — pending-cleanup integration oracles retire before tmux runtime support. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-terminal-tabs-shell-harness-docs-retain-deleted-conformance-caller.md`](trailing-terminal-tabs-shell-harness-docs-retain-deleted-conformance-caller.md) — shell harness docs still describe the deleted conformance battery. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-terminal-tabs-shared-gate-docs-retain-removed-local-hook-installations.md`](trailing-terminal-tabs-shared-gate-docs-retain-removed-local-hook-installations.md) — shared gate docs claim hook installations that the module no longer has. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-647f0227-removes-supported-tmux-transport-sink-crash-recovery-oracles.md`](trailing-647f0227-removes-supported-tmux-transport-sink-crash-recovery-oracles.md) — Still-supported old-terminal recovery loses integration regression protection. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-converted-old-session-warning-retention-assertion-vacuous-all.md`](trailing-converted-old-session-warning-retention-assertion-vacuous-all.md) — Require the converted session's resolved warning to remain present. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-pre-range-tmux-probe-fixture-process-oracles.md`](trailing-pre-range-tmux-probe-fixture-process-oracles.md) — Retained probe fixtures and process oracles are unchanged from the range base. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-launch-excerpt-whole-row-intermediate-allocation.md`](trailing-launch-excerpt-whole-row-intermediate-allocation.md) — Deleted reducer has distinct provenance and temporary-allocation consequences. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-historical-desktop-tmux-abovepin-warning-after-retirement.md`](trailing-historical-desktop-tmux-abovepin-warning-after-retirement.md) — Historical installation policy keeps a newer-tmux warning promise after its desktop emitter retires. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-bounded-sigterm-sigcont-pid-reuse.md`](trailing-bounded-sigterm-sigcont-pid-reuse.md) — Replacement SIGCONT has a spec-accepted short PID-reuse window. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-delete-held-gone-host-skips-adopted-process-confirmation.md`](trailing-delete-held-gone-host-skips-adopted-process-confirmation.md) — Known Delete confirmation bypass is separate from guarded tab-close identity. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-restart-seeded-history-promoted-into-launch-error-screen.md`](trailing-restart-seeded-history-promoted-into-launch-error-screen.md) — Earlier codec-removal refutation does not refute the known inherited-history excerpt route. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-connection-writer-comment-points-to-deleted-outputstream-checkpoint.md`](trailing-connection-writer-comment-points-to-deleted-outputstream-checkpoint.md) — Connection writer diagnostics still point to the deleted stream checkpoint. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-terminal-osc52-browser-refusal-test-removed-before-retirement.md`](trailing-old-terminal-osc52-browser-refusal-test-removed-before-retirement.md) — Old-terminal clipboard read refusal loses its browser check before retirement. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-real-app-terminal-disclosure-cover-and-refusal-layer-tests-removed.md`](trailing-real-app-terminal-disclosure-cover-and-refusal-layer-tests-removed.md) — Keep real-app checks for terminal disclosure admission and refusal layers. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-live-redraw-pending-ready-refused-hover-browser-matrix-removed.md`](trailing-live-redraw-pending-ready-refused-hover-browser-matrix-removed.md) — Preserve browser redraw coverage for pending and refused file hovers. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-settings-to-mounted-agent-shell-link-ownership-integration-test-removed.md`](trailing-settings-to-mounted-agent-shell-link-ownership-integration-test-removed.md) — Keep program-observed link ownership checks through Settings and mounted tabs. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-terminal-whole-stream-flow-stall-paused-remount-oracles-removed-before-retirement.md`](trailing-old-terminal-whole-stream-flow-stall-paused-remount-oracles-removed-before-retirement.md) — Old-terminal flood and paused-remount checks disappear before retirement. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-terminal-positive-large-websocket-message-oracle-removed-before-retirement.md`](trailing-old-terminal-positive-large-websocket-message-oracle-removed-before-retirement.md) — Old-terminal large-message acceptance loses its regression check. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-retired-xterm-private-url-tag-test-gap.md`](trailing-retired-xterm-private-url-tag-test-gap.md) — Intermediate removal of the vendored-xterm tag contract test. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-retired-xterm-deferred-replay-flush-test-gap.md`](trailing-retired-xterm-deferred-replay-flush-test-gap.md) — Intermediate loss of late-xterm-flush recovery coverage. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-retired-xterm-per-tab-write-flow-isolation-test-gap.md`](trailing-retired-xterm-per-tab-write-flow-isolation-test-gap.md) — Intermediate loss of old-renderer per-tab flow isolation coverage. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-grid-catchup-progress-and-empty-frame-idle-tests-removed.md`](trailing-grid-catchup-progress-and-empty-frame-idle-tests-removed.md) — Deleting replay degradation tests also removes surviving grid idle-bound assertions. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-xterm-sustained-viewport-tests-removed-before-retirement.md`](trailing-old-xterm-sustained-viewport-tests-removed-before-retirement.md) — Intermediate loss of sustained viewport regression checks before old-renderer retirement. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-xterm-query-selection-unicode-tests-removed-before-retirement.md`](trailing-old-xterm-query-selection-unicode-tests-removed-before-retirement.md) — Old-renderer regressions lose coverage before the supported renderer is retired. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-mouse-reattach-test-claims-nonexistent-viewer-sgr-encoding-restoration.md`](trailing-mouse-reattach-test-claims-nonexistent-viewer-sgr-encoding-restoration.md) — Mouse test claims to check SGR viewer restoration that the grid protocol does not carry. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-retired-renderer-swap-kind-notice-test-deletion.md`](trailing-retired-renderer-swap-kind-notice-test-deletion.md) — Retired renderer compatibility tests removed with the compatibility path. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-held-replay-helper-misstates-history-drained-boundary.md`](trailing-held-replay-helper-misstates-history-drained-boundary.md) — held-replay helper claims history is applied before its oracle proves it. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-retired-old-terminal-migration-ui-test-deletion.md`](trailing-retired-old-terminal-migration-ui-test-deletion.md) — Removing the old-terminal migration UI tests matches the retired feature contract. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-hidden-grid-test-no-measurement-two-column-rationale.md`](trailing-hidden-grid-test-no-measurement-two-column-rationale.md) — Grid geometry test gives a false two-column failure rationale. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-tmux-only-sgr-adapter-deletion-frozen-snapshot-compatibility-concern.md`](trailing-tmux-only-sgr-adapter-deletion-frozen-snapshot-compatibility-concern.md) — Frozen snapshot compatibility concern remains source-refuted, pending independent check. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-events-test-cross-realm-array-example-reference.md`](trailing-events-test-cross-realm-array-example-reference.md) — Cross-realm test comment points to an example that does not exist. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-primary-write-notice-filter-drag-guidance.md`](trailing-primary-write-notice-filter-drag-guidance.md) — Primary-selection writes cannot suppress drag-copy guidance (predates range). Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-terminal-grid-lacks-sgr53-overline-after-old-route-retirement.md`](trailing-terminal-grid-lacks-sgr53-overline-after-old-route-retirement.md) — Retiring the byte renderer removes overline support from served terminals. Abbreviated collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
+- [`trailing-retired-container-delete-treats-podman-lookup-none-as-absence.md`](trailing-retired-container-delete-treats-podman-lookup-none-as-absence.md)
+  — Unverified after investigation: lookup failure exceeds the literal missing-Podman exception. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-wake-budget-inflight-busy-resume.md`](trailing-wake-budget-inflight-busy-resume.md) — Wake contract omits
+  the longer in-flight Resume wait. Abbreviated collection; confidence, proposed dismissals and unresolved consequences
+  are preserved in the entry.
+
+- [`trailing-testing-overview-falsely-generalizes-built-farhelm-host-program.md`](trailing-testing-overview-falsely-generalizes-built-farhelm-host-program.md)
+  — Testing overview names the wrong executable for supervisor unit-test hosts. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-environment-agent-launch-specs-disagree-receipt-relative-versus-post-allow-timeout.md`](trailing-environment-agent-launch-specs-disagree-receipt-relative-versus-post-allow-timeout.md)
+  — environment launch contracts describe different effective waits. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-suspended-source-clone-rules-distinguish-agent-authority-from-gui-prefill.md`](trailing-suspended-source-clone-rules-distinguish-agent-authority-from-gui-prefill.md)
+  — suspended-source Clone rules distinguish agent authority from GUI prefill. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-removed-terminal-selector-stale-migration-spec-condition.md`](trailing-removed-terminal-selector-stale-migration-spec-condition.md)
+  — Remove the obsolete condition from the migration contract. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-old-terminal-startup-best-effort-duplicate-agent-residual.md`](trailing-old-terminal-startup-best-effort-duplicate-agent-residual.md)
+  — Fresh Restart refutes ordinary duplicate-agent inference, not misleading stop consent. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-spec-terminal-switch-point-names-deleted-terminal-type.md`](trailing-spec-terminal-switch-point-names-deleted-terminal-type.md)
+  — Rewritten terminal contract points to the deleted Terminal type. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-old-terminal-create-refusal-qualified-rollback-wording.md`](trailing-old-terminal-create-refusal-qualified-rollback-wording.md)
+  — Rollback phrase references a policy that already retains allocated checkouts. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-launch-excerpt-inherited-history-provenance.md`](trailing-launch-excerpt-inherited-history-provenance.md) —
+  Pre-existing excerpt contamination; in-range implementation spec repeats a false blank-screen proof. Abbreviated
+  collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-spec-shim-container-execution-branch-retired.md`](trailing-spec-shim-container-execution-branch-retired.md)
+  — Launch contract still describes the retired shim container branch. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-shift-enter-unconditional-pty-write-guarantee.md`](trailing-shift-enter-unconditional-pty-write-guarantee.md)
+  — Qualify the grid Shift+Enter single-write guarantee. Abbreviated collection; confidence, proposed dismissals and
+  unresolved consequences are preserved in the entry.
+
+- [`trailing-grid-input-font-inline-owner-rationale.md`](trailing-grid-input-font-inline-owner-rationale.md) — The new
+  font-rule explanation assigns the inline font to the wrong element. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-uninstall-accepted-outlived-private-tmux-residual.md`](trailing-uninstall-accepted-outlived-private-tmux-residual.md)
+  — Uninstall can leave an earlier private tmux server running. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-spec-report-discard-on-terminal-disappearance.md`](trailing-spec-report-discard-on-terminal-disappearance.md)
+  — Report-discard contract does not match gone host terminals. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-spec-automatic-tab-reap-omits-failed-close-retry.md`](trailing-spec-automatic-tab-reap-omits-failed-close-retry.md)
+  — Automatic-tab cleanup contract omits failed-close retries. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-delete-recorded-tab-scope-kept-derived-under-unusable-manager.md`](trailing-delete-recorded-tab-scope-kept-derived-under-unusable-manager.md)
+  — Scoped-tab Delete policy gap predates the whole review range. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-http-golden-defaulted-trash-epoch.md`](trailing-http-golden-defaulted-trash-epoch.md) — The new Trash epoch
+  golden fixture cannot detect a defaulted decoder regression. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-http-golden-omits-populated-environment.md`](trailing-http-golden-omits-populated-environment.md) — The new
+  environment host JSON is omitted from every golden contract row. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-agent-launch-placement-docs-obsolete-caller-contract.md`](trailing-agent-launch-placement-docs-obsolete-caller-contract.md)
+  — Placement documentation misstates ordinary-create inputs and links a missing helper. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-agent-environment-guide-key-and-wait-exceptions.md`](trailing-agent-environment-guide-key-and-wait-exceptions.md)
+  — Agent guide explicitly qualifies key and wait advice for environment launches. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-supplied-timing-comment-defect-is-source-confirmed-and-already-owned-by-g020-l7.md`](trailing-supplied-timing-comment-defect-is-source-confirmed-and-already-owned-by-g020-l7.md)
+  — Supplied timing-comment defect is source-confirmed and already owned by g020/l7. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-environment-test-responders-heartbeat-control-decode.md`](trailing-environment-test-responders-heartbeat-control-decode.md)
+  — Environment test responders panic on valid heartbeat frames. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-intermediate-agent-delete-calls-podman-container-sandbox.md`](trailing-intermediate-agent-delete-calls-podman-container-sandbox.md)
+  — Intermediate agent refusal calls a Podman container a sandbox. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-shared-rollback-allowance-does-not-remove-the-refusal-tests-observable-boundaries.md`](trailing-shared-rollback-allowance-does-not-remove-the-refusal-tests-observable-boundaries.md)
+  — Shared rollback allowance does not remove the refusal tests observable boundaries. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-recipe-template-management-refusal-denies-supported-agent-launch-use.md`](trailing-recipe-template-management-refusal-denies-supported-agent-launch-use.md)
+  — Recipe-template refusals still claim agent use is GUI-only. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-generic-lost-reply-remedy-does-not-prescribe-an-unsupported-environment-retry-key.md`](trailing-generic-lost-reply-remedy-does-not-prescribe-an-unsupported-environment-retry-key.md)
+  — Generic lost-reply remedy does not prescribe an unsupported environment retry key. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-agent-environment-missing-local-ssh-key-preflight.md`](trailing-agent-environment-missing-local-ssh-key-preflight.md)
+  — Sandbox agent launches ask for approval before checking the local SSH key. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-environment-history-admits-agent-origin.md`](trailing-environment-history-admits-agent-origin.md) — Agent
+  environment launches enter GUI place-default and recent-history bookkeeping. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-environment-wait-comment-promises-a-relay-ordering-the-budgets-do-not-guarantee.md`](trailing-environment-wait-comment-promises-a-relay-ordering-the-budgets-do-not-guarantee.md)
+  — Environment wait comment promises a relay ordering the budgets do not guarantee. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-environment-create-result-drops-operation-claim-remints-current.md`](trailing-environment-create-result-drops-operation-claim-remints-current.md)
+  — Environment create replies can mark an earlier connection result current. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-module-overview-does-not-independently-require-every-clone-to-name-a-host.md`](trailing-module-overview-does-not-independently-require-every-clone-to-name-a-host.md)
+  — Module overview does not independently require every clone to name a host. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-nonfinal-environment-delete-cache-survivor-oracle.md`](trailing-nonfinal-environment-delete-cache-survivor-oracle.md)
+  — Non-final Delete test accepts clearing every cached session. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-sealed-delete-comment-hold-versus-seal-record.md`](trailing-sealed-delete-comment-hold-versus-seal-record.md)
+  — Deletion test comment wrongly forbids releasing the failed host's connection hold. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-stopped-idle-local-arc-blocks-direct-manager-drop.md`](trailing-stopped-idle-local-arc-blocks-direct-manager-drop.md)
+  — Stopped actors retain strong manager references across idle waits. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-shared-suspended-refusal-retains-tensorlake-noun.md`](trailing-shared-suspended-refusal-retains-tensorlake-noun.md)
+  — Paused-container refusals incorrectly identify a Tensorlake sandbox. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-create-history-current-claim-comment-contradiction.md`](trailing-create-history-current-claim-comment-contradiction.md)
+  — Create routing comment promises history can bypass connection-claim checks. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-stopped-episode-test-does-not-witness-settled-unavailable-cycle.md`](trailing-stopped-episode-test-does-not-witness-settled-unavailable-cycle.md)
+  — Unanswered-status regression test can skip the settled failure boundary. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-host-phase-vocabulary-test-omits-stopped.md`](trailing-host-phase-vocabulary-test-omits-stopped.md) —
+  Phase-consistency test omits new Stopped and Deleting states despite its every-variant promise. Abbreviated
+  collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-shared-suspended-view-doc-retains-tensorlake-only-contract.md`](trailing-shared-suspended-view-doc-retains-tensorlake-only-contract.md)
+  — Suspended view documentation retains the known Tensorlake-only vocabulary. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-dial-documentation-incorrectly-exempts-podman-from-the-provider-status-gate.md`](trailing-dial-documentation-incorrectly-exempts-podman-from-the-provider-status-gate.md)
+  — Dial documentation incorrectly exempts Podman from the provider status gate. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-ordinary-tensorlake-add-keeps-source-mutex-through-ssh-readiness.md`](trailing-ordinary-tensorlake-add-keeps-source-mutex-through-ssh-readiness.md)
+  — Ordinary Add retains source exclusion during post-Running SSH readiness. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-wake-browser-stale-suspension-oracle-unattributed-host-read-count.md`](trailing-wake-browser-stale-suspension-oracle-unattributed-host-read-count.md)
+  — The stale-suspension browser test counts unrelated host reads as its readiness oracle. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-browser-native-arrival-latch-bypasses-owned-finally.md`](trailing-browser-native-arrival-latch-bypasses-owned-finally.md)
+  — The wake scenarios' unbounded arrival wait bypasses owned cleanup on timeout. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-ordinary-host-remove-bypasses-sealed-attempt-outcome.md`](trailing-ordinary-host-remove-bypasses-sealed-attempt-outcome.md)
+  — Whole-host Delete does not record sealed deletion failures. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-deleting-extends-the-known-incomplete-backend-phase-test-matrix.md`](trailing-deleting-extends-the-known-incomplete-backend-phase-test-matrix.md)
+  — Deleting extends the known incomplete backend phase-test matrix. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-normal-removal-parks-or-cancels-the-listing-before-clearing-its-seal.md`](trailing-normal-removal-parks-or-cancels-the-listing-before-clearing-its-seal.md)
+  — Normal removal parks or cancels the listing before clearing its seal. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-seal-finisher-stale-pending-snapshot-admission.md`](trailing-seal-finisher-stale-pending-snapshot-admission.md)
+  — Finisher can automatically retry a destruction that already failed. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-delete-freshness-test-docstring-connected-versus-suspended.md`](trailing-delete-freshness-test-docstring-connected-versus-suspended.md)
+  — Delete freshness test describes the opposite retained host state. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-bulk-delete-test-row-disappearance-comment-false-oracle.md`](trailing-bulk-delete-test-row-disappearance-comment-false-oracle.md)
+  — Bulk Delete test comment promises a reply-completion oracle it does not have. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-browser-cleanup-drains-real-api-route-before-request-client-lifetime.md`](trailing-browser-cleanup-drains-real-api-route-before-request-client-lifetime.md)
+  — Draining mocked Deletes can outlive the client needed to clean independent sessions. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-cancelled-trash-observation-test-misses-fleet-publication.md`](trailing-cancelled-trash-observation-test-misses-fleet-publication.md)
+  — The cancellation test does not assert its committed fleet wake. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-ui-host-lifecycle-provider-and-start-wording.md`](trailing-ui-host-lifecycle-provider-and-start-wording.md)
+  — Container lifecycle wording bypasses provider-aware UI text. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-ui-deleting-environment-retains-running-reconnect-promise.md`](trailing-ui-deleting-environment-retains-running-reconnect-promise.md)
+  — Deleting environment can promise its cached session is still running. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-ui-stopped-container-waiting-place-offers-suspend.md`](trailing-ui-stopped-container-waiting-place-offers-suspend.md)
+  — Stopped container offers Suspend when its container host is unavailable. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-ui-host-phase-fixture-omits-stopped-deleting.md`](trailing-ui-host-phase-fixture-omits-stopped-deleting.md)
+  — UI phase-wide regression guards omit the new host phases. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-ui-host-flow-omits-shared-environment-details.md`](trailing-ui-host-flow-omits-shared-environment-details.md)
+  — Unverified after investigation: shared environment detail changes bypass causal anchor projection. Abbreviated
+  collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-ui-remove-label-docstring-still-sandbox-only.md`](trailing-ui-remove-label-docstring-still-sandbox-only.md)
+  — Removal-label documentation still promises sandbox wording for containers. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-stopped-waiting-row-menu-order-disagrees-with-render.md`](trailing-stopped-waiting-row-menu-order-disagrees-with-render.md)
+  — A stopped-waiting container row renders an item omitted from keyboard navigation. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-retired-only-bulk-delete-cancel-has-no-focus-target.md`](trailing-retired-only-bulk-delete-cancel-has-no-focus-target.md)
+  — Retired-only bulk Delete cancellation has no rendered focus return. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-retired-delete-only-menu-invalidates-unconditional-rename-rationale.md`](trailing-retired-delete-only-menu-invalidates-unconditional-rename-rationale.md)
+  — Delete-only retirement leaves the separator explanation claiming every row has Rename. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-sidebar-retires-restart-success-before-mounted-observer.md`](trailing-sidebar-retires-restart-success-before-mounted-observer.md)
+  — Sidebar retirement can consume a restart result before the open view observes it. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-warned-delete-handoff-clears-error-before-view-admission.md`](trailing-warned-delete-handoff-clears-error-before-view-admission.md)
+  — A deferred whole-environment Delete offer can lose its failure explanation. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-bulk-cleanup-captures-targets-after-deleting-exclusion.md`](trailing-bulk-cleanup-captures-targets-after-deleting-exclusion.md)
+  — A confirmed bulk target excluded as Deleting keeps its old mark. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-deleting-environment-row-rename-omits-phase-guard.md`](trailing-deleting-environment-row-rename-omits-phase-guard.md)
+  — Rename stays enabled for retained sessions while their environment is being deleted. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-late-environment-delete-count-republished-after-host-absence.md`](trailing-late-environment-delete-count-republished-after-host-absence.md)
+  — A delayed Delete result can leave a destroyed environment described as staying. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-the-nothing-decided-terminology-refutation-does-not-cover-the-stronger-no-change-comment.md`](trailing-the-nothing-decided-terminology-refutation-does-not-cover-the-stronger-no-change-comment.md)
+  — The nothing-decided terminology refutation does not cover the stronger no-change comment. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-environment-delete-expanded-error-false-no-change-comment.md`](trailing-environment-delete-expanded-error-false-no-change-comment.md)
+  — Expanded Delete error handling retains a false no-change explanation. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-settings-container-tensorlake-order-contract.md`](trailing-settings-container-tensorlake-order-contract.md)
+  — Settings regression test enforces the wrong section order. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-retired-container-positive-ui-test-removal.md`](trailing-retired-container-positive-ui-test-removal.md) —
+  Legacy-container replacement and owned-template cleanup preserve their contracts. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-live-recipe-settings-need-an-independent-contract-based-drop-check.md`](trailing-live-recipe-settings-need-an-independent-contract-based-drop-check.md)
+  — Live recipe settings need an independent contract-based drop check. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-environment-wrapper-direct-allow-without-separate-prefix-gate.md`](trailing-environment-wrapper-direct-allow-without-separate-prefix-gate.md)
+  — Environment wrapper bytes are shown and the separate prefix gate does not apply. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-cleanup-status-masks-body-assertion.md`](trailing-cleanup-status-masks-body-assertion.md) — Retirement test
+  can replace its body assertion with a cleanup error. Abbreviated collection; confidence, proposed dismissals and
+  unresolved consequences are preserved in the entry.
+
+- [`trailing-retired-supervisor-tmux-pin.md`](trailing-retired-supervisor-tmux-pin.md) — Removing the unit's tmux pin
+  matches the retired runtime contract. Abbreviated collection; confidence, proposed dismissals and unresolved
+  consequences are preserved in the entry.
+
+- [`trailing-stopped-provider-state-zero-refusal-ticket.md`](trailing-stopped-provider-state-zero-refusal-ticket.md) —
+  Stopped-environment attach diagnosis is excluded by its own freshness gate. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-sealed-setup-test-overlay-hides-hold-and-run-leak.md`](trailing-sealed-setup-test-overlay-hides-hold-and-run-leak.md)
+  — Sealed-setup regression test cannot observe its claimed no-hold boundary. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-agent-file-size-only-read-consistency-docstring.md`](trailing-agent-file-size-only-read-consistency-docstring.md)
+  — Sensitive-read consistency explanation and same-size limitation predate the full pinned range. Abbreviated
+  collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-ordinary-tensorlake-add-outer-source-lock-across-ssh-readiness.md`](trailing-ordinary-tensorlake-add-outer-source-lock-across-ssh-readiness.md)
+  — Ordinary Add holds recipe source exclusion while waiting for SSH. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-prepared-image-inherits-private-tmux-cleanup-exception.md`](trailing-prepared-image-inherits-private-tmux-cleanup-exception.md)
+  — Prepared-snapshot cleanup explicitly excludes bundled-tmux removal. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-provisioning-shared-environment-preparation-progress.md`](trailing-provisioning-shared-environment-preparation-progress.md)
+  — Environment preparation stays on Select the recipe source in launch progress. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-rest-admission-owns-registration-before-the-launch-task-is-spawned.md`](trailing-rest-admission-owns-registration-before-the-launch-task-is-spawned.md)
+  — REST admission owns registration before the launch task is spawned. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-intermediate-reach-test-comment-accurately-names-the-remaining-uninstall-consumer.md`](trailing-intermediate-reach-test-comment-accurately-names-the-remaining-uninstall-consumer.md)
+  — Intermediate reach-test comment accurately names the remaining uninstall consumer. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-provider-preparation-callbacks-await-insertion-before-reporting-phases.md`](trailing-provider-preparation-callbacks-await-insertion-before-reporting-phases.md)
+  — Provider preparation callbacks await insertion before reporting phases. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-provisioning-cleanup-test-misstates-pre-0-18-tmux-ownership.md`](trailing-provisioning-cleanup-test-misstates-pre-0-18-tmux-ownership.md)
+  — Cleanup test misstates legacy tmux ownership. Abbreviated collection; confidence, proposed dismissals and unresolved
+  consequences are preserved in the entry.
+
+- [`trailing-uninstall-previously-orphaned-legacy-private-tmux-survives.md`](trailing-uninstall-previously-orphaned-legacy-private-tmux-survives.md)
+  — Deleted retry test concerns only the accepted previously orphaned tmux server. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-ssh-provisioning-test-private-server-coverage-docstring.md`](trailing-ssh-provisioning-test-private-server-coverage-docstring.md)
+  — SSH integration test still claims private-tmux teardown coverage. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-environment-history-obsolete-claim-after-adoption.md`](trailing-environment-history-obsolete-claim-after-adoption.md)
+  — Origin-provenance input confirmed separately from replay authority. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-environment-history-deleted-place-id-reuse.md`](trailing-environment-history-deleted-place-id-reuse.md) —
+  Reusable place intent does not freeze a pending action's endpoint authority. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-clone-protocol-docs-omit-environment-hostless-contract.md`](trailing-clone-protocol-docs-omit-environment-hostless-contract.md)
+  — Clone protocol docs reject the omission required by environment clones. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-interrupted-doc-defines-only-reboot-attribution-after-retirement.md`](trailing-interrupted-doc-defines-only-reboot-attribution-after-retirement.md)
+  — Interruption documentation still claims boot-id change is its only detector. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-environment-provisioning-probe-omits-stdin-watchdog.md`](trailing-environment-provisioning-probe-omits-stdin-watchdog.md)
+  — Environment provisioning probes omit the required stdin deadline. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-podman-dial-kind-advances-before-process-marker.md`](trailing-podman-dial-kind-advances-before-process-marker.md)
+  — Container dial staging disables its process-exit diagnosis. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-atomic-install-failed-cleanup-clears-safe-session-limit-refusal.md`](trailing-atomic-install-failed-cleanup-clears-safe-session-limit-refusal.md)
+  — Failed install cleanup discards the safe session-limit diagnosis. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-uninstall-retains-already-orphaned-legacy-private-tmux-server.md`](trailing-uninstall-retains-already-orphaned-legacy-private-tmux-server.md)
+  — Legacy tmux server may survive uninstall; specification explicitly accepts it. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-podman-literal-image-user-argument-injection.md`](trailing-podman-literal-image-user-argument-injection.md)
+  — Literal input boundary refutation persists through the review tip. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-warning-repair-does-not-cover-implicit-user-base-deletion.md`](trailing-warning-repair-does-not-cover-implicit-user-base-deletion.md)
+  — Warning repair does not cover implicit user-base deletion. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-deletion-ownership-refutation-remains-separate-from-warning-repair.md`](trailing-deletion-ownership-refutation-remains-separate-from-warning-repair.md)
+  — Deletion ownership refutation remains separate from warning repair. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-shared-recipe-container-base-summary-raw-presentation.md`](trailing-shared-recipe-container-base-summary-raw-presentation.md)
+  — Recipe summaries render literal container-base formatting characters. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-tensorlake-add-host-inline-container-recipe-compatibility.md`](trailing-tensorlake-add-host-inline-container-recipe-compatibility.md)
+  — Inline container-recipe Save leaves Tensorlake Add host on an unusable choice. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-recipe-row-deep-clones-global-place-status-matrix.md`](trailing-recipe-row-deep-clones-global-place-status-matrix.md)
+  — Recipe list clones the complete status matrix for every row. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-podman-job-removal-after-last-fleet-invalidation.md`](trailing-podman-job-removal-after-last-fleet-invalidation.md)
+  — Container job completion lacks a final fleet invalidation. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-podman-account-observation-exec-guesses-root-home.md`](trailing-podman-account-observation-exec-guesses-root-home.md)
+  — Custom-image login lookup unnecessarily requires /root. Abbreviated collection; confidence, proposed dismissals and
+  unresolved consequences are preserved in the entry.
+
+- [`trailing-podman-ordinary-wal-tail-loss-after-external-create.md`](trailing-podman-ordinary-wal-tail-loss-after-external-create.md)
+  — Power loss can lose a binding after external creation under accepted WAL durability. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-podman-probe-dedup-test-asserts-before-spawned-task.md`](trailing-podman-probe-dedup-test-asserts-before-spawned-task.md)
+  — Probe deduplication test checks its counter before a duplicate task can run. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-podman-proxy-exact-inheritance-test-shared-serializer-oracle.md`](trailing-podman-proxy-exact-inheritance-test-shared-serializer-oracle.md)
+  — Proxy test's shared serializer cannot prove its exact-inheritance claim. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-podman-delete-lifecycle-test-equal-membership-oracle.md`](trailing-podman-delete-lifecycle-test-equal-membership-oracle.md)
+  — Deletion test does not distinguish the membership authority it claims. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-podman-tests-nested-build-module-registration.md`](trailing-podman-tests-nested-build-module-registration.md)
+  — Nested build module registers the Podman tests and validates their namespace. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-podman-test-payload-producer-consumer-tmux-mismatch.md`](trailing-podman-test-payload-producer-consumer-tmux-mismatch.md)
+  — Real-container prerequisites require a payload the producer no longer stages. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-podman-lost-session-create-test-misses-presend-store-witness.md`](trailing-podman-lost-session-create-test-misses-presend-store-witness.md)
+  — Lost-create test does not observe its promised pre-send durability boundary. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-delayed-probe-test-unfenced-initial-feed-consumer.md`](trailing-delayed-probe-test-unfenced-initial-feed-consumer.md)
+  — Fence the initial feed greeting before measuring silent probe invalidation. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-podman-acceptance-fallback-misses-inflight-ssh-bootstrap-storage.md`](trailing-podman-acceptance-fallback-misses-inflight-ssh-bootstrap-storage.md)
+  — Source-verified conditional SSH bootstrap cleanup gap. Abbreviated collection; confidence, proposed dismissals and
+  unresolved consequences are preserved in the entry.
+
+- [`trailing-real-container-agent-host-list-oracle-omits-extra-ssh-hosts.md`](trailing-real-container-agent-host-list-oracle-omits-extra-ssh-hosts.md)
+  — Real-container hosts-list test overstates its exact-membership oracle. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-selected-above-handoff-floor-legacy-target-missing-tmux-launch-advice.md`](trailing-selected-above-handoff-floor-legacy-target-missing-tmux-launch-advice.md)
+  — Older-target prerequisite omission has explicit competing installer policy. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-snapshot-preparation-skips-inherited-private-tmux-removal.md`](trailing-snapshot-preparation-skips-inherited-private-tmux-removal.md)
+  — Snapshot tmux retention follows an explicit preparation exception. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-missing-release-entry-test-count-does-not-prove-exact-variant-inventory.md`](trailing-missing-release-entry-test-count-does-not-prove-exact-variant-inventory.md)
+  — Missing-entry fixture premise overstates its inventory check. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-retired-session-tcp-relay-cache-only-admission.md`](trailing-retired-session-tcp-relay-cache-only-admission.md)
+  — Bounded refutation of ordinary retired-session TCP cache bypass. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-detach-timeout-test-confuses-cooperative-yield-with-writer-capacity.md`](trailing-detach-timeout-test-confuses-cooperative-yield-with-writer-capacity.md)
+  — The detach timeout test yields before establishing writer backpressure. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-ui-environment-place-reader-discards-probe-refresh-intent.md`](trailing-ui-environment-place-reader-discards-probe-refresh-intent.md)
+  — Refresh can be silently reduced to a cached read. Abbreviated collection; confidence, proposed dismissals and
+  unresolved consequences are preserved in the entry.
+
+- [`trailing-ui-agent-environment-launch-last-session-consequence.md`](trailing-ui-agent-environment-launch-last-session-consequence.md)
+  — Last-session wording matches the later revision's changed deletion contract. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-podman-place-typed-ssh-refusal-reasons-missing-final-ui-escaping.md`](trailing-podman-place-typed-ssh-refusal-reasons-missing-final-ui-escaping.md)
+  — Typed SSH capacity reasons bypass final display escaping. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-ui-shared-sandbox-recipe-choices-omit-resource-sizes.md`](trailing-ui-shared-sandbox-recipe-choices-omit-resource-sizes.md)
+  — Shared sandbox recipe picker omits CPU and memory sizes. Abbreviated collection; confidence, proposed dismissals and
+  unresolved consequences are preserved in the entry.
+
+- [`trailing-ui-podman-start-help-overpromises-interrupted-and-restart.md`](trailing-ui-podman-start-help-overpromises-interrupted-and-restart.md)
+  — Container-start explanation promises interrupted status for every session. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-ui-container-leftover-question-missing-answer-focus-handoff.md`](trailing-ui-container-leftover-question-missing-answer-focus-handoff.md)
+  — Container-leftover Delete opens its question without focusing an answer. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-ui-recipe-panel-move-leaves-old-key-location-and-module-map.md`](trailing-ui-recipe-panel-move-leaves-old-key-location-and-module-map.md)
+  — Moved Recipes panel retains guidance for the old Tensorlake layout. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-podman-unregistered-explicit-cleanup-lacks-retained-operation-reason.md`](trailing-podman-unregistered-explicit-cleanup-lacks-retained-operation-reason.md)
+  — Closing Containers loses an unregistered cleanup failure's reason. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-ui-legacy-container-editor-specified-retirement.md`](trailing-ui-legacy-container-editor-specified-retirement.md)
+  — Removing the legacy container editor is specified retirement. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-ui-retained-whole-environment-question-stale-unreachable-rationale.md`](trailing-ui-retained-whole-environment-question-stale-unreachable-rationale.md)
+  — Retained whole-environment warning can misstate current reachability. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-grid-only-removal-leaves-hidden-pane-fitaddon-rationale-stale.md`](trailing-grid-only-removal-leaves-hidden-pane-fitaddon-rationale-stale.md)
+  — Renderer removal leaves hidden-pane rationale pointing at removed FitAddon. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-file-links-failed-grid-mount-fixture-getter-mismatch.md`](trailing-file-links-failed-grid-mount-fixture-getter-mismatch.md)
+  — Rewritten failed-mount test misses the grid hosting failure. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-environment-pending-launch-label-resolves-with-empty-places.md`](trailing-environment-pending-launch-label-resolves-with-empty-places.md)
+  — Container launch progress loses the selected host name. Abbreviated collection; confidence, proposed dismissals and
+  unresolved consequences are preserved in the entry.
+
+- [`trailing-container-place-footer-omits-peer-format-escaping.md`](trailing-container-place-footer-omits-peer-format-escaping.md)
+  — Container placement footer renders host formatting characters verbatim. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-agent-clone-wire-docs-unconditional-host-requirement.md`](trailing-agent-clone-wire-docs-unconditional-host-requirement.md)
+  — Clone wire documentation still forbids the new environment clone form. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-agent-create-cwd-help-omits-recipe-home-default.md`](trailing-agent-create-cwd-help-omits-recipe-home-default.md)
+  — Create folder help omits the new recipe launch default. Abbreviated collection; confidence, proposed dismissals and
+  unresolved consequences are preserved in the entry.
+
+- [`trailing-replay-reveal-helper-retired-async-write-rationale.md`](trailing-replay-reveal-helper-retired-async-write-rationale.md)
+  — Reveal-wait documentation describes a retired asynchronous write. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-retired-ci-tmux-python-ignore-removed-without-residue-cleanup.md`](trailing-retired-ci-tmux-python-ignore-removed-without-residue-cleanup.md)
+  — Unignoring an older non-self-ignored venv can add generated files to jj changes. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-mac-devbuild-header-retains-removed-local-tmux-requirement.md`](trailing-mac-devbuild-header-retains-removed-local-tmux-requirement.md)
+  — Intermediate Mac devbuild requirements still demand the removed tmux prerequisite. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-desktop-smoke-direct-websocket-comment-overclaims-page-delivery.md`](trailing-desktop-smoke-direct-websocket-comment-overclaims-page-delivery.md)
+  — Direct WebSocket smoke helper overstates its evidence of page delivery. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-podman-payload-cargo-artifact-identity-not-held-through-copy.md`](trailing-podman-payload-cargo-artifact-identity-not-held-through-copy.md)
+  — Shared Cargo output can change before same-source payload packaging. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-deflake-current-driver-downgrades-historical-recorder-required-tmux-policy.md`](trailing-deflake-current-driver-downgrades-historical-recorder-required-tmux-policy.md)
+  — Historical-base deflake runs lose their selected revision's required tmux check. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-legacy-container-delete-conflates-podman-resolution-failure-with-absence.md`](trailing-legacy-container-delete-conflates-podman-resolution-failure-with-absence.md)
+  — unverified after investigation: PATH lookup failure versus Podman absence. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-launch-comment-terminal-host-inherits-tab-marker.md`](trailing-launch-comment-terminal-host-inherits-tab-marker.md)
+  — marker-inheritance documentation wrongly puts tab markers on terminal hosts. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-failed-host-relaunch-warn-scope-error-definitive-rollback.md`](trailing-failed-host-relaunch-warn-scope-error-definitive-rollback.md)
+  — failed-relaunch warning policy and restoration route predate the full range. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-launch-excerpt-full-row-allocation-before-500-byte-trim.md`](trailing-launch-excerpt-full-row-allocation-before-500-byte-trim.md)
+  — Launch-error reduction now allocates full rows before enforcing its tiny result limit. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-deleted-integrated-unmarked-tab-shell-delete-oracle.md`](trailing-deleted-integrated-unmarked-tab-shell-delete-oracle.md)
+  — Unmarked tab-shell cleanup loses its integrated regression oracle. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-checkout-status-borrower-reload-keeps-origin-runtime.md`](trailing-checkout-status-borrower-reload-keeps-origin-runtime.md)
+  — borrower reload fixture retains a competing origin runtime. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-legacy-tmux-retry-refusal-private-launch-artifact-retention.md`](trailing-legacy-tmux-retry-refusal-private-launch-artifact-retention.md)
+  — Tmux-retry refusal defers cleanup of credential-bearing launch input. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-tab-settle-gate-bare-link-out-of-scope.md`](trailing-tab-settle-gate-bare-link-out-of-scope.md) —
+  TabSettleGate retains an unresolved documentation link through the pinned tip. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-restart-definitive-comment-promises-no-external-effects.md`](trailing-restart-definitive-comment-promises-no-external-effects.md)
+  — Definitive-Restart documentation overpromises absence of external effects. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-restart-reply-stale-tab-rediscovery-comment.md`](trailing-restart-reply-stale-tab-rediscovery-comment.md) —
+  Restart reply comment promises a removed tab rediscovery path. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-legacy-retry-refusal-skips-launch-artifact-cleanup.md`](trailing-legacy-retry-refusal-skips-launch-artifact-cleanup.md)
+  — Legacy retry refusal leaves old launch artifacts until later cleanup; proposed specification-based drop. Abbreviated
+  collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-lone-surviving-old-tab-loses-its-guard-and-stop-regression-oracles.md`](trailing-lone-surviving-old-tab-loses-its-guard-and-stop-regression-oracles.md)
+  — lone surviving old tab loses its guard and Stop regression oracles. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-failed-spec-test-accepts-an-attempted-host-start-as-never-started.md`](trailing-failed-spec-test-accepts-an-attempted-host-start-as-never-started.md)
+  — failed-spec test accepts an attempted host start as never started. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-failed-restart-loses-the-live-tab-preservation-regression-oracle.md`](trailing-failed-restart-loses-the-live-tab-preservation-regression-oracle.md)
+  — failed Restart loses the live-tab preservation regression oracle. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-deleted-ambiguous-create-test-loses-published-handle-and-pending-intent-oracles.md`](trailing-deleted-ambiguous-create-test-loses-published-handle-and-pending-intent-oracles.md)
+  — deleted ambiguous-create test loses published-handle and pending-intent oracles. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-held-start-documentation-retains-the-retired-uncancelled-tmux-child-lifetime.md`](trailing-held-start-documentation-retains-the-retired-uncancelled-tmux-child-lifetime.md)
+  — held-start documentation retains the retired uncancelled-tmux child lifetime. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-deleted-startup-error-artifact-readonly-oracle.md`](trailing-deleted-startup-error-artifact-readonly-oracle.md)
+  — Deleted reload test loses read-only Error-artifact ownership oracle. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-host-scan-lock-map-forbids-required-host-io.md`](trailing-host-scan-lock-map-forbids-required-host-io.md) —
+  Host-scan lock map forbids the terminal calls its fence must span. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-sentinel-reload-comment-denies-recorded-host-delete-fallback.md`](trailing-sentinel-reload-comment-denies-recorded-host-delete-fallback.md)
+  — Reload comment incorrectly makes the runtime handle Delete's only host ownership record. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-tab-scope-prefix-stale-two-terminal-kinds-docstring.md`](trailing-tab-scope-prefix-stale-two-terminal-kinds-docstring.md)
+  — Tab scope-helper documentation retains a removed two-kind responsibility. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-omp-capture-survives-owner-exit-test-loses-exit-barrier.md`](trailing-omp-capture-survives-owner-exit-test-loses-exit-barrier.md)
+  — Host-backed teardown removes the owner-exit test's exit barrier. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-prompt-recorder-default-off-without-catchup-witness.md`](trailing-prompt-recorder-default-off-without-catchup-witness.md)
+  — Proposed source-based exclusion: examined raw paste-off fixture produces one initial output record. Abbreviated
+  collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-terminal-less-host-orphan-doc-asserts-no-survivors.md`](trailing-terminal-less-host-orphan-doc-asserts-no-survivors.md)
+  — Terminal-less test documentation treats host loss as proof no program survives. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-hold-mark-negative-oracle-retained-in-host-terminal-tests.md`](trailing-hold-mark-negative-oracle-retained-in-host-terminal-tests.md)
+  — Host-terminal test module preserves the missing/stale hold-mark oracle. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-late-activity-test-doc-retains-removed-screen-read-await.md`](trailing-late-activity-test-doc-retains-removed-screen-read-await.md)
+  — Late-activity test documents a screen-read await removed by the host migration. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-migration-missing-terminal-lifecycle-docs.md`](trailing-migration-missing-terminal-lifecycle-docs.md) —
+  Migration commit has stale lifecycle docs, corrected by later removal. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-supervisor-clone-doorway-testdoc-universal-host-requirement.md`](trailing-supervisor-clone-doorway-testdoc-universal-host-requirement.md)
+  — Creating-verb test documentation still requires a host for every clone. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-delete-directory-admission-test-observes-only-earlier-agent-fence.md`](trailing-delete-directory-admission-test-observes-only-earlier-agent-fence.md)
+  — Directory-admission test observes the earlier fence, not the blocked directory wait. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-list-reply-doc-prescribes-nonexistent-sentinel-read-failure.md`](trailing-list-reply-doc-prescribes-nonexistent-sentinel-read-failure.md)
+  — Listing error comments falsely claim unreadable launch sentinels fail the request. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-pre-range-grid-first-input-queue-acceptance-wording.md`](trailing-pre-range-grid-first-input-queue-acceptance-wording.md)
+  — Direct grid input call preserves the prior delivery contract. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-deleted-replay-chunk-leaves-connection-doc-reference.md`](trailing-deleted-replay-chunk-leaves-connection-doc-reference.md)
+  — Replay removal leaves a dangling writer-queue documentation link. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-stop-comment-falsely-bans-retaining-original-final-screen.md`](trailing-stop-comment-falsely-bans-retaining-original-final-screen.md)
+  — Stop comment incorrectly says full-screen final frames are never retained. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-busy-host-list-limit-negative-oracle-never-reads-client-output.md`](trailing-busy-host-list-limit-negative-oracle-never-reads-client-output.md)
+  — List-limit test checks an undrained reply cache. Abbreviated collection; confidence, proposed dismissals and
+  unresolved consequences are preserved in the entry.
+
+- [`trailing-request-conformance-target-testhost-owner-dropped-at-preparation-return.md`](trailing-request-conformance-target-testhost-owner-dropped-at-preparation-return.md)
+  — Keep the target host alive through conformance observation. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-status-documentation-probe-versus-processed-exit-evidence.md`](trailing-status-documentation-probe-versus-processed-exit-evidence.md)
+  — Status documentation conflates process liveness with processed exit evidence. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-retired-tmux-periodic-warning-contract.md`](trailing-retired-tmux-periodic-warning-contract.md) —
+  Old-terminal warning tests are obsolete under the migration contract. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-test-one-shot-sample-before-host-catch-up.md`](trailing-test-one-shot-sample-before-host-catch-up.md) —
+  Persistence test can skip an uncaught-up host. Abbreviated collection; confidence, proposed dismissals and unresolved
+  consequences are preserved in the entry.
+
+- [`trailing-sampler-docs-promise-deleted-capture-failure-reset.md`](trailing-sampler-docs-promise-deleted-capture-failure-reset.md)
+  — Sampler field documentation still promises the deleted capture-failure reset. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-ordinary-path-provider-test-awaits-synchronous-oracle.md`](trailing-ordinary-path-provider-test-awaits-synchronous-oracle.md)
+  — Synchronous-recognition test only asserts eventual callback output. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-terminal-files-cursor-teardown-comment-misattributes-global-setter-to-grid.md`](trailing-terminal-files-cursor-teardown-comment-misattributes-global-setter-to-grid.md)
+  — Cursor teardown comment attributes retired accessor behavior to the grid. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-retired-container-positive-path-test-removal.md`](trailing-retired-container-positive-path-test-removal.md)
+  — Retired container isolation tests were deliberately removed. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-legacy-container-delete-existing-object-removal-oracle-lost.md`](trailing-legacy-container-delete-existing-object-removal-oracle-lost.md)
+  — Legacy Delete loses its existing-container removal oracle. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-upload-ack-priority-regression-oracle-removed.md`](trailing-upload-ack-priority-regression-oracle-removed.md)
+  — Upload credit priority loses its end-to-end regression check. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-refused-delete-live-upload-continuation-oracle-removed.md`](trailing-refused-delete-live-upload-continuation-oracle-removed.md)
+  — Refused Delete loses its in-flight upload preservation oracle. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-deleted-legacy-deep-replay-tail-oracle.md`](trailing-deleted-legacy-deep-replay-tail-oracle.md) — Removing
+  the replay suite loses the legacy replay-tail oracle. Abbreviated collection; confidence, proposed dismissals and
+  unresolved consequences are preserved in the entry.
+
+- [`trailing-deleted-signal-legacy-two-client-shutdown-oracle.md`](trailing-deleted-signal-legacy-two-client-shutdown-oracle.md)
+  — Stop-test migration removes the signal-to-legacy-client teardown oracle. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-deleted-raw-pty-cursor-control-sequence-oracle.md`](trailing-deleted-raw-pty-cursor-control-sequence-oracle.md)
+  — The deleted raw-input test leaves cursor/control-sequence delivery without its end-to-end oracle. Abbreviated
+  collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-removed-live-alternate-screen-reattach-oracle.md`](trailing-removed-live-alternate-screen-reattach-oracle.md)
+  — The live alternate-screen reattach oracle was deleted without a host replacement. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-removed-serving-legacy-binary-final-output-oracle.md`](trailing-removed-serving-legacy-binary-final-output-oracle.md)
+  — Deleting the immediate-exit test loses the real-ticker legacy final-output oracle. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-removed-completed-keyed-create-reboot-replay-oracle.md`](trailing-removed-completed-keyed-create-reboot-replay-oracle.md)
+  — Deleting the kind test also removes the completed-create reboot retry oracle. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-stopped-altscreen-test-comment-claims-inactive-buffer-erasure.md`](trailing-stopped-altscreen-test-comment-claims-inactive-buffer-erasure.md)
+  — Correct the stopped alternate-screen test's emulator-retention explanation. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-old-server-guard-loses-directory-in-consumed-restart.md`](trailing-old-server-guard-loses-directory-in-consumed-restart.md)
+  — Restart failure deletes the tmux socket before the explicit server guard runs. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-flood-fixture-false-child-exit-terminal-lifetime-rationale.md`](trailing-flood-fixture-false-child-exit-terminal-lifetime-rationale.md)
+  — Flood fixture docs incorrectly say program exit ends its terminal. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-rust-worker-trims-explicit-payload-directory.md`](trailing-rust-worker-trims-explicit-payload-directory.md)
+  — Archive packer changes an accepted explicit payload directory. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-docs-stop-callout-overpromises-descendant-cleanup.md`](trailing-docs-stop-callout-overpromises-descendant-cleanup.md)
+  — Exclusive range base already contains the broad Stop claim and conflicting cleanup caveat. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-capture-terminaltext-stale-no-row-dom-rationale.md`](trailing-capture-terminaltext-stale-no-row-dom-rationale.md)
+  — Update the terminal target helper's obsolete no-row-DOM rationale. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-old-terminal-startup-filesystem-cleanup-outside-deadline.md`](trailing-old-terminal-startup-filesystem-cleanup-outside-deadline.md)
+  — Old-terminal file cleanup runs outside its startup deadline. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-migrated-seal-constraint-test-accepts-duplicate-metadata-key.md`](trailing-migrated-seal-constraint-test-accepts-duplicate-metadata-key.md)
+  — Migrated seal CHECK assertion accepts a duplicate-key failure. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-outcome-backfill-comment-falsely-promises-live-probe-after-legacy-retirement.md`](trailing-outcome-backfill-comment-falsely-promises-live-probe-after-legacy-retirement.md)
+  — Outcome-backfill comment promises live reconciliation that legacy rows no longer receive. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-647f022-old-terminal-process-compatibility-oracle-deletion.md`](trailing-647f022-old-terminal-process-compatibility-oracle-deletion.md)
+  — Old-terminal process wiring gap is historical after later source retirement. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-647f022-pre-reap-tab-live-only-attach-oracle-not-ported.md`](trailing-647f022-pre-reap-tab-live-only-attach-oracle-not-ported.md)
+  — Dead-but-unreaped tab refusal gap remains applicable to host tabs at tip. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-70bc66a-host-size-wait-comment-denies-public-status-size.md`](trailing-70bc66a-host-size-wait-comment-denies-public-status-size.md)
+  — Resize wait comment gives a false synchronization rationale. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-647f022-old-to-host-migration-integration-oracle-deletion.md`](trailing-647f022-old-to-host-migration-integration-oracle-deletion.md)
+  — Migration regression coverage was removed before its behavior retired. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-647f022-stale-connection-pause-oracle-restored-f560058.md`](trailing-647f022-stale-connection-pause-oracle-restored-f560058.md)
+  — Stale-owner pause coverage lost at 647f022 is restored at f560058. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-mixed-session-regression-coverage-disappears-before-legacy-serving-retires.md`](trailing-mixed-session-regression-coverage-disappears-before-legacy-serving-retires.md)
+  — Mixed-session regression coverage disappears before legacy serving retires. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-legacy-forced-pause-mode-restoration-oracles-disappear-before-legacy-serving-retires.md`](trailing-legacy-forced-pause-mode-restoration-oracles-disappear-before-legacy-serving-retires.md)
+  — Legacy forced-pause mode-restoration oracles disappear before legacy serving retires. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-legacy-stalled-viewer-rss-regression-check-is-removed-before-legacy-serving-retires.md`](trailing-legacy-stalled-viewer-rss-regression-check-is-removed-before-legacy-serving-retires.md)
+  — Legacy stalled-viewer RSS regression check is removed before legacy serving retires. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-647f0227-removes-supported-tmux-pending-cleanup-request-oracles.md`](trailing-647f0227-removes-supported-tmux-pending-cleanup-request-oracles.md)
+  — pending-cleanup integration oracles retire before tmux runtime support. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-terminal-tabs-shell-harness-docs-retain-deleted-conformance-caller.md`](trailing-terminal-tabs-shell-harness-docs-retain-deleted-conformance-caller.md)
+  — shell harness docs still describe the deleted conformance battery. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-terminal-tabs-shared-gate-docs-retain-removed-local-hook-installations.md`](trailing-terminal-tabs-shared-gate-docs-retain-removed-local-hook-installations.md)
+  — shared gate docs claim hook installations that the module no longer has. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-647f0227-removes-supported-tmux-transport-sink-crash-recovery-oracles.md`](trailing-647f0227-removes-supported-tmux-transport-sink-crash-recovery-oracles.md)
+  — Still-supported old-terminal recovery loses integration regression protection. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-converted-old-session-warning-retention-assertion-vacuous-all.md`](trailing-converted-old-session-warning-retention-assertion-vacuous-all.md)
+  — Require the converted session's resolved warning to remain present. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-pre-range-tmux-probe-fixture-process-oracles.md`](trailing-pre-range-tmux-probe-fixture-process-oracles.md)
+  — Retained probe fixtures and process oracles are unchanged from the range base. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-launch-excerpt-whole-row-intermediate-allocation.md`](trailing-launch-excerpt-whole-row-intermediate-allocation.md)
+  — Deleted reducer has distinct provenance and temporary-allocation consequences. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-historical-desktop-tmux-abovepin-warning-after-retirement.md`](trailing-historical-desktop-tmux-abovepin-warning-after-retirement.md)
+  — Historical installation policy keeps a newer-tmux warning promise after its desktop emitter retires. Abbreviated
+  collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-bounded-sigterm-sigcont-pid-reuse.md`](trailing-bounded-sigterm-sigcont-pid-reuse.md) — Replacement SIGCONT
+  has a spec-accepted short PID-reuse window. Abbreviated collection; confidence, proposed dismissals and unresolved
+  consequences are preserved in the entry.
+
+- [`trailing-delete-held-gone-host-skips-adopted-process-confirmation.md`](trailing-delete-held-gone-host-skips-adopted-process-confirmation.md)
+  — Known Delete confirmation bypass is separate from guarded tab-close identity. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-restart-seeded-history-promoted-into-launch-error-screen.md`](trailing-restart-seeded-history-promoted-into-launch-error-screen.md)
+  — Earlier codec-removal refutation does not refute the known inherited-history excerpt route. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-connection-writer-comment-points-to-deleted-outputstream-checkpoint.md`](trailing-connection-writer-comment-points-to-deleted-outputstream-checkpoint.md)
+  — Connection writer diagnostics still point to the deleted stream checkpoint. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-old-terminal-osc52-browser-refusal-test-removed-before-retirement.md`](trailing-old-terminal-osc52-browser-refusal-test-removed-before-retirement.md)
+  — Old-terminal clipboard read refusal loses its browser check before retirement. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-real-app-terminal-disclosure-cover-and-refusal-layer-tests-removed.md`](trailing-real-app-terminal-disclosure-cover-and-refusal-layer-tests-removed.md)
+  — Keep real-app checks for terminal disclosure admission and refusal layers. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-live-redraw-pending-ready-refused-hover-browser-matrix-removed.md`](trailing-live-redraw-pending-ready-refused-hover-browser-matrix-removed.md)
+  — Preserve browser redraw coverage for pending and refused file hovers. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-settings-to-mounted-agent-shell-link-ownership-integration-test-removed.md`](trailing-settings-to-mounted-agent-shell-link-ownership-integration-test-removed.md)
+  — Keep program-observed link ownership checks through Settings and mounted tabs. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-old-terminal-whole-stream-flow-stall-paused-remount-oracles-removed-before-retirement.md`](trailing-old-terminal-whole-stream-flow-stall-paused-remount-oracles-removed-before-retirement.md)
+  — Old-terminal flood and paused-remount checks disappear before retirement. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-old-terminal-positive-large-websocket-message-oracle-removed-before-retirement.md`](trailing-old-terminal-positive-large-websocket-message-oracle-removed-before-retirement.md)
+  — Old-terminal large-message acceptance loses its regression check. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-retired-xterm-private-url-tag-test-gap.md`](trailing-retired-xterm-private-url-tag-test-gap.md) —
+  Intermediate removal of the vendored-xterm tag contract test. Abbreviated collection; confidence, proposed dismissals
+  and unresolved consequences are preserved in the entry.
+
+- [`trailing-retired-xterm-deferred-replay-flush-test-gap.md`](trailing-retired-xterm-deferred-replay-flush-test-gap.md)
+  — Intermediate loss of late-xterm-flush recovery coverage. Abbreviated collection; confidence, proposed dismissals and
+  unresolved consequences are preserved in the entry.
+
+- [`trailing-retired-xterm-per-tab-write-flow-isolation-test-gap.md`](trailing-retired-xterm-per-tab-write-flow-isolation-test-gap.md)
+  — Intermediate loss of old-renderer per-tab flow isolation coverage. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-grid-catchup-progress-and-empty-frame-idle-tests-removed.md`](trailing-grid-catchup-progress-and-empty-frame-idle-tests-removed.md)
+  — Deleting replay degradation tests also removes surviving grid idle-bound assertions. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-old-xterm-sustained-viewport-tests-removed-before-retirement.md`](trailing-old-xterm-sustained-viewport-tests-removed-before-retirement.md)
+  — Intermediate loss of sustained viewport regression checks before old-renderer retirement. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-old-xterm-query-selection-unicode-tests-removed-before-retirement.md`](trailing-old-xterm-query-selection-unicode-tests-removed-before-retirement.md)
+  — Old-renderer regressions lose coverage before the supported renderer is retired. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-mouse-reattach-test-claims-nonexistent-viewer-sgr-encoding-restoration.md`](trailing-mouse-reattach-test-claims-nonexistent-viewer-sgr-encoding-restoration.md)
+  — Mouse test claims to check SGR viewer restoration that the grid protocol does not carry. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-retired-renderer-swap-kind-notice-test-deletion.md`](trailing-retired-renderer-swap-kind-notice-test-deletion.md)
+  — Retired renderer compatibility tests removed with the compatibility path. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-held-replay-helper-misstates-history-drained-boundary.md`](trailing-held-replay-helper-misstates-history-drained-boundary.md)
+  — held-replay helper claims history is applied before its oracle proves it. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-retired-old-terminal-migration-ui-test-deletion.md`](trailing-retired-old-terminal-migration-ui-test-deletion.md)
+  — Removing the old-terminal migration UI tests matches the retired feature contract. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-hidden-grid-test-no-measurement-two-column-rationale.md`](trailing-hidden-grid-test-no-measurement-two-column-rationale.md)
+  — Grid geometry test gives a false two-column failure rationale. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-tmux-only-sgr-adapter-deletion-frozen-snapshot-compatibility-concern.md`](trailing-tmux-only-sgr-adapter-deletion-frozen-snapshot-compatibility-concern.md)
+  — Frozen snapshot compatibility concern remains source-refuted, pending independent check. Abbreviated collection;
+  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-events-test-cross-realm-array-example-reference.md`](trailing-events-test-cross-realm-array-example-reference.md)
+  — Cross-realm test comment points to an example that does not exist. Abbreviated collection; confidence, proposed
+  dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-primary-write-notice-filter-drag-guidance.md`](trailing-primary-write-notice-filter-drag-guidance.md) —
+  Primary-selection writes cannot suppress drag-copy guidance (predates range). Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.
+
+- [`trailing-terminal-grid-lacks-sgr53-overline-after-old-route-retirement.md`](trailing-terminal-grid-lacks-sgr53-overline-after-old-route-retirement.md)
+  — Retiring the byte renderer removes overline support from served terminals. Abbreviated collection; confidence,
+  proposed dismissals and unresolved consequences are preserved in the entry.

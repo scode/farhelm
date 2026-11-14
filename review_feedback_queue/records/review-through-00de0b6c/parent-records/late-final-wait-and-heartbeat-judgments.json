@@ -1,4 +1,17 @@
 [
-  {"id":"g005","turn":6,"offset":15,"state":"complete","verdict":"final-discovery-empty","discovery":{"new_verified":[],"new_unverified":[],"empty":true},"reason":"Parent read full delta reply and event15; complete626line supported audit,zero gaps/rejections/unfinished/unrecognized. Separate search after exact latestg020 timer input checked suspendedClone caller boundaries,sealed-create retries,notification gating,retirement ordering and revision-specificsetup/releasecontracts. Newcandidatef6's exact GUI-prefill versus agent-live-source distinction source-refutes apparent contradiction; no new defect/openlead. Last input consumed before search, valid finalempty stopping condition."},
-  {"id":"g021","turn":7,"offset":19,"reason":"Parent read full reply and event19diff including all originaltext plus rewritten details; complete620line audit,zero gaps/rejections/unfinished/unrecognized. Corroborated new190d launch-recording helper and retained222bf seal helper share valid emptyData heartbeat decoding root, but retain separatelocations/introductioncommits. One queue item can cover both. Shared-splice fix must preserve intentional lost-peer signaling for priorf2 negative fixture; no currentnewbug alleged. No openlead. Separate post-input discovery required; original018 receives this exact current neighbour record before its search."}
+  {
+    "id": "g005",
+    "turn": 6,
+    "offset": 15,
+    "state": "complete",
+    "verdict": "final-discovery-empty",
+    "discovery": { "new_verified": [], "new_unverified": [], "empty": true },
+    "reason": "Parent read full delta reply and event15; complete626line supported audit,zero gaps/rejections/unfinished/unrecognized. Separate search after exact latestg020 timer input checked suspendedClone caller boundaries,sealed-create retries,notification gating,retirement ordering and revision-specificsetup/releasecontracts. Newcandidatef6's exact GUI-prefill versus agent-live-source distinction source-refutes apparent contradiction; no new defect/openlead. Last input consumed before search, valid finalempty stopping condition."
+  },
+  {
+    "id": "g021",
+    "turn": 7,
+    "offset": 19,
+    "reason": "Parent read full reply and event19diff including all originaltext plus rewritten details; complete620line audit,zero gaps/rejections/unfinished/unrecognized. Corroborated new190d launch-recording helper and retained222bf seal helper share valid emptyData heartbeat decoding root, but retain separatelocations/introductioncommits. One queue item can cover both. Shared-splice fix must preserve intentional lost-peer signaling for priorf2 negative fixture; no currentnewbug alleged. No openlead. Separate post-input discovery required; original018 receives this exact current neighbour record before its search."
+  }
 ]

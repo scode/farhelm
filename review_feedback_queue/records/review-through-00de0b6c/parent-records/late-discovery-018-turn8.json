@@ -1,8 +1,10 @@
 [
   {
-    "id": "g018", "turn": 8, "offset": 29,
+    "id": "g018",
+    "turn": 8,
+    "offset": 29,
     "verdict": "productive-discovery",
-    "discovery": {"new_verified": ["f9"], "new_unverified": [], "empty": false},
+    "discovery": { "new_verified": ["f9"], "new_unverified": [], "empty": false },
     "reason": "Parent read full reply and every event24-29, complete1497line supported audit with zero gaps/rejections/unfinished/unrecognized. f8 independently observed refusal, dispatch, row preservation and preparation-count oracles refute the specific lost-panic concern; no universal test guarantee inferred. f9 is a new semantic false application: 190d enables ordinary agent use of a recipe template, expressly accepted in SPEC.md1554-1568, while retained management refusal/comment3734-3739 says GUI-only use. Parent directly checked these exact source excerpts. Refusing management remains correct, no authorization/work-loss consequence. No open lead; source-only. Productive discovery requires another separate search beyond f9 and known heartbeat/timer documentation issues. Current relevant interface syntheses already judged; this wording correction adds no uncommunicated behavior contract or new caller defect. Recording coverage/filter checks still pending."
   }
 ]

@@ -8,9 +8,13 @@ Unverified collection: Older-target prerequisite omission has explicit competing
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g071/f5`, `g072/c1`.
 
@@ -20,29 +24,92 @@ Confidence: Unverified collection; recording proposals and any disagreement rema
 
 Latest reviewer record, event 15 (finding, open):
 
-Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. Original TLDR and consequence preserved: selecting an older release such as v0.35.0 on a Mac without supported tmux prints launch advice without its still-required tmux warning; opening that app can refuse startup. This remains a confirmed conditional source mechanism and lost advance prerequisite/remedy guidance, not file corruption, silent failure, unrecoverable install failure or loss of user work. Suggested bucket remains other; could-be-highest: no established security or loss-of-work route. No execution, install, download or reproduction observed.
+Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7. Original TLDR and consequence preserved: selecting an older
+release such as v0.35.0 on a Mac without supported tmux prints launch advice without its still-required tmux warning;
+opening that app can refuse startup. This remains a confirmed conditional source mechanism and lost advance
+prerequisite/remedy guidance, not file corruption, silent failure, unrecoverable install failure or loss of user work.
+Suggested bucket remains other; could-be-highest: no established security or loss-of-work route. No execution, install,
+download or reproduction observed.
 
-Late named-clause synthesis changes the proposed disposition, not the mechanism. Exact reviewed SPEC_impl.md:2787-2789: 'This release ends them at startup (below); every terminal runs in a terminal host ("Terminal host"). Neither the desktop app nor `farhelm helm setup` requires, looks for or names a tmux, and neither does the installer.' This explicitly names the installer and says it does not look for or name tmux; it is stronger than the current-app capability statement alone. Parent supplies already-landed tmux-drop-from-install criterion4 as context only: 'The installer gives no tmux advice', requiring install.sh to lose probe/floor/Homebrew advice/launch-advice ordering and test-install-sh.sh to lose matching cases. I did not open/search plans or coverage metadata. The reviewed patch implements that uniform report policy; its installer clause contains no selected-target exception. Best source/contract reading is that the current installer deliberately supplies no tmux advice, including when its supported selection mechanism installs an older payload. Selecting a specific release does not itself promise that the current installer reproduces every historical prerequisite report. The supplied plan criterion reinforces that intended uniform omission. Proposed_drop: explicit no-tmux-advice policy for the installer, with the exact specification and parent-supplied decision above, for parent judgment only; no parent drop or lowering is accepted here. This supersedes the earlier proposed_drop:false to that limited policy basis. It does not revive the false universal-handoff argument or refute the omitted-guidance source facts.
+Late named-clause synthesis changes the proposed disposition, not the mechanism. Exact reviewed SPEC_impl.md:2787-2789:
+'This release ends them at startup (below); every terminal runs in a terminal host ("Terminal host"). Neither the
+desktop app nor `farhelm helm setup` requires, looks for or names a tmux, and neither does the installer.' This
+explicitly names the installer and says it does not look for or name tmux; it is stronger than the current-app
+capability statement alone. Parent supplies already-landed tmux-drop-from-install criterion4 as context only: 'The
+installer gives no tmux advice', requiring install.sh to lose probe/floor/Homebrew advice/launch-advice ordering and
+test-install-sh.sh to lose matching cases. I did not open/search plans or coverage metadata. The reviewed patch
+implements that uniform report policy; its installer clause contains no selected-target exception. Best source/contract
+reading is that the current installer deliberately supplies no tmux advice, including when its supported selection
+mechanism installs an older payload. Selecting a specific release does not itself promise that the current installer
+reproduces every historical prerequisite report. The supplied plan criterion reinforces that intended uniform omission.
+Proposed_drop: explicit no-tmux-advice policy for the installer, with the exact specification and parent-supplied
+decision above, for parent judgment only; no parent drop or lowering is accepted here. This supersedes the earlier
+proposed_drop:false to that limited policy basis. It does not revive the false universal-handoff argument or refute the
+omitted-guidance source facts.
 
-Exact competing selection/handoff facts retained: SPEC.md:686-688 permits FARHELM_VERSION selecting a specific release. SPEC_impl.md:7354-7368 delegates a target only when too old for the locked-install interface. Reviewed install.sh:91-101 sets HANDOFF_FLOOR=0.31.1-dev.0; :936 and :970-971 run a verified target-owned installer and exit only below that floor. v0.35.0 is above it, so :817-819/:881-884 selects it, :1094-1098 validates its binary version, :1202 calls its farhelm internal install, and :1213-1228/:1250-1251 prints the current script's successful fresh-launch report without tmux advice. The below-floor proof remains valid for below-floor targets only. No target-version exception or tmux-capability test was found in the named installer policy. This is not a claim that older target capabilities changed.
+Exact competing selection/handoff facts retained: SPEC.md:686-688 permits FARHELM_VERSION selecting a specific release.
+SPEC_impl.md:7354-7368 delegates a target only when too old for the locked-install interface. Reviewed install.sh:91-101
+sets HANDOFF_FLOOR=0.31.1-dev.0; :936 and :970-971 run a verified target-owned installer and exit only below that floor.
+v0.35.0 is above it, so :817-819/:881-884 selects it, :1094-1098 validates its binary version, :1202 calls its farhelm
+internal install, and :1213-1228/:1250-1251 prints the current script's successful fresh-launch report without tmux
+advice. The below-floor proof remains valid for below-floor targets only. No target-version exception or tmux-capability
+test was found in the named installer policy. This is not a claim that older target capabilities changed.
 
-Concrete target proof retained: local tag v0.35.0 is ee6957b5f0aa10bd4d36834f633b122cf2ec4695, Cargo.toml:86 version 0.35.0. Its main.rs:1511-1533 accepts the current handover flags; :1544-1573 writes the expected locked-install result. Its desktop.rs:550-553 calls prerequisites for a fresh Spawn; :1205-1214 calls tmux preflight; desktop/tmux_preflight.rs:342-378 can refuse/exit when no supported tmux exists. Its original installer :1305-1316 supplied the removed advance warning/Homebrew remedy. Its own startup still gives an actionable diagnostic and native Mac alert (tmux_preflight.rs:226-279, desktop.rs:1772-1802), so the omission does not establish loss of recovery guidance everywhere. Installer/test path history has no later repair through endpoint 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.
+Concrete target proof retained: local tag v0.35.0 is ee6957b5f0aa10bd4d36834f633b122cf2ec4695, Cargo.toml:86 version
+0.35.0. Its main.rs:1511-1533 accepts the current handover flags; :1544-1573 writes the expected locked-install result.
+Its desktop.rs:550-553 calls prerequisites for a fresh Spawn; :1205-1214 calls tmux preflight;
+desktop/tmux_preflight.rs:342-378 can refuse/exit when no supported tmux exists. Its original installer :1305-1316
+supplied the removed advance warning/Homebrew remedy. Its own startup still gives an actionable diagnostic and native
+Mac alert (tmux_preflight.rs:226-279, desktop.rs:1772-1802), so the omission does not establish loss of recovery
+guidance everywhere. Installer/test path history has no later repair through endpoint
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.
 
-Confidence: confirmed source behavior; likely explicit acceptance of the uniform no-advice reporting policy, inferred from the installer-specific wording without a target exception and the exact supplied criterion. There is no remaining readily checkable source premise, and no normative conflict requiring old-target warnings is established by specific-release selection alone. Parent decides whether that acceptance covers the conditional older-target consequence. possible_cover: exact SPEC_impl.md:2787-2789 plus the parent-supplied criterion4 quoted above; g072/c1 is the same older-target interface concern. Preserve all earlier correction history for consolidation. This is named-input synthesis, not a new discovery. c1's narrow exact-output-test consistency conclusion, c3's current setup PATH contract, c4's refusal label refutation, and f2's original potentially-highest process-loss assurance concern and exact proposed-drop bases are unchanged. The plan's deletion of test cases concerns the explicit reporting policy; product correctness is not being used to dismiss a separate test-oracle or documentation defect. No new independent test defect is asserted or disposed of here. All scoped source checks are complete; no open lead remains.
+Confidence: confirmed source behavior; likely explicit acceptance of the uniform no-advice reporting policy, inferred
+from the installer-specific wording without a target exception and the exact supplied criterion. There is no remaining
+readily checkable source premise, and no normative conflict requiring old-target warnings is established by
+specific-release selection alone. Parent decides whether that acceptance covers the conditional older-target
+consequence. possible_cover: exact SPEC_impl.md:2787-2789 plus the parent-supplied criterion4 quoted above; g072/c1 is
+the same older-target interface concern. Preserve all earlier correction history for consolidation. This is named-input
+synthesis, not a new discovery. c1's narrow exact-output-test consistency conclusion, c3's current setup PATH contract,
+c4's refusal label refutation, and f2's original potentially-highest process-loss assurance concern and exact
+proposed-drop bases are unchanged. The plan's deletion of test cases concerns the explicit reporting policy; product
+correctness is not being used to dismiss a separate test-oracle or documentation defect. No new independent test defect
+is asserted or disposed of here. All scoped source checks are complete; no open lead remains.
 
 Returned proposal (claims-126, event 14): **retain-verified**, suggested bucket **other**.
 
-The conditional source route is established: the newest script can install v0.35.0 itself and advise opening it without its tmux prerequisite; a fresh desktop start then refuses when usable tmux is absent. Retain the source-confirmed guidance issue with the explicit acceptance ambiguity below. This is avoidable failed launch and missing advance advice, not failed installation, missing later diagnostics, bricking or work loss.
+The conditional source route is established: the newest script can install v0.35.0 itself and advise opening it without
+its tmux prerequisite; a fresh desktop start then refuses when usable tmux is absent. Retain the source-confirmed
+guidance issue with the explicit acceptance ambiguity below. This is avoidable failed launch and missing advance advice,
+not failed installation, missing later diagnostics, bricking or work loss.
 
-Original stronger consequence: Line 11 suspected loss of prerequisite/remedy advice for selected older releases. Lines 12 and 14 confirm an avoidable refusal on launch while explicitly preserving the old app's later diagnosis/remedy. No original security, process-loss, file-corruption or other user-work-loss consequence was alleged for f5. c1's exact-output refutation and other IDs' potentially highest consequences remain separate.
+Original stronger consequence: Line 11 suspected loss of prerequisite/remedy advice for selected older releases. Lines
+12 and 14 confirm an avoidable refusal on launch while explicitly preserving the old app's later diagnosis/remedy. No
+original security, process-loss, file-corruption or other user-work-loss consequence was alleged for f5. c1's
+exact-output refutation and other IDs' potentially highest consequences remain separate.
 
-Unresolved premise or limitation: No missing source premise for the conditional advice/refusal route. Successful retrieval of the release's matching assets and otherwise ordinary installation prerequisites are assumed; those assets were not downloaded. Whether the broad no-tmux installer policy intentionally accepts omitting advice for selected legacy binaries remains a product-contract interpretation, not a runtime premise.
+Unresolved premise or limitation: No missing source premise for the conditional advice/refusal route. Successful
+retrieval of the release's matching assets and otherwise ordinary installation prerequisites are assumed; those assets
+were not downloaded. Whether the broad no-tmux installer policy intentionally accepts omitting advice for selected
+legacy binaries remains a product-contract interpretation, not a runtime premise.
 
-Proposed basis: Retain one conditional source-confirmed OTHER record, carrying the conflicting breadth of no-tmux wording for triage. Consolidate the named same-root g072/c1 without losing its selected-older-target regression-test responsibility. Do not use universal old-target handoff or current-release no-tmux capability as a complete refutation.
+Proposed basis: Retain one conditional source-confirmed OTHER record, carrying the conflicting breadth of no-tmux
+wording for triage. Consolidate the named same-root g072/c1 without losing its selected-older-target regression-test
+responsibility. Do not use universal old-target handoff or current-release no-tmux capability as a complete refutation.
 
-Existing parent disposition (event 15): rejected. Parent read full126 then actualowner071event15/072event19. Confirmed current script can directly install above-handoff-floorv0.35.0 and print OpenFarhelm without still-neededtmux warning; oldapp laterrefuseswithactionablediagnosis/remedy. Preserveconditionalroute, removedadvanceguidance, falseuniversalhandoffcorrection, noinstallfailure/bricking/workloss. ExactreviewedSPEC_impl2787-2789 expressly says installer neitherrequires/looksfor/names tmux; suppliedlanded criterion explicitly 'installer gives no tmux advice' and removesmatchingcases. Parentacceptsthatunqualifiedcomponentreportingpolicy across selected-targetpath: supportforspecificrelease/lockedinstallcapability promises no targetaware external-prerequisite advice. Policyacceptance of omission, not falseclaimoldtargetneednotmux, not rarityfilter or laterrepair. Matchingreporttests assertonlyspecifiednewreport and donotclaimoldbinarylaunches. Noindependenttestoracledefectremaining; separatehighestprocess-survivalassurance071f2unaffected. Keep proposedbases/history in complete dropregister.
+Existing parent disposition (event 15): rejected. Parent read full126 then actualowner071event15/072event19. Confirmed
+current script can directly install above-handoff-floorv0.35.0 and print OpenFarhelm without still-neededtmux warning;
+oldapp laterrefuseswithactionablediagnosis/remedy. Preserveconditionalroute, removedadvanceguidance,
+falseuniversalhandoffcorrection, noinstallfailure/bricking/workloss. ExactreviewedSPEC_impl2787-2789 expressly says
+installer neitherrequires/looksfor/names tmux; suppliedlanded criterion explicitly 'installer gives no tmux advice' and
+removesmatchingcases. Parentacceptsthatunqualifiedcomponentreportingpolicy across selected-targetpath:
+supportforspecificrelease/lockedinstallcapability promises no targetaware external-prerequisite advice. Policyacceptance
+of omission, not falseclaimoldtargetneednotmux, not rarityfilter or laterrepair. Matchingreporttests
+assertonlyspecifiednewreport and donotclaimoldbinarylaunches. Noindependenttestoracledefectremaining;
+separatehighestprocess-survivalassurance071f2unaffected. Keep proposedbases/history in complete dropregister.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g071 record](records/review-through-00de0b6c/groups/g071.json). Record ID: `f5`.
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g071 record](records/review-through-00de0b6c/groups/g071.json). Record ID: `f5`.
 
 ### g072/c1
 
@@ -50,44 +117,121 @@ Confidence: Unverified collection; recording proposals and any disagreement rema
 
 Latest reviewer record, event 20 (candidate, open):
 
-Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7
-TLDR: Original consequence preserved: selecting a supported older target such as v0.35.0 on a Mac without usable tmux can yield unconditional launch advice, followed by the old app's tmux refusal. The route and removed advance/remedy guidance are real source consequences. The newly supplied exact no-advice policy expressly covers the installer, so this is now proposed for drop as specified behavior rather than a source-refuted mechanism.
-Details: Preserve source facts from earlier c1 events: v0.35.0 resolves ee6957b5f0aa10bd4d36834f633b122cf2ec4695; its desktop Spawn branch checks prerequisites and exits through tmux preflight. It exceeds the reviewed installer's locked-install HANDOFF_FLOOR=0.31.1-dev.0, supports the handover flags/marker/icon/result shape, and therefore is not excluded by below-floor delegation. Reviewed install.sh:1246-1263 unconditionally prints fresh launch advice and does not inspect/warn about tmux. The assigned tests remove tmux fixture/report cases and keep only generic current-release output cases. The original omission is not disproved by matching output or by the fact the current app itself needs no tmux.
-Exact additional proposed-drop basis, directly re-read at the reviewed revision, SPEC_impl.md:2786-2792 (line wraps normalized): 'This section covers the old terminals: the private tmux server releases before terminal hosts ran every terminal in, which later releases kept running beside terminal hosts. This release ends them at startup (below); every terminal runs in a terminal host ("Terminal host"). Neither the desktop app nor `farhelm helm setup` requires, looks for or names a tmux, and neither does the installer.' The last clause expressly governs the installer as a component; it does not say only when installing this binary version. Caller-supplied already-landed plan criterion4, context only and not opened/searched here, says exactly: 'The installer gives no tmux advice'. The caller states it requires removing install.sh's probe/floor/Homebrew advice/launch-advice ordering and matching test-install-sh.sh cases. That direct criterion is stronger evidence of intended no-advice behavior than the narrower current-app capability inference previously used here.
-Interpretation: the current release's component policy removes installer inspection/advice, including on an otherwise supported selected older target. This does not assert older target apps stop requiring tmux. The explicit no-advice criterion accepts removal of that advance guidance; it is not proof that an old app will launch. No separate guarantee of a tmux warning for selected older targets has been established. The bounded selected-target and handoff contract is being rechecked next to ensure it does not supply such a contrary guarantee.
-Earlier proposed-drop bases and corrections preserved: (1) SPEC.md:3012-3014 says 'Neither the Mac app nor a Linux machine set up with `farhelm helm setup` needs tmux' for the current release; that alone cannot refute the old-target route. (2) SPEC_impl.md:7354-7364 delegates a target older than the first locked-install-capable release to its own installer; the verified below-floor delegation remains correct, but the earlier blanket inference that all older tmux-dependent releases delegate was false and remains retracted. The new proposal rests on explicit installer no-advice wording, not those refuted extensions.
-Independent test responsibility: absence of a selected-old-target warning oracle remains an accurate coverage description. Matching current report tests does not prove old-target prerequisite correctness. However the supplied criterion expressly retires the tmux advice cases, so lack of an oracle demanding that advice is not separately established as a defect under this policy. A test asserting the old app's documented dependency or selected-target installation routing would be a distinct responsibility; no changed false assertion of either was identified here.
-Suggested bucket: other if retained, conditional older-target advance guidance/failed launch. No security/loss-of-work claim or priority lowering based on rarity.
-Confidence: confirmed conditional source mechanism; confirmed exact component-policy wording and caller-supplied criterion. Proposed acceptance interpretation is explicit for independent review, not a parent-approved drop. No runtime, install/download/test/reproduction observation.
-proposed_drop: exact reviewed SPEC_impl.md:2788-2789 installer clause plus caller-supplied criterion4 'The installer gives no tmux advice', with the scope interpretation above. Preserve the omission consequence; propose specification/intent acceptance, not mechanism refutation. No parent drop accepted.
-Could-be-highest: no established security/loss-of-work route; the old app retains actionable preflight refusal.
-possible_cover: g071/f5 exact duplicate from supplied interface context; focused late overlay126 supplies additional acceptance context. Plans/coverage metadata were not opened or searched.
-Caveats: users choosing an older target may still need tmux; supported tmux and new-release targets are unaffected. Current no-advice policy does not change that old binary or its own installer. A future product decision could restore target-aware advance advice, but the exact policy supplied here instructs its removal. All prior records remain append-only.
-Final bounded contract check: reviewed SPEC_impl.md:7354-7369 defines below-floor handoff and selected-target CLI ownership of locked install work; it supplies no target-specific tmux advice obligation and does not equate locked-install capability with no-tmux capability. SPEC.md:675-697 supports selected releases and describes layout/resources/upgrade-floor protections, without guaranteeing the selected old app has no external startup prerequisite or requiring this installer to warn about tmux. Re-reading test-install-sh.sh:1866-1910 confirms the exact-report assertions demand the new no-advice output; they do not exercise or falsely assert that v0.35.0 passes desktop preflight. Thus there is no separate concrete false-test assertion established by those lines. Their absence of a legacy-warning case is the already-described responsibility deliberately retired by the supplied criterion, not an independent surviving oracle proven defective.
-Resolved interpretation for independent checking: exact no-advice wording is accepted current-installer behavior across its target-selection path, not a statement that every selected older app needs no tmux. The initial current-capability quote alone was insufficient, and the handoff blanket exclusion remains refuted; neither is revived. The new proposed drop rests only on the explicit installer clause and exact caller-supplied no-advice criterion. This is a policy acceptance of omitted advance tmux guidance, not a source refutation of the old-target failed-launch route or a claim of a later repair. No contrary target-aware warning contract was found in the directly checked governing passages. No readily checkable premise remains open under c1; independent acceptance/disposition is still the parent review step. Existing g071/f5 overlap remains. No new ID, execution observation, source edit, plan read, coverage read or discovery search this synthesis.
-Discovery-pass3 interface reconciliation: refreshed supplied g071/f5 now retains the same older-target mechanism together with the explicit reviewed installer/no-advice policy and supplied criterion4, proposing independent acceptance on that policy basis. This agrees with the prior c1 synthesis and supplies no new cause or source premise. Keep exact duplicate provenance, original failed-launch/advance-guidance consequence, handoff correction, bounded test responsibility and every proposed-drop basis. No independent or parent drop/lowering is inferred; not a new finding or execution observation.
+Reviewed commit: 17a3fe858c5511a24b7403af15dd41c93bf69fd7 TLDR: Original consequence preserved: selecting a supported
+older target such as v0.35.0 on a Mac without usable tmux can yield unconditional launch advice, followed by the old
+app's tmux refusal. The route and removed advance/remedy guidance are real source consequences. The newly supplied exact
+no-advice policy expressly covers the installer, so this is now proposed for drop as specified behavior rather than a
+source-refuted mechanism. Details: Preserve source facts from earlier c1 events: v0.35.0 resolves
+ee6957b5f0aa10bd4d36834f633b122cf2ec4695; its desktop Spawn branch checks prerequisites and exits through tmux
+preflight. It exceeds the reviewed installer's locked-install HANDOFF_FLOOR=0.31.1-dev.0, supports the handover
+flags/marker/icon/result shape, and therefore is not excluded by below-floor delegation. Reviewed install.sh:1246-1263
+unconditionally prints fresh launch advice and does not inspect/warn about tmux. The assigned tests remove tmux
+fixture/report cases and keep only generic current-release output cases. The original omission is not disproved by
+matching output or by the fact the current app itself needs no tmux. Exact additional proposed-drop basis, directly
+re-read at the reviewed revision, SPEC_impl.md:2786-2792 (line wraps normalized): 'This section covers the old
+terminals: the private tmux server releases before terminal hosts ran every terminal in, which later releases kept
+running beside terminal hosts. This release ends them at startup (below); every terminal runs in a terminal host
+("Terminal host"). Neither the desktop app nor `farhelm helm setup` requires, looks for or names a tmux, and neither
+does the installer.' The last clause expressly governs the installer as a component; it does not say only when
+installing this binary version. Caller-supplied already-landed plan criterion4, context only and not opened/searched
+here, says exactly: 'The installer gives no tmux advice'. The caller states it requires removing install.sh's
+probe/floor/Homebrew advice/launch-advice ordering and matching test-install-sh.sh cases. That direct criterion is
+stronger evidence of intended no-advice behavior than the narrower current-app capability inference previously used
+here. Interpretation: the current release's component policy removes installer inspection/advice, including on an
+otherwise supported selected older target. This does not assert older target apps stop requiring tmux. The explicit
+no-advice criterion accepts removal of that advance guidance; it is not proof that an old app will launch. No separate
+guarantee of a tmux warning for selected older targets has been established. The bounded selected-target and handoff
+contract is being rechecked next to ensure it does not supply such a contrary guarantee. Earlier proposed-drop bases and
+corrections preserved: (1) SPEC.md:3012-3014 says 'Neither the Mac app nor a Linux machine set up with
+`farhelm helm setup` needs tmux' for the current release; that alone cannot refute the old-target route. (2)
+SPEC_impl.md:7354-7364 delegates a target older than the first locked-install-capable release to its own installer; the
+verified below-floor delegation remains correct, but the earlier blanket inference that all older tmux-dependent
+releases delegate was false and remains retracted. The new proposal rests on explicit installer no-advice wording, not
+those refuted extensions. Independent test responsibility: absence of a selected-old-target warning oracle remains an
+accurate coverage description. Matching current report tests does not prove old-target prerequisite correctness. However
+the supplied criterion expressly retires the tmux advice cases, so lack of an oracle demanding that advice is not
+separately established as a defect under this policy. A test asserting the old app's documented dependency or
+selected-target installation routing would be a distinct responsibility; no changed false assertion of either was
+identified here. Suggested bucket: other if retained, conditional older-target advance guidance/failed launch. No
+security/loss-of-work claim or priority lowering based on rarity. Confidence: confirmed conditional source mechanism;
+confirmed exact component-policy wording and caller-supplied criterion. Proposed acceptance interpretation is explicit
+for independent review, not a parent-approved drop. No runtime, install/download/test/reproduction observation.
+proposed_drop: exact reviewed SPEC_impl.md:2788-2789 installer clause plus caller-supplied criterion4 'The installer
+gives no tmux advice', with the scope interpretation above. Preserve the omission consequence; propose
+specification/intent acceptance, not mechanism refutation. No parent drop accepted. Could-be-highest: no established
+security/loss-of-work route; the old app retains actionable preflight refusal. possible_cover: g071/f5 exact duplicate
+from supplied interface context; focused late overlay126 supplies additional acceptance context. Plans/coverage metadata
+were not opened or searched. Caveats: users choosing an older target may still need tmux; supported tmux and new-release
+targets are unaffected. Current no-advice policy does not change that old binary or its own installer. A future product
+decision could restore target-aware advance advice, but the exact policy supplied here instructs its removal. All prior
+records remain append-only. Final bounded contract check: reviewed SPEC_impl.md:7354-7369 defines below-floor handoff
+and selected-target CLI ownership of locked install work; it supplies no target-specific tmux advice obligation and does
+not equate locked-install capability with no-tmux capability. SPEC.md:675-697 supports selected releases and describes
+layout/resources/upgrade-floor protections, without guaranteeing the selected old app has no external startup
+prerequisite or requiring this installer to warn about tmux. Re-reading test-install-sh.sh:1866-1910 confirms the
+exact-report assertions demand the new no-advice output; they do not exercise or falsely assert that v0.35.0 passes
+desktop preflight. Thus there is no separate concrete false-test assertion established by those lines. Their absence of
+a legacy-warning case is the already-described responsibility deliberately retired by the supplied criterion, not an
+independent surviving oracle proven defective. Resolved interpretation for independent checking: exact no-advice wording
+is accepted current-installer behavior across its target-selection path, not a statement that every selected older app
+needs no tmux. The initial current-capability quote alone was insufficient, and the handoff blanket exclusion remains
+refuted; neither is revived. The new proposed drop rests only on the explicit installer clause and exact caller-supplied
+no-advice criterion. This is a policy acceptance of omitted advance tmux guidance, not a source refutation of the
+old-target failed-launch route or a claim of a later repair. No contrary target-aware warning contract was found in the
+directly checked governing passages. No readily checkable premise remains open under c1; independent
+acceptance/disposition is still the parent review step. Existing g071/f5 overlap remains. No new ID, execution
+observation, source edit, plan read, coverage read or discovery search this synthesis. Discovery-pass3 interface
+reconciliation: refreshed supplied g071/f5 now retains the same older-target mechanism together with the explicit
+reviewed installer/no-advice policy and supplied criterion4, proposing independent acceptance on that policy basis. This
+agrees with the prior c1 synthesis and supplies no new cause or source premise. Keep exact duplicate provenance,
+original failed-launch/advance-guidance consequence, handoff correction, bounded test responsibility and every
+proposed-drop basis. No independent or parent drop/lowering is inferred; not a new finding or execution observation.
 
 Returned proposal (claims-046, event 10): **retain-verified**, suggested bucket **other**.
 
-The latest blanket handoff refutation is false. HANDOFF_FLOOR marks support for locked installation, not removal of tmux prerequisites. An older target at or above that floor reaches the current report while its desktop can still require tmux.
+The latest blanket handoff refutation is false. HANDOFF_FLOOR marks support for locked installation, not removal of tmux
+prerequisites. An older target at or above that floor reaches the current report while its desktop can still require
+tmux.
 
-Original stronger consequence: Removing missing/old-tmux report cases can make an older tmux-dependent Mac release claim it can be launched without its prerequisite. Later history withdrew this on the mistaken assumption that every such target is below HANDOFF_FLOOR.
+Original stronger consequence: Removing missing/old-tmux report cases can make an older tmux-dependent Mac release claim
+it can be launched without its prerequisite. Later history withdrew this on the mistaken assumption that every such
+target is below HANDOFF_FLOOR.
 
-Unresolved premise or limitation: No runtime observation or endpoint download was made. Local released-tag source establishes a concrete above-floor tmux-dependent version; the report consequence is conditional on selecting such a release without tmux.
+Unresolved premise or limitation: No runtime observation or endpoint download was made. Local released-tag source
+establishes a concrete above-floor tmux-dependent version; the report consequence is conditional on selecting such a
+release without tmux.
 
-Proposed basis: Retain the original missing-prerequisite guidance concern, narrowed to above-floor older targets. This is a diagnostic/convenience defect with no established security or work-loss route. The latest source-refutation claim must be corrected; handoff only refutes the below-floor subset.
+Proposed basis: Retain the original missing-prerequisite guidance concern, narrowed to above-floor older targets. This
+is a diagnostic/convenience defect with no established security or work-loss route. The latest source-refutation claim
+must be corrected; handoff only refutes the below-floor subset.
 
 Returned proposal (claims-126, event 16): **duplicate**, suggested bucket **other**.
 
-Same underlying older-target report omission as g071/f5, with a useful test-coverage extension to retain in the consolidated record. Duplicate means combine the two named records; it does not accept the earlier withdrawal/refutation, dismiss the underlying issue, or discard the test responsibility.
+Same underlying older-target report omission as g071/f5, with a useful test-coverage extension to retain in the
+consolidated record. Duplicate means combine the two named records; it does not accept the earlier
+withdrawal/refutation, dismiss the underlying issue, or discard the test responsibility.
 
-Original stronger consequence: Original line 1 considered claiming a fresh installation can launch despite a missing prerequisite, then proposed a current-release specification refutation. Line 10 extended the handoff floor to all supported tmux-dependent targets; lines 13-16 reopen and correct that inference using v0.35.0. Preserve both earlier proposed-drop bases narrowly: the new release needs no tmux, and below-floor targets delegate. Latest line 16 retains missing advance guidance and avoidable startup refusal, plus selected-older-target test coverage. No security or user-owned-work-loss consequence was alleged; later app diagnostics remain available.
+Original stronger consequence: Original line 1 considered claiming a fresh installation can launch despite a missing
+prerequisite, then proposed a current-release specification refutation. Line 10 extended the handoff floor to all
+supported tmux-dependent targets; lines 13-16 reopen and correct that inference using v0.35.0. Preserve both earlier
+proposed-drop bases narrowly: the new release needs no tmux, and below-floor targets delegate. Latest line 16 retains
+missing advance guidance and avoidable startup refusal, plus selected-older-target test coverage. No security or
+user-owned-work-loss consequence was alleged; later app diagnostics remain available.
 
-Unresolved premise or limitation: No missing source premise for the conditional report/refusal mechanism or removed oracle cases. Asset availability and execution remain unobserved. The only substantive unresolved question is the intended breadth of the no-tmux installer policy when FARHELM_VERSION selects a legacy target.
+Unresolved premise or limitation: No missing source premise for the conditional report/refusal mechanism or removed
+oracle cases. Asset availability and execution remain unobserved. The only substantive unresolved question is the
+intended breadth of the no-tmux installer policy when FARHELM_VERSION selects a legacy target.
 
-Proposed basis: Consolidate exact same root with retained g071/f5, explicitly carrying the independent test-responsibility extension and the specification/plan acceptance ambiguity. No new separate finding, parent decision or accepted earlier drop is inferred.
+Proposed basis: Consolidate exact same root with retained g071/f5, explicitly carrying the independent
+test-responsibility extension and the specification/plan acceptance ambiguity. No new separate finding, parent decision
+or accepted earlier drop is inferred.
 
-Existing parent disposition (event 20): duplicate. Join the exact same-root071f5 policy decision as duplicate, preserving035substance and actualevent20. The canonical finding is rejected as explicitly accepted no-advice reporting; a candidate excluded beside that rejected canonical incorrectly creates a mechanical group conflict. This adjusts only equivalent-record disposition, not source/policyjudgment. Sameoriginalfailedlaunch/advanceguidance/testscope/handoffcorrection/citations staywith canonical; finaldropregister retainsallproposals. No substantivefinding/newpremise dropped.
+Existing parent disposition (event 20): duplicate. Join the exact same-root071f5 policy decision as duplicate,
+preserving035substance and actualevent20. The canonical finding is rejected as explicitly accepted no-advice reporting;
+a candidate excluded beside that rejected canonical incorrectly creates a mechanical group conflict. This adjusts only
+equivalent-record disposition, not source/policyjudgment.
+Sameoriginalfailedlaunch/advanceguidance/testscope/handoffcorrection/citations staywith canonical; finaldropregister
+retainsallproposals. No substantivefinding/newpremise dropped.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g072 record](records/review-through-00de0b6c/groups/g072.json). Record ID: `c1`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g072 record](records/review-through-00de0b6c/groups/g072.json). Record ID: `c1`.

@@ -1,3 +1,9 @@
 [
- {"key":"g034/c2","proposal":"claim-checks/claims-020/result.json","parent_proposal":"source-refuted-deleted-desktop-tmux-preflight-runtime-dependency","final_independent_gate":"required-before-original-possible-highest-session-crash-drop","reason":"Parent read full020. OrdinaryownversionCLIselected/held, sessionprogramcheckedbeforeownedpredecessorstop, agents/tabsstartfarhelminternalterminal-hostwithenvclear; oldcleanupsocketverifiedpeernotprogram. Missing/unsupportedtmuxpreflightnolongerguardsactualsessionruntime. Narrowrefutationpreservesunsupportedruntimecrash/userprocesslossoriginal, arbitrarydevoverride/noexecutioncaveats; no blanketupgradefilter orclaimallcleanup/provisioningsafe. Freshgateexactproductionpath andappCLIselection."}
+  {
+    "key": "g034/c2",
+    "proposal": "claim-checks/claims-020/result.json",
+    "parent_proposal": "source-refuted-deleted-desktop-tmux-preflight-runtime-dependency",
+    "final_independent_gate": "required-before-original-possible-highest-session-crash-drop",
+    "reason": "Parent read full020. OrdinaryownversionCLIselected/held, sessionprogramcheckedbeforeownedpredecessorstop, agents/tabsstartfarhelminternalterminal-hostwithenvclear; oldcleanupsocketverifiedpeernotprogram. Missing/unsupportedtmuxpreflightnolongerguardsactualsessionruntime. Narrowrefutationpreservesunsupportedruntimecrash/userprocesslossoriginal, arbitrarydevoverride/noexecutioncaveats; no blanketupgradefilter orclaimallcleanup/provisioningsafe. Freshgateexactproductionpath andappCLIselection."
+  }
 ]

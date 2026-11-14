@@ -1,3 +1,9 @@
 [
- {"key":"g013/f1","proposal":"claim-checks/claims-006/result.json","parent_proposal":"covered-same-root-failed-retirement-duplicate-agent","final_independent_gate":"required-before-drop-or-original-highest-lowering","reason":"Parentreadfull006. Sameexactstartupfailure/endedclassification/possibleRestartsecondagentacceptanceas005f1/007f1, withf96sourceconfirminggeneration/priorlaunchscopepreserved andmandatoryfreshAgentOnlyRefusesweepbeforelaunch. Ordinaryknownscope/markersurvivorstartupfailurealoneinsufficientforcoexistingagents; originalhighestworkdamageandwithdrawnclaimedruntimeconfidence retained, no measuredharm. ProposedexactSPECcoverofstatedworstresidual, not raritylowering orabsenceproofagainstallsurvivors. Freshgatejudgehistoricalconsequencenarrowing andexactacceptance, distinctfalsewarning/NothingAliveDelete notsettled."}
+  {
+    "key": "g013/f1",
+    "proposal": "claim-checks/claims-006/result.json",
+    "parent_proposal": "covered-same-root-failed-retirement-duplicate-agent",
+    "final_independent_gate": "required-before-drop-or-original-highest-lowering",
+    "reason": "Parentreadfull006. Sameexactstartupfailure/endedclassification/possibleRestartsecondagentacceptanceas005f1/007f1, withf96sourceconfirminggeneration/priorlaunchscopepreserved andmandatoryfreshAgentOnlyRefusesweepbeforelaunch. Ordinaryknownscope/markersurvivorstartupfailurealoneinsufficientforcoexistingagents; originalhighestworkdamageandwithdrawnclaimedruntimeconfidence retained, no measuredharm. ProposedexactSPECcoverofstatedworstresidual, not raritylowering orabsenceproofagainstallsurvivors. Freshgatejudgehistoricalconsequencenarrowing andexactacceptance, distinctfalsewarning/NothingAliveDelete notsettled."
+  }
 ]

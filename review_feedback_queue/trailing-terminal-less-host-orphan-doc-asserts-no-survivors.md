@@ -4,13 +4,30 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Source-confirmed review record: the rewritten predicate-test explanation tells maintainers that no program can still run after its terminal host is lost, contrary to the explicitly supported host/program lifecycle. This is inaccurate test documentation; no production guard bypass, cleanup failure or observed user harm is claimed. Exact changed explanation at core.rs:17825-17830: 'A rebooted (`Interrupted`) or host-orphaned (`Exited`) row also reloads with no terminal, and nothing of it is running'. The pure test at :17832-17857 exercises terminal presence/outcome only; it does not prove that stronger absence-of-program premise. Contrary source contract: hosts/terminal.rs:754-769 describes Delete's pinned_child_root as usable after an unavailable or ended host, specifically including 'a child that outlived its host (one that ignored the hangup of a host killed outright)'; :771-784 returns the still-running matching child. Host end is not child reaping: terminal-host/src/host.rs:256-264 returns from its serve loop and closes its owned PTY when its fields drop; the Shutdown branch :821-830 queues Goodbye/ending, with no group kill/wait. Its failure-before-readiness path separately calls abandon -> kill_child_group (host.rs:247-253; spawn.rs:196-215), demonstrating that guaranteed kill/reap belongs to failed start, not every running-host exit. Current reload core.rs:6924-6955 records ObservedExit for a Running row whose terminal is absent, with no live host from which it could learn a surviving child identity. Thus host-orphaned Exited is an absence-of-terminal/evidence boundary, not proof nothing remains run
+Source-confirmed review record: the rewritten predicate-test explanation tells maintainers that no program can still run
+after its terminal host is lost, contrary to the explicitly supported host/program lifecycle. This is inaccurate test
+documentation; no production guard bypass, cleanup failure or observed user harm is claimed. Exact changed explanation
+at core.rs:17825-17830: 'A rebooted (`Interrupted`) or host-orphaned (`Exited`) row also reloads with no terminal, and
+nothing of it is running'. The pure test at :17832-17857 exercises terminal presence/outcome only; it does not prove
+that stronger absence-of-program premise. Contrary source contract: hosts/terminal.rs:754-769 describes Delete's
+pinned_child_root as usable after an unavailable or ended host, specifically including 'a child that outlived its host
+(one that ignored the hangup of a host killed outright)'; :771-784 returns the still-running matching child. Host end is
+not child reaping: terminal-host/src/host.rs:256-264 returns from its serve loop and closes its owned PTY when its
+fields drop; the Shutdown branch :821-830 queues Goodbye/ending, with no group kill/wait. Its failure-before-readiness
+path separately calls abandon -> kill_child_group (host.rs:247-253; spawn.rs:196-215), demonstrating that guaranteed
+kill/reap belongs to failed start, not every running-host exit. Current reload core.rs:6924-6955 records ObservedExit
+for a Running row whose terminal is absent, with no live host from which it could learn a surviving child identity. Thus
+host-orphaned Exited is an absence-of-terminal/evidence boundary, not proof nothing remains run
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g114/l3`.
 
@@ -20,19 +37,78 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 20 (finding, open):
 
-Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Discovery pass 2 final source/attribution revision. TLDR: the rewritten predicate-test explanation tells maintainers that no program can still run after its terminal host is lost, contrary to the explicitly supported host/program lifecycle. This is inaccurate test documentation; no production guard bypass, cleanup failure or observed user harm is claimed. Exact changed explanation at core.rs:17825-17830: 'A rebooted (`Interrupted`) or host-orphaned (`Exited`) row also reloads with no terminal, and nothing of it is running'. The pure test at :17832-17857 exercises terminal presence/outcome only; it does not prove that stronger absence-of-program premise. Contrary source contract: hosts/terminal.rs:754-769 describes Delete's pinned_child_root as usable after an unavailable or ended host, specifically including 'a child that outlived its host (one that ignored the hangup of a host killed outright)'; :771-784 returns the still-running matching child. Host end is not child reaping: terminal-host/src/host.rs:256-264 returns from its serve loop and closes its owned PTY when its fields drop; the Shutdown branch :821-830 queues Goodbye/ending, with no group kill/wait. Its failure-before-readiness path separately calls abandon -> kill_child_group (host.rs:247-253; spawn.rs:196-215), demonstrating that guaranteed kill/reap belongs to failed start, not every running-host exit. Current reload core.rs:6924-6955 records ObservedExit for a Running row whose terminal is absent, with no live host from which it could learn a surviving child identity. Thus host-orphaned Exited is an absence-of-terminal/evidence boundary, not proof nothing remains running. Fix direction: keep this useful pure predicate test, but describe why an unconfirmed launch is conservatively treated as possibly live and distinguish absent tracked liveness from residual programs left for later process-tree cleanup. Whole-range attribution checked: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a core.rs:20993-21001 already has the unqualified 'nothing of it is running' clause about tmux-orphaned rows. Do not claim this patch first introduced that generic overstatement or a new runtime policy. The assigned hunk explicitly replaces tmux-orphaned with host-orphaned and pane-probed with terminal-probed; in-range -G history finds only 1ed482d for that substitution. This newly teaches the invalid host-specific inference despite the retained host-child-survival contract. Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db core.rs:17771-17776 retains that host wording, so later cleanup does not repair it. Suggested bucket: other (documentation correctness about a lifecycle/test premise). Could-be-highest: no established security or work-loss consequence from this explanatory text. Confidence: confirmed pinned source/contract and full-range wording comparison; no execution. proposed_drop: false for the newly rewritten host-specific claim; prior generic wording and pre-existing runtime behavior are disclosed, not used as an automatic out-of-range dismissal. possible_cover: no same-location/source responsibility in supplied neighbours; g130/l3 also discusses distinct status evidence, and g128/l1 is legacy consent rather than this no-survivors explanation. Material caveats: this does not demand that the pure predicate be widened or that cleanup behavior be changed. Correct absence-of-terminal classification and intentional survivor limits do not make the stronger explanatory promise true. All readily checkable source premises settled, no open l3 lead. No tests, builds, reproductions or live-install actions.
+Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333. Discovery pass 2 final source/attribution revision. TLDR: the
+rewritten predicate-test explanation tells maintainers that no program can still run after its terminal host is lost,
+contrary to the explicitly supported host/program lifecycle. This is inaccurate test documentation; no production guard
+bypass, cleanup failure or observed user harm is claimed. Exact changed explanation at core.rs:17825-17830: 'A rebooted
+(`Interrupted`) or host-orphaned (`Exited`) row also reloads with no terminal, and nothing of it is running'. The pure
+test at :17832-17857 exercises terminal presence/outcome only; it does not prove that stronger absence-of-program
+premise. Contrary source contract: hosts/terminal.rs:754-769 describes Delete's pinned_child_root as usable after an
+unavailable or ended host, specifically including 'a child that outlived its host (one that ignored the hangup of a host
+killed outright)'; :771-784 returns the still-running matching child. Host end is not child reaping:
+terminal-host/src/host.rs:256-264 returns from its serve loop and closes its owned PTY when its fields drop; the
+Shutdown branch :821-830 queues Goodbye/ending, with no group kill/wait. Its failure-before-readiness path separately
+calls abandon -> kill_child_group (host.rs:247-253; spawn.rs:196-215), demonstrating that guaranteed kill/reap belongs
+to failed start, not every running-host exit. Current reload core.rs:6924-6955 records ObservedExit for a Running row
+whose terminal is absent, with no live host from which it could learn a surviving child identity. Thus host-orphaned
+Exited is an absence-of-terminal/evidence boundary, not proof nothing remains running. Fix direction: keep this useful
+pure predicate test, but describe why an unconfirmed launch is conservatively treated as possibly live and distinguish
+absent tracked liveness from residual programs left for later process-tree cleanup. Whole-range attribution checked:
+exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a core.rs:20993-21001 already has the unqualified 'nothing of it
+is running' clause about tmux-orphaned rows. Do not claim this patch first introduced that generic overstatement or a
+new runtime policy. The assigned hunk explicitly replaces tmux-orphaned with host-orphaned and pane-probed with
+terminal-probed; in-range -G history finds only 1ed482d for that substitution. This newly teaches the invalid
+host-specific inference despite the retained host-child-survival contract. Pinned tip
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db core.rs:17771-17776 retains that host wording, so later cleanup does not repair
+it. Suggested bucket: other (documentation correctness about a lifecycle/test premise). Could-be-highest: no established
+security or work-loss consequence from this explanatory text. Confidence: confirmed pinned source/contract and
+full-range wording comparison; no execution. proposed_drop: false for the newly rewritten host-specific claim; prior
+generic wording and pre-existing runtime behavior are disclosed, not used as an automatic out-of-range dismissal.
+possible_cover: no same-location/source responsibility in supplied neighbours; g130/l3 also discusses distinct status
+evidence, and g128/l1 is legacy consent rather than this no-survivors explanation. Material caveats: this does not
+demand that the pure predicate be widened or that cleanup behavior be changed. Correct absence-of-terminal
+classification and intentional survivor limits do not make the stronger explanatory promise true. All readily checkable
+source premises settled, no open l3 lead. No tests, builds, reproductions or live-install actions.
 
 Returned proposal (claims-074, event 20): **retain-verified**, suggested bucket **other**.
 
-The rewritten test explanation makes a false host/program lifecycle claim. The pure predicate and its product behavior are not shown defective.
+The rewritten test explanation makes a false host/program lifecycle claim. The pure predicate and its product behavior
+are not shown defective.
 
-Original stronger consequence: Maintainers are taught that terminal-host loss proves no program remains. The finding has consistently been documentation correctness only; no production consent bypass, cleanup failure, security impact or loss of user work is established.
+Original stronger consequence: Maintainers are taught that terminal-host loss proves no program remains. The finding has
+consistently been documentation correctness only; no production consent bypass, cleanup failure, security impact or loss
+of user work is established.
 
 Unresolved premise or limitation: No missing premise stated in this returned proposal.
 
-Proposed basis: Record the changed host-specific lifecycle explanation. Preserve the pre-existing generic clause and keep the useful pure predicate test; no behavior change is requested by this finding.
+Proposed basis: Record the changed host-specific lifecycle explanation. Preserve the pre-existing generic clause and
+keep the useful pure predicate test; no behavior change is requested by this finding.
 
-Existing parent disposition (event 20): verified. Parent explicitly accepted named retain-verified proposal from claims-074 after inspecting it. The rewritten test explanation makes a false host/program lifecycle claim. The pure predicate and its product behavior are not shown defective. Record the changed host-specific lifecycle explanation. Preserve the pre-existing generic clause and keep the useful pure predicate test; no behavior change is requested by this finding. Checked source/results: ["At 1ed482dde220452e424973faf38a5e1318986333, core.rs:17822-17857 says a host-orphaned Exited row has nothing running, then tests only synthetic terminal/outcome combinations.","At that revision hosts/terminal.rs:754-784 explicitly supports a child that ignored hangup and outlived its unavailable or ended host. A missing host therefore cannot establish the claimed no-programs-running premise.","Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a core.rs:20993-21005 already said nothing was running about tmux-orphaned rows. The reviewed change newly substitutes host-orphaned and terminal-probed; this is an in-range host-specific rewrite, not the first occurrence of the generic overstatement.","The scoped later core.rs diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db does not repair this wording. No runtime or cleanup-bypass observation was made."] Current coverage/results: {"SPEC.md":"Searched orphaned, terminal-less, cleanup and survivor terms; no acceptance of the false test explanation.","SPEC_impl.md":"Terminal-host ending contract at 1979 and reload residual at 2337 explicitly leave hangup-ignoring descendants to session cleanup. That contract contradicts rather than covers the stronger prose.","TODO.md Planned":"Empty.","plans/queue":"No only_an_unconfirmed, host-orphan or no-survivor explanation repair in targeted searches. Old-tmux retirement plans concern different production compatibility behavior.","BUGS.md":"Unrelated SSH helper hang only.","INDEX.md and queue":"No exact explanatory claim. gone-retry-forgets-pinned-foreground-child concerns a conditional production recovery/cleanup route; it does not cover this test docstring.","TRIAGE_OUTCOMES.md":"No matching active decision in terminal-less/orphan/claim searches.","FILTER.md":"Static lifecycle documentation is not a rare diagnostic or self-correcting display. No full filter boundary matches."} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "Maintainers are taught that terminal-host loss proves no program remains. The finding has consistently been documentation correctness only; no production consent bypass, cleanup failure, security impact or loss of user work is established."; null.
+Existing parent disposition (event 20): verified. Parent explicitly accepted named retain-verified proposal from
+claims-074 after inspecting it. The rewritten test explanation makes a false host/program lifecycle claim. The pure
+predicate and its product behavior are not shown defective. Record the changed host-specific lifecycle explanation.
+Preserve the pre-existing generic clause and keep the useful pure predicate test; no behavior change is requested by
+this finding. Checked source/results: ["At 1ed482dde220452e424973faf38a5e1318986333, core.rs:17822-17857 says a
+host-orphaned Exited row has nothing running, then tests only synthetic terminal/outcome combinations.","At that
+revision hosts/terminal.rs:754-784 explicitly supports a child that ignored hangup and outlived its unavailable or ended
+host. A missing host therefore cannot establish the claimed no-programs-running premise.","Exclusive base
+6e423e30068b62c6cfa276c6d720ee35bb70387a core.rs:20993-21005 already said nothing was running about tmux-orphaned rows.
+The reviewed change newly substitutes host-orphaned and terminal-probed; this is an in-range host-specific rewrite, not
+the first occurrence of the generic overstatement.","The scoped later core.rs diff through
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db does not repair this wording. No runtime or cleanup-bypass observation was
+made."] Current coverage/results: {"SPEC.md":"Searched orphaned, terminal-less, cleanup and survivor terms; no
+acceptance of the false test explanation.","SPEC_impl.md":"Terminal-host ending contract at 1979 and reload residual at
+2337 explicitly leave hangup-ignoring descendants to session cleanup. That contract contradicts rather than covers the
+stronger prose.","TODO.md Planned":"Empty.","plans/queue":"No only_an_unconfirmed, host-orphan or no-survivor
+explanation repair in targeted searches. Old-tmux retirement plans concern different production compatibility
+behavior.","BUGS.md":"Unrelated SSH helper hang only.","INDEX.md and queue":"No exact explanatory claim.
+gone-retry-forgets-pinned-foreground-child concerns a conditional production recovery/cleanup route; it does not cover
+this test docstring.","TRIAGE_OUTCOMES.md":"No matching active decision in terminal-less/orphan/claim
+searches.","FILTER.md":"Static lifecycle documentation is not a rare diagnostic or self-correcting display. No full
+filter boundary matches."} Exact cited cover: [] Original stronger consequence and missing premise remain preserved:
+"Maintainers are taught that terminal-host loss proves no program remains. The finding has consistently been
+documentation correctness only; no production consent bypass, cleanup failure, security impact or loss of user work is
+established."; null.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g114 record](records/review-through-00de0b6c/groups/g114.json). Record ID: `l3`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g114 record](records/review-through-00de0b6c/groups/g114.json). Record ID: `l3`.

@@ -46,7 +46,10 @@
       "FILTER.md supplies no necessary basis; explicit specification acceptance settles the bounded refusal claim."
     ],
     "exact_cover_quotes": [
-      {"source": "SPEC_impl.md:2180-2185", "quote": "A retried keyed create whose interrupted row is a tmux row (left by an older supervisor) keeps that kind through the store's takeover, so a row that turns out to have launched replays as itself; one the takeover claims is refused before anything starts and rolled back like a launch whose spec never landed, the refusal settled against its intent key: the evidence that allowed the retry was gathered for tmux, so starting it in a host instead would be a guess, and this supervisor creates no tmux terminal."}
+      {
+        "source": "SPEC_impl.md:2180-2185",
+        "quote": "A retried keyed create whose interrupted row is a tmux row (left by an older supervisor) keeps that kind through the store's takeover, so a row that turns out to have launched replays as itself; one the takeover claims is refused before anything starts and rolled back like a launch whose spec never landed, the refusal settled against its intent key: the evidence that allowed the retry was gathered for tmux, so starting it in a host instead would be a guess, and this supervisor creates no tmux terminal."
+      }
     ],
     "missing_premise": null,
     "original_stronger_consequence": "If unintended, refusing the interrupted create would prevent that create's retry recovery (high). Allocated checkout ownership is retained; this candidate alleges no lost work or security route.",
@@ -76,8 +79,14 @@
       "FILTER.md read; no filter needed. No rare-condition filter is used to lower a proven security consequence."
     ],
     "exact_cover_quotes": [
-      {"source": "SPEC_impl.md:94-97", "quote": "Confirmed 2026-09-28: files left behind are not a leak, and need no extra cleanup machinery, when they are bounded by a fixed amount, grow only with a rare and explicit user action (such as switching the release download source), or are removed by the next attempt at the same operation or by the next start of the process that owns them. As with retained supervisor metadata, the line is accumulation without bound over time during ordinary operation."},
-      {"source": "SPEC.md:4903-4907", "quote": "The local security boundary is the Unix account on a particular host. Processes the user runs on the target host, including same-account processes that can reach Farhelm's terminal hosts (the processes that keep its terminals), are trusted by this threat model. Farhelm does not provide strong same-account isolation against deliberate interference with agents or those terminal hosts, and session credentials do not provide same-account containment."}
+      {
+        "source": "SPEC_impl.md:94-97",
+        "quote": "Confirmed 2026-09-28: files left behind are not a leak, and need no extra cleanup machinery, when they are bounded by a fixed amount, grow only with a rare and explicit user action (such as switching the release download source), or are removed by the next attempt at the same operation or by the next start of the process that owns them. As with retained supervisor metadata, the line is accumulation without bound over time during ordinary operation."
+      },
+      {
+        "source": "SPEC.md:4903-4907",
+        "quote": "The local security boundary is the Unix account on a particular host. Processes the user runs on the target host, including same-account processes that can reach Farhelm's terminal hosts (the processes that keep its terminals), are trusted by this threat model. Farhelm does not provide strong same-account isolation against deliberate interference with agents or those terminal hosts, and session credentials do not provide same-account containment."
+      }
     ],
     "missing_premise": "A security consequence would need an unauthorized reader or transfer beyond private same-account state. Failed-settlement lifetime is not proof of a new unbounded accumulation route; no such route was established.",
     "original_stronger_consequence": "Immediate cleanup of credential-bearing launch input is skipped; retaining checkout ownership retains valid authority. Earlier history claimed its spec could survive ordinary successful starts until Delete, then retracted that assertion after checking Error-row reload cleanup. Preserve that correction and the valid-token distinction; do not replace them with a claim that all credentials were revoked.",
@@ -104,7 +113,10 @@
       "INDEX.md, matching queue terms, and active TRIAGE_OUTCOMES.md searched for removed tmux export/version guard. No matching item or decision found. Archive not read. FILTER.md supplies no necessary basis."
     ],
     "exact_cover_quotes": [
-      {"source": "SPEC_impl.md:2785-2788", "quote": "Ending the old terminals (`service::core::old_terminals`) is the one tmux-related step the running supervisor keeps, and works whether or not any tmux program exists."}
+      {
+        "source": "SPEC_impl.md:2785-2788",
+        "quote": "Ending the old terminals (`service::core::old_terminals`) is the one tmux-related step the running supervisor keeps, and works whether or not any tmux program exists."
+      }
     ],
     "missing_premise": null,
     "original_stronger_consequence": "Considered an integration/build risk or an unchecked remaining tmux driver after deleting its export. No security or user-work-loss route was asserted; old-terminal retirement correctness is outside this bounded export check.",

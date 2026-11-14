@@ -8,9 +8,13 @@ Unverified collection: Unverified after investigation: shared environment detail
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g031/f9`.
 
@@ -20,19 +24,87 @@ Confidence: Unverified collection; recording proposals and any disagreement rema
 
 Latest reviewer record, event 26 (finding, open):
 
-Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR suspected: a lower host menu can remain at old coordinates if new environment details above it move rows without changing the whole Hosts panel's measured size. Confirmed source basis: the new host-row-details block at 5278-5293 renders shared environment name/recipe/place_name, tunnels and credential_warning, while HostRowLines:1355-1388 and host_flow_rows:1430-1446 project only destination, state detail and remedy. Accepted host reads at list/view.rs:2160-2220 close affected host menus only from that three-line prefix projection before publishing. HostRow's local movement report at 4664-4666 covers retained mutation error/warning only, not the new environment fields. Public producer hosts.rs:537-555 in the helm fills environment.place_name from the place host display name and warning/tunnels from current provider health. Thus the omission affects current provider data, not an unknown future kind. Contract: SPEC_impl.md GUI says fixed row menus close on layout changes that could move the measured row; HostRowLines itself declares these are the actual PeerLine inputs used by HostRow. Useful refutation/limit found: the ordinary single-row-height trigger is NOT established as a persistent bug. HostsPanel:3004-3007 observes whole-section resize, list/view.rs:1456-1459/1524-1533 increments hosts_panel_layout_epoch and closes open host/session menus. Normal net panel growth is therefore repaired by that independent path. CSS app.css:5515-5524 leaves the section height content-driven. The remaining suspected route requires prefix movement with unchanged total section size, for example two environment detail lines changing wrapping above and below an open lower-host anchor while net panel dimensions stay equal. New container place_name text can change when ordinary place aliases change on another client; ordinary host headers are nonwrapping/ellipsized at app.css:5550-5570,5625 onward, and the generic detail PeerLines can wrap. hosts_list_shape at list/view.rs:1490-1512 tracks count/read health/traces/auto-disclosure, not those texts; it does not otherwise close on such a balanced text change. Actual host/menu binding uses use_anchor_binding at hosts.rs:4350 and not the measured-anchor probe used for session-heading resize, so no independent per-host geometry query was found. Exact missing premise: a concrete supported before/after layout and host-response publication in which the new environment-detail changes move the chosen header while whole-section border-box dimensions remain unchanged and no independent resize/scroll/trace event closes it. Source establishes the untracked fields and fallback behavior but cannot establish actual equal-height wrapping under the client's window/font/layout or that the combined response occurs; no runtime layout reproduction was authorized or performed. A source-backed fixed-size compensation case or an explicitly requested isolated UI observation establishing that layout would settle reportability. Suggested bucket: other for the currently established projection/contract concern; high UX would require a shown materially misplaced menu route. Confidence: unverified after investigation, not source-confirmed user-visible misplacement. proposed_drop false pending parent judgment. possible_cover none. Could-be-highest no security/work-loss route established. Attribution: pre-range Tensorlake-only metadata was already outside this projection; this record does NOT independently report that retired/pre-existing scope. The assigned patch newly adds shared Podman environment/place-name/health containers and producers to the same untracked surface. Later assigned guard/deletion changes do not update HostRowLines/HostFlow; hosts.rs has no change after 222bf625 through tip. Original suspected misanchored-menu consequence preserved, and ordinary net-growth rescue is explicitly retained as a limit. Lead f9 is closed to this investigated uncertainty; no uninvestigated source lead remains.
+Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR suspected: a lower host menu can remain at old
+coordinates if new environment details above it move rows without changing the whole Hosts panel's measured size.
+Confirmed source basis: the new host-row-details block at 5278-5293 renders shared environment name/recipe/place_name,
+tunnels and credential_warning, while HostRowLines:1355-1388 and host_flow_rows:1430-1446 project only destination,
+state detail and remedy. Accepted host reads at list/view.rs:2160-2220 close affected host menus only from that
+three-line prefix projection before publishing. HostRow's local movement report at 4664-4666 covers retained mutation
+error/warning only, not the new environment fields. Public producer hosts.rs:537-555 in the helm fills
+environment.place_name from the place host display name and warning/tunnels from current provider health. Thus the
+omission affects current provider data, not an unknown future kind. Contract: SPEC_impl.md GUI says fixed row menus
+close on layout changes that could move the measured row; HostRowLines itself declares these are the actual PeerLine
+inputs used by HostRow. Useful refutation/limit found: the ordinary single-row-height trigger is NOT established as a
+persistent bug. HostsPanel:3004-3007 observes whole-section resize, list/view.rs:1456-1459/1524-1533 increments
+hosts_panel_layout_epoch and closes open host/session menus. Normal net panel growth is therefore repaired by that
+independent path. CSS app.css:5515-5524 leaves the section height content-driven. The remaining suspected route requires
+prefix movement with unchanged total section size, for example two environment detail lines changing wrapping above and
+below an open lower-host anchor while net panel dimensions stay equal. New container place_name text can change when
+ordinary place aliases change on another client; ordinary host headers are nonwrapping/ellipsized at
+app.css:5550-5570,5625 onward, and the generic detail PeerLines can wrap. hosts_list_shape at list/view.rs:1490-1512
+tracks count/read health/traces/auto-disclosure, not those texts; it does not otherwise close on such a balanced text
+change. Actual host/menu binding uses use_anchor_binding at hosts.rs:4350 and not the measured-anchor probe used for
+session-heading resize, so no independent per-host geometry query was found. Exact missing premise: a concrete supported
+before/after layout and host-response publication in which the new environment-detail changes move the chosen header
+while whole-section border-box dimensions remain unchanged and no independent resize/scroll/trace event closes it.
+Source establishes the untracked fields and fallback behavior but cannot establish actual equal-height wrapping under
+the client's window/font/layout or that the combined response occurs; no runtime layout reproduction was authorized or
+performed. A source-backed fixed-size compensation case or an explicitly requested isolated UI observation establishing
+that layout would settle reportability. Suggested bucket: other for the currently established projection/contract
+concern; high UX would require a shown materially misplaced menu route. Confidence: unverified after investigation, not
+source-confirmed user-visible misplacement. proposed_drop false pending parent judgment. possible_cover none.
+Could-be-highest no security/work-loss route established. Attribution: pre-range Tensorlake-only metadata was already
+outside this projection; this record does NOT independently report that retired/pre-existing scope. The assigned patch
+newly adds shared Podman environment/place-name/health containers and producers to the same untracked surface. Later
+assigned guard/deletion changes do not update HostRowLines/HostFlow; hosts.rs has no change after 222bf625 through tip.
+Original suspected misanchored-menu consequence preserved, and ordinary net-growth rescue is explicitly retained as a
+limit. Lead f9 is closed to this investigated uncertainty; no uninvestigated source lead remains.
 
 Returned proposal (claims-018, event 26): **retain-unverified**, suggested bucket **other**.
 
-Source confirms new mutable environment detail containers are absent from causal prefix projection. Actual surviving menu misplacement remains conditional on layout movement without a section-size change or another invalidator.
+Source confirms new mutable environment detail containers are absent from causal prefix projection. Actual surviving
+menu misplacement remains conditional on layout movement without a section-size change or another invalidator.
 
-Original stronger consequence: A lower host menu might remain at old coordinates after details above it change. The original ordinary row-growth route is limited by the whole-panel resize fallback. Materially misplaced-menu UX could justify high only after its complete route is established; no wrong-target operation or work loss was alleged.
+Original stronger consequence: A lower host menu might remain at old coordinates after details above it change. The
+original ordinary row-growth route is limited by the whole-panel resize fallback. Materially misplaced-menu UX could
+justify high only after its complete route is established; no wrong-target operation or work loss was alleged.
 
-Unresolved premise or limitation: A concrete supported before/after environment-detail publication moves the chosen host header while the entire Hosts section's measured dimensions stay equal, and no scroll/resize/trace invalidator closes its menu. Equal-height wrapping/font geometry and that event sequence remain unobserved.
+Unresolved premise or limitation: A concrete supported before/after environment-detail publication moves the chosen host
+header while the entire Hosts section's measured dimensions stay equal, and no scroll/resize/trace invalidator closes
+its menu. Equal-height wrapping/font geometry and that event sequence remain unobserved.
 
-Proposed basis: Retain the investigated uncertainty and fallback, without presenting source omission as runtime misplacement or silently lowering an established harm.
+Proposed basis: Retain the investigated uncertainty and fallback, without presenting source omission as runtime
+misplacement or silently lowering an established harm.
 
-Existing parent disposition (event 26): unverified-after-investigation. Parent explicitly accepted named retain-unverified proposal from claims-018 after inspecting it. Source confirms new mutable environment detail containers are absent from causal prefix projection. Actual surviving menu misplacement remains conditional on layout movement without a section-size change or another invalidator. Retain the investigated uncertainty and fallback, without presenting source omission as runtime misplacement or silently lowering an established harm. Checked source/results: ["350a4b33b6d4476f4a78e43cea124bc2b828f462:UI hosts.rs:5278-5293 renders environment name/recipe/place/tunnels/warning. HostRowLines:1355-1388 and host_flow_rows:1430-1446 include only destination/detail/remedy.","350a4b33:list/view.rs:2160-2225 compares that projection before publishing accepted host reads. HostRow:4664-4666 reports only retained diagnostics locally. Helm hosts.rs:537-555 supplies mutable place alias and health data.","350a4b33:HostsPanel:3004-3007 observes whole-section resize. list/view.rs:1456-1459,1524-1533 closes open Hosts/Session surfaces on the resulting layout epoch. Ordinary net panel growth therefore has an independent repair path.","350a4b33:list/view.rs:1490-1512 list shape tracks count/read status/traces/auto-disclosure, not these detail texts. The diff adds the shared environment block within range; older Tensorlake-only omitted metadata is not independently attributed. UI hosts.rs has no diff after 222bf625 through tip. No native/browser layout observation was performed."] Current coverage/results: ["SPEC_impl.md:1027-1031 requires fixed menus to close when layout could move their measured row. :1216-1225 adds measured probes for session-heading size, not general host detail changes. Generic convenience-state lag acceptance in active TRIAGE_OUTCOMES.md:915-928 does not clearly override this specific geometry contract; retain that ambiguity.","TODO.md Planned and plans/queue/INDEX.md are empty; BUGS.md is unrelated.","INDEX.md and queue content searched for HostRowLines, host_flow_rows, environment details and host anchors. late-rail-restoration-retains-menu-coordinates.md and marked-count-reflow-leaves-popup-at-old-anchor.md were read in full: different geometry producers/owners, not exact aliases. Active ledger has no exact environment-detail case.","FILTER.md does not clearly match: neither actual rarity nor the whole surviving consequence has been established. Uncertainty alone is not a filter."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "A lower host menu might remain at old coordinates after details above it change. The original ordinary row-growth route is limited by the whole-panel resize fallback. Materially misplaced-menu UX could justify high only after its complete route is established; no wrong-target operation or work loss was alleged."; "A concrete supported before/after environment-detail publication moves the chosen host header while the entire Hosts section's measured dimensions stay equal, and no scroll/resize/trace invalidator closes its menu. Equal-height wrapping/font geometry and that event sequence remain unobserved.".
+Existing parent disposition (event 26): unverified-after-investigation. Parent explicitly accepted named
+retain-unverified proposal from claims-018 after inspecting it. Source confirms new mutable environment detail
+containers are absent from causal prefix projection. Actual surviving menu misplacement remains conditional on layout
+movement without a section-size change or another invalidator. Retain the investigated uncertainty and fallback, without
+presenting source omission as runtime misplacement or silently lowering an established harm. Checked source/results:
+["350a4b33b6d4476f4a78e43cea124bc2b828f462:UI hosts.rs:5278-5293 renders environment name/recipe/place/tunnels/warning.
+HostRowLines:1355-1388 and host_flow_rows:1430-1446 include only
+destination/detail/remedy.","350a4b33:list/view.rs:2160-2225 compares that projection before publishing accepted host
+reads. HostRow:4664-4666 reports only retained diagnostics locally. Helm hosts.rs:537-555 supplies mutable place alias
+and health data.","350a4b33:HostsPanel:3004-3007 observes whole-section resize. list/view.rs:1456-1459,1524-1533 closes
+open Hosts/Session surfaces on the resulting layout epoch. Ordinary net panel growth therefore has an independent repair
+path.","350a4b33:list/view.rs:1490-1512 list shape tracks count/read status/traces/auto-disclosure, not these detail
+texts. The diff adds the shared environment block within range; older Tensorlake-only omitted metadata is not
+independently attributed. UI hosts.rs has no diff after 222bf625 through tip. No native/browser layout observation was
+performed."] Current coverage/results: ["SPEC_impl.md:1027-1031 requires fixed menus to close when layout could move
+their measured row. :1216-1225 adds measured probes for session-heading size, not general host detail changes. Generic
+convenience-state lag acceptance in active TRIAGE_OUTCOMES.md:915-928 does not clearly override this specific geometry
+contract; retain that ambiguity.","TODO.md Planned and plans/queue/INDEX.md are empty; BUGS.md is unrelated.","INDEX.md
+and queue content searched for HostRowLines, host_flow_rows, environment details and host anchors.
+late-rail-restoration-retains-menu-coordinates.md and marked-count-reflow-leaves-popup-at-old-anchor.md were read in
+full: different geometry producers/owners, not exact aliases. Active ledger has no exact environment-detail
+case.","FILTER.md does not clearly match: neither actual rarity nor the whole surviving consequence has been
+established. Uncertainty alone is not a filter."] Exact cited cover: [] Original stronger consequence and missing
+premise remain preserved: "A lower host menu might remain at old coordinates after details above it change. The original
+ordinary row-growth route is limited by the whole-panel resize fallback. Materially misplaced-menu UX could justify high
+only after its complete route is established; no wrong-target operation or work loss was alleged."; "A concrete
+supported before/after environment-detail publication moves the chosen host header while the entire Hosts section's
+measured dimensions stay equal, and no scroll/resize/trace invalidator closes its menu. Equal-height wrapping/font
+geometry and that event sequence remain unobserved.".
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g031 record](records/review-through-00de0b6c/groups/g031.json). Record ID: `f9`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g031 record](records/review-through-00de0b6c/groups/g031.json). Record ID: `f9`.

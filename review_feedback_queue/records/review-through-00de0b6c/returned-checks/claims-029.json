@@ -44,7 +44,10 @@
       "FILTER.md does not independently dispose of a broken-session or work-loss route."
     ],
     "exact_cover_quotes": [
-      {"source": "SPEC_impl.md:7996-8001", "quote": "The supervisor runs no tmux. The supervisor unit, whether provisioning or `farhelm helm setup` renders it, names no tmux and puts no tmux directory on `PATH`"}
+      {
+        "source": "SPEC_impl.md:7996-8001",
+        "quote": "The supervisor runs no tmux. The supervisor unit, whether provisioning or `farhelm helm setup` renders it, names no tmux and puts no tmux directory on `PATH`"
+      }
     ],
     "missing_premise": "A current supervisor dependency on the selected tmux executable is absent. Inherited tmux used by user commands is a separate concern and is not dismissed here.",
     "original_stronger_consequence": "Deleting the pinning test could restore running-supervisor substrate shadowing and possibly stopped/lost sessions. No such route is established; retain that hypothetical for independent dismissal review.",
@@ -100,8 +103,14 @@
       "INDEX.md:903-904 points to finished-task-handle-published-after-host-purge.md; its complete file was read and matches trigger, consequence and failed-initial-launch scope. FILTER.md is unnecessary; durable bookkeeping does not fit transient-display filtering."
     ],
     "exact_cover_quotes": [
-      {"source": "review_feedback_queue/finished-task-handle-published-after-host-purge.md, Failed initial sandbox launch adds another producer", "quote": "A child on another worker can finish failed-launch cleanup while the parent is descheduled before insertion."},
-      {"source": "same section", "quote": "The consequence is stale map/handle bookkeeping until restart, with no established credential retention, live process, billed-resource leak or availability failure."}
+      {
+        "source": "review_feedback_queue/finished-task-handle-published-after-host-purge.md, Failed initial sandbox launch adds another producer",
+        "quote": "A child on another worker can finish failed-launch cleanup while the parent is descheduled before insertion."
+      },
+      {
+        "source": "same section",
+        "quote": "The consequence is stale map/handle bookkeeping until restart, with no established credential retention, live process, billed-resource leak or availability failure."
+      }
     ],
     "missing_premise": "A new scheduling/ownership change relative to the range base is not shown. This does not prove the inherited pattern correct.",
     "original_stronger_consequence": "A fast failed launch could leave a completed task handle after its host was forgotten. No live orphan or loss of user work was claimed.",
@@ -155,8 +164,14 @@
       "FILTER.md older-upgrade filter is not the basis: no separate rare condition or security-free scope should be inferred from legacy state alone."
     ],
     "exact_cover_quotes": [
-      {"source": "SPEC.md:214-217 at 500548b9253b07a26fd03119679184b69544e31d; retained current uninstall paragraph", "quote": "Uninstall has no tmux step of its own: stopping the supervisor's service ends whatever still runs under it, an earlier release's private tmux server included, but one that outlived a supervisor stopped before uninstall (on a host never updated to a release that ends it at startup, say) keeps running, which the maintainer accepted on 2026-11-11."},
-      {"source": "SPEC_impl.md:7824-7827 current", "quote": "Uninstall has no tmux step: a private tmux server that outlived a supervisor stopped before uninstall (a host never updated to a release that ends it at startup, or one whose startup ending failed and whose supervisor was later stopped) keeps running. The maintainer accepted that residual on 2026-11-11 when the step was removed."}
+      {
+        "source": "SPEC.md:214-217 at 500548b9253b07a26fd03119679184b69544e31d; retained current uninstall paragraph",
+        "quote": "Uninstall has no tmux step of its own: stopping the supervisor's service ends whatever still runs under it, an earlier release's private tmux server included, but one that outlived a supervisor stopped before uninstall (on a host never updated to a release that ends it at startup, say) keeps running, which the maintainer accepted on 2026-11-11."
+      },
+      {
+        "source": "SPEC_impl.md:7824-7827 current",
+        "quote": "Uninstall has no tmux step: a private tmux server that outlived a supervisor stopped before uninstall (a host never updated to a release that ends it at startup, or one whose startup ending failed and whose supervisor was later stopped) keeps running. The maintainer accepted that residual on 2026-11-11 when the step was removed."
+      }
     ],
     "missing_premise": "Additional loss of user work or security harm outside accepted process survival has not been established. No Add-over-answering-supervisor route follows from this acceptance.",
     "original_stronger_consequence": "Latest record deliberately keeps highest pending independent determination because cleanup retirement concerns processes/work; earlier other classifications were explicitly not accepted lowerings. Legacy processes can remain after host and binary removal. Preserve all of that for the independent check.",

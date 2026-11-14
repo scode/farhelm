@@ -4,13 +4,31 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Unverified collection: considered whether replacing the shared test provider destroy panic with a successful never-created proof weakens environment refusal tests, so an unwanted destruction or rollback could escape their observations. This is an investigated fixture lead, not an established product or test defect. Source checked: assigned patch 00654 changes RunningContainers::destroy at agent_requests.rs:14211 onward to return binding.handle.never_created(binding.host), while ensure_prepared at 14167 onward counts and refuses builds. environment/mod.rs:181-189 defines never_created as a rollback exception before provider create. The new Deny test compares retained owned rows and build count after awaiting the handler, and the Allow control expects exactly one refused preparation and complete row cleanup. Missing premise: whether earlier shared refusal tests depend solely on the former provider panic, or already observe supervisor dispatch and persistent source/host state independently; inspect those callers and lifecycle admissions next. Suggested bucket if a test regression is established: other; Could-be-highest: false for this fixture-only concern. Confidence: unverified, source investigation in progress, no execution. proposed_drop: false pending the caller/oracle check. possible_cover: none among supplied interface records; no prohibited coverage search. No runtime failure or false pass is asserted, and no runtime test, build or reproduction was run. Discovery pass 4 resolution: source does not establish a test-oracle regression from this allowance. Exact provider source is agent_requests.
+Unverified collection: considered whether replacing the shared test provider destroy panic with a successful
+never-created proof weakens environment refusal tests, so an unwanted destruction or rollback could escape their
+observations. This is an investigated fixture lead, not an established product or test defect. Source checked: assigned
+patch 00654 changes RunningContainers::destroy at agent_requests.rs:14211 onward to return
+binding.handle.never_created(binding.host), while ensure_prepared at 14167 onward counts and refuses builds.
+environment/mod.rs:181-189 defines never_created as a rollback exception before provider create. The new Deny test
+compares retained owned rows and build count after awaiting the handler, and the Allow control expects exactly one
+refused preparation and complete row cleanup. Missing premise: whether earlier shared refusal tests depend solely on the
+former provider panic, or already observe supervisor dispatch and persistent source/host state independently; inspect
+those callers and lifecycle admissions next. Suggested bucket if a test regression is established: other;
+Could-be-highest: false for this fixture-only concern. Confidence: unverified, source investigation in progress, no
+execution. proposed_drop: false pending the caller/oracle check. possible_cover: none among supplied interface records;
+no prohibited coverage search. No runtime failure or false pass is asserted, and no runtime test, build or reproduction
+was run. Discovery pass 4 resolution: source does not establish a test-oracle regression from this allowance. Exact
+provider source is agent_requests.
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g018/f8`.
 
@@ -20,9 +38,42 @@ Confidence: Unverified collection; recording proposals and any disagreement rema
 
 Latest reviewer record, event 25 (candidate, open):
 
-Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: considered whether replacing the shared test provider destroy panic with a successful never-created proof weakens environment refusal tests, so an unwanted destruction or rollback could escape their observations. This is an investigated fixture lead, not an established product or test defect. Source checked: assigned patch 00654 changes RunningContainers::destroy at agent_requests.rs:14211 onward to return binding.handle.never_created(binding.host), while ensure_prepared at 14167 onward counts and refuses builds. environment/mod.rs:181-189 defines never_created as a rollback exception before provider create. The new Deny test compares retained owned rows and build count after awaiting the handler, and the Allow control expects exactly one refused preparation and complete row cleanup. Missing premise: whether earlier shared refusal tests depend solely on the former provider panic, or already observe supervisor dispatch and persistent source/host state independently; inspect those callers and lifecycle admissions next. Suggested bucket if a test regression is established: other; Could-be-highest: false for this fixture-only concern. Confidence: unverified, source investigation in progress, no execution. proposed_drop: false pending the caller/oracle check. possible_cover: none among supplied interface records; no prohibited coverage search. No runtime failure or false pass is asserted, and no runtime test, build or reproduction was run.
+Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: considered whether replacing the shared test provider
+destroy panic with a successful never-created proof weakens environment refusal tests, so an unwanted destruction or
+rollback could escape their observations. This is an investigated fixture lead, not an established product or test
+defect. Source checked: assigned patch 00654 changes RunningContainers::destroy at agent_requests.rs:14211 onward to
+return binding.handle.never_created(binding.host), while ensure_prepared at 14167 onward counts and refuses builds.
+environment/mod.rs:181-189 defines never_created as a rollback exception before provider create. The new Deny test
+compares retained owned rows and build count after awaiting the handler, and the Allow control expects exactly one
+refused preparation and complete row cleanup. Missing premise: whether earlier shared refusal tests depend solely on the
+former provider panic, or already observe supervisor dispatch and persistent source/host state independently; inspect
+those callers and lifecycle admissions next. Suggested bucket if a test regression is established: other;
+Could-be-highest: false for this fixture-only concern. Confidence: unverified, source investigation in progress, no
+execution. proposed_drop: false pending the caller/oracle check. possible_cover: none among supplied interface records;
+no prohibited coverage search. No runtime failure or false pass is asserted, and no runtime test, build or reproduction
+was run.
 
-Discovery pass 4 resolution: source does not establish a test-oracle regression from this allowance. Exact provider source is agent_requests.rs:14162-14180 (preparation increments and fails; create still panics) and 14209-14215 (the explicit rollback exception). The shared ordinary-origin refusal test at 14874-14889 awaits the target Delete and checks its exact Unauthorized reason, then at 14948-14950 checks no card, no recorded supervisor dispatch, and that the same environment host row survives. Its responder records DeleteSession before returning SessionDeleted (14317-14328); owned_environment establishes a connected real session-owned row, including a recorded Podman container ID and admission, at 14402-14429 and 14445-14452. The production Delete admission returns at 676-679 before agent_delete whenever this target is session-owned. If an actual provider destruction/removal path succeeded, hosts.rs:1492-1508 consumes that proof to delete the registered host, which is independently observed by the retained-row assertion. Confined Deny likewise checks its supervisor dispatch log after joining the request at 14826-14835. The new launch Deny/Allow pair checks zero versus exactly one preparation, exact declined versus provider-failure outcomes, and retained owned-row membership. Returning a test-only never-created proof permits the intended failed-build cleanup; it does not make successful provider create possible, and no concrete competing mechanism that the changed allowance newly hides was established. No demand that a finite regression test exclude arbitrary side effects is made. Original suspected consequence (silently masked destructive dispatch or rollback) is retained above but remains unsupported. Suggested bucket: other if established; confidence: confirmed source refutation of the specific lost-panic-oracle premise, not a proof against all future test regressions. Could-be-highest: false for this fixture-only candidate. proposed_drop: the source-supported independent refusal, dispatch, row-preservation and preparation-count oracles above; this is a local non-report proposal, no parent drop/lowering presumed. possible_cover: none. No remaining missing source premise for this considered concern; no open lead under f8. All checks source-only, no runtime execution or reproduction.
+Discovery pass 4 resolution: source does not establish a test-oracle regression from this allowance. Exact provider
+source is agent_requests.rs:14162-14180 (preparation increments and fails; create still panics) and 14209-14215 (the
+explicit rollback exception). The shared ordinary-origin refusal test at 14874-14889 awaits the target Delete and checks
+its exact Unauthorized reason, then at 14948-14950 checks no card, no recorded supervisor dispatch, and that the same
+environment host row survives. Its responder records DeleteSession before returning SessionDeleted (14317-14328);
+owned_environment establishes a connected real session-owned row, including a recorded Podman container ID and
+admission, at 14402-14429 and 14445-14452. The production Delete admission returns at 676-679 before agent_delete
+whenever this target is session-owned. If an actual provider destruction/removal path succeeded, hosts.rs:1492-1508
+consumes that proof to delete the registered host, which is independently observed by the retained-row assertion.
+Confined Deny likewise checks its supervisor dispatch log after joining the request at 14826-14835. The new launch
+Deny/Allow pair checks zero versus exactly one preparation, exact declined versus provider-failure outcomes, and
+retained owned-row membership. Returning a test-only never-created proof permits the intended failed-build cleanup; it
+does not make successful provider create possible, and no concrete competing mechanism that the changed allowance newly
+hides was established. No demand that a finite regression test exclude arbitrary side effects is made. Original
+suspected consequence (silently masked destructive dispatch or rollback) is retained above but remains unsupported.
+Suggested bucket: other if established; confidence: confirmed source refutation of the specific lost-panic-oracle
+premise, not a proof against all future test regressions. Could-be-highest: false for this fixture-only candidate.
+proposed_drop: the source-supported independent refusal, dispatch, row-preservation and preparation-count oracles above;
+this is a local non-report proposal, no parent drop/lowering presumed. possible_cover: none. No remaining missing source
+premise for this considered concern; no open lead under f8. All checks source-only, no runtime execution or
+reproduction.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g018 record](records/review-through-00de0b6c/groups/g018.json). Record ID: `f8`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g018 record](records/review-through-00de0b6c/groups/g018.json). Record ID: `f8`.

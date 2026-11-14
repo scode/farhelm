@@ -4,13 +4,19 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Unverified collection: developers are told a session-list request can fail because a launch-sentinel file cannot be read, although launch-file failures are deliberately handled by the background ticker and leave listings available. This misstates the error boundary and can steer a failure fixture or maintenance change toward the wrong operation.
+Unverified collection: developers are told a session-list request can fail because a launch-sentinel file cannot be
+read, although launch-file failures are deliberately handled by the background ticker and leave listings available. This
+misstates the error boundary and can steer a failure fixture or maintenance change toward the wrong operation.
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g123/l6`, `g125/l4`.
 
@@ -20,21 +26,56 @@ Confidence: Unverified collection; recording proposals and any disagreement rema
 
 Latest reviewer record, event 13 (candidate, open):
 
-Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR/original concern preserved: misleading internal listing-failure documentation may send maintainers to launch-file failures even though lists do not read those files. Direct source/range checks: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a handlers.rs:619-623 already contains verbatim 'Every failure the listing can hit — an unreadable launch sentinel, an unclassified tmux failure — is an Internal' and the list_all justification. Assigned 47f33bbd relocates it verbatim to handlers.rs:672-676. Pinned listing.rs:92-97 correctly says 'Lists never sample screens, apply reports, read launch artifacts or commit outcomes' and 'A launch artifact read failure leaves lists available; the ticker logs and retries it.' The new helper description at handlers.rs:640-641 uses a tmux failure as its concrete failing-list example, which remains a real fallible dependency at this revision (listing.rs's pane_states await), unlike the sentinel. The scoped diff to 1ed482dde220452e424973faf38a5e1318986333 newly replaces that example with 'an unreadable launch sentinel or checkout registry' and changes the stale inline clause to replace tmux with checkout registry. This is exactly the later rewrite reported by supplied neighbour g125/l4, including its same sentinel-error-boundary cause; do not count it as a new independent g123 discovery. Suggested bucket: other/documentation if considered; confidence: confirmed source attribution and overlap, no execution. proposed_drop: no independent in-range introduction of the already-stale sentinel clause by this assigned relocation, plus supplied exact g125/l4 tracking the later newly false fixture guidance; this is a scoped attribution/novelty disposition, not a claim that correct production code makes the stale prose accurate. possible_cover: g125/l4 explicitly, from allowed discovery-neighbours.json; no prohibited coverage sources searched. Could-be-highest: false; consequence is incorrect internal error/test guidance, no established security or user-work-loss route. Caveats: the entire range was compared, not merely this commit's immediate parent. The pre-range stale clause remains misleading but is not independently reportable under this assignment; the later false new docstring is an in-range issue retained by its assigned owner. Lead l6 is resolved to this candidate; no missing premise remains.
+Reviewed commit: 47f33bbdbd5ff4a6e437e97a800f9083be43096e. TLDR/original concern preserved: misleading internal
+listing-failure documentation may send maintainers to launch-file failures even though lists do not read those files.
+Direct source/range checks: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a handlers.rs:619-623 already contains
+verbatim 'Every failure the listing can hit — an unreadable launch sentinel, an unclassified tmux failure — is an
+Internal' and the list_all justification. Assigned 47f33bbd relocates it verbatim to handlers.rs:672-676. Pinned
+listing.rs:92-97 correctly says 'Lists never sample screens, apply reports, read launch artifacts or commit outcomes'
+and 'A launch artifact read failure leaves lists available; the ticker logs and retries it.' The new helper description
+at handlers.rs:640-641 uses a tmux failure as its concrete failing-list example, which remains a real fallible
+dependency at this revision (listing.rs's pane_states await), unlike the sentinel. The scoped diff to
+1ed482dde220452e424973faf38a5e1318986333 newly replaces that example with 'an unreadable launch sentinel or checkout
+registry' and changes the stale inline clause to replace tmux with checkout registry. This is exactly the later rewrite
+reported by supplied neighbour g125/l4, including its same sentinel-error-boundary cause; do not count it as a new
+independent g123 discovery. Suggested bucket: other/documentation if considered; confidence: confirmed source
+attribution and overlap, no execution. proposed_drop: no independent in-range introduction of the already-stale sentinel
+clause by this assigned relocation, plus supplied exact g125/l4 tracking the later newly false fixture guidance; this is
+a scoped attribution/novelty disposition, not a claim that correct production code makes the stale prose accurate.
+possible_cover: g125/l4 explicitly, from allowed discovery-neighbours.json; no prohibited coverage sources searched.
+Could-be-highest: false; consequence is incorrect internal error/test guidance, no established security or
+user-work-loss route. Caveats: the entire range was compared, not merely this commit's immediate parent. The pre-range
+stale clause remains misleading but is not independently reportable under this assignment; the later false new docstring
+is an in-range issue retained by its assigned owner. Lead l6 is resolved to this candidate; no missing premise remains.
 
 Returned proposal (claims-078, event 13): **needs-parent**, suggested bucket **other**.
 
-The stale inline sentinel clause predates the exclusive base and was merely relocated by 47f33bbd. However the later in-range rewrite newly adds the same false example to the helper docstring. Preserve that in-range remainder for reconciliation with the separately mentioned g125/l4; its record was not supplied in this batch, so an exact duplicate disposition cannot be independently established here.
+The stale inline sentinel clause predates the exclusive base and was merely relocated by 47f33bbd. However the later
+in-range rewrite newly adds the same false example to the helper docstring. Preserve that in-range remainder for
+reconciliation with the separately mentioned g125/l4; its record was not supplied in this batch, so an exact duplicate
+disposition cannot be independently established here.
 
-Original stronger consequence: Maintainers may be sent toward launch-file failures when diagnosing or constructing listing failures. This is internal error/test-fixture guidance, without established security or work loss. The original relocation-only attribution concern is resolved as pre-range.
+Original stronger consequence: Maintainers may be sent toward launch-file failures when diagnosing or constructing
+listing failures. This is internal error/test-fixture guidance, without established security or work loss. The original
+relocation-only attribution concern is resolved as pre-range.
 
-Unresolved premise or limitation: The parent must reconcile the separately owned g125/l4 record before treating the later in-range helper-doc rewrite as already retained elsewhere. This batch can establish source overlap, not that record's final disposition.
+Unresolved premise or limitation: The parent must reconcile the separately owned g125/l4 record before treating the
+later in-range helper-doc rewrite as already retained elsewhere. This batch can establish source overlap, not that
+record's final disposition.
 
-Proposed basis: Exclude the pre-range inline clause as an independent introduction, but retain/reconcile the later in-range helper-doc error under the common underlying key. Do not silently drop the whole cause on per-commit attribution.
+Proposed basis: Exclude the pre-range inline clause as an independent introduction, but retain/reconcile the later
+in-range helper-doc error under the common underlying key. Do not silently drop the whole cause on per-commit
+attribution.
 
-Existing parent disposition (event 13): duplicate. Parent read full claims078 and079g125/l4. Same1ed482 newly added helper-doc example wrongly prescribes unreadable launch sentinel as a listing-failure stimulus; listing and checkout projection never read launch files. Original inline clause predates exclusive base and47f33bbd only relocates it; preserve that attribution rather than claiming new inline runtime behavior. Join retained g125/l4 documentation root, preserving both locations and true checkout-registry example. No additional item or exact spec acceptance; no highest harm.
+Existing parent disposition (event 13): duplicate. Parent read full claims078 and079g125/l4. Same1ed482 newly added
+helper-doc example wrongly prescribes unreadable launch sentinel as a listing-failure stimulus; listing and checkout
+projection never read launch files. Original inline clause predates exclusive base and47f33bbd only relocates it;
+preserve that attribution rather than claiming new inline runtime behavior. Join retained g125/l4 documentation root,
+preserving both locations and true checkout-registry example. No additional item or exact spec acceptance; no highest
+harm.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g123 record](records/review-through-00de0b6c/groups/g123.json). Record ID: `l6`.
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g123 record](records/review-through-00de0b6c/groups/g123.json). Record ID: `l6`.
 
 ### g125/l4
 
@@ -42,19 +83,73 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 14 (finding, open):
 
-Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; full range attribution checked against exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a and pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: developers are told a session-list request can fail because a launch-sentinel file cannot be read, although launch-file failures are deliberately handled by the background ticker and leave listings available. This misstates the error boundary and can steer a failure fixture or maintenance change toward the wrong operation. Details: assigned handlers.rs 620-622 rewrites list_reply's testability explanation to say a genuinely failing listing takes an unreadable launch sentinel or checkout registry. Lines 653-657 repeat the sentinel as a request-fatal failure and cite list_all's documentation as justification. The full listing.rs 88-153 contradicts this: 90-93 states 'Lists never sample screens, apply reports, read launch artifacts or commit outcomes' and 'A launch artifact read failure leaves lists available; the ticker logs and retries it.' Its complete function snapshots and projects entries, with its sole fallible await store.project_checkout_metadata at 139. The latter's complete body at store.rs 3557-3605 performs database-only working-copy membership projection and transaction commit, not launch-file reads. status.rs 339-344 explicitly states replies never touch launch artifacts; entry_info reads retained cells. Attribution: the old inline sentinel-error clause already exists at the exclusive base, handlers.rs 619-623, while base listing.rs 90-215 already keeps launch-file reads out of lists. In-range 47f33bbdbd5ff4a6e437e97a800f9083be43096e moves that old clause into list_reply and introduces a helper docstring whose real-failure example is tmux. The assigned 1ed482d patch newly rewrites that docstring to prescribe an unreadable launch sentinel as an actual failure mechanism and retains/updates the internal clause. Thus the broad stale clause predates the range, but the explicit false failure-fixture guidance is added by this assigned patch. Pinned-tip handlers.rs 620-622 and 653-657 retain it; later scoped diff removes grid/terminal-kind fields, not this comment. Suggested bucket: other (internal error-contract documentation). Could-be-highest: no established or suspected security or user-work-loss route from this comment. Confidence: confirmed source/contract and full-range attribution analysis; no execution. proposed_drop: false; correct listing behavior is not a refutation of the distinct newly rewritten documentation, and the earlier stale clause is disclosed rather than misattributed. possible_cover: none among supplied neighbour records for this specific error-boundary claim; no prohibited coverage search. Caveats: checkout metadata failures can genuinely fail a listing, so retain that real failure example. No claim that lists actually fail on a sentinel or that production availability regressed. Useful fix: remove the fictitious sentinel failure from the two changed explanations and describe the checkout projection as the actual fallible dependency. All readily checkable premises resolved; l4 is a finding, not an unresolved lead.
+Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; full range attribution checked against exclusive base
+6e423e30068b62c6cfa276c6d720ee35bb70387a and pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: developers are
+told a session-list request can fail because a launch-sentinel file cannot be read, although launch-file failures are
+deliberately handled by the background ticker and leave listings available. This misstates the error boundary and can
+steer a failure fixture or maintenance change toward the wrong operation. Details: assigned handlers.rs 620-622 rewrites
+list_reply's testability explanation to say a genuinely failing listing takes an unreadable launch sentinel or checkout
+registry. Lines 653-657 repeat the sentinel as a request-fatal failure and cite list_all's documentation as
+justification. The full listing.rs 88-153 contradicts this: 90-93 states 'Lists never sample screens, apply reports,
+read launch artifacts or commit outcomes' and 'A launch artifact read failure leaves lists available; the ticker logs
+and retries it.' Its complete function snapshots and projects entries, with its sole fallible await
+store.project_checkout_metadata at 139. The latter's complete body at store.rs 3557-3605 performs database-only
+working-copy membership projection and transaction commit, not launch-file reads. status.rs 339-344 explicitly states
+replies never touch launch artifacts; entry_info reads retained cells. Attribution: the old inline sentinel-error clause
+already exists at the exclusive base, handlers.rs 619-623, while base listing.rs 90-215 already keeps launch-file reads
+out of lists. In-range 47f33bbdbd5ff4a6e437e97a800f9083be43096e moves that old clause into list_reply and introduces a
+helper docstring whose real-failure example is tmux. The assigned 1ed482d patch newly rewrites that docstring to
+prescribe an unreadable launch sentinel as an actual failure mechanism and retains/updates the internal clause. Thus the
+broad stale clause predates the range, but the explicit false failure-fixture guidance is added by this assigned patch.
+Pinned-tip handlers.rs 620-622 and 653-657 retain it; later scoped diff removes grid/terminal-kind fields, not this
+comment. Suggested bucket: other (internal error-contract documentation). Could-be-highest: no established or suspected
+security or user-work-loss route from this comment. Confidence: confirmed source/contract and full-range attribution
+analysis; no execution. proposed_drop: false; correct listing behavior is not a refutation of the distinct newly
+rewritten documentation, and the earlier stale clause is disclosed rather than misattributed. possible_cover: none among
+supplied neighbour records for this specific error-boundary claim; no prohibited coverage search. Caveats: checkout
+metadata failures can genuinely fail a listing, so retain that real failure example. No claim that lists actually fail
+on a sentinel or that production availability regressed. Useful fix: remove the fictitious sentinel failure from the two
+changed explanations and describe the checkout projection as the actual fallible dependency. All readily checkable
+premises resolved; l4 is a finding, not an unresolved lead.
 
 Returned proposal (claims-079, event 14): **retain-verified**, suggested bucket **other**.
 
-The patch newly prescribes unreadable launch sentinels as a real way to make a session listing fail, although listing does no launch-file reads. The older inline stale clause predates the range; the new failure-fixture guidance is in range and remains at the tip.
+The patch newly prescribes unreadable launch sentinels as a real way to make a session listing fail, although listing
+does no launch-file reads. The older inline stale clause predates the range; the new failure-fixture guidance is in
+range and remains at the tip.
 
-Original stronger consequence: Misleading maintainers or tests about which operation fails and where the error boundary lies. The existing checkout-metadata failure example is real and should remain. The broad stale inline sentinel clause is disclosed as pre-range, not newly attributed to this patch.
+Original stronger consequence: Misleading maintainers or tests about which operation fails and where the error boundary
+lies. The existing checkout-metadata failure example is real and should remain. The broad stale inline sentinel clause
+is disclosed as pre-range, not newly attributed to this patch.
 
-Unresolved premise or limitation: None for the new false fixture guidance. This does not claim listings actually read sentinels, fail because of them, or have regressed in availability.
+Unresolved premise or limitation: None for the new false fixture guidance. This does not claim listings actually read
+sentinels, fail because of them, or have regressed in availability.
 
-Proposed basis: Retain the in-range error-contract documentation defect at other, distinguishing it from correct listing behavior and from the pre-range stale inline wording.
+Proposed basis: Retain the in-range error-contract documentation defect at other, distinguishing it from correct listing
+behavior and from the pre-range stale inline wording.
 
-Existing parent disposition (event 14): verified. Parent explicitly accepted named retain-verified proposal from claims-079 after inspecting it. The patch newly prescribes unreadable launch sentinels as a real way to make a session listing fail, although listing does no launch-file reads. The older inline stale clause predates the range; the new failure-fixture guidance is in range and remains at the tip. Retain the in-range error-contract documentation defect at other, distinguishing it from correct listing behavior and from the pre-range stale inline wording. Checked source/results: ["1ed482d:service/handlers.rs:620-622 adds the unreadable-launch-sentinel failure-fixture example; :653-657 repeats it as request-fatal and cites list_all. The scoped patch confirms the new helper doc replaces a tmux-failure example. Both claims remain at pinned tip.","1ed482d:service/listing.rs:88-153 explicitly says launch-artifact read failure leaves lists available. The complete function projects retained state; its only fallible await is store.project_checkout_metadata. The complete store.rs:3557-3605 helper performs database working-copy projection and transaction commit, not launch-file reads.","Current SPEC_impl.md:4280-4288 assigns unreadable launch evidence to ticker retry and explicitly says it does not fail lists. No execution or listing failure was observed."] Current coverage/results: ["Searched SPEC.md and SPEC_impl.md for list errors, launch sentinels and launch-artifact reads; the current implementation contract contradicts the comment. No product-spec acceptance of the false guidance.","TODO.md Planned is empty. Searched plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for sentinel failure, list_reply, listing error boundary and checkout projection. No exact cover. tmux-drop-from-docs's already-landed general audit is not unlanded-plan coverage. FILTER.md's rare diagnostic rule does not cover ordinary test-authoring guidance in a source comment."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "Misleading maintainers or tests about which operation fails and where the error boundary lies. The existing checkout-metadata failure example is real and should remain. The broad stale inline sentinel clause is disclosed as pre-range, not newly attributed to this patch."; "None for the new false fixture guidance. This does not claim listings actually read sentinels, fail because of them, or have regressed in availability.".
+Existing parent disposition (event 14): verified. Parent explicitly accepted named retain-verified proposal from
+claims-079 after inspecting it. The patch newly prescribes unreadable launch sentinels as a real way to make a session
+listing fail, although listing does no launch-file reads. The older inline stale clause predates the range; the new
+failure-fixture guidance is in range and remains at the tip. Retain the in-range error-contract documentation defect at
+other, distinguishing it from correct listing behavior and from the pre-range stale inline wording. Checked
+source/results: ["1ed482d:service/handlers.rs:620-622 adds the unreadable-launch-sentinel failure-fixture example;
+:653-657 repeats it as request-fatal and cites list_all. The scoped patch confirms the new helper doc replaces a
+tmux-failure example. Both claims remain at pinned tip.","1ed482d:service/listing.rs:88-153 explicitly says
+launch-artifact read failure leaves lists available. The complete function projects retained state; its only fallible
+await is store.project_checkout_metadata. The complete store.rs:3557-3605 helper performs database working-copy
+projection and transaction commit, not launch-file reads.","Current SPEC_impl.md:4280-4288 assigns unreadable launch
+evidence to ticker retry and explicitly says it does not fail lists. No execution or listing failure was observed."]
+Current coverage/results: ["Searched SPEC.md and SPEC_impl.md for list errors, launch sentinels and launch-artifact
+reads; the current implementation contract contradicts the comment. No product-spec acceptance of the false
+guidance.","TODO.md Planned is empty. Searched plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for sentinel
+failure, list_reply, listing error boundary and checkout projection. No exact cover. tmux-drop-from-docs's
+already-landed general audit is not unlanded-plan coverage. FILTER.md's rare diagnostic rule does not cover ordinary
+test-authoring guidance in a source comment."] Exact cited cover: [] Original stronger consequence and missing premise
+remain preserved: "Misleading maintainers or tests about which operation fails and where the error boundary lies. The
+existing checkout-metadata failure example is real and should remain. The broad stale inline sentinel clause is
+disclosed as pre-range, not newly attributed to this patch."; "None for the new false fixture guidance. This does not
+claim listings actually read sentinels, fail because of them, or have regressed in availability.".
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g125 record](records/review-through-00de0b6c/groups/g125.json). Record ID: `l4`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g125 record](records/review-through-00de0b6c/groups/g125.json). Record ID: `l4`.

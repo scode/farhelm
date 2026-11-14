@@ -45,9 +45,18 @@
       "FILTER.md older-upgrade filter is not the basis: ordinary retirement needs no additional rare condition. Coverage rests on the explicit specifications."
     ],
     "exact_cover_quotes": [
-      {"source": "SPEC.md:3000-3002, Terminal experience", "quote": "A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program."},
-      {"source": "SPEC.md:3003-3004, Terminal experience", "quote": "one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed."},
-      {"source": "SPEC.md:3009-3011, Terminal experience", "quote": "A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running."}
+      {
+        "source": "SPEC.md:3000-3002, Terminal experience",
+        "quote": "A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program."
+      },
+      {
+        "source": "SPEC.md:3003-3004, Terminal experience",
+        "quote": "one whose agent had already ended keeps its outcome, but its terminal's last screen, which lived in the server, is gone; old tabs are closed."
+      },
+      {
+        "source": "SPEC.md:3009-3011, Terminal experience",
+        "quote": "A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running."
+      }
     ],
     "missing_premise": "Independent fresh-context agreement is still required before the parent drops this highest-consequence record.",
     "original_stronger_consequence": "Upgrade ends running old agents and tab shells and loses their terminal screens/history. These are user-owned processes and work, so highest is preserved even though the migration is explicitly accepted.",

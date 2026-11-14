@@ -177,8 +177,14 @@
       "FILTER not used. Supplied references to g082/c2,g083/c5,g196/l1 are not included inputs and were not independently checked; they must retain their own potentially highest production route. No alias is asserted with those records."
     ],
     "exact_cover_quotes": [
-      {"source":"SPEC_impl.md:2943-2945, Grid streams","quote":"Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries a grid stream, so `Attach`, `Attached` and the browser's socket say nothing about it, and `SessionInfo` and `TabInfo` no longer report a terminal kind."},
-      {"source":"SPEC_impl.md:2949-2950, Grid streams","quote":"A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working."}
+      {
+        "source": "SPEC_impl.md:2943-2945, Grid streams",
+        "quote": "Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries a grid stream, so `Attach`, `Attached` and the browser's socket say nothing about it, and `SessionInfo` and `TabInfo` no longer report a terminal kind."
+      },
+      {
+        "source": "SPEC_impl.md:2949-2950, Grid streams",
+        "quote": "A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working."
+      }
     ],
     "missing_premise": null,
     "original_stronger_consequence": "Preserve loss-of-supported-compatibility-test concern and the interface caveat: valid pasted GridInput-shaped JSON may be reinterpreted as program input according to other supplied records. Correct new-page mounting and reload acceptance do not refute that wider potentially highest route.",
@@ -311,9 +317,18 @@
       "plans/queue/tmux-end-old-terminals.md explicitly removes migration band/kind display and ends old terminals; plans/REPORTS.md:29 records it landed. No unlanded fix needed for the retired UI. FILTER not used."
     ],
     "exact_cover_quotes": [
-      {"source":"f560058d:SPEC.md:3002-3006, Terminal experience","quote":"Every terminal is new: it runs in a terminal host of its own (above)."},
-      {"source":"f560058d:SPEC.md:3005-3006, Terminal experience","quote":"This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program."},
-      {"source":"SPEC.md:3000-3003, Terminal experience","quote":"A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program."}
+      {
+        "source": "f560058d:SPEC.md:3002-3006, Terminal experience",
+        "quote": "Every terminal is new: it runs in a terminal host of its own (above)."
+      },
+      {
+        "source": "f560058d:SPEC.md:3005-3006, Terminal experience",
+        "quote": "This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program."
+      },
+      {
+        "source": "SPEC.md:3000-3003, Terminal experience",
+        "quote": "A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program."
+      }
     ],
     "missing_premise": null,
     "original_stronger_consequence": "Deleting migration UI tests could leave users without a required warning or route to move running terminals. The specified ending itself can terminate user processes but was expressly outside this test-deletion candidate; retain that boundary and do not infer approval of another termination defect.",

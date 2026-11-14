@@ -1,5 +1,32 @@
 [
-  {"key":"g135/l2","line":9,"disposition":"duplicate","group":"file-links-failed-grid-mount-fixture-getter-mismatch","bucket":"other","recording":"retain-verified","needs_independent_drop_check":false,"reason":"Parent read full claims085 and canonical retained g083/l1claims054. Same rewritten f560058 terminal-files.test615-678/834-848 uses safely existing host getter where production createGridSurface's preassignment getGrid().element throws during failed-constructor disposal. In-range fixture/explanation mismatch persists; production masking structure predates exclusivebase. Join one retained test-fidelity finding with exact g083/g135/g136 provenance and all constructorfrequency/no broaderleak/nohighest caveats. No currentfixturefailure observed, no blanket productionrollback certificate."},
-  {"key":"g136/l1","line":8,"disposition":"duplicate","group":"file-links-failed-grid-mount-fixture-getter-mismatch","bucket":"other","recording":"retain-verified","needs_independent_drop_check":false,"reason":"Parent read complete claims085 and canonical g083/l1 plus g135/l2. Exact same failed-mount test/getter counterexample, not another source defect: changed test safely returns host.element while production dereferences unassigned created via getGrid().element before rethrow. Preserve optional-chaining-inside-getter limit, original error masking, unchanged pre-range production structure and same-tip test. One other-priority item; no observed runtimefailure, extraresourceleak/permanentmountloss/security/workloss. All introduced fixture provenance and prior narrowedseverity retained."},
-  {"key":"g135/l3","line":14,"disposition":"rejected","group":"ordinary-path-provider-test-awaits-synchronous-oracle","bucket":"other","recording":"removed-in-range","needs_independent_drop_check":false,"reason":"Parent read full claims085.04d85f0c newly adds test398-413 claiming synchronous callback recognition but awaits resolve-only promise before assertions; throwing request stub proves no hostrequest, not callback-before-return. Actual production callback is synchronous; true historical missingtiming oracle, not runtimefailure. f560058 deletes this retired XtermFileLinksAddon test and adapter; absent at00de. Preserve defect and later removal without residual actionable queueitem. This does not refute required retained grid recognition tests or assertion fidelity generally; no highest consequence."}
+  {
+    "key": "g135/l2",
+    "line": 9,
+    "disposition": "duplicate",
+    "group": "file-links-failed-grid-mount-fixture-getter-mismatch",
+    "bucket": "other",
+    "recording": "retain-verified",
+    "needs_independent_drop_check": false,
+    "reason": "Parent read full claims085 and canonical retained g083/l1claims054. Same rewritten f560058 terminal-files.test615-678/834-848 uses safely existing host getter where production createGridSurface's preassignment getGrid().element throws during failed-constructor disposal. In-range fixture/explanation mismatch persists; production masking structure predates exclusivebase. Join one retained test-fidelity finding with exact g083/g135/g136 provenance and all constructorfrequency/no broaderleak/nohighest caveats. No currentfixturefailure observed, no blanket productionrollback certificate."
+  },
+  {
+    "key": "g136/l1",
+    "line": 8,
+    "disposition": "duplicate",
+    "group": "file-links-failed-grid-mount-fixture-getter-mismatch",
+    "bucket": "other",
+    "recording": "retain-verified",
+    "needs_independent_drop_check": false,
+    "reason": "Parent read complete claims085 and canonical g083/l1 plus g135/l2. Exact same failed-mount test/getter counterexample, not another source defect: changed test safely returns host.element while production dereferences unassigned created via getGrid().element before rethrow. Preserve optional-chaining-inside-getter limit, original error masking, unchanged pre-range production structure and same-tip test. One other-priority item; no observed runtimefailure, extraresourceleak/permanentmountloss/security/workloss. All introduced fixture provenance and prior narrowedseverity retained."
+  },
+  {
+    "key": "g135/l3",
+    "line": 14,
+    "disposition": "rejected",
+    "group": "ordinary-path-provider-test-awaits-synchronous-oracle",
+    "bucket": "other",
+    "recording": "removed-in-range",
+    "needs_independent_drop_check": false,
+    "reason": "Parent read full claims085.04d85f0c newly adds test398-413 claiming synchronous callback recognition but awaits resolve-only promise before assertions; throwing request stub proves no hostrequest, not callback-before-return. Actual production callback is synchronous; true historical missingtiming oracle, not runtimefailure. f560058 deletes this retired XtermFileLinksAddon test and adapter; absent at00de. Preserve defect and later removal without residual actionable queueitem. This does not refute required retained grid recognition tests or assertion fidelity generally; no highest consequence."
+  }
 ]

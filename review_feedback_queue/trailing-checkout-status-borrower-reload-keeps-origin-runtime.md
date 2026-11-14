@@ -4,13 +4,30 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Source-confirmed review record: the converted checkout-status test reloads a still-running origin host while its original runtime is attached. The test creates two owners that can take the same host back from each other, rather than modeling a restarted supervisor. The supported finding is an unintended fixture ownership conflict and inaccurate helper assumption, not an observed flaky assertion or production failure. Suggested bucket: other (test fixture/lifecycle validity). Confidence: confirmed by source/caller ownership analysis, no execution. proposed_drop: false. Could-be-highest: no established security or user-work-loss route. possible_cover: none in the supplied exact neighbour records; no prohibited coverage sources searched. Source: checkout_interruption_status_matches_reload creates a live origin using long_lived_launcher at core.rs:41773-41780. In the borrower branch :41793-41799 it creates another session and selects that borrower's info; the supervisor's session map still owns the origin runtime. :41857-41862 ends only the selected borrower's host. :41879 invokes reload_sessions over all rows, without aborting or passing the live origin handle. This wrapper at :7957-7978 supplies adopted: HashMap::new() and tabs: HashMap::new(); its comment explicitly states no runtime counts as already adopted and incorrectly still says The tests that use it have no hosts. attribute_host_rows in core/host_handover.rs:672-710 skips only passed adopted/tab sockets, scans with HostRegistry, and at :764-790 adopts the origin over the scan's connection. Registry scan calls HostConnection::connect_with at hosts/r
+Source-confirmed review record: the converted checkout-status test reloads a still-running origin host while its
+original runtime is attached. The test creates two owners that can take the same host back from each other, rather than
+modeling a restarted supervisor. The supported finding is an unintended fixture ownership conflict and inaccurate helper
+assumption, not an observed flaky assertion or production failure. Suggested bucket: other (test fixture/lifecycle
+validity). Confidence: confirmed by source/caller ownership analysis, no execution. proposed_drop: false.
+Could-be-highest: no established security or user-work-loss route. possible_cover: none in the supplied exact neighbour
+records; no prohibited coverage sources searched. Source: checkout_interruption_status_matches_reload creates a live
+origin using long_lived_launcher at core.rs:41773-41780. In the borrower branch :41793-41799 it creates another session
+and selects that borrower's info; the supervisor's session map still owns the origin runtime. :41857-41862 ends only the
+selected borrower's host. :41879 invokes reload_sessions over all rows, without aborting or passing the live origin
+handle. This wrapper at :7957-7978 supplies adopted: HashMap::new() and tabs: HashMap::new(); its comment explicitly
+states no runtime counts as already adopted and incorrectly still says The tests that use it have no hosts.
+attribute_host_rows in core/host_handover.rs:672-710 skips only passed adopted/tab sockets, scans with HostRegistry, and
+at :764-790 adopts the origin over the scan's connection. Registry scan calls HostConnection::connect_with at hosts/r
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g104/l4`.
 
@@ -20,27 +37,95 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 10 (finding, open):
 
-Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: the converted checkout-status test reloads a still-running origin host while its original runtime is attached. The test creates two owners that can take the same host back from each other, rather than modeling a restarted supervisor. The supported finding is an unintended fixture ownership conflict and inaccurate helper assumption, not an observed flaky assertion or production failure. Suggested bucket: other (test fixture/lifecycle validity). Confidence: confirmed by source/caller ownership analysis, no execution. proposed_drop: false. Could-be-highest: no established security or user-work-loss route. possible_cover: none in the supplied exact neighbour records; no prohibited coverage sources searched.
+Reviewed commit: 70bc66a9f285cc2a9984924f389834d118b7cfdc. TLDR: the converted checkout-status test reloads a
+still-running origin host while its original runtime is attached. The test creates two owners that can take the same
+host back from each other, rather than modeling a restarted supervisor. The supported finding is an unintended fixture
+ownership conflict and inaccurate helper assumption, not an observed flaky assertion or production failure. Suggested
+bucket: other (test fixture/lifecycle validity). Confidence: confirmed by source/caller ownership analysis, no
+execution. proposed_drop: false. Could-be-highest: no established security or user-work-loss route. possible_cover: none
+in the supplied exact neighbour records; no prohibited coverage sources searched.
 
-Source: checkout_interruption_status_matches_reload creates a live origin using long_lived_launcher at core.rs:41773-41780. In the borrower branch :41793-41799 it creates another session and selects that borrower's info; the supervisor's session map still owns the origin runtime. :41857-41862 ends only the selected borrower's host. :41879 invokes reload_sessions over all rows, without aborting or passing the live origin handle. This wrapper at :7957-7978 supplies adopted: HashMap::new() and tabs: HashMap::new(); its comment explicitly states no runtime counts as already adopted and incorrectly still says The tests that use it have no hosts. attribute_host_rows in core/host_handover.rs:672-710 skips only passed adopted/tab sockets, scans with HostRegistry, and at :764-790 adopts the origin over the scan's connection. Registry scan calls HostConnection::connect_with at hosts/registry.rs:775; client.rs:1277-1279 always sends take_over: true. The original handle remains in sup.sessions. hosts/terminal.rs:3964-4040 reconnects on takeover while its control channel is open, up to its bounded instability limit. Thus no global registry or handle drop silently prevents the second owner. The host contract at SPEC_impl.md:2077-2078 says Each host has one owning connection inside the supervisor, since a second connection takes the host over from the first without notice. The same commit's helper docs at core.rs:39729-39734 explicitly warn about two runtimes taking over and require abort before another reload.
+Source: checkout_interruption_status_matches_reload creates a live origin using long_lived_launcher at
+core.rs:41773-41780. In the borrower branch :41793-41799 it creates another session and selects that borrower's info;
+the supervisor's session map still owns the origin runtime. :41857-41862 ends only the selected borrower's host. :41879
+invokes reload_sessions over all rows, without aborting or passing the live origin handle. This wrapper at :7957-7978
+supplies adopted: HashMap::new() and tabs: HashMap::new(); its comment explicitly states no runtime counts as already
+adopted and incorrectly still says The tests that use it have no hosts. attribute_host_rows in
+core/host_handover.rs:672-710 skips only passed adopted/tab sockets, scans with HostRegistry, and at :764-790 adopts the
+origin over the scan's connection. Registry scan calls HostConnection::connect_with at hosts/registry.rs:775;
+client.rs:1277-1279 always sends take_over: true. The original handle remains in sup.sessions.
+hosts/terminal.rs:3964-4040 reconnects on takeover while its control channel is open, up to its bounded instability
+limit. Thus no global registry or handle drop silently prevents the second owner. The host contract at
+SPEC_impl.md:2077-2078 says Each host has one owning connection inside the supervisor, since a second connection takes
+the host over from the first without notice. The same commit's helper docs at core.rs:39729-39734 explicitly warn about
+two runtimes taking over and require abort before another reload.
 
-Attribution and limits: the range base 6e423e30068b62c6cfa276c6d720ee35bb70387a's corresponding test (:41488 onward) uses tmux_supervisor; this origin has no reconnecting host runtime. The immediate parent has the same tmux fixture. The assigned migration introduces the still-live competing host owner in this test. The no-hosts wrapper comment predates the range (git log -S found no introduction inside the complete range); this finding does not claim that old comment itself was newly authored. The new caller violates its stated assumption, just as it begins making the stale claim false for this caller. Production reload already supports preserving existing runtimes via its adopted map; this test wrapper passes none.
+Attribution and limits: the range base 6e423e30068b62c6cfa276c6d720ee35bb70387a's corresponding test (:41488 onward)
+uses tmux_supervisor; this origin has no reconnecting host runtime. The immediate parent has the same tmux fixture. The
+assigned migration introduces the still-live competing host owner in this test. The no-hosts wrapper comment predates
+the range (git log -S found no introduction inside the complete range); this finding does not claim that old comment
+itself was newly authored. The new caller violates its stated assumption, just as it begins making the stale claim false
+for this caller. Production reload already supports preserving existing runtimes via its adopted map; this test wrapper
+passes none.
 
-Original potential consequence preserved and narrowed after investigation: origin takeover could affect test reliability or make the reload fixture unrepresentative. The test checks only the stopped borrower's result, so source has not established that contention changes those assertions. Do not label this a confirmed flake, fabricate a failure trace, or claim the borrower is misclassified. Neither current correct borrower classification nor that limitation removes the concrete second-owner setup. Fix direction: release the origin's runtime before the manual reload (or pass the existing runtime deliberately), and document the wrapper's ownership requirement. Keep the selected borrower's stopped/absent boundary unchanged. No reproduction, runtime test, build or live-install operation.
+Original potential consequence preserved and narrowed after investigation: origin takeover could affect test reliability
+or make the reload fixture unrepresentative. The test checks only the stopped borrower's result, so source has not
+established that contention changes those assertions. Do not label this a confirmed flake, fabricate a failure trace, or
+claim the borrower is misclassified. Neither current correct borrower classification nor that limitation removes the
+concrete second-owner setup. Fix direction: release the origin's runtime before the manual reload (or pass the existing
+runtime deliberately), and document the wrapper's ownership requirement. Keep the selected borrower's stopped/absent
+boundary unchanged. No reproduction, runtime test, build or live-install operation.
 
-Later-range check: pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db still uses the live origin fixture at core.rs:36689-36700, ends only the selected host at :36768-36773, and reloads at :36782-36790 without releasing the origin. Its wrapper :7379-7407 still passes an empty adopted map and retains the no-hosts comment. No later repair for this lifetime interaction is present at tip.
+Later-range check: pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db still uses the live origin fixture at
+core.rs:36689-36700, ends only the selected host at :36768-36773, and reloads at :36782-36790 without releasing the
+origin. Its wrapper :7379-7407 still passes an empty adopted map and retains the no-hosts comment. No later repair for
+this lifetime interaction is present at tip.
 
 Returned proposal (claims-068, event 10): **retain-verified**, suggested bucket **other**.
 
-The migrated borrower fixture reloads all rows while its supervisor still owns the live origin runtime. The reload wrapper supplies no adopted hosts, so discovery takes over that host and creates another runtime. This is a fixture ownership defect, not an observed assertion failure or product failure.
+The migrated borrower fixture reloads all rows while its supervisor still owns the live origin runtime. The reload
+wrapper supplies no adopted hosts, so discovery takes over that host and creates another runtime. This is a fixture
+ownership defect, not an observed assertion failure or product failure.
 
-Original stronger consequence: Origin takeover might weaken reliability or make the reload fixture unrepresentative. History narrowed this to the source-established second-owner setup and stale wrapper assumption; no failing schedule was observed.
+Original stronger consequence: Origin takeover might weaken reliability or make the reload fixture unrepresentative.
+History narrowed this to the source-established second-owner setup and stale wrapper assumption; no failing schedule was
+observed.
 
-Unresolved premise or limitation: A dependency from origin contention to failure of the selected borrower's assertions remains unestablished. Do not call this a confirmed flake, wrong borrower classification, or production failure.
+Unresolved premise or limitation: A dependency from origin contention to failure of the selected borrower's assertions
+remains unestablished. Do not call this a confirmed flake, wrong borrower classification, or production failure.
 
-Proposed basis: Retain the concrete fixture lifetime conflict as other; preserve the unproved assertion-failure consequence as a caveat.
+Proposed basis: Retain the concrete fixture lifetime conflict as other; preserve the unproved assertion-failure
+consequence as a caveat.
 
-Existing parent disposition (event 10): verified. Parent explicitly accepted named retain-verified proposal from claims-068 after inspecting it. The migrated borrower fixture reloads all rows while its supervisor still owns the live origin runtime. The reload wrapper supplies no adopted hosts, so discovery takes over that host and creates another runtime. This is a fixture ownership defect, not an observed assertion failure or product failure. Retain the concrete fixture lifetime conflict as other; preserve the unproved assertion-failure consequence as a caveat. Checked source/results: ["70bc66a9f285cc2a9984924f389834d118b7cfdc:crates/farhelm-supervisor/src/service/core.rs:41773-41799 creates the live origin and a separate borrower; 41857-41862 shuts down only the selected borrower; 41879-41900 reloads all rows and asserts only the borrower's outcome. The origin remains in sup.sessions.","Same revision core.rs:7957-7978 supplies adopted/tabs as empty maps and claims these tests have no hosts. core/host_handover.rs:672-790 skips supplied runtimes only, then scans and adopts the origin. hosts/client.rs:1277-1279 sends take_over:true; hosts/terminal.rs:3964-4040 reconnects while handles remain, subject to its instability limit. No implicit global reuse removes the ownership conflict.","Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:core.rs:41488-41530 uses tmux_supervisor for this test. The host migration introduces this particular competing-runtime setup; the wrapper's old comment itself is not claimed newly authored.","Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:36689-36798 retains the live origin, shuts down only the selected host, and reloads; 7379-7407 still supplies no adopted hosts. No runtime tests or reproductions ran."] Current coverage/results: ["Current SPEC.md and SPEC_impl.md searched for borrower/reload/ownership. SPEC_impl.md:1948-1949 requires one owning connection and explains takeover; host reload preservation describes production behavior, not acceptance of this test conflict. No exact acceptance found.","Current TODO.md Planned bucket is empty (25-27). BUGS.md has only an SSH-helper provisioning hang, unrelated. plans/queue searched for the fixture and ownership trigger; tmux-end-old-terminals and tmux-drop-from-docs are already landed per plans/REPORTS.md:29,32, and provide no unlanded fix coverage.","INDEX.md and matching queue text searched for borrower/reload/competing runtime and exact test/helper names. No same-root item found. Existing readoption and runtime-drop items have different triggers. Active TRIAGE_OUTCOMES.md has no matching decision; archive not read.","FILTER.md read in full. This deterministic fixture ownership setup is not wholly a rare self-correcting product diagnostic/status consequence; no filter applies."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "Origin takeover might weaken reliability or make the reload fixture unrepresentative. History narrowed this to the source-established second-owner setup and stale wrapper assumption; no failing schedule was observed."; "A dependency from origin contention to failure of the selected borrower's assertions remains unestablished. Do not call this a confirmed flake, wrong borrower classification, or production failure.".
+Existing parent disposition (event 10): verified. Parent explicitly accepted named retain-verified proposal from
+claims-068 after inspecting it. The migrated borrower fixture reloads all rows while its supervisor still owns the live
+origin runtime. The reload wrapper supplies no adopted hosts, so discovery takes over that host and creates another
+runtime. This is a fixture ownership defect, not an observed assertion failure or product failure. Retain the concrete
+fixture lifetime conflict as other; preserve the unproved assertion-failure consequence as a caveat. Checked
+source/results: ["70bc66a9f285cc2a9984924f389834d118b7cfdc:crates/farhelm-supervisor/src/service/core.rs:41773-41799
+creates the live origin and a separate borrower; 41857-41862 shuts down only the selected borrower; 41879-41900 reloads
+all rows and asserts only the borrower's outcome. The origin remains in sup.sessions.","Same revision core.rs:7957-7978
+supplies adopted/tabs as empty maps and claims these tests have no hosts. core/host_handover.rs:672-790 skips supplied
+runtimes only, then scans and adopts the origin. hosts/client.rs:1277-1279 sends take_over:true;
+hosts/terminal.rs:3964-4040 reconnects while handles remain, subject to its instability limit. No implicit global reuse
+removes the ownership conflict.","Exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a:core.rs:41488-41530 uses
+tmux_supervisor for this test. The host migration introduces this particular competing-runtime setup; the wrapper's old
+comment itself is not claimed newly authored.","Pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:core.rs:36689-36798
+retains the live origin, shuts down only the selected host, and reloads; 7379-7407 still supplies no adopted hosts. No
+runtime tests or reproductions ran."] Current coverage/results: ["Current SPEC.md and SPEC_impl.md searched for
+borrower/reload/ownership. SPEC_impl.md:1948-1949 requires one owning connection and explains takeover; host reload
+preservation describes production behavior, not acceptance of this test conflict. No exact acceptance found.","Current
+TODO.md Planned bucket is empty (25-27). BUGS.md has only an SSH-helper provisioning hang, unrelated. plans/queue
+searched for the fixture and ownership trigger; tmux-end-old-terminals and tmux-drop-from-docs are already landed per
+plans/REPORTS.md:29,32, and provide no unlanded fix coverage.","INDEX.md and matching queue text searched for
+borrower/reload/competing runtime and exact test/helper names. No same-root item found. Existing readoption and
+runtime-drop items have different triggers. Active TRIAGE_OUTCOMES.md has no matching decision; archive not
+read.","FILTER.md read in full. This deterministic fixture ownership setup is not wholly a rare self-correcting product
+diagnostic/status consequence; no filter applies."] Exact cited cover: [] Original stronger consequence and missing
+premise remain preserved: "Origin takeover might weaken reliability or make the reload fixture unrepresentative. History
+narrowed this to the source-established second-owner setup and stale wrapper assumption; no failing schedule was
+observed."; "A dependency from origin contention to failure of the selected borrower's assertions remains unestablished.
+Do not call this a confirmed flake, wrong borrower classification, or production failure.".
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g104 record](records/review-through-00de0b6c/groups/g104.json). Record ID: `l4`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g104 record](records/review-through-00de0b6c/groups/g104.json). Record ID: `l4`.

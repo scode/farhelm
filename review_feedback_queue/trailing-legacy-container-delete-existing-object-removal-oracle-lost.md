@@ -8,9 +8,13 @@ Source-confirmed review record: Legacy Delete loses its existing-container remov
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g137/f1`.
 
@@ -20,33 +24,116 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 10 (finding, open):
 
-Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc; replacement search extends through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.
+Reviewed commit: 04d85f0c98a9b635709d00b056719a0baa7fd3fc; replacement search extends through pinned tip
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.
 
 ## TLDR
-The remaining legacy Delete tests can pass if Delete stops attempting to remove containers and only handles objects that are already absent. The deleted tests distinguished that regression by deleting an existing Podman container. This is loss of a required cleanup regression check, not evidence that today's Delete fails.
+
+The remaining legacy Delete tests can pass if Delete stops attempting to remove containers and only handles objects that
+are already absent. The deleted tests distinguished that regression by deleting an existing Podman container. This is
+loss of a required cleanup regression check, not evidence that today's Delete fails.
 
 ## Details
-Precise removed oracle: at the reviewed commit's parent, containerized_sessions.rs:820-827 calls Stop, asserts the real container is exited, calls delete_session and asserts Podman container exists returns 1. Account and wrapper fixtures carry the same existing-object-to-absence oracle at parent :408-417 and :578-587; these assertions are in this group's assigned patch. The positive creation/execution paths may be retired, but Delete of old existing containers remains required. Correction to the caller's running-container premise: these successful Delete assertions act on an existing stopped container, not a still-running one. The removed failed_spec_retry_removes_its_predecessor_container helper removes a running predecessor through failed Create retry, a different operation removed by retirement. No old successful Delete-on-running oracle was demonstrated.
 
-The replacement at reviewed containerized_sessions.rs:45-105 creates an ordinary session running true, changes its persisted launch to legacy JSON and restarts the supervisor; it creates no Podman container. :211-227 only deletes that row and verifies it disappears. Existing absence succeeds even when no removal is attempted. The retained focused fake-engine test at container.rs:274-293 does not replace the removal oracle: its shell at :280 exits 125 on rm and returns the loop's fixed code for every other command, without changing state or asserting rm was invoked. Consequently omitting the production rm call leaves its code=1 case passing and code=0/125 cases refusing just as before. This is source-level discrimination analysis, not an executed mutation or reproduction. Ticket/inode tests at :222-269 use no engine and test a separate invariant.
+Precise removed oracle: at the reviewed commit's parent, containerized_sessions.rs:820-827 calls Stop, asserts the real
+container is exited, calls delete_session and asserts Podman container exists returns 1. Account and wrapper fixtures
+carry the same existing-object-to-absence oracle at parent :408-417 and :578-587; these assertions are in this group's
+assigned patch. The positive creation/execution paths may be retired, but Delete of old existing containers remains
+required. Correction to the caller's running-container premise: these successful Delete assertions act on an existing
+stopped container, not a still-running one. The removed failed_spec_retry_removes_its_predecessor_container helper
+removes a running predecessor through failed Create retry, a different operation removed by retirement. No old
+successful Delete-on-running oracle was demonstrated.
 
-Through-tip alternative checks: git log over the whole pinned range for containerized_sessions.rs and container.rs finds only retirement and 1ed482dde220452e424973faf38a5e1318986333; that later container.rs patch changes one comment, so the replacement and focused tests remain as above. Searches across crates, browser tests and scripts for legacy/retired container references, ContainerRuntime::for_session, remove_with_podman, the old container name and container-launch fixtures found no equivalent existing-object removal assertion. The remaining pending-retry fixture at pinned-tip service/core.rs:27207-27322 seeds ticket/marker bytes and explicitly asserts no removal was dispatched; it is not a Delete fixture. The browser retirement test at e2e/tests/retired-container-sessions.spec.ts:1-4 expressly creates no Podman environment, and :68-70 intercepts Delete with 409. Its normal fixture cleanup cannot test legacy removal because retirement exists only in intercepted presentation. podman_environments.rs tests the new provider-backed environment's helm-side whole-environment deletion and does not exercise the legacy ContainerRuntime or ContainerConfig route. No equivalent removal oracle was found. All readily checkable replacement premises are settled for this bounded finding.
+The replacement at reviewed containerized_sessions.rs:45-105 creates an ordinary session running true, changes its
+persisted launch to legacy JSON and restarts the supervisor; it creates no Podman container. :211-227 only deletes that
+row and verifies it disappears. Existing absence succeeds even when no removal is attempted. The retained focused
+fake-engine test at container.rs:274-293 does not replace the removal oracle: its shell at :280 exits 125 on rm and
+returns the loop's fixed code for every other command, without changing state or asserting rm was invoked. Consequently
+omitting the production rm call leaves its code=1 case passing and code=0/125 cases refusing just as before. This is
+source-level discrimination analysis, not an executed mutation or reproduction. Ticket/inode tests at :222-269 use no
+engine and test a separate invariant.
 
-Contract: SPEC_impl.md at reviewed :8652-8656 requires "Retain only the legacy `podman rm -f` removal, confirmed-absence check and lock/ticket handling still required to serialize deletion with an already-started creator." SPEC.md:4819-4821 retains Delete and confirmed absence. Retirement of positive execution paths cannot refute this independently retained cleanup oracle. A focused stateful engine fixture requiring correctly named rm to transition an existing object to absent, exercised through Delete, or a real legacy-object Delete fixture could restore the distinction without restoring retired creation APIs.
+Through-tip alternative checks: git log over the whole pinned range for containerized_sessions.rs and container.rs finds
+only retirement and 1ed482dde220452e424973faf38a5e1318986333; that later container.rs patch changes one comment, so the
+replacement and focused tests remain as above. Searches across crates, browser tests and scripts for legacy/retired
+container references, ContainerRuntime::for_session, remove_with_podman, the old container name and container-launch
+fixtures found no equivalent existing-object removal assertion. The remaining pending-retry fixture at pinned-tip
+service/core.rs:27207-27322 seeds ticket/marker bytes and explicitly asserts no removal was dispatched; it is not a
+Delete fixture. The browser retirement test at e2e/tests/retired-container-sessions.spec.ts:1-4 expressly creates no
+Podman environment, and :68-70 intercepts Delete with 409. Its normal fixture cleanup cannot test legacy removal because
+retirement exists only in intercepted presentation. podman_environments.rs tests the new provider-backed environment's
+helm-side whole-environment deletion and does not exercise the legacy ContainerRuntime or ContainerConfig route. No
+equivalent removal oracle was found. All readily checkable replacement premises are settled for this bounded finding.
 
-Suggested bucket: other, loss of maintainer regression coverage. Confidence: confirmed by source, including through-tip replacement checks; no execution. Could-be-highest: no for this distinct finding; no shipped removal failure, security impact or user-work-loss route is established. The original potentially-highest old-isolation concern remains independently preserved under c1. Proposed_drop: false. Possible_cover: none known; supplied neighbor records contain no equivalent finding and prohibited coverage sources were not searched. Material caveats: current production still invokes rm and requires confirmed absence; production correctness does not provide the missing test oracle. No tests, builds, mutation tests, reproductions or live-install actions were run. No remaining open source lead for this ID.
+Contract: SPEC_impl.md at reviewed :8652-8656 requires "Retain only the legacy `podman rm -f` removal, confirmed-absence
+check and lock/ticket handling still required to serialize deletion with an already-started creator." SPEC.md:4819-4821
+retains Delete and confirmed absence. Retirement of positive execution paths cannot refute this independently retained
+cleanup oracle. A focused stateful engine fixture requiring correctly named rm to transition an existing object to
+absent, exercised through Delete, or a real legacy-object Delete fixture could restore the distinction without restoring
+retired creation APIs.
+
+Suggested bucket: other, loss of maintainer regression coverage. Confidence: confirmed by source, including through-tip
+replacement checks; no execution. Could-be-highest: no for this distinct finding; no shipped removal failure, security
+impact or user-work-loss route is established. The original potentially-highest old-isolation concern remains
+independently preserved under c1. Proposed_drop: false. Possible_cover: none known; supplied neighbor records contain no
+equivalent finding and prohibited coverage sources were not searched. Material caveats: current production still invokes
+rm and requires confirmed absence; production correctness does not provide the missing test oracle. No tests, builds,
+mutation tests, reproductions or live-install actions were run. No remaining open source lead for this ID.
 
 Returned proposal (claims-087, event 10): **retain-verified**, suggested bucket **other**.
 
-The removed tests distinguished deletion of an existing stopped container from absence-only handling. The replacement and focused fake-engine matrix cannot distinguish omission of rm. This is a maintainer regression-oracle gap, not a demonstrated product cleanup failure.
+The removed tests distinguished deletion of an existing stopped container from absence-only handling. The replacement
+and focused fake-engine matrix cannot distinguish omission of rm. This is a maintainer regression-oracle gap, not a
+demonstrated product cleanup failure.
 
-Original stronger consequence: The initial lead described removal of a running container. Later source analysis corrected that to deletion of an existing stopped container; a running predecessor was removed only by the separately retired failed-Create retry path. The potentially highest isolation concern remains under g137/c1, not this test-only finding.
+Original stronger consequence: The initial lead described removal of a running container. Later source analysis
+corrected that to deletion of an existing stopped container; a running predecessor was removed only by the separately
+retired failed-Create retry path. The potentially highest isolation concern remains under g137/c1, not this test-only
+finding.
 
-Unresolved premise or limitation: No current product removal failure, security impact or user-work-loss route established. Existing-running Delete coverage was not demonstrated by the deleted successful Delete assertions. A bounded alternative-test search found no replacement, but this consultation is not a new repository-wide inventory.
+Unresolved premise or limitation: No current product removal failure, security impact or user-work-loss route
+established. Existing-running Delete coverage was not demonstrated by the deleted successful Delete assertions. A
+bounded alternative-test search found no replacement, but this consultation is not a new repository-wide inventory.
 
-Proposed basis: Retain the narrow source-verified test-oracle defect as other. A stateful fake requiring correctly named rm to change existing to absent, or a real-object Delete test, could restore the distinction. No fix authorized.
+Proposed basis: Retain the narrow source-verified test-oracle defect as other. A stateful fake requiring correctly named
+rm to change existing to absent, or a real-object Delete test, could restore the distinction. No fix authorized.
 
-Existing parent disposition (event 10): verified. Parent explicitly accepted named retain-verified proposal from claims-087 after inspecting it. The removed tests distinguished deletion of an existing stopped container from absence-only handling. The replacement and focused fake-engine matrix cannot distinguish omission of rm. This is a maintainer regression-oracle gap, not a demonstrated product cleanup failure. Retain the narrow source-verified test-oracle defect as other. A stateful fake requiring correctly named rm to change existing to absent, or a real-object Delete test, could restore the distinction. No fix authorized. Checked source/results: ["04d85f0c98a9b635709d00b056719a0baa7fd3fc^:crates/farhelm/tests/e2e/containerized_sessions.rs:820-827 stops the object, proves exited, deletes and requires Podman exists status 1. This proves an existing-stopped-object oracle, not Delete on a still-running container.","04d85f0c98a9b635709d00b056719a0baa7fd3fc:containerized_sessions.rs:45-105 creates no container, and :211-227 only checks row disappearance. container.rs:274-293 returns a fixed exists result independent of rm; rm itself always exits 125, with no invocation assertion. Removing rm preserves all matrix expectations by source analysis.","git log over the entire pinned range shows only 04d85f0c and 1ed482dd for these two files; the reviewed-revision-to-tip diff changes only one container.rs comment. The defective oracles remain through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.","At pinned tip, service/core.rs:27207-27322 is a pending-retry refusal test requiring that removal was not dispatched. e2e/tests/retired-container-sessions.spec.ts:1-4 creates no old container and :68-70 intercepts Delete with 409. Targeted legacy/retired/ContainerRuntime/remove_with_podman searches found no equivalent existing-object removal test.","Production container.rs:176-191 still invokes rm and checks absence, and service/teardown.rs:533-577 propagates cleanup failure. Correct production code does not replace the lost oracle. No test, mutation or reproduction was executed."] Current coverage/results: {"SPEC.md":"Current :4892-4900 retains legacy Delete and confirmed absence; it does not accept losing its existing-object regression check.","SPEC_impl.md":"Current :8312-8326 expressly retains podman rm -f and confirmed absence. Positive-path retirement is not coverage of this independent retained contract.","TODO.md Planned":"Empty. Near-term agent-started Podman stopping at :68 onward concerns marked agent subprocesses, not this legacy Delete oracle.","plans/queue":"podman-environments :284-295 and :453-468 require retirement/Delete and replacement tests, but the plan is landed per plans/REPORTS.md:21. No unlanded plan promising this exact oracle was found.","BUGS.md":"No matching cleanup-oracle acceptance.","INDEX.md and queue":"No exact existing-object Delete oracle item found. Read container-template-replacement-test-reuses-old-config.md: different template-apply oracle. Read mac-fixture-cleanup-stop-budget.md: different deadline defect. Neither covers this finding.","TRIAGE_OUTCOMES.md":"No exact legacy Delete oracle decision found; archive not read.","FILTER.md":"No filter covers persistent missing test discrimination; neither safe retry nor status-after-crash boundaries match."} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "The initial lead described removal of a running container. Later source analysis corrected that to deletion of an existing stopped container; a running predecessor was removed only by the separately retired failed-Create retry path. The potentially highest isolation concern remains under g137/c1, not this test-only finding."; "No current product removal failure, security impact or user-work-loss route established. Existing-running Delete coverage was not demonstrated by the deleted successful Delete assertions. A bounded alternative-test search found no replacement, but this consultation is not a new repository-wide inventory.".
+Existing parent disposition (event 10): verified. Parent explicitly accepted named retain-verified proposal from
+claims-087 after inspecting it. The removed tests distinguished deletion of an existing stopped container from
+absence-only handling. The replacement and focused fake-engine matrix cannot distinguish omission of rm. This is a
+maintainer regression-oracle gap, not a demonstrated product cleanup failure. Retain the narrow source-verified
+test-oracle defect as other. A stateful fake requiring correctly named rm to change existing to absent, or a real-object
+Delete test, could restore the distinction. No fix authorized. Checked source/results:
+["04d85f0c98a9b635709d00b056719a0baa7fd3fc^:crates/farhelm/tests/e2e/containerized_sessions.rs:820-827 stops the object,
+proves exited, deletes and requires Podman exists status 1. This proves an existing-stopped-object oracle, not Delete on
+a still-running container.","04d85f0c98a9b635709d00b056719a0baa7fd3fc:containerized_sessions.rs:45-105 creates no
+container, and :211-227 only checks row disappearance. container.rs:274-293 returns a fixed exists result independent of
+rm; rm itself always exits 125, with no invocation assertion. Removing rm preserves all matrix expectations by source
+analysis.","git log over the entire pinned range shows only 04d85f0c and 1ed482dd for these two files; the
+reviewed-revision-to-tip diff changes only one container.rs comment. The defective oracles remain through
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db.","At pinned tip, service/core.rs:27207-27322 is a pending-retry refusal test
+requiring that removal was not dispatched. e2e/tests/retired-container-sessions.spec.ts:1-4 creates no old container and
+:68-70 intercepts Delete with 409. Targeted legacy/retired/ContainerRuntime/remove_with_podman searches found no
+equivalent existing-object removal test.","Production container.rs:176-191 still invokes rm and checks absence, and
+service/teardown.rs:533-577 propagates cleanup failure. Correct production code does not replace the lost oracle. No
+test, mutation or reproduction was executed."] Current coverage/results: {"SPEC.md":"Current :4892-4900 retains legacy
+Delete and confirmed absence; it does not accept losing its existing-object regression check.","SPEC_impl.md":"Current
+:8312-8326 expressly retains podman rm -f and confirmed absence. Positive-path retirement is not coverage of this
+independent retained contract.","TODO.md Planned":"Empty. Near-term agent-started Podman stopping at :68 onward concerns
+marked agent subprocesses, not this legacy Delete oracle.","plans/queue":"podman-environments :284-295 and :453-468
+require retirement/Delete and replacement tests, but the plan is landed per plans/REPORTS.md:21. No unlanded plan
+promising this exact oracle was found.","BUGS.md":"No matching cleanup-oracle acceptance.","INDEX.md and queue":"No
+exact existing-object Delete oracle item found. Read container-template-replacement-test-reuses-old-config.md: different
+template-apply oracle. Read mac-fixture-cleanup-stop-budget.md: different deadline defect. Neither covers this
+finding.","TRIAGE_OUTCOMES.md":"No exact legacy Delete oracle decision found; archive not read.","FILTER.md":"No filter
+covers persistent missing test discrimination; neither safe retry nor status-after-crash boundaries match."} Exact cited
+cover: [] Original stronger consequence and missing premise remain preserved: "The initial lead described removal of a
+running container. Later source analysis corrected that to deletion of an existing stopped container; a running
+predecessor was removed only by the separately retired failed-Create retry path. The potentially highest isolation
+concern remains under g137/c1, not this test-only finding."; "No current product removal failure, security impact or
+user-work-loss route established. Existing-running Delete coverage was not demonstrated by the deleted successful Delete
+assertions. A bounded alternative-test search found no replacement, but this consultation is not a new repository-wide
+inventory.".
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g137 record](records/review-through-00de0b6c/groups/g137.json). Record ID: `f1`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g137 record](records/review-through-00de0b6c/groups/g137.json). Record ID: `f1`.

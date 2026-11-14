@@ -1,6 +1,30 @@
 [
- {"key":"g023/f1","proposal":"claim-checks/claims-012/result.json","parent_proposal":"source-refuted-keyed-session-identity-only","final_independent_gate":"required-before-highest-drop","reason":"Parentreadfull012. KeyedSessionViewbyIDandcallbackconsumingsource.idonly+separatesuppliedguardsrefuterefreshedsessioncrossidentityStoproute. Same-sessionguardcaptureNOTrefuted:startisrefreshedcallbackcanuseneweffectiveguard, distinct023f4/025direction/026openingtoken. Preserveoriginalstopdifferentworkhighest andexactidentity-onlylimitsforfreshgate; no assertionallguardsrenderfrozen."},
- {"key":"g023/f3","proposal":"claim-checks/claims-012/result.json","parent_proposal":"source-refuted-never-created-caller-order","final_independent_gate":"required-before-highest-drop","reason":"Full012singleproductionhandle.never_createdrollbackcallerregisters/reconcilesandfailsBEFOREsetupspawn/preparation/providercreate; freshPodmanrowhasnocanonicalID sostatus/explicitlifecycle refusebeforeI/O/hold, no actorautostart intervening. TensorlakewrapperrequiresnocreatedID/outstandingcreate. Refutesforgettingliveenvironment/userworkrootforTHISwrapper/caller, notallproofs/concurrentproviderops. Freshgatechecksno-createpremise, nottestexecutionortrustconstructoralone."},
- {"key":"g023/f4","proposal":"claim-checks/claims-012/result.json","parent_proposal":"out-of-range","final_independent_gate":"required-before-highest-drop","reason":"Full012refreshedstart(bool)canrecapturepermissiveguardbeforeactivationhandlingandstopnewlylivework beyondoldendeddisplay. Exactprehandlerrouteandcontractalreadyexclusivebase;086repairfreezesbeforeactivityawaitbutnotolderstartcallbackrace. Proposedwhole-rangeattributionexclusion, notfixed/source-refuted/narrow-rarityfilter. Preservehighestactualconditionalprocessloss/Dioxus0.7.10callbackreplacement andstableIdlestopadmission, distinctdirection/openingtokenqueuefindings. Freshcheckbasecode+requiredconsent, no lackofruntimeincidenceexcuse."},
- {"key":"g024/c3","proposal":"claim-checks/claims-012/result.json","parent_proposal":"partial-refutation-original-authority-plus-retain-history-provenance","final_independent_gate":"required-before-authority-withdrawal","reason":"Full012historicalevent13: arbitraryordinaryrequest/supervisordescriptor/obsoleteconnectionmanufacturingplacementrefutedbyserde-skippedtarget,capturedclaim/client/entry/identityandblockingclosureownedtransactionguard. Preserveoriginalauthoritydropproposalforfreshgate. Lateragent-origin targetwithNULLGUIselectionstillwriteslastplace/agesboundedrecents, explicitlySPECexcludesagentcreatesfromGUIdefaults; retainunder050l1 canonical, notsource-refutedbyforgeryguards. CURRENTc3later26also corroborates020l8remintedclaimfreshness; separatecause/recordingcoveredbyfocused128, don'tapplystaleproposalorcombineGUIhistorywithconnectionfreshnessroot. Candidatecanbeonecanonicaldispositionbutotherrootssupportingprovenancemustremaininqueue/evidence. No currentdrop/dedupaccepted."}
+  {
+    "key": "g023/f1",
+    "proposal": "claim-checks/claims-012/result.json",
+    "parent_proposal": "source-refuted-keyed-session-identity-only",
+    "final_independent_gate": "required-before-highest-drop",
+    "reason": "Parentreadfull012. KeyedSessionViewbyIDandcallbackconsumingsource.idonly+separatesuppliedguardsrefuterefreshedsessioncrossidentityStoproute. Same-sessionguardcaptureNOTrefuted:startisrefreshedcallbackcanuseneweffectiveguard, distinct023f4/025direction/026openingtoken. Preserveoriginalstopdifferentworkhighest andexactidentity-onlylimitsforfreshgate; no assertionallguardsrenderfrozen."
+  },
+  {
+    "key": "g023/f3",
+    "proposal": "claim-checks/claims-012/result.json",
+    "parent_proposal": "source-refuted-never-created-caller-order",
+    "final_independent_gate": "required-before-highest-drop",
+    "reason": "Full012singleproductionhandle.never_createdrollbackcallerregisters/reconcilesandfailsBEFOREsetupspawn/preparation/providercreate; freshPodmanrowhasnocanonicalID sostatus/explicitlifecycle refusebeforeI/O/hold, no actorautostart intervening. TensorlakewrapperrequiresnocreatedID/outstandingcreate. Refutesforgettingliveenvironment/userworkrootforTHISwrapper/caller, notallproofs/concurrentproviderops. Freshgatechecksno-createpremise, nottestexecutionortrustconstructoralone."
+  },
+  {
+    "key": "g023/f4",
+    "proposal": "claim-checks/claims-012/result.json",
+    "parent_proposal": "out-of-range",
+    "final_independent_gate": "required-before-highest-drop",
+    "reason": "Full012refreshedstart(bool)canrecapturepermissiveguardbeforeactivationhandlingandstopnewlylivework beyondoldendeddisplay. Exactprehandlerrouteandcontractalreadyexclusivebase;086repairfreezesbeforeactivityawaitbutnotolderstartcallbackrace. Proposedwhole-rangeattributionexclusion, notfixed/source-refuted/narrow-rarityfilter. Preservehighestactualconditionalprocessloss/Dioxus0.7.10callbackreplacement andstableIdlestopadmission, distinctdirection/openingtokenqueuefindings. Freshcheckbasecode+requiredconsent, no lackofruntimeincidenceexcuse."
+  },
+  {
+    "key": "g024/c3",
+    "proposal": "claim-checks/claims-012/result.json",
+    "parent_proposal": "partial-refutation-original-authority-plus-retain-history-provenance",
+    "final_independent_gate": "required-before-authority-withdrawal",
+    "reason": "Full012historicalevent13: arbitraryordinaryrequest/supervisordescriptor/obsoleteconnectionmanufacturingplacementrefutedbyserde-skippedtarget,capturedclaim/client/entry/identityandblockingclosureownedtransactionguard. Preserveoriginalauthoritydropproposalforfreshgate. Lateragent-origin targetwithNULLGUIselectionstillwriteslastplace/agesboundedrecents, explicitlySPECexcludesagentcreatesfromGUIdefaults; retainunder050l1 canonical, notsource-refutedbyforgeryguards. CURRENTc3later26also corroborates020l8remintedclaimfreshness; separatecause/recordingcoveredbyfocused128, don'tapplystaleproposalorcombineGUIhistorywithconnectionfreshnessroot. Candidatecanbeonecanonicaldispositionbutotherrootssupportingprovenancemustremaininqueue/evidence. No currentdrop/dedupaccepted."
+  }
 ]

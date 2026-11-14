@@ -1,3 +1,11 @@
 [
- {"id":"g023","turn":7,"offset":16,"state":"complete","verdict":"final-discovery-empty","discovery":{"new_verified":[],"new_unverified":[],"empty":true},"reason":"Parent read full reply and refreshed supported complete audit:1525 mandatory lines, no missing/rejected packets, unfinished calls or unrecognized kinds, zero new events. Separate discovery after new Podman-domain synthesis searched saved-install admission, provider cleanup, lifecycle dispatch and typed busy handling beyond retained f4; explicit no new verified/UAI/open lead. No pending interface question for this owner. Source only; valid final empty pass."}
+  {
+    "id": "g023",
+    "turn": 7,
+    "offset": 16,
+    "state": "complete",
+    "verdict": "final-discovery-empty",
+    "discovery": { "new_verified": [], "new_unverified": [], "empty": true },
+    "reason": "Parent read full reply and refreshed supported complete audit:1525 mandatory lines, no missing/rejected packets, unfinished calls or unrecognized kinds, zero new events. Separate discovery after new Podman-domain synthesis searched saved-install admission, provider cleanup, lifecycle dispatch and typed busy handling beyond retained f4; explicit no new verified/UAI/open lead. No pending interface question for this owner. Source only; valid final empty pass."
+  }
 ]

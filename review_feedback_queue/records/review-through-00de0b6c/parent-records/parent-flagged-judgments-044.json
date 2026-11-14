@@ -1,3 +1,9 @@
 [
- {"key":"g070/c4","proposal":"claim-checks/claims-044/result.json","parent_proposal":"retain-real-CLI-host-membership-oracle-overclaim","final_independent_gate":"required-for-any-revived-original-security-oracle-drop-or-lowering","reason":"Parent read full044. New503 real helper says only this container but checks own-name substring and absence of local label; own plus ordinary SSH host passes. Separate production scope filter and exact handler test are complementary and do not establish this real CLI/relay oracle. Retain source-confirmed test/comment defect at proposed other, no actual escaped production listing/security consequence or runtime false pass asserted. Original production-correctness dismissal was explicitly reversed and stays in register. Distinct067l1 Delete-authority oracle and070l1 cleanup lifetime remain unaffected; no exact cover/filter."}
+  {
+    "key": "g070/c4",
+    "proposal": "claim-checks/claims-044/result.json",
+    "parent_proposal": "retain-real-CLI-host-membership-oracle-overclaim",
+    "final_independent_gate": "required-for-any-revived-original-security-oracle-drop-or-lowering",
+    "reason": "Parent read full044. New503 real helper says only this container but checks own-name substring and absence of local label; own plus ordinary SSH host passes. Separate production scope filter and exact handler test are complementary and do not establish this real CLI/relay oracle. Retain source-confirmed test/comment defect at proposed other, no actual escaped production listing/security consequence or runtime false pass asserted. Original production-correctness dismissal was explicitly reversed and stays in register. Distinct067l1 Delete-authority oracle and070l1 cleanup lifetime remain unaffected; no exact cover/filter."
+  }
 ]

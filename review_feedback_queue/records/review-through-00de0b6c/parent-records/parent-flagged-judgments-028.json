@@ -1,6 +1,30 @@
 [
- {"key":"g044/l10","proposal":"claim-checks/claims-028/result.json","parent_proposal":"out-of-range-unchanged-size-only-read-consistency-comment","final_independent_gate":"required-by-conservative-credential-read-flag","reason":"Parent read full028 exclusivebasehasexactuniversalchangedfilerefusalwordingandonlysize/lengthconsistencychecks, wholerangepathdiffdoesnotchangeclaim/checks. Realconditionalsame-sizeeditlimitationnotrefutedbysecuritymergespecorindependentsettings-save/finaldigestqueue. No newinrangecontract/domainestablished; sourceagefornamedunchangedreadcommentonly, notallchangedredaction/preparation. Preservecredentialsettingscontext/possiblebroaderlossforfreshgate, noaffectedfile/mixedread/runtimeclaim."},
- {"key":"g045/c1","proposal":"claim-checks/claims-028/result.json","parent_proposal":"source-refuted-row-deletion-before-create-durable-ownership","final_independent_gate":"required-before-possible-highest-unowned-resource-drop","reason":"Full028 bothprovidersrereadmatchingrow/bindingandrequireguardedpending/preparedcreatestoragetruebeforeexternalcreate/run; afterlockcreate/deleteusesameguard. Publishingrowbeforelockthereforedoesnotestablishdeleted-rowunownedbilledresourcecreate. Narrowrefutationpreservesoriginalownership/workhypothesisforfreshgate, notunrelatedstorage/cancellationalgorithms."},
- {"key":"g045/f1","proposal":"claim-checks/claims-028/result.json","parent_proposal":"exact-spec-accepted-initial-environment-lost-create-reply-cleanup","final_independent_gate":"required-before-highest-drop","reason":"Full028 sourceconfirmsnewresourcecanbedestroyedafteragentstartsbutcreate-replylost; sharedinitialfinishonlynewresource, neverReplacesource. Exactproductandimplacceptpreconfirmednormalnewlaunchcleanupincludinglostreplyandcontainerinheritance, retainrowifcleanupfails. Originalworklosskept highest, notrefuted/lowered. Freshgatepreciseinitial-resource/before-confirmationboundary, noacceptanceolderexisting/Replaceworkloss."},
- {"key":"g045/l2","proposal":"claim-checks/claims-028/result.json","parent_proposal":"explicit-preparation-skip-contract-pending-inherited-private-binary-gate","final_independent_gate":"required-by-conservative-inherited-command-selection-flag","reason":"Full028 custombasecanretainprivate lib/tmuxwithoutmanagedunit/database; finalcleanupdoesnotprovebinaryabsence. Farhelmdoesnotinvokeitbutexplicituser/agentcommandmayselectoldprivatebinary. Sourceconditionalnotrefutednorrequiringolderliveupgrade. Proposedexactimplsnapshot-preparationskipqualifiesordinarysetup/Updatecleanup, weak'notexpected'claimNOTproofabsence. Freshgatecheckgoverningproduct/implscopeandpreserveoriginallikelycodefinding→speccoverrevision/custominputlimits; noconcretevulnerability/worklossestablished."}
+  {
+    "key": "g044/l10",
+    "proposal": "claim-checks/claims-028/result.json",
+    "parent_proposal": "out-of-range-unchanged-size-only-read-consistency-comment",
+    "final_independent_gate": "required-by-conservative-credential-read-flag",
+    "reason": "Parent read full028 exclusivebasehasexactuniversalchangedfilerefusalwordingandonlysize/lengthconsistencychecks, wholerangepathdiffdoesnotchangeclaim/checks. Realconditionalsame-sizeeditlimitationnotrefutedbysecuritymergespecorindependentsettings-save/finaldigestqueue. No newinrangecontract/domainestablished; sourceagefornamedunchangedreadcommentonly, notallchangedredaction/preparation. Preservecredentialsettingscontext/possiblebroaderlossforfreshgate, noaffectedfile/mixedread/runtimeclaim."
+  },
+  {
+    "key": "g045/c1",
+    "proposal": "claim-checks/claims-028/result.json",
+    "parent_proposal": "source-refuted-row-deletion-before-create-durable-ownership",
+    "final_independent_gate": "required-before-possible-highest-unowned-resource-drop",
+    "reason": "Full028 bothprovidersrereadmatchingrow/bindingandrequireguardedpending/preparedcreatestoragetruebeforeexternalcreate/run; afterlockcreate/deleteusesameguard. Publishingrowbeforelockthereforedoesnotestablishdeleted-rowunownedbilledresourcecreate. Narrowrefutationpreservesoriginalownership/workhypothesisforfreshgate, notunrelatedstorage/cancellationalgorithms."
+  },
+  {
+    "key": "g045/f1",
+    "proposal": "claim-checks/claims-028/result.json",
+    "parent_proposal": "exact-spec-accepted-initial-environment-lost-create-reply-cleanup",
+    "final_independent_gate": "required-before-highest-drop",
+    "reason": "Full028 sourceconfirmsnewresourcecanbedestroyedafteragentstartsbutcreate-replylost; sharedinitialfinishonlynewresource, neverReplacesource. Exactproductandimplacceptpreconfirmednormalnewlaunchcleanupincludinglostreplyandcontainerinheritance, retainrowifcleanupfails. Originalworklosskept highest, notrefuted/lowered. Freshgatepreciseinitial-resource/before-confirmationboundary, noacceptanceolderexisting/Replaceworkloss."
+  },
+  {
+    "key": "g045/l2",
+    "proposal": "claim-checks/claims-028/result.json",
+    "parent_proposal": "explicit-preparation-skip-contract-pending-inherited-private-binary-gate",
+    "final_independent_gate": "required-by-conservative-inherited-command-selection-flag",
+    "reason": "Full028 custombasecanretainprivate lib/tmuxwithoutmanagedunit/database; finalcleanupdoesnotprovebinaryabsence. Farhelmdoesnotinvokeitbutexplicituser/agentcommandmayselectoldprivatebinary. Sourceconditionalnotrefutednorrequiringolderliveupgrade. Proposedexactimplsnapshot-preparationskipqualifiesordinarysetup/Updatecleanup, weak'notexpected'claimNOTproofabsence. Freshgatecheckgoverningproduct/implscopeandpreserveoriginallikelycodefinding→speccoverrevision/custominputlimits; noconcretevulnerability/worklossestablished."
+  }
 ]

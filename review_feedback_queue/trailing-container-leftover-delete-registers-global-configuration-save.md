@@ -4,13 +4,31 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Source-confirmed review record: deleting an interrupted container in Settings holds unrelated host/session reads and actions in the same client behind remote cleanup, even after Settings closes. A slow cleanup leaves displays stale and can make unrelated requests fail as waiting for configuration saves. Synthesis recheck: the actual Settings caller is containers_settings.rs:155–176. It consumes the rendered confirmation, sets local busy, constructs delete_container_leftover synchronously at :165, then drives the returned future with dioxus::core::spawn_forever at :166–167. Its mounted flag is checked only AFTER sending.await returns (:168–174), to suppress component-owned completion paint. Thus cancellation safety is supplied by spawn_forever, not configuration-save ordering. api/environments.rs:80–91 chooses the row-backed whole-host DELETE or the unregistered orphan DELETE and calls send_save at :91 (correcting the earlier off-by-one primary location). api.rs:2259–2267 independently registers CONFIGURATION_SAVES and holds its ticket through response headers or request failure; it bypasses preceding-save waits for this mutation. Ordinary send/send_read reach send_inner_ordered with dependent=true (:2461–2489), snapshot preceding tickets before their first await, and await them before HTTP dispatch (:2491–2507). fetch_hosts is an unrelated concrete consumer at :4603–4605; fetch_session also uses send at :3611–3613. api/save_order.rs:27–65 releases waiters only on ticket drop; :89–108 charges the wait to each request deadline and reports "Request timed out waiting for earlier configuration saves". READ_TIM
+Source-confirmed review record: deleting an interrupted container in Settings holds unrelated host/session reads and
+actions in the same client behind remote cleanup, even after Settings closes. A slow cleanup leaves displays stale and
+can make unrelated requests fail as waiting for configuration saves. Synthesis recheck: the actual Settings caller is
+containers_settings.rs:155–176. It consumes the rendered confirmation, sets local busy, constructs
+delete_container_leftover synchronously at :165, then drives the returned future with dioxus::core::spawn_forever at
+:166–167. Its mounted flag is checked only AFTER sending.await returns (:168–174), to suppress component-owned
+completion paint. Thus cancellation safety is supplied by spawn_forever, not configuration-save ordering.
+api/environments.rs:80–91 chooses the row-backed whole-host DELETE or the unregistered orphan DELETE and calls send_save
+at :91 (correcting the earlier off-by-one primary location). api.rs:2259–2267 independently registers
+CONFIGURATION_SAVES and holds its ticket through response headers or request failure; it bypasses preceding-save waits
+for this mutation. Ordinary send/send_read reach send_inner_ordered with dependent=true (:2461–2489), snapshot preceding
+tickets before their first await, and await them before HTTP dispatch (:2491–2507). fetch_hosts is an unrelated concrete
+consumer at :4603–4605; fetch_session also uses send at :3611–3613. api/save_order.rs:27–65 releases waiters only on
+ticket drop; :89–108 charges the wait to each request deadline and reports "Request timed out waiting for earlier
+configuration saves". READ_TIM
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **high**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **high**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g032/l3`.
 
@@ -20,19 +38,84 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 11 (finding, open):
 
-Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: deleting an interrupted container in Settings holds unrelated host/session reads and actions in the same client behind remote cleanup, even after Settings closes. A slow cleanup leaves displays stale and can make unrelated requests fail as waiting for configuration saves. Synthesis recheck: the actual Settings caller is containers_settings.rs:155–176. It consumes the rendered confirmation, sets local busy, constructs delete_container_leftover synchronously at :165, then drives the returned future with dioxus::core::spawn_forever at :166–167. Its mounted flag is checked only AFTER sending.await returns (:168–174), to suppress component-owned completion paint. Thus cancellation safety is supplied by spawn_forever, not configuration-save ordering. api/environments.rs:80–91 chooses the row-backed whole-host DELETE or the unregistered orphan DELETE and calls send_save at :91 (correcting the earlier off-by-one primary location). api.rs:2259–2267 independently registers CONFIGURATION_SAVES and holds its ticket through response headers or request failure; it bypasses preceding-save waits for this mutation. Ordinary send/send_read reach send_inner_ordered with dependent=true (:2461–2489), snapshot preceding tickets before their first await, and await them before HTTP dispatch (:2491–2507). fetch_hosts is an unrelated concrete consumer at :4603–4605; fetch_session also uses send at :3611–3613. api/save_order.rs:27–65 releases waiters only on ticket drop; :89–108 charges the wait to each request deadline and reports "Request timed out waiting for earlier configuration saves". READ_TIMEOUT is 10 seconds (:2167), versus the cleanup's REQUEST_TIMEOUT of 60 seconds (:2127). The helm whole-host handler awaits hosts.rs:1477–1500's connection hold, release and provider.destroy; Podman destroy at environment/podman.rs:1294–1338 reaches remove_container (:400–414), which runs remote inspect, rm --force and absence verification with 30-second command budgets (:25). This is remote execution, not admission-only acknowledgment. SPEC_impl.md GUI: Dioxus, :334–340 explicitly says "host mutations can wait on remote operations and must not hold every read behind them." Owning the existing future in spawn_forever while using send rather than send_save preserves deletion after dismissal without making it a global configuration prerequisite. Suggested bucket: high, material unrelated-client interaction degradation under slow cleanup. Confidence: confirmed source/contract route, not execution. proposed_drop: false. possible_cover: none. Caveats preserved: this affects the initiating client's Rust HTTP funnel, not other clients, already-dispatched requests, terminal sockets, the event feed or page-side JavaScript HTTP. The request deadline eventually drops the barrier; the server still owns admitted deletion. No established highest/security or work-loss route. git diff from reviewed commit to inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for api/environments.rs is empty. No tests, builds or reproductions run. This revision distinguishes cancellation lifetime from configuration ordering and confirms the precise caller rather than changing the finding's consequence.
+Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462. TLDR: deleting an interrupted container in Settings holds
+unrelated host/session reads and actions in the same client behind remote cleanup, even after Settings closes. A slow
+cleanup leaves displays stale and can make unrelated requests fail as waiting for configuration saves. Synthesis
+recheck: the actual Settings caller is containers_settings.rs:155–176. It consumes the rendered confirmation, sets local
+busy, constructs delete_container_leftover synchronously at :165, then drives the returned future with
+dioxus::core::spawn_forever at :166–167. Its mounted flag is checked only AFTER sending.await returns (:168–174), to
+suppress component-owned completion paint. Thus cancellation safety is supplied by spawn_forever, not configuration-save
+ordering. api/environments.rs:80–91 chooses the row-backed whole-host DELETE or the unregistered orphan DELETE and calls
+send_save at :91 (correcting the earlier off-by-one primary location). api.rs:2259–2267 independently registers
+CONFIGURATION_SAVES and holds its ticket through response headers or request failure; it bypasses preceding-save waits
+for this mutation. Ordinary send/send_read reach send_inner_ordered with dependent=true (:2461–2489), snapshot preceding
+tickets before their first await, and await them before HTTP dispatch (:2491–2507). fetch_hosts is an unrelated concrete
+consumer at :4603–4605; fetch_session also uses send at :3611–3613. api/save_order.rs:27–65 releases waiters only on
+ticket drop; :89–108 charges the wait to each request deadline and reports "Request timed out waiting for earlier
+configuration saves". READ_TIMEOUT is 10 seconds (:2167), versus the cleanup's REQUEST_TIMEOUT of 60 seconds (:2127).
+The helm whole-host handler awaits hosts.rs:1477–1500's connection hold, release and provider.destroy; Podman destroy at
+environment/podman.rs:1294–1338 reaches remove_container (:400–414), which runs remote inspect, rm --force and absence
+verification with 30-second command budgets (:25). This is remote execution, not admission-only acknowledgment.
+SPEC_impl.md GUI: Dioxus, :334–340 explicitly says "host mutations can wait on remote operations and must not hold every
+read behind them." Owning the existing future in spawn_forever while using send rather than send_save preserves deletion
+after dismissal without making it a global configuration prerequisite. Suggested bucket: high, material unrelated-client
+interaction degradation under slow cleanup. Confidence: confirmed source/contract route, not execution. proposed_drop:
+false. possible_cover: none. Caveats preserved: this affects the initiating client's Rust HTTP funnel, not other
+clients, already-dispatched requests, terminal sockets, the event feed or page-side JavaScript HTTP. The request
+deadline eventually drops the barrier; the server still owns admitted deletion. No established highest/security or
+work-loss route. git diff from reviewed commit to inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for
+api/environments.rs is empty. No tests, builds or reproductions run. This revision distinguishes cancellation lifetime
+from configuration ordering and confirms the precise caller rather than changing the finding's consequence.
 
 Returned proposal (claims-019, event 11): **retain-verified**, suggested bucket **high**.
 
-Source establishes a remote cleanup operation holding the initiating client's configuration-save barrier, delaying unrelated reads and actions until cleanup answers or its client deadline expires. This is broader than a harmless diagnostic delay and contradicts the explicit host-mutation exclusion.
+Source establishes a remote cleanup operation holding the initiating client's configuration-save barrier, delaying
+unrelated reads and actions until cleanup answers or its client deadline expires. This is broader than a harmless
+diagnostic delay and contradicts the explicit host-mutation exclusion.
 
-Original stronger consequence: Unrelated host/session requests stall or time out while container cleanup runs, even after Settings closes. No established security or user-work-loss route.
+Original stronger consequence: Unrelated host/session requests stall or time out while container cleanup runs, even
+after Settings closes. No established security or user-work-loss route.
 
-Unresolved premise or limitation: No missing source premise for the conditional barrier. Cleanup latency and frequency have not been measured.
+Unresolved premise or limitation: No missing source premise for the conditional barrier. Cleanup latency and frequency
+have not been measured.
 
-Proposed basis: Record high for material same-client interaction degradation. Retain the limited scope and eventual ticket release; use ordinary send while keeping the existing owned future.
+Proposed basis: Record high for material same-client interaction degradation. Retain the limited scope and eventual
+ticket release; use ordinary send while keeping the existing owned future.
 
-Existing parent disposition (event 11): verified. Parent explicitly accepted named retain-verified proposal from claims-019 after inspecting it. Source establishes a remote cleanup operation holding the initiating client's configuration-save barrier, delaying unrelated reads and actions until cleanup answers or its client deadline expires. This is broader than a harmless diagnostic delay and contradicts the explicit host-mutation exclusion. Record high for material same-client interaction degradation. Retain the limited scope and eventual ticket release; use ordinary send while keeping the existing owned future. Checked source/results: ["At 350a4b33b6d4476f4a78e43cea124bc2b828f462, api/environments.rs:80-91 selects whole-host or orphan DELETE then calls send_save. api.rs:2259-2267 registers CONFIGURATION_SAVES synchronously and holds its ticket through the response future.","At that revision, api.rs:2488-2507 captures preceding tickets and awaits them before HTTP dispatch; api/save_order.rs:47-65,69-82 releases readers only on ticket drop, and :89-108 charges that wait to their deadline with the configuration-save timeout diagnostic. fetch_hosts at api.rs:4603-4605 is a concrete unrelated consumer. READ_TIMEOUT at :2167 is 10 seconds, REQUEST_TIMEOUT at :2127 is 60 seconds.","containers_settings.rs:155-176 constructs the request at :165 and runs it in spawn_forever at :166-167. mounted is checked only after sending.await, so closing Settings does not release the ticket. This separates request lifetime from save ordering.","farhelm-helm/src/hosts.rs:1470-1500 awaits connection withdrawal and provider.destroy. environment/podman.rs:1294-1335 reaches remove_container:400-414, including inspect, remote rm --force and absence verification; COMMAND at :25 is 30 seconds. The endpoint performs remote work rather than returning an admission receipt.","git diff from that revision through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for api/environments.rs was empty. This is a conditional slow-cleanup source route, not an observed outage. Other clients, already-dispatched requests, terminal/event sockets and page JavaScript HTTP are outside its scope."] Current coverage/results: {"specifications":"Searched both specifications for container leftovers and save ordering. SPEC_impl.md:327-341 explicitly excludes host mutations from tickets and names bypasses; SPEC.md:4888-4890 promises retryable leftover cleanup, not global client blockage.","TODO_Planned":"Empty at TODO.md:23-25. The broader near-term infallible-GUI-transport proposal is neither Planned nor an exact remedy for wrongly classifying a remote mutation as a save.","plans_queue":"Searched save ticket/order, leftover delete and host mutation terms; no unlanded plan removes this cause. Podman and nonblocking-session-action plans concern broader landed work.","BUGS":"Read BUGS.md; its provisioning transfer-helper hang is unrelated and does not cover blocking the GUI funnel behind a container delete.","queue":"INDEX.md searched and read; no exact alias. orphan-cleanup-promises-unheld-provisioning-lock concerns server ownership-lock documentation, not this client-side barrier.","active_triage":"Searched TRIAGE_OUTCOMES.md for container, save ordering, tickets and remote host mutation; no exact decision.","filter":"No full match: remote slowness need not be a rare fault, and the consequence includes unrelated host/session interaction degradation in the initiating client."} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "Unrelated host/session requests stall or time out while container cleanup runs, even after Settings closes. No established security or user-work-loss route."; "No missing source premise for the conditional barrier. Cleanup latency and frequency have not been measured.".
+Existing parent disposition (event 11): verified. Parent explicitly accepted named retain-verified proposal from
+claims-019 after inspecting it. Source establishes a remote cleanup operation holding the initiating client's
+configuration-save barrier, delaying unrelated reads and actions until cleanup answers or its client deadline expires.
+This is broader than a harmless diagnostic delay and contradicts the explicit host-mutation exclusion. Record high for
+material same-client interaction degradation. Retain the limited scope and eventual ticket release; use ordinary send
+while keeping the existing owned future. Checked source/results: ["At 350a4b33b6d4476f4a78e43cea124bc2b828f462,
+api/environments.rs:80-91 selects whole-host or orphan DELETE then calls send_save. api.rs:2259-2267 registers
+CONFIGURATION_SAVES synchronously and holds its ticket through the response future.","At that revision, api.rs:2488-2507
+captures preceding tickets and awaits them before HTTP dispatch; api/save_order.rs:47-65,69-82 releases readers only on
+ticket drop, and :89-108 charges that wait to their deadline with the configuration-save timeout diagnostic. fetch_hosts
+at api.rs:4603-4605 is a concrete unrelated consumer. READ_TIMEOUT at :2167 is 10 seconds, REQUEST_TIMEOUT at :2127 is
+60 seconds.","containers_settings.rs:155-176 constructs the request at :165 and runs it in spawn_forever at :166-167.
+mounted is checked only after sending.await, so closing Settings does not release the ticket. This separates request
+lifetime from save ordering.","farhelm-helm/src/hosts.rs:1470-1500 awaits connection withdrawal and provider.destroy.
+environment/podman.rs:1294-1335 reaches remove_container:400-414, including inspect, remote rm --force and absence
+verification; COMMAND at :25 is 30 seconds. The endpoint performs remote work rather than returning an admission
+receipt.","git diff from that revision through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db for api/environments.rs was
+empty. This is a conditional slow-cleanup source route, not an observed outage. Other clients, already-dispatched
+requests, terminal/event sockets and page JavaScript HTTP are outside its scope."] Current coverage/results:
+{"specifications":"Searched both specifications for container leftovers and save ordering. SPEC_impl.md:327-341
+explicitly excludes host mutations from tickets and names bypasses; SPEC.md:4888-4890 promises retryable leftover
+cleanup, not global client blockage.","TODO_Planned":"Empty at TODO.md:23-25. The broader near-term
+infallible-GUI-transport proposal is neither Planned nor an exact remedy for wrongly classifying a remote mutation as a
+save.","plans_queue":"Searched save ticket/order, leftover delete and host mutation terms; no unlanded plan removes this
+cause. Podman and nonblocking-session-action plans concern broader landed work.","BUGS":"Read BUGS.md; its provisioning
+transfer-helper hang is unrelated and does not cover blocking the GUI funnel behind a container
+delete.","queue":"INDEX.md searched and read; no exact alias. orphan-cleanup-promises-unheld-provisioning-lock concerns
+server ownership-lock documentation, not this client-side barrier.","active_triage":"Searched TRIAGE_OUTCOMES.md for
+container, save ordering, tickets and remote host mutation; no exact decision.","filter":"No full match: remote slowness
+need not be a rare fault, and the consequence includes unrelated host/session interaction degradation in the initiating
+client."} Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "Unrelated
+host/session requests stall or time out while container cleanup runs, even after Settings closes. No established
+security or user-work-loss route."; "No missing source premise for the conditional barrier. Cleanup latency and
+frequency have not been measured.".
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g032 record](records/review-through-00de0b6c/groups/g032.json). Record ID: `l3`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g032 record](records/review-through-00de0b6c/groups/g032.json). Record ID: `l3`.
