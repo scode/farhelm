@@ -17,10 +17,10 @@ part of Visual Studio Code's vs/base that xterm.js 6.0.0 compiles in. Those
 JavaScript ports were deleted with that UI (GPUI migration, F1); their
 notices below are kept unchanged.
 
-NOTE: This file used to ship inside the web bundle, which every release
-farhelm binary embedded. That bundle is gone, so no binary carries this
-notice at the moment. THIRD_PARTY_NOTICES.md at the repository root
-records it for the source tree.
+This file is embedded in every farhelm binary, which compiles the encoder,
+and `farhelm licenses` prints it. (It used to ship inside the web bundle
+that binary embedded; that bundle is gone.) THIRD_PARTY_NOTICES.md at the
+repository root records it for the source tree.
 
 The xterm.js text is copied verbatim from the LICENSE file of @xterm/xterm
 6.0.0 as published to npm; the add-ons' texts from their own LICENSE files;

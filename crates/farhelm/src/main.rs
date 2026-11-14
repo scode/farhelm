@@ -143,6 +143,11 @@ enum Cmd {
         #[command(subcommand)]
         command: SupervisorCmd,
     },
+    /// Print the license notices for code Farhelm ported or derived from other projects.
+    // Ported and derived code carries its upstream notice with every copy, and this is how the binary carries it: the
+    // texts are embedded at build time and printed verbatim; nothing is read from disk. A plain comment, not a doc
+    // comment, so it stays out of `farhelm licenses --help`.
+    Licenses,
     /// Internal commands: machinery, not user surface. Hidden from help;
     /// scripts and other farhelm processes are the only callers.
     #[command(hide = true)]
@@ -1649,11 +1654,36 @@ fn hold_own_version(command: &Cmd) -> anyhow::Result<()> {
     }
 }
 
+/// The Unicode License V3 notice for the Unicode-derived property tables in the vendored terminal emulator
+/// (`vendor/alacritty_terminal`, see `THIRD_PARTY_NOTICES.md`), which every `farhelm` binary links through the
+/// supervisor. The vendored tree is upstream code changed only through its patch files, so the notice is embedded here
+/// rather than beside the tables.
+const UNICODE_NOTICE: &str = include_str!("../../../vendor/UNICODE-LICENSE.txt");
+
+/// What `farhelm licenses` prints: every notice that must travel with this binary, because the binary contains code
+/// ported or derived from another project.
+///
+/// Today that is the supervisor's xterm.js port and the vendored terminal emulator's Unicode-derived tables (checked
+/// against the linked binary when this was written). Code ported or derived later and linked into `farhelm` adds its
+/// notice here, so the command keeps covering everything the binary contains (SPEC_impl.md, "Dependencies and
+/// licenses").
+fn licenses_text() -> String {
+    format!(
+        "{}\n{}",
+        farhelm_supervisor::grid_input::PORTED_CODE_NOTICES,
+        UNICODE_NOTICE
+    )
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     hold_own_version(&cli.command)?;
     match cli.command {
         Cmd::Uninstall(options) => uninstall::run(options),
+        Cmd::Licenses => {
+            print!("{}", licenses_text());
+            Ok(())
+        }
         Cmd::Spawn {
             cwd,
             title,
@@ -2864,6 +2894,39 @@ mod tests {
         .err()
         .expect("the retired container tab option is absent");
         assert_eq!(tab.kind(), clap::error::ErrorKind::UnknownArgument);
+    }
+
+    /// `farhelm licenses` is the only place the xterm.js port's MIT notice
+    /// ships since the web bundle that carried it was removed; losing it
+    /// would ship ported code without its required attribution.
+    ///
+    /// Spec: the command parses and is listed in help, and what it prints
+    /// holds the xterm.js copyright line and the MIT permission notice.
+    #[test]
+    fn licenses_prints_the_xterm_js_notice() {
+        use clap::{CommandFactory, Parser};
+        let cli = super::Cli::try_parse_from(["farhelm", "licenses"]).unwrap();
+        assert!(matches!(cli.command, super::Cmd::Licenses));
+        let listed = super::Cli::command()
+            .get_subcommands()
+            .any(|sub| sub.get_name() == "licenses" && !sub.is_hide_set());
+        assert!(listed, "`farhelm licenses` must be visible in help");
+        let text = super::licenses_text();
+        assert!(
+            text.contains(
+                "Copyright (c) 2017-2019, The xterm.js authors (https://github.com/xtermjs/xterm.js)"
+            ),
+            "the xterm.js copyright line is missing"
+        );
+        assert!(
+            text.contains("Permission is hereby granted, free of charge"),
+            "the MIT permission notice is missing"
+        );
+        assert!(
+            text.contains("UNICODE LICENSE V3")
+                && text.contains("Copyright © 1991-2026 Unicode, Inc."),
+            "the Unicode notice for the terminal emulator's derived tables is missing"
+        );
     }
 
     /// New helpers cannot impose liveness on old helms. Absence of the
