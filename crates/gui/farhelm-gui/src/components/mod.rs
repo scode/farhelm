@@ -49,7 +49,7 @@ pub use scrollbar::{SCROLLBAR_WIDTH, Scrollbar, ScrollbarEvent, ScrollbarLines};
 pub use select::{Select, SelectOption};
 pub use status_mark::StatusMark;
 pub use tab_strip::{TabOption, TabStrip};
-pub use text_input::{TextInput, TextInputEvent, TextInputState, Vertical};
+pub use text_input::{EditCommand, TextInput, TextInputEvent, TextInputState, Vertical};
 
 use std::rc::Rc;
 

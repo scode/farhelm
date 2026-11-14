@@ -25,9 +25,10 @@ use gpui::{
 };
 
 use crate::actions::{
-    CONTEXT, Captured, DecreaseTerminalTextSize, DeleteSession, IncreaseTerminalTextSize, KeyOwner,
-    PHYSICAL_KEYS, PhysicalKey, QuickSwitcher, RenameSession, ShowKeyboardShortcuts,
-    TERMINAL_CONTEXT, TERMINAL_KEYS, TEXT_INPUT_CONTEXT, THIS_PLATFORM, TemplateNumberKey,
+    CONTEXT, Captured, DecreaseTerminalTextSize, DeleteSession, HideApp, HideOtherApps,
+    IncreaseTerminalTextSize, KeyOwner, MAC_MENU_CHORDS, MinimizeWindow, PHYSICAL_KEYS,
+    PhysicalKey, QuickSwitcher, Quit, RenameSession, ShowKeyboardShortcuts, TERMINAL_CONTEXT,
+    TERMINAL_KEYS, TEXT_INPUT_CONTEXT, THIS_PLATFORM, TemplateNumberKey, ToggleFullScreen,
     arm_key_capture, disarm_key_capture, key_capture_armed, owner_on, physical_key_at, physical_on,
     terminal_key_owner,
 };
@@ -651,6 +652,37 @@ fn a_held_session_shortcut_runs_once_and_again_after_a_release(cx: &mut TestAppC
             opened.runs_of(name),
             2,
             "a fresh press of {chord} after its release ran {name} again"
+        );
+    }
+}
+
+/// The Mac app menu's chords are bound only on macOS, where these tests do not run, so their table is checked here as
+/// data: each chord runs the action its menu item names (AppKit's standard chords, as the old app's menu items had
+/// them), each is an app shortcut in the terminal's table on the Mac (so a focused terminal's program never receives
+/// it), and none is Cmd+W, which must stay the open session's Delete (SPEC.md, "Desktop window chrome"). Spelled out
+/// here rather than read from `actions.rs`, so a chord or action changed there by mistake fails.
+#[gpui::test]
+fn the_mac_menu_chords_run_their_actions_and_are_app_shortcuts_in_a_terminal(
+    _: &mut TestAppContext,
+) {
+    let expected = [
+        ("cmd-q", Quit.name()),
+        ("cmd-h", HideApp.name()),
+        ("alt-cmd-h", HideOtherApps.name()),
+        ("cmd-m", MinimizeWindow.name()),
+        ("ctrl-cmd-f", ToggleFullScreen.name()),
+    ];
+    let table: Vec<(&str, &str)> = MAC_MENU_CHORDS
+        .iter()
+        .map(|(chord, bind)| (*chord, bind(chord).action().name()))
+        .collect();
+    assert_eq!(table, expected);
+    for (chord, _) in expected {
+        assert_ne!(chord, "cmd-w", "Cmd+W stays the session's Delete");
+        assert_eq!(
+            owner_on(Platform::Mac, &down(parse(chord))),
+            KeyOwner::App,
+            "{chord} is an app shortcut in a focused terminal on a Mac"
         );
     }
 }

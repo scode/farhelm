@@ -4,8 +4,9 @@
 //! declared here, so a key and the control it stands for can never drift apart. This file holds the actions the focus
 //! coordinator and the layer manager need, the session shortcuts' actions, the terminal's key table
 //! ([`TERMINAL_KEYS`]), the shortcuts matched by the physical key ([`PHYSICAL_KEYS`]), the list of actions a held key
-//! runs only once (`ONCE_PER_PRESS`), and the one slot through which a feature can take every key for a while
-//! ([`arm_key_capture`]). The features add their own actions as they are built.
+//! runs only once (`ONCE_PER_PRESS`), the one slot through which a feature can take every key for a while
+//! ([`arm_key_capture`]), and the Mac app menu's window and app commands with their chords (`MAC_MENU_CHORDS`; the
+//! desktop module builds the menu and handles them). The features add their own actions as they are built.
 //!
 //! Every binding lives in [`CONTEXT`], the key context the root view sets on everything Farhelm draws. GPUI Kit's
 //! `Root` binds Tab and Shift+Tab in its own context, which sits above Farhelm's root, and moves focus itself when it
@@ -256,8 +257,48 @@ actions!(
         /// Step every open terminal's text size down (the key at the US position of −; otherwise as
         /// [`IncreaseTerminalTextSize`]).
         DecreaseTerminalTextSize,
+        /// Quit the app the ordinary way, so every quit path runs the host's quit handler once
+        /// (`bootstrap::Host::on_quit`; SPEC.md, "Desktop window chrome": Cmd+Q closes the app). The Mac app menu's Quit
+        /// item and Cmd+Q; handled app-wide by the desktop module.
+        Quit,
+        /// Hide the app (the Mac app menu's Hide, Cmd+H); handled app-wide by the desktop module.
+        HideApp,
+        /// Hide every other app (the Mac app menu's Hide Others, Option-Cmd+H).
+        HideOtherApps,
+        /// Show every app again (the Mac app menu's Show All).
+        ShowAllApps,
+        /// Minimize the active window (the Mac app menu's Minimize, Cmd+M).
+        MinimizeWindow,
+        /// Zoom the active window, or restore it from zoom (the Mac app menu's Zoom, which has no key).
+        ZoomWindow,
+        /// Enter or leave native fullscreen (the Mac app menu's Toggle Full Screen, Ctrl+Cmd+F).
+        ToggleFullScreen,
     ]
 );
+
+/// Builds one chord's binding to its action ([`MAC_MENU_CHORDS`]): a function, because GPUI builds a binding from a
+/// concrete action type.
+type BindChord = fn(&'static str) -> KeyBinding;
+
+/// The Mac app menu's chords, in AppKit's standard spelling (the old app's menu items carried the same ones): bound in
+/// [`CONTEXT`] by [`install`] on macOS only, before the desktop module installs the menu that shows them. Each is an
+/// app shortcut row in [`TERMINAL_KEYS`], so a focused terminal's program never receives it. Linux has no menu bar and
+/// binds none of them; its window's close button quits (SPEC.md, "Desktop window chrome").
+pub(crate) const MAC_MENU_CHORDS: &[(&str, BindChord)] = &[
+    ("cmd-q", |chord| KeyBinding::new(chord, Quit, Some(CONTEXT))),
+    ("cmd-h", |chord| {
+        KeyBinding::new(chord, HideApp, Some(CONTEXT))
+    }),
+    ("alt-cmd-h", |chord| {
+        KeyBinding::new(chord, HideOtherApps, Some(CONTEXT))
+    }),
+    ("cmd-m", |chord| {
+        KeyBinding::new(chord, MinimizeWindow, Some(CONTEXT))
+    }),
+    ("ctrl-cmd-f", |chord| {
+        KeyBinding::new(chord, ToggleFullScreen, Some(CONTEXT))
+    }),
+];
 
 /// Paste's chords. The Mac's is the system's; the old app's terminal got it from WebKit. Linux has two because the
 /// desktop terminals there do (Ctrl+Shift+V, since plain Ctrl+V is the program's, and Shift+Insert); the old app had
@@ -300,6 +341,10 @@ pub fn install(cx: &mut App) {
         // a focused terminal because its `TERMINAL_KEYS` row is an app shortcut.
         KeyBinding::new(QUICK_SWITCHER_CHORD, QuickSwitcher, Some(CONTEXT)),
     ]);
+    // Before the desktop module installs the Mac menu, which shows each item's chord only if it is bound by then.
+    if cfg!(target_os = "macos") {
+        cx.bind_keys(MAC_MENU_CHORDS.iter().map(|(chord, bind)| bind(chord)));
+    }
     cx.bind_keys(
         TEXT_FIELD_KEYS
             .iter()
@@ -539,6 +584,14 @@ const ONCE_PER_PRESS: &[&dyn Action] = &[
     // It is listed the same way so a held chord opens the switcher once; a repeat would only reach the ground's
     // handler, which refuses while the switcher is open, and listed, it never runs the opener again.
     &QuickSwitcher,
+    // The Mac app menu's chords (`MAC_MENU_CHORDS`): a GPUI binding runs on every repeat of a held key, so without
+    // these a held Ctrl+Cmd+F would flip full screen on and off, and a held Cmd+M, Cmd+H or Cmd+Q act again on each
+    // repeat, which none of them can usefully do.
+    &ToggleFullScreen,
+    &MinimizeWindow,
+    &HideApp,
+    &HideOtherApps,
+    &Quit,
 ];
 
 /// Whether `action` is one a held key runs only once: its name is listed in [`ONCE_PER_PRESS`].
@@ -657,6 +710,12 @@ pub const TERMINAL_KEYS: &[TerminalKey] = &[
         RENAME_SESSION_LINUX,
         "rename the open session",
     ),
+    // The Mac app menu's chords (`MAC_MENU_CHORDS`); Linux has no menu bar.
+    mac_app("cmd-q", "quit the app"),
+    mac_app("cmd-h", "hide the app"),
+    mac_app("alt-cmd-h", "hide every other app"),
+    mac_app("cmd-m", "minimize the window"),
+    mac_app("ctrl-cmd-f", "enter or leave full screen"),
     // The terminal's own commands.
     TerminalKey {
         mac: Some("shift-pageup"),
@@ -773,6 +832,17 @@ const fn app(mac: &'static str, linux: &'static str, what: &'static str) -> Term
     TerminalKey {
         mac: Some(mac),
         linux: Some(linux),
+        owner: KeyOwner::App,
+        what,
+        bind: None,
+    }
+}
+
+/// An app shortcut that exists only in the Mac app (the app menu's chords).
+const fn mac_app(mac: &'static str, what: &'static str) -> TerminalKey {
+    TerminalKey {
+        mac: Some(mac),
+        linux: None,
         owner: KeyOwner::App,
         what,
         bind: None,

@@ -3,9 +3,9 @@
 //! decorations, and the open-source notices the app menu opens.
 //!
 //! NOTE: This is area code, not a foundation (`docs/gpui/foundation-ownership.md`, "What is not a foundation"). It
-//! belongs to the desktop-integration area, which builds it here and under `desktop/`. What is here now is the stub the
-//! bootstrap's seams were cut against: every function does nothing, so the app behaves exactly as it did before the
-//! seams existed.
+//! belongs to the desktop-integration area, which builds it here and under `desktop/`. It started as the stub the
+//! bootstrap's seams were cut against; the menu bar (`menu`) and quitting on close are built, and each function still
+//! documented as a stub does nothing yet, so that part of the app behaves as it did before the seams existed.
 //!
 //! The bootstrap's contract with this module is the signatures of the functions below, the names of [`FrameHost`] and
 //! [`FrameFollow`], and the four window options [`dress_window`] may set, nothing more: it passes a `FrameHost`
@@ -29,24 +29,53 @@
 //! Nothing in the bootstrap interprets what passes through these calls: the host's frame callbacks reach this module
 //! as they are, and the conversion between the host's frames and GPUI's window bounds lives here.
 
-use gpui::{AnyWindowHandle, App, WindowBounds, WindowOptions};
+use gpui::{AnyWindowHandle, App, Global, Subscription, WindowBounds, WindowOptions};
+
+pub(crate) mod menu;
+#[cfg(test)]
+mod tests;
 
 // ---- The menu bar and quitting -------------------------------------------------------------------------------------
 
-/// Register the menu items' app-level handlers and, on macOS, set the menu bar.
+/// Register the menu items' app-level handlers and, on macOS, set the menu bar (`menu`: the old app's app menu and
+/// Edit menu, with no Close Window).
 ///
 /// The menu's actions and their chords are declared in `actions.rs` like every other key and are never bound here:
 /// the actions and keymap foundation is the one place Farhelm binds keys. The bootstrap calls this after every binding
-/// is in place, so the menu shows them; a binding added after it would never show in a Mac menu. The stub does
-/// nothing.
-pub fn install_menus(_cx: &mut App) {}
+/// is in place, so the menu shows them; a binding added after it would never show in a Mac menu.
+pub fn install_menus(cx: &mut App) {
+    menu::install(cx, cfg!(target_os = "macos"));
+}
 
-/// Quit the app when `main` closes, on every platform, so the host's quit handler runs as it does for any other quit.
-/// Only the main window's close quits: a second window (the notices window) closing must not.
+/// What keeps the main window's close wired to quitting: dropping the subscription would silently undo it, so the app
+/// holds it as a global for its whole life.
+struct QuitWhenClosed {
+    _closed: Subscription,
+}
+
+impl Global for QuitWhenClosed {}
+
+/// Quit the app when `main` closes, on every platform, so the host's quit handler runs as it does for any other quit
+/// (SPEC.md, "Desktop window chrome": "the window close button and Cmd+Q still close the app"). Only the main window's
+/// close quits: a second window (the notices window) closing must not.
 ///
-/// The stub does nothing, so the app keeps GPUI's own behavior: on Linux it quits once its last window closes, on
-/// macOS it keeps running.
-pub fn quit_when_closed(_main: AnyWindowHandle, _cx: &mut App) {}
+/// Needed on both platforms, for different reasons: on macOS GPUI keeps an app running after its last window closes,
+/// and on Linux it quits only once every window has, so an open notices window would keep it running.
+pub fn quit_when_closed(main: AnyWindowHandle, cx: &mut App) {
+    when_closed(main, |cx| cx.quit(), cx);
+}
+
+/// Run `quit` when `main` closes, and only then: [`quit_when_closed`] with the quit passed in, because GPUI's test
+/// platform ignores a quit, so a test needs its own to see whether one was asked for.
+fn when_closed(main: AnyWindowHandle, quit: impl Fn(&mut App) + 'static, cx: &mut App) {
+    let main = main.window_id();
+    let closed = cx.on_window_closed(move |cx, closed| {
+        if closed == main {
+            quit(cx);
+        }
+    });
+    cx.set_global(QuitWhenClosed { _closed: closed });
+}
 
 // ---- Open-source notices --------------------------------------------------------------------------------------------
 
