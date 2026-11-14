@@ -304,11 +304,7 @@ fn identity(host: &HostView) -> SharedString {
     let local = host.is_local();
     // Only its accessible name is used, so the sentence is never drawn and its id never reaches a frame.
     let sentence = HostSentence::new("host-identity");
-    let sentence = if local && host.name == LOCAL_NAME {
-        sentence.text("Local (this machine)")
-    } else {
-        sentence.host(&HostText::from_host(host.name.as_str()))
-    };
+    let sentence = sentence.host(&display_name(host));
     match host
         .destination
         .as_deref()
@@ -321,6 +317,18 @@ fn identity(host: &HostView) -> SharedString {
         None => sentence,
     }
     .accessible_name()
+}
+
+/// A registered host's full display name, the one rule the rail's identity and the Hosts panel's rows share: the
+/// registry's name for it (its alias, else its destination), or "Local (this machine)" for the local host under the
+/// registry's own name. An alias stays the user's word, even on the local host. Host text; the app's own words for the
+/// local host travel the same way, and escaping them changes nothing.
+pub(crate) fn display_name(host: &HostView) -> HostText {
+    if host.is_local() && host.name == LOCAL_NAME {
+        HostText::from_host("Local (this machine)")
+    } else {
+        HostText::from_host(host.name.as_str())
+    }
 }
 
 /// How a chosen host the registry no longer lists is named everywhere it shows.

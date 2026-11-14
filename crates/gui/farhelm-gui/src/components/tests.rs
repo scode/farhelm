@@ -3140,3 +3140,124 @@ fn a_mark_toggle_takes_its_click_from_the_control_around_it_and_no_focus(cx: &mu
         Some("Idle — new output — Mark read")
     );
 }
+
+/// A status that shows more than a word (the Hosts panel's phase dot with its words, a host's identity mark) is still a
+/// status mark: its label must stay its name, since what it draws may say nothing to a screen reader, and its hover help
+/// must still show. Specified: a status mark given content is named by its label, paints the content's text and not its
+/// own, is no control, and shows its help on hover (here with the help not also its description).
+#[gpui::test]
+fn a_status_mark_with_content_keeps_its_name_and_help(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| {
+        div()
+            .child(
+                super::StatusMark::new(
+                    "phase",
+                    "Connected",
+                    HoverHelp::tooltip("Connected"),
+                    Role::Status,
+                    "unused",
+                )
+                .described(false)
+                .content(div().flex().child("●").child("Connected")),
+            )
+            .into_any_element()
+    });
+    let nodes = frame(cx);
+    let mark = nodes
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some("phase"))
+        .expect("the mark was drawn");
+    assert_eq!(mark.role, Some(Role::Status));
+    assert_eq!(mark.label.as_deref(), Some("Connected"));
+    assert!(!mark.flags.focusable && !mark.flags.click, "not a control");
+    let painted: Vec<String> = nodes
+        .iter()
+        .flat_map(|node| node.texts.iter().map(|text| text.text.to_string()))
+        .collect();
+    assert!(painted.iter().any(|text| text == "●"), "{painted:?}");
+    assert!(!painted.iter().any(|text| text == "unused"), "{painted:?}");
+
+    let at = center(cx, "phase");
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    wait_hover_delay(cx);
+    assert_eq!(tooltip(cx).as_deref(), Some("Connected"));
+}
+
+/// The Hosts heading's Details control is a switch drawn before its words, where a Settings row draws its words first
+/// and the switch at the row's far end; drawing it the Settings way would move the words and stretch the control across
+/// the heading. Specified: an inline switch paints its words to the right of where the control starts plus the switch's
+/// 34 pixels, a Settings switch paints them at the control's start, and a click on an inline switch's words still
+/// toggles it.
+#[gpui::test]
+fn an_inline_switch_draws_its_words_after_it_and_still_toggles(cx: &mut TestAppContext) {
+    let checked = Rc::new(Cell::new(false));
+    let state = checked.clone();
+    let cx = open(cx, move |_, _| {
+        let state = state.clone();
+        div()
+            .w(px(300.))
+            .child(
+                Checkbox::new(
+                    "inline",
+                    "Details",
+                    HoverHelp::tooltip("Show details"),
+                    Role::Switch,
+                )
+                .switch()
+                .inline()
+                .checked(state.get())
+                .on_toggle(move |next, _, _| state.set(next)),
+            )
+            .child(
+                Checkbox::new(
+                    "row",
+                    "Sounds",
+                    HoverHelp::tooltip("Play sounds"),
+                    Role::Switch,
+                )
+                .switch(),
+            )
+            .into_any_element()
+    });
+    let nodes = frame(cx);
+    let words_left = |id: &str, word: &str| {
+        let control = nodes
+            .iter()
+            .position(|node| node.element_id.as_deref() == Some(id))
+            .unwrap_or_else(|| panic!("{id} was drawn"));
+        let text = nodes
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| {
+                let mut at = Some(*index);
+                while let Some(here) = at {
+                    if here == control {
+                        return true;
+                    }
+                    at = nodes[here].parent;
+                }
+                false
+            })
+            .flat_map(|(_, node)| node.texts.iter())
+            .find(|text| text.text.as_ref() == word)
+            .unwrap_or_else(|| panic!("{id} painted {word}"));
+        (nodes[control].bounds.left(), text.bounds.left())
+    };
+    let (inline_start, inline_words) = words_left("inline", "Details");
+    assert!(
+        inline_words >= inline_start + px(34.),
+        "the words follow the switch: {inline_start:?} {inline_words:?}"
+    );
+    let (row_start, row_words) = words_left("row", "Sounds");
+    assert_eq!(row_words, row_start, "a Settings switch's words come first");
+
+    let words = nodes
+        .iter()
+        .flat_map(|node| node.texts.iter())
+        .find(|text| text.text.as_ref() == "Details")
+        .map(|text| text.bounds.center())
+        .expect("the words were painted");
+    cx.simulate_click(words, Modifiers::none());
+    check(cx);
+    assert!(checked.get(), "a click on the words toggles it");
+}

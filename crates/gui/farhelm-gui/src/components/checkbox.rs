@@ -12,7 +12,8 @@
 //!   goes on to whatever holds the control (a dialog's Enter). A held Space does not toggle again.
 //! - **The label is part of the control.** The old markup wrapped the input in its `<label>`, so a click on the words
 //!   toggles too, and the words are drawn beside the box (after the box for a checkbox, before the switch for a
-//!   switch, as the old Settings rows put them).
+//!   switch, as the old Settings rows put them, and after a [`Checkbox::inline`] switch, as the old Hosts heading
+//!   put its Details control).
 //! - **Focus follows the platform's control rule** ([`crate::focus::OnPress::Control`]): on macOS with Keyboard
 //!   navigation off, Tab skips it and a click does not focus it, as WebKit treated a checkbox (SPEC.md, "Keyboard
 //!   focus"); on Linux Tab reaches it.
@@ -56,6 +57,7 @@ pub struct Checkbox {
     checked: bool,
     disabled: bool,
     switch: bool,
+    inline: bool,
     on_toggle: Option<OnToggle>,
     focus: Option<FocusHandle>,
 }
@@ -77,6 +79,7 @@ impl Checkbox {
             checked: false,
             disabled: false,
             switch: false,
+            inline: false,
             on_toggle: None,
             focus: None,
         }
@@ -97,6 +100,15 @@ impl Checkbox {
     /// Draw it as the old Settings switch (`.control-switch`) instead of a checkbox, with its label before it.
     pub fn switch(mut self) -> Self {
         self.switch = true;
+        self
+    }
+
+    /// Draw a switch at its own width with its words after it, in the quiet ink and 4 pixels away, instead of across a
+    /// Settings row: the old Hosts heading's Details control (`.host-details-control`, a `label` holding the switch and
+    /// then its text). Changes nothing on a plain checkbox, only on a [`Checkbox::switch`]; the words take the
+    /// surrounding text size.
+    pub fn inline(mut self) -> Self {
+        self.inline = true;
         self
     }
 
@@ -224,7 +236,11 @@ impl RenderOnce for Checkbox {
                         .rounded(ring_radius),
                 )
             });
-        let words = div().child(self.label.clone());
+        let words = div()
+            .when(self.switch && self.inline, |words| {
+                words.text_color(theme::color(palette.fg_1))
+            })
+            .child(self.label.clone());
         let mut control = div()
             .id(ElementId::Name(self.id.clone()))
             // Tests find a control by its id; this records nothing outside test builds.
@@ -242,8 +258,10 @@ impl RenderOnce for Checkbox {
             // The words take the surrounding text size: the launcher's choices and Settings' rows each set their own.
             .text_color(theme::color(palette.fg_0));
         // A Settings row (`.setting-row`) put its words at the left and the switch at the far right, 16 pixels apart at
-        // least, with the whole row a click target; a checkbox sits before its words.
-        control = if self.switch {
+        // least, with the whole row a click target; a checkbox, and an inline switch, sit before their words.
+        control = if self.switch && self.inline {
+            control.gap(px(4.)).child(mark).child(words)
+        } else if self.switch {
             control
                 .w_full()
                 .justify_between()
