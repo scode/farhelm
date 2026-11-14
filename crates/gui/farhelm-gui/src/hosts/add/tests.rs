@@ -23,7 +23,7 @@ use serde_json::{Value, json};
 use super::{AddHostDialog, refused_before_contact};
 use crate::components::{Button, HoverHelp, Role};
 use crate::drafts::DraftInput;
-use crate::focus::Mark;
+use crate::focus::{self, Mark};
 use crate::hosts::HostsPanel;
 use crate::hosts::tests::{aliased, connected, host, hosts};
 use crate::operations::Work;
@@ -338,10 +338,13 @@ fn add_sends_the_probe_with_its_new_entry_under_the_dialogs_key(cx: &mut TestApp
 
 /// SPEC.md, "Topology": a running supervisor is registered as it is. The dialog has nothing more to ask, and the new
 /// host shows in the pushed hosts list; leaving the dialog open would invite a second Add that the helm refuses as a
-/// duplicate. Specified: a `discovered` reply closes the dialog and focus goes back to Add host, its opener.
+/// duplicate. Run under macOS's click rule, where the click on Add host leaves it unfocused, so focus gets back to it
+/// only because the dialog names it as where closing returns focus (nothing focuses it before the dialog opens).
+/// Specified: a `discovered` reply closes the dialog and focus goes back to Add host, its opener.
 #[gpui::test]
 fn a_discovered_host_closes_the_dialog(cx: &mut TestAppContext) {
     let (mut helm, cx, add) = open_rail(cx);
+    cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
     open_dialog(cx);
     type_text(cx, "dev@newbox");
     click(cx, "add-host-submit");
@@ -353,7 +356,10 @@ fn a_discovered_host_closes_the_dialog(cx: &mut TestAppContext) {
     );
     settle(cx);
     assert!(!any_open(cx), "the dialog closed");
-    assert!(focused(cx, &add), "focus went back to Add host");
+    assert!(
+        focused(cx, &add),
+        "focus went back to Add host, which the click never focused"
+    );
     assert_eq!(probe_work(cx), None, "the key is free");
 }
 

@@ -455,10 +455,10 @@ Owner: the focus coordinator. It implements SPEC.md's "Keyboard focus" as one mo
 (the selected session's terminal), the dialog stack's trap and restore, and the record of who opened what.
 
 It is the only Farhelm code that moves focus. In GPUI, moving focus also redraws the whole window and drops pending
-keystrokes, which is one more reason for one owner. While a dialog is open, focus moves only inside it: the one move
-between parts of the topmost layer (along a radio group, into a question drawn inline in the dialog and back out)
-happens only from the control that holds focus. GPUI Kit moves focus inside its own text inputs on user clicks; those
-moves are accepted, and the per-step focus invariant covers them.
+keystrokes, which is one more reason for one owner. While a dialog is open, focus moves only inside it, and the one move
+between parts of one control (along a radio group or a tab strip) happens only from the part that holds focus. GPUI Kit
+moves focus inside its own text inputs on user clicks; those moves are accepted, and the per-step focus invariant covers
+them.
 
 GPUI also focuses any element that tracks a focus handle when it is pressed, with any mouse button, so tracking focus
 goes through the coordinator too (`focus::track`), which applies its own press rule in place of GPUI's to a press of
@@ -488,18 +488,28 @@ reveal. A control focused before it is first drawn (a layer's start) has no posi
 archive's global confirmation, whose actions SPEC.md brings into view when it opens, still needs a way to scroll a
 layer's start into view. On the page, a result that arrives later moves focus with `focus::focus_control`. Inside the
 open dialog, a move to another control goes through `focus::focus_in_layer`, for a result that arrives later (Settings
-moving to an agent's switch once its trust read answers) or for the user's own action there (the launcher's Custom
-choice moving into its flags field). Both do nothing once the user has moved on since the action, and both scroll the
-control into view. `focus_in_layer` also does nothing once focus has left that dialog or for a control not drawn in it,
-so a target the action makes appear is moved to from the next frame. `focus::move_within_control`, which carries focus
-along inside one control as part of the key the user pressed there, scrolls nothing.
+moving to an agent's switch once its trust read answers), for the user's own action there (the launcher's Custom choice
+moving into its flags field), and for a question the prompt draws inline in the dialog, as it opens and closes. Both do
+nothing once the user has moved on since the action, and both scroll the control into view. `focus_in_layer` also does
+nothing once focus has left that dialog or for a control drawn outside it. A control that is not drawn yet (one the
+action itself makes appear, or any control of a dialog opened in the same update) becomes the window's one pending move,
+which the coordinator makes with the same checks once a frame has drawn the control: the position record every control
+draws while a frame is prepared tells it the target was drawn, and the move runs once that frame is drawn. Any other
+focus move but the coordinator's own recovery drops it, and so does a layer that took focus closing with focus returned
+(a dialog closed before its first frame keeps it, harmlessly, since its target is never drawn elsewhere), so a newer
+move wins, and area code never schedules a focus move on a frame itself. A dialog opened from a button names that button
+as where closing returns focus (`focus::ReturnTo::Control`) rather than focusing it before opening: on macOS a click
+leaves a button unfocused, so what held focus before the click would get it back, and a focus move made first costs a
+whole-window refresh and is refused from inside another dialog. `focus::move_within_control`, which carries focus along
+inside one control as part of the key the user pressed there, scrolls nothing.
 
 Enforced by clippy `disallowed-methods` on GPUI's focus calls and on `track_focus` everywhere in the GUI crates except
-the coordinator, and by the focus invariant that in-process tests check after every step: exactly one focused element,
-inside the topmost modal (or a menu opened above it) or in an agent approval card if a modal is open (SPEC.md, "Keyboard
-focus"). When nothing else holds focus it rests where SPEC.md's "Where focus rests" says (the selected session's
-terminal, New, a stopped session's card), and on the window's root view only when none of those is on screen, so a key
-press always reaches Farhelm's own key bindings rather than GPUI Kit's.
+the coordinator, by the review gate, which refuses area code that defers a focus move to a later frame itself (a
+`window.defer` around a call to the coordinator), and by the focus invariant that in-process tests check after every
+step: exactly one focused element, inside the topmost modal (or a menu opened above it) or in an agent approval card if
+a modal is open (SPEC.md, "Keyboard focus"). When nothing else holds focus it rests where SPEC.md's "Where focus rests"
+says (the selected session's terminal, New, a stopped session's card), and on the window's root view only when none of
+those is on screen, so a key press always reaches Farhelm's own key bindings rather than GPUI Kit's.
 
 ### Overlays: the layer manager
 
@@ -935,6 +945,10 @@ Traps that an earlier rule already prevents get one line pointing at it.
   while assistive technology is active. Rule: flat, explicitly sized cached views behind the wrapper, and none with
   accessibility roles until replay restores them (decided by the migration's orchestrator on 2026-11-14).
 - **`focus()` clears pending keystrokes and refreshes the whole window;** see "Focus: the focus coordinator".
+- **A control an action shows is not drawn while the action runs,** nor when a `window.defer` queued there runs, which
+  is before the next frame, so a focus move to it then has no position to scroll to and no layer to check it against.
+  Rule: area code does not call `window.defer` to move focus; it calls `focus::focus_in_layer` from the action, which
+  waits for the frame that draws the target itself.
 - **A focus move made in a focus-lost listener draws no frame.** GPUI runs those listeners while it finishes a frame,
   when a refresh is ignored, so the drawn frame keeps showing nothing focused until something else redraws; found when
   dismissing this app's own banner left an idle window that way. Rule: the focus coordinator's listener asks for one

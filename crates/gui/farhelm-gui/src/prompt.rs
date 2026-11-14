@@ -66,16 +66,18 @@
 //! [`ask_inline`] hands the question to its owner, which draws it inside its own surface, as the old app drew the
 //! launcher's YOLO question in the launcher's body and the template editor's leave question as a band at the editor's
 //! foot. It is not a layer: no veil, no header Close, no subject (it goes when its owner stops drawing it), and Tab
-//! passes through it as through the rest of the owner's dialog. Where it is drawn, and scrolling it into view, are the
-//! owner's; how it looks and answers are the prompt's. Focus moves into it when it opens, onto its starting answer,
-//! unless the user has moved on since `mark` (then it shows and waits), and an answer pressed while focus is inside it
-//! returns focus to what held it when it opened, inside the owner's dialog; both moves go through the focus
-//! coordinator's [`focus::move_within_control`]. Escape while focus is in it means Cancel and is taken there, so the
-//! owning dialog stays open; Escape anywhere else in the dialog is the dialog's. Enter presses the focused answer; the
-//! question holds no focus of its own, so a press on its empty space does what the owning dialog's empty-space rule
-//! says. It draws in one of two looks: plain, the old leave question's text and answers (`.templates-departure`), on
-//! whatever band its owner puts it in, or loud ([`Question::loud`]), the old YOLO confirmation's red-edged, red-washed
-//! block with its title as a red heading (`.yolo-confirmation`). Decided by the migration's orchestrator on 2026-11-14.
+//! passes through it as through the rest of the owner's dialog. Where it is drawn is the owner's; how it looks and
+//! answers are the prompt's. Focus moves into it when it opens, onto its starting answer, unless the user has moved on
+//! since `mark` (then it shows and waits), and an answer pressed while focus is inside it returns focus to what held it
+//! when it opened, inside the owner's dialog. Inside a dialog both moves go through the focus coordinator's
+//! [`focus::focus_in_layer`], which waits for the frame that first draws the starting answer and scrolls it into view
+//! as Tab would, so the owner scrolls nothing itself; on the page they go through [`focus::focus_control`]. Escape
+//! while focus is in it means Cancel and is taken there, so the owning dialog stays open; Escape anywhere else in the
+//! dialog is the dialog's. Enter presses the focused answer; the question holds no focus of its own, so a press on its
+//! empty space does what the owning dialog's empty-space rule says. It draws in one of two looks: plain, the old leave
+//! question's text and answers (`.templates-departure`), on whatever band its owner puts it in, or loud
+//! ([`Question::loud`]), the old YOLO confirmation's red-edged, red-washed block with its title as a red heading
+//! (`.yolo-confirmation`). Decided by the migration's orchestrator on 2026-11-14.
 //!
 //! NOTE: Two recorded deviations from the old YOLO question's look. The old one drew its last line (the host "asks
 //! before every YOLO launch") in the dimmer `--fg-dim`; here every line is drawn alike, since a question's lines carry
@@ -563,15 +565,14 @@ impl<T: Clone + 'static> Prompt<T> {
             layers::close(layer, window, cx);
         }
         if self.shown == Shown::Inline {
-            // The coordinator moves focus only from the answer that holds it, so at most one of these moves happens,
-            // and none when the user had already taken focus elsewhere.
-            if let Some(opener) = self.opener.as_ref().and_then(WeakFocusHandle::upgrade) {
-                for answer in std::iter::once(&self.cancel_focus)
-                    .chain(&self.alternative_focus)
-                    .chain(std::iter::once(&self.confirm_focus))
-                {
-                    focus::move_within_control(answer, &opener, window, cx);
-                }
+            // Focus goes back only from an answer that holds it, so it stays wherever the user took it otherwise. The
+            // answer's own press or key is the action, so its mark is taken now.
+            let holds = std::iter::once(&self.cancel_focus)
+                .chain(&self.alternative_focus)
+                .chain(std::iter::once(&self.confirm_focus))
+                .any(|answer| answer.is_focused(window));
+            if holds && let Some(opener) = self.opener.as_ref().and_then(WeakFocusHandle::upgrade) {
+                move_for_question(&opener, &Mark::take(cx), window, cx);
             }
             cx.notify();
         }
@@ -909,8 +910,9 @@ pub fn ask_anchored<T: Clone + 'static>(
 }
 
 /// Ask `question` inside its owner's surface: the owner draws what this returns where SPEC.md puts the question (the
-/// launcher's body for the YOLO question, the template editor's foot for its leave question), and must draw it from the
-/// next frame on, or focus, which moves to its starting answer at once, finds nothing there and recovers elsewhere. It
+/// launcher's body for the YOLO question, the template editor's foot for its leave question), from the next frame on.
+/// Inside a dialog, focus moves to its starting answer once a frame has drawn it there, and the answer is scrolled into
+/// view; on the page it moves at once, so a question the owner does not draw in the next frame loses focus to home. It
 /// opens even when the user has moved on since `mark`, since it shows where it belongs; then it does not take focus,
 /// and waits to be reached. `on_confirm` runs at most once, with the frozen value, if the user confirms. See the module
 /// docs for focus, Escape and the looks.
@@ -932,18 +934,20 @@ pub fn ask_inline<T: Clone + 'static>(
     prompt.update(cx, |prompt, _| {
         prompt.opener = opener.as_ref().map(FocusHandle::downgrade)
     });
-    if !focus::has_moved_on(mark, cx) {
-        if layers::focus_layer_open(window, cx) {
-            // Inside the owner's dialog: from what holds focus there to the question's starting answer beside it.
-            if let Some(opener) = &opener {
-                focus::move_within_control(opener, &start, window, cx);
-            }
-        } else {
-            // On the page, with no layer open: the ordinary move after something the user did.
-            focus::focus_control(&start, mark, window, cx);
-        }
-    }
+    move_for_question(&start, mark, window, cx);
     Inline { prompt }
+}
+
+/// Move focus into or out of an inline question for the user's action at `mark`: inside the owner's dialog through
+/// [`focus::focus_in_layer`], which waits for a starting answer not drawn yet and scrolls it into view, and on the
+/// page, with no layer that holds focus open, through the page's own move. Both do nothing once the user has moved
+/// on.
+fn move_for_question(target: &FocusHandle, mark: &Mark, window: &mut Window, cx: &mut App) {
+    if layers::focus_layer_open(window, cx) {
+        focus::focus_in_layer(target, mark, window, cx);
+    } else {
+        focus::focus_control(target, mark, window, cx);
+    }
 }
 
 /// [`ask`] or [`ask_anchored`], also handing back the prompt's entity for tests.
@@ -968,7 +972,7 @@ fn ask_inner<T: Clone + 'static>(
     }
     let enabled = question.confirm_enabled;
     let keeps_focus_on_empty_click = question.keeps_focus_on_empty_click;
-    let returns_to = question.returns_to;
+    let returns_to = question.returns_to.clone();
     let shown = match presentation {
         Presentation::Centered => Shown::Centered,
         Presentation::Anchored(_) => Shown::Anchored,

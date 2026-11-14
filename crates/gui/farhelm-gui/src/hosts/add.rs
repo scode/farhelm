@@ -7,8 +7,8 @@
 //! Here's the TLDR of its rules:
 //!
 //! - **Opening.** [`open`] is the entry point for the host rail's Add host and the Hosts panel heading's add button.
-//!   The opener takes focus first and gets it back when the dialog closes, as Settings' gear does. Focus starts in the
-//!   destination field.
+//!   The opener gets focus back when the dialog closes, as Settings' gear does, because the dialog names it as its
+//!   return target. Focus starts in the destination field.
 //! - **Before the probe is sent.** Add refuses an alias the helm would refuse for its shape (the old app's
 //!   `validate_alias_draft`, in its words) and a destination that is already a host entry, naming that entry in the
 //!   helm's own words (SPEC.md: "Adding a destination that is already a host entry is refused, naming that entry,
@@ -99,11 +99,11 @@ const ALIAS_MAX_CHARS: usize = 64;
 /// Open the Add host dialog on top of everything else in `window`: the entry point for the host rail's Add host and
 /// the Hosts panel heading's add button.
 ///
-/// `opener` is the clicked control's focus handle and `mark` the [`Mark`] taken in its click handler. The opener takes
-/// focus first, so that closing the dialog returns focus to it on every platform, also where a click leaves a button
-/// unfocused (macOS), as [`crate::settings::open`] does for the gear (SPEC.md: "Closing something the user opened
-/// returns focus to where it was before it opened, on every platform"). Nothing opens, and the opener takes no focus,
-/// when the user has moved on since `mark` or the window is inert.
+/// `opener` is the clicked control's focus handle and `mark` the [`Mark`] taken in its click handler. The dialog names
+/// the opener as where closing returns focus ([`ReturnTo::Control`]), so it goes back there on every platform, also
+/// where a click leaves a button unfocused (macOS), as [`crate::settings::open`] does for the gear (SPEC.md: "Closing
+/// something the user opened returns focus to where it was before it opened, on every platform"). Nothing opens when
+/// the user has moved on since `mark` or the window is inert.
 ///
 /// Returns the dialog's layer, or `None` when nothing opened.
 pub fn open(
@@ -144,7 +144,6 @@ pub(crate) fn reopen(
     if focus::has_moved_on(mark, cx) {
         return None;
     }
-    focus::focus_control(opener, mark, window, cx);
     let dialog = cx.new(|cx| AddHostDialog::new(opener.clone(), seed, window, cx));
     let start = dialog.read(cx).destination.input().focus_handle(cx);
     let weak = dialog.downgrade();
@@ -162,7 +161,7 @@ pub(crate) fn reopen(
             // SPEC.md, "Opening and closing": the dialogs that share the host and Settings installer keep focus on the
             // control in use when their empty space is clicked.
             keeps_focus_on_empty_click: true,
-            returns_to: ReturnTo::Opener,
+            returns_to: ReturnTo::Control(opener.clone()),
             // None: closing never waits, not even for a probe in flight (the module docs).
             on_dismiss: None,
             placement: layers::DialogPlacement::Centered,
