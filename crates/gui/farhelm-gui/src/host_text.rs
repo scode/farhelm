@@ -33,10 +33,11 @@
 //! way, or, for wording that is usually the app's own but may name a host value (a dialog's title and summary, a
 //! prompt's lines), takes a [`Line`]. A sentence's technical host values go in with [`HostSentence::mono`] rather than
 //! by restyling a part from outside, so the escaping and isolation stay this module's. A control's hover help that
-//! names a host value is a [`HostSentence`] handed to `HoverHelp::sentence`: the tooltip draws it through this module's
-//! element, and the control's accessible description is the sentence's [`HostSentence::accessible_name`]. Identity
-//! labels the user compares (installation ids, which SPEC.md also wants with their spaces visible) are not built yet;
-//! they arrive with the first view that shows one, as a second presentation here.
+//! names a host value is a [`HostSentence`] handed to `HoverHelp::sentence` (or several, one per paragraph, handed to
+//! `HoverHelp::paragraphs`): the tooltip draws each through this module's element, and the control's accessible
+//! description is the sentence's [`HostSentence::accessible_name`] (for paragraphs, each one's, a blank line apart).
+//! Identity labels the user compares (installation ids, which SPEC.md also wants with their spaces visible) are not
+//! built yet; they arrive with the first view that shows one, as a second presentation here.
 
 use std::fmt;
 use std::ops::Range;
@@ -298,9 +299,10 @@ impl RenderOnce for HostSentence {
 /// formatting [`HostText::raw`] into one would reach the screen and the accessible name unescaped: name a host value in
 /// a title only through a sentence.
 ///
-/// Hover help is a `Line` too: a control's help that names a host value ("Claude Code on «build-box»") is built with
-/// [`HoverHelp::sentence`](crate::components::HoverHelp::sentence), and the layer manager draws the tooltip from the
-/// `Line` itself, so the host value is laid out by this module's element there as anywhere else.
+/// Short hover help is a `Line` too: a control's help that names a host value ("Claude Code on «build-box»") is built
+/// with [`HoverHelp::sentence`](crate::components::HoverHelp::sentence), and the layer manager draws the tooltip from
+/// the `Line` itself, so the host value is laid out by this module's element there as anywhere else. Help in
+/// paragraphs is a list of sentences instead ([`HoverHelp::paragraphs`](crate::components::HoverHelp::paragraphs)).
 #[derive(Clone, Debug, PartialEq, Eq, IntoElement)]
 pub enum Line {
     /// The app's own words.

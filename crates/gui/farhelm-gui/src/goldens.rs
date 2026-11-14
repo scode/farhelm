@@ -1,6 +1,6 @@
-//! Headless screenshot goldens: one per component, per dialog frame and per overlay kind (tooltip, popover, the prompt
-//! over its veil, once more with a summary that names a host value, once more with a feature-drawn body, a header tile
-//! and a footer note, and the prompt anchored to a row's menu button),
+//! Headless screenshot goldens: one per component, per dialog frame and per overlay kind (tooltip, once more with help
+//! in paragraphs, popover, the prompt over its veil, once more with a summary that names a host value, once more with
+//! a feature-drawn body, a header tile and a footer note, and the prompt anchored to a row's menu button),
 //! the keyboard focus ring, host-supplied text over its spoofing corpus, the notice banner, the terminal's styles and
 //! cursor shapes, an attached terminal's exit line and status line, the scrim a pending Delete puts over the open
 //! session's terminal, the session list (a fleet of every status a row draws, the open row on a host the helm cannot
@@ -481,6 +481,60 @@ fn tooltip_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     layers::show_tooltip_at(
         &state.tooltip_owner,
         RESTART_HELP.into(),
+        point(px(40.), px(30.)),
+        window,
+        cx,
+    );
+}
+
+/// The paragraph tooltip scene's help: a guarded Codex launch's agent-mark help, as the old app worded it (the mode
+/// and its explanation under a line break, the flags, the caveat, the stored command in the monospace face), which runs
+/// past the short tooltip's eight lines.
+fn guarded_codex_help() -> Vec<HostSentence> {
+    let command = HostText::from_host("codex -a on-request -s workspace-write");
+    vec![
+        HostSentence::new("golden-help-mode").text(
+            "Codex — Guarded · Codex sandboxed auto\nCodex runs within its workspace sandbox and asks before stepping \
+             outside it. An approval reviewer may decide requests according to your configuration.",
+        ),
+        HostSentence::new("golden-help-flags").text("Flags: -a on-request -s workspace-write"),
+        HostSentence::new("golden-help-caveat").text(
+            "Farhelm starts the agent with these choices, but can't guarantee how it behaves. Your own allow \
+             rules, hooks, plugins, always-allow answers, sandbox settings or switching modes inside the session \
+             can loosen it, and agents change between versions. See About permission modes in the agent \
+             documentation.",
+        ),
+        HostSentence::new("golden-help-command")
+            .text("Launched with: ")
+            .mono(&command),
+    ]
+}
+
+/// A neutral button, and paragraph help as the layer manager draws it: the wider card, a blank line between
+/// paragraphs, and no eight-line cut.
+fn tooltip_paragraphs(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    div()
+        .flex()
+        .items_start()
+        .w(px(500.))
+        .h(px(300.))
+        .child(
+            Button::new(
+                "agent",
+                "Agent",
+                HoverHelp::paragraphs(guarded_codex_help()),
+                Role::Button,
+            )
+            .tier(Tier::Neutral),
+        )
+        .into_any_element()
+}
+
+/// Show the paragraph help as if the pointer had come to rest over the button.
+fn tooltip_paragraphs_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    layers::show_tooltip_at(
+        &state.tooltip_owner,
+        layers::Help::Paragraphs(guarded_codex_help()),
         point(px(40.), px(30.)),
         window,
         cx,
@@ -2243,6 +2297,12 @@ static SCENES: &[Scene] = &[
         size: (400., 140.),
         draw: tooltip,
         setup: tooltip_setup,
+    },
+    Scene {
+        name: "tooltip-paragraphs",
+        size: (520., 320.),
+        draw: tooltip_paragraphs,
+        setup: tooltip_paragraphs_setup,
     },
     Scene {
         name: "focus-ring",
