@@ -6,14 +6,18 @@
 //! Fonts are registered with the text system by the bootstrap ([`crate::bootstrap::install`]); icons are served to
 //! GPUI's `svg()` element through [`Assets`].
 //!
-//! Inter is the old app's interface face (`--font-ui` in its stylesheet), and JetBrains Mono Nerd Font its terminal face
-//! (regular and bold only, as the old app shipped it). GPUI does not synthesize an oblique the way the old app's
-//! browser did, so italic terminal text draws upright: the maintainer decided on 2026-11-13 that the terminal ships
-//! upright italics until a follow-up change bundles the Italic and Bold Italic faces.
-//! All the TTFs are lossless decompressions of the WOFF2 files the old app shipped at the reference commit;
-//! `THIRD_PARTY_NOTICES.md` has their licenses ("Inter interface font", "JetBrains Mono terminal font"). The Close and
-//! Delete icons are the old app's own action glyphs, copied from its icon module at the reference commit (14-unit box,
-//! 1.2 stroke, round caps and joins). The More icon is a new drawing: the old app wrote the "⋯" character in text.
+//! Inter is the old app's interface face (`--font-ui` in its stylesheet), and JetBrains Mono Nerd Font its terminal
+//! face. The old app shipped only the terminal's regular and bold faces and let the browser slant the regular one for
+//! italic text. GPUI does not synthesize an oblique, so the Italic and Bold Italic faces are bundled as well (the
+//! migration's orchestrator decided on 2026-11-13 to bundle them so terminal italics stay slanted, at about 5 MB of
+//! binary size). The Inter faces and the terminal's regular and bold faces are lossless decompressions of the WOFF2
+//! files the old app shipped at the reference commit; the two italic faces are the TTFs of the same Nerd Fonts release
+//! those came from, unchanged. `THIRD_PARTY_NOTICES.md` has their provenance and licenses ("Inter interface font",
+//! "JetBrains Mono terminal font").
+//!
+//! The Close and Delete icons are the old app's own action glyphs, copied from its icon module at the reference commit
+//! (14-unit box, 1.2 stroke, round caps and joins). The More icon is a new drawing: the old app wrote the "⋯" character
+//! in text.
 
 use std::borrow::Cow;
 
@@ -31,11 +35,13 @@ pub fn ui_fonts() -> Vec<Cow<'static, [u8]>> {
 }
 
 /// The terminal font family name, as the bundled faces declare it. Bold and italic requests must use this family so
-/// the text system picks a bundled face instead of substituting another font; with no italic face bundled yet, an
-/// italic request draws in the upright face.
+/// the text system picks the matching bundled face instead of substituting another font.
 pub const TERMINAL_FONT: &str = "JetBrainsMono Nerd Font";
 
-/// The terminal faces: regular and bold.
+/// The terminal faces: regular, bold, italic and bold italic, one for every combination of the bold and italic
+/// attributes a cell can carry. All four share the same advance and vertical metrics, so a cell is the same size
+/// whatever its style. Dropping a face does not fail anything at run time: the text system quietly draws its style in
+/// the nearest face that is left (italic upright, say).
 pub fn terminal_fonts() -> Vec<Cow<'static, [u8]>> {
     vec![
         Cow::Borrowed(include_bytes!(
@@ -43,6 +49,12 @@ pub fn terminal_fonts() -> Vec<Cow<'static, [u8]>> {
         )),
         Cow::Borrowed(include_bytes!(
             "../assets/fonts/JetBrainsMonoNerdFont-Bold.ttf"
+        )),
+        Cow::Borrowed(include_bytes!(
+            "../assets/fonts/JetBrainsMonoNerdFont-Italic.ttf"
+        )),
+        Cow::Borrowed(include_bytes!(
+            "../assets/fonts/JetBrainsMonoNerdFont-BoldItalic.ttf"
         )),
     ]
 }

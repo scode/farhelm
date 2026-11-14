@@ -24,13 +24,23 @@ are licensed under the SIL Open Font License, Version 1.1; the complete notice i
 
 ## JetBrains Mono terminal font
 
-The JetBrains Mono Nerd Font regular and bold TrueType files in `crates/gui/farhelm-gui/assets/fonts/`, which the GPUI
-desktop app bundles for its terminal, are decompressed byte for byte (`woff2_decompress`) from the WOFF2 files the old
-app shipped in `crates/farhelm-ui/assets/fonts/` at the GPUI port's reference commit `24bc0580`. Copyright 2020 The
-JetBrains Mono Project Authors ([`JetBrains/JetBrainsMono`](https://github.com/JetBrains/JetBrainsMono)), patched with
-the Nerd Fonts glyph set ([`ryanoasis/nerd-fonts`](https://github.com/ryanoasis/nerd-fonts)). They are licensed under
-the SIL Open Font License, Version 1.1; the complete notice the old app shipped with them is `OFL-JetBrainsMono.txt`
-beside them.
+The GPUI desktop app bundles four JetBrains Mono Nerd Font TrueType faces for its terminal, in
+`crates/gui/farhelm-gui/assets/fonts/`. The regular and bold files are decompressed byte for byte (`woff2_decompress`)
+from the WOFF2 files the old app shipped in `crates/farhelm-ui/assets/fonts/` at the GPUI port's reference commit
+`24bc0580`. The old app had no italic faces, so the italic and bold italic files (`JetBrainsMonoNerdFont-Italic.ttf`,
+`JetBrainsMonoNerdFont-BoldItalic.ttf`) are copied unchanged from the Nerd Fonts release the regular and bold faces come
+from: Nerd Fonts v3.5.0's
+[`JetBrainsMono.tar.xz`](https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.0/JetBrainsMono.tar.xz) (SHA-256
+`0227b220360a6f819b9ead92343e8112b34733054782561af50cfba1e8afab63`). That archive's regular and bold TTFs are
+byte-identical to the ones the old app first committed (in `96f7cc51a`, before it switched to WOFF2), and its `OFL.txt`
+to `OFL-JetBrainsMono.txt` here. The italic file's SHA-256 is
+`1920111383857d3b3785e661c334701729436901f53e087522c0fa73e55d1fc0` and the bold italic's
+`dafe5a9603a94584f95926c99beb684b70d63200ff2af86ae92715e100505a4d`.
+
+Copyright 2020 The JetBrains Mono Project Authors
+([`JetBrains/JetBrainsMono`](https://github.com/JetBrains/JetBrainsMono)), patched with the Nerd Fonts glyph set
+([`ryanoasis/nerd-fonts`](https://github.com/ryanoasis/nerd-fonts)). All four are licensed under the SIL Open Font
+License, Version 1.1; the complete notice, which covers the whole family, is `OFL-JetBrainsMono.txt` beside them.
 
 ## Code ported from xterm.js
 
