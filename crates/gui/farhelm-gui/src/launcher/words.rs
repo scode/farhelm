@@ -166,3 +166,18 @@ pub(super) const fn agent_note(harness: LaunchHarness) -> Option<&'static str> {
         | LaunchHarness::OpenCode => None,
     }
 }
+
+/// The order the launcher lists agent types in its searches and its model list (the old `HARNESS_SEARCH_ORDER`).
+/// It differs from [`HARNESS_PICKER_ORDER`] only in where Grok sits; both orders predate the GPUI app and are kept.
+pub(super) const HARNESS_SEARCH_ORDER: [LaunchHarness; 9] = [
+    LaunchHarness::Codex,
+    LaunchHarness::Claude,
+    LaunchHarness::Muse,
+    LaunchHarness::Cursor,
+    LaunchHarness::Goose,
+    LaunchHarness::Pi,
+    LaunchHarness::Omp,
+    LaunchHarness::OpenCode,
+    LaunchHarness::Grok,
+];
+const _: () = assert!(LaunchHarness::is_ordering_of_all(&HARNESS_SEARCH_ORDER));

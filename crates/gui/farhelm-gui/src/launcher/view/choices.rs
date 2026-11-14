@@ -58,14 +58,18 @@ const APPROVAL_MODES: [LaunchPermission; 3] = [
 impl Launcher {
     /// The agent-choice edit `edit` happened: its notice replaces the one shown (none clears it), and the draft
     /// changed. The escalation it may carry is the banner's, which comes later.
-    fn chose(&mut self, edit: Edit, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn chose(&mut self, edit: Edit, window: &mut Window, cx: &mut Context<Self>) {
         self.notice = edit.notice;
         self.sync_fields(window, cx);
         self.changed(cx);
     }
 
     /// The prefix the helm remembers for `harness`, from the pushed preferences.
-    fn remembered_wrapper(&self, harness: LaunchHarness, cx: &App) -> Option<Vec<String>> {
+    pub(super) fn remembered_wrapper(
+        &self,
+        harness: LaunchHarness,
+        cx: &App,
+    ) -> Option<Vec<String>> {
         self.store
             .read(cx)
             .collections()

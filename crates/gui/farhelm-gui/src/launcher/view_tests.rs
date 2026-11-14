@@ -787,6 +787,13 @@ fn each_agent_type_offers_its_own_permission_vocabulary(cx: &mut TestAppContext)
             effort,
             "{chip}: effort offered"
         );
+        // Grok alone has no model choice, so its composer hides the model field (the old grok-composer spec).
+        let model = chip != "launcher-harness-Grok";
+        assert_eq!(
+            drawn(cx, "launcher-model-row"),
+            model,
+            "{chip}: model field drawn"
+        );
     }
 }
 
@@ -865,5 +872,312 @@ fn restart_with_keeps_its_stored_effort_offered(cx: &mut TestAppContext) {
     assert!(
         has_node(cx, "launcher-effort-Max"),
         "the stored Max is still offered"
+    );
+}
+
+// ---- The model field -----------------------------------------------------------------------------------------------
+
+/// A catalog with two Codex models and one Claude model.
+fn model_catalog() -> serde_json::Value {
+    serde_json::json!([
+        { "id": "gpt-5", "harness": "codex", "efforts": ["high"] },
+        { "id": "gpt-5-mini", "harness": "codex", "efforts": ["high"] },
+        { "id": "sonnet", "harness": "claude", "efforts": ["high"] }
+    ])
+}
+
+/// The launcher on New on `host` with Codex chosen, the model catalog answered and the model field focused by a click,
+/// its list open.
+fn model_field_open(
+    cx: &mut TestAppContext,
+    host: Option<i64>,
+) -> (FakeHelm, &mut VisualTestContext) {
+    let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(host, "~".into(), None));
+    answer_catalog(&mut helm, cx, Some(model_catalog()));
+    test_support::click(cx, "launcher-harness-Codex");
+    test_support::click(cx, "launcher-model-row");
+    assert!(
+        read(cx, |launcher, window, cx| launcher
+            .model_input
+            .focus_handle(cx)
+            .is_focused(window)),
+        "the premise: the click focused the model field"
+    );
+    assert!(
+        has_node(cx, "launcher-model-list"),
+        "the premise: focusing the field opened its list"
+    );
+    (helm, cx)
+}
+
+/// The text the model field shows.
+fn model_text(cx: &mut VisualTestContext) -> String {
+    read(cx, |launcher, _, cx| {
+        launcher.model_input.text(cx).to_string()
+    })
+}
+
+/// Focusing the model field empties it and opens its list under it: the default, the chosen agent type's catalog
+/// models and the show-all row, filtered by what is typed; Down moves the highlight and Enter picks it, closing the
+/// list with the model chosen and shown (the old launcher's model combobox). Why this matters: the model is how the
+/// user picks what the agent runs on, and Enter must apply only the row the user moved to.
+#[gpui::test]
+fn the_model_list_filters_and_enter_picks_the_highlighted_row(cx: &mut TestAppContext) {
+    let (_helm, cx) = model_field_open(cx, Some(1));
+    assert_eq!(model_text(cx), "", "the field empties for typing");
+    for id in [
+        "launcher-model-default",
+        "launcher-model-option-Codex-gpt-5",
+        "launcher-model-show-all",
+    ] {
+        assert!(has_node(cx, id), "{id} is listed");
+    }
+    assert!(
+        !has_node(cx, "launcher-model-option-Claude-sonnet"),
+        "another agent's models wait for show-all"
+    );
+    keys(cx, "m i n i");
+    assert!(
+        !has_node(cx, "launcher-model-option-Codex-gpt-5"),
+        "typing filters the rows"
+    );
+    keys(cx, "down down enter");
+    assert_eq!(draft(cx).agent.model.as_deref(), Some("gpt-5-mini"));
+    assert!(
+        !has_node(cx, "launcher-model-list"),
+        "picking closes the list"
+    );
+    assert_eq!(model_text(cx), "gpt-5-mini");
+}
+
+/// Enter on typed text with no row moved to applies what the text means: a custom id under the chosen agent type is
+/// kept exactly; another agent type's model is said, not applied, since typing never switches the agent (SPEC.md,
+/// "Creation"). Enter in New only chooses: it presses nothing, which the launcher, having no host, would otherwise
+/// answer with its refusal.
+#[gpui::test]
+fn enter_on_typed_text_applies_a_custom_id_or_says_who_owns_it(cx: &mut TestAppContext) {
+    let (_helm, cx) = model_field_open(cx, None);
+    keys(cx, "s o n n e t enter");
+    assert_eq!(
+        draft(cx).agent.harness,
+        Some(LaunchHarness::Codex),
+        "typing did not switch the agent"
+    );
+    assert_eq!(
+        draft(cx).agent.model,
+        None,
+        "nor apply the other agent's model"
+    );
+    assert_eq!(
+        name_of(cx, "launcher-model-error").as_deref(),
+        Some("sonnet is offered by Claude; choose Claude to use it")
+    );
+    keys(
+        cx,
+        "backspace backspace backspace backspace backspace backspace m y - m o d e l enter",
+    );
+    assert_eq!(
+        draft(cx).agent.model.as_deref(),
+        Some("my-model"),
+        "a custom id is kept as typed"
+    );
+    assert!(!has_node(cx, "launcher-model-error"));
+    assert_eq!(shown_refusal(cx), None, "Enter in New presses nothing");
+}
+
+/// Escape closes the list, not the launcher, and the field shows the chosen model again in place of what was typed;
+/// the launcher's own Escape comes after (the layer manager closes the topmost layer first). Specified with a model
+/// already chosen, so the restored text is the choice, not the field's starting text.
+#[gpui::test]
+fn escape_closes_the_model_list_first(cx: &mut TestAppContext) {
+    let (_helm, cx) = model_field_open(cx, Some(1));
+    keys(cx, "down down enter");
+    assert_eq!(
+        draft(cx).agent.model.as_deref(),
+        Some("gpt-5"),
+        "the premise: gpt-5 is chosen"
+    );
+    // The field kept focus after the pick, so typing, not a click, opens the list again, as in the old combobox.
+    keys(cx, "x y z");
+    assert!(
+        has_node(cx, "launcher-model-list"),
+        "the premise: typing opened the list again"
+    );
+    keys(cx, "escape");
+    assert!(!has_node(cx, "launcher-model-list"), "the list closed");
+    assert!(is_open(cx), "the launcher did not");
+    assert_eq!(
+        model_text(cx),
+        "gpt-5",
+        "the field shows the chosen model again"
+    );
+}
+
+/// Tab out of the field closes its list and puts the chosen model back in the field (the old combobox closed on blur,
+/// and a list left open would float over the next control).
+#[gpui::test]
+fn leaving_the_model_field_closes_its_list(cx: &mut TestAppContext) {
+    let (_helm, cx) = model_field_open(cx, Some(1));
+    keys(cx, "g p t");
+    keys(cx, "tab");
+    assert!(
+        !read(cx, |launcher, window, cx| launcher
+            .model_input
+            .focus_handle(cx)
+            .is_focused(window)),
+        "the premise: Tab left the field"
+    );
+    assert!(!has_node(cx, "launcher-model-list"), "the list closed");
+    assert_eq!(model_text(cx), "Harness default");
+}
+
+/// In Restart with, which holds the agent type, the list offers no other agents' models, and Enter in the field
+/// chooses and then presses Restart, as the old launcher did there. Specified: no show-all row; a typed custom id and
+/// Enter choose it and show Restart's reason beside it (the source session is not in the store, so the press is refused).
+#[gpui::test]
+fn restart_with_model_enter_chooses_then_presses_restart(cx: &mut TestAppContext) {
+    let mut source = super::draft_tests::session(codex(None, None, None));
+    source.restart_offer = RestartOffer::Resume;
+    let restart = LaunchDraft::restart_with("missing", &source, Some(1)).unwrap();
+    let (mut helm, cx) = launcher_on(cx, restart);
+    answer_catalog(&mut helm, cx, Some(model_catalog()));
+    test_support::click(cx, "launcher-model-row");
+    assert!(
+        has_node(cx, "launcher-model-list"),
+        "the premise: the list is open"
+    );
+    assert!(
+        !has_node(cx, "launcher-model-show-all"),
+        "no other agents' models in Restart with"
+    );
+    keys(cx, "m y - m o d e l enter");
+    assert_eq!(draft(cx).agent.model.as_deref(), Some("my-model"));
+    let refusal = shown_refusal(cx).unwrap_or_default();
+    assert!(
+        refusal.starts_with("Restart error. "),
+        "Enter pressed Restart: {refusal}"
+    );
+    // A model that is not applied refuses the restart, so it cannot quietly keep the old model. The field shows the
+    // picked model now, and typing would add to it, so it is focused afresh first, which empties it.
+    keys(cx, "tab");
+    test_support::click(cx, "launcher-model-row");
+    assert_eq!(
+        model_text(cx),
+        "",
+        "the premise: the field is empty for typing"
+    );
+    keys(cx, "s o n n e t enter");
+    assert_eq!(
+        shown_refusal(cx).as_deref(),
+        Some("Restart error. Choose a model before restarting")
+    );
+}
+
+/// Show-all lists every agent type's models, each with its agent's name; clicking another agent's model switches to
+/// that agent on purpose (SPEC.md: "choosing another harness's model from the full model list switches the harness on
+/// purpose").
+#[gpui::test]
+fn show_all_lists_every_agents_models_and_picking_one_switches_the_agent(cx: &mut TestAppContext) {
+    let (_helm, cx) = model_field_open(cx, Some(1));
+    test_support::click(cx, "launcher-model-show-all");
+    assert!(
+        has_node(cx, "launcher-model-option-Claude-sonnet"),
+        "the other agent's model is listed"
+    );
+    assert_eq!(
+        name_of(cx, "launcher-model-option-Claude-sonnet").as_deref(),
+        Some("sonnet (Claude)")
+    );
+    test_support::click(cx, "launcher-model-option-Claude-sonnet");
+    assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Claude));
+    assert_eq!(draft(cx).agent.model.as_deref(), Some("sonnet"));
+}
+
+/// With no agent type chosen, a typed id no single agent type owns needs one first, and says so.
+#[gpui::test]
+fn a_custom_id_with_no_agent_says_to_choose_one(cx: &mut TestAppContext) {
+    let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    answer_catalog(&mut helm, cx, Some(model_catalog()));
+    test_support::click(cx, "launcher-model-row");
+    assert!(
+        read(cx, |launcher, window, cx| launcher
+            .model_input
+            .focus_handle(cx)
+            .is_focused(window)),
+        "the premise: the click focused the model field"
+    );
+    keys(cx, "x y z enter");
+    assert_eq!(
+        name_of(cx, "launcher-model-error").as_deref(),
+        Some("Choose a harness before a custom model id")
+    );
+    assert_eq!(draft(cx).agent.model, None);
+}
+
+/// The error under the model field lasts until it is dealt with: a completed pick or Escape clears it, but leaving the
+/// field keeps it, so the user can go and choose the agent it names (the old combobox's rule). Specified: a typed
+/// Claude model under Codex shows the error; Tab away keeps it; back in the field, Escape clears it; shown again, a
+/// pick of the default row clears it.
+#[gpui::test]
+fn the_model_error_lasts_until_a_pick_or_escape(cx: &mut TestAppContext) {
+    let (_helm, cx) = model_field_open(cx, Some(1));
+    keys(cx, "s o n n e t enter");
+    assert!(
+        has_node(cx, "launcher-model-error"),
+        "the premise: the error shows"
+    );
+    keys(cx, "tab");
+    assert!(
+        has_node(cx, "launcher-model-error"),
+        "leaving the field keeps it"
+    );
+    test_support::click(cx, "launcher-model-row");
+    assert!(
+        !has_node(cx, "launcher-model-error"),
+        "focusing the field again starts over"
+    );
+    keys(cx, "s o n n e t enter");
+    assert!(
+        has_node(cx, "launcher-model-error"),
+        "the premise: the error shows again"
+    );
+    keys(cx, "escape");
+    assert!(!has_node(cx, "launcher-model-error"), "Escape clears it");
+    // The field shows the chosen model again, and typing would add to it, so it is focused afresh, which empties it.
+    keys(cx, "tab");
+    test_support::click(cx, "launcher-model-row");
+    assert_eq!(
+        model_text(cx),
+        "",
+        "the premise: the field is empty for typing"
+    );
+    keys(cx, "s o n n e t enter");
+    assert!(
+        has_node(cx, "launcher-model-error"),
+        "the premise: the error shows once more"
+    );
+    keys(cx, "down enter");
+    assert_eq!(draft(cx).agent.model, None, "the default row was picked");
+    assert!(
+        !has_node(cx, "launcher-model-error"),
+        "a completed pick clears it"
+    );
+}
+
+/// The model list stops at 260 pixels and scrolls, as the old one did; a full catalog lists dozens of models, and a
+/// list taller than the window would hide its lower rows and float over the field being typed in.
+#[gpui::test]
+fn the_model_list_stops_at_260_pixels(cx: &mut TestAppContext) {
+    let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    let rows: Vec<serde_json::Value> = (0..30)
+        .map(|index| serde_json::json!({ "id": format!("model-{index}"), "harness": "codex", "efforts": [] }))
+        .collect();
+    answer_catalog(&mut helm, cx, Some(serde_json::Value::Array(rows)));
+    test_support::click(cx, "launcher-harness-Codex");
+    test_support::click(cx, "launcher-model-row");
+    let list = test_support::bounds(cx, "launcher-model-list");
+    assert!(
+        list.size.height <= gpui::px(262.),
+        "the list is capped: {list:?}"
     );
 }
