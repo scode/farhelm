@@ -565,7 +565,9 @@ Owner: actions and keymap, a module unless crate layering needs a crate.
 
 All actions are declared in one place. Buttons, menu items and keys dispatch the same action. A terminal pass-through
 table lists the keys the terminal always receives. No key context that contains a terminal may hold a multi-key chord
-prefix, because GPUI holds the first key of a chord back for up to a second.
+prefix, because GPUI holds the first key of a chord back until the next key shows whether the chord goes on. It gives up
+after a second only when that key alone is bound too, or when it types text into an element that accepts text input;
+otherwise it waits with no time limit, which includes typing into a terminal that has no text input handler.
 
 Enforced by a test that walks the keymap and fails on a chord prefix in any context containing a terminal, and by a test
 that every pass-through key reaches the terminal with the app's bindings loaded.
@@ -696,7 +698,7 @@ Traps that an earlier rule already prevents get one line pointing at it.
   context ranks as the deepest. In the prototype, the Mac Edit-menu work made Kit Root's `ctrl-c` binding active, and it
   swallowed Ctrl+C on Linux, so programs never got ^C. Rule: the terminal pass-through table, with `NoAction` bindings
   in the terminal context, and a test per pass-through key.
-- **Chord prefixes hold the first key for up to a second;** see "Actions and keymap".
+- **Chord prefixes hold the first key back, often with no time limit;** see "Actions and keymap".
 - **Bound keys never reach the input method,** so a bare printable key cannot be bound in a text field.
 - **Mac menus read the keymap once.** `set_menus` captures shortcuts when it runs, and menu items are enabled only when
   the focused dispatch path handles their action. Bind keys first.
