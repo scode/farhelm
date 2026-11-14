@@ -690,6 +690,11 @@
       "golden": "hosts-shown-with-a-host-chosen",
       "title": "Host management shown with a host chosen: the panel in place of the list, Hosts pressed at the rail's foot, and the chosen avatar in the quieter look",
       "reference": "hosts-panel"
+    },
+    {
+      "golden": "host-add-setup-plan",
+      "title": "The setup confirmation a probe's plan opens: the numbered plan with its paths, Copy plan, the footer note and the three answers",
+      "reference": "host-add-setup-plan"
     }
   ],
   "reference_scenes": [

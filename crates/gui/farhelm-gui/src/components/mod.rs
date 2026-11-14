@@ -17,6 +17,7 @@
 mod banner;
 mod button;
 mod checkbox;
+mod copy_button;
 mod dialog;
 mod divider;
 mod list_row;
@@ -36,6 +37,7 @@ mod tests;
 pub use banner::Banner;
 pub use button::{Button, IconButton, Tier};
 pub use checkbox::Checkbox;
+pub use copy_button::copy_button;
 pub use dialog::DialogFrame;
 pub(crate) use dialog::dialog_shadow;
 pub use divider::{Divider, DividerDrag, DividerGrip, DividerStep};

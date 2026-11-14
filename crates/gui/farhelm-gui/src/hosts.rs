@@ -15,7 +15,9 @@
 //! read from the store when it draws. It fills the box it is given and scrolls its rows inside it, so the box needs a
 //! definite height.
 //!
-//! The Add host dialog is [`add::open`], which the host rail's Add host and the heading's add button call.
+//! The Add host dialog is [`add::open`], which the host rail's Add host and the heading's add button call. A new host
+//! without Farhelm goes on to the setup confirmation and the setup's submission ([`setup`]); a setup the helm refused
+//! after the user moved on from it shows at the top of the panel, since it has no row.
 //!
 //! How a host is named and marked, here and in every other area that shows a host, is [`identity`].
 //!
@@ -54,6 +56,7 @@
 pub mod add;
 pub(crate) mod identity;
 pub(crate) mod offers;
+pub(crate) mod setup;
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -62,7 +65,7 @@ use farhelm_proto::provisioning::ProvisioningView;
 use farhelm_proto::ui_channel::{Availability, Collection, HostView};
 use gpui::{
     AnyElement, Context, FontWeight, InteractiveElement, IntoElement, ParentElement, Render, Role,
-    SharedString, StatefulInteractiveElement, Styled, Window, div, px,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div, px,
 };
 
 use crate::components::{Checkbox, HoverHelp, StatusMark};
@@ -123,13 +126,19 @@ const ERROR_PAD_TOP: f32 = 2.;
 pub struct HostsPanel {
     /// The Details switch: whether every row is open. Starts off and is never saved.
     details: bool,
+    /// Redraws the panel when its top line changes (a setup refused after the user moved on, a refused "don't ask
+    /// again"): that line lives in a global of the setup module, which notifies no view by itself.
+    _lines: Subscription,
 }
 
 impl HostsPanel {
     /// A panel with Details off. It reads everything else from the store while it draws, so it can be made before the
     /// connection or the first snapshot and needs nothing from them.
-    pub fn new(_cx: &mut Context<Self>) -> Self {
-        HostsPanel { details: false }
+    pub fn new(cx: &mut Context<Self>) -> Self {
+        HostsPanel {
+            details: false,
+            _lines: setup::observe_panel_lines(cx),
+        }
     }
 
     /// Turn Details on or off, as the switch does.
@@ -278,6 +287,16 @@ impl Render for HostsPanel {
             ),
             (None, Some(_)) => None,
         };
+        // A setup refused after the user moved on from it, and a refused "don't ask again": no row exists for a host
+        // the helm did not add, and the question that asked has closed, so they show here (`setup::panel_lines`).
+        let refused_setup = setup::panel_lines(cx).into_iter().map(|line| {
+            div()
+                .py(px(4.))
+                .px(px(10.))
+                .text_size(metrics::TEXT_SM)
+                .text_color(theme::color(palette.danger))
+                .child(line)
+        });
         div()
             .id("hosts-panel")
             // Tests and the bridge find the panel by this; it records nothing outside test builds.
@@ -290,6 +309,7 @@ impl Render for HostsPanel {
             .min_h_0()
             .child(heading)
             .children(status)
+            .children(refused_setup)
             .child(
                 div()
                     .id("host-list")
