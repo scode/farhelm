@@ -12,6 +12,8 @@ description = "Wire types and protocol version shared by helm and supervisor"
 dist = false
 
 [dependencies]
+# The UI channel's command paths (`ui_channel::ApiPath`): built percent-encoded, parsed with escapes decoded.
+percent-encoding.workspace = true
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -302,28 +302,35 @@ GUI's copy with a fresh full snapshot and fails loudly on a mismatch.
 
 ### Paths are a trust boundary
 
-Owner: the UI channel's path builder.
+Owner: the command path type, `farhelm_proto::ui_channel::ApiPath`, which both sides of the channel use.
 
 GUI commands are built only through one path builder that percent-encodes each segment. Ids that come from a supervisor
 (tab ids, for example) get no check on the helm side, so an id like `../../victim` must never be able to retarget a
-request. The envelope dispatcher refuses non-canonical paths: dot segments (plain or percent-encoded), empty segments
-and encoded slashes.
+request. The helm refuses non-canonical paths: dot segments (plain or percent-encoded), empty segments, fragments, and
+characters no URI carries. Refusing is decoding: a command whose path is not canonical does not decode, so it never
+reaches the router, and the helm closes the channel as for any message it cannot read. A correct GUI never meets this,
+because its builder cannot produce such a path, and the type has no public constructor from a string. A segment holding
+an encoded `/` or `\` is canonical (a host's id may contain one), so it decodes; the dispatcher refuses that command
+with an ordinary reply and the channel continues, so a host-supplied id cannot reset the GUI.
 
-Enforced by the path builder being the only constructor of a command path (the envelope's path field is not a plain
-string feature code can fill in), and by dispatcher tests for each refused form.
+Enforced by that type being the envelope's path field (not a plain string feature code can fill in), with the builder
+and the decoding check in one place so they cannot drift apart, by tests of each refused form and that every built path
+decodes back unchanged, and by a test that a command with a non-canonical path ends the channel unrouted.
 
 ### One failure path: the reset
 
 Owner: the UI channel's watchdog, and the UI-session owner.
 
 A heartbeat, plus one watchdog that treats any command left unanswered for N seconds as a broken channel, replaces every
-per-request deadline. A command's clock starts when the channel admits it (when the previous command's reply arrived),
-not when the GUI sent it, so a queue behind a slow command does not trip the watchdog. N is set above the helm's own
-bound on host waits. That bound is also the longest any queued click can wait behind a slow host, so it is kept short
-(the exact value is chosen with the channel's implementation). However the channel broke, the same code runs: the window
-goes inert behind "Reconnecting to the helm…", everything that came from the helm is dropped, and the window rebuilds
-from the new snapshot. One generic notice says the connection was lost and that something done just before may or may
-not have happened. No action tracks its own fate.
+per-request deadline. The heartbeat is the GUI's: the helm sends no keepalive of its own, and closes a channel that has
+sent nothing for about a minute, so a GUI that vanished without closing gives up the seat. A command's clock starts when
+the channel admits it (when the previous command's reply arrived), not when the GUI sent it, so a queue behind a slow
+command does not trip the watchdog. N is set above the helm's own bound on host waits. That bound is also the longest
+any queued click can wait behind a slow host, so it is kept short (the exact value is chosen with the channel's
+implementation). However the channel broke, the same code runs: the window goes inert behind "Reconnecting to the
+helm…", everything that came from the helm is dropped, and the window rebuilds from the new snapshot. One generic notice
+says the connection was lost and that something done just before may or may not have happened. No action tracks its own
+fate.
 
 In the embedded topology the UI reconnects to the same helm. If the helm task itself has ended, the app shows the
 existing startup-refusal surface and exits; there is no in-process helm restarter. A refused credential shows a terminal

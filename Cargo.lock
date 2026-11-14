@@ -2077,7 +2077,6 @@ dependencies = [
  "farhelm-helm",
  "farhelm-proto",
  "futures-util",
- "percent-encoding",
  "serde",
  "serde_json",
  "tempfile",
@@ -2104,6 +2103,7 @@ name = "farhelm-proto"
 version = "0.0.0-unreleased"
 dependencies = [
  "farhelm-testtrace",
+ "percent-encoding",
  "semver",
  "serde",
  "serde_json",

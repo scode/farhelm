@@ -68,7 +68,7 @@ pub use crate::transport::{
     HostTransport, LocalSupervisorNotRunning, SystemTransport, TransportConnection, TransportPair,
 };
 use crate::transport::{ProcessRoute, SshDiagnostics, SshExit, SshObservation, SshSnapshot};
-pub use crate::ui_channel::{SeatClaim, UiSeat};
+pub use crate::ui_channel::UiSeat;
 
 use crate::client::{SessionListing, SupervisorClient, SupervisorError, SupervisorTransportError};
 use crate::environment::{ConnectedResources, EnvironmentStatus, Providers, StatusUnanswered};
@@ -1223,7 +1223,7 @@ pub struct ConnectionManager {
     /// Which GUI holds this helm, if any (see [`UiSeat`]). Beside the feed
     /// because both answer "who is watching": agent approvals ask the seat
     /// whether a window is open, where they used to count feed subscribers.
-    ui_seat: Arc<UiSeat>,
+    ui_seat: UiSeat,
     /// Per-host lock serializing a provisioning run against edits of that
     /// host's registry row (retarget, alias, removal); see
     /// [`Self::host_provision_lock`].
@@ -1588,7 +1588,7 @@ impl ConnectionManager {
             #[cfg(test)]
             refusal_gate: DuplicateGateSlot::default(),
             events: Arc::new(FleetEvents::new()),
-            ui_seat: Arc::default(),
+            ui_seat: UiSeat::default(),
             reconcile: tokio::sync::Mutex::new(()),
             actors: Mutex::new(ActorMap::default()),
             provision_locks: Arc::new(Mutex::new(HashMap::new())),
@@ -1732,7 +1732,7 @@ impl ConnectionManager {
     }
 
     /// The seat a GUI's UI channel holds; see [`UiSeat`].
-    pub fn ui_seat(&self) -> &Arc<UiSeat> {
+    pub fn ui_seat(&self) -> &UiSeat {
         &self.ui_seat
     }
 
@@ -12293,7 +12293,7 @@ mod tests {
             connect_gate: DuplicateGateSlot::default(),
             refusal_gate: DuplicateGateSlot::default(),
             events: Arc::new(FleetEvents::new()),
-            ui_seat: Arc::default(),
+            ui_seat: UiSeat::default(),
             reconcile: tokio::sync::Mutex::new(()),
             actors: Mutex::new(ActorMap::default()),
             provision_locks: Arc::new(Mutex::new(HashMap::new())),

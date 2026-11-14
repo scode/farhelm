@@ -10,60 +10,12 @@ use super::*;
 use crate::rest_harness::{self, WsTestClient};
 use axum::extract::State as AxState;
 use axum::routing::get;
-use farhelm_proto::ui_channel::{Collection, SessionRow};
-use std::sync::atomic::{AtomicBool, Ordering};
+use farhelm_proto::ui_channel::{Collection, KeyedEntry, SessionRow};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 /// How long a test waits for something that should be immediate. Generous,
 /// because a shorter wait would not diagnose "nothing arrived" any better.
 const NOTICE: Duration = Duration::from_secs(10);
-
-// ---------------------------------------------------------------------------
-// Paths
-// ---------------------------------------------------------------------------
-
-/// Paths are a trust boundary: an id spliced into a path must not be able to
-/// retarget the request. Each form a URL normalizer would rewrite is refused,
-/// and ordinary encoded ids (including ones that look like separators once
-/// decoded only partly) pass, so refusing is not over-broad.
-#[farhelm_testtrace::test]
-fn non_canonical_command_paths_are_refused_and_canonical_ones_pass() {
-    for refused in [
-        "/api/sessions/../hosts",
-        "/api/sessions/./x",
-        "/api/sessions/%2e%2e/hosts",
-        "/api/sessions/%2E/x",
-        "/api/sessions//x",
-        "/api/sessions/x/",
-        "/api/sessions/a%2Fb",
-        "/api/sessions/a%5Cb",
-        "/api/sessions/a\\b",
-        "/api/sessions/x#frag",
-        "/api/x?q=a#b",
-        "/ui/elsewhere",
-        "api/sessions",
-        // Not refused by a segment rule: no request can carry these at all.
-        "/api/sessions/a b",
-        "/api/sessions/x?q=a b",
-        "/api/x\t",
-    ] {
-        assert!(
-            check_command_path(refused).is_err(),
-            "should refuse {refused}"
-        );
-    }
-    for allowed in [
-        "/api/sessions",
-        "/api/sessions/00000000-0000-4000-8000-000000000001%3As1/rename",
-        "/api/sessions/x?only_if_nothing_alive=true",
-        "/api/browse-directory?path=/a/../b",
-        "/api/sessions/..x",
-    ] {
-        assert!(
-            check_command_path(allowed).is_ok(),
-            "should allow {allowed}"
-        );
-    }
-}
 
 // ---------------------------------------------------------------------------
 // The diff
@@ -74,6 +26,12 @@ fn entry(id: &str, title: &str) -> (String, Value) {
         id.to_string(),
         serde_json::json!({ "id": id, "title": title }),
     )
+}
+
+/// The same entry as the wire carries it: under its key.
+fn keyed(id: &str, title: &str) -> KeyedEntry {
+    let (key, value) = entry(id, title);
+    KeyedEntry { key, value }
 }
 
 fn projected(entries: Vec<(String, Value)>) -> Projected {
@@ -96,7 +54,8 @@ fn empty_sent() -> Sent {
 
 /// The generic diff is what every collection's pushes come from, so its
 /// three outcomes are pinned directly: an added and a changed entry are sent
-/// whole, a vanished one is named for removal, and an identical read sends
+/// whole under the key the diff found them by (the one key the GUI files them
+/// under), a vanished one is named for removal, and an identical read sends
 /// nothing at all (a feed bump that changed nothing must not wake the GUI).
 #[farhelm_testtrace::test]
 fn the_diff_sends_added_and_replaced_entries_whole_and_names_removed_ones() {
@@ -120,7 +79,7 @@ fn the_diff_sends_added_and_replaced_entries_whole_and_names_removed_ones() {
     let second = second.expect("a different read is a change");
     assert_eq!(
         second.upsert,
-        vec![entry("b", "two, renamed").1, entry("c", "three").1]
+        vec![keyed("b", "two, renamed"), keyed("c", "three")]
     );
     assert_eq!(second.remove, ["a"]);
     assert_eq!(second.meta.order, ["b", "c"]);
@@ -179,28 +138,28 @@ fn a_failed_read_marks_the_collection_unavailable_without_removing_anything() {
 // The seat
 // ---------------------------------------------------------------------------
 
-/// One UI per helm: taking the seat tells the holder it was displaced, and
-/// the displaced claim's release (its channel closing afterwards) must not
-/// free the seat its successor now holds.
+/// One UI per helm: taking the seat tells the holder it was displaced, the
+/// displaced channel's ending (dropping its receiver afterwards) must not free
+/// the seat its successor now holds, and the successor's ending does.
 #[farhelm_testtrace::test]
 async fn taking_the_seat_displaces_the_holder_and_its_release_keeps_the_successor() {
-    let seat = Arc::new(UiSeat::default());
+    let seat = UiSeat::default();
     assert!(!seat.is_held());
-    let (first, mut first_displaced) = seat.take();
+    let mut first = seat.take();
     assert!(seat.is_held());
-    assert!(first_displaced.try_recv().is_err(), "not displaced yet");
+    assert!(first.try_recv().is_err(), "not displaced yet");
 
-    let (second, _second_displaced) = seat.take();
-    first_displaced
+    let second = seat.take();
+    first
         .try_recv()
         .expect("the first holder is told it was displaced");
     drop(first);
     assert!(
         seat.is_held(),
-        "the displaced claim's release keeps the successor"
+        "the displaced channel's ending keeps the successor"
     );
     drop(second);
-    assert!(!seat.is_held());
+    assert!(!seat.is_held(), "the holder's ending frees the seat");
 }
 
 // ---------------------------------------------------------------------------
@@ -216,6 +175,9 @@ struct TestRoutes {
     items: Mutex<Vec<Value>>,
     save_gate: Mutex<Option<oneshot::Receiver<()>>>,
     fail_items: AtomicBool,
+    /// Requests that matched no test route. The router's fallback counts them, so a test can show a command never
+    /// reached the router at all, not merely that it missed every real route.
+    unrouted_hits: AtomicUsize,
 }
 
 /// A router of test routes, standing in for the helm's: a save that waits on
@@ -248,9 +210,14 @@ fn test_router(routes: Arc<TestRoutes>) -> axum::Router {
         let items = routes.items.lock().unwrap().clone();
         axum::Json(serde_json::json!({ "items": items })).into_response()
     }
+    async fn unrouted(AxState(routes): AxState<Arc<TestRoutes>>) -> StatusCode {
+        routes.unrouted_hits.fetch_add(1, Ordering::SeqCst);
+        StatusCode::NOT_FOUND
+    }
     axum::Router::new()
         .route("/api/test/value", get(read).put(save))
         .route("/api/test/items", get(items).post(add))
+        .fallback(unrouted)
         .with_state(routes)
 }
 
@@ -307,7 +274,10 @@ fn command(id: u64, method: &str, path: &str, body: Option<Value>) -> ClientMess
     ClientMessage::Command(Command {
         id,
         method: method.to_string(),
-        path: path.to_string(),
+        // Through deserialization, the helm's only way in: there is no public string constructor (paths are a trust
+        // boundary), and a test that needs a non-canonical path sends raw JSON instead.
+        path: serde_json::from_value(Value::String(path.to_string()))
+            .expect("a test command's path is canonical"),
         body,
     })
 }
@@ -399,7 +369,13 @@ async fn the_changes_a_command_causes_arrive_before_its_reply() {
     let ServerMessage::Changes(changes) = next(&mut driven).await else {
         panic!("the change must come before the reply");
     };
-    assert_eq!(changes.upsert, vec![serde_json::json!({ "id": "\"x\"" })]);
+    assert_eq!(
+        changes.upsert,
+        vec![KeyedEntry {
+            key: "\"x\"".into(),
+            value: serde_json::json!({ "id": "\"x\"" }),
+        }]
+    );
     let ServerMessage::Reply(reply) = next(&mut driven).await else {
         panic!("then the reply");
     };
@@ -431,10 +407,12 @@ async fn a_feed_bump_pushes_changes_and_a_failed_read_removes_nothing() {
     assert_eq!(changes.meta.order, ["kept"]);
 }
 
-/// A non-canonical path is refused with an ordinary reply and never routed,
-/// and the channel carries on with the next command.
+/// A canonical path can still hold an id with an encoded slash, which a
+/// route would decode into two segments. The dispatcher refuses it with an
+/// ordinary reply, never routes it, and the channel carries on with the next
+/// command: an odd host id costs that one action, not a reset.
 #[farhelm_testtrace::test]
-async fn a_non_canonical_path_is_refused_without_being_routed() {
+async fn an_encoded_separator_is_refused_without_being_routed() {
     let routes = Arc::new(TestRoutes::default());
     let (mut driven, _snapshot) = drive(Arc::clone(&routes)).await;
     driven
@@ -442,7 +420,7 @@ async fn a_non_canonical_path_is_refused_without_being_routed() {
         .send(command(
             1,
             "PUT",
-            "/api/test/%2e%2e/value",
+            "/api/test/x%2F..%2Fvalue",
             Some(Value::String("no".into())),
         ))
         .await
@@ -453,27 +431,15 @@ async fn a_non_canonical_path_is_refused_without_being_routed() {
     assert_eq!((reply.id, reply.status), (1, 400));
     assert!(routes.value.lock().unwrap().is_none(), "nothing was routed");
 
-    // A path no request can carry (a raw space) once panicked the channel's task while building the request; through
-    // the channel it must be an ordinary refusal that leaves the channel serving.
     driven
         .to_channel
-        .send(command(2, "GET", "/api/test/a b", None))
-        .await
-        .unwrap();
-    let ServerMessage::Reply(reply) = next(&mut driven).await else {
-        panic!("expected the refusal of an unparseable path");
-    };
-    assert_eq!((reply.id, reply.status), (2, 400));
-
-    driven
-        .to_channel
-        .send(command(3, "GET", "/api/test/value", None))
+        .send(command(2, "GET", "/api/test/value", None))
         .await
         .unwrap();
     let ServerMessage::Reply(reply) = next(&mut driven).await else {
         panic!("the next command still runs");
     };
-    assert_eq!((reply.id, reply.status), (3, 200));
+    assert_eq!((reply.id, reply.status), (2, 200));
 }
 
 /// Commands run one at a time, so a GUI that keeps sending while one is stuck
@@ -538,6 +504,211 @@ async fn a_displaced_channel_says_so_and_ends() {
         .await
         .expect("a displaced channel ends")
         .unwrap();
+}
+
+// ---------------------------------------------------------------------------
+// The socket bridge, against test routes
+// ---------------------------------------------------------------------------
+
+/// How the test's stand-in for the socket's write half treats what the helm
+/// writes: hand it to the test, fail at once (a GUI that went away), or never
+/// finish (a GUI that stopped reading).
+#[derive(Clone, Copy)]
+enum Writes {
+    Accept,
+    Fail,
+    Hang,
+}
+
+/// A [`serve_socket`] running over the test routes, with an in-memory socket:
+/// frames the test sends in, frames the helm wrote out.
+struct Bridged {
+    to_helm: mpsc::UnboundedSender<Result<ws::Message, axum::Error>>,
+    from_helm: mpsc::UnboundedReceiver<ws::Message>,
+    /// Held so the feed stays open: a closed feed would end the channel on
+    /// its own and hide what the test looks at.
+    _feed: watch::Sender<u64>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+/// Bridge a channel over the test routes to an in-memory socket whose writes
+/// behave as `writes` says. `displaced` is the seat receiver the channel holds.
+fn bridge(routes: Arc<TestRoutes>, writes: Writes, displaced: oneshot::Receiver<()>) -> Bridged {
+    let channel = Channel::new(
+        test_router(routes),
+        HeaderValue::from_static("Bearer test"),
+        vec![test_collection()],
+    );
+    let (to_helm, mut from_gui) = mpsc::unbounded_channel();
+    let rx = futures_util::stream::poll_fn(move |cx| from_gui.poll_recv(cx));
+    let (written, from_helm) = mpsc::unbounded_channel();
+    let tx = futures_util::sink::unfold(written, move |written, message: ws::Message| async move {
+        match writes {
+            Writes::Accept => {
+                let _ = written.send(message);
+                Ok(written)
+            }
+            Writes::Fail => Err(axum::Error::new("the GUI went away")),
+            Writes::Hang => std::future::pending().await,
+        }
+    });
+    let (feed, feed_rx) = watch::channel(0);
+    let task = tokio::spawn(serve_socket(Box::pin(tx), rx, channel, displaced, feed_rx));
+    Bridged {
+        to_helm,
+        from_helm,
+        _feed: feed,
+        task,
+    }
+}
+
+impl Bridged {
+    /// Send one text frame, as the GUI's socket would deliver it.
+    fn send_text(&self, text: &str) {
+        let _ = self
+            .to_helm
+            .send(Ok(ws::Message::Text(text.to_string().into())));
+    }
+
+    /// The next message the helm wrote, which must arrive promptly.
+    async fn next(&mut self) -> ServerMessage {
+        let frame = tokio::time::timeout(NOTICE, self.from_helm.recv())
+            .await
+            .expect("the helm should write promptly")
+            .expect("the bridge should still be writing");
+        match frame {
+            ws::Message::Text(text) => {
+                serde_json::from_str(text.as_str()).expect("a server message")
+            }
+            other => panic!("expected a text frame, got {other:?}"),
+        }
+    }
+}
+
+/// A command whose path is not canonical does not decode, so it is never
+/// routed: the channel closes as for any message it has no word for, which is
+/// the reset a correct GUI (whose path type cannot build such a path) never
+/// sees. The canonical command before it is routed, so the refusal is the
+/// path's doing, not a dead channel.
+#[farhelm_testtrace::test]
+async fn a_command_whose_path_is_not_canonical_ends_the_channel_unrouted() {
+    let routes = Arc::new(TestRoutes::default());
+    let seat = UiSeat::default();
+    let mut bridged = bridge(Arc::clone(&routes), Writes::Accept, seat.take());
+    assert!(matches!(
+        bridged.next().await,
+        ServerMessage::Snapshot { .. }
+    ));
+
+    bridged.send_text(
+        r#"{"type":"command","id":1,"method":"PUT","path":"/api/test/value","body":"kept"}"#,
+    );
+    let ServerMessage::Reply(reply) = bridged.next().await else {
+        panic!("premise: a canonical command is routed and answered");
+    };
+    assert_eq!((reply.id, reply.status), (1, 204));
+
+    bridged.send_text(
+        r#"{"type":"command","id":2,"method":"PUT","path":"/api/test/%2e%2e/test/value","body":"overwritten"}"#,
+    );
+    tokio::time::timeout(NOTICE, bridged.task)
+        .await
+        .expect("a non-canonical path ends the channel")
+        .unwrap();
+    assert_eq!(
+        routes.value.lock().unwrap().as_deref(),
+        Some("\"kept\""),
+        "the non-canonical command reached no real route"
+    );
+    // A router does not normalize `%2e%2e`, so that path would miss every real route anyway; only the fallback's
+    // count shows the command never reached the router at all.
+    assert_eq!(
+        routes.unrouted_hits.load(Ordering::SeqCst),
+        0,
+        "the non-canonical command was never routed"
+    );
+    assert!(!seat.is_held(), "the ended channel gave the seat up");
+}
+
+/// A write that fails must end the channel and free the seat: before the
+/// writer owned its queue, the channel kept running with nobody draining it,
+/// held the seat for good, and agent approvals kept waiting on a window that
+/// would never show their card. The GUI's side stays open throughout, so only
+/// the failed write can be what ended it.
+#[farhelm_testtrace::test]
+async fn a_failed_write_ends_the_channel_and_gives_up_the_seat() {
+    let seat = UiSeat::default();
+    let bridged = bridge(Arc::new(TestRoutes::default()), Writes::Fail, seat.take());
+    assert!(seat.is_held(), "premise: the channel holds the seat");
+    tokio::time::timeout(NOTICE, bridged.task)
+        .await
+        .expect("a failed write ends the channel")
+        .unwrap();
+    assert!(!seat.is_held());
+    // `bridged.to_helm` is still held here, so the GUI side never closed or sent anything, and the silence close is a
+    // minute away: the reader cannot be what ended the channel.
+}
+
+/// A GUI that stops reading must not hold the channel forever either: a
+/// write that never completes ends it at the write deadline, well before the
+/// silence close could be what ended it. The paused clock makes both exact.
+#[farhelm_testtrace::test(start_paused = true)]
+async fn a_write_that_never_completes_ends_the_channel_at_the_write_deadline() {
+    let seat = UiSeat::default();
+    let started = tokio::time::Instant::now();
+    let bridged = bridge(Arc::new(TestRoutes::default()), Writes::Hang, seat.take());
+    bridged.task.await.unwrap();
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= WRITE_DEADLINE && elapsed < SILENCE_CLOSE,
+        "ended after {elapsed:?}, not at the write deadline"
+    );
+    assert!(!seat.is_held());
+}
+
+/// The helm sends no keepalive; it closes a channel whose GUI sent nothing
+/// for a minute, which gives up the seat of a GUI that vanished without
+/// closing. A GUI that heartbeats (the client does every 5 seconds) is never
+/// closed, however long it stays otherwise quiet. The helm writes nothing
+/// during the silence, which is what tells this design from the idle ping it
+/// replaced (that one also closed after a minute, but pinged first).
+#[farhelm_testtrace::test(start_paused = true)]
+async fn a_silent_gui_is_closed_after_a_minute_and_a_heartbeat_keeps_it_open() {
+    let seat = UiSeat::default();
+    let mut bridged = bridge(Arc::new(TestRoutes::default()), Writes::Accept, seat.take());
+    assert!(matches!(
+        bridged.next().await,
+        ServerMessage::Snapshot { .. }
+    ));
+
+    // Heartbeats for twice the silence bound: every one is answered, and the
+    // channel stays open past the point where silence would have closed it.
+    for n in 0..24 {
+        // sleep-ok: the paused clock's stand-in for the client's 5-second heartbeat interval.
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        bridged.send_text(&format!(r#"{{"type":"ping","n":{n}}}"#));
+        assert_eq!(bridged.next().await, ServerMessage::Pong { n });
+    }
+    assert!(
+        !bridged.task.is_finished(),
+        "a heartbeating GUI stays connected"
+    );
+    assert!(seat.is_held());
+
+    let quiet_from = tokio::time::Instant::now();
+    bridged.task.await.unwrap();
+    let silent_for = quiet_from.elapsed();
+    assert!(
+        silent_for >= SILENCE_CLOSE && silent_for < SILENCE_CLOSE + Duration::from_secs(1),
+        "closed after {silent_for:?} of silence"
+    );
+    assert!(!seat.is_held());
+    while let Ok(frame) = bridged.from_helm.try_recv() {
+        assert!(
+            matches!(frame, ws::Message::Close(_)),
+            "the helm wrote {frame:?} to a silent GUI; it must send nothing until it closes"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -656,9 +827,15 @@ async fn the_snapshot_on_open_holds_every_collection_as_served() {
     let rows: Vec<SessionRow> = sessions
         .entries
         .iter()
-        .map(|entry| serde_json::from_value(entry.clone()).expect("a session row"))
+        .map(|entry| serde_json::from_value(entry.value.clone()).expect("a session row"))
         .collect();
     let ids: Vec<String> = rows.iter().map(|row| row.info.id.clone()).collect();
+    let keys: Vec<&str> = sessions
+        .entries
+        .iter()
+        .map(|entry| entry.key.as_str())
+        .collect();
+    assert_eq!(keys, ids, "each row travels under its served id");
     // The list's default order is creation time, newest first.
     assert_eq!(
         ids,
@@ -716,7 +893,7 @@ async fn a_preference_write_outside_the_channel_reaches_an_idle_connected_ui() {
     assert_eq!(status, StatusCode::NO_CONTENT);
     let changes = changes_of(&mut ws, Collection::Preferences).await;
     let preferences: farhelm_proto::ui_channel::Preferences =
-        serde_json::from_value(changes.upsert[0].clone()).expect("preferences decode");
+        serde_json::from_value(changes.upsert[0].value.clone()).expect("preferences decode");
     assert_eq!(preferences.compact, Some(true));
 }
 
@@ -762,7 +939,7 @@ async fn an_ordinary_preference_patch_reaches_the_connected_ui_before_its_reply(
     .await;
     let changes = changes_of(&mut ws, Collection::Preferences).await;
     let preferences: farhelm_proto::ui_channel::Preferences =
-        serde_json::from_value(changes.upsert[0].clone()).expect("preferences decode");
+        serde_json::from_value(changes.upsert[0].value.clone()).expect("preferences decode");
     assert_eq!(preferences.compact, Some(true));
     let ServerMessage::Reply(reply) = recv_message(&mut ws).await else {
         panic!("the reply follows the change");
@@ -785,7 +962,7 @@ async fn a_change_through_the_agent_relays_mutation_path_reaches_the_connected_u
         panic!("the first message is the snapshot");
     };
     let before: farhelm_proto::ui_channel::HostView =
-        serde_json::from_value(collections[1].entries[0].clone()).expect("a host");
+        serde_json::from_value(collections[1].entries[0].value.clone()).expect("a host");
     assert_ne!(before.color, HostColor::Teal, "premise: not teal yet");
 
     crate::hosts::edit_identity_checked(
@@ -802,8 +979,9 @@ async fn a_change_through_the_agent_relays_mutation_path_reaches_the_connected_u
     .expect("the edit succeeds");
     let changes = changes_of(&mut ws, Collection::Hosts).await;
     let host: farhelm_proto::ui_channel::HostView =
-        serde_json::from_value(changes.upsert[0].clone()).expect("a host");
+        serde_json::from_value(changes.upsert[0].value.clone()).expect("a host");
     assert_eq!((host.id, host.color), (local, HostColor::Teal));
+    assert_eq!(changes.upsert[0].key, local.to_string());
 }
 
 /// Wait until the seat's state is `held`, polling briefly: a disconnect is
@@ -931,7 +1109,7 @@ async fn served(harness: &rest_harness::Harness, path: &str) -> Value {
 
 /// Decode `json` as `T` and encode it again: the two must agree, or the GUI
 /// would read a different shape than the helm served.
-fn round_trip<T: farhelm_proto::ui_channel::Entry>(json: &Value) -> T {
+fn round_trip<T: serde::Serialize + serde::de::DeserializeOwned>(json: &Value) -> T {
     let decoded: T = serde_json::from_value(json.clone()).expect("the served entry decodes");
     assert_eq!(
         &serde_json::to_value(&decoded).unwrap(),
@@ -942,17 +1120,16 @@ fn round_trip<T: farhelm_proto::ui_channel::Entry>(json: &Value) -> T {
 }
 
 /// The helm serves the same proto types the GUI decodes. Each pushed
-/// collection's served JSON must decode and re-encode unchanged, and the key
-/// the GUI files an entry under must be the one the helm diffed it by.
+/// collection's served JSON must decode and re-encode unchanged. (The key an
+/// entry is filed under needs no check here: it travels on the wire beside
+/// the entry, so the GUI files it under the key the helm diffed it by.)
 #[farhelm_testtrace::test]
 async fn every_pushed_collection_round_trips_through_its_proto_type() {
     let harness = rest_harness::helm_listing(vec![rest_harness::session("s1", 100)]).await;
 
     let sessions = served(&harness, "/api/sessions").await;
     let row = &sessions["sessions"][0];
-    let decoded: SessionRow = round_trip(row);
-    use farhelm_proto::ui_channel::Entry;
-    assert_eq!(decoded.key(), row["id"].as_str().unwrap());
+    let _: SessionRow = round_trip(row);
     let list: farhelm_proto::ui_channel::SessionList =
         serde_json::from_value(sessions.clone()).expect("the list decodes");
     assert_eq!(serde_json::to_value(&list).unwrap(), sessions);
@@ -968,13 +1145,11 @@ async fn every_pushed_collection_round_trips_through_its_proto_type() {
     assert_eq!(written.status(), StatusCode::NO_CONTENT);
     let preferences = served(&harness, "/api/preferences").await;
     let decoded: farhelm_proto::ui_channel::Preferences = round_trip(&preferences);
-    assert_eq!(decoded.key(), PREFERENCES_KEY);
     assert_eq!(decoded.list_sort.as_deref(), Some("title"));
 
     let hosts = served(&harness, "/api/hosts").await;
     let host = &hosts["hosts"][0];
-    let decoded: farhelm_proto::ui_channel::HostView = round_trip(host);
-    assert_eq!(decoded.key(), host["id"].as_i64().unwrap().to_string());
+    let _: farhelm_proto::ui_channel::HostView = round_trip(host);
 
     // A card needs an open window; the waiting request is aborted at the end.
     let _gui = harness.state.manager.ui_seat().hold();
@@ -983,7 +1158,7 @@ async fn every_pushed_collection_round_trips_through_its_proto_type() {
     let approvals = served(&harness, "/api/approvals").await;
     let entry = &approvals["approvals"][0];
     let decoded: farhelm_proto::approvals::PendingApproval = round_trip(entry);
-    assert_eq!(decoded.key(), id);
+    assert_eq!(decoded.id, id);
     assert_eq!(entry["id"].as_str(), Some(id.as_str()));
     asking.abort();
 }

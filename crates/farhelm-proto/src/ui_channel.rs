@@ -14,8 +14,12 @@
 //!   caused BEFORE that reply. A GUI that sees "done" already shows the result.
 //! - State arrives as collections keyed by id: a [`ServerMessage::Snapshot`]
 //!   when the channel opens, then [`ServerMessage::Changes`] per collection,
-//!   each entry replaced whole. The GUI applies both with one generic piece of
-//!   code, keyed by [`Entry::key`], never per kind.
+//!   each entry replaced whole. Every entry travels with its key
+//!   ([`KeyedEntry`]), the one the helm diffs by, and the GUI applies both
+//!   with one generic piece of code under that key, never per kind.
+//! - A command's path is an [`ApiPath`], never a plain string: the one type
+//!   that both builds canonical paths for the GUI and refuses non-canonical
+//!   ones on the helm (SPEC_impl.md, "Paths are a trust boundary").
 //!
 //! Entries travel as JSON values inside the envelope and are decoded with the
 //! entry types below ([`SessionRow`], [`HostView`], [`Preferences`], the approvals'
@@ -29,8 +33,10 @@
 //! HTTP request, so bulk data never delays a click.
 
 use crate::SessionInfo;
-use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+
+mod path;
+pub use path::{ApiPath, PathError};
 
 /// The path of the UI channel's WebSocket upgrade.
 pub const UI_CHANNEL_PATH: &str = "/api/ui";
@@ -58,18 +64,21 @@ pub enum ClientMessage {
 
 /// One command: the HTTP request the helm should run on the GUI's behalf.
 ///
-/// `path` is an absolute `/api/...` path, optionally with a `?query`, built
-/// on the GUI side by one path builder that percent-encodes every segment.
-/// The helm refuses a non-canonical path (empty, `.` or `..` segments, also
-/// percent-encoded, and encoded `/` or `\`) rather than normalizing it: an id
-/// from a host must never be able to retarget a request.
+/// `path` is an absolute `/api/...` path, optionally with a `?query`, or the
+/// channel-local [`SESSION_QUERY_PATH`]. Its type is the trust boundary: the
+/// GUI can only build it by percent-encoding every segment, and a command
+/// whose path is not canonical (empty, `.` or `..` segments, also
+/// percent-encoded, a fragment) does not decode on the helm, so it never
+/// reaches the router. A segment holding an encoded `/` or `\` does decode
+/// (a host's id may contain one); the helm refuses that command with an
+/// ordinary reply instead, and the channel continues.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Command {
     /// Chosen by the GUI, echoed in the reply. Unique within one channel.
     pub id: u64,
     /// `GET`, `POST`, `PUT`, `DELETE` or `PATCH`.
     pub method: String,
-    pub path: String,
+    pub path: ApiPath,
     /// The JSON request body, if the route takes one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<serde_json::Value>,
@@ -130,13 +139,29 @@ pub enum Collection {
 /// inside the generic apply rather than giving it a code path of its own.
 pub const PREFERENCES_KEY: &str = "preferences";
 
+/// One entry of a pushed collection, with the key it is filed under.
+///
+/// The key travels beside the entry rather than being derived from it on
+/// each side: the helm diffs by this key and the GUI applies by it, so there
+/// is exactly one definition of what identifies an entry, and a GUI never has
+/// to know which field of which type carries it. Keys are what
+/// [`CollectionMeta::order`] and [`CollectionChanges::remove`] name.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct KeyedEntry {
+    pub key: String,
+    /// The entry as the collection's GET route serves it; it decodes as the
+    /// collection's entry type ([`SessionRow`], [`HostView`], [`Preferences`],
+    /// [`crate::approvals::PendingApproval`]).
+    pub value: serde_json::Value,
+}
+
 /// One collection as a whole, in a [`ServerMessage::Snapshot`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CollectionState {
     pub collection: Collection,
     pub meta: CollectionMeta,
     /// The entries, in the order the helm serves them.
-    pub entries: Vec<serde_json::Value>,
+    pub entries: Vec<KeyedEntry>,
 }
 
 /// A change to one collection.
@@ -151,7 +176,7 @@ pub struct CollectionChanges {
     pub collection: Collection,
     pub meta: CollectionMeta,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub upsert: Vec<serde_json::Value>,
+    pub upsert: Vec<KeyedEntry>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remove: Vec<String>,
 }
@@ -214,43 +239,6 @@ pub struct SessionQuery {
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sort: Option<String>,
-}
-
-/// A pushed collection's entry type: how the GUI decodes an entry and which
-/// key the generic apply files it under.
-///
-/// The helm finds keys in the JSON it serves; `key` must agree with that
-/// (each collection's round-trip test pins it), so it reads only fields the
-/// wire carries.
-pub trait Entry: Serialize + DeserializeOwned {
-    fn key(&self) -> String;
-}
-
-impl Entry for SessionRow {
-    /// The served id, which the helm has already qualified into a full,
-    /// entry-bound session reference, unique across hosts.
-    fn key(&self) -> String {
-        self.info.id.clone()
-    }
-}
-
-impl Entry for HostView {
-    /// The registry id, as the decimal text the wire's keys use.
-    fn key(&self) -> String {
-        self.id.to_string()
-    }
-}
-
-impl Entry for Preferences {
-    fn key(&self) -> String {
-        PREFERENCES_KEY.to_string()
-    }
-}
-
-impl Entry for crate::approvals::PendingApproval {
-    fn key(&self) -> String {
-        self.id.clone()
-    }
 }
 
 // ---------------------------------------------------------------------------
