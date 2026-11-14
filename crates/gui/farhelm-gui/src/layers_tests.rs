@@ -1314,6 +1314,188 @@ fn focus_moves_go_on_under_a_popover_that_never_takes_focus(cx: &mut TestAppCont
     assert!(is_open(cx, menu), "and the menu stayed open");
 }
 
+// ---- Layers: what a close takes with it ------------------------------------------------------------------------------
+
+/// What the close tests hold of their scene: the page control the user is in when something opens (the terminal, or a
+/// field), the anchor element a popover sits on, and the switch that stops the anchor being drawn.
+struct CloseScene {
+    page: FocusHandle,
+    anchor: Rc<RefCell<Option<Anchor>>>,
+    anchor_shown: Rc<Cell<bool>>,
+}
+
+impl CloseScene {
+    /// Open a window drawing a page control above an anchor element, with focus on the page control.
+    fn open(cx: &mut TestAppContext) -> (&mut VisualTestContext, CloseScene) {
+        let anchor: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));
+        let anchor_shown = Rc::new(Cell::new(true));
+        let page = Rc::new(RefCell::new(None::<FocusHandle>));
+        let (out, shown, drawn_page) = (anchor.clone(), anchor_shown.clone(), page.clone());
+        let cx = open(cx, move |window, cx| {
+            let column = div().flex().flex_col().gap(px(8.)).children(
+                drawn_page
+                    .borrow()
+                    .clone()
+                    .map(|focus| button("page", &focus)),
+            );
+            if shown.get() {
+                column.child(anchor_element("field", &out, window, cx))
+            } else {
+                column
+            }
+            .into_any_element()
+        });
+        let focus = handle(cx);
+        page.replace(Some(focus.clone()));
+        redraw(cx);
+        click(cx, "page");
+        assert!(
+            focused(cx, &focus),
+            "the premise: the page control holds focus"
+        );
+        let scene = CloseScene {
+            page: focus,
+            anchor,
+            anchor_shown,
+        };
+        (cx, scene)
+    }
+
+    /// The anchor as last drawn. Panics if it was never drawn, since every caller opens a layer on it.
+    fn anchor(&self) -> Anchor {
+        match self.anchor.borrow().clone() {
+            Some(anchor) => anchor.matching_width(),
+            None => panic!("the premise: the anchor was drawn"),
+        }
+    }
+
+    /// A floating list on the anchor (a popover that never takes focus, standing in for the terminal's link
+    /// disclosure), then a dialog over it, opened from the page control as a shortcut opens Rename there. Checks that
+    /// both are open and focus is on the dialog's control.
+    fn list_under_dialog(&self, cx: &mut VisualTestContext) -> (LayerId, LayerId, FocusHandle) {
+        let list = open_floating_list(cx, self.anchor());
+        assert!(
+            focused(cx, &self.page),
+            "the premise: the list left focus on the page"
+        );
+        let only = handle(cx);
+        let (dialog, _, _) = open_dialog(cx, vec![("only", only.clone())], &only);
+        assert!(
+            is_open(cx, list) && is_open(cx, dialog),
+            "the premise: the list and the dialog over it are open"
+        );
+        assert!(focused(cx, &only), "the premise: focus is in the dialog");
+        (list, dialog, only)
+    }
+}
+
+/// Why this matters: a popover that never takes focus (the terminal's link destination display, a floating list) shows
+/// while the user keeps typing or pointing on the page, so a dialog the user opens then (the quick switcher, Rename,
+/// Delete) lands above it. The popover goes on its own schedule: its owner closes it when the pointer leaves the link,
+/// a press outside it closes it, and so does its anchor no longer being drawn. Had that close taken every layer above
+/// the popover with it, as a menu's close does, the dialog the user is working in would vanish under them.
+///
+/// Specified: with a dialog opened over such a popover, closing the popover by its id, by its anchor going and by a
+/// press outside it (on the dialog's own control) each close the popover only: the dialog stays open and focus stays on
+/// its control. The dialog's own close still returns focus to the page control it was opened from.
+#[gpui::test]
+fn a_dialog_over_a_popover_that_never_takes_focus_outlives_its_close(cx: &mut TestAppContext) {
+    let (cx, scene) = CloseScene::open(cx);
+
+    let (list, dialog, only) = scene.list_under_dialog(cx);
+    cx.update(|window, cx| layers::close(list, window, cx));
+    settle(cx);
+    assert!(!is_open(cx, list), "closing the list closed it");
+    assert!(is_open(cx, dialog), "and left the dialog over it open");
+    assert!(focused(cx, &only), "with focus still in the dialog");
+    keys(cx, "escape");
+    assert!(
+        !is_open(cx, dialog),
+        "the premise: Escape closed the dialog"
+    );
+    assert!(
+        focused(cx, &scene.page),
+        "the dialog's close returned focus to the page control it was opened from"
+    );
+
+    let (list, dialog, only) = scene.list_under_dialog(cx);
+    scene.anchor_shown.set(false);
+    redraw(cx);
+    assert!(
+        !is_open(cx, list),
+        "the list closed when its anchor was no longer drawn"
+    );
+    assert!(is_open(cx, dialog), "and left the dialog over it open");
+    assert!(focused(cx, &only), "with focus still in the dialog");
+    keys(cx, "escape");
+    assert!(
+        !is_open(cx, dialog),
+        "the premise: Escape closed the dialog"
+    );
+    scene.anchor_shown.set(true);
+    redraw(cx);
+
+    let (list, dialog, only) = scene.list_under_dialog(cx);
+    click(cx, "only");
+    assert!(!is_open(cx, list), "a press outside the list closed it");
+    assert!(
+        is_open(cx, dialog),
+        "and left the dialog the press was in open"
+    );
+    assert!(focused(cx, &only), "with focus still in the dialog");
+}
+
+/// Why this matters: a layer that takes focus owns what was opened over it, since focus stays inside the topmost such
+/// layer and whatever opened over it was opened from there. A dialog opened from a menu's item must go with the menu,
+/// or it would be left over a page whose menu is gone. This is the rule the popover that never takes focus is the
+/// exception to, kept as it was.
+///
+/// Specified: closing a menu with a dialog opened over it closes the dialog too, and focus returns to the page control
+/// that held it when the menu opened.
+#[gpui::test]
+fn closing_a_layer_that_takes_focus_closes_what_was_opened_over_it(cx: &mut TestAppContext) {
+    let (cx, scene) = CloseScene::open(cx);
+    let item = handle(cx);
+    let menu = open_menu(cx, scene.anchor(), vec![("item", item.clone())]);
+    assert!(focused(cx, &item), "the premise: the menu took focus");
+    let only = handle(cx);
+    let (dialog, _, _) = open_dialog(cx, vec![("only", only.clone())], &only);
+    assert!(focused(cx, &only), "the premise: focus is in the dialog");
+
+    cx.update(|window, cx| layers::close(menu, window, cx));
+    settle(cx);
+    assert!(!is_open(cx, menu), "closing the menu closed it");
+    assert!(!is_open(cx, dialog), "and the dialog opened over it");
+    assert!(
+        focused(cx, &scene.page),
+        "focus returned to the page control that held it when the menu opened"
+    );
+}
+
+/// Why this matters: a reset of the connection to the helm closes every layer (SPEC.md, "Losing the connection to the
+/// helm"), and a dialog left behind would keep its veil over the inert window. The reset must not reach the layers
+/// through a close of the bottom one: when that is a popover that never takes focus, it closes alone.
+///
+/// Specified: a reset with a dialog open over a popover that never takes focus closes both, and focus returns to the
+/// page control the dialog was opened from.
+#[gpui::test]
+fn a_reset_closes_a_dialog_over_a_popover_that_never_takes_focus(cx: &mut TestAppContext) {
+    let (cx, scene) = CloseScene::open(cx);
+    let (list, dialog, _) = scene.list_under_dialog(cx);
+    // Deferred to after this update, as the reset runs from the channel's events: `close_all` updates each window to
+    // close its layers, and a window cannot be updated from inside its own update.
+    cx.update(|_, cx| cx.defer(layers::close_all));
+    settle(cx);
+    assert!(
+        !is_open(cx, list) && !is_open(cx, dialog),
+        "the reset closed the list and the dialog over it"
+    );
+    assert!(
+        focused(cx, &scene.page),
+        "focus returned to the page control the dialog was opened from"
+    );
+}
+
 // ---- Layers: a session as a subject ----------------------------------------------------------------------------------
 
 /// Why this matters: a Delete question about a session must close when that session is deleted from another window or

@@ -43,9 +43,11 @@
 //!   it moves none, Tab is not trapped in it, closing it returns none, and a press on it leaves focus where it was. It
 //!   is for a list that floats beside the control the user keeps typing in or pointing at, as the old launcher's
 //!   folder picker and composer search kept focus in their field (options at `tabindex: -1`, the list's mousedown
-//!   prevented). Escape, a press outside it and its anchor going still close it, as any popover. Every rule above that
-//!   names "the topmost layer" for focus (Tab's trap, where focus recovers, the menu highlight) means the topmost layer
-//!   that holds focus, which such a popover never is.
+//!   prevented). Escape, a press outside it and its anchor going still close it, as any popover, but closing it closes
+//!   only it: it owns nothing above it, so a dialog opened while it shows (a shortcut pressed in the field or the
+//!   terminal beside it) stays open, with focus inside, when it goes ([`close`]). Every rule above that names "the
+//!   topmost layer" for focus (Tab's trap, where focus recovers, the menu highlight) means the topmost layer that holds
+//!   focus, which such a popover never is.
 //! - **One tooltip at a time**, owned by the control that showed it (see [`TooltipOwner`]). It says the app's own
 //!   words, or a host sentence when the help names a host value, drawn through host text's element ([`ShownTooltip`]).
 //! - **One pill, drawn above every layer and under the tooltip, that is not a layer** ([`show_pill`]). It is the one
@@ -701,9 +703,18 @@ fn close_later(window: AnyWindowHandle, id: LayerId, cx: &mut App) {
     });
 }
 
-/// Close the layer `id`, if it is still open, and anything opened on top of it. If focus was inside what closed, it
-/// returns to what held it when `id` opened, or where `id`'s opener said instead ([`Dialog::returns_to`]). A popover
-/// that never took focus is passed over: closing one with no layer above it moves no focus.
+/// Close the layer `id`, if it is still open, and anything opened on top of it, unless `id` is a popover that never
+/// takes focus ([`Popover::start`] `None`): that one closes alone. If focus was inside what closed, it returns to what
+/// held it when `id` opened, or where `id`'s opener said instead ([`Dialog::returns_to`]). A popover that never took
+/// focus is passed over: closing one moves no focus.
+///
+/// A layer that takes focus owns what was opened over it: focus stays inside the topmost such layer ([`trap`]), so
+/// whatever opened over it was opened from inside it (a menu from one of a dialog's controls), and goes with it. A
+/// popover that never takes focus owns nothing above it. Focus was never in it, so a dialog over it was opened from the
+/// page or the layer beneath (a shortcut pressed while a floating list or a link's disclosure showed), and the
+/// popover's going (its owner closing it, a press outside it, its anchor no longer drawn) must leave that dialog open
+/// with focus inside it. A layer opened by a click on the popover's own content and anchored there still goes with it,
+/// since its anchor is no longer drawn; a centered dialog opened that way stays.
 pub fn close(id: LayerId, window: &mut Window, cx: &mut App) {
     close_as(id, false, window, cx);
 }
@@ -711,12 +722,30 @@ pub fn close(id: LayerId, window: &mut Window, cx: &mut App) {
 /// [`close`], saying whether the user dismissed the layer (`dismissed`), which decides where a layer that returns
 /// focus home on Escape only ([`focus::ReturnTo::HomeOnEscape`]) sends it.
 fn close_as(id: LayerId, dismissed: bool, window: &mut Window, cx: &mut App) {
+    close_taking(dismissed, window, cx, |layers| {
+        let index = layers.iter().position(|layer| layer.id == id)?;
+        Some(if layers[index].takes_focus {
+            layers.drain(index..).collect()
+        } else {
+            vec![layers.remove(index)]
+        })
+    });
+}
+
+/// Take the layers `take` picks out of `window`'s stack, then return focus as the lowest of them that took it says.
+/// The one place layers leave the stack, so [`close`] and [`close_all`] share the focus return. `take` gets the stack's
+/// layers, bottom to top, and answers `None` when there is nothing to close.
+fn close_taking(
+    dismissed: bool,
+    window: &mut Window,
+    cx: &mut App,
+    take: impl FnOnce(&mut Vec<Layer>) -> Option<Vec<Layer>>,
+) {
     let Some(stack) = stack(window, cx) else {
         return;
     };
     let closed = stack.update(cx, |stack, cx| {
-        let index = stack.layers.iter().position(|layer| layer.id == id)?;
-        let closed: Vec<Layer> = stack.layers.drain(index..).collect();
+        let closed = take(&mut stack.layers)?;
         cx.notify();
         Some(closed)
     });
@@ -747,9 +776,9 @@ fn close_as(id: LayerId, dismissed: bool, window: &mut Window, cx: &mut App) {
 /// This is the one close that does not need the layer's id: a reset is not any opener's decision, and a dialog that
 /// survived it would keep its veil over the inert window, where it takes the clicks meant for Take back or Retry and
 /// traps Tab away from them. Focus follows the ordinary close rule, returning to what held it when the bottom layer
-/// opened (and going home once that is no longer drawn). The pill goes too ([`show_pill`]): what it showed belonged to
-/// the UI session the reset retired, and its feature, which lives in that session, is no longer there to hide it. The
-/// tooltip is left alone: it goes with its control.
+/// that took focus opened (and going home once that is no longer drawn). The pill goes too ([`show_pill`]): what it
+/// showed belonged to the UI session the reset retired, and its feature, which lives in that session, is no longer
+/// there to hide it. The tooltip is left alone: it goes with its control.
 pub fn close_all(cx: &mut App) {
     let Some(windows) = installed::<Windows>(cx) else {
         return;
@@ -762,14 +791,14 @@ pub fn close_all(cx: &mut App) {
                 cx.notify();
             }
         });
-        let (window, bottom) = {
-            let stack = stack.read(cx);
-            (stack.window, stack.layers.first().map(|layer| layer.id))
-        };
-        if let Some(bottom) = bottom {
-            // A window that closed meanwhile has nothing left to close.
-            let _ = window.update(cx, |_, window, cx| close(bottom, window, cx));
-        }
+        let window = stack.read(cx).window;
+        // Every layer, not a close of the bottom one: when that is a popover that never takes focus, it closes alone.
+        // A window that closed meanwhile has nothing left to close.
+        let _ = window.update(cx, |_, window, cx| {
+            close_taking(false, window, cx, |layers| {
+                (!layers.is_empty()).then(|| std::mem::take(layers))
+            })
+        });
     }
 }
 
@@ -845,10 +874,10 @@ pub fn any_open(window: &Window, cx: &App) -> bool {
 /// coordinator keeps focus from leaving the topmost layer for the page behind it, this is the test, since with only
 /// such a popover open focus is on the page already.
 ///
-/// NOTE: The app's shortcuts that refuse while anything is open (Rename, Delete, the quick switcher) still ask
-/// [`any_open`], which counts a popover that never takes focus. Nothing opens one yet; when the terminal's overlays do
-/// (a link disclosure beside the pointer), those shortcuts should ask this instead, or they stop working while a
-/// disclosure shows although nothing modal is open.
+/// NOTE: A shortcut that refuses while something modal is open (Rename, Delete, the quick switcher) must ask this, not
+/// [`any_open`]. A popover that never takes focus (a floating list, the terminal's link destination display) is not
+/// modal: [`any_open`] counts it, so a shortcut asking that would stop working while one shows. The dialog such a
+/// shortcut opens then sits above the popover, which is why closing the popover closes only itself ([`close`]).
 pub fn focus_layer_open(window: &Window, cx: &App) -> bool {
     top_container(window, cx).is_some()
 }
