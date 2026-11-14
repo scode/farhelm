@@ -84,7 +84,7 @@ same pin CI and release builds use; no second clippy run on floating stable is n
 - `python -B scripts/check-test-sleeps.py`, with the isolated interpreter from `docs/test-sleep-check.md` (create its
   venv in your scratch directory)
 - `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`
-- `cargo clippy -p farhelm-desktop --all-targets -- -D warnings`
+- `cargo clippy -p farhelm-desktop --all-targets -- -D warnings`, and the same with `--features agent`
 - `python3 -B scripts/check-gui-lints.py` and `python3 -B scripts/test-check-gui-lints.py` (every GUI lint ban fires)
 - `python3 -B scripts/check-crate-layering.py` and `python3 -B scripts/test-check-crate-layering.py`
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh`
@@ -131,6 +131,9 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   workspace batteries never reach either
 - The GPUI app's screenshot goldens from `.agents/validation.md` (`scripts/check-gui-goldens.py`), ignored in the
   workspace batteries because they need the software renderer the script selects
+- `python3 -B scripts/test-gui-agent.py`, and one end-to-end run of the GPUI app harness from `.agents/validation.md`
+  (`scripts/gui-agent.py <run dir> start`, a `snapshot` and a `screenshot`, then `stop`), which needs `mutter` and
+  lavapipe
 - The terminal emulator's ignored tests from `.agents/validation.md`, in release: the snapshot spike's full round-trip
   configuration, the review's short scripts and hostile blobs, and the per-terminal memory measurement (on Linux), whose
   assertions fail when an emulator exceeds the crate's stated budget; the workspace batteries skip ignored tests

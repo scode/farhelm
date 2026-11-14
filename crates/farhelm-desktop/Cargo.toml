@@ -18,10 +18,20 @@ path = "src/lib.rs"
 name = "farhelm-desktop"
 path = "src/main.rs"
 
+[features]
+# The GPUI app's test-automation bridge, for development runs driven by `scripts/gui-agent.py` (docs/gui-agent.md).
+# Debug builds only: farhelm-gui refuses to compile it into an optimized build, so a release or devbuild cannot carry
+# it. It also makes the app write its helm's address and a credential for this process into the file named by
+# `FARHELM_DESKTOP_AGENT_HELM_FILE`, which is how that script seeds sessions through the real helm API.
+agent = ["farhelm-gui/agent"]
+
 [dependencies]
 anyhow.workspace = true
 # Native file downloads use the platform's account-specific Downloads folder; the helm receives the capability.
 dirs = "6"
+# The GPUI app this process runs once the helm and supervisor are up. The desktop binary is the one place the GUI and the
+# helm meet (SPEC_impl.md, "Where the GUI meets the helm").
+farhelm-gui.workspace = true
 farhelm-helm.workspace = true
 # The shared presentation-unsafe character table, for host text in a startup refusal, and the development-build rule
 # the update readout uses.

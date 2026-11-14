@@ -33,7 +33,7 @@ exclude = [
   "vendor/gpui-agent",
 ]
 # Application and ordinary library members, excluding `farhelm-desktop`: on Linux it links GIO, which needs the GLib
-# development packages, and once the GPUI app is wired in it compiles GPUI too, so it follows `farhelm-gui` below. The
+# development packages, and it compiles the GPUI app (`farhelm-gui`, below) and the helm together. The
 # cost is that `-p farhelm-desktop` (or a `--workspace` run) is the only way the crate gets compiled; the `desktop` CI
 # job's explicit `-p farhelm-desktop` steps are what notice it break.
 #
@@ -228,6 +228,7 @@ url = "2"
 uuid = { version = "1", features = ["v4"] }
 
 farhelm-grid-model = { path = "crates/gui/farhelm-grid-model" }
+farhelm-gui = { path = "crates/gui/farhelm-gui" }
 farhelm-helm = { path = "crates/farhelm-helm" }
 farhelm-helm-client = { path = "crates/farhelm-helm-client" }
 farhelm-proto = { path = "crates/farhelm-proto" }
@@ -243,6 +244,9 @@ terminal-host = { path = "crates/terminal-host" }
 # as a dedicated change (SPEC_impl.md, "GUI architecture"). gpui-pre and three of its platform crates are vendored and
 # patched (vendor/README.md, "GPUI"); the patch table below swaps them in only while these versions match.
 gpui = { package = "gpui-pre", version = "=0.3.12" }
+# The test-automation bridge's in-app half (vendor/README.md, "GPUI"), built against the vendored gpui-pre 0.3.12. Only
+# the GUI's `agent` feature pulls it in, and that feature never reaches a shipped build or a devbuild.
+gpui-agent = { path = "vendor/gpui-agent/gpui/gpui-agent", default-features = false, features = ["gpui-pre-0-3-12"] }
 gpui-base = "=0.9.1"
 gpui-component = "=0.9.1"
 # Platform features, chosen rather than defaulted: `wayland` without `x11`, because Linux is supported on Wayland only

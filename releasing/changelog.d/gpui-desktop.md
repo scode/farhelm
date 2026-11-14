@@ -8,6 +8,6 @@ Farhelm no longer has a browser interface. `farhelm helm run` serves no page and
 
 The GUI is being rebuilt as a native desktop app for macOS and Linux, which replaces both the browser interface and the
 old Mac app. The old Mac app's window is already gone: until the new app lands, the desktop app starts its helm and
-local supervisor and opens no window. This draft is written while that migration is under way, so builds from the
+local supervisor and opens an empty window. This draft is written while that migration is under way, so builds from the
 development branch in this period have no working GUI, and the entry is revised as the new app lands. Agents and the
 command line keep working as before.
