@@ -76,6 +76,8 @@ pub enum Icon {
     More,
     /// A bin: delete (the old app's Delete glyph).
     Trash,
+    /// A pencil: rename (the old app's Edit glyph, on its Rename command).
+    Edit,
     /// A filled circle: the running status.
     StatusRunning,
     /// A triangle: the waiting status, the one pointed shape, because it asks for a person.
@@ -91,10 +93,11 @@ pub enum Icon {
 
 impl Icon {
     /// Every icon, for the asset listing and the test that each one is bundled.
-    pub const ALL: [Icon; 8] = [
+    pub const ALL: [Icon; 9] = [
         Icon::Close,
         Icon::More,
         Icon::Trash,
+        Icon::Edit,
         Icon::StatusRunning,
         Icon::StatusWaiting,
         Icon::StatusUnseen,
@@ -110,6 +113,7 @@ impl Icon {
             Icon::Close => "icons/close.svg",
             Icon::More => "icons/more.svg",
             Icon::Trash => "icons/trash.svg",
+            Icon::Edit => "icons/edit.svg",
             Icon::StatusRunning => "icons/status-running.svg",
             Icon::StatusWaiting => "icons/status-waiting.svg",
             Icon::StatusUnseen => "icons/status-unseen.svg",
@@ -129,6 +133,7 @@ impl Assets {
             "icons/close.svg" => Some(include_bytes!("../assets/icons/close.svg")),
             "icons/more.svg" => Some(include_bytes!("../assets/icons/more.svg")),
             "icons/trash.svg" => Some(include_bytes!("../assets/icons/trash.svg")),
+            "icons/edit.svg" => Some(include_bytes!("../assets/icons/edit.svg")),
             "icons/status-running.svg" => {
                 Some(include_bytes!("../assets/icons/status-running.svg"))
             }

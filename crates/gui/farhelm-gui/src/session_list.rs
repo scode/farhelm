@@ -27,17 +27,22 @@
 //! redraws a notified view's whole window, re-rendering every uncached view in it and dirtying the notified view's
 //! ancestors, so per-row views would not have limited what a step redraws, only multiplied the notifications.
 //!
-//! Each row has an actions menu ([`menu`]) whose one command so far is Delete ([`delete`]), which the Delete shortcut
-//! also reaches for the open session ([`SessionList::delete_selected`]). While any Delete is in flight, the selection
+//! Each row has an actions menu ([`menu`]) whose commands so far are Rename ([`rename`]) and Delete ([`delete`]); the
+//! Rename and Delete shortcuts reach them for the open session ([`rename::open_for_selected`],
+//! [`SessionList::delete_selected`]). While any Delete is in flight, the selection
 //! rules hold back their automatic choice, so a list that loses its open session to that Delete opens the next one only
 //! once every Delete has settled. A pending Delete's spinner turns from one handle the list holds, the way the pulse
 //! does ([`delete::Spinner`]).
+//!
+//! The Rename editor the list owns is a dialog rather than part of a row, so a listing that changes under it never
+//! moves its field.
 //!
 //! NOTE: Not ported yet, each with the area that brings it: the order menu (the title is the stored order's name, not a
 //! control), filters and their counts, compact rows, marking, pins, the row menu's other commands, and the host rail.
 
 pub(crate) mod delete;
 mod menu;
+pub(crate) mod rename;
 mod row;
 mod selection;
 mod status;

@@ -1,11 +1,12 @@
-//! Tests of a session row's actions menu and its Delete: the menu's placement and focus, the question and the
-//! precondition each request carries, what a pending or refused Delete shows, the selection while a Delete runs, and
-//! the Delete shortcut.
+//! Tests of a session row's actions menu, its Rename and its Delete: the menu's placement and focus, Rename opening the
+//! editor for its row, the question and the precondition each request carries, what a pending or refused Delete shows,
+//! the selection while a Delete runs, and the Delete shortcut.
 //!
 //! Everything runs in the real main view over the helm client's fake, as the list's own tests do, and reads what the
 //! window sent from the fake and what it drew from GPUI's driver record of the frame. Controls are found by their ids:
-//! a row's menu button is `session-menu-<key>`, the menu's Delete is `session-menu-delete`, and the question's answers
-//! are `prompt-confirm` and `prompt-cancel`.
+//! a row's menu button is `session-menu-<key>`, the menu's Rename and Delete are `session-menu-rename` and
+//! `session-menu-delete`, the Rename editor is `rename`, and the question's answers are `prompt-confirm` and
+//! `prompt-cancel`.
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
@@ -21,7 +22,7 @@ use serde_json::{Value, json};
 use super::tests::{
     Fixture, change, frame, listing_meta, open_main, painted, selected, sent, session,
 };
-use crate::actions::DELETE_SESSION_CHORD as DELETE_CHORD;
+use crate::actions::{DELETE_SESSION_CHORD as DELETE_CHORD, RENAME_SESSION_SHORTCUT_NAME};
 use crate::operations::Command;
 use crate::session_tests::meta;
 use crate::{layers, session, test_support};
@@ -171,8 +172,9 @@ fn click_at(at: Point<Pixels>) -> [PlatformInput; 2] {
 /// SPEC.md, "Opening and closing" and "Inside a dialog or menu, focus stays inside": a menu the user opened starts on
 /// its first command, keeps Tab inside, and Escape gives focus back to the button that opened it. Opening a row's menu
 /// is not opening its session, which would switch what the user is looking at. Specified: clicking b's menu button
-/// opens the menu below the button with focus on Delete, its header names b and says "Codex · Running", a is still
-/// the open session and nothing is sent; Tab leaves focus on Delete; Escape closes the menu and focus is on b's button.
+/// opens the menu below the button with focus on its first command, Rename, its header names b and says "Codex ·
+/// Running", a is still the open session and nothing is sent; Tab moves to Delete and then wraps to Rename, staying in
+/// the menu; Escape closes the menu and focus is on b's button.
 #[gpui::test]
 fn the_menu_opens_below_its_button_holds_focus_and_leaves_the_selection(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
@@ -186,7 +188,7 @@ fn the_menu_opens_below_its_button_holds_focus_and_leaves_the_selection(cx: &mut
         menu.top() >= button.bottom(),
         "the menu is below its button: {menu:?} under {button:?}"
     );
-    assert_eq!(focused(cx).as_deref(), Some("session-menu-delete"));
+    assert_eq!(focused(cx).as_deref(), Some("session-menu-rename"));
     assert_eq!(
         label_of(cx, "session-menu-summary-b").as_deref(),
         Some("Codex · Running")
@@ -197,6 +199,8 @@ fn the_menu_opens_below_its_button_holds_focus_and_leaves_the_selection(cx: &mut
 
     test_support::keys(cx, "tab");
     assert_eq!(focused(cx).as_deref(), Some("session-menu-delete"));
+    test_support::keys(cx, "tab");
+    assert_eq!(focused(cx).as_deref(), Some("session-menu-rename"));
     test_support::keys(cx, "escape");
     assert!(!any_layer(cx));
     assert_eq!(focused(cx).as_deref(), Some("session-menu-b"));
@@ -218,21 +222,105 @@ fn a_pushed_removal_of_the_row_closes_its_menu(cx: &mut TestAppContext) {
     assert!(!drawn(cx, "session-menu"));
 }
 
+// ---- Rename --------------------------------------------------------------------------------------------------------
+
+/// The row menu is one of Rename's two openers (SPEC.md, "Lifecycle operations": "A list rename opens in a modal editor
+/// owned by the list rather than by the row-actions popup"). It must rename the row it was opened from, not the open
+/// session, and give focus back to the menu's button when the editor closes. Specified: with a open, Enter on b's
+/// Rename closes the menu and opens the editor; Escape closes it with focus on b's button; opened again, Enter saves,
+/// sending b's own title to b's rename route.
+#[gpui::test]
+fn the_menus_rename_opens_the_editor_for_its_row(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
+    assert_eq!(selected(cx).as_deref(), Some("a"), "the premise: a is open");
+    deletes(&mut fake);
+
+    test_support::click(cx, "session-menu-b");
+    assert_eq!(
+        focused(cx).as_deref(),
+        Some("session-menu-rename"),
+        "the premise: the menu starts on Rename"
+    );
+    test_support::keys(cx, "enter");
+    assert!(drawn(cx, "rename"), "the editor opened");
+    assert!(!drawn(cx, "session-menu"), "and the menu closed");
+    test_support::keys(cx, "escape");
+    assert!(!any_layer(cx));
+    assert_eq!(focused(cx).as_deref(), Some("session-menu-b"));
+
+    test_support::click(cx, "session-menu-b");
+    test_support::keys(cx, "enter enter");
+    assert_eq!(
+        sent(&mut fake),
+        [("/api/sessions/b/rename".to_owned(), json!({ "title": "b" }))]
+    );
+}
+
+/// SPEC.md: a pending request "refuses another lifecycle action" on its session, and a Rename sent behind a Delete
+/// would race it. Specified: with Skip session confirmations on, b's Delete is sent and left unanswered; b's menu then
+/// draws Rename unavailable, and choosing it opens no editor and sends nothing.
+#[gpui::test]
+fn the_menus_rename_is_refused_while_a_delete_of_its_row_is_in_flight(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], true));
+    deletes(&mut fake);
+    choose_delete(cx, "session-menu-b");
+    assert_eq!(
+        paths(&deletes(&mut fake)),
+        ["/api/sessions/b"],
+        "the premise: b's Delete is in flight"
+    );
+
+    test_support::click(cx, "session-menu-b");
+    test_support::click(cx, "session-menu-rename");
+    // What tells an unavailable item from an enabled one whose open was refused: the enabled one closes the menu.
+    assert!(
+        drawn(cx, "session-menu"),
+        "the unavailable Rename ignored the click; the menu is still open"
+    );
+    assert!(!drawn(cx, "rename"));
+    assert_eq!(sent(&mut fake), []);
+}
+
+/// SPEC.md, "Desktop window chrome": the Rename shortcut appears "only on the open session's row-menu item", the one
+/// row the shortcut acts on; naming it on another row would suggest it renames that one. Specified: with a open, the
+/// help of Rename in a's menu, shown after the hover delay, holds the shortcut's name, and in b's menu it does not.
+#[gpui::test]
+fn only_the_open_rows_rename_names_the_shortcut(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
+    assert_eq!(selected(cx).as_deref(), Some("a"), "the premise: a is open");
+    deletes(&mut fake);
+    let mut help_in_menu_of = |button: &'static str| {
+        test_support::click(cx, button);
+        let rename = test_support::center(cx, "session-menu-rename");
+        cx.simulate_mouse_move(rename, None, Modifiers::none());
+        test_support::advance(cx, layers::HOVER_DELAY);
+        let help = cx
+            .update(|window, cx| layers::shown_tooltip(window, cx))
+            .map(|shown| shown.text.to_string());
+        test_support::keys(cx, "escape escape");
+        help.expect("the premise: Rename's help is showing")
+    };
+    let open = help_in_menu_of("session-menu-a");
+    let other = help_in_menu_of("session-menu-b");
+    assert!(open.contains(RENAME_SESSION_SHORTCUT_NAME), "{open}");
+    assert!(!other.contains(RENAME_SESSION_SHORTCUT_NAME), "{other}");
+}
+
 // ---- The question and the request ----------------------------------------------------------------------------------
 
 /// SPEC.md, "Opening and closing": "from a row's menu, Delete then Enter deletes", and a live session's question says
-/// it kills the agent, quotes the title on a line of its own and, for a managed checkout, says what happens to it.
-/// A click on the question's empty space keeps focus on Confirm (SPEC.md gives the row Delete question that rule), so
-/// the Enter after it still answers what the user was looking at. Specified, by keys after the menu opens: Enter on
-/// Delete asks with focus on Confirm and sends nothing; the question's lines are the consequence, the quoted title and
-/// the checkout line; a click on the question's empty space leaves focus on Confirm; Enter then sends the Delete with
-/// no precondition flag and closes the question.
+/// it kills the agent, quotes the title on a line of its own and, for a managed checkout, says what happens to it. A
+/// click on the question's empty space keeps focus on Confirm (SPEC.md gives the row Delete question that rule), so the
+/// Enter after it still answers what the user was looking at. Specified, by keys after the menu opens: Down to Delete
+/// and Enter asks with focus on Confirm and sends nothing; the question's lines are the consequence, the quoted title
+/// and the checkout line; a click on the question's empty space leaves focus on Confirm; Enter then sends the Delete
+/// with no precondition flag and closes the question.
 #[gpui::test]
 fn delete_then_enter_asks_about_a_live_session_and_enter_deletes_it(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0)], false));
     deletes(&mut fake);
     test_support::click(cx, "session-menu-a");
-    test_support::keys(cx, "enter");
+    test_support::keys(cx, "down enter");
     assert_eq!(focused(cx).as_deref(), Some("prompt-confirm"));
     let texts = painted(&frame(cx));
     for line in [
