@@ -430,13 +430,17 @@ keystrokes, which is one more reason for one owner. GPUI Kit moves focus inside 
 those moves are accepted, and the per-step focus invariant covers them.
 
 GPUI also focuses any element that tracks a focus handle when it is pressed, so tracking focus goes through the
-coordinator too (`focus::track`), which applies its own press rule in place of GPUI's. Which controls Tab reaches
-follows the platform (settled for the GPUI migration on 2026-11-13): on macOS the system's Keyboard navigation setting,
-which the desktop binary reads and the coordinator asks on every Tab and Shift+Tab press, so a change applies at once
-(off, the default: Tab reaches text fields and pop-ups only and Option-Tab reaches every control; on: Tab reaches every
-control); on Linux, every control. Key presses count toward "the user moved on" where GPUI shows every keystroke before
-any binding runs: a key a binding handles (Farhelm's Tab and Escape, GPUI Kit's editing keys in a text input) never
-reaches an ordinary key listener.
+coordinator too (`focus::track`), which applies its own press rule in place of GPUI's. An element that takes focus when
+pressed (the terminal, a dialog's empty space) takes it only from a press that did not move focus into it, because GPUI
+hands the press to the controls under the pointer first: a click into a dialog's text field is the field's, not a click
+on the dialog's empty space. What tells them apart is where focus went, not a prevented default (GPUI's usual signal),
+because the coordinator prevents the default on every control to keep GPUI from focusing it, including a macOS button
+that a click leaves unfocused. Which controls Tab reaches follows the platform (settled for the GPUI migration on
+2026-11-13): on macOS the system's Keyboard navigation setting, which the desktop binary reads and the coordinator asks
+on every Tab and Shift+Tab press, so a change applies at once (off, the default: Tab reaches text fields and pop-ups
+only and Option-Tab reaches every control; on: Tab reaches every control); on Linux, every control. Key presses count
+toward "the user moved on" where GPUI shows every keystroke before any binding runs: a key a binding handles (Farhelm's
+Tab and Escape, GPUI Kit's editing keys in a text input) never reaches an ordinary key listener.
 
 Enforced by clippy `disallowed-methods` on GPUI's focus calls and on `track_focus` everywhere in the GUI crates except
 the coordinator, and by the focus invariant that in-process tests check after every step: exactly one focused element,
@@ -451,7 +455,8 @@ Owner: the layer manager. It owns the dialog slot, the popover stack and tooltip
 
 Every overlay is anchored to an element, not to coordinates (SPEC.md has no menu opened at a pointer position). Escape
 from a focused terminal goes to its program (SPEC.md); otherwise it closes only the topmost layer, unless a mode SPEC.md
-says captures the keyboard (the quick-launch sequence) is armed. An overlay closes when its subject is gone, not when it
+says captures the keyboard (the quick-launch sequence) is armed, or the topmost dialog says it may not be dismissed now
+(an editor whose save is in flight), when Escape closes nothing. An overlay closes when its subject is gone, not when it
 moves; anchoring to the element makes a moved row's menu follow the row. Whether a click on a dialog's empty space
 (label text included) keeps focus on the control in use is a property of each dialog, set as SPEC.md's list says; a
 dialog without it takes focus itself, so Enter then presses its main action. Whether a terminal link's destination

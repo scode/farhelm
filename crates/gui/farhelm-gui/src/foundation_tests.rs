@@ -72,6 +72,16 @@ fn open_dialog(
     controls: Vec<(&'static str, FocusHandle)>,
     start: &FocusHandle,
 ) -> (LayerId, FocusHandle, Rc<Cell<bool>>) {
+    open_dialog_returning(cx, controls, start, focus::ReturnTo::Opener)
+}
+
+/// [`open_dialog`], returning focus where `returns_to` says when it closes.
+fn open_dialog_returning(
+    cx: &mut VisualTestContext,
+    controls: Vec<(&'static str, FocusHandle)>,
+    start: &FocusHandle,
+    returns_to: focus::ReturnTo,
+) -> (LayerId, FocusHandle, Rc<Cell<bool>>) {
     let shown = Rc::new(Cell::new(true));
     let container = handle(cx);
     let (start, kept, panel_shown) = (start.clone(), container.clone(), shown.clone());
@@ -89,6 +99,8 @@ fn open_dialog(
                 subject: None,
                 main_action: None,
                 keeps_focus_on_empty_click: true,
+                returns_to,
+                may_dismiss: None,
             },
             &mark,
             window,
@@ -103,10 +115,13 @@ fn open_dialog(
     }
 }
 
-/// A control in a [`Placed`] dialog: a button with a focus handle the test holds, or a text field.
+/// A control in a [`Placed`] dialog: a button with a focus handle the test holds, a text field, or an element a press
+/// focuses whose handle is not a tab stop, so the coordinator records no position for it (as for a control that tracks
+/// its own focus and records none).
 enum PlacedKind {
     Button(FocusHandle),
     Field,
+    Pressable(FocusHandle),
 }
 
 /// A dialog's content view whose controls sit at fixed horizontal positions, in the order given, which is their tab
@@ -134,6 +149,14 @@ impl Render for Placed {
             let placed = div().absolute().left(px(*x)).top(px(10.));
             panel = panel.child(match kind {
                 PlacedKind::Button(focus) => placed.child(button(id, focus)),
+                PlacedKind::Pressable(focus) => {
+                    let selector = *id;
+                    focus::track(
+                        placed.debug_selector(move || selector.into()).size(px(30.)),
+                        focus,
+                        OnPress::Focus,
+                    )
+                }
                 PlacedKind::Field => {
                     let selector = *id;
                     let placed = placed.debug_selector(move || selector.into());
@@ -165,6 +188,17 @@ fn open_placed_dialog(
     controls: Vec<(&'static str, f32, PlacedKind)>,
     start: &FocusHandle,
 ) -> (FocusHandle, Rc<Cell<bool>>, FieldState) {
+    open_placed_dialog_with(cx, controls, start, true)
+}
+
+/// [`open_placed_dialog`] with the dialog's empty-space rule given: `keeps` is
+/// [`Dialog::keeps_focus_on_empty_click`].
+fn open_placed_dialog_with(
+    cx: &mut VisualTestContext,
+    controls: Vec<(&'static str, f32, PlacedKind)>,
+    start: &FocusHandle,
+    keeps: bool,
+) -> (FocusHandle, Rc<Cell<bool>>, FieldState) {
     let shown = Rc::new(Cell::new(true));
     let field = Rc::new(RefCell::new(None));
     let container = handle(cx);
@@ -188,7 +222,9 @@ fn open_placed_dialog(
                 start,
                 subject: None,
                 main_action: None,
-                keeps_focus_on_empty_click: true,
+                keeps_focus_on_empty_click: keeps,
+                returns_to: focus::ReturnTo::Opener,
+                may_dismiss: None,
             },
             &mark,
             window,
@@ -690,6 +726,8 @@ fn a_dialog_without_the_rule_takes_focus_on_an_empty_space_click(cx: &mut TestAp
                 subject: None,
                 main_action: Some(Rc::new(move |_, _| record.set(record.get() + 1))),
                 keeps_focus_on_empty_click: false,
+                returns_to: focus::ReturnTo::Opener,
+                may_dismiss: None,
             },
             &mark,
             window,
@@ -719,6 +757,155 @@ fn a_dialog_without_the_rule_takes_focus_on_an_empty_space_click(cx: &mut TestAp
         pressed.get(),
         1,
         "Enter on the focused dialog pressed its main action"
+    );
+}
+
+/// Why this matters: a dialog's empty-space rule runs after the controls under the press have handled it, and it used
+/// to take focus for the dialog from a text field that had just focused itself for the click, so a click into the
+/// Rename title left it unfocused and typing went nowhere. The rule now asks what the press did to focus
+/// ([`OnPress::Focus`]), which covers every control, not only GPUI Kit's field, while a press on empty space still
+/// focuses the dialog.
+///
+/// Specification: in a dialog without the rule that keeps focus on an empty-space click, with focus on a button, a
+/// click into the field and then typing lands in the field, and so does a second click into the field that already
+/// has focus. A click on empty space focuses the dialog. A click on a button leaves it focused where a click focuses
+/// controls (Linux), and focuses the dialog where the button takes no focus (macOS, as in WebKit), even when the
+/// button already had focus. A click on an element that focuses itself on a press keeps it focused whether or not
+/// the coordinator knows where it is drawn.
+#[gpui::test]
+fn a_click_into_a_dialogs_text_field_leaves_the_field_focused(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    let control = handle(cx);
+    let pressable = cx.update(|_, cx| cx.focus_handle());
+    let (container, _, field) = open_placed_dialog_with(
+        cx,
+        vec![
+            ("control", 10., PlacedKind::Button(control.clone())),
+            ("field", 200., PlacedKind::Field),
+            ("pressable", 400., PlacedKind::Pressable(pressable.clone())),
+        ],
+        &control,
+        false,
+    );
+    assert!(focused(cx, &control), "the premise: the button has focus");
+
+    click(cx, "field");
+    keys(cx, "a");
+    assert_eq!(
+        field_text(cx, &field).as_deref(),
+        Some("a"),
+        "the click focused the field and typing landed in it"
+    );
+    click(cx, "field");
+    keys(cx, "b");
+    assert_eq!(
+        field_text(cx, &field).as_deref(),
+        Some("ab"),
+        "a second click into the focused field kept focus there"
+    );
+
+    let panel = bounds(cx, "panel");
+    cx.simulate_click(
+        point(panel.right() - px(4.), panel.bottom() - px(4.)),
+        Modifiers::none(),
+    );
+    check(cx);
+    assert!(
+        focused(cx, &container),
+        "a click on empty space still focused the dialog itself"
+    );
+
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    click(cx, "control");
+    assert!(
+        focused(cx, &control),
+        "the Linux rule: the click focused the button, and the dialog left it there"
+    );
+    cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
+    click(cx, "control");
+    assert!(
+        focused(cx, &container),
+        "the macOS rule: the button took no focus from the click, so the dialog did"
+    );
+
+    click(cx, "pressable");
+    assert!(
+        focused(cx, &pressable),
+        "an element that focused itself on the press, with no position recorded, kept focus"
+    );
+}
+
+/// Why this matters: an editor whose save is in flight must not be dismissed, or the draft and the helm's refusal are
+/// lost (the Rename editor: while a save is in flight, Escape does nothing). The editor's own view sees Escape only
+/// while focus is inside it, not while the dialog itself holds focus after a click on its empty space, so the guard
+/// belongs to the layer manager, which handles Escape there.
+///
+/// Specification: while a dialog's guard says it may not be dismissed, Escape leaves it open and focus where it was,
+/// both from a control inside it and from the dialog itself holding focus, and the layer manager reports Escape as
+/// taken, so it is not passed on; once the guard says yes, Escape closes it.
+#[gpui::test]
+fn a_dialog_that_may_not_be_dismissed_ignores_escape(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    let busy = Rc::new(Cell::new(true));
+    let (only, container) = (handle(cx), handle(cx));
+    let (start, kept, guard) = (only.clone(), container.clone(), busy.clone());
+    let opened = cx.update(move |window, cx| {
+        let view = cx.new(|_| Panel {
+            controls: vec![("only", start.clone())],
+            shown: Rc::new(Cell::new(true)),
+        });
+        let mark = Mark::take(cx);
+        layers::open_dialog(
+            Dialog {
+                view: view.into(),
+                container: kept,
+                start,
+                subject: None,
+                main_action: None,
+                keeps_focus_on_empty_click: false,
+                returns_to: focus::ReturnTo::Opener,
+                may_dismiss: Some(Rc::new(move |_| !guard.get())),
+            },
+            &mark,
+            window,
+            cx,
+        )
+    });
+    cx.run_until_parked();
+    check(cx);
+    let Some(dialog) = opened else {
+        panic!("the premise: the dialog opened");
+    };
+    assert!(focused(cx, &only), "the premise: its control has focus");
+    keys(cx, "escape");
+    assert!(is_open(cx, dialog), "Escape from its control left it open");
+    assert!(focused(cx, &only), "and focus where it was");
+
+    let panel = bounds(cx, "panel");
+    cx.simulate_click(
+        point(panel.left() + px(4.), panel.top() + px(4.)),
+        Modifiers::none(),
+    );
+    check(cx);
+    assert!(
+        focused(cx, &container),
+        "the premise: the dialog itself holds focus"
+    );
+    keys(cx, "escape");
+    assert!(
+        is_open(cx, dialog),
+        "Escape from the dialog itself left it open"
+    );
+    assert!(
+        cx.update(layers::dismiss_top),
+        "the guarded dialog took Escape, so it goes on to nothing behind it"
+    );
+
+    busy.set(false);
+    keys(cx, "escape");
+    assert!(
+        !is_open(cx, dialog),
+        "once it may be dismissed, Escape closed it"
     );
 }
 
@@ -913,6 +1100,184 @@ fn choosing_a_terminal_while_a_dialog_is_open_leaves_focus_in_the_dialog(cx: &mu
     opener_shown.set(false);
     redraw(cx);
     assert!(focused(cx, &terminal), "the chosen terminal became home");
+}
+
+/// Why this matters: SPEC.md, "Desktop window chrome", sends focus back to the terminal when the Rename editor opened
+/// with its shortcut closes, and the shortcut may be pressed while a row reached with Tab holds focus, where returning
+/// to the opener would land on the row. The dialog's opener names home instead; every other dialog keeps returning to
+/// its opener, which the tests above cover.
+///
+/// Specification: with the terminal home and a row focused, a dialog opened returning home gives focus to the terminal
+/// when it closes. Opened over another dialog, it gives focus back to that dialog, since focus never leaves an open
+/// dialog for the page, and that dialog in turn returns it to the row.
+#[gpui::test]
+fn a_dialog_whose_opener_names_home_returns_focus_to_the_terminal(cx: &mut TestAppContext) {
+    let (cx, items) = open_terminals(cx, &["row"], &["terminal"]);
+    let ((row, _), (terminal, _)) = (drawn(&items, "row"), drawn(&items, "terminal"));
+    choose_now(cx, &terminal);
+    keys(cx, "shift-tab");
+    assert!(
+        focused(cx, &row),
+        "the premise: a row reached with Tab holds focus"
+    );
+
+    let inside = handle(cx);
+    open_dialog_returning(
+        cx,
+        vec![("inside", inside.clone())],
+        &inside,
+        focus::ReturnTo::Home,
+    );
+    keys(cx, "escape");
+    assert!(
+        focused(cx, &terminal),
+        "closing it returned focus home, to the terminal"
+    );
+
+    keys(cx, "shift-tab");
+    assert!(focused(cx, &row), "the premise: the row has focus again");
+    let below = handle(cx);
+    let (outer, _, _) = open_dialog(cx, vec![("below", below.clone())], &below);
+    let above = handle(cx);
+    open_dialog_returning(
+        cx,
+        vec![("above", above.clone())],
+        &above,
+        focus::ReturnTo::Home,
+    );
+    keys(cx, "escape");
+    assert!(
+        focused(cx, &below),
+        "with a dialog still open below it, focus went back into that dialog"
+    );
+    keys(cx, "escape");
+    assert!(!is_open(cx, outer), "the premise: the dialog below closed");
+    assert!(
+        focused(cx, &row),
+        "and that dialog returned focus to its own opener, the row"
+    );
+}
+
+/// Why this matters: a dialog opened to return home may close when there is no home (no session is selected), and
+/// focus must then still land somewhere a key reaches, rather than on the window's root.
+///
+/// Specification: with no home set, a dialog opened returning home gives focus back to its opener when it closes.
+#[gpui::test]
+fn a_dialog_returning_home_falls_back_to_its_opener_without_a_home(cx: &mut TestAppContext) {
+    let (cx, items) = open_terminals(cx, &["row"], &[]);
+    let (row, _) = drawn(&items, "row");
+    keys(cx, "tab");
+    assert!(focused(cx, &row), "the premise: the row holds focus");
+    let inside = handle(cx);
+    open_dialog_returning(
+        cx,
+        vec![("inside", inside.clone())],
+        &inside,
+        focus::ReturnTo::Home,
+    );
+    keys(cx, "escape");
+    assert!(
+        focused(cx, &row),
+        "with no home, closing it returned focus to its opener"
+    );
+}
+
+/// A window with a row button, an element a menu can be anchored to, and a terminal stand-in below them, for the
+/// menu-over-terminal tests. Returns the row's and the terminal's focus handles and the menu's anchor.
+fn open_menu_over_terminal(
+    cx: &mut TestAppContext,
+) -> (&mut VisualTestContext, FocusHandle, FocusHandle, Anchor) {
+    let anchor_out: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));
+    let row_slot: Rc<RefCell<Option<FocusHandle>>> = Rc::new(RefCell::new(None));
+    let terminal_slot: Rc<RefCell<Option<FocusHandle>>> = Rc::new(RefCell::new(None));
+    let (out, rows, terminals) = (anchor_out.clone(), row_slot.clone(), terminal_slot.clone());
+    let cx = open(cx, move |window, cx| {
+        let row = rows
+            .borrow_mut()
+            .get_or_insert_with(|| cx.focus_handle().tab_stop(true))
+            .clone();
+        let terminal = terminals
+            .borrow_mut()
+            .get_or_insert_with(|| cx.focus_handle().tab_stop(true))
+            .clone();
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(button("row", &row))
+            .child(anchor_element("opener", &out, window, cx))
+            // Room for the menu, so that it never covers the terminal.
+            .child(div().h(px(120.)))
+            .child(focus::track(
+                div()
+                    .relative()
+                    .debug_selector(|| "terminal".into())
+                    .size(px(40.)),
+                &terminal,
+                OnPress::Focus,
+            ))
+            .into_any_element()
+    });
+    let row = row_slot.borrow().clone().unwrap();
+    let terminal = terminal_slot.borrow().clone().unwrap();
+    let anchor = anchor_out.borrow().clone().unwrap();
+    (cx, row, terminal, anchor)
+}
+
+/// Why this matters: a click into the terminal types into it (SPEC.md, "Where focus rests"), also when it closes an
+/// open menu. The menu's press-outside close returns focus to the menu's opener while the same press is still being
+/// handled, before the terminal sees it; a terminal that counted any focus move during the press as a press taken by
+/// something inside it left focus on the opener, where Space or Enter reopened the menu.
+///
+/// Specification, Linux click rule: with the row's menu open after a click on the row (so the row held focus), a click
+/// into the terminal closes the menu and focuses the terminal.
+#[gpui::test]
+fn a_click_into_the_terminal_with_a_menu_open_focuses_it_under_the_linux_rule(
+    cx: &mut TestAppContext,
+) {
+    let (cx, row, terminal, anchor) = open_menu_over_terminal(cx);
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    click(cx, "row");
+    assert!(
+        focused(cx, &row),
+        "the premise: the clicked row holds focus"
+    );
+    let item = handle(cx);
+    let menu = open_menu(cx, anchor, vec![("item", item.clone())]);
+    assert!(focused(cx, &item), "the premise: the menu's item has focus");
+    click(cx, "terminal");
+    assert!(!is_open(cx, menu), "the press outside closed the menu");
+    assert!(
+        focused(cx, &terminal),
+        "the click into the terminal focused the terminal"
+    );
+}
+
+/// The macOS half of the test above: there a click does not focus the row, so the opener the menu returns focus to is
+/// whatever held focus before (here the row, reached with Tab).
+///
+/// Specification, macOS click rule: with the row's menu open after Tab reached the row, a click into the terminal
+/// closes the menu and focuses the terminal.
+#[gpui::test]
+fn a_click_into_the_terminal_with_a_menu_open_focuses_it_under_the_macos_rule(
+    cx: &mut TestAppContext,
+) {
+    let (cx, row, terminal, anchor) = open_menu_over_terminal(cx);
+    cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &row),
+        "the premise: the row reached with Tab holds focus"
+    );
+    let item = handle(cx);
+    let menu = open_menu(cx, anchor, vec![("item", item.clone())]);
+    assert!(focused(cx, &item), "the premise: the menu's item has focus");
+    click(cx, "terminal");
+    assert!(!is_open(cx, menu), "the press outside closed the menu");
+    assert!(
+        focused(cx, &terminal),
+        "the click into the terminal focused the terminal"
+    );
 }
 
 // ---- Which controls Tab reaches -------------------------------------------------------------------------------------
@@ -1291,6 +1656,8 @@ fn a_layer_does_not_open_once_the_user_moved_on(cx: &mut TestAppContext) {
                 subject: None,
                 main_action: None,
                 keeps_focus_on_empty_click: true,
+                returns_to: focus::ReturnTo::Opener,
+                may_dismiss: None,
             },
             &mark,
             window,
@@ -1334,6 +1701,8 @@ fn a_dialog_closes_when_its_subject_is_gone(cx: &mut TestAppContext) {
                 subject: Some(subject),
                 main_action: None,
                 keeps_focus_on_empty_click: true,
+                returns_to: focus::ReturnTo::Opener,
+                may_dismiss: None,
             },
             &mark,
             window,
@@ -1631,6 +2000,8 @@ fn opening_and_closing_a_layer_redraws_only_the_root(cx: &mut TestAppContext) {
                 subject: None,
                 main_action: None,
                 keeps_focus_on_empty_click: true,
+                returns_to: focus::ReturnTo::Opener,
+                may_dismiss: None,
             },
             &mark,
             window,
@@ -1983,6 +2354,8 @@ fn enter_on_the_dialog_itself_presses_its_main_action(cx: &mut TestAppContext) {
                 subject: None,
                 main_action: Some(Rc::new(move |_, _| record.set(record.get() + 1))),
                 keeps_focus_on_empty_click: true,
+                returns_to: focus::ReturnTo::Opener,
+                may_dismiss: None,
             },
             &mark,
             window,

@@ -23,13 +23,16 @@
 //!   which the terminal tabs add here when they arrive.
 //! - **The dialog stack's trap and restore**, together with the layer manager, which records who opened each layer and
 //!   what was focused at the time. Tab and Shift+Tab stay inside the topmost layer; closing a layer returns focus to
-//!   where it was before it opened; when the focused control disappears inside a dialog or menu, focus moves to the
-//!   closest remaining control there (by the controls' last drawn positions), and to the layer itself only when no
-//!   control is left. A menu traps Tab like a dialog (SPEC.md: "Inside a dialog or menu, focus stays inside").
+//!   where it was before it opened, or home when its opener asked for that ([`ReturnTo`]); when the focused control
+//!   disappears inside a dialog or menu, focus moves to the closest remaining control there (by the controls' last
+//!   drawn positions), and to the layer itself only when no control is left. A menu traps Tab like a dialog (SPEC.md:
+//!   "Inside a dialog or menu, focus stays inside").
 //! - **Which press focuses an element.** Every focusable element is tracked through [`track`], which suppresses GPUI's
 //!   own focus-on-press (GPUI focuses any tracked element on mouse-down, a move no lint could see) and applies the
 //!   coordinator's rule instead: on Linux a click focuses the control it lands on; on macOS it does not, as in WebKit
-//!   there. `track_focus` itself is banned outside this module. The macOS half is ported from the old app, which ran in
+//!   there. An element that takes focus when pressed (a terminal, a dialog's empty space) takes it only from a press
+//!   that gave focus to nothing inside it ([`OnPress::Focus`]), so a click into a dialog's text field stays in the
+//!   field. `track_focus` itself is banned outside this module. The macOS half is ported from the old app, which ran in
 //!   WebKit. On Linux the old desktop app built against WebKitGTK but was released only for the Mac, so there is no
 //!   shipped behavior to keep, and a click follows the platform.
 //! - **Which controls Tab reaches** ([`TabReach`]). On macOS, Tab follows the system's Keyboard navigation setting
@@ -44,13 +47,14 @@
 //! NOTE: Agent approval cards, which keep focus while a dialog is open, do not exist yet, so [`invariant_violation`]
 //! knows only the topmost dialog.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use gpui::{
     App, AppContext as _, Bounds, Context, Div, ElementId, Entity, FocusHandle, Global,
     InteractiveElement, Keystroke, KeystrokeEvent, MouseButton, MouseDownEvent, ParentElement,
-    Pixels, Styled, Subscription, WeakEntity, WeakFocusHandle, Window, WindowId, canvas,
+    Pixels, Point, Styled, Subscription, WeakEntity, WeakFocusHandle, Window, WindowId, canvas,
 };
 
 use crate::actions::{
@@ -418,6 +422,9 @@ pub enum OnPress {
     /// An element that takes focus whenever it is pressed, on every platform: a terminal, which a click types into, a
     /// pop-up control, or a dialog whose empty space takes focus (the dialogs SPEC.md does not list as keeping it on the
     /// control in use). A tab stop of this kind counts as a text field or pop-up for [`TabReach`]: Tab always reaches it.
+    ///
+    /// Only a press that gave focus to nothing inside the element focuses it ([`press_was_taken`]): the innermost
+    /// element a press focuses wins, as on a web page, so a click into a dialog's text field leaves the field focused.
     Focus,
     /// A press leaves focus where it is: a layer's container, whose empty space keeps focus on the control in use.
     Keep,
@@ -435,16 +442,33 @@ pub fn track<E: InteractiveElement + ParentElement>(
     on_press: OnPress,
 ) -> E {
     let pressed_handle = handle.clone();
-    let element =
-        track_raw(element, handle).on_mouse_down(MouseButton::Left, move |_, window, cx| {
-            // Runs before GPUI's own focus-on-press, which a prevented default skips.
-            window.prevent_default();
-            match on_press {
-                OnPress::Control => pressed(&pressed_handle, window, cx),
-                OnPress::Focus => apply(Move::To(&pressed_handle), window, cx),
-                OnPress::Keep => {}
+    // What held focus as a press on this element began, for [`press_was_taken`]. The capture phase reaches this element
+    // before any element inside it has handled the press, and the bubble phase reaches it after all of them have. Only
+    // an element that takes focus on a press needs it, so a button gets no capture listener.
+    let at_press: Rc<Cell<Option<FocusHandle>>> = Rc::default();
+    let element = track_raw(element, handle);
+    let element = if on_press == OnPress::Focus {
+        let recorded = at_press.clone();
+        element.capture_any_mouse_down(move |_, window, cx| {
+            recorded.replace(window.focused(cx));
+        })
+    } else {
+        element
+    };
+    let element = element.on_mouse_down(MouseButton::Left, move |event, window, cx| {
+        // Runs before GPUI's own focus-on-press, which a prevented default skips.
+        window.prevent_default();
+        match on_press {
+            OnPress::Control => pressed(&pressed_handle, window, cx),
+            OnPress::Focus => {
+                let before = at_press.take();
+                if !press_was_taken(&pressed_handle, before.as_ref(), event.position, window, cx) {
+                    apply(Move::To(&pressed_handle), window, cx);
+                }
             }
-        });
+            OnPress::Keep => {}
+        }
+    });
     let kind = match on_press {
         OnPress::Control => ControlKind::Button,
         OnPress::Focus | OnPress::Keep => ControlKind::Field,
@@ -645,6 +669,53 @@ fn pressed(handle: &FocusHandle, window: &mut Window, cx: &mut App) {
     }
 }
 
+/// Whether a press at `position` already gave focus to something inside `element`, the [`OnPress::Focus`] element it
+/// reached, so that element must leave focus where it is: `before` is what held focus as the press began. The press was
+/// taken when focus is now inside the element and either moved there while the press was handled (GPUI Kit's text
+/// field focuses itself on mouse-down; on Linux a button does), or the press landed on the control that already holds
+/// focus and is one a press focuses (a second click into a focused field, to place the caret). Anything else is a press
+/// on the element's empty space.
+///
+/// Inside, because focus can also move elsewhere during the same press: GPUI runs every capture listener before any
+/// bubble listener, and an open menu's or anchored question's press-outside close is a capture listener, which returns
+/// focus to the menu's opener before the pressed element sees the press. A click into the terminal while a menu is
+/// open must still focus the terminal. The one case that reads as taken although nothing was clicked into: a press on
+/// a dialog's empty space while a menu inside the dialog is open closes the menu, focus returns to the menu's opener
+/// inside the dialog, and the dialog leaves it there.
+///
+/// Decided by what focus did rather than by whether the press was marked: GPUI's mark, a prevented default, is also
+/// what [`track`] sets on every control to keep GPUI from focusing it, including a macOS button that a press leaves
+/// unfocused, and a press on such a button falls through to the element around it, as a click on a button that takes
+/// no focus did in WebKit. So no mark can tell a press a control took from one it did not, and every kind of control
+/// is covered here rather than each wrapper having to remember to mark its presses.
+///
+/// The bounds read are the ones recorded as the frame the user pressed on was prepared; a control that records no
+/// position (one that is not a tab stop) counts only through the first rule.
+fn press_was_taken(
+    element: &FocusHandle,
+    before: Option<&FocusHandle>,
+    position: Point<Pixels>,
+    window: &Window,
+    cx: &App,
+) -> bool {
+    if !element.contains_focused(window, cx) {
+        return false;
+    }
+    let now = window.focused(cx);
+    if now.as_ref() != before {
+        return true;
+    }
+    let (Some(now), Some(state)) = (now, state(window, cx)) else {
+        return false;
+    };
+    let click_focuses = click_focuses_controls(cx);
+    state.read(cx).controls.iter().any(|entry| {
+        entry.bounds.contains(&position)
+            && (entry.kind == ControlKind::Field || click_focuses)
+            && entry.control.upgrade().as_ref() == Some(&now)
+    })
+}
+
 /// The pointer moved onto `item`, a control in a menu: it takes the menu's highlight, which is keyboard focus, so Up,
 /// Down and Enter go on from where the pointer is. SPEC.md: "A menu has one highlight. Whichever moved last, the
 /// pointer or the keys, sets it". A menu item calls this when the pointer enters it, on every platform (the click rule
@@ -666,11 +737,37 @@ pub(crate) fn enter_layer(handle: &FocusHandle, window: &mut Window, cx: &mut Ap
     apply(Move::To(handle), window, cx);
 }
 
-/// Return focus to `opener` because the layer it opened closed, or recover if it is gone (the layer manager calls this).
-pub(crate) fn return_to(opener: Option<&WeakFocusHandle>, window: &mut Window, cx: &mut App) {
-    match opener.and_then(WeakFocusHandle::upgrade) {
-        // If the opener is no longer drawn, GPUI reports the focus as lost on the next frame and [`recover`] runs then.
-        Some(opener) => apply(Move::To(&opener), window, cx),
+/// Where focus goes when a dialog closes with focus inside it. The dialog's opener chooses
+/// ([`crate::layers::Dialog::returns_to`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReturnTo {
+    /// What held focus when the dialog opened: SPEC.md, "Closing something the user opened returns focus to where it
+    /// was before it opened". Every dialog but those below.
+    Opener,
+    /// Home as it is when the dialog closes (the selected session's terminal), whatever held focus when it opened. For
+    /// a dialog SPEC.md sends back to the terminal: the Rename editor opened with its shortcut, which may have been
+    /// pressed while a row reached with Tab held focus ("Desktop window chrome").
+    ///
+    /// Home only once no other layer is left open, since focus never leaves a dialog for the page behind it; with a
+    /// layer still open, or with no home, it falls back to [`ReturnTo::Opener`].
+    Home,
+}
+
+/// Return focus where `target` says because a layer closed, `opener` being what held focus when it opened, or recover
+/// if that is gone (the layer manager calls this).
+pub(crate) fn return_to(
+    target: ReturnTo,
+    opener: Option<&WeakFocusHandle>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let home = match target {
+        ReturnTo::Home if !layers::any_open(window, cx) => home(window, cx),
+        ReturnTo::Home | ReturnTo::Opener => None,
+    };
+    match home.or_else(|| opener.and_then(WeakFocusHandle::upgrade)) {
+        // If it is no longer drawn, GPUI reports the focus as lost on the next frame and [`recover`] runs then.
+        Some(place) => apply(Move::To(&place), window, cx),
         None => recover(window, cx),
     }
 }

@@ -42,7 +42,7 @@ use gpui::{
 };
 
 use crate::components::{Button, DialogFrame, HoverHelp, Role, Tier};
-use crate::focus::Mark;
+use crate::focus::{Mark, ReturnTo};
 use crate::host_text::Line;
 use crate::layers::{self, Anchor, AnchoredDialog, Dialog, LayerId, Subject};
 use crate::theme::{self, metrics};
@@ -390,6 +390,8 @@ fn ask_inner<T: Clone + 'static>(
                 subject,
                 main_action,
                 keeps_focus_on_empty_click,
+                returns_to: ReturnTo::Opener,
+                may_dismiss: None,
             },
             mark,
             window,
