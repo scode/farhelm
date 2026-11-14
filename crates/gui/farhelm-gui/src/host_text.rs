@@ -23,18 +23,20 @@
 //! terminal.
 //!
 //! Extension points (docs/gpui/foundation-ownership.md): a view that shows a new host-supplied field wraps it with
-//! [`HostText::from_host`] where it reads the field and draws it with [`element`] or a [`HostSentence`]; a component
-//! that takes host text takes `&HostText` and draws it the same way, or, for wording that is usually the app's own but
-//! may name a host value (a dialog's summary, a prompt's lines), takes a [`Line`]. Identity labels the user compares
-//! (installation ids, which SPEC.md also wants with their spaces visible) are not built yet; they arrive with the first
-//! view that shows one, as a second presentation here.
+//! [`HostText::from_host`] where it reads the field and draws it with [`element`] (or [`marked`], for a value with some
+//! characters marked) or a [`HostSentence`]; a component that takes host text takes `&HostText` and draws it the same
+//! way, or, for wording that is usually the app's own but may name a host value (a dialog's summary, a prompt's lines),
+//! takes a [`Line`]. Identity labels the user compares (installation ids, which SPEC.md also wants with their spaces
+//! visible) are not built yet; they arrive with the first view that shows one, as a second presentation here.
 
 use std::fmt;
+use std::ops::Range;
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, App, Div, ElementId, InteractiveElement as _, IntoElement, ParentElement,
-    RenderOnce, Role, SharedString, StatefulInteractiveElement as _, Styled, Window, div,
+    AnyElement, App, Div, ElementId, HighlightStyle, InteractiveElement as _, IntoElement,
+    ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement as _, Styled,
+    StyledText, Window, div,
 };
 
 /// Text a host supplied, as the GUI holds it from the moment it reads it.
@@ -97,6 +99,65 @@ impl fmt::Debug for HostText {
 /// It inherits the surrounding text style (font, size, color), as any label does.
 pub fn element(text: &HostText) -> Div {
     div().child(text.presentation())
+}
+
+/// Draw `text` like [`element`], with some of its characters drawn in `style`: the quick switcher's matched characters
+/// (SPEC.md, "Desktop window chrome": rows show their values "with matching characters marked"; the old switcher drew
+/// them in the accent color at weight 600).
+///
+/// `marks` is handed the escaped presentation, the spelling the user sees, and returns the char indices to mark in it.
+/// Matching on that spelling keeps presentation from changing which characters look matched: a raw match whose escaped
+/// form does not match shows no mark. An index inside a `<U+…>` escape is dropped, so no escape is ever drawn partly
+/// marked, and an index past the end is dropped too; a matcher that settles on a hit inside an escape therefore marks
+/// less, rather than moving on to a later visible hit. The value stays one text element, so its direction stays
+/// isolated, and it has no accessible name of its own, as [`element`] has none: the marks are drawn, not announced.
+///
+/// The presentation reaches `marks` only to be matched against: a caller must not keep it or draw it, which would put a
+/// host value on screen outside this module's elements (the one rule of SPEC_impl.md, "Host-supplied text").
+pub fn marked(
+    text: &HostText,
+    marks: impl FnOnce(&str) -> Vec<usize>,
+    style: HighlightStyle,
+) -> Div {
+    let presentation = text.presentation();
+    let ranges = mark_ranges(&presentation, marks(&presentation));
+    div().child(
+        StyledText::new(presentation)
+            .with_highlights(ranges.into_iter().map(|range| (range, style))),
+    )
+}
+
+/// The byte ranges of `presentation` to draw marked, for the char indices `chosen`: in order, adjacent characters
+/// joined into one range, and nothing inside an escape or past the end.
+fn mark_ranges(presentation: &str, mut chosen: Vec<usize>) -> Vec<Range<usize>> {
+    chosen.sort_unstable();
+    chosen.dedup();
+    // Every `<U+` in a presentation starts an escape (a literal `<U+` a host typed has its `<` escaped), running to the
+    // next `>`.
+    let escapes: Vec<Range<usize>> = presentation
+        .match_indices("<U+")
+        .filter_map(|(start, _)| {
+            presentation[start..]
+                .find('>')
+                .map(|end| start..start + end + 1)
+        })
+        .collect();
+    let chars: Vec<(usize, char)> = presentation.char_indices().collect();
+    let mut ranges: Vec<Range<usize>> = Vec::new();
+    for index in chosen {
+        let Some(&(start, ch)) = chars.get(index) else {
+            continue;
+        };
+        if escapes.iter().any(|escape| escape.contains(&start)) {
+            continue;
+        }
+        let end = start + ch.len_utf8();
+        match ranges.last_mut() {
+            Some(last) if last.end == start => last.end = end,
+            _ => ranges.push(start..end),
+        }
+    }
+    ranges
 }
 
 /// One part of a [`HostSentence`].
@@ -378,6 +439,120 @@ pub(crate) mod tests {
         assert!(
             parts.iter().all(|&index| nodes[index].role.is_none()),
             "a part of the sentence has a role of its own"
+        );
+    }
+
+    /// Why this matters: the quick switcher marks the characters a search matched in host values, and the marks are
+    /// the only part of the value drawn differently, so they must cover exactly the matched characters.
+    ///
+    /// Specification: in a plain value, marked char indices become the byte ranges of those characters, in order, with
+    /// neighbours joined, duplicates ignored and indices past the end dropped.
+    #[test]
+    fn marks_in_a_plain_value_cover_exactly_the_matched_characters() {
+        let shown = HostText::from_host("api-refactor").presentation();
+        assert_eq!(
+            mark_ranges(&shown, vec![4, 0, 1, 1, 5, 99]),
+            vec![0..2, 4..6]
+        );
+    }
+
+    /// Why this matters: an escape such as `<U+202E>` is how a hidden character is shown; drawing part of it marked
+    /// would split it visually and make a matcher's hit on the notation's letters look like a hit on the value.
+    ///
+    /// Specification: the matcher is handed the escaped spelling; in a value whose presentation holds escapes
+    /// (including the escape of a literal `<U+` the host typed), indices inside an escape are dropped and indices around
+    /// it are kept, at their byte positions.
+    #[test]
+    fn a_mark_never_splits_an_escape() {
+        let mut handed = String::new();
+        let _ = marked(
+            &HostText::from_host("a\u{202E}b"),
+            |shown| {
+                handed = shown.to_owned();
+                Vec::new()
+            },
+            HighlightStyle::default(),
+        );
+        assert_eq!(
+            handed, "a<U+202E>b",
+            "the matcher was handed the escaped spelling"
+        );
+        let shown = HostText::from_host("a\u{202E}b").presentation();
+        assert_eq!(mark_ranges(&shown, (0..10).collect()), vec![0..1, 9..10]);
+        let literal = HostText::from_host("<U+202E>").presentation();
+        assert_eq!(literal.as_ref(), "<U+003C>U+202E>");
+        assert_eq!(
+            mark_ranges(&literal, (0..15).collect()),
+            vec![8..15],
+            "only the host's own letters after the escaped `<` are markable"
+        );
+    }
+
+    /// Draws one marked right-to-left value beside the app's words, as a switcher row would.
+    struct MarkedView;
+
+    impl gpui::Render for MarkedView {
+        fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+            div()
+                .id("row")
+                .role(Role::Label)
+                .aria_label("Open")
+                .flex()
+                .child("Open ")
+                .child(marked(
+                    &HostText::from_host("\u{5e9}\u{5dc}\u{5d5}\u{5dd}"),
+                    |_| vec![1, 2],
+                    HighlightStyle {
+                        font_weight: Some(gpui::FontWeight::SEMIBOLD),
+                        ..HighlightStyle::default()
+                    },
+                ))
+        }
+    }
+
+    /// Why this matters: right-to-left letters in a host value must reorder only within that value (SPEC_impl.md,
+    /// "Host-supplied text"), which holds while the value is its own text element; and a mark's range must fall on
+    /// character boundaries of multi-byte text, or drawing it fails.
+    ///
+    /// Specification: in a right-to-left value of two-byte letters, char indices map to two-byte ranges; drawn beside
+    /// the app's words with two letters marked at a heavier weight, the value is painted as one whole line of its own,
+    /// never as pieces split at the marks, and adds no node with a role or a name of its own.
+    #[gpui::test]
+    fn a_marked_right_to_left_value_stays_one_isolated_element(cx: &mut gpui::TestAppContext) {
+        let value = "\u{5e9}\u{5dc}\u{5d5}\u{5dd}";
+        let shown = HostText::from_host(value).presentation();
+        assert_eq!(mark_ranges(&shown, vec![1, 2]), vec![2..6]);
+        crate::test_support::install(cx);
+        let (_, cx) = cx.add_window_view(|_, _| MarkedView);
+        cx.update(|window, _| window.set_driver_enabled(true));
+        cx.run_until_parked();
+        let nodes = cx.update(|window, _| window.driver_nodes().to_vec());
+        let row = nodes
+            .iter()
+            .position(|node| node.element_id.as_deref() == Some("row"))
+            .expect("the row was drawn");
+        let inside = |mut index: usize| loop {
+            match nodes[index].parent {
+                Some(parent) if parent == row => return true,
+                Some(parent) => index = parent,
+                None => return false,
+            }
+        };
+        let painted: Vec<String> = (0..nodes.len())
+            .filter(|&index| inside(index))
+            .flat_map(|index| nodes[index].texts.iter().map(|text| text.text.to_string()))
+            .filter(|text| text.chars().any(|ch| value.contains(ch)))
+            .collect();
+        assert_eq!(
+            painted,
+            vec![value.to_string()],
+            "the value was painted whole, as one line"
+        );
+        assert!(
+            (0..nodes.len())
+                .filter(|&index| inside(index))
+                .all(|index| nodes[index].role.is_none() && nodes[index].label.is_none()),
+            "the marked value adds no node with a role or name of its own"
         );
     }
 
