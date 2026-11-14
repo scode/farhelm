@@ -675,13 +675,17 @@ systemd or SSH substrate ran.
   After an intended visual change, `--update` rewrites the references; look at each changed PNG before keeping it. A
   failure leaves the new captures in `gui-goldens/` beside the test binary. Run it when anything under
   `crates/gui/farhelm-gui/` that draws, its fonts, or GPUI or GPUI Kit change; CI does not run it yet.
-- `python3 -B scripts/test-gui-agent.py` — the headless harness that drives the GPUI app (`scripts/gui-agent.py`,
-  `docs/gui-agent.md`): the run directory's checks (absolute, and shallow enough for the bridge socket's path limit),
-  the app's environment (nothing of the caller's display, bus, bridge or `FARHELM_*` variables; the run's own
-  compositor, state directory and supervisor program; lavapipe), the seeding request, and that a recorded pid whose
-  start time no longer matches is never signalled. Seconds; starts and builds nothing. The harness itself is a tool, not
-  a gate: an end-to-end run (`start`, then `stop`) needs `mutter`, `dbus-run-session` and lavapipe, and builds the app.
-  Run the tests when the script changes, and an end-to-end run when the script, the bridge's wiring in `farhelm-gui` or
+- `python3 -B scripts/test-gui-agent.py` — the harness that drives the GPUI app (`scripts/gui-agent.py`,
+  `docs/gui-agent.md`; headless on Linux, in the GUI session on a Mac): the run directory's checks (absolute, and
+  shallow enough for the deepest socket's path limit), the app's environment (nothing of the caller's display, bus,
+  bridge or `FARHELM_*` variables; on Linux the run's own compositor and lavapipe; the run's state directory and
+  supervisor program), the seeding request, that a recorded pid whose start time no longer matches is never signalled
+  (from /proc on Linux, `ps` on macOS, in the C locale and UTC), and the `--lock` rules: held until the holder is
+  stopped, kept by `stop` while part of the run may still be running, given up by a holder whose `start` was killed
+  while it waited, and a lock path that cannot be opened failing at once. Seconds; starts and builds nothing; runs on
+  Linux and macOS. The harness itself is a tool, not a gate: an end-to-end run (`start`, then `stop`) builds the app and
+  needs `mutter`, `dbus-run-session` and lavapipe on Linux, or a logged-in GUI session of the same user on a Mac. Run
+  the tests when the script changes, and an end-to-end run when the script, the bridge's wiring in `farhelm-gui` or
   `farhelm-desktop`, or the app's startup changes.
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh` — the curl-installer is POSIX
   `sh` run unread on a fresh machine (`curl | sh`), so a syntax slip or a shellcheck-catchable bug in it gets caught
