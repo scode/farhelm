@@ -9,10 +9,10 @@ captured screenshots are never committed on main (`.agents/docs-media.md`).
 ## Running a batch
 
 - `scripts/gui-screenshot-batch.py all /tmp/farhelm-tmp/<id>/batch1 --reference <reference set>`: copies the foundation
-  goldens, then, for each app variant in the scene list, starts the app through `scripts/gui-agent.py` (headless under
-  Mutter and lavapipe on Linux; in the logged-in GUI session on a Mac, where the app opens a real window, as
-  `docs/gui-agent.md` says), captures every app scene and stops the app; last it writes `index.html` in the output
-  directory. Only the first app run builds.
+  goldens, then, for each app variant in the scene list and each group of scenes that share `start` options (see "The
+  scene list"), starts the app through `scripts/gui-agent.py` (headless under Mutter and lavapipe on Linux; in the
+  logged-in GUI session on a Mac, where the app opens a real window, as `docs/gui-agent.md` says), captures the group's
+  scenes and stops the app; last it writes `index.html` in the output directory. Only the first app run builds.
 - `capture` and `page` are the two halves. Run `capture` where the app builds (a build worker, say) and `page` where the
   reference set is, after copying the output directory over. `--copy-references` copies the old-app pictures next to the
   page, so the directory can be handed on as is.
@@ -52,20 +52,32 @@ non-zero when any capture failed or any app run did not start or did not stop cl
 - The commit the capture ran on: the jj working-copy commit in a jj checkout, or git's HEAD (marked when the tree had
   uncommitted changes).
 
-So far the app scenes show the session list over the sessions `gui-agent.py start` seeds (its default two fake agents),
-as it opens and after a click opens the other one. Their reference scenes stay unported, because the old app's pictures
-also show the host rail, the app bar, the row marks and the open session's terminal. The rest of the first slice (row
-menu, delete confirmation, terminal attach) adds the app scenes that show it.
+The app scenes show the first slice over a fleet of four seeded sessions, one each running, waiting, idle and exited
+(`gui-agent.py start --fleet`, `docs/gui-agent.md`, "Seeded sessions"): each one open with its terminal, the idle one's
+row menu, Delete asked from the waiting one's menu, and the rename dialog; and, in an app run of its own, the window
+over an empty fleet. A scene's reference scene is marked ported when the scene's subject is complete, not when the whole
+picture matches: the Delete question and the rename dialog are, while the main window and the selected sessions still
+lack the host rail, the app bar, the list header and the session header, and the row menu lacks most of its commands, so
+those stay unported with their app scenes beside them.
 
 ## The scene list
 
 `docs/gpui/screenshot-scenes.json` is the committed scene set: `app_variants` (each a theme, a size name matching the
-reference set's, and the window size in pixels), `reference_scenes` (each reference id and whether it is ported),
-`app_scenes` (an id, a title, the related reference id, whether it is a mockup, and the bridge commands that reach the
-scene before the screenshot) and `foundation_goldens`. When an area ports a scene, it adds the app scene that shows it
-and marks the reference scene ported. Both `capture` and `page` refuse a list that is not well formed (duplicate ids, a
-reference to an unlisted scene, malformed steps or variants, a committed golden missing from the list or a listed one
-missing from the tree), and the page flags any reference scene the list forgot.
+reference set's, and the window size in pixels), `app_start` (the `gui-agent.py start` options, such as the fleet to
+seed, of every app run whose scenes name none), `reference_scenes` (each reference id and whether it is ported),
+`app_scenes` (an id, a title, the related reference id, whether it is a mockup, the bridge commands that reach the scene
+before the screenshot, and, for a scene that needs another app run than `app_start`'s, its own `start` options) and
+`foundation_goldens`. When an area ports a scene, it adds the app scene that shows it and marks the reference scene
+ported once that scene's subject is complete. Both `capture` and `page` refuse a list that is not well formed (duplicate
+ids, a reference to an unlisted scene, malformed steps or variants, `start` options the batch sets itself, a committed
+golden missing from the list or a listed one missing from the tree), and the page flags any reference scene the list
+forgot.
+
+The scenes that share start options share one app run per variant and run in list order, so each scene's steps begin
+where the one before it left the app (the Delete scene closes the menu the row-menu scene opened, the rename scene
+answers Cancel to the Delete question). A scene that needs another fleet names its own `start` options, `--sessions 0`
+for the empty one, and gets an app run of its own. A new scene goes into the group whose state it can start from, and
+its steps leave the app the way the next scene in that group expects.
 
 `python3 -B scripts/test-gui-screenshot-batch.py` tests the page from fixtures and the capture step against a fake
 harness; it needs neither the app nor the reference set.

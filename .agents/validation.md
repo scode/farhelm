@@ -682,10 +682,12 @@ systemd or SSH substrate ran.
   `docs/gui-agent.md`; headless on Linux, in the GUI session on a Mac): the run directory's checks (absolute, and
   shallow enough for the deepest socket's path limit), the app's environment (nothing of the caller's display, bus,
   bridge or `FARHELM_*` variables; on Linux the run's own compositor and lavapipe; the run's state directory and
-  supervisor program, and the window size and appearance a run asks for), the seeding request, that a recorded pid whose
-  start time no longer matches is never signalled (from /proc on Linux, `ps` on macOS, in the C locale and UTC), and the
-  `--lock` rules: held until the holder is stopped, kept by `stop` while part of the run may still be running, given up
-  by a holder whose `start` was killed while it waited, and a lock path that cannot be opened failing at once. Seconds;
+  supervisor program, and the window size and appearance a run asks for), the seeding requests (a `--fleet` kind's
+  replay shape, its transcript fitting a narrow terminal, and only the waiting kind declaring an agent type), the wait
+  for a fleet's statuses, `terminal-text --wait` asking again until its text shows, that a recorded pid whose start time
+  no longer matches is never signalled (from /proc on Linux, `ps` on macOS, in the C locale and UTC), and the `--lock`
+  rules: held until the holder is stopped, kept by `stop` while part of the run may still be running, given up by a
+  holder whose `start` was killed while it waited, and a lock path that cannot be opened failing at once. Seconds;
   starts and builds nothing; runs on Linux and macOS. The harness itself is a tool, not a gate: an end-to-end run
   (`start`, then `stop`) builds the app and needs `mutter`, `dbus-run-session` and lavapipe on Linux, or a logged-in GUI
   session of the same user on a Mac. Run the tests when the script changes, and an end-to-end run when the script, the
@@ -702,8 +704,22 @@ systemd or SSH substrate ran.
   Linux, larger by the frame, cropped back to the variant's size) and lock, `stop` after every `start` that made a run
   directory (also a failed or interrupted one), a failed start (also with no app scenes), a failed or timed-out step, a
   failed `stop` or a golden no platform has failing the batch, every platform's goldens copied wherever the batch runs,
-  and run directories removed when clean and kept when not. Seconds; needs neither the app nor the reference set. The
+  and run directories removed when clean and kept when not, and scenes with their own `start` options getting an app run
+  of their own while the rest share the list's `app_start`. Seconds; needs neither the app nor the reference set. The
   batch itself is a tool, not a gate. Run the tests when the script or the scene list changes.
+- `python3 scripts/record-test-run.py --kind development --selection 'GPUI app end-to-end smoke' --concurrency 'one app run, steps in order' --termination-grace 30 -- python3 -B scripts/gui-e2e-smoke.py`
+  — the GPUI app end to end (`scripts/gui-e2e-smoke.py`): the real app, its embedded helm and a real supervisor with
+  three basic fake agents, driven through the bridge by `scripts/gui-agent.py`. In one app run, in order: the list shows
+  every seeded session; a click on a row opens its terminal, which shows the fake agent's ready line and echoes a
+  stamped line typed into it; a row's actions button opens its menu and Escape closes it; the menu's Delete asks, and
+  Confirm delete removes the session from the helm's listing and its row from the window; the menu's Rename opens the
+  rename dialog, and a saved title reaches the helm's listing and the row. A failed run keeps its run directory under
+  `/tmp` for its logs. An interrupted one (Ctrl-C, or SIGTERM from the recorder) still stops its app run, for which the
+  recorder's `--termination-grace` leaves it time. Under 20 seconds on a build worker with the app already built (4 and
+  18 s measured); it builds the app first unless given `--no-build`. Needs what `gui-agent.py start` needs (`mutter`,
+  `dbus-run-session` and lavapipe on Linux, or a logged-in GUI session of the same user on a Mac). CI does not run it.
+  Run it when the app's session list, row menu, Delete, Rename or terminal attach, the bridge's wiring, the app's
+  startup or `scripts/gui-agent.py` change.
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh` — the curl-installer is POSIX
   `sh` run unread on a fresh machine (`curl | sh`), so a syntax slip or a shellcheck-catchable bug in it gets caught
   before the slower Rust-side asset-table parity test in `assets.rs` would notice. `test-install-sh.sh` is bash, not

@@ -10,9 +10,10 @@ its session, so those rows are superseded. One closing rule still stands: change
 session menus anchored below it (SPEC.md, "Session list"); that case belongs to the host-updates row in
 [Settings and hosts](settings-and-hosts.md).
 
-The screenshot batch (`docs/gpui/screenshot-batch.md`) so far captures only the app's empty main window and the
-foundation goldens. The first slice (session list, row menu, delete confirmation, terminal attach), adds the app scenes
-that show it and marks their reference scenes ported in `docs/gpui/screenshot-scenes.json`.
+The screenshot batch (`docs/gpui/screenshot-batch.md`) captures the first slice (session list, the open session's
+terminal, row menu, Delete question, rename dialog, empty fleet) beside the foundation goldens; of its reference scenes,
+the Delete question and the rename dialog are ported, and the rest wait for the parts of their pictures that no area has
+built yet. `scripts/gui-e2e-smoke.py` drives the same slice end to end through the bridge.
 
 | Old spec                                       | Tests | Covers                                                                              | Status                                                                                                                                                                                                                             |
 | ---------------------------------------------- | ----- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

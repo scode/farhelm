@@ -6,23 +6,36 @@
     { "theme": "dark", "size": "wide", "window": [1600, 1000] },
     { "theme": "dark", "size": "narrow", "window": [900, 700] }
   ],
+  "app_start": [
+    "--fleet",
+    "running,waiting,idle,exited"
+  ],
   "app_scenes": [
     {
       "id": "app-session-list",
-      "title": "The main window over the seeded fleet: the session list with the latest session open (no terminal yet)",
+      "title": "The main window over a fleet of four (running, waiting, idle, exited), the running Fixture 1 open with its terminal attached",
       "reference": "main-running-session",
       "mockup": false,
       "steps": [
         [
-          "wait",
-          "--idle"
+          "click",
+          "text:Fixture 1"
+        ],
+        [
+          "hover",
+          "text:Recently active"
+        ],
+        [
+          "terminal-text",
+          "--wait",
+          "Verifying"
         ]
       ]
     },
     {
-      "id": "app-session-selected",
-      "title": "The session list after clicking another row: that session is open",
-      "reference": null,
+      "id": "app-selected-waiting",
+      "title": "The waiting Fixture 2 open, its terminal showing the question it waits on",
+      "reference": "selected-waiting-session",
       "mockup": false,
       "steps": [
         [
@@ -30,8 +43,154 @@
           "text:Fixture 2"
         ],
         [
+          "hover",
+          "text:Recently active"
+        ],
+        [
+          "terminal-text",
+          "--wait",
+          "Do you want to"
+        ]
+      ]
+    },
+    {
+      "id": "app-selected-idle",
+      "title": "The idle Fixture 3 open",
+      "reference": "selected-idle-session",
+      "mockup": false,
+      "steps": [
+        [
+          "click",
+          "text:Fixture 3"
+        ],
+        [
+          "hover",
+          "text:Recently active"
+        ],
+        [
+          "terminal-text",
+          "--wait",
+          "now holds its idle screen"
+        ]
+      ]
+    },
+    {
+      "id": "app-selected-ended",
+      "title": "The exited Fixture 4 open, its terminal on its last screen",
+      "reference": "selected-ended-session",
+      "mockup": false,
+      "steps": [
+        [
+          "click",
+          "text:Fixture 4"
+        ],
+        [
+          "hover",
+          "text:Recently active"
+        ],
+        [
+          "terminal-text",
+          "--wait",
+          "now holds its exited screen"
+        ]
+      ]
+    },
+    {
+      "id": "app-session-row-menu",
+      "title": "The idle Fixture 3's row menu, opened from its actions button",
+      "reference": "session-row-menu",
+      "mockup": false,
+      "steps": [
+        [
+          "click",
+          "text:Session actions for Fixture 3"
+        ],
+        [
           "wait",
-          "--idle"
+          "--text",
+          "Removes the session and its state"
+        ]
+      ]
+    },
+    {
+      "id": "app-row-delete-confirmation",
+      "title": "Delete chosen from the waiting Fixture 2's row menu: the question asked beside its actions button",
+      "reference": "row-delete-confirmation",
+      "mockup": false,
+      "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Removes the session and its state"
+        ],
+        [
+          "click",
+          "text:Session actions for Fixture 2"
+        ],
+        [
+          "wait",
+          "--text",
+          "Removes the session and its state"
+        ],
+        [
+          "click",
+          "text:Delete"
+        ],
+        [
+          "wait",
+          "--text",
+          "Confirm delete"
+        ]
+      ]
+    },
+    {
+      "id": "app-rename-dialog",
+      "title": "Rename chosen from the idle Fixture 3's row menu (after Cancel on the Delete question): the rename dialog",
+      "reference": "rename-dialog",
+      "mockup": false,
+      "steps": [
+        [
+          "click",
+          "text:Cancel"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Confirm delete"
+        ],
+        [
+          "click",
+          "text:Session actions for Fixture 3"
+        ],
+        [
+          "click",
+          "text:Rename"
+        ],
+        [
+          "wait",
+          "--text",
+          "Rename session"
+        ]
+      ]
+    },
+    {
+      "id": "app-empty-fleet",
+      "title": "The main window over an empty fleet",
+      "reference": "empty-fleet",
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "0"
+      ],
+      "steps": [
+        [
+          "wait",
+          "--text",
+          "No sessions"
         ]
       ]
     }
@@ -299,7 +458,7 @@
     },
     {
       "id": "row-delete-confirmation",
-      "ported": false
+      "ported": true
     },
     {
       "id": "row-replace-confirmation",
@@ -307,7 +466,7 @@
     },
     {
       "id": "rename-dialog",
-      "ported": false
+      "ported": true
     },
     {
       "id": "header-replace-question",

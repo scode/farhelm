@@ -1,5 +1,5 @@
-"""The parts of gui-agent.py that decide what a run may touch: its paths, the app's environment, the seeding request and
-the processes `stop` signals.
+"""The parts of gui-agent.py that decide what a run may touch: its paths, the app's environment, the seeding requests
+and the processes `stop` signals; and the waits scenes rely on (a seeded fleet's statuses, `terminal-text --wait`).
 
 These start no compositor and build nothing; the process tests start only `sleep` and Python children of their own. The
 end-to-end run is the check that the pieces work together (docs/gui-agent.md); these pin the rules that keep a run from
@@ -178,6 +178,77 @@ class SeedTest(unittest.TestCase):
         self.assertEqual(body["cwd"], "/tmp/run/work")
         self.assertEqual(body["command"]["command"], "'/t dir/farhelm-fixtures' fake-agent --script basic")
         self.assertFalse(body["command"]["yolo"])
+
+    def test_fleet_kinds_hold_the_screen_their_status_needs(self):
+        """A scene of a waiting, idle or ended session shows it only if the supervisor reads its screen that way, so
+        each kind runs the replay script with the shape that classifies as it (`ReplayThen`) and its own transcript.
+        Only `waiting` declares Claude, because the generic reading never says waiting, and a declared agent type
+        requires `{farhelm_args}` as one whole word exactly once; the others stay undeclared, without it, since the
+        helm refuses the placeholder on an undeclared command."""
+        for kind, then in gui_agent.REPLAY_THEN.items():
+            transcript = pathlib.Path("/tmp/run/work/fixture-3.txt")
+            body = gui_agent.seed_body(3, pathlib.Path("/tmp/run/work"), "/t dir/fx", kind, transcript)
+            words = body["command"]["command"].split(" ")
+            self.assertEqual(body["title"], "Fixture 3")
+            self.assertIn("--script replay", body["command"]["command"])
+            self.assertEqual(words[words.index("--then") + 1], then)
+            self.assertEqual(words[words.index("--transcript") + 1], str(transcript))
+            self.assertTrue(body["command"]["command"].startswith("'/t dir/fx' "), "the fixture path stays one word")
+            if kind == "waiting":
+                self.assertEqual(body["command"]["agent"], "claude")
+                self.assertEqual(words.count("{farhelm_args}"), 1)
+            else:
+                self.assertIsNone(body["command"]["agent"])
+                self.assertNotIn("{farhelm_args}", body["command"]["command"])
+
+    def test_a_transcript_fits_a_narrow_terminal_and_ends_on_its_kind(self):
+        """The screenshot batch waits for a fleet session's last transcript line and photographs it in a 900-pixel
+        window, whose terminal is about 55 columns wide: a longer line wraps, and the wrap plus the row an exited
+        session's exit line lifts away left only a stray letter on screen (seen in a batch). Specified: more than one
+        line, each under 50 characters, the last `now holds its <kind> screen`."""
+        lines = gui_agent.transcript(4, "exited").splitlines()
+        self.assertGreater(len(lines), 1)
+        self.assertTrue(all(len(line) < 50 for line in lines), lines)
+        self.assertEqual(lines[-1], "now holds its exited screen")
+        self.assertIn("Fixture 4", lines[0])
+
+    def test_a_fleet_lists_known_kinds_only(self):
+        """A typo in a fleet is refused before anything starts, rather than seeding a session that never settles."""
+        self.assertEqual(gui_agent.parse_fleet("running,basic,exited"), ["running", "basic", "exited"])
+        for bad in ("", "running,", "Running", "waiting,ended"):
+            with self.assertRaises(gui_agent.UsageError, msg=bad):
+                gui_agent.parse_fleet(bad)
+
+
+class SettleTest(unittest.TestCase):
+    """`start --fleet` returns only once the helm lists every seeded session at its status, because the scenes that
+    follow photograph those statuses; a session that never gets there fails the start, naming it."""
+
+    def test_the_wait_ends_once_every_target_is_listed_at_its_state(self):
+        """Specified: earlier listings with a session still unclassified (None) or missing keep the wait going; the
+        first listing with every target at its state ends it. A session that is not a target is never waited for."""
+        answers = iter([
+            {"a": None},
+            {"a": "running", "b": "idle", "basic": "idle"},
+            {"a": "waiting", "b": "idle", "basic": "running"},
+        ])
+        reads = []
+
+        def read():
+            reads.append(1)
+            return next(answers)
+
+        gui_agent.wait_for_statuses(read, {"a": "waiting", "b": "idle"}, timeout=10, interval=0)
+        self.assertEqual(len(reads), 3)
+
+    def test_a_session_that_never_settles_fails_the_wait_naming_it(self):
+        """The error names each pending session and the state it was last listed in, `missing` when not listed, so a
+        fixture that no longer reads as its status is found from the message alone."""
+        with self.assertRaises(RuntimeError) as raised:
+            gui_agent.wait_for_statuses(lambda: {"a": "running"}, {"a": "waiting", "b": "exited"}, timeout=0.2,
+                                        interval=0.05)
+        self.assertIn("a=running", str(raised.exception))
+        self.assertIn("b=missing", str(raised.exception))
 
 
 class ProcessIdentityTest(unittest.TestCase):
@@ -429,17 +500,19 @@ class TerminalTextTest(unittest.TestCase):
     """`terminal-text` reads the probe of the terminal that holds focus. With none focused the probe answers null,
     which must fail with a message: printed as is, it would look like a terminal whose screen is empty."""
 
-    def run_with(self, stdout: str, returncode: int = 0) -> tuple[int, str, str]:
-        answer = subprocess.CompletedProcess([], returncode, stdout=stdout, stderr="")
+    def run_with(self, *stdouts: str, args: list[str] | None = None, returncode: int = 0) -> tuple[int, str, str]:
+        """`terminal_text` against a stand-in bridge whose probe answers `stdouts` in turn, the last one from then on;
+        returns the status, stdout and stderr."""
+        answers = [subprocess.CompletedProcess([], returncode, stdout=stdout, stderr="") for stdout in stdouts]
         original = gui_agent.cli
-        gui_agent.cli = lambda *_args, **_kwargs: answer
+        gui_agent.cli = lambda *_args, **_kwargs: answers.pop(0) if len(answers) > 1 else answers[0]
         try:
             import contextlib
             import io
 
             out, err = io.StringIO(), io.StringIO()
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                status = gui_agent.terminal_text(pathlib.Path("/unused"), {})
+                status = gui_agent.terminal_text(pathlib.Path("/unused"), {}, args, interval=0)
         finally:
             gui_agent.cli = original
         return status, out.getvalue(), err.getvalue()
@@ -451,6 +524,21 @@ class TerminalTextTest(unittest.TestCase):
         status, out, err = self.run_with("null\n")
         self.assertEqual((status, out), (1, ""))
         self.assertIn("no terminal holds focus", err)
+
+    def test_wait_asks_again_until_the_text_shows(self):
+        """A just-clicked terminal holds no focus yet, then shows an empty screen, then its program's output; `--wait`
+        rides out both earlier answers and prints the one that has the text. The match is on the decoded JSON string,
+        so text holding a quote matches although the bridge prints it escaped."""
+        status, out, err = self.run_with("null\n", '""\n', '"say \\"hi\\"\\n"\n', args=["--wait", 'say "hi"'])
+        self.assertEqual((status, out, err), (0, '"say \\"hi\\"\\n"\n', ""))
+
+    def test_wait_times_out_saying_what_the_terminal_showed(self):
+        """A terminal that never shows the text fails the wait, and the message carries its last screen, so the
+        failure says whether the program printed something else or nothing at all."""
+        status, out, err = self.run_with('"FAKE-AGENT READY"\n', args=["--wait", "echo:x", "--timeout", "0.1"])
+        self.assertEqual((status, out), (1, ""))
+        self.assertIn("does not show 'echo:x'", err)
+        self.assertIn("FAKE-AGENT READY", err)
 
 
 class CommandLineTest(unittest.TestCase):
