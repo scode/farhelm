@@ -1032,7 +1032,8 @@ fn inline_prompt_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
 }
 
 /// The host-text element over the spoofing corpus, one value per line, then a sentence mixing the app's words with two
-/// host values: every hidden or direction-changing character shows as `<U+XXXX>`.
+/// host values, then one with a monospace host value (a path) beside an ordinary one: every hidden or
+/// direction-changing character shows as `<U+XXXX>`, in either face.
 ///
 /// Only the corpus entries the bundled Latin fonts can draw are pictured: the goldens render with the bundled fonts
 /// alone (so a font installed on the machine cannot change a result), and goldens of fallback fonts are not in scope
@@ -1058,6 +1059,13 @@ fn host_text(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
                 .text(" on ")
                 .host(&host)
                 .text("?"),
+        )
+        .child(
+            HostSentence::new("host-text-mono")
+                .text("Runs ")
+                .mono(&HostText::from_host("/opt/farhelm\u{202E}/bin/farhelm"))
+                .text(" on ")
+                .host(&host),
         )
         .into_any_element()
 }
@@ -1847,7 +1855,7 @@ static SCENES: &[Scene] = &[
     },
     Scene {
         name: "host-text",
-        size: (420., 440.),
+        size: (420., 500.),
         draw: host_text,
         setup: no_setup,
     },

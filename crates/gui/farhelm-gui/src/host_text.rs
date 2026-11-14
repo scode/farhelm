@@ -19,6 +19,11 @@
 //! with host text is built with [`HostSentence`], which keeps every part its own element and exposes the whole to
 //! assistive technology as one label whose name is made of the same escaped parts.
 //!
+//! Typography is separate from trust. A technical host value inside a sentence (a destination, an executable path, a
+//! version) is set in the monospace face with [`HostSentence::mono`], as the old app's `MonoPeer` runs were, and is
+//! escaped, isolated and named exactly as any other host part; only the drawn face differs. Names and host-written
+//! prose keep the surrounding interface face ([`HostSentence::host`]).
+//!
 //! Terminal output is not host text in this sense: it is the remote program's own display (SPEC.md), drawn by the
 //! terminal.
 //!
@@ -26,11 +31,12 @@
 //! [`HostText::from_host`] where it reads the field and draws it with [`element`] (or [`marked`], for a value with some
 //! characters marked) or a [`HostSentence`]; a component that takes host text takes `&HostText` and draws it the same
 //! way, or, for wording that is usually the app's own but may name a host value (a dialog's summary, a prompt's lines),
-//! takes a [`Line`]. A control's hover help that names a host value is a [`HostSentence`] handed to
-//! `HoverHelp::sentence`: the tooltip draws it through this module's element, and the control's accessible description
-//! is the sentence's [`HostSentence::accessible_name`]. Identity labels the user compares (installation ids, which
-//! SPEC.md also wants with their spaces visible) are not built yet; they arrive with the first view that shows one, as
-//! a second presentation here.
+//! takes a [`Line`]. A sentence's technical host values go in with [`HostSentence::mono`] rather than by restyling a
+//! part from outside, so the escaping and isolation stay this module's. A control's hover help that names a host value
+//! is a [`HostSentence`] handed to `HoverHelp::sentence`: the tooltip draws it through this module's element, and the
+//! control's accessible description is the sentence's [`HostSentence::accessible_name`]. Identity labels the user
+//! compares (installation ids, which SPEC.md also wants with their spaces visible) are not built yet; they arrive with
+//! the first view that shows one, as a second presentation here.
 
 use std::fmt;
 use std::ops::Range;
@@ -41,6 +47,8 @@ use gpui::{
     ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement as _, Styled,
     StyledText, Window, div,
 };
+
+use crate::assets;
 
 /// Text a host supplied, as the GUI holds it from the moment it reads it.
 ///
@@ -168,8 +176,10 @@ fn mark_ranges(presentation: &str, mut chosen: Vec<usize>) -> Vec<Range<usize>> 
 enum Part {
     /// The app's own words.
     App(SharedString),
-    /// A host's value.
+    /// A host's value, in the surrounding face.
     Host(HostText),
+    /// A host's value in the monospace face: a [`Part::Host`] in every respect but the face it is drawn in.
+    Mono(HostText),
 }
 
 /// A line that mixes the app's own words with host-supplied text ("Delete «api-refactor» on «build-box»?"), drawn as a
@@ -206,9 +216,20 @@ impl HostSentence {
         self
     }
 
-    /// Append a host's value.
+    /// Append a host's value, drawn in the sentence's own face. For names and host-written prose.
     pub fn host(mut self, text: &HostText) -> Self {
         self.parts.push(Part::Host(text.clone()));
+        self
+    }
+
+    /// Append a technical host value (a destination, a path, a version), drawn in the monospace face, the
+    /// terminal's face, at the sentence's size and color, as the old app set its `MonoPeer` runs in `--font-mono`.
+    ///
+    /// Only the face differs from [`host`](Self::host): the part is the same escaped presentation in a text element of
+    /// its own, so its direction stays isolated, and the accessible name (and so a hover help's description) names it
+    /// escaped exactly as a host part. Equality still tells the two apart, since the sentences draw differently.
+    pub fn mono(mut self, text: &HostText) -> Self {
+        self.parts.push(Part::Mono(text.clone()));
         self
     }
 
@@ -219,7 +240,7 @@ impl HostSentence {
         for part in &self.parts {
             match part {
                 Part::App(words) => name.push_str(words),
-                Part::Host(text) => name.push_str(&text.presentation()),
+                Part::Host(text) | Part::Mono(text) => name.push_str(&text.presentation()),
             }
         }
         name.into()
@@ -243,9 +264,18 @@ impl RenderOnce for HostSentence {
             // dialog summary ran past the dialog's edge and was cut off there, hiding the part that tells two
             // look-alike titles apart. Parts still wrap as whole blocks, since each is its own element.
             .children(self.parts.into_iter().map(|part| -> AnyElement {
-                match part {
-                    Part::App(words) => div().min_w_0().child(words).into_any_element(),
-                    Part::Host(text) => element(&text).min_w_0().into_any_element(),
+                let (text, mono) = match part {
+                    Part::App(words) => return div().min_w_0().child(words).into_any_element(),
+                    Part::Host(text) => (text, false),
+                    Part::Mono(text) => (text, true),
+                };
+                // One wrapper for every host part, whatever its face, so the escaping element and the wrap fix above
+                // cannot be dropped from one kind of host part and kept on the other.
+                let drawn = element(&text).min_w_0();
+                if mono {
+                    drawn.font_family(assets::TERMINAL_FONT).into_any_element()
+                } else {
+                    drawn.into_any_element()
                 }
             }))
     }
@@ -461,6 +491,165 @@ pub(crate) mod tests {
             parts.iter().all(|&index| nodes[index].role.is_none()),
             "a part of the sentence has a role of its own"
         );
+    }
+
+    /// The index of the node drawn under `id` in a frame's driver record, and every line of text painted by it or by
+    /// any node inside it, at any depth: a part's text is painted by the text element inside the part, never by the
+    /// sentence's own node. Panics when nothing was drawn under `id`.
+    fn painted(nodes: &[gpui::DriverNode], id: &str) -> (usize, Vec<gpui::DriverText>) {
+        let Some(top) = nodes
+            .iter()
+            .position(|node| node.element_id.as_deref() == Some(id))
+        else {
+            panic!("{id} was not drawn");
+        };
+        let inside = |mut index: usize| loop {
+            if index == top {
+                return true;
+            }
+            match nodes[index].parent {
+                Some(parent) => index = parent,
+                None => return false,
+            }
+        };
+        let texts = (0..nodes.len())
+            .filter(|&index| inside(index))
+            .flat_map(|index| nodes[index].texts.iter().cloned())
+            .collect();
+        (top, texts)
+    }
+
+    /// Draws each spoofing string twice, once as a host part and once as a monospace part, in sentences `host-<n>` and
+    /// `mono-<n>`.
+    struct MonoCorpusView;
+
+    impl gpui::Render for MonoCorpusView {
+        fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+            div()
+                .flex()
+                .flex_col()
+                .children(
+                    SPOOFING_CORPUS
+                        .iter()
+                        .enumerate()
+                        .flat_map(|(n, (raw, _))| {
+                            let text = HostText::from_host(*raw);
+                            [
+                                HostSentence::new(SharedString::from(format!("host-{n}")))
+                                    .text("At ")
+                                    .host(&text),
+                                HostSentence::new(SharedString::from(format!("mono-{n}")))
+                                    .text("At ")
+                                    .mono(&text),
+                            ]
+                        }),
+                )
+        }
+    }
+
+    /// Why this matters: a monospace part exists only to change the face a technical host value is drawn in. Its
+    /// escaping and direction isolation come from how it is drawn (its escaped presentation as a text element of its
+    /// own), and its accessible name (which is also a hover help's description) from how the sentence is named; a mono
+    /// part that differed from a host part in either would put a path's hidden characters on screen or in a screen
+    /// reader raw.
+    ///
+    /// Specification: with GPUI's driver record on, for every string in the spoofing corpus, the monospace sentence is
+    /// one `Label` node named like the host sentence, the app's words followed by the escaped value, paints the same
+    /// lines of text, and paints the escaped value as a line of its own, apart from the app's words.
+    #[gpui::test]
+    fn a_drawn_mono_part_is_escaped_and_isolated_as_a_host_part(cx: &mut gpui::TestAppContext) {
+        crate::test_support::install(cx);
+        let (_, cx) = cx.add_window_view(|_, _| MonoCorpusView);
+        let nodes = crate::test_support::frame(cx);
+        let drawn = |id: &str| {
+            let (top, texts) = painted(&nodes, id);
+            let lines: Vec<String> = texts.iter().map(|text| text.text.to_string()).collect();
+            (&nodes[top], lines)
+        };
+        for (n, (_, shown)) in SPOOFING_CORPUS.iter().enumerate() {
+            let (host, host_painted) = drawn(&format!("host-{n}"));
+            let (mono, mono_painted) = drawn(&format!("mono-{n}"));
+            assert_eq!(mono.role, Some(Role::Label), "{shown:?}");
+            assert_eq!(mono.label, host.label, "{shown:?}");
+            assert_eq!(mono.label.as_deref(), Some(format!("At {shown}").as_str()));
+            assert_eq!(mono_painted, host_painted, "{shown:?}");
+            assert!(
+                mono_painted.iter().any(|line| line == shown),
+                "{shown:?} was not painted whole as a line of its own: {mono_painted:?}"
+            );
+        }
+    }
+
+    /// Why this matters: the monospace face is the part's whole reason to exist (paths and versions line up and read
+    /// as technical values, as in the old app), and GPUI's test text system gives every character the same width in
+    /// any face, so only the real text system with the bundled fonts can tell which face a part was drawn in.
+    ///
+    /// Specification: laid out with the real text system, a monospace part of eight `i`s and one of eight `M`s are
+    /// both eight advances of the terminal face wide, while the same values as host parts differ in width (the
+    /// premise: the interface face is proportional, so the comparison can tell the faces apart).
+    #[test]
+    fn a_mono_part_is_drawn_in_the_monospace_face() {
+        use gpui::{AppContext as _, px, size};
+
+        let text_system = Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(
+            assets::UI_FONT,
+        ));
+        let mut cx =
+            gpui::HeadlessAppContext::with_asset_source(text_system, Arc::new(assets::Assets));
+        cx.update(crate::bootstrap::install).unwrap();
+        let window = cx
+            .open_window(size(px(800.), px(400.)), |_, cx| cx.new(|_| WidthView))
+            .unwrap();
+        let nodes = cx
+            .update_window(window.into(), |_, window, cx| {
+                window.set_driver_enabled(true);
+                window.draw(cx).clear(cx);
+                window.driver_nodes().to_vec()
+            })
+            .unwrap();
+        let width = |id: &str| {
+            let (_, texts) = painted(&nodes, id);
+            assert_eq!(texts.len(), 1, "{id} paints one line: {texts:?}");
+            f32::from(texts[0].bounds.size.width)
+        };
+        let advance = cx.update(|cx| {
+            let text_system = cx.text_system();
+            let face = text_system.resolve_font(&gpui::font(assets::TERMINAL_FONT));
+            f32::from(text_system.advance(face, px(13.), 'M').unwrap().width)
+        });
+        let (host_narrow, host_wide) = (width("host-narrow"), width("host-wide"));
+        assert!(
+            host_wide - host_narrow > 10.,
+            "premise: the interface face is proportional ({host_narrow} vs {host_wide})"
+        );
+        for id in ["mono-narrow", "mono-wide"] {
+            let drawn = width(id);
+            assert!(
+                (drawn - 8. * advance).abs() < 0.5,
+                "{id} is {drawn} wide, not eight terminal-face advances ({advance} each)"
+            );
+        }
+    }
+
+    /// Draws two values, one narrow and one wide in a proportional face, as host parts and as monospace parts, one
+    /// sentence each, at 13 pixels in the interface face.
+    struct WidthView;
+
+    impl gpui::Render for WidthView {
+        fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+            let narrow = HostText::from_host("iiiiiiii");
+            let wide = HostText::from_host("MMMMMMMM");
+            div()
+                .flex()
+                .flex_col()
+                .items_start()
+                .font_family(assets::UI_FONT)
+                .text_size(gpui::px(13.))
+                .child(HostSentence::new("host-narrow").host(&narrow))
+                .child(HostSentence::new("host-wide").host(&wide))
+                .child(HostSentence::new("mono-narrow").mono(&narrow))
+                .child(HostSentence::new("mono-wide").mono(&wide))
+        }
     }
 
     /// Why this matters: the quick switcher marks the characters a search matched in host values, and the marks are
