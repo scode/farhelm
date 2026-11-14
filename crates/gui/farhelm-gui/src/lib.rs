@@ -12,7 +12,8 @@
 //! - [`focus`]: the focus coordinator, the only code that moves focus (SPEC.md, "Keyboard focus").
 //! - [`layers`]: the layer manager, the one owner of overlays: dialogs, popovers and the tooltip.
 //! - [`prompt`]: the one way to ask a question, frozen at the moment it opens.
-//! - [`actions`]: the app's actions and their keys, declared in one place.
+//! - [`actions`]: the app's actions and their keys, declared in one place, and which keys a focused terminal keeps
+//!   from its program.
 //! - [`host_text`]: host-supplied text, escaped and direction-isolated wherever the GUI shows it.
 //! - [`session`]: the connection to the helm and the resettable UI-session owner (SPEC_impl.md, "One failure path:
 //!   the reset"); [`store`]: the one copy of what the helm pushed, which views read when they draw;
@@ -82,6 +83,8 @@ pub const PORTED_CODE_NOTICES: &str = concat!(
     include_str!("../../farhelm-input-mapping/LICENSE-PORTED"),
 );
 
+#[cfg(test)]
+mod actions_tests;
 #[cfg(test)]
 mod foundation_tests;
 #[cfg(test)]
