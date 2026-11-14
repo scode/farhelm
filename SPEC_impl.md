@@ -503,7 +503,7 @@ press always reaches Farhelm's own key bindings rather than GPUI Kit's.
 
 ### Overlays: the layer manager
 
-Owner: the layer manager. It owns the dialog slot, the popover stack and tooltips.
+Owner: the layer manager. It owns the dialog slot, the popover stack, the pill and tooltips.
 
 Every overlay is anchored to an element, not to coordinates (SPEC.md has no menu opened at a pointer position). Escape
 from a focused terminal goes to its program (SPEC.md); otherwise it closes only the topmost layer, unless a mode SPEC.md
@@ -529,6 +529,19 @@ Enter then presses its main action. Whether a terminal link's destination disclo
 hand-kept list of covering surfaces. Things the user did not start never open a layer over what they are doing (SPEC.md,
 "Keyboard focus").
 
+One feature-supplied element is drawn above every layer without being one: the pill (`layers::show_pill`), for SPEC.md's
+quick-launch sequence pill and its candidate list, which stay in view over the launcher's veil, as the old pill sat
+above the launcher's backdrop, while taking neither focus nor pointer input. It is display only, like the tooltip, which
+is drawn above it: its view has no listener, hover style, cursor, help or focus-tracked control, so GPUI gives it no hit
+area and a press on it is a press on what it covers (the control under it, or a dialog's veil). It opens no layer and is
+not counted by `layers::any_open`, Tab's trap, focus recovery or Escape. It sits centered over an anchor element or
+centered across that element's bottom edge, and goes when its feature hides it, on a reset (`layers::close_all`), and
+when the element is no longer drawn, so the feature anchors it to the element SPEC.md names for the current state (the
+terminal area, or the main area with no session open), best one element drawn under the same key in both states, and
+otherwise shows the pill again on the new anchor when a session opens or closes. A window has one pill slot: showing
+replaces, and hiding takes down only the pill that show returned; `layers::show_pill` says when a second pill would need
+a slot of its own.
+
 Enforced by clippy bans on GPUI's `deferred` and `anchored` outside the layer manager; by `disallowed-types` on GPUI
 Kit's Dialog, Sheet, Popover, HoverCard, PopupMenu, ContextMenu, DropdownMenu, Notification and Tooltip, and its Select,
 Combobox and DatePicker, which draw their dropdowns through `deferred` and `anchored` (dropdowns go through the layer
@@ -536,7 +549,9 @@ manager instead); by `disallowed-methods` on Kit's `open_dialog`, `open_sheet` a
 `.tooltip(..)` methods on Kit controls, and the `context_menu` and `dropdown_menu` extension methods; and by the overlay
 invariant checked after every test step (every open popover's anchor was drawn, and a popover that never takes focus
 does not hold it). The Kit bans apply inside the component layer too: only the layer manager draws overlays. Kit Input's
-built-in right-click menu is disabled, matching today's app, whose release builds have no context menu.
+built-in right-click menu is disabled, matching today's app, whose release builds have no context menu. That a pill's
+view takes no input is held by review: the layer manager cannot see inside it, and its tests show a press passing
+through a view that asks for nothing.
 
 ### Questions: the prompt
 

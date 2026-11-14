@@ -1,6 +1,7 @@
 //! Behavior tests for the layer manager, on GPUI's simulated platform: the modal dialog (its veil, its empty-space
 //! rule, its main action and its dismissal hook), the refusal to open a layer once the user has moved on, subjects
-//! and anchors, popovers and menus, and that the layer stack redraws only the root.
+//! and anchors, popovers and menus, the pill drawn above every layer without being one, and that the layer stack
+//! redraws only the root.
 //!
 //! Each test opens its window through the shared harness ([`crate::test_support::open`]: GPUI Kit's `Root` around a
 //! root view wired as the app's), drives it through simulated keys and clicks, so key bindings resolve as they do in
@@ -21,12 +22,15 @@ use gpui::{
 use crate::cache::{self, Cached};
 use crate::components::{Button, HoverHelp, Role, TextInput, TextInputState, Tier};
 use crate::focus::{self, Mark};
-use crate::layers::{self, Anchor, Dialog, DialogPlacement, Dismissal, LayerId, Popover, Subject};
+use crate::layers::{
+    self, Anchor, Dialog, DialogPlacement, Dismissal, LayerId, Pill, PillId, PillPlacement,
+    Popover, Subject,
+};
 use crate::prompt;
 use crate::render_count;
 use crate::test_support::{
-    Panel, Thing, anchor_element, bounds, button, center, check, click, focused, follow, handle,
-    is_open, keys, open, open_dialog, open_menu, question, redraw,
+    Panel, Thing, anchor_element, bounds, button, center, check, click, focused, follow, frame,
+    handle, is_open, keys, open, open_dialog, open_menu, question, redraw, settle,
 };
 
 // ---- Layers: a dialog is modal --------------------------------------------------------------------------------------
@@ -1550,4 +1554,431 @@ fn arrows_walk_every_menu_item_and_wrap_and_the_pointer_moves_the_same_highlight
         "the page behind the menu took nothing"
     );
     assert_eq!(at(cx), Some(2), "the highlight stayed in the menu");
+}
+
+// ---- The pill --------------------------------------------------------------------------------------------------------
+
+/// A pill's content: a fixed-size box under its own selector, with nothing in it that asks for the pointer or focus, as
+/// [`layers::Pill`] requires of its view.
+struct PillBox {
+    selector: &'static str,
+}
+
+impl Render for PillBox {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let selector = self.selector;
+        div()
+            .debug_selector(move || selector.into())
+            .w(px(120.))
+            .h(px(30.))
+    }
+}
+
+/// Show `view` as a pill on `anchor`, placed as `placement` says, and settle. Returns what [`layers::show_pill`]
+/// returned: the pill's id, or `None` when it does not show.
+fn show_pill_view(
+    cx: &mut VisualTestContext,
+    view: gpui::AnyView,
+    anchor: Anchor,
+    placement: PillPlacement,
+) -> Option<PillId> {
+    let id = cx.update(move |window, cx| {
+        let pill = Pill {
+            view,
+            anchor,
+            placement,
+        };
+        layers::show_pill(pill, window, cx)
+    });
+    settle(cx);
+    id
+}
+
+/// Show a [`PillBox`] drawn under `selector` on `anchor`; see [`show_pill_view`].
+fn show_pill(
+    cx: &mut VisualTestContext,
+    anchor: Anchor,
+    selector: &'static str,
+    placement: PillPlacement,
+) -> Option<PillId> {
+    let view = cx.update(|_, cx| cx.new(|_| PillBox { selector }));
+    show_pill_view(cx, view.into(), anchor, placement)
+}
+
+/// [`show_pill`], for a step whose premise is that the pill shows: panics when it does not.
+fn shown(
+    cx: &mut VisualTestContext,
+    anchor: Anchor,
+    selector: &'static str,
+    placement: PillPlacement,
+) -> PillId {
+    match show_pill(cx, anchor, selector, placement) {
+        Some(id) => id,
+        None => panic!("the premise: the pill {selector} shows"),
+    }
+}
+
+/// Whether the pill `id` shows in the test's window.
+fn pill_shown(cx: &mut VisualTestContext, id: PillId) -> bool {
+    cx.update(|window, cx| layers::pill_shown(id, window, cx))
+}
+
+/// Why this matters: SPEC.md puts the quick-launch sequence pill centered over its area, and at the bottom of the main
+/// area while the launcher is open, so it does not cover the launcher. The feature moves it between the two by showing
+/// it again, so showing must replace rather than add a second pill. The area it sits over resizes with the sidebar
+/// and the window, and the pill must stay centered in the frame that draws the new size, not a frame later. And like a
+/// popover it must not outlive the element it is placed over, where it would be pinned to a place that is gone.
+///
+/// Specified: a pill shown [`PillPlacement::Centered`] on an anchor element has the element's center, and has it again
+/// in the one redraw after the element changes size; one then shown [`PillPlacement::Bottom`] replaces it, centered
+/// across the element with its bottom edge on the element's; once the element is no longer drawn the pill goes, and a
+/// pill shown on that gone element does not show.
+#[gpui::test]
+fn the_pill_sits_centered_over_its_anchor_or_on_its_bottom_edge(cx: &mut TestAppContext) {
+    let area_shown = Rc::new(Cell::new(true));
+    let area_size = Rc::new(Cell::new(gpui::size(px(400.), px(240.))));
+    let anchor_out: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));
+    let (shown_cell, size, out) = (area_shown.clone(), area_size.clone(), anchor_out.clone());
+    let cx = open(cx, move |window, cx| {
+        // Away from the window's corner on both axes, so a pill placed against the window rather than the element is
+        // caught.
+        let page = div().pl(px(30.)).pt(px(10.));
+        if !shown_cell.get() {
+            return page.into_any_element();
+        }
+        let anchor = Anchor::for_element("area-anchor", window, cx);
+        out.replace(Some(anchor.clone()));
+        page.child(
+            div()
+                .relative()
+                .debug_selector(|| "area".into())
+                .w(size.get().width)
+                .h(size.get().height)
+                .child(anchor.track()),
+        )
+        .into_any_element()
+    });
+    let anchor = || anchor_out.borrow().clone().unwrap();
+
+    let first = shown(cx, anchor(), "pill-a", PillPlacement::Centered);
+    let (pill, area) = (bounds(cx, "pill-a"), bounds(cx, "area"));
+    assert_eq!(
+        pill.size,
+        gpui::size(px(120.), px(30.)),
+        "the premise: the pill is drawn at its own size"
+    );
+    assert_eq!(
+        pill.center(),
+        area.center(),
+        "the pill is centered over its anchor: {pill:?} over {area:?}"
+    );
+
+    area_size.set(gpui::size(px(300.), px(180.)));
+    redraw(cx);
+    let (pill, area) = (bounds(cx, "pill-a"), bounds(cx, "area"));
+    assert_eq!(
+        area.size,
+        gpui::size(px(300.), px(180.)),
+        "the premise: the anchor is drawn at its new size"
+    );
+    assert_eq!(
+        pill.center(),
+        area.center(),
+        "in the frame that resized its anchor, the pill is centered over the new size: {pill:?} over {area:?}"
+    );
+
+    let second = shown(cx, anchor(), "pill-b", PillPlacement::Bottom);
+    assert!(
+        cx.debug_bounds("pill-a").is_none() && !pill_shown(cx, first),
+        "showing a pill replaced the one showing"
+    );
+    let (pill, area) = (bounds(cx, "pill-b"), bounds(cx, "area"));
+    assert_eq!(
+        (pill.center().x, pill.bottom()),
+        (area.center().x, area.bottom()),
+        "the pill is centered across its anchor, on its bottom edge: {pill:?} over {area:?}"
+    );
+
+    // One redraw is enough: the frame that no longer draws the anchor releases its state as it ends, and the pill's
+    // removal notifies the stack, whose next frame the same settle draws.
+    let gone = anchor();
+    area_shown.set(false);
+    redraw(cx);
+    assert!(!pill_shown(cx, second), "the pill went with its anchor");
+    assert!(
+        cx.debug_bounds("pill-b").is_none(),
+        "and is no longer drawn"
+    );
+    assert!(
+        show_pill(cx, gone, "pill-c", PillPlacement::Centered).is_none(),
+        "a pill on an anchor that is gone does not show"
+    );
+}
+
+/// Why this matters: SPEC.md says neither the sequence pill nor its list takes focus or pointer input, and the old pill
+/// was `pointer-events: none` over the terminal: a click on it must reach the terminal or control under it (where the
+/// sequence's own rules cancel it), and the keys must stay where the user is. A pill that counted as a layer would
+/// also stop the shortcuts that refuse while anything is open, trap Tab, or swallow Escape.
+///
+/// Specified: showing a pill moves no focus, and it is not an open layer (`any_open`, `focus_layer_open` and `trap`
+/// all say nothing is open); a press on it clicks the control under it, which takes focus as it would without the
+/// pill; Escape leaves the pill showing. With a dialog opened over the page, the pill still shows, a press on it is the
+/// veil's (the page control gets nothing and the dialog stays), and Escape closes the dialog, not the pill, with focus
+/// back on its opener. The harness's focus and overlay invariants are checked after every step.
+#[gpui::test]
+fn a_press_on_the_pill_reaches_what_it_covers_and_the_pill_is_not_a_layer(cx: &mut TestAppContext) {
+    let clicks = Rc::new(Cell::new(0));
+    let anchor_out: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));
+    let controls = Rc::new(RefCell::new(None::<(FocusHandle, FocusHandle)>));
+    let (counted, out, drawn) = (clicks.clone(), anchor_out.clone(), controls.clone());
+    let cx = open(cx, move |window, cx| {
+        let anchor = Anchor::for_element("under-anchor", window, cx);
+        out.replace(Some(anchor.clone()));
+        let Some((page, under)) = drawn.borrow().clone() else {
+            return div().into_any_element();
+        };
+        let counted = counted.clone();
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(40.))
+            .child(button("page", &page))
+            // The control the pill is placed over, big enough that the pill lies inside it.
+            .child(
+                div()
+                    .relative()
+                    .debug_selector(|| "under-box".into())
+                    .w(px(200.))
+                    .h(px(80.))
+                    .flex()
+                    .justify_center()
+                    .child(
+                        button("under", &under)
+                            .on_click(move |_, _, _| counted.set(counted.get() + 1)),
+                    )
+                    .child(anchor.track()),
+            )
+            .into_any_element()
+    });
+    let (page, under) = (handle(cx), handle(cx));
+    controls.replace(Some((page.clone(), under.clone())));
+    redraw(cx);
+    let nothing_open = |cx: &mut VisualTestContext| {
+        cx.update(|window, cx| {
+            !layers::any_open(window, cx)
+                && !layers::focus_layer_open(window, cx)
+                && layers::trap(window, cx).is_none()
+        })
+    };
+    click(cx, "page");
+    assert!(
+        focused(cx, &page),
+        "the premise: the page control holds focus"
+    );
+
+    let anchor = anchor_out.borrow().clone().unwrap();
+    let id = shown(cx, anchor, "pill", PillPlacement::Centered);
+    assert!(focused(cx, &page), "showing the pill moved no focus");
+    assert!(nothing_open(cx), "the pill is not an open layer");
+    let (pill, control) = (bounds(cx, "pill"), bounds(cx, "under"));
+    assert!(
+        control.contains(&pill.center()),
+        "the premise: the pill covers the control ({pill:?} over {control:?})"
+    );
+
+    cx.simulate_click(pill.center(), Modifiers::none());
+    check(cx);
+    assert_eq!(
+        clicks.get(),
+        1,
+        "the press on the pill clicked the control under it"
+    );
+    assert!(
+        focused(cx, &under),
+        "and that control took focus, as without the pill"
+    );
+    keys(cx, "escape");
+    assert!(
+        pill_shown(cx, id),
+        "Escape takes no pill down: it is not a layer"
+    );
+
+    let only = handle(cx);
+    let (dialog, _, _) = open_dialog(cx, vec![("only", only.clone())], &only);
+    assert!(focused(cx, &only), "the premise: the dialog took focus");
+    assert_eq!(
+        bounds(cx, "pill"),
+        pill,
+        "the pill still shows, in its place, with a dialog open"
+    );
+    cx.simulate_click(pill.center(), Modifiers::none());
+    check(cx);
+    assert_eq!(
+        clicks.get(),
+        1,
+        "under a dialog, a press on the pill is the veil's"
+    );
+    assert!(is_open(cx, dialog), "and the dialog stays");
+    keys(cx, "escape");
+    assert!(!is_open(cx, dialog), "Escape closed the dialog");
+    assert!(pill_shown(cx, id), "and not the pill");
+    assert!(
+        focused(cx, &under),
+        "focus went back to the dialog's opener"
+    );
+    assert!(nothing_open(cx));
+}
+
+/// A pill that breaks the [`layers::Pill`] rule on purpose: it blocks and counts every press on it, so a test can tell
+/// whether it is drawn above what it covers. A rule-abiding pill takes no press, so its draw order cannot be seen by
+/// pressing it.
+struct ProbePill {
+    presses: Rc<Cell<u32>>,
+}
+
+impl Render for ProbePill {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let presses = self.presses.clone();
+        div()
+            .id("probe-pill")
+            .debug_selector(|| "probe".into())
+            .w(px(120.))
+            .h(px(30.))
+            .occlude()
+            .on_mouse_down(gpui::MouseButton::Left, move |_, _, _| {
+                presses.set(presses.get() + 1)
+            })
+    }
+}
+
+/// Why this matters: the pill exists so the sequence pill stays in view above the launcher's veil (the old one at
+/// z-index 50 over the launcher's backdrop at 40); drawn under the veil it would be dimmed and, for SPEC.md, missing.
+/// The tooltip goes above it, a choice made here: the old ladder had the two level at z-index 50. A rule-abiding pill shows neither
+/// order to a press, so this test uses a probe that takes presses, and reads the order the frame drew in for the
+/// tooltip, whose card takes no press either.
+///
+/// Specified: with a dialog open, a press on a probe pill over the page reaches the probe, not the dialog's veil; and in
+/// the drawn frame the dialog's layer comes before the probe, and the probe before a tooltip shown over it.
+#[gpui::test]
+fn the_pill_is_drawn_above_every_layer_and_under_the_tooltip(cx: &mut TestAppContext) {
+    let anchor_out: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));
+    let out = anchor_out.clone();
+    let cx = open(cx, move |window, cx| {
+        anchor_element("area", &out, window, cx).into_any_element()
+    });
+    let only = handle(cx);
+    let (dialog, _, _) = open_dialog(cx, vec![("only", only.clone())], &only);
+    let presses = Rc::new(Cell::new(0));
+    let probe = presses.clone();
+    let view = cx.update(move |_, cx| cx.new(|_| ProbePill { presses: probe }));
+    let anchor = anchor_out.borrow().clone().unwrap();
+    if show_pill_view(cx, view.into(), anchor, PillPlacement::Centered).is_none() {
+        panic!("the premise: the probe pill shows");
+    }
+
+    let at = center(cx, "probe");
+    cx.simulate_click(at, Modifiers::none());
+    check(cx);
+    assert_eq!(
+        presses.get(),
+        1,
+        "the press reached the probe pill, drawn above the dialog's veil"
+    );
+    assert!(is_open(cx, dialog), "the premise: the dialog is still open");
+
+    // The tooltip shows after the dialog opened, since a layer opening puts it away.
+    let owner = cx.update(|_, cx| cx.new(|_| layers::TooltipOwner));
+    cx.update(|window, cx| layers::show_tooltip_at(&owner, "Probe help".into(), at, window, cx));
+    settle(cx);
+    // The driver record is filled as elements are prepared, and GPUI prepares deferred draws in priority order, the
+    // same order it paints and hit-tests them, so a lower index is drawn under a higher one.
+    let nodes = frame(cx);
+    let position = |what: &str, found: &dyn Fn(&gpui::DriverNode) -> bool| match nodes
+        .iter()
+        .position(found)
+    {
+        Some(index) => index,
+        None => panic!("the premise: the frame draws {what}"),
+    };
+    let layer = position("the dialog's layer", &|node| {
+        node.element_id.as_deref() == Some("layer-0")
+    });
+    let pill = position("the probe pill", &|node| {
+        node.element_id.as_deref() == Some("probe-pill")
+    });
+    let tooltip = position("the tooltip's text", &|node| {
+        node.texts
+            .iter()
+            .any(|text| text.text.as_ref() == "Probe help")
+    });
+    assert!(
+        layer < pill && pill < tooltip,
+        "drawn bottom to top: the dialog ({layer}), the pill ({pill}), the tooltip ({tooltip})"
+    );
+}
+
+/// Why this matters: the pill's feature takes it down when the sequence ends, and a reset retires the UI session that
+/// feature lives in, so nothing would be left to take it down: SPEC.md has everything from before a reset start over,
+/// and a pill left over the inert window would show a sequence that no longer exists. And a feature hiding its own
+/// pill must not take down a pill shown after it, as no opener closes a layer it did not open.
+///
+/// Specified: [`layers::hide_pill`] takes its pill down, and does nothing to a pill shown after it; so does
+/// [`layers::close_all`], which the UI-session owner calls on every reset (its own tests check that call), with or
+/// without a dialog open.
+#[gpui::test]
+fn hiding_the_pill_or_a_reset_takes_it_down(cx: &mut TestAppContext) {
+    let anchor_out: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));
+    let out = anchor_out.clone();
+    let cx = open(cx, move |window, cx| {
+        anchor_element("area", &out, window, cx).into_any_element()
+    });
+    let anchor = || anchor_out.borrow().clone().unwrap();
+    let hide = |cx: &mut VisualTestContext, id: PillId| {
+        cx.update(move |window, cx| layers::hide_pill(id, window, cx));
+        settle(cx);
+    };
+
+    let first = shown(cx, anchor(), "pill", PillPlacement::Centered);
+    hide(cx, first);
+    assert!(!pill_shown(cx, first), "hiding took the pill down");
+    assert!(
+        cx.debug_bounds("pill").is_none(),
+        "and it is no longer drawn"
+    );
+
+    let replaced = shown(cx, anchor(), "pill-old", PillPlacement::Centered);
+    let current = shown(cx, anchor(), "pill", PillPlacement::Centered);
+    hide(cx, replaced);
+    assert!(
+        pill_shown(cx, current),
+        "hiding a replaced pill left the pill shown after it"
+    );
+    hide(cx, current);
+
+    for with_dialog in [false, true] {
+        let id = shown(cx, anchor(), "pill", PillPlacement::Centered);
+        let dialog = with_dialog.then(|| {
+            let only = handle(cx);
+            open_dialog(cx, vec![("only", only.clone())], &only).0
+        });
+        assert!(
+            pill_shown(cx, id),
+            "the premise: the pill shows (with_dialog: {with_dialog})"
+        );
+        // Deferred to after this update, as the reset runs from the channel's events: `close_all` updates each
+        // window to close its layers, and a window cannot be updated from inside its own update.
+        cx.update(|_, cx| cx.defer(layers::close_all));
+        settle(cx);
+        assert!(!pill_shown(cx, id), "a reset took the pill down");
+        assert!(
+            cx.debug_bounds("pill").is_none(),
+            "and it is no longer drawn"
+        );
+        if let Some(dialog) = dialog {
+            assert!(
+                !is_open(cx, dialog),
+                "the premise: the reset closed the dialog too"
+            );
+        }
+    }
 }
