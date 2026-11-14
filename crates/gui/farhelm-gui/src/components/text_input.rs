@@ -333,6 +333,40 @@ pub enum Vertical {
     Down,
 }
 
+/// One of a text field's own editing commands, for the Mac app's Edit menu (Undo, Redo, Cut, Copy, Paste, Select All,
+/// as the old app's Edit menu had them).
+///
+/// The menu dispatches Kit's own action for each, so a focused field (of every kind this module draws) does exactly
+/// what its keys do. GPUI enables a menu item only while something on the focused element's path handles its action:
+/// with no text field focused, Undo, Redo, Cut, Paste and Select All are disabled. Copy stays enabled everywhere,
+/// because Kit's window root handles it too (it copies Kit's own selected text, of which Farhelm draws none, so there
+/// it does nothing). This is the one way Kit's editing actions leave this module, boxed, so the menu never names a Kit
+/// type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EditCommand {
+    Undo,
+    Redo,
+    Cut,
+    Copy,
+    Paste,
+    SelectAll,
+}
+
+impl EditCommand {
+    /// The action a focused text field handles for this command.
+    pub fn action(self) -> Box<dyn gpui::Action> {
+        use gpui_component::input;
+        match self {
+            Self::Undo => Box::new(input::Undo),
+            Self::Redo => Box::new(input::Redo),
+            Self::Cut => Box::new(input::Cut),
+            Self::Copy => Box::new(input::Copy),
+            Self::Paste => Box::new(input::Paste),
+            Self::SelectAll => Box::new(input::SelectAll),
+        }
+    }
+}
+
 impl TextInput {
     /// An input showing `state`. `label` is its accessible name; `help` its hover help.
     pub fn new(
