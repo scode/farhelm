@@ -1,3 +1,19 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index d0a404d..0eef28a 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -275,6 +275,11 @@ path = "examples/window_shadow.rs"
+ name = "action_macros"
+ path = "tests/action_macros.rs"
+ 
++[[test]]
++name = "driver_record"
++path = "tests/driver_record.rs"
++required-features = ["test-support"]
++
+ [dependencies.accesskit]
+ version = "0.24.0"
+ features = ["enumn"]
 diff --git a/src/app.rs b/src/app.rs
 index 75da2eb..5052bf4 100644
 --- a/src/app.rs
@@ -280,7 +296,7 @@ index 5691782..de563bf 100644
              origin,
              &self.layout.unwrapped_layout,
 diff --git a/src/window.rs b/src/window.rs
-index 4e2e1a7..295e912 100644
+index 4e2e1a7..c795300 100644
 --- a/src/window.rs
 +++ b/src/window.rs
 @@ -68,8 +68,11 @@ use std::{
@@ -358,7 +374,7 @@ index 4e2e1a7..295e912 100644
              #[cfg(any(feature = "inspector", debug_assertions))]
              inspector: None,
              #[cfg(feature = "profiler")]
-@@ -4230,6 +4247,147 @@ impl Window {
+@@ -4230,6 +4247,148 @@ impl Window {
          sorted_indices
      }
  
@@ -444,6 +460,7 @@ index 4e2e1a7..295e912 100644
 +                .map(|value| value.to_string().into()),
 +            disabled: a11y.as_ref().is_some_and(|(_, node)| node.is_disabled()),
 +            toggled: a11y.as_ref().and_then(|(_, node)| node.toggled()),
++            selected: a11y.as_ref().and_then(|(_, node)| node.is_selected()),
 +            flags: DriverFlags::default(),
 +            key_context: None,
 +            focus: None,
@@ -506,7 +523,7 @@ index 4e2e1a7..295e912 100644
      pub(crate) fn prepaint_index(&self) -> PrepaintStateIndex {
          PrepaintStateIndex {
              hitboxes_index: self.next_frame.hitboxes.len(),
-@@ -4238,10 +4396,20 @@ impl Window {
+@@ -4238,10 +4397,20 @@ impl Window {
              dispatch_tree_index: self.next_frame.dispatch_tree.len(),
              accessed_element_states_index: self.next_frame.accessed_element_states.len(),
              line_layout_index: self.text_system.layout_index(),
@@ -527,7 +544,7 @@ index 4e2e1a7..295e912 100644
          self.next_frame.hitboxes.extend(
              self.rendered_frame.hitboxes[range.start.hitboxes_index..range.end.hitboxes_index]
                  .iter()
-@@ -4303,11 +4471,16 @@ impl Window {
+@@ -4303,11 +4472,16 @@ impl Window {
              cursor_styles_index: self.next_frame.cursor_styles.len(),
              accessed_element_states_index: self.next_frame.accessed_element_states.len(),
              tab_handle_index: self.next_frame.tab_stops.paint_index(),
@@ -544,7 +561,7 @@ index 4e2e1a7..295e912 100644
          // Cached elements still exist in the frame even when their paint methods don't run.
          #[cfg(any(test, feature = "test-support"))]
          for (selector, bounds) in &self.rendered_frame.debug_bounds_records
-@@ -5646,6 +5819,10 @@ impl Window {
+@@ -5646,6 +5820,10 @@ impl Window {
      ) {
          self.invalidator.debug_assert_paint();
  
@@ -557,10 +574,10 @@ index 4e2e1a7..295e912 100644
              self.next_frame.input_handlers.push(Some(
 diff --git a/src/window/driver.rs b/src/window/driver.rs
 new file mode 100644
-index 0000000..5d738d5
+index 0000000..1198197
 --- /dev/null
 +++ b/src/window/driver.rs
-@@ -0,0 +1,99 @@
+@@ -0,0 +1,102 @@
 +//! A record of each drawn frame's elements and text, for tools that drive an app from outside it.
 +//!
 +//! Recording is off until [`Window::set_driver_enabled`](crate::Window::set_driver_enabled) turns it on.
@@ -620,6 +637,9 @@ index 0000000..5d738d5
 +    pub disabled: bool,
 +    /// The element's checked state, when it has one.
 +    pub toggled: Option<accesskit::Toggled>,
++    /// The element's selected state, such as a list's selected item: `Some(false)` only when the element says it is
++    /// not selected, `None` when selection does not apply to it.
++    pub selected: Option<bool>,
 +    /// What the element responds to.
 +    pub flags: DriverFlags,
 +    /// The primary entry of the key context the element sets, such as `Editor`.
@@ -659,4 +679,70 @@ index 0000000..5d738d5
 +        };
 +        node
 +    })
++}
+diff --git a/tests/driver_record.rs b/tests/driver_record.rs
+new file mode 100644
+index 0000000..4a02176
+--- /dev/null
++++ b/tests/driver_record.rs
+@@ -0,0 +1,60 @@
++//! The bridge layer's driver record (`src/window/driver.rs`), read the way the automation bridge reads it: enable
++//! recording, let a frame draw, and look at the nodes it recorded.
++
++use gpui::{
++    Context, InteractiveElement as _, IntoElement, ParentElement as _, Render, Role,
++    StatefulInteractiveElement as _, TestAppContext, Window, div,
++};
++
++/// Three list items that differ only in what they say about selection: selected, not selected, and nothing at all.
++struct ListView;
++
++impl Render for ListView {
++    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
++        div()
++            .child(
++                div()
++                    .id("selected")
++                    .role(Role::ListItem)
++                    .aria_selected(true),
++            )
++            .child(
++                div()
++                    .id("unselected")
++                    .role(Role::ListItem)
++                    .aria_selected(false),
++            )
++            .child(div().id("unmarked").role(Role::ListItem))
++    }
++}
++
++/// Why this matters: the driver record is the only place the bridge learns an element's state from, and a list's
++/// selected item (the open session's row in the sidebar) says so only through `aria_selected`, which nothing else in
++/// the record carries. Without the field, a test driving the app cannot tell which row is selected except by its
++/// colors.
++///
++/// Specified: a list item marked selected records `selected: Some(true)`; one marked not selected records
++/// `Some(false)`; one that never calls `aria_selected` records `None`, so "not selected" stays distinct from
++/// "selection does not apply", as AccessKit keeps them.
++#[gpui::test]
++fn a_list_items_selected_state_reaches_the_driver_record(cx: &mut TestAppContext) {
++    let (_, cx) = cx.add_window_view(|_, _| ListView);
++    cx.update(|window, _| window.set_driver_enabled(true));
++    cx.run_until_parked();
++    let nodes = cx.update(|window, _| window.driver_nodes().to_vec());
++    let recorded = |id: &str| {
++        let node = nodes
++            .iter()
++            .find(|node| node.element_id.as_deref() == Some(id));
++        let Some(node) = node else {
++            let ids: Vec<_> = nodes.iter().map(|node| &node.element_id).collect();
++            panic!("no node {id:?} in the recorded frame: {ids:?}");
++        };
++        // The premise: the item recorded its accessibility role, so its accessibility state was read at all.
++        assert_eq!(node.role, Some(Role::ListItem), "{id}'s role");
++        node.selected
++    };
++    assert_eq!(recorded("selected"), Some(true));
++    assert_eq!(recorded("unselected"), Some(false));
++    assert_eq!(recorded("unmarked"), None);
 +}

@@ -1251,8 +1251,8 @@ test-automation bridge that lets an agent drive the running app.
 
 These trees came from a private GPUI prototype of Farhelm, which built and measured them; the changes were ported, not
 re-derived. They are the prototype's trees minus its two measurement-only layers (per-draw CPU attribution and a
-frame-wake counter for one test), plus the change notices below and two layers of Farhelm's own, `frame-source` and
-`no-kde-blur`.
+frame-wake counter for one test), plus the change notices below, two layers of Farhelm's own, `frame-source` and
+`no-kde-blur`, and one addition of Farhelm's to the bridge layer (an element's selected state).
 
 ### What is here
 
@@ -1290,7 +1290,7 @@ retained. So is its small test app (`gpui/testapp/`): the in-app crate inherits 
 
 The GPUI crates and gpui-agent are Apache-2.0 only; each tree keeps its license file (`LICENSE-APACHE`, and
 `gpui-agent/LICENSE`). Apache-2.0 requires modified files to say so, so the last layer, `modified-notices`, puts a
-one-line `Modified for Farhelm` comment at the top of every file an earlier layer changed or added (29 files; the
+one-line `Modified for Farhelm` comment at the top of every file an earlier layer changed or added (32 files; the
 bridge's `gpui/Cargo.lock` is left without one, because cargo rewrites lockfiles), the same marker the terminal crates
 use, so one search finds every modified vendored file. Unlike the terminal crates' patches, these layers do not mark
 each patched spot with a `Farhelm patch` comment: they were carried over from the prototype as they were, and the patch
@@ -1306,17 +1306,17 @@ crates; every one of them declares Apache-2.0, which was checked on 2026-11-13.
 
 Here's what each layer changes and why, in application order. Sizes are `git apply --numstat` added / removed lines.
 
-| Layer                  | Trees (added / removed)                                                        | Why                                                        |
-| ---------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------- |
-| `bridge`               | gpui-pre 411 / 4, gpui-pre-linux 30 / 1, gpui-pre-wgpu 147 / 101               | Hooks the automation bridge reads; window screenshots      |
-| `capture-alpha`        | gpui-pre-wgpu 6 / 1                                                            | Screenshot colors on premultiplied-alpha surfaces          |
-| `gpui-agent`           | gpui-agent 11 / 11, 29 / 11 and a lockfile refresh                             | Build the bridge against these gpui-pre 0.3.12 trees       |
-| `native-key`           | gpui-pre 354 / 11, gpui-pre-linux 89 / 4, gpui-pre-macos 27 / 17               | Physical key identity and the original Shift on key events |
-| `attachment-clipboard` | gpui-pre-linux 159 / 1, gpui-pre-macos 92 / 0                                  | Image-before-text async clipboard reads for paste          |
-| `activation-token`     | gpui-pre 13 / 0, gpui-pre-linux 9 / 0                                          | Activate a window with another client's Wayland token      |
-| `frame-source`         | gpui-pre-macos 10 / 1                                                          | Keep the lower-latency frame source on macOS 14 and later  |
-| `no-kde-blur`          | gpui-pre-linux 4 / 36, gpui-agent 0 / 14                                       | Drop the KDE-blur fallback and its LGPL-bundling crate     |
-| `modified-notices`     | gpui-pre 11, gpui-pre-linux 8, gpui-pre-wgpu 1, gpui-pre-macos 4, gpui-agent 5 | The license's change notices (above)                       |
+| Layer                  | Trees (added / removed)                                                             | Why                                                        |
+| ---------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `bridge`               | gpui-pre 480 / 4, gpui-pre-linux 30 / 1, gpui-pre-wgpu 147 / 101, gpui-agent 22 / 1 | Hooks the automation bridge reads; window screenshots      |
+| `capture-alpha`        | gpui-pre-wgpu 6 / 1                                                                 | Screenshot colors on premultiplied-alpha surfaces          |
+| `gpui-agent`           | gpui-agent 11 / 11, 29 / 11 and a lockfile refresh                                  | Build the bridge against these gpui-pre 0.3.12 trees       |
+| `native-key`           | gpui-pre 354 / 11, gpui-pre-linux 89 / 4, gpui-pre-macos 27 / 17                    | Physical key identity and the original Shift on key events |
+| `attachment-clipboard` | gpui-pre-linux 159 / 1, gpui-pre-macos 92 / 0                                       | Image-before-text async clipboard reads for paste          |
+| `activation-token`     | gpui-pre 13 / 0, gpui-pre-linux 9 / 0                                               | Activate a window with another client's Wayland token      |
+| `frame-source`         | gpui-pre-macos 10 / 1                                                               | Keep the lower-latency frame source on macOS 14 and later  |
+| `no-kde-blur`          | gpui-pre-linux 4 / 36, gpui-agent 0 / 14                                            | Drop the KDE-blur fallback and its LGPL-bundling crate     |
+| `modified-notices`     | gpui-pre 12, gpui-pre-linux 8, gpui-pre-wgpu 1, gpui-pre-macos 4, gpui-agent 7      | The license's change notices (above)                       |
 
 Without the bridge's own patches and the notices, the GPUI changes come to 1,351 added and 177 removed lines, tests
 included.
@@ -1325,9 +1325,13 @@ included.
   targets) while it is enabled, lets its driver answer file panels and edit text inputs, and renders a window's scene to
   an image for screenshots on Wayland and X11 (`render_to_image`, compiled only in test or bench builds, through
   `test-support`, which the bridge's in-app crate turns on). The bridge's upstream publishes these patches only for
-  gpui-pre 0.3.9 and for Zed; these are three-way ports of the 0.3.9 copies. The hooks are compiled into every build,
-  release builds included, but stay inert unless the bridge starts, which needs the GUI's automation feature (never in
-  shipped or devbuild builds) and an explicit launch through its CLI or `GPUI_AGENT=1`.
+  gpui-pre 0.3.9 and for Zed; these are three-way ports of the 0.3.9 copies, plus one addition of Farhelm's: the record
+  also carries an element's selected state (`aria_selected`, which the sidebar's list items set), and the bridge's own
+  patch here (`gpui-agent.patch`, on its protocol, in-app crate and snapshot outline) reports it, as `[selected]` on the
+  selected element's snapshot line and as `selected` in the raw frame record (`gpui-agent tree`). Its test is
+  `tests/driver_record.rs`. The hooks are compiled into every build, release builds included, but stay inert unless the
+  bridge starts, which needs the GUI's automation feature (never in shipped or devbuild builds) and an explicit launch
+  through its CLI or `GPUI_AGENT=1`.
 - **capture-alpha.** Screenshot capture reuses the window's blend pipelines, so its shader must use the surface's
   premultiplied-alpha mode. With straight alpha hard-coded, translucent selection highlights came out opaque. This
   changes capture only, not what is presented on screen.
@@ -1404,6 +1408,7 @@ Work in a scratch directory outside the checkout, holding a copy of `patches/gpu
 git apply --directory=vendor/gpui-pre patches/gpui/bridge/gpui-pre-0.3.12.patch
 git apply --directory=vendor/gpui-pre-linux patches/gpui/bridge/gpui-pre-linux-0.3.12.patch
 git apply --directory=vendor/gpui-pre-wgpu patches/gpui/bridge/gpui-pre-wgpu-0.3.12.patch
+git apply --directory=vendor/gpui-agent patches/gpui/bridge/gpui-agent.patch
 git apply --directory=vendor/gpui-pre-wgpu patches/gpui/capture-alpha/gpui-pre-wgpu-0.3.12.patch
 git apply --directory=vendor/gpui-agent patches/gpui/gpui-agent/gpui-agent-crates-io.patch
 git apply --directory=vendor/gpui-agent patches/gpui/gpui-agent/gpui-agent-gpui-pre-0.3.12.patch
@@ -1430,9 +1435,9 @@ git apply --directory=vendor/gpui-agent patches/gpui/modified-notices/gpui-agent
 - `diff -r vendor/<tree> <checkout>/vendor/<tree>` prints nothing for each of the five trees (for `gpui-agent`, apart
   from a `target/` left by building its CLI in the checkout).
 
-Every layer applies without offsets. The sequence was checked end to end on 2026-11-13, and against the prototype: its
-trees equal these minus the notices, `frame-source` and `no-kde-blur`, with its two measurement layers added back for
-`gpui-pre`.
+Every layer applies without offsets. The sequence was checked end to end on 2026-11-14. On 2026-11-13 it was also
+checked against the prototype: its trees equal these minus the notices, `frame-source`, `no-kde-blur` and the bridge
+layer's selected state (added later), with its two measurement layers added back for `gpui-pre`.
 
 Layers touch overlapping files, so to check one layer by itself with `git apply --reverse --check`, first reverse every
 later layer in a disposable copy.
@@ -1442,8 +1447,10 @@ later layer in a disposable copy.
 Upgrade only as a dedicated change, at a milestone, with GPUI Kit: Kit pins its gpui-pre exactly, so the two move
 together. Unpack the new crates twice, as `a/<name>` (as published) and `b/<name>`, apply each layer to `b` in order
 with `git apply`, and fix rejected hunks by hand; a three-way merge (`git apply -3` inside a scratch git repository
-holding the old pristine, old patched and new pristine trees) does most of it. Regenerate each patch from the scratch
-directory with `git diff --no-index --no-prefix a/<name> b/<name>` after each layer, and the notices layer last. The
+holding the old pristine, old patched and new pristine trees) does most of it. Regenerate each patch after each layer,
+and the notices layer last, with `git diff --no-index --no-prefix a b` run where that tree's copies from before and
+after the layer sit as `a` and `b`, so the patch's paths start at the tree's root as `git apply --directory` expects
+(`git diff --no-index --no-prefix a/<name> b/<name>` puts `<name>/` into every path, and the result does not apply). The
 prototype's bump from 0.3.9 to 0.3.12 took about half an hour and found one silently non-compiling line from a three-way
 merge, so build every tree, on Linux and on a Mac, before trusting the result. Then update the checksums above, the
 version pins in the root `Cargo.toml`, and `THIRD_PARTY_NOTICES.md`.
@@ -1459,11 +1466,11 @@ require newer versions: the `icu_*` crates from 2.3 to 2.4, with `tinystr`, `yok
 
 ### Running their tests
 
-The native-key layer's test of the core, outside the workspace like the terminal crates' tests (minutes, since it builds
-GPUI on its own; `.agents/validation.md` has the recorded form):
+The native-key layer's and the bridge layer's tests of the core, outside the workspace like the terminal crates' tests
+(minutes, since it builds GPUI on its own; `.agents/validation.md` has the recorded form):
 
 ```sh
-cargo test --locked --manifest-path vendor/gpui-pre/Cargo.toml --features test-support --test native_key_metadata
+cargo test --locked --manifest-path vendor/gpui-pre/Cargo.toml --features test-support --test native_key_metadata --test driver_record
 ```
 
 ### Staying out of the workspace's checks

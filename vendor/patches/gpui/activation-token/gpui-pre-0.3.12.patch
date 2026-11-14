@@ -16,10 +16,10 @@ index ff19aff..3148dc2 100644
      fn request_attention(&self) {}
      fn is_active(&self) -> bool;
 diff --git a/src/window.rs b/src/window.rs
-index 2693757..0b388cc 100644
+index e9a7d5c..bb03f03 100644
 --- a/src/window.rs
 +++ b/src/window.rs
-@@ -7117,6 +7117,13 @@ impl Window {
+@@ -7118,6 +7118,13 @@ impl Window {
          self.platform_window.activate();
      }
  

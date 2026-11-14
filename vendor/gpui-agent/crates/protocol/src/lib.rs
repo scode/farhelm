@@ -1,3 +1,4 @@
+// Modified for Farhelm: changed or added by the patch layers in vendor/patches/gpui/ (vendor/README.md, "GPUI").
 //! The messages between the `gpui-agent` command line and the crate inside a GPUI app.
 //!
 //! One JSON object per line over a Unix socket. Coordinates are logical pixels in window space.
@@ -246,6 +247,10 @@ pub struct RawNode {
     /// `checked`, `unchecked` or `mixed`, for elements with a checked state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checked: Option<String>,
+    /// Whether the element is selected, for elements where selection applies, such as a list's
+    /// items: `false` only when the element says it is not selected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected: Option<bool>,
     #[serde(default)]
     pub flags: Flags,
     #[serde(default, skip_serializing_if = "Option::is_none")]
