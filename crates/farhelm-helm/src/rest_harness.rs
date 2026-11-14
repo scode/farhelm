@@ -1137,6 +1137,10 @@ pub(crate) struct FleetBuilder {
     ntfy_client: Option<reqwest::Client>,
     /// How long agent requests wait for approval; `None` is production's.
     approval_wait: Option<std::time::Duration>,
+    /// Refuse requests that need approval as the desktop app's embedded helm
+    /// does while its window has no cards; see
+    /// [`FleetBuilder::window_without_cards`].
+    window_without_cards: bool,
     /// The Tensorlake API behind the helm, when a test points it at a stub
     /// server; `None` keeps every fixture helm's Tensorlake offline.
     tensorlake_api: Option<Arc<dyn crate::tensorlake::api::TensorlakeApi>>,
@@ -1233,6 +1237,7 @@ impl FleetBuilder {
             link_opener: None,
             feedback: None,
             approval_wait: None,
+            window_without_cards: false,
             tensorlake_api: None,
             tensorlake_shell: None,
             sandboxes: None,
@@ -1273,6 +1278,17 @@ impl FleetBuilder {
     /// production nine minutes, so a test can observe the expiry.
     pub(crate) fn approval_wait(mut self, wait: std::time::Duration) -> FleetBuilder {
         self.approval_wait = Some(wait);
+        self
+    }
+
+    /// Build the helm the way the desktop app's embedded helm is built while
+    /// its window has no approval cards: a request that needs approval is
+    /// refused at once, even while a UI holds the seat.
+    /// Every other fixture helm keeps the card path, which is what most
+    /// approval tests exercise. Interim; remove with
+    /// `crate::approvals::Approvals::set_window_without_cards`.
+    pub(crate) fn window_without_cards(mut self) -> FleetBuilder {
+        self.window_without_cards = true;
         self
     }
 
@@ -1402,6 +1418,13 @@ impl FleetBuilder {
             .await
         }
         .expect("start manager");
+        let mut approvals = crate::approvals::Approvals::new(
+            self.approval_wait
+                .unwrap_or(farhelm_proto::approvals::APPROVAL_WAIT),
+        );
+        if self.window_without_cards {
+            approvals.set_window_without_cards();
+        }
         let state = AppState {
             // The only override any fixture makes, and it exists so the
             // feed's own bound can be exhausted through real sockets — see
@@ -1415,10 +1438,7 @@ impl FleetBuilder {
             feedback: self
                 .feedback
                 .unwrap_or_else(crate::feedback::FeedbackForwarder::offline),
-            approvals: crate::approvals::Approvals::new(
-                self.approval_wait
-                    .unwrap_or(farhelm_proto::approvals::APPROVAL_WAIT),
-            ),
+            approvals,
             ..AppState::new(
                 Arc::clone(&manager),
                 self.store.clone(),
