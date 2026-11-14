@@ -9,5 +9,15 @@
 //! local supervisor, then runs the GPUI app.
 
 fn main() -> anyhow::Result<()> {
+    // `--licenses` prints the notices this binary must carry and exits, before anything starts; the binary takes no
+    // other arguments (a launcher may add its own, which are ignored as before).
+    // `args_os`, not `args`: a launch argument that is not valid Unicode must not panic before the app starts.
+    if std::env::args_os()
+        .nth(1)
+        .is_some_and(|arg| arg == "--licenses")
+    {
+        print!("{}", farhelm_desktop::licenses_text());
+        return Ok(());
+    }
     farhelm_desktop::run()
 }

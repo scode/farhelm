@@ -598,9 +598,18 @@ Zed's keymap and settings JSON. Code adapted from a permissive source carries a 
 
 Every binary that contains (links) code ported or derived from another project carries that project's license notice,
 however small the part. `farhelm` embeds the notices for the supervisor's xterm.js port and the vendored terminal
-emulator's Unicode-derived tables and prints them with `farhelm licenses`. When the desktop app first links the GUI
-crates' ports (`crates/gui/farhelm-grid-model` and `crates/gui/farhelm-input-mapping`, each with its `LICENSE-PORTED`),
-the same change embeds their notices and makes the app show them to the user.
+emulator's Unicode-derived tables and prints them with `farhelm licenses`; the desktop app links both through the
+supervisor it embeds and prints them with `farhelm-desktop --licenses`. When the desktop app first links the GUI crates'
+ports (`crates/gui/farhelm-grid-model` and `crates/gui/farhelm-input-mapping`, each with its `LICENSE-PORTED`), the same
+change embeds their notices and makes the app show them to the user.
+
+The license notices of every third-party crate the shipped binaries link are generated from `Cargo.lock` into
+`crates/farhelm/notices/dependencies.txt` by `scripts/dependency-notices.py` (a pinned cargo-about), checked in, and
+printed by `farhelm licenses` after the ported-code notices and by `farhelm-desktop --licenses`; the ordinary checks
+fail when the file no longer matches the graph, or when a text that must carry its copyright line carries a template
+placeholder instead. The desktop app shows the same notices, with the license of the fonts it embeds, in an "Open-Source
+Notices" window opened from its app menu (decision D-25); until that window exists, `farhelm-desktop --licenses` is the
+interim surface.
 
 Enforced by cargo-deny: a license allowlist (no GPL, AGPL or LGPL) and a sources section that denies every git source,
 because cargo-deny cannot check a git repository's license. Copying cannot be caught by a tool, so the review gate asks.
