@@ -16,9 +16,10 @@
 //!   what they are doing" is kept.
 //! - **Home.** When nothing holds focus and no layer is open, focus goes home, which SPEC.md's "Where focus rests"
 //!   defines: the selected session's terminal, New when there are no sessions, a stopped session's card when the
-//!   selected session has stopped. None of those exists yet, so home is whatever the window's root sets with
-//!   [`set_home`]. Only when none of them is on screen does focus rest on the window's root view, which is not a tab
-//!   stop, so a key press still starts inside Farhelm's key context.
+//!   selected session has stopped. The views that own those set it: [`set_home`] in general, [`choose_terminal`] when
+//!   the user chooses a session (its terminal becomes home and takes focus), and [`replace_home`] when home itself goes
+//!   away (a shell tab exits, and the agent tab takes its place). Only when none of them is on screen does focus rest
+//!   on the window's root view, which is not a tab stop, so a key press still starts inside Farhelm's key context.
 //! - **The dialog stack's trap and restore**, together with the layer manager, which records who opened each layer and
 //!   what was focused at the time. Tab and Shift+Tab stay inside the topmost layer; closing a layer returns focus to
 //!   where it was before it opened; when the focused control disappears inside a dialog or menu, focus moves to the
@@ -27,15 +28,16 @@
 //! - **Which press focuses an element.** Every focusable element is tracked through [`track`], which suppresses GPUI's
 //!   own focus-on-press (GPUI focuses any tracked element on mouse-down, a move no lint could see) and applies the
 //!   coordinator's rule instead: on Linux a click focuses the control it lands on; on macOS it does not, as in WebKit
-//!   there. `track_focus` itself is banned outside this module. This rule and the next were settled for the GPUI
-//!   migration on 2026-11-13: the Mac keeps the old app's behavior, and Linux, where the app is new, follows its
-//!   platform.
+//!   there. `track_focus` itself is banned outside this module. The macOS half is ported from the old app, which ran in
+//!   WebKit; on Linux, where the app is new, a click follows the platform.
 //! - **Which controls Tab reaches** ([`TabReach`]). On macOS, Tab follows the system's Keyboard navigation setting
 //!   exactly as the old app did: with it off, Tab reaches text fields and pop-ups only and skips buttons, and
 //!   Option-Tab reaches every control; with it on, Tab reaches every control. Linux has no such setting, and Tab
 //!   reaches every control there. The desktop binary supplies how to read the setting ([`follow_tab_reach`]), and the
 //!   coordinator reads it on every Tab and Shift+Tab press, as WebKit follows the setting's change at once: the user
-//!   can flip it from the keyboard (Control-F7 by default) without leaving the app.
+//!   can flip it from the keyboard (Control-F7 by default) without leaving the app. The migration's orchestrator
+//!   decided this on 2026-11-13, under the rule that the GPUI app ports the old one rather than redesigning it: the Mac
+//!   keeps the old app's behavior, and Linux follows the GTK and Qt convention.
 //!
 //! NOTE: Agent approval cards, which keep focus while a dialog is open, do not exist yet, so [`invariant_violation`]
 //! knows only the topmost dialog.
@@ -307,6 +309,46 @@ pub fn set_home(home: Option<&FocusHandle>, window: &mut Window, cx: &mut App) {
     };
     state.update(cx, |state, _| state.home = home.map(FocusHandle::downgrade));
     if holds_nothing(window, cx) && !layers::any_open(window, cx) {
+        recover(window, cx);
+    }
+}
+
+/// The user chose a session, so its terminal `terminal` becomes home and takes focus (SPEC.md, "Where focus rests":
+/// "Choosing a session, including the one already selected, focuses its terminal"), taking it from whatever control
+/// holds it, such as the session's row the user clicked.
+///
+/// `chosen` is the mark taken when the user chose. A choice that completes later (the terminal finishing loading, an
+/// open the helm accepts after a reply) passes the mark from the moment of choosing; once the user has moved on since,
+/// the terminal only becomes home, and takes focus only if nothing holds it (SPEC.md: the session filter typed into
+/// meanwhile keeps focus when the terminal arrives). With a layer open the same holds, since focus never leaves the
+/// topmost dialog or menu for the page behind it: a dialog that chose a session (the quick switcher) closes itself
+/// first, or closing it returns focus to its opener rather than to the terminal.
+pub fn choose_terminal(terminal: &FocusHandle, chosen: &Mark, window: &mut Window, cx: &mut App) {
+    let Some(state) = state(window, cx) else {
+        return;
+    };
+    if has_moved_on(chosen, cx) || layers::any_open(window, cx) {
+        set_home(Some(terminal), window, cx);
+        return;
+    }
+    state.update(cx, |state, _| state.home = Some(terminal.downgrade()));
+    apply(Move::To(terminal), window, cx);
+}
+
+/// Home is going away and `next` takes its place: a shell tab exited, and the session's agent tab is home now (SPEC.md,
+/// "Cases that settled disputed points": "A shell tab exits on its own while the user types in it. The session's agent
+/// tab takes focus.").
+///
+/// If the old home held focus, `next` takes it at once (the window's root if `next` is `None`), so typing goes on in
+/// the agent tab whether or not the exited tab is still drawn: focus moves on its own only once its holder is gone from
+/// a drawn frame, and nothing says when the exited tab's view takes it out. Otherwise this is [`set_home`]: a
+/// control that holds focus, such as the session filter, keeps it, and `next` takes focus only once nothing does. Call
+/// it while the old home's focus handle is still alive, or "held focus" cannot be told and only the second rule
+/// applies.
+pub fn replace_home(next: Option<&FocusHandle>, window: &mut Window, cx: &mut App) {
+    let held = home(window, cx).is_some_and(|old| old.contains_focused(window, cx));
+    set_home(next, window, cx);
+    if held && !layers::any_open(window, cx) {
         recover(window, cx);
     }
 }
