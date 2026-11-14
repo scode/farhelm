@@ -28,6 +28,7 @@ use gpui::{
 
 use crate::components::{Button, DialogFrame, HoverHelp, Role, Tier};
 use crate::focus::Mark;
+use crate::host_text::Line;
 use crate::layers::{self, Dialog, LayerId, Subject};
 use crate::theme;
 
@@ -47,8 +48,8 @@ pub struct Answer {
 #[derive(Clone)]
 pub struct Question<T> {
     title: SharedString,
-    summary: Option<SharedString>,
-    lines: Vec<SharedString>,
+    summary: Option<Line>,
+    lines: Vec<Line>,
     confirm: Answer,
     cancel: Answer,
     confirm_enabled: bool,
@@ -77,14 +78,17 @@ impl<T: Clone + 'static> Question<T> {
         }
     }
 
-    /// A one-line summary under the title, usually naming the target.
-    pub fn summary(mut self, summary: impl Into<SharedString>) -> Self {
+    /// A one-line summary under the title, usually naming the target. A target a host named (a session's title, a
+    /// host's name) goes in as a [`HostSentence`](crate::host_text::HostSentence), never as a string made from its raw
+    /// value; the title stays the app's own words, since it is the question's accessible name.
+    pub fn summary(mut self, summary: impl Into<Line>) -> Self {
         self.summary = Some(summary.into());
         self
     }
 
-    /// One line of the body: a consequence or a precondition, as the user should see it.
-    pub fn line(mut self, line: impl Into<SharedString>) -> Self {
+    /// One line of the body: a consequence or a precondition, as the user should see it. Like the summary, a line that
+    /// names a host value is a [`HostSentence`](crate::host_text::HostSentence); each sentence needs an id of its own.
+    pub fn line(mut self, line: impl Into<Line>) -> Self {
         self.lines.push(line.into());
         self
     }
@@ -104,11 +108,13 @@ impl<T: Clone + 'static> Question<T> {
         self
     }
 
-    /// A click on the question's empty space (or its text, decision D-15) keeps focus on the answer in use, instead of
-    /// moving it to the question itself. SPEC.md, "Opening and closing", gives this rule to the session row and header
-    /// Stop, Restart, Replace and Delete questions, which must call this when they are ported: without it a click on
-    /// their empty space focuses the question, and a following Enter presses Confirm. Rename, tab close, the interrupted
-    /// card's Replace question and the host update confirmation do not have the rule yet; those leave it off.
+    /// A click on the question's empty space (or its text, which counts as empty space since labels are not
+    /// selectable, as the GPUI migration's orchestrator decided on 2026-11-13) keeps focus on the answer in use,
+    /// instead of moving it to the question itself. SPEC.md, "Opening and closing", gives this rule to the session row
+    /// and header Stop, Restart, Replace and Delete questions, which must call this when they are ported: without it a
+    /// click on their empty space focuses the question, and a following Enter presses Confirm. Rename, tab close, the
+    /// interrupted card's Replace question and the host update confirmation do not have the rule yet; those leave it
+    /// off.
     pub fn keeps_focus_on_empty_click(mut self) -> Self {
         self.keeps_focus_on_empty_click = true;
         self

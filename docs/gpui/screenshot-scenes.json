@@ -37,6 +37,11 @@
       "reference": "row-delete-confirmation"
     },
     {
+      "golden": "prompt-host-text",
+      "title": "A confirmation whose summary names a host-supplied title, escaped",
+      "reference": "row-delete-confirmation"
+    },
+    {
       "golden": "popover",
       "title": "A menu popover",
       "reference": "session-row-menu"
