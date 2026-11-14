@@ -52,8 +52,8 @@ pub use text_input::{TextInput, TextInputEvent, TextInputState, Vertical};
 use std::rc::Rc;
 
 use gpui::{
-    App, ClickEvent, ElementId, InteractiveElement, SharedString, StatefulInteractiveElement,
-    Window,
+    App, ClickEvent, ElementId, InteractiveElement, KeyDownEvent, SharedString,
+    StatefulInteractiveElement, Window,
 };
 
 use crate::host_text::{HostSentence, Line};
@@ -184,5 +184,95 @@ pub(crate) fn activate_on_enter_or_space<E: InteractiveElement>(
             cx.stop_propagation();
             handler(&ClickEvent::default(), window, cx);
         }
+    })
+}
+
+/// A dialog's main action (the launcher's Launch), which Enter on one of its choice controls runs through
+/// [`enter_choice`].
+pub(crate) type MainAction = Rc<dyn Fn(&mut Window, &mut App)>;
+
+/// The choice controls' Enter rule: with the owner's main action given, a plain Enter on the focused choice applies it
+/// and then runs that action, so a launcher's Enter launches from any of its choices. The segments and chips of a
+/// button group, plain radios, the checkbox and the closed select all go through here, and so do an area's own
+/// controls through [`on_enter_choice`], so they cannot drift apart on it. It is the old launcher's `enter_choice`
+/// (`launch_controls.rs` at reference commit `24bc0580`), which SPEC.md's launcher describes control by control.
+///
+/// `apply` is what the choice under focus means: choosing a segment or a tab. A control that shows a value rather than
+/// a pending choice (a radio, a checkbox, a closed select) passes a no-op, so the action runs with the values shown,
+/// which is what the old launcher did for its YOLO radios, its Resume checkbox and its selects. Space and a click never
+/// come here: they only choose, as before.
+///
+/// `main` runs right after `apply` returns and reads what `apply` wrote, so `apply` must change the owner's state
+/// directly (an entity update, a cell). A choice sent through `window.dispatch_action` runs only after this handler,
+/// since GPUI defers it, and `main` would launch with the previous choice.
+///
+/// It knows nothing of the owner's busy state, which the old `enter_choice` checked: `main` must refuse a run already
+/// in flight itself (the launcher's Launch must ignore an Enter while it is busy). A disabled control takes no keys,
+/// so it never gets here.
+///
+/// Returns whether the key was this rule's. It is not, and the control's own keys decide, when `main` is `None` (no
+/// owner opted in, so Enter keeps each control's own behavior), when the key is not Enter, or when Enter is modified:
+/// a Shift+Enter is not an activation under the shared key rule ([`activate_on_enter_or_space`]), where the old
+/// `enter_choice` ignored modifiers and launched on it.
+///
+/// A held Enter is the rule's too, and it does nothing but stop there: a held key's repeats neither run the action
+/// again nor reach what holds the control (SPEC.md: "A held Enter never launches"). A composing Enter cannot reach
+/// these controls at all, since none of them has an input handler for an input method to compose into.
+pub(crate) fn enter_choice(
+    event: &KeyDownEvent,
+    main: Option<&MainAction>,
+    apply: impl FnOnce(&mut Window, &mut App),
+    window: &mut Window,
+    cx: &mut App,
+) -> bool {
+    let Some(main) = main else {
+        return false;
+    };
+    if event.keystroke.key != "enter" || event.keystroke.modifiers.modified() {
+        return false;
+    }
+    cx.stop_propagation();
+    if !event.is_held {
+        apply(window, cx);
+        main(window, cx);
+    }
+    true
+}
+
+/// Give an area's own choice control the choice controls' Enter rule ([`enter_choice`]): a plain Enter while it has
+/// focus runs `apply` and then `main`, a held Enter does nothing, and a modified Enter or any other key goes on to the
+/// element's other key listeners. It is for the launcher's Agent and Command tabs, which the launcher draws itself
+/// (SPEC_impl.md, "The component layer and theme"); this layer's controls take the rule through their `on_enter`
+/// builders. As with [`enter_choice`], `apply` must write the owner's state directly, because `main` reads it right
+/// after; a choice sent through `window.dispatch_action` would reach `main` too late.
+///
+/// It handles keys only. Pair it with [`activate_on_click`] for the control's click, which ignores the click GPUI makes
+/// from the released Enter; a plain `on_click` would apply the choice a second time on that release. Put it before the
+/// element's own key listener, since GPUI stops at the first listener on an element that takes the key.
+///
+/// ```ignore
+/// let tab = div().id("launch-kind-agent"); // and its focus tracking, role and label
+/// let tab = components::on_enter_choice(
+///     tab,
+///     move |window, cx| choose_tab(LaunchTab::Agent, window, cx),
+///     move |window, cx| launch(window, cx),
+/// )
+/// .on_key_down(move |event, window, cx| tab_strip_arrows(event, window, cx));
+/// ```
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the launcher's tab strip is its first caller; until it is built only the tests call it"
+    )
+)]
+pub(crate) fn on_enter_choice<E: InteractiveElement>(
+    element: E,
+    apply: impl Fn(&mut Window, &mut App) + 'static,
+    main: impl Fn(&mut Window, &mut App) + 'static,
+) -> E {
+    let main: MainAction = Rc::new(main);
+    element.on_key_down(move |event, window, cx| {
+        enter_choice(event, Some(&main), &apply, window, cx);
     })
 }
