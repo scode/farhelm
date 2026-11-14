@@ -74,9 +74,9 @@ Paths are relative to the repository root; a path ending in `/` covers everythin
 ## What is not a foundation
 
 The rest of `crates/gui/farhelm-gui/src/` is area code, owned by the area that builds it and outside this table: the
-session list (`session_list.rs` and `session_list/`) belongs to the sidebar area, the session pane (`session_pane.rs`
-and `session_pane/`) to the session-view area, and the terminal (`terminal.rs` and `terminal/`) to the terminal area.
-The reference PNGs under `crates/gui/farhelm-gui/tests/goldens/` and the screenshot scene list
+session list (`session_list.rs` and `session_list/`) and the session pane (`session_pane.rs` and `session_pane/`) belong
+to the sidebar-and-session-view area, and the terminal (`terminal.rs` and `terminal/`) to the terminal area. The
+reference PNGs under `crates/gui/farhelm-gui/tests/goldens/` and the screenshot scene list
 (`docs/gpui/screenshot-scenes.json`) are outside it too: an area adds its own scenes and references and updates them,
 with no request and no rule from the check.
 
