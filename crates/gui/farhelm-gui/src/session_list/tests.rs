@@ -95,7 +95,7 @@ impl Fixture {
         self
     }
 
-    pub(super) fn entry(&self) -> KeyedEntry {
+    pub(crate) fn entry(&self) -> KeyedEntry {
         let mut entry = session_entry(self.key);
         let value = &mut entry.value;
         value["id"] = json!(self.key);
@@ -142,7 +142,7 @@ pub(crate) fn preferences(history: &[&str], last: Option<&str>) -> CollectionSta
 }
 
 /// A change replacing the sessions collection's metadata with `meta` and upserting `rows`.
-pub(super) fn change(meta: CollectionMeta, rows: &[Fixture], remove: &[&str]) -> CollectionChanges {
+pub(crate) fn change(meta: CollectionMeta, rows: &[Fixture], remove: &[&str]) -> CollectionChanges {
     CollectionChanges {
         collection: Collection::Sessions,
         meta,
@@ -152,7 +152,7 @@ pub(super) fn change(meta: CollectionMeta, rows: &[Fixture], remove: &[&str]) ->
 }
 
 /// `listing(order, rows)`'s metadata alone.
-pub(super) fn listing_meta(order: &[&str], total: u64, truncated: bool) -> CollectionMeta {
+pub(crate) fn listing_meta(order: &[&str], total: u64, truncated: bool) -> CollectionMeta {
     let mut meta = meta(order);
     meta.counts = Some(ListCounts {
         total,
@@ -174,7 +174,7 @@ fn collections(snapshot: Vec<CollectionState>) -> Collections {
 }
 
 /// The real main view over the fake helm, connected with `snapshot`, in an active window, checked once settled.
-pub(super) fn open_main(
+pub(crate) fn open_main(
     cx: &mut TestAppContext,
     snapshot: Vec<CollectionState>,
 ) -> (FakeHelm, &mut VisualTestContext) {
@@ -186,7 +186,7 @@ pub(super) fn open_main(
 }
 
 /// The commands the window sent since the last call, as (path, body).
-pub(super) fn sent(fake: &mut FakeHelm) -> Vec<(String, Value)> {
+pub(crate) fn sent(fake: &mut FakeHelm) -> Vec<(String, Value)> {
     fake.commands()
         .into_iter()
         .map(|command| (command.path, command.body.unwrap_or_default()))
@@ -204,7 +204,7 @@ fn seen(key: &str, activity: i64) -> (String, Value) {
     )
 }
 
-pub(super) fn selected(cx: &mut VisualTestContext) -> Option<String> {
+pub(crate) fn selected(cx: &mut VisualTestContext) -> Option<String> {
     cx.update(|_, cx| local_state::selected(cx))
 }
 

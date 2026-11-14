@@ -3599,12 +3599,14 @@ pub(crate) async fn rename_session(
 ///
 /// What a caller must not assume from the timeout reply: that the work
 /// finished, failed, or did not start. The next command the channel admits
-/// can therefore run while the timed-out one is still going, so a client that
-/// sends the same Replace again after a timeout reuses its intent key, which
-/// is what keeps a second attempt from creating a second replacement. A reply
-/// the work produces after the bound (a Replace's partial-failure words, a
-/// Stop's notice about tabs it could not close) reaches only the log; the
-/// pushed session list still shows what happened to the sessions.
+/// can therefore run while the timed-out one is still going. The desktop app,
+/// these routes' only client, sends no intent keys (a settled decision: the
+/// GUI writes no retry keys), so a Replace the user sends again after a
+/// timed-out one may leave a duplicate replacement. That risk is accepted
+/// rather than guarded here. A reply the work produces after the bound (a
+/// Replace's partial-failure words, a Stop's notice about tabs it could not
+/// close) reaches only the log; the pushed session list still shows what
+/// happened to the sessions.
 ///
 /// Only the HTTP routes are bounded. Every other caller of the shared work
 /// (`do_delete_session`, `do_rename_session`, `do_stop_session`,

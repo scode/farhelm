@@ -26,8 +26,9 @@
 //! terminal's own notices (`session_pane.rs`), reading the same [`in_flight`] and [`progress_label`] the row does and
 //! turning its own [`Spinner`].
 //!
-//! NOTE: The open session's header, whose Delete the shortcut stands for in SPEC.md, is not ported; until it is, the
-//! shortcut asks the row's question.
+//! The open session's header asks its own Delete question (`session_pane/header.rs`), and the Delete shortcut asks it
+//! through the header, from these same functions ([`begin`]): beside the header's Delete button, and even for a session
+//! with nothing alive, as SPEC.md's header Delete does.
 
 use std::f32::consts::TAU;
 
@@ -48,7 +49,7 @@ use crate::host_text::{HostSentence, HostText};
 use crate::operations::{Command, OpKey, Work};
 use crate::prompt::{Answer, Question};
 use crate::theme::{self, metrics};
-use crate::{local_state, session, ticker};
+use crate::{session, ticker};
 
 // ---- What a Delete of a row asks and sends ---------------------------------------------------------------------------
 
@@ -119,9 +120,9 @@ pub(super) fn with_tabs(verb: &str, tabs: usize, agent: &str) -> String {
 /// What a confirmed Delete acts on: the session, by the key the helm files it under, and the guard of the row the
 /// question was drawn from.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct Frozen {
-    pub(super) key: String,
-    pub(super) guard: DeleteGuard,
+pub(crate) struct Frozen {
+    pub(crate) key: String,
+    pub(crate) guard: DeleteGuard,
 }
 
 /// The row's Delete question for `row`, filed under `key`, asked with `guard`: the consequence first, then the title
@@ -164,26 +165,10 @@ pub(super) fn question(key: &str, row: &SessionRow, guard: DeleteGuard) -> Quest
 // ---- Starting a Delete -----------------------------------------------------------------------------------------------
 
 impl SessionList {
-    /// The Delete shortcut (SPEC.md, "Desktop window chrome": Cmd+W on a Mac, Ctrl+Shift+Backspace on Linux): the open
-    /// session's Delete, with the row's confirmation and busy rules. With no session open it does nothing, and while a
-    /// dialog, menu or question is open it does nothing either, since that layer keeps the keyboard. It runs once per
-    /// press (the action is in `actions::ONCE_PER_PRESS`), so its caller must take the key even when this does nothing.
-    pub fn delete_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if crate::layers::any_open(window, cx) {
-            return;
-        }
-        let Some(key) = local_state::selected(cx) else {
-            return;
-        };
-        let mark = Mark::take(cx);
-        self.delete(&key, &mark, window, cx);
-    }
-
-    /// The user asked to delete `key` (its row's Delete, or the shortcut), at `mark`: delete it at once when nothing
-    /// shows alive or confirmations are skipped, and otherwise ask, beside the row's menu button while the row is in
-    /// the list's view and centered when it is not (scrolled away, or not listed). Nothing happens for a session that
-    /// is not listed, or that has any request in flight. Visible to the crate for the screenshot goldens, which ask the
-    /// question without a click.
+    /// The user asked to delete `key` (its row's Delete) at `mark`: delete it at once when nothing shows alive or
+    /// confirmations are skipped, and otherwise ask, beside the row's menu button while the row is in the list's view
+    /// and centered when it is not (scrolled away). Nothing happens for a session that is not listed, or that has any
+    /// request in flight. Visible to the crate for the screenshot goldens, which ask the question without a click.
     pub(crate) fn delete(
         &mut self,
         key: &str,
@@ -194,23 +179,37 @@ impl SessionList {
         let Some(target) = menu::actionable(key, cx) else {
             return;
         };
-        let row = &target.row;
-        let guard = guard(row);
-        if shows_nothing_alive(row) || target.skips_questions {
-            send_delete(key, guard, cx);
-            return;
+        if let Some(ask) = begin(key, &target.row, target.skips_questions, false, cx) {
+            self.ask_about_row(key, ask, mark, confirm, window, cx);
         }
-        self.ask_about_row(
-            key,
-            || question(key, row, guard),
-            mark,
-            |frozen: Frozen, _: &mut Window, cx: &mut App| {
-                send_delete(&frozen.key, frozen.guard, cx)
-            },
-            window,
-            cx,
-        );
     }
+}
+
+/// Start a Delete of `row`, filed under `key`, with Skip session confirmations as `skipped`: the one statement of
+/// Delete's ask-or-send rule, for the row's menu and the open session's header alike. The row's Delete goes ahead
+/// unasked on a session that shows nothing alive; the header's asks even then (SPEC.md: it "asks first in the same
+/// anchored way, even for a session that has ended"), which `ask_when_nothing_alive` says. Skipped questions go ahead
+/// either way. When nothing needs asking, the Delete is sent at once with the guard of `row` as drawn, and there is
+/// nothing to ask. Otherwise nothing is sent, and what comes back builds the question to ask, whose answer goes to
+/// [`confirm`].
+pub(crate) fn begin<'a>(
+    key: &'a str,
+    row: &'a SessionRow,
+    skipped: bool,
+    ask_when_nothing_alive: bool,
+    cx: &mut App,
+) -> Option<impl Fn() -> Question<Frozen> + 'a> {
+    let guard = guard(row);
+    if skipped || (shows_nothing_alive(row) && !ask_when_nothing_alive) {
+        send_delete(key, guard, cx);
+        return None;
+    }
+    Some(move || question(key, row, guard))
+}
+
+/// A Delete question was confirmed: send the Delete it froze.
+pub(crate) fn confirm(frozen: Frozen, _: &mut Window, cx: &mut App) {
+    send_delete(&frozen.key, frozen.guard, cx);
 }
 
 /// The ordinary session Delete, `DELETE /api/sessions/{id}`, with the precondition the user's confirmation covered:
@@ -266,7 +265,7 @@ fn send_delete(key: &str, guard: DeleteGuard, cx: &mut App) {
 /// Whether `key` has any request in flight, whatever its kind: then every lifecycle command of the session (Rename,
 /// Replace, Stop and Delete) is refused ([`super::menu::actionable`]) and its menu draws them unavailable, as SPEC.md's
 /// "a pending request refuses another lifecycle action" asks.
-pub(super) fn busy(key: &str, cx: &App) -> bool {
+pub(crate) fn busy(key: &str, cx: &App) -> bool {
     session::current_operations(cx).is_some_and(|operations| {
         operations
             .read(cx)

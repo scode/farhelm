@@ -17,13 +17,17 @@
 //! button is a tab stop tracked through [`focus::track`], which applies the coordinator's click rule (on Linux a click
 //! focuses it, on macOS it does not, as in WebKit there) in place of GPUI's own focus-on-press.
 //! A disabled button is not a tab stop and takes no focus on a click (SPEC.md: Tab stays within a dialog's "visible,
-//! enabled controls"). A busy button ([`Button::busy`]), whose action is in flight, is different: it keeps focus and
-//! its place in Tab's order and does nothing when pressed, the old app's `aria-disabled` Save, so the control the user
-//! chose stays focused while its work runs (disabling it would drop focus out of the dialog's controls). The
-//! focus ring is the old `:focus-visible` ring (a 2-pixel accent outline one pixel outside the button, shown only after
-//! keyboard input) together with the hover fill, which the old sheet also gave a focused button so a ghost button's box
-//! is visible to a keyboard user. The Settings section list's entries (`Tier::Nav`) are the exception: their old rules
-//! drew the ring alone, one pixel inside the edge, with no focus fill.
+//! enabled controls"). A busy button ([`Button::busy`]) is the old app's `aria-disabled` control, different in that it
+//! keeps focus, its place in Tab's order and its hover help, and does nothing when pressed. The old app used it for
+//! two cases: an action in flight (a Save while the save runs, so the control the user chose stays focused while its
+//! work runs, where disabling it would drop focus out of the dialog's controls), and an action that cannot run for a
+//! reason its hover help explains (the session header's Restart for a session that cannot resume, whose reason must
+//! stay reachable by pointer and keyboard alike).
+//!
+//! The focus ring is the old `:focus-visible` ring (a 2-pixel accent outline one pixel outside the button, shown only
+//! after keyboard input) together with the hover fill, which the old sheet also gave a focused button so a ghost
+//! button's box is visible to a keyboard user. The Settings section list's entries (`Tier::Nav`) are the exception:
+//! their old rules drew the ring alone, one pixel inside the edge, with no focus fill.
 
 use std::rc::Rc;
 
@@ -99,6 +103,14 @@ const NAV_PAD: (f32, f32) = (8., 10.);
 /// The [`Tier::Nav`] label's line height.
 const NAV_LINE_HEIGHT: f32 = 16.;
 
+/// A compact button's padding, vertical then horizontal: `.titlebar-actions .btn`'s `padding: 2px 8px`, the session
+/// header's actions.
+const COMPACT_PAD: (f32, f32) = (2., 8.);
+/// A compact button's gap between its icon and its label: the header's main buttons' `gap: 4px`.
+const COMPACT_GAP: f32 = 4.;
+/// A compact button's icon: `.action-glyph`'s 13 pixels.
+const COMPACT_ICON: f32 = 13.;
+
 /// A button with a visible text label (and optionally a leading icon).
 #[derive(IntoElement)]
 pub struct Button {
@@ -109,11 +121,16 @@ pub struct Button {
     tier: Tier,
     icon: Option<Icon>,
     show_label: bool,
+    /// The accessible name, when it says more than the visible label ([`Button::accessible_name`]).
+    accessible_name: Option<SharedString>,
     disabled: bool,
-    /// Whether the button's action is in flight: drawn as unavailable, ignoring activation, but still focusable.
+    /// Whether the button's action is in flight or cannot run: drawn as unavailable, ignoring activation, but still
+    /// focusable ([`Button::busy`]).
     busy: bool,
     /// Whether the button's action would be refused now: drawn as unavailable, but still pressed ([`Button::refused`]).
     refused: bool,
+    /// The session header's tighter geometry ([`Button::compact`]).
+    compact: bool,
     /// Whether what the button opens is open; `None` for a button that opens nothing.
     expanded: Option<bool>,
     /// Whether the button's choice is the one in force; `None` for a button that is not a choice.
@@ -143,9 +160,11 @@ impl Button {
             tier: Tier::default(),
             icon: None,
             show_label: true,
+            accessible_name: None,
             disabled: false,
             busy: false,
             refused: false,
+            compact: false,
             expanded: None,
             pressed: None,
             content: None,
@@ -172,13 +191,22 @@ impl Button {
         self
     }
 
-    /// A button whose action is in flight (a Save while the save runs): drawn as unavailable (the retired fill for
-    /// primary and danger, the old `aria-disabled` look; the other tiers keep their look and lose only their hover
-    /// fill) and ignoring activation, but, unlike [`Button::disabled`], it stays a tab stop and keeps focus, so the
-    /// button the user pressed is still where focus is when the work settles. A press while busy does nothing at all:
-    /// Enter and Space stop at the button, as they do at an enabled one, instead of going on to whatever holds it. The
-    /// look is applied on the next redraw, so a handler must still keep its own guard for a press that arrives before
-    /// it (Rename's Save checks its draft).
+    /// The old `aria-disabled` button: one whose action is in flight (a Save while the save runs) or cannot run for a
+    /// reason its hover help explains (the session header's Restart for a session that cannot resume). Unlike
+    /// [`Button::disabled`], it stays a tab stop, keeps focus and keeps its hover help, so the button the user pressed
+    /// is still where focus is when the work settles, and a reason stays reachable. It ignores activation: Enter and
+    /// Space stop at the button, as they do at an enabled one, instead of going on to whatever holds it. A busy neutral
+    /// button shows `cursor: not-allowed`, as the old sheet gave the `aria-disabled` header Restart; no other tier
+    /// does, since the old busy Save kept the button's cursor.
+    ///
+    /// Its look by tier: the filled tiers (neutral, chip, primary, danger) take the retired look, the old sheet's
+    /// `--bg-2` fill, `--border-dim` edge and `--fg-2` text; the unfilled ones (ghost, the danger outline, the row's ⋯,
+    /// the banner's, the rail's, the Settings section list's and the link) keep their look and lose only their hover
+    /// fill. GPUI cannot report the state to assistive technology, so a button whose action cannot run should say so in
+    /// its name ([`Button::accessible_name`]).
+    ///
+    /// The look is applied on the next redraw, so a handler must still keep its own guard for a press that arrives
+    /// before it (Rename's Save checks its draft).
     pub fn busy(mut self, busy: bool) -> Self {
         self.busy = busy;
         self
@@ -191,6 +219,21 @@ impl Button {
     /// incomplete attempt says why beside Launch, as does a refused Launch press").
     pub fn refused(mut self, refused: bool) -> Self {
         self.refused = refused;
+        self
+    }
+
+    /// The accessible name, when the visible label alone would leave something out: the session header's Restart shows
+    /// "Restart" but is named for its offer ("Resume conversation", "Restart unavailable"), as the old button's
+    /// `aria-label` was. Without it the label is the name.
+    pub fn accessible_name(mut self, name: impl Into<SharedString>) -> Self {
+        self.accessible_name = Some(name.into());
+        self
+    }
+
+    /// The session header's geometry (`.titlebar-actions .btn`): 2 by 8 pixels of padding, 4 between the icon and the
+    /// label, and a 13-pixel icon, so the header's actions keep their compact height and fit a 650-pixel pane.
+    pub fn compact(mut self) -> Self {
+        self.compact = true;
         self
     }
 
@@ -237,7 +280,7 @@ impl Button {
     }
 
     /// Colors for this tier and state: (fill, hover fill, edge, text). Ghost buttons have no fill or edge at rest.
-    fn colors(&self, palette: &Palette) -> (Option<Token>, Token, Option<Token>, Token) {
+    pub(super) fn colors(&self, palette: &Palette) -> (Option<Token>, Token, Option<Token>, Token) {
         if self.expanded == Some(true) {
             return (
                 Some(palette.accent_fill_hover),
@@ -281,6 +324,7 @@ impl Button {
                 Some(palette.danger_soft),
                 palette.on_fill,
             ),
+            Tier::Neutral | Tier::Chip if self.busy => retired,
             Tier::Neutral | Tier::Chip => (
                 Some(palette.bg_2),
                 palette.control_hover,
@@ -331,6 +375,9 @@ impl RenderOnce for Button {
         let (pad_y, pad_x) = match self.tier {
             Tier::OnBanner => metrics::BANNER_BUTTON_PAD,
             Tier::RowMenu { .. } => (px(0.), px(ROW_MENU_PAD_X)),
+            Tier::Ghost | Tier::Neutral | Tier::Primary | Tier::Danger if self.compact => {
+                (px(COMPACT_PAD.0), px(COMPACT_PAD.1))
+            }
             Tier::Rail | Tier::Link => (px(0.), px(0.)),
             Tier::Chip => (px(CHIP_PAD.0), px(CHIP_PAD.1)),
             Tier::Nav => (px(NAV_PAD.0), px(NAV_PAD.1)),
@@ -362,7 +409,7 @@ impl RenderOnce for Button {
             _ => (pad_y, None),
         };
         let enabled = !self.disabled;
-        // A busy button stays focusable (`enabled`), but nothing it does acts while busy (`active`).
+        // A busy button stays focusable (`enabled`), but nothing it does acts then (`active`).
         let active = enabled && !self.busy;
         let handler = self.on_click.clone().filter(|_| active);
         // A busy button still takes Enter and Space, doing nothing with them, so a press while busy does nothing at
@@ -380,11 +427,15 @@ impl RenderOnce for Button {
             // Tests find a control by its id; this records nothing outside test builds.
             .debug_selector(|| self.id.to_string())
             .role(self.role)
-            .aria_label(self.label.clone())
+            .aria_label(
+                self.accessible_name
+                    .clone()
+                    .unwrap_or_else(|| self.label.clone()),
+            )
             .flex()
             .items_center()
             .justify_center()
-            .gap(px(6.))
+            .gap(px(if self.compact { COMPACT_GAP } else { 6. }))
             .py(pad_y)
             .px(pad_x)
             .when_some(height, |button, height| button.h(height))
@@ -468,6 +519,10 @@ impl RenderOnce for Button {
             button = button
                 .cursor_pointer()
                 .hover(|style| style.bg(theme::color(hover_fill)));
+        } else if enabled && self.busy && self.tier == Tier::Neutral {
+            // The old sheet's `cursor: not-allowed` on the `aria-disabled` header Restart, which still answers the
+            // hover. Only the neutral tier: the old busy Save (a primary) kept the button's cursor.
+            button = button.cursor_not_allowed();
         } else if !enabled
             && matches!(
                 self.tier,
@@ -487,7 +542,7 @@ impl RenderOnce for Button {
             button = button.child(
                 svg()
                     .path(icon.path())
-                    .size(px(14.))
+                    .size(px(if self.compact { COMPACT_ICON } else { 14. }))
                     .text_color(theme::color(text)),
             );
         }
