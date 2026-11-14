@@ -8,9 +8,15 @@ Farhelm no longer has a browser interface. `farhelm helm run` serves no page and
 
 The GUI is being rebuilt as a native desktop app for macOS and Linux, which replaces both the browser interface and the
 old Mac app. The old Mac app's window is already gone: until the new app lands, the desktop app starts its helm and
-local supervisor and opens an empty window. This draft is written while that migration is under way, so builds from the
-development branch in this period have no working GUI, and the entry is revised as the new app lands. Agents and the
-command line keep working as before.
+local supervisor and opens a window that shows no sessions yet. That window does connect to its helm, says when the
+connection is lost or another window has taken over, and offers to take the helm back. This draft is written while that
+migration is under way, so builds from the development branch in this period have no working GUI, and the entry is
+revised as the new app lands. Agents and the command line keep working as before.
+
+Five settings the old app kept per device reset to their defaults when you switch to the new app: the appearance
+(System, Dark or Light), the sidebar width, whether the host rail is open, the status sounds on or off, and the terminal
+text size. The new app will keep them with your other settings in Farhelm itself instead of in the old app's window.
+(Curator: none of the five exists in the new app yet; say "keeps" once they have moved into the helm's preferences.)
 
 The new `farhelm licenses` command prints the license notices for the open-source code Farhelm is built from: the
 crates its binaries depend on, and code it ported from xterm.js or derived from Unicode data, whose notices used to ship

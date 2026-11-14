@@ -67,10 +67,10 @@ devbuilds (`scripts/devbuild-mac.sh` builds with `--release`). Nothing else turn
 
 ## Things to know
 
-- The app's first screen is still empty: the foundations it will draw with are being built (GPUI migration, M1). A
-  snapshot shows the window and little else until the session list lands.
-- Headless Mutter reports the window as inactive forever, so anything that pauses while the window is inactive (the
-  animation ticker, once it exists) needs a test override in these runs (SPEC_impl.md, "GPUI cookbook: traps").
+- The app connects to its embedded helm and shows the connection's states (connecting, another window took over with
+  Take back, the connection-lost notice), but no sessions yet: the session list lands later in the GPUI migration (M1).
+- Headless Mutter reports the window as inactive forever, so agent builds pin the animation ticker's notion of an active
+  window on (SPEC_impl.md, "GPUI cookbook: traps"); otherwise nothing would animate in these runs.
 - `stop` signals only processes it can tie to the run, and only while each is still the process that was recorded (its
   pid and its start time both match): the app as recorded right after launch, the supervisor through the app's record of
   it plus the state directory on its command line, the compositor as recorded when it started. A `start` whose

@@ -1,9 +1,10 @@
-//! Buttons, drawn as the old stylesheet's `.btn` tiers: ghost (the default), neutral, primary and danger.
+//! Buttons, drawn as the old stylesheet's `.btn` tiers: ghost (the default), neutral, primary and danger, plus the
+//! compact control that sits on the red banner.
 //!
 //! A button activates on click, and on Enter or Space while it has keyboard focus (a held key does not repeat it:
 //! SPEC.md, "Repeated or composing Enter cannot answer the new question"). Focus is the focus coordinator's: an enabled
 //! button is a tab stop tracked through [`focus::track`], which applies the coordinator's click rule (on Linux a click
-//! focuses it, on macOS it does not, as in WebKit there; maintainer decision D-2) in place of GPUI's own focus-on-press.
+//! focuses it, on macOS it does not, as in WebKit there) in place of GPUI's own focus-on-press.
 //! A disabled button is not a tab stop and takes no focus on a click (SPEC.md: Tab stays within a dialog's "visible,
 //! enabled controls"). The
 //! focus ring is the old `:focus-visible` ring (a 2-pixel accent outline one pixel outside the button, shown only after
@@ -35,6 +36,10 @@ pub enum Tier {
     Primary,
     /// `.btn-danger`: the solid red fill of a destructive confirmation.
     Danger,
+    /// `.btn.banner-reclaim`: a compact ghost button for the red banner (the old terminal's "Take control"). It has a
+    /// pale red outline and white text so it reads against the banner's fill, a darker red hover, and a white focus
+    /// ring because the accent ring is not calibrated for a red background. Use it only on a red banner.
+    OnBanner,
 }
 
 /// A click handler.
@@ -124,6 +129,12 @@ impl Button {
         );
         match self.tier {
             Tier::Ghost => (None, palette.control_hover, None, palette.fg_1),
+            Tier::OnBanner => (
+                None,
+                palette.danger_fill_hover,
+                Some(palette.danger_soft),
+                palette.on_fill,
+            ),
             Tier::Neutral => (
                 Some(palette.bg_2),
                 palette.control_hover,
@@ -160,7 +171,15 @@ impl RenderOnce for Button {
             )
         });
         let ring = focus::shows_ring(&focus, window);
-        let (pad_y, pad_x) = metrics::BUTTON_PAD;
+        // `.banner-reclaim` overrides `.btn`'s padding to fit inside the banner's 4-pixel band.
+        let (pad_y, pad_x) = match self.tier {
+            Tier::OnBanner => metrics::BANNER_BUTTON_PAD,
+            Tier::Ghost | Tier::Neutral | Tier::Primary | Tier::Danger => metrics::BUTTON_PAD,
+        };
+        let ring_color = match self.tier {
+            Tier::OnBanner => palette.on_fill,
+            Tier::Ghost | Tier::Neutral | Tier::Primary | Tier::Danger => palette.accent,
+        };
         let enabled = !self.disabled;
         let handler = self.on_click.clone().filter(|_| enabled);
         let key_handler = handler.clone();
@@ -200,7 +219,7 @@ impl RenderOnce for Button {
                     .right(px(-3.))
                     .bottom(px(-3.))
                     .border_2()
-                    .border_color(theme::color(palette.accent))
+                    .border_color(theme::color(ring_color))
                     .rounded(metrics::RADIUS_SM + px(3.)),
             );
         }
@@ -208,7 +227,7 @@ impl RenderOnce for Button {
             button = button
                 .cursor_pointer()
                 .hover(|style| style.bg(theme::color(hover_fill)));
-        } else if matches!(self.tier, Tier::Ghost | Tier::Neutral) {
+        } else if matches!(self.tier, Tier::Ghost | Tier::Neutral | Tier::OnBanner) {
             button = button.opacity(0.5);
         }
         if let Some(icon) = self.icon {

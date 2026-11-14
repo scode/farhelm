@@ -212,6 +212,7 @@ mod tests {
         cx.update(|window, cx| {
             layers::show_tooltip(&owner, "What this list is".into(), window, cx)
         });
+        cx.executor().advance_clock(layers::HOVER_DELAY);
         cx.run_until_parked();
         assert!(
             cx.update(|window, cx| layers::shown_tooltip(window, cx))

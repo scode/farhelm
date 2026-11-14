@@ -631,6 +631,71 @@ fn focus_goes_home_when_nothing_holds_it_and_never_takes_it_from_a_control(
     );
 }
 
+/// A button whose own click removes it (the connection-lost banner's Dismiss) hands focus home in a frame of its own,
+/// with nothing else redrawing. GPUI reports the lost focus while it finishes a frame and draws no new one for a focus
+/// move made then, so without the coordinator asking for one the window kept drawing "nothing focused" until some
+/// unrelated redraw: no focus events, and the test bridge reported no focus after Dismiss in the running app. The
+/// focus-in event on home is what tells the drawn frame caught up from the focus merely being recorded.
+#[gpui::test]
+fn a_control_that_removes_itself_on_click_hands_focus_home_in_a_drawn_frame(
+    cx: &mut TestAppContext,
+) {
+    let state = Rc::new(RefCell::new(None::<(FocusHandle, FocusHandle)>));
+    let control_shown = Rc::new(Cell::new(true));
+    let (drawn, shown) = (state.clone(), control_shown.clone());
+    let cx = open(cx, move |_, _| {
+        let Some((home, control)) = drawn.borrow().clone() else {
+            return div().into_any_element();
+        };
+        let hide = shown.clone();
+        div()
+            .flex()
+            .gap(px(8.))
+            .child(focus::track(
+                div()
+                    .relative()
+                    .debug_selector(|| "home".into())
+                    .size(px(40.)),
+                &home,
+                OnPress::Focus,
+            ))
+            .children(shown.get().then(|| {
+                button("dismiss", &control).on_click(move |_, window, _| {
+                    hide.set(false);
+                    window.refresh();
+                })
+            }))
+            .into_any_element()
+    });
+    let (home, control) = (handle(cx), handle(cx));
+    state.replace(Some((home.clone(), control.clone())));
+    redraw(cx);
+    cx.update(|window, cx| focus::set_home(Some(&home), window, cx));
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    redraw(cx);
+    let entered = Rc::new(Cell::new(0));
+    let counted = entered.clone();
+    let _entered = cx.update(|window, cx| {
+        window.on_focus_in(&home, cx, move |_, _| counted.set(counted.get() + 1))
+    });
+    keys(cx, "tab");
+    assert!(focused(cx, &control), "the premise: the button holds focus");
+    entered.set(0);
+
+    click(cx, "dismiss");
+    cx.run_until_parked();
+    assert!(
+        !control_shown.get(),
+        "the premise: the click removed the button"
+    );
+    assert!(focused(cx, &home), "focus went home");
+    assert_eq!(
+        entered.get(),
+        1,
+        "home's focus-in arrived, so a frame was drawn with home focused"
+    );
+}
+
 /// A dialog is modal: a click on the page behind it does nothing, because the veil takes it. And in a dialog SPEC.md
 /// lists as keeping focus (the launcher, the Stop, Restart, Replace and Delete questions), a click on its empty space
 /// keeps focus on the control in use (SPEC.md, "Opening and closing").
@@ -678,8 +743,8 @@ fn the_page_behind_a_dialog_takes_no_clicks_and_empty_space_keeps_focus(cx: &mut
 
 /// A dialog SPEC.md does not list as keeping focus on an empty-space click (Rename, say) moves focus to the dialog
 /// itself on such a click, as a click on a web dialog's background did, and Enter then presses its main action
-/// (SPEC.md, "Opening and closing"; D-15 makes label text count as empty space). The rule is per dialog: the test above
-/// covers a dialog that keeps focus, this one a dialog that does not.
+/// (SPEC.md, "Opening and closing"; label text counts as empty space, since labels are not selectable). The rule is per
+/// dialog: the test above covers a dialog that keeps focus, this one a dialog that does not.
 #[gpui::test]
 fn a_dialog_without_the_rule_takes_focus_on_an_empty_space_click(cx: &mut TestAppContext) {
     let cx = open(cx, |_, _| div().into_any_element());
@@ -733,7 +798,7 @@ fn a_dialog_without_the_rule_takes_focus_on_an_empty_space_click(cx: &mut TestAp
     );
 }
 
-// ---- Which controls Tab reaches (D-2) --------------------------------------------------------------------------------
+// ---- Which controls Tab reaches -------------------------------------------------------------------------------------
 
 /// Make the coordinator follow `reach` for which controls Tab reaches, as the bootstrap does with the host's answer.
 fn follow(cx: &mut VisualTestContext, reach: &Rc<Cell<focus::TabReach>>) {
@@ -748,7 +813,7 @@ fn field_text(cx: &mut VisualTestContext, field: &FieldState) -> Option<String> 
     cx.update(|_, cx| state.map(|state| state.text(cx).to_string()))
 }
 
-/// Decision D-2: on macOS with Keyboard navigation off (the system default), Tab reaches text fields and pop-ups only,
+/// On macOS with Keyboard navigation off (the system default), Tab reaches text fields and pop-ups only,
 /// skipping buttons, and Option-Tab reaches every control; with it on, and on Linux, Tab reaches every control. A
 /// keyboard-only Mac user who never turned the setting on must still get through a form with Tab, and one who turned it
 /// on must reach the buttons; getting either wrong is what this guards.
@@ -869,7 +934,7 @@ fn the_tab_setting_is_read_on_every_press(cx: &mut TestAppContext) {
     );
 }
 
-/// Whether a click focuses a button is the coordinator's platform rule (D-2): it does on Linux, not on macOS. Both rules
+/// Whether a click focuses a button is the coordinator's platform rule: it does on Linux, not on macOS. Both rules
 /// are applied here, whatever platform runs the suite, so the macOS rule (which also proves GPUI's own focus-on-press
 /// is suppressed) is tested on Linux too. A click activates the button either way.
 #[gpui::test]

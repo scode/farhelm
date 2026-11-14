@@ -60,6 +60,11 @@
       "golden": "host-text",
       "title": "Host-supplied text, escaped",
       "reference": null
+    },
+    {
+      "golden": "notice-banner",
+      "title": "The notice banner, its button focused",
+      "reference": "terminal-detached-banner"
     }
   ],
   "reference_scenes": [

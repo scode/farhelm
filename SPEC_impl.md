@@ -344,16 +344,25 @@ existing startup-refusal surface and exits; there is no in-process helm restarte
 
 A reset drops the UI's async owners, not just its data. Transient stores, and their UI-side tasks, subscriptions and
 callbacks, live under one resettable UI-session owner. On reset that owner is dropped and its queued callbacks are
-rejected before the new snapshot is installed. Only the agreed survivors carry over: local preferences (sidebar width,
-theme, window size) and the selected session by id, if it still exists. The survivors (per-device local preferences, the
-selected session id) live in a local store outside the UI-session owner; the store fed by the channel holds only helm
-state. Half-typed drafts do not survive. Work the helm accepted continues independently of the reset.
+rejected before the new snapshot is installed. The one survivor the UI keeps itself is the selected session, by id, if
+the new snapshot still has it; it lives in a small foundation of its own outside the UI-session owner
+(`crates/gui/farhelm-gui/src/local_state.rs`, owned paths in `docs/gpui/foundation-ownership.md`), which is not a
+device-local preferences store and has no room for one. The window itself, its size included, is not part of the UI
+session and is untouched. The settings the old app kept per device (appearance, sidebar width, host rail, status sounds,
+terminal text size) become helm preferences in the new app, so they return with the new snapshot like the rest of the
+helm's state (maintainer decision, 2026-11-13; SPEC.md still calls them per device until the change that moves them).
+The store fed by the channel holds only helm state. Half-typed drafts do not survive, and neither do open dialogs and
+menus: going inert closes every layer through the layer manager (`layers::close_all`). Menus would close anyway with the
+ground they are anchored to, but a dialog closes only when its opener or its subject says so, and one left open would
+keep its veil over the inert window, taking the clicks and Tab presses meant for Take back or Retry. Work the helm
+accepted continues independently of the reset.
 
 What never gets written again on the GUI side: lost-reply reconciliation, retry keys, request fences, outcome-unknown
 reports, and their tests. On the helm side only machinery that existed solely for the old GUI goes; idempotency the
 command line or agents use stays (the launch idempotency keys in `crates/farhelm/src/agent_client.rs`, for example).
 
-Enforced by a test of a completion queued across a reset (it must not reach the new UI session), and by the review gate.
+Enforced by a test of a completion queued across a reset (it must not reach the new UI session), a test that a dialog
+open at a break is closed and Take back still takes a click, and by the review gate.
 
 ### The seat: one UI per helm
 
@@ -406,12 +415,12 @@ those moves are accepted, and the per-step focus invariant covers them.
 
 GPUI also focuses any element that tracks a focus handle when it is pressed, so tracking focus goes through the
 coordinator too (`focus::track`), which applies its own press rule in place of GPUI's. Which controls Tab reaches
-follows the platform (decision D-2): on macOS the system's Keyboard navigation setting, which the desktop binary reads
-and the coordinator asks on every Tab and Shift+Tab press, so a change applies at once (off, the default: Tab reaches
-text fields and pop-ups only and Option-Tab reaches every control; on: Tab reaches every control); on Linux, every
-control. Key presses count toward "the user moved on" where GPUI shows every keystroke before any binding runs: a key a
-binding handles (Farhelm's Tab and Escape, GPUI Kit's editing keys in a text input) never reaches an ordinary key
-listener.
+follows the platform (settled for the GPUI migration on 2026-11-13): on macOS the system's Keyboard navigation setting,
+which the desktop binary reads and the coordinator asks on every Tab and Shift+Tab press, so a change applies at once
+(off, the default: Tab reaches text fields and pop-ups only and Option-Tab reaches every control; on: Tab reaches every
+control); on Linux, every control. Key presses count toward "the user moved on" where GPUI shows every keystroke before
+any binding runs: a key a binding handles (Farhelm's Tab and Escape, GPUI Kit's editing keys in a text input) never
+reaches an ordinary key listener.
 
 Enforced by clippy `disallowed-methods` on GPUI's focus calls and on `track_focus` everywhere in the GUI crates except
 the coordinator, and by the focus invariant that in-process tests check after every step: exactly one focused element,
@@ -617,8 +626,8 @@ The license notices of every third-party crate the shipped binaries link are gen
 printed by `farhelm licenses` after the ported-code notices and by `farhelm-desktop --licenses`; the ordinary checks
 fail when the file no longer matches the graph, or when a text that must carry its copyright line carries a template
 placeholder instead. The desktop app shows the same notices, with the license of the fonts it embeds, in an "Open-Source
-Notices" window opened from its app menu (decision D-25); until that window exists, `farhelm-desktop --licenses` is the
-interim surface.
+Notices" window opened from its app menu (the maintainer's choice, on 2026-11-13); until that window exists,
+`farhelm-desktop --licenses` is the interim surface.
 
 Enforced by cargo-deny: a license allowlist (no GPL, AGPL or LGPL) and a sources section that denies every git source,
 because cargo-deny cannot check a git repository's license. Copying cannot be caught by a tool, so the review gate asks.
@@ -663,6 +672,10 @@ Traps that an earlier rule already prevents get one line pointing at it.
   parent re-renders (zed#66451), a cached view is laid out from its style alone so it needs an explicit size, and
   per-frame paint callbacks are skipped on replay. Rule: flat, explicitly sized cached views behind the wrapper.
 - **`focus()` clears pending keystrokes and refreshes the whole window;** see "Focus: the focus coordinator".
+- **A focus move made in a focus-lost listener draws no frame.** GPUI runs those listeners while it finishes a frame,
+  when a refresh is ignored, so the drawn frame keeps showing nothing focused until something else redraws; found when
+  dismissing this app's own banner left an idle window that way. Rule: the focus coordinator's listener asks for one
+  more frame (`window.defer`).
 - **A focus handle is a Tab stop only when built with `.tab_stop(true)`.** The default blocks Tab.
 - **A virtualized row keeps focus only if registered with `ListState::splice_focusable`.** Otherwise a focused row that
   scrolls out, or is re-spliced, fires focus-lost.
@@ -7792,11 +7805,11 @@ outputs of CSS shrinking, never inputs to this measurement. Terminal output muta
 observers are released when the region leaves the DOM. Sidebar size is an input even at the pane's minimum width, where
 a resize moves the pane without changing its size.
 
-"A GUI is connected" means at least one subscriber to the fleet invalidation feed, which every GUI holds open for its
-whole life and which the cards rely on to appear without a reload. The desktop app's process ends when its window closes
-(dioxus-desktop's default, which Farhelm keeps), so a closed app holds no subscription. A browser whose feed socket
-failed and fell back to polling does not count, and its requests are refused as having no window to ask in; that is the
-accepted cost of not adding a second presence signal.
+"A GUI is connected" means a window holds the helm's UI seat (`gui_connected` in the helm's approvals module reads it;
+see "The seat: one UI per helm"): the seat is what a window holds for its whole connected life, and the UI channel that
+holds it is what pushes the card to it. A displaced window, or one whose channel dropped, has given the seat up, so a
+request then is refused as having no window to ask in rather than waiting on a card nobody can see. The helm's own
+internal subscriptions to the fleet feed never count as a window.
 
 Waiting needs time budgets that outlast the wait. `AgentVerb::may_wait_for_user` names the verbs that can wait (every
 acting verb, no listing); the supervisor's relay gives those an answer budget of its ordinary agent upcall timeout plus

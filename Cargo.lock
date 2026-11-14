@@ -1958,6 +1958,7 @@ dependencies = [
  "dirs 6.0.0",
  "farhelm-gui",
  "farhelm-helm",
+ "farhelm-helm-client",
  "farhelm-proto",
  "farhelm-supervisor",
  "farhelm-teststate",
@@ -2011,6 +2012,7 @@ name = "farhelm-gui"
 version = "0.0.0-unreleased"
 dependencies = [
  "anyhow",
+ "farhelm-helm-client",
  "farhelm-proto",
  "gpui-agent",
  "gpui-base",
