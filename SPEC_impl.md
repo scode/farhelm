@@ -594,10 +594,25 @@ coming. A listed action's handler must take every key that reaches it, even when
 covered: GPUI's key events do not say whether an input method is composing, so refusing a shortcut typed mid-composition
 falls to the element that owns the input handler.
 
+The shortcuts SPEC.md matches by key position rather than printed character (the template number keys, Keyboard
+shortcuts, terminal text size) are rows of one physical-key table in the same module, because a binding matches only the
+logical key. A row names the key's position and its exact modifiers on each platform; the position comes from the key
+event's native identity (an XKB position name on Linux, a virtual keycode on macOS), so a non-US layout's key at the
+same place matches and a keypad digit does not. The same keystroke interceptor matches them before any binding or
+listener: it dispatches the row's action and stops the key, so no terminal program or text field receives it, whether or
+not a feature handles the action yet. A held repeat of a row whose action ignores repeat is stopped without dispatching.
+Only an event with no native identity at all (a key the test bridge injects) is matched by its unshifted US key instead;
+on real hardware such events are input-method text and replayed keystrokes, never these chords. Because the interceptor
+takes these keys before the element that owns the input handler, refusing one typed mid-composition (SPEC.md asks it of
+Keyboard shortcuts) falls to the action's handler, which can ask the focused input whether it is composing.
+
 Enforced by a test that walks the keymap and fails on a chord prefix in any context containing a terminal, by a test
 that every pass-through key reaches the terminal with the app's bindings loaded, and by tests that a held listed
 shortcut runs once, from a focused terminal too and without reaching it, and again on a fresh press, while an unlisted
-key and a deeper binding of a listed chord keep every repeat.
+key and a deeper binding of a listed chord keep every repeat. The physical-key table is enforced by tests on both
+platforms' identities: each row runs from a focused terminal without reaching it, and a held one acts once or on every
+repeat as its action says; a key without an identity falls back to its US key; the position decides on another layout; a
+keypad digit, an extra modifier or a missing one matches nothing; and no row's key types into a text field.
 
 ### Animation time: the ticker
 
