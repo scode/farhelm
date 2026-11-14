@@ -262,8 +262,8 @@ impl AttachedTerminal {
     }
 
     /// The pane's focus handle, for the focus coordinator: the session view passes it to [`focus::choose_terminal`]
-    /// when the user chooses this terminal's session, and to [`focus::set_home`] or [`focus::replace_home`] when it
-    /// becomes or stops being home. Never focus it any other way.
+    /// when the user chooses this terminal's session, and to [`focus::set_home`] when it becomes or stops being home.
+    /// Never focus it any other way.
     pub fn focus_handle(&self) -> &FocusHandle {
         &self.focus
     }

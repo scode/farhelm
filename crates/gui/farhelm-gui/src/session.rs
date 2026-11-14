@@ -276,9 +276,7 @@ impl Subject {
 /// Drop the selected session if the new snapshot proves it gone ([`listing_proves_gone`]); a list that proves nothing
 /// keeps the selection.
 fn keep_survivors(session: &Entity<UiSession>, cx: &mut App) {
-    // Checked rather than assumed, as the notice center and the layer manager do: `global` panics on a missing global.
-    let Some(key) = cx
-        .try_global::<LocalState>()
+    let Some(key) = crate::bootstrap::installed::<LocalState>(cx)
         .and_then(|local| local.selected_session.clone())
     else {
         return;

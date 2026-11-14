@@ -400,8 +400,9 @@ pub fn terminal_key_owner(event: &KeyDownEvent) -> KeyOwner {
     owner_on(THIS_PLATFORM, event)
 }
 
-/// [`terminal_key_owner`] on `platform`, so the Mac's answers can be tested where the suite runs, on Linux.
-pub fn owner_on(platform: Platform, event: &KeyDownEvent) -> KeyOwner {
+/// [`terminal_key_owner`] on `platform`, so the Mac's answers can be tested where the suite runs, on Linux. Crate-only:
+/// the app asks about the platform it runs on, through [`terminal_key_owner`]; only the tests ask about another.
+pub(crate) fn owner_on(platform: Platform, event: &KeyDownEvent) -> KeyOwner {
     let keystroke = &event.keystroke;
     TERMINAL_KEYS
         .iter()

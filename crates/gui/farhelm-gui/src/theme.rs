@@ -26,6 +26,8 @@ use std::rc::Rc;
 use gpui::{App, Global, Hsla, Pixels, Subscription, Window, WindowAppearance, px};
 use gpui_component::{Theme, ThemeConfig, ThemeMode};
 
+use crate::bootstrap::{installed, installed_mut};
+
 /// A color from the theme's tables. The constructors are private, so every color the GUI draws with is one of the
 /// tokens defined in this module; [`color`] turns one into a GPUI color.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -418,22 +420,23 @@ pub fn install(preference: Preference, system: WindowAppearance, cx: &mut App) {
     apply(cx);
 }
 
-/// The palette every view paints with. Before [`install`] (a bare fixture) this is dark, the old app's default look.
+/// The palette every view paints with. Without [`install`] (a bootstrap bug, which fails a debug build) this is dark,
+/// the old app's default look.
 pub fn palette(cx: &App) -> &'static Palette {
-    cx.try_global::<AppTheme>()
+    installed::<AppTheme>(cx)
         .and_then(|theme| theme.applied)
         .unwrap_or(&DARK)
 }
 
 /// Commit a user choice and repaint. Choosing the current value again changes nothing.
 pub fn set_preference(preference: Preference, cx: &mut App) {
-    let Some(theme) = cx.try_global::<AppTheme>() else {
+    let Some(theme) = installed_mut::<AppTheme>(cx) else {
         return;
     };
     if theme.preference == preference {
         return;
     }
-    cx.global_mut::<AppTheme>().preference = preference;
+    theme.preference = preference;
     apply(cx);
     // The control's selected state changes even when the palette does not (System to the mode it already resolved to).
     cx.refresh_windows();
@@ -442,10 +445,10 @@ pub fn set_preference(preference: Preference, cx: &mut App) {
 /// The operating-system seam: production reaches it through [`observe_window`] and the bootstrap; tests call it with
 /// the appearance a platform would report.
 pub fn follow_system(system: WindowAppearance, cx: &mut App) {
-    if !cx.has_global::<AppTheme>() {
+    let Some(theme) = installed_mut::<AppTheme>(cx) else {
         return;
-    }
-    cx.global_mut::<AppTheme>().system = system;
+    };
+    theme.system = system;
     apply(cx);
 }
 
@@ -468,7 +471,8 @@ fn apply(cx: &mut App) {
         return;
     }
     cx.global_mut::<AppTheme>().applied = Some(next);
-    if cx.has_global::<Theme>() {
+    // Kit's theme, which Kit's own init installs ahead of this one in the bootstrap.
+    if installed::<Theme>(cx).is_some() {
         if first {
             let kit = Theme::global_mut(cx);
             kit.dark_theme = Rc::new(kit_config(&DARK));
@@ -600,6 +604,20 @@ mod tests {
                 ThemeMode::Dark,
                 "Kit agrees with the palette"
             );
+        });
+    }
+
+    /// SPEC_impl.md's rule for a missing global: a debug build fails at once, naming it, rather than quietly carrying
+    /// on without it. The palette stands in for every foundation's global, since they all go through the same
+    /// bootstrap lookup. Without this test, that lookup could go back to a silent fallback, the regression the rule
+    /// exists to prevent, and every other test would still pass. A release build only logs, so the test exists only
+    /// where the assertion does.
+    #[cfg(debug_assertions)]
+    #[gpui::test]
+    #[should_panic(expected = "AppTheme is missing")]
+    fn reading_the_palette_before_the_bootstrap_fails_a_debug_build(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            palette(cx);
         });
     }
 }

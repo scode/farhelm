@@ -81,35 +81,65 @@ pub(crate) fn install_app_state(cx: &mut App) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The appearance preference a launch starts with: System, unless an agent run forced one
-/// ([`crate::agent_startup`]). Test builds take this one too, so tests can install overrides; they start at System
-/// unless a test does.
-#[cfg(any(feature = "agent", test))]
+// ---- Reading what the bootstrap installed ----------------------------------------------------------------------------
+
+/// The app-wide state [`install`] put in place as `T`, for a foundation reading its own global: `None` only when the
+/// bootstrap did not install it, which is a bug in the bootstrap or in a test's setup, never a state the app runs in.
+///
+/// GPUI's own `global` panics on a missing global, and on macOS that panic would abort the app inside an AppKit
+/// callback, so a foundation never calls it on its own state. This is the one place that decides what a missing global
+/// does instead: a debug build (every test, and every agent build) fails at once with an assertion naming the global,
+/// so an omission fails the first test that reaches it rather than quietly turning a feature into one that does
+/// nothing; a release build logs an error and the caller carries on without the global, doing what its doc says it
+/// does then.
+///
+/// Not for state that is optional by design (the helm connection, which some tests never start; agent startup
+/// overrides, which only agent builds install; state a module creates on first use): those keep their own lookups.
+pub(crate) fn installed<T: Global>(cx: &App) -> Option<&T> {
+    let global = cx.try_global::<T>();
+    report_if_missing::<T>(global.is_some());
+    global
+}
+
+/// [`installed`], for a foundation that changes its own global.
+pub(crate) fn installed_mut<T: Global>(cx: &mut App) -> Option<&mut T> {
+    let present = cx.has_global::<T>();
+    report_if_missing::<T>(present);
+    if present {
+        Some(cx.global_mut::<T>())
+    } else {
+        None
+    }
+}
+
+/// Report a global the bootstrap should have installed, unless it is `present`: an error in the log always, and a
+/// failed assertion in a debug build.
+fn report_if_missing<T>(present: bool) {
+    let name = std::any::type_name::<T>();
+    if !present {
+        tracing::error!("{name} is missing: the bootstrap did not install it before it was read");
+    }
+    debug_assert!(
+        present,
+        "{name} is missing: the bootstrap did not install it before it was read"
+    );
+}
+
+/// The appearance preference a launch starts with: System, the old app's default, unless an agent run forced one
+/// ([`crate::agent_startup`]). Only agent builds install overrides from the environment, so every other launch starts
+/// at System; a test may install overrides of its own.
 fn starting_preference(cx: &App) -> Preference {
     crate::agent_startup::current(cx)
         .preference
         .unwrap_or(Preference::System)
 }
 
-/// The appearance preference a launch starts with: System, the old app's default.
-#[cfg(not(any(feature = "agent", test)))]
-fn starting_preference(_cx: &App) -> Preference {
-    Preference::System
-}
-
 /// The size a first launch asks for before fitting it to the display: [`DEFAULT_WINDOW_SIZE`], unless an agent run
-/// asked for another ([`crate::agent_startup`]). Test builds take this one too, as with `starting_preference`.
-#[cfg(any(feature = "agent", test))]
+/// asked for another ([`crate::agent_startup`]), as with `starting_preference`.
 fn first_launch_size(cx: &App) -> Size<gpui::Pixels> {
     crate::agent_startup::current(cx)
         .window_size
         .unwrap_or(DEFAULT_WINDOW_SIZE)
-}
-
-/// The size a first launch asks for before fitting it to the display.
-#[cfg(not(any(feature = "agent", test)))]
-fn first_launch_size(_cx: &App) -> Size<gpui::Pixels> {
-    DEFAULT_WINDOW_SIZE
 }
 
 /// The main window's options: title, app identity, minimum size and a first-launch frame centered on the display.

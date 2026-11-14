@@ -1,9 +1,10 @@
 //! Startup overrides for agent builds: the first window's size and a forced appearance, so a screenshot batch can
 //! capture the app light and dark, narrow and wide, without a resize or theme command in the bridge.
 //!
-//! NOTE: Only agent builds (the `agent` feature, which optimized builds refuse) read these values; test builds compile
-//! the rest of this module so ordinary test runs check the parsing and the bootstrap's use of it, but nothing installs
-//! overrides there unless a test does. These are test hooks, not settings: the real appearance choice is the user's
+//! NOTE: Only agent builds (the `agent` feature, which optimized builds refuse) read these values. The rest of this
+//! module is compiled into every build, so that the bootstrap has one way to read the overrides and ordinary test runs
+//! check the parsing and the bootstrap's use of it, but nothing installs overrides outside an agent build unless a test
+//! does. These are test hooks, not settings: the real appearance choice is the user's
 //! preference, which the helm's preferences will hold (the maintainer decided on 2026-11-13 that appearance is a helm
 //! preference, not a per-device one), and the window's real size is its saved frame or the first-launch default.
 //! Nothing here is persisted, and the app never offers it.
@@ -83,7 +84,8 @@ pub fn parse(window_size: Option<&str>, appearance: Option<&str>) -> anyhow::Res
     })
 }
 
-/// The installed overrides, or none when the bootstrap has not installed them (a test fixture, say).
+/// The installed overrides, or none when nothing installed them: every build but an agent build, and a test that did
+/// not install its own. Optional by design, unlike the foundations' globals ([`crate::bootstrap::installed`]).
 pub fn current(cx: &App) -> Overrides {
     cx.try_global::<Overrides>().copied().unwrap_or_default()
 }

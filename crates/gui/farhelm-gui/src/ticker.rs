@@ -30,6 +30,8 @@ use std::time::Duration;
 
 use gpui::{AnyWindowHandle, App, Context, EntityId, Global, Task, Window};
 
+use crate::bootstrap::{installed, installed_mut};
+
 /// The most animation ticks per second any view gets.
 pub const TICKS_PER_SECOND: u32 = 10;
 
@@ -86,7 +88,7 @@ impl Blinking {
     /// because the blink stopped in its hidden half. The view is notified each time this changes, while its window is
     /// active; in an inactive window the answer may change unannounced, so a view there should not draw from it.
     pub fn is_on(&self, cx: &App) -> bool {
-        match cx.try_global::<Ticker>() {
+        match installed::<Ticker>(cx) {
             Some(ticker) if !ticker.reduced_motion => {
                 (ticker.ticks.saturating_sub(self.since) / BLINK_HALF_TICKS).is_multiple_of(2)
             }
@@ -106,21 +108,10 @@ pub fn install(cx: &mut App) {
     cx.set_global(Ticker::default());
 }
 
-/// The installed ticker, or `None` before [`install`] (a bare test fixture): checked first because `global_mut` panics
-/// on a missing global, as the notice center and the layer manager also check. Without a ticker nothing ticks and the
-/// setters change nothing.
-fn installed(cx: &mut App) -> Option<&mut Ticker> {
-    if cx.has_global::<Ticker>() {
-        Some(cx.global_mut::<Ticker>())
-    } else {
-        None
-    }
-}
-
 /// Record the operating system's reduced-motion setting. Under reduced motion views still draw their state, but no
 /// animation ticks are delivered, so nothing moves on its own.
 pub fn set_reduced_motion(reduced: bool, cx: &mut App) {
-    if let Some(ticker) = installed(cx) {
+    if let Some(ticker) = installed_mut::<Ticker>(cx) {
         ticker.reduced_motion = reduced;
     }
 }
@@ -128,7 +119,7 @@ pub fn set_reduced_motion(reduced: bool, cx: &mut App) {
 /// Pin whether windows count as active (`Some`), or follow GPUI again (`None`). For runs where the platform cannot
 /// report activity truthfully: headless Mutter, which reports every window inactive.
 pub fn set_active_override(active: Option<bool>, cx: &mut App) {
-    if let Some(ticker) = installed(cx) {
+    if let Some(ticker) = installed_mut::<Ticker>(cx) {
         ticker.active_override = active;
     }
 }
@@ -137,7 +128,7 @@ pub fn set_active_override(active: Option<bool>, cx: &mut App) {
 /// that draws differently in an inactive window (a terminal's cursor, unfocused there) asks this rather than GPUI, so
 /// it agrees with whether its ticks come.
 pub fn is_active(window: &Window, cx: &App) -> bool {
-    cx.try_global::<Ticker>()
+    installed::<Ticker>(cx)
         .and_then(|ticker| ticker.active_override)
         .unwrap_or_else(|| window.is_window_active())
 }
@@ -166,7 +157,7 @@ pub fn blink<V: 'static>(window: &Window, cx: &mut Context<V>) -> Blinking {
 fn subscribe<V: 'static>(window: &Window, cx: &mut Context<V>, every: u64) -> (Rc<()>, u64) {
     let alive = Rc::new(());
     let view = cx.entity_id();
-    let Some(ticker) = installed(cx) else {
+    let Some(ticker) = installed_mut::<Ticker>(cx) else {
         return (alive, 0);
     };
     let since = ticker.ticks;
@@ -187,7 +178,7 @@ fn subscribe<V: 'static>(window: &Window, cx: &mut Context<V>, every: u64) -> (R
                 }
             }
         });
-        if let Some(ticker) = installed(cx) {
+        if let Some(ticker) = installed_mut::<Ticker>(cx) {
             ticker.tick_loop = Some(task);
         }
     }
@@ -209,7 +200,7 @@ pub fn after(delay: Duration, cx: &mut App, callback: impl FnOnce(&mut App) + 's
 /// should keep running: not once nobody animates, and not under reduced motion.
 fn tick(cx: &mut App) -> bool {
     let (subscribers, override_active) = {
-        let Some(ticker) = installed(cx) else {
+        let Some(ticker) = installed_mut::<Ticker>(cx) else {
             return false;
         };
         ticker

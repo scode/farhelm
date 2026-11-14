@@ -35,6 +35,9 @@ farhelm-input-mapping.workspace = true
 farhelm-proto.workspace = true
 gpui.workspace = true
 gpui-agent = { workspace = true, optional = true }
+# Not used directly. GPUI Kit asks for its base crate as `^0.9.1`, so an exact requirement on it (the root manifest's
+# `=0.9.1`, here and in `crates/gui/lint-demo`) is what keeps an update from moving the base crate on its own while Kit
+# stays pinned.
 gpui-base.workspace = true
 gpui-component.workspace = true
 gpui_platform.workspace = true
