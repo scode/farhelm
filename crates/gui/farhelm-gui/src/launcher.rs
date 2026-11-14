@@ -5,6 +5,7 @@
 //! Built in pieces. So far:
 //!
 //! - [`draft`]: what the launcher holds, and every edit to it, with no GPUI types.
+//! - [`request`]: whether a draft can launch, the one reason it cannot, and the request body it sends.
 //!
 //! The launcher's seams, which the templates-and-quick-launch work plugs into rather than adding a mechanism of its
 //! own:
@@ -19,8 +20,13 @@
 //! - **What a mode holds.** [`draft::LaunchDraft::holds`] is the one presence check for the fields Restart with and
 //!   Replace with hold fixed. The equality rules a template needs beside it (a held value repeated as a no-op) are the
 //!   templates work's to add next to it.
+//! - **One submit path.** [`request`] turns a complete draft into its one request body; a launch started without
+//!   showing the launcher goes through the same check and body.
 
 pub mod draft;
+pub mod request;
 
 #[cfg(test)]
 mod draft_tests;
+#[cfg(test)]
+mod request_tests;
