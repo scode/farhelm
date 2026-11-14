@@ -1,14 +1,15 @@
 //! Tests of the host rail: its entries and their names, the session query a choice sends and how the helm's answer
-//! settles it, the chip, the empty state of a host with no sessions, the placeholder of a removed host, the status of a
-//! host list never read, a reset, the keyboard, Add host and the keyboard's reach below the rail's fold, the foot's
-//! Hosts control and Settings gear, and the rail's width in the sidebar.
+//! settles it, the chip, the empty sentence of a host with no sessions, the placeholder of a removed host, the status
+//! of a host list never read, a reset, the keyboard, Add host and the keyboard's reach below the rail's fold, the
+//! foot's Hosts control and Settings gear, and the rail's width in the sidebar. The query's status dimension, and the
+//! query's bookkeeping as pure functions, are tested in `filters/tests.rs`, which shares these fixtures.
 //!
 //! Like the list's other tests, these run the real main view over the helm client's fake, which hands the test every
 //! command the window sent, and read controls from GPUI's driver record of the frame by their ids (`host-rail-all`,
-//! `host-rail-host-<id>`, `host-filter-chip`). The rules that are pure functions (the choice's bookkeeping, a host's
-//! identity) are tested as such; a host's mark and its tint are tested where they live, in `hosts/identity/tests.rs`.
-//! The one test whose outcome is layout (the rail's width, the list beside it and a caption cut short) uses the real
-//! text system, since the test context's fake one gives every character the same width.
+//! `host-rail-host-<id>`, `host-filter-chip`). The rule that is a pure function (a host's identity) is tested as such;
+//! a host's mark and its tint are tested where they live, in `hosts/identity/tests.rs`. The one test whose outcome is
+//! layout (the rail's width, the list beside it and a caption cut short) uses the real text system, since the test
+//! context's fake one gives every character the same width.
 
 use std::sync::Arc;
 
@@ -25,14 +26,13 @@ use gpui::{
 use gpui_component::Root;
 use serde_json::{Value, json};
 
-use super::{Choice, empty_host, identity, refusal_words};
-use crate::host_text::HostText;
+use super::identity;
 use crate::host_text::tests::SPOOFING_CORPUS;
 use crate::hosts::add::tests::Opened;
 use crate::hosts::identity::LOCAL_NAME;
 use crate::main_view::MainView;
 use crate::session_list::tests::{change, listing, open_main, painted, preferences, session};
-use crate::test_support::{self, focused_id, frame, meta};
+use crate::test_support::{self, any_open, focused_id, frame, meta};
 use crate::{assets, bootstrap, layers};
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
@@ -139,7 +139,7 @@ pub(crate) fn hosts(hosts: &[Host]) -> CollectionState {
 
 /// The fleet most tests use: the local host, an aliased remote whose alias is far too long for the rail's caption, an
 /// unaliased remote, and a container a session owns, in that registry order.
-fn fleet_hosts() -> Vec<Host> {
+pub(crate) fn fleet_hosts() -> Vec<Host> {
     vec![
         local(),
         remote(3, "deploy@builder-east.example.invalid")
@@ -151,7 +151,7 @@ fn fleet_hosts() -> Vec<Host> {
 }
 
 /// A snapshot of two sessions, both open-able, over [`fleet_hosts`].
-fn snapshot() -> Vec<CollectionState> {
+pub(crate) fn snapshot() -> Vec<CollectionState> {
     vec![
         listing(&["a", "b"], &[session("a"), session("b")]),
         preferences(&["a"], None),
@@ -160,7 +160,7 @@ fn snapshot() -> Vec<CollectionState> {
 }
 
 /// The sessions collection's metadata for a host query that matched `matching` of `total` sessions, complete.
-fn filtered(order: &[&str], total: u64, matching: u64) -> CollectionMeta {
+pub(crate) fn filtered(order: &[&str], total: u64, matching: u64) -> CollectionMeta {
     let mut meta = meta(order);
     meta.counts = Some(ListCounts {
         total,
@@ -172,14 +172,14 @@ fn filtered(order: &[&str], total: u64, matching: u64) -> CollectionMeta {
 
 /// Answer, as done, every command the window has sent so far (remembering the selection, a seen mark), so a test's
 /// next look at the fake sees only what its own step sent.
-fn answer_everything(fake: &mut FakeHelm) {
+pub(crate) fn answer_everything(fake: &mut FakeHelm) {
     for command in fake.commands() {
         fake.reply(command.id, 200, None);
     }
 }
 
 /// Every command the window sent since the last look, each checked to be a session query, as (its command, its body).
-fn queries(fake: &mut FakeHelm) -> Vec<(FakeCommand, Value)> {
+pub(crate) fn queries(fake: &mut FakeHelm) -> Vec<(FakeCommand, Value)> {
     fake.commands()
         .into_iter()
         .map(|command| {
@@ -195,14 +195,14 @@ fn queries(fake: &mut FakeHelm) -> Vec<(FakeCommand, Value)> {
 }
 
 /// The one query the window sent since the last look, with its body; fails on none or several.
-fn one_query(fake: &mut FakeHelm) -> (FakeCommand, Value) {
+pub(crate) fn one_query(fake: &mut FakeHelm) -> (FakeCommand, Value) {
     let mut sent = queries(fake);
     assert_eq!(sent.len(), 1, "one query: {sent:?}");
     sent.remove(0)
 }
 
 /// The node drawn under `id` in `nodes`.
-fn node<'a>(nodes: &'a [DriverNode], id: &str) -> Option<&'a DriverNode> {
+pub(crate) fn node<'a>(nodes: &'a [DriverNode], id: &str) -> Option<&'a DriverNode> {
     nodes
         .iter()
         .find(|node| node.element_id.as_deref() == Some(id))
@@ -233,7 +233,7 @@ fn within<'a>(nodes: &'a [DriverNode], id: &str) -> Vec<&'a DriverNode> {
 }
 
 /// The lines of text painted under `id` (see [`within`]), with where each was painted.
-fn texts_within(nodes: &[DriverNode], id: &str) -> Vec<DriverText> {
+pub(crate) fn texts_within(nodes: &[DriverNode], id: &str) -> Vec<DriverText> {
     within(nodes, id)
         .into_iter()
         .flat_map(|node| node.texts.iter().cloned())
@@ -241,7 +241,7 @@ fn texts_within(nodes: &[DriverNode], id: &str) -> Vec<DriverText> {
 }
 
 /// The accessible name of the control drawn under `id`; fails if nothing was drawn under it.
-fn label(nodes: &[DriverNode], id: &str) -> String {
+pub(crate) fn label(nodes: &[DriverNode], id: &str) -> String {
     match node(nodes, id).and_then(|node| node.label.as_deref()) {
         Some(label) => label.to_owned(),
         None => panic!("{id} was not drawn with a name"),
@@ -249,7 +249,7 @@ fn label(nodes: &[DriverNode], id: &str) -> String {
 }
 
 /// Whether the rail entry drawn under `id` is pressed, as assistive technology hears it.
-fn pressed(nodes: &[DriverNode], id: &str) -> bool {
+pub(crate) fn pressed(nodes: &[DriverNode], id: &str) -> bool {
     match node(nodes, id).map(|node| node.toggled) {
         Some(Some(toggled)) => toggled == Toggled::True,
         Some(None) => panic!("{id} reports no pressed state"),
@@ -273,7 +273,7 @@ fn rail_entries(nodes: &[DriverNode]) -> Vec<String> {
 }
 
 /// The hover help showing after the pointer rests on the control drawn under `selector` for the hover delay.
-fn hover_help(cx: &mut VisualTestContext, selector: &'static str) -> Option<String> {
+pub(crate) fn hover_help(cx: &mut VisualTestContext, selector: &'static str) -> Option<String> {
     let at = test_support::center(cx, selector);
     cx.simulate_mouse_move(at, None, Modifiers::none());
     test_support::advance(cx, layers::HOVER_DELAY);
@@ -449,7 +449,7 @@ fn choosing_a_host_sends_its_query_once_and_all_sends_an_empty_one(cx: &mut Test
 /// window must not go on showing a choice the helm is not serving; and SPEC.md wants a refusal reported, not swallowed.
 /// The words are the helm's, which may quote a host, so they are host text. Specified: with host 3 chosen and
 /// accepted, choosing host 2 and having it refused with words holding a direction override presses host 3 again,
-/// keeps the chip on host 3, and paints the words escaped after "Could not show that host's sessions: "; choosing All
+/// keeps the chip on host 3, and paints the words escaped after "Could not show those sessions: "; choosing All
 /// then takes the words away.
 #[gpui::test]
 fn a_refused_query_keeps_the_previous_choice_and_shows_the_helms_words(cx: &mut TestAppContext) {
@@ -473,63 +473,12 @@ fn a_refused_query_keeps_the_previous_choice_and_shows_the_helms_words(cx: &mut 
     assert!(!pressed(&nodes, "host-rail-host-2"));
     assert!(label(&nodes, "host-filter-chip").contains("Build fleet"));
     assert_eq!(
-        label(&nodes, "host-filter-refusal"),
-        "Could not show that host's sessions: unknown host <U+202E>2"
+        label(&nodes, "filter-refusal"),
+        "Could not show those sessions: unknown host <U+202E>2"
     );
 
     test_support::click(cx, "host-rail-all");
-    assert!(node(&frame(cx), "host-filter-refusal").is_none());
-}
-
-/// The rail holds its own copy of the app's refusal wording (its query is a PUT the shared helpers do not send), so the
-/// copy is pinned here against the rule it copies: a user who meets a refused host choice reads the same words as for
-/// any refused command. Specified: the helm's plain-text words are shown trimmed, other JSON as sent, and a refusal
-/// without words names the query and its status.
-#[test]
-fn a_refused_query_is_worded_as_any_refused_command() {
-    let shown = "PUT /ui/session-query";
-    assert_eq!(
-        refusal_words(400, Some(serde_json::json!("  unknown host  ")), shown),
-        HostText::from_host("unknown host")
-    );
-    assert_eq!(
-        refusal_words(400, Some(serde_json::json!({"error": "no"})), shown),
-        HostText::from_host(r#"{"error":"no"}"#)
-    );
-    assert_eq!(
-        refusal_words(500, None, shown),
-        HostText::from_host("PUT /ui/session-query: 500")
-    );
-    assert_eq!(
-        refusal_words(500, Some(serde_json::json!("")), shown),
-        HostText::from_host("PUT /ui/session-query: 500")
-    );
-}
-
-/// Replies come in the order queries were sent, and the helm serves the last query it accepted; a refusal of a query
-/// the user already replaced must not undo the newer choice. The choice's bookkeeping, as a pure function. Specified:
-/// choosing the current choice sends nothing; a refusal of a superseded query changes nothing; an accepted query
-/// becomes the answered one; a refusal of the latest puts the choice back to the answered one with the words.
-#[test]
-fn a_refusal_undoes_only_the_latest_choice() {
-    let mut choice = Choice::default();
-    assert_eq!(choice.choose(None), None, "All is the choice to begin with");
-    let first = choice.choose(Some(3)).unwrap();
-    let second = choice.choose(Some(2)).unwrap();
-    choice.settle(first, Some(3), Err(HostText::from_host("no")));
-    assert_eq!((choice.chosen(), choice.answered()), (Some(2), None));
-    assert!(
-        choice.refusal().is_none(),
-        "a superseded refusal is not shown"
-    );
-    choice.settle(second, Some(2), Ok(()));
-    assert_eq!((choice.chosen(), choice.answered()), (Some(2), Some(2)));
-    let third = choice.choose(Some(3)).unwrap();
-    choice.settle(third, Some(3), Err(HostText::from_host("no")));
-    assert_eq!((choice.chosen(), choice.answered()), (Some(2), Some(2)));
-    assert_eq!(choice.refusal(), Some(&HostText::from_host("no")));
-    assert!(choice.choose(Some(3)).is_some());
-    assert!(choice.refusal().is_none(), "a new choice drops the words");
+    assert!(node(&frame(cx), "filter-refusal").is_none());
 }
 
 // ---- The chip ------------------------------------------------------------------------------------------------------
@@ -576,8 +525,8 @@ fn the_chip_names_the_chosen_host_and_removes_the_choice(cx: &mut TestAppContext
 /// focus to the rail's All then ("After a clear button or the chip removes its focused control, focus returns to the
 /// rail's All button"), where the coordinator's ordinary rule would send it home to the terminal. Specified: a click on
 /// the chip leaves focus on All, whatever a click focuses on this platform; and by keyboard alone, from All, Tab twice
-/// and Space choose host 3, Tab three times more (host 2, Add host) reaches the chip, and Enter on it removes the
-/// filter and leaves focus on All. Each removal sends `{}`.
+/// and Space choose host 3, Tab four times more (host 2, Add host, the status segments' one stop) reaches the chip,
+/// and Enter on it removes the filter and leaves focus on All. Each removal sends `{}`.
 #[gpui::test]
 fn clearing_the_filter_by_keyboard_or_click_focuses_all(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot());
@@ -606,7 +555,7 @@ fn clearing_the_filter_by_keyboard_or_click_focuses_all(cx: &mut TestAppContext)
     );
     fake.reply(query.id, 204, None);
     cx.run_until_parked();
-    test_support::keys(cx, "tab tab tab");
+    test_support::keys(cx, "tab tab tab tab");
     assert_eq!(
         focused_id(cx).as_deref(),
         Some("host-filter-chip"),
@@ -645,16 +594,16 @@ fn the_empty_state_names_the_answered_host_and_show_all_hosts_clears_it(cx: &mut
     cx.run_until_parked();
     let nodes = frame(cx);
     assert_eq!(
-        label(&nodes, "host-filter-empty"),
+        label(&nodes, "filter-empty"),
         "No sessions on Build fleet with a deliberately long caption."
     );
-    assert_eq!(label(&nodes, "host-filter-show-all"), "Show all hosts");
+    assert_eq!(label(&nodes, "filter-show-all-hosts"), "Show all hosts");
 
     test_support::click(cx, "host-rail-host-2");
     let (held, _) = one_query(&mut fake);
     let nodes = frame(cx);
     assert_eq!(
-        label(&nodes, "host-filter-empty"),
+        label(&nodes, "filter-empty"),
         "No sessions on Build fleet with a deliberately long caption.",
         "the sentence still describes the listing on screen"
     );
@@ -667,11 +616,11 @@ fn the_empty_state_names_the_answered_host_and_show_all_hosts_clears_it(cx: &mut
     fake.reply(held.id, 204, None);
     cx.run_until_parked();
     assert_eq!(
-        label(&frame(cx), "host-filter-empty"),
+        label(&frame(cx), "filter-empty"),
         "No sessions on render-west."
     );
 
-    test_support::click(cx, "host-filter-show-all");
+    test_support::click(cx, "filter-show-all-hosts");
     let (all, body) = one_query(&mut fake);
     assert_eq!(body, json!({}));
     assert_eq!(
@@ -683,31 +632,8 @@ fn the_empty_state_names_the_answered_host_and_show_all_hosts_clears_it(cx: &mut
     fake.reply(all.id, 204, None);
     cx.run_until_parked();
     let nodes = frame(cx);
-    assert!(node(&nodes, "host-filter-empty").is_none());
+    assert!(node(&nodes, "filter-empty").is_none());
     assert!(node(&nodes, "session-row-a").is_some(), "the rows are back");
-}
-
-/// The empty state's evidence rule as a pure function: only an available, complete listing that matched nothing for
-/// an answered host may be named; a cut listing keeps the count line's warning instead, and with no host answered
-/// there is nothing to name. Specified over the four conditions, each one alone failing it.
-#[test]
-fn only_a_complete_empty_answer_for_a_host_is_named() {
-    let complete = filtered(&[], 5, 0);
-    assert_eq!(empty_host(&complete, 0, Some(3)), Some(3));
-    assert_eq!(empty_host(&complete, 0, None), None, "no host answered");
-    assert_eq!(empty_host(&complete, 1, Some(3)), None, "rows on screen");
-    let mut cut = filtered(&[], 5, 0);
-    cut.counts = Some(ListCounts {
-        total: 5,
-        matching: Some(0),
-        truncated: true,
-    });
-    assert_eq!(empty_host(&cut, 0, Some(3)), None, "a cut listing");
-    let mut failed = filtered(&[], 5, 0);
-    failed.availability = Availability::Unavailable {
-        error: "down".into(),
-    };
-    assert_eq!(empty_host(&failed, 0, Some(3)), None, "a failed read");
 }
 
 // ---- A removed host, a reset, the keyboard -------------------------------------------------------------------------
@@ -833,11 +759,6 @@ const GEAR: &str = "app-settings-toggle";
 /// confirmations), as the Settings dialog's own tests name it.
 const FIRST_SWITCH: &str = "settings-skip-session-confirmations";
 
-/// Whether any layer (Settings, here) is open in the test's window.
-fn any_layer_open(cx: &mut VisualTestContext) -> bool {
-    cx.update(|window, cx| layers::any_open(window, cx))
-}
-
 /// Whether the Hosts panel is drawn in place of the list's column: the panel's node is there and the list's is not.
 /// Fails on any other combination, which would mean both or neither show.
 fn panel_shown(cx: &mut VisualTestContext) -> bool {
@@ -924,17 +845,17 @@ fn the_gear_opens_settings_at_its_first_switch_and_escape_returns_to_the_gear(
     );
 
     test_support::click(cx, GEAR);
-    assert!(any_layer_open(cx), "the click opened Settings");
+    assert!(any_open(cx), "the click opened Settings");
     assert_eq!(focused_id(cx).as_deref(), Some(FIRST_SWITCH));
     test_support::keys(cx, "escape");
-    assert!(!any_layer_open(cx), "Escape closed Settings");
+    assert!(!any_open(cx), "Escape closed Settings");
     assert_eq!(focused_id(cx).as_deref(), Some(GEAR), "after the click");
 
     test_support::keys(cx, "enter");
-    assert!(any_layer_open(cx), "Enter on the gear opened Settings");
+    assert!(any_open(cx), "Enter on the gear opened Settings");
     assert_eq!(focused_id(cx).as_deref(), Some(FIRST_SWITCH));
     test_support::keys(cx, "escape");
-    assert!(!any_layer_open(cx));
+    assert!(!any_open(cx));
     assert_eq!(focused_id(cx).as_deref(), Some(GEAR), "after Enter");
 }
 
@@ -1025,8 +946,9 @@ fn choosing_all_or_a_host_returns_from_the_panel_to_sessions(cx: &mut TestAppCon
 /// between them, before the foot; in GPUI, Tab follows the order controls are drawn in, which is why the list draws the
 /// foot after its own column. A foot drawn inside the rail would put Hosts and the gear between the last avatar and the
 /// list. Specified (Linux's rule, where Tab reaches every control): over an empty fleet with host 3 chosen by a click,
-/// which leaves focus on its avatar and draws the chip as the list's one control, Tab goes to host 2's avatar, Add
-/// host, the chip, Hosts, then the gear; Shift+Tab from the gear goes back to Hosts.
+/// which leaves focus on its avatar and draws the status segments and the chip as the list's controls, Tab goes to
+/// host 2's avatar, Add host, the segments' chosen All (their one stop), the chip, Hosts, then the gear; Shift+Tab from
+/// the gear goes back to Hosts.
 #[gpui::test]
 fn tab_reaches_the_foot_after_the_rail_and_the_lists_controls(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, vec![listing(&[], &[]), hosts(&fleet_hosts())]);
@@ -1044,6 +966,7 @@ fn tab_reaches_the_foot_after_the_rail_and_the_lists_controls(cx: &mut TestAppCo
     for expected in [
         "host-rail-host-2",
         ADD_HOST,
+        "session-status-All",
         "host-filter-chip",
         HOSTS,
         GEAR,
@@ -1184,7 +1107,7 @@ fn add_host_opens_the_dialog_and_escape_returns_focus_to_it(cx: &mut TestAppCont
     );
     assert_eq!(fake.commands(), [], "opening it sent nothing");
     test_support::keys(cx, "escape");
-    assert!(!any_layer_open(cx), "Escape closed the dialog");
+    assert!(!any_open(cx), "Escape closed the dialog");
     assert_eq!(focused_id(cx).as_deref(), Some(ADD_HOST), "after the click");
 
     test_support::keys(cx, "enter");
@@ -1193,7 +1116,7 @@ fn add_host_opens_the_dialog_and_escape_returns_focus_to_it(cx: &mut TestAppCont
         "Enter on Add host opened the dialog"
     );
     test_support::keys(cx, "escape");
-    assert!(!any_layer_open(cx));
+    assert!(!any_open(cx));
     assert_eq!(focused_id(cx).as_deref(), Some(ADD_HOST), "after Enter");
 }
 

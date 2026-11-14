@@ -18,7 +18,7 @@
 //! The list follows the connection and the current store through [`session::observe_current`], which moves its store
 //! subscription to each new UI session's store, so the list never observes a store a reset retired and never misses
 //! the first change of the one that replaced it. What the list keeps for one UI session (the seen mark's memory, the
-//! row menus and the layers they opened, the host rail's choice, whether the Hosts panel shows, and the subscription to
+//! row menus and the layers they opened, the list's query, whether the Hosts panel shows, and the subscription to
 //! the operation store, which `observe_current` does not follow) lives in a [`PerSession`], which starts it over when
 //! the session changes.
 //!
@@ -91,17 +91,21 @@
 //! a listing of its own and opens the session the user picks through the same selection rules as a click on a row.
 //!
 //! The host rail ([`host_rail`]) is drawn by the list, at the sidebar's left edge with the list's own column beside
-//! it, because choosing a host is the list's query: the rail sets the UI channel's session query, the list's state
-//! keeps the choice per UI session, and the list's column shows the chosen host's chip under its heading and, for a
-//! host with no sessions, an empty state that names it. The rail's foot, which the list draws after its column, holds
-//! Hosts, which swaps that column for the Hosts panel ([`crate::hosts`]), and the Settings gear.
+//! it, because choosing a host is the list's query, and so is choosing a status in the segments under the heading
+//! ([`filters`]): both set the UI channel's session query, the list's state keeps the choice per UI session, and the
+//! list's column shows the segments with the chosen host's chip beside them and, for a filtered answer with no
+//! sessions, a sentence that names its filters. The heading and the segments are drawn from the first frame on, also
+//! while the first listing has not arrived, as the old app kept them usable before its first read. The rail's foot,
+//! which the list draws after its column, holds Hosts, which swaps that column for the Hosts panel ([`crate::hosts`]),
+//! and the Settings gear.
 //!
 //! NOTE: Not ported yet, each with the area that brings it: the order menu (the title is the stored order's name, not a
-//! control), the status segments, compact rows, marking, pins, the row menu's other commands, and the rail's host
-//! status, the foot's controls other than Hosts and Settings, Add host and expansion.
+//! control), compact rows, marking, pins, the row menu's other commands, and the rail's host status, the foot's
+//! controls other than Hosts and Settings, Add host and expansion.
 
 mod age;
 pub(crate) mod delete;
+pub(crate) mod filters;
 pub(crate) mod host_rail;
 pub(crate) mod menu;
 pub(crate) mod outcome;
@@ -212,7 +216,7 @@ pub struct SessionList {
     /// dropped by a reset, say), and the window would go on reporting it as focused, so focus would never go home.
     focus_seen: Option<WeakFocusHandle>,
     /// The host rail's All button's focus handle, a tab stop: kept here rather than in the button's element state so
-    /// that removing the host filter from the chip or the empty state can move focus to All ([`host_rail`]).
+    /// that removing a filter from the chip or the empty sentence's links can move focus to All ([`filters`]).
     all_focus: FocusHandle,
     /// The Settings gear's focus handle, on the host rail's foot ([`host_rail::foot`]), a tab stop: kept here for the
     /// window's life so that Settings, which the gear opens with itself as the opener, returns focus to the same
@@ -243,9 +247,9 @@ struct Current {
     operations: Option<Subscription>,
     /// The rows' menu buttons and the layers they opened, shared with the item callback that draws the rows.
     rows: menu::SharedRows,
-    /// The host rail's choice and the helm's answers to it. Per UI session because the helm's channel keeps the query
-    /// per channel: a new channel starts unfiltered, and so does this.
-    hosts: host_rail::Choice,
+    /// The list's query (the rail's host and the segments' status) and the helm's answers to it. Per UI session
+    /// because the helm's channel keeps the query per channel: a new channel starts unfiltered, and so does this.
+    filters: filters::Choice,
     /// Whether the Hosts panel shows in place of the list's column. Per UI session like the choice, so a reset brings
     /// the window back to Sessions with the rest of the UI.
     hosts_shown: bool,
@@ -558,14 +562,14 @@ impl Render for SessionList {
         }
         let shared = self.current.current(cx).rows.clone();
         shared.borrow_mut().start_frame();
-        let choice = self.current.current(cx).hosts.clone();
+        let choice = self.current.current(cx).filters.clone();
         let hosts_shown = self.current.current(cx).hosts_shown;
         let weak = cx.weak_entity();
         let collections = store.read(cx).collections();
         let palette = theme::palette(cx);
         let body_row = body_row.child(host_rail::rail(
             collections,
-            choice.chosen(),
+            choice.chosen().host,
             &weak,
             &self.all_focus,
             &self.rail,
@@ -593,38 +597,32 @@ impl Render for SessionList {
                 )
                 .child(foot);
         }
+        // The heading and the segments row are drawn before the first listing too (the module docs).
+        let filter_row = filters::row(collections, choice.chosen(), &weak, palette);
+        let refused = choice
+            .refusal()
+            .map(|refusal| failure_line(filters::refusal_sentence(refusal), palette));
         let Some(meta) = collections.meta(Collection::Sessions) else {
             return body_row
-                .child(list.child(status_line("Loading sessions…")))
+                .child(
+                    list.child(heading(collections, None, palette))
+                        .child(filter_row)
+                        .children(refused)
+                        .child(status_line("Loading sessions…")),
+                )
                 .child(foot);
         };
         let selected = local_state::selected(cx);
 
         let count = count_line(meta, self.entries.len());
-        let heading = div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(6.))
-            .py(metrics::LIST_HEADING_PAD.0)
-            .px(metrics::LIST_HEADING_PAD.1)
-            .bg(theme::color(palette.bg_2))
-            .child(
-                div()
-                    .text_size(metrics::TEXT_MD)
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::color(palette.fg_0))
-                    .child(order_title(selection::preferences(collections))),
-            )
-            .children(match &count {
-                CountLine::Count(count) => Some(
-                    div()
-                        .text_size(metrics::TEXT_SM)
-                        .text_color(theme::color(palette.fg_1))
-                        .child(count.clone()),
-                ),
+        let heading = heading(
+            collections,
+            match &count {
+                CountLine::Count(count) => Some(count.clone()),
                 CountLine::Cut(_) => None,
-            });
+            },
+            palette,
+        );
         let truncated = match count {
             CountLine::Count(_) => None,
             CountLine::Cut(warning) => Some(band(warning, palette.warn_bg, palette.warn_bright)),
@@ -639,16 +637,10 @@ impl Render for SessionList {
                 palette,
             )),
         };
-        let chip = choice
-            .chosen()
-            .map(|host| host_rail::chip_row(collections, host, &weak, palette));
-        let refused = choice
-            .refusal()
-            .map(|words| failure_line(host_rail::refusal_sentence(words), palette));
 
-        let empty_host = host_rail::empty_host(meta, self.entries.len(), choice.answered());
-        let body: AnyElement = if let Some(host) = empty_host {
-            host_rail::empty_state(collections, host, &weak, palette).into_any_element()
+        let empty = filters::empty(meta, self.entries.len(), choice.answered());
+        let body: AnyElement = if let Some(empty) = empty {
+            filters::empty_state(collections, empty, &weak, palette).into_any_element()
         } else if empty_fleet(collections) {
             status_line("No sessions").into_any_element()
         } else {
@@ -677,7 +669,7 @@ impl Render for SessionList {
         body_row
             .child(
                 list.child(heading)
-                    .children(chip)
+                    .child(filter_row)
                     .children(refused)
                     .children(truncated)
                     .children(unavailable)
@@ -733,10 +725,40 @@ fn draw_row(
     )
 }
 
+/// The list's heading band: the title, which names the order the helm stored, and `count` beside it when the list has
+/// one to show (none before the first listing, and none for a cut listing, whose warning has a line of its own).
+fn heading(
+    collections: &Collections,
+    count: Option<String>,
+    palette: &theme::Palette,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(6.))
+        .py(metrics::LIST_HEADING_PAD.0)
+        .px(metrics::LIST_HEADING_PAD.1)
+        .bg(theme::color(palette.bg_2))
+        .child(
+            div()
+                .text_size(metrics::TEXT_MD)
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(theme::color(palette.fg_0))
+                .child(order_title(selection::preferences(collections))),
+        )
+        .children(count.map(|count| {
+            div()
+                .text_size(metrics::TEXT_SM)
+                .text_color(theme::color(palette.fg_1))
+                .child(count)
+        }))
+}
+
 /// What the list says about its count: the count beside the title, or, for a listing the helm's cap cut, a warning on
 /// a line of its own instead, because the numbers alone would read as the whole list. Ported from the old app's
-/// `count_banner` (its filter cases arrive with filters). A collection without counts (no helm sends one, but the type
-/// allows it) counts its rows.
+/// `count_banner`, without its unsupported-filter wording, which nothing the channel's helm sends can call for
+/// ([`filters`]' NOTE). A collection without counts (no helm sends one, but the type allows it) counts its rows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum CountLine {
     /// "N" for a complete list, "N of M" for a narrowed one (N matched, M is the whole fleet).
