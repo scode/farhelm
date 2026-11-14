@@ -1,9 +1,9 @@
 //! Headless screenshot goldens: one per component, per dialog frame and per overlay kind (tooltip, popover, the prompt
 //! over its veil, once more with a summary that names a host value, and the prompt anchored to a row's menu button),
 //! the keyboard focus ring, host-supplied text over its spoofing corpus, the notice banner, the terminal's styles and
-//! cursor shapes, an attached terminal's exit line and status line, and the session list (a fleet of every status a row
-//! draws, an empty fleet, a row's open menu, a row's Delete question, and a pending and a refused Delete), in both
-//! appearances, compared pixel for pixel.
+//! cursor shapes, an attached terminal's exit line and status line, the scrim a pending Delete puts over the open
+//! session's terminal, and the session list (a fleet of every status a row draws, an empty fleet, a row's open menu, a
+//! row's Delete question, and a pending and a refused Delete), in both appearances, compared pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
@@ -768,6 +768,45 @@ fn attached_terminals(state: &SceneState, _: &mut Window, _: &mut App) -> AnyEle
         .into_any_element()
 }
 
+/// A shell's last lines at the bottom of a small terminal, for the Delete scrim to lie over: enough text that the
+/// picture shows how far the veil dims it.
+fn terminal_delete_scrim_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    let screen = serde_json::json!([
+        screen_row(4, vec![run(0, 9, "$ cargo t", 0, -1, -1)]),
+        screen_row(5, vec![run(0, 21, "test result: ok. 41 p", 0, 2, -1)]),
+        screen_row(6, vec![run(0, 2, "$ ", 0, -1, -1)]),
+    ]);
+    let cursor = serde_json::json!({"x":2,"y":6,"visible":true,"shape":"block","blink":false});
+    let view = terminal_view(
+        grid_output(46, 7, screen, cursor),
+        CursorPhase {
+            focused: true,
+            on: true,
+        },
+        cx,
+    );
+    state.terminals.borrow_mut().push(view);
+}
+
+/// The scene's terminal in a pane of a fixed size, on the terminal's ground as an attached terminal's pane is, under the
+/// scrim the session pane draws over the open session's terminal while its Delete stops the agent (the old
+/// `.terminal-delete-overlay`), its spinner on its first step.
+fn terminal_delete_scrim(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    div()
+        .relative()
+        .w(px(420.))
+        .h(px(150.))
+        .overflow_hidden()
+        .bg(theme::color(theme::TERMINAL.background))
+        .children(state.terminals.borrow().iter().cloned())
+        .child(crate::session_pane::delete_scrim(
+            DeleteGuard::Unconditional,
+            0,
+            cx,
+        ))
+        .into_any_element()
+}
+
 /// The terminals a terminal scene's setup made, in a row.
 fn terminals(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
     div()
@@ -937,7 +976,7 @@ fn session_lists(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement
         .into_any_element()
 }
 
-static SCENES: [Scene; 20] = [
+static SCENES: [Scene; 21] = [
     Scene {
         name: "buttons",
         size: (560., 64.),
@@ -1027,6 +1066,12 @@ static SCENES: [Scene; 20] = [
         size: (444., 336.),
         draw: attached_terminals,
         setup: terminal_status_setup,
+    },
+    Scene {
+        name: "terminal-delete-scrim",
+        size: (444., 174.),
+        draw: terminal_delete_scrim,
+        setup: terminal_delete_scrim_setup,
     },
     Scene {
         name: "session-list",

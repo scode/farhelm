@@ -1,5 +1,6 @@
 //! Tests of the main pane's terminal: which session it attaches and when it lets go of a stream, where focus goes when
-//! the user or the selection rules open a session, and what a reset does to the terminal.
+//! the user or the selection rules open a session, what a Delete of the open session draws over it, and what a reset
+//! does to the terminal.
 //!
 //! The window is the real main view over the helm client's fake channel, and its connection hands out the fake terminal
 //! (`Connection::serve_terminals`), which plays the helm's side of every stream the pane opens and records it. The
@@ -16,6 +17,7 @@ use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::fake::terminal::{FakePhase, FakeTerminal, FakeTerminalRequest};
 use farhelm_helm_client::terminal::TerminalAttach;
 use farhelm_input_mapping::Platform;
+use farhelm_proto::DetachCode;
 use farhelm_proto::grid::{GridInput, GridOutput};
 use farhelm_proto::ui_channel::{Collection, CollectionChanges, CollectionState};
 use gpui::{
@@ -29,7 +31,7 @@ use crate::components::{HoverHelp, TextInput, TextInputState};
 use crate::main_view::MainView;
 use crate::session::Connection;
 use crate::session_list::SessionList;
-use crate::session_list::tests::{listing, preferences, session};
+use crate::session_list::tests::{frame, listing, painted, preferences, session};
 use crate::session_tests::{meta, started};
 use crate::test_support::{self, click, keys, settle};
 use crate::{focus, local_state, root};
@@ -445,6 +447,255 @@ fn the_delete_shortcut_from_a_focused_terminal_asks_and_never_reaches_the_progra
         fleet.terminal_focused(),
         "closing the question gave focus back"
     );
+}
+
+// ---- A Delete of the open session ---------------------------------------------------------------------------------
+
+/// What the status line says once a Delete's detach has dropped the stream: the detach the supervisor sends when it
+/// deletes a session carries `other`, which the stream answers by reconnecting.
+const RECONNECTING: &str = "Session unavailable — reconnecting";
+
+/// What the row and the scrim say while a Delete that stops the running agent is in flight.
+const STOPPING: &str = "Stopping agent…";
+
+/// The state message of a program that a signal ended: what the agent's terminal sends when a Delete kills it.
+fn ended_by_signal(signal: i32) -> GridOutput {
+    serde_json::from_value(
+        serde_json::json!({"t":"state","mouse":"off","focus":false,"alt_screen":false,
+        "default_fg":null,"default_bg":null,"history_trimmed":false,"exit":{"signal":signal}}),
+    )
+    .unwrap()
+}
+
+impl Fleet<'_> {
+    /// The ids of the Deletes the window sent since the last call. Every other command (the open session's seen mark,
+    /// the remembered selection) is answered with success at once, because the fake answers in order and a test
+    /// answers its Delete after them.
+    fn deletes(&mut self) -> Vec<u64> {
+        let mut found = Vec::new();
+        for command in self.helm.commands() {
+            if command.method == Method::Delete {
+                found.push(command.id);
+            } else {
+                self.helm.reply(command.id, 200, None);
+            }
+        }
+        found
+    }
+
+    /// With a open and live, delete it with the shortcut and its confirmation, and return the Delete's id, unanswered.
+    fn delete_open_session(&mut self) -> u64 {
+        self.deletes();
+        keys(self.cx, DELETE_SESSION_CHORD);
+        keys(self.cx, "enter");
+        let [id] = self.deletes()[..] else {
+            panic!("one Delete was sent");
+        };
+        id
+    }
+
+    /// The `index`th stream sees what a Delete does to its session, or anything else that kills the agent and detaches
+    /// the viewer: the agent is ended by SIGTERM, then the viewer is detached with `other`, which drops the stream into
+    /// a reconnect.
+    fn delete_happens_to(&mut self, index: usize) {
+        {
+            let mut opened = self.opened.borrow_mut();
+            let terminal = &mut opened[index].0;
+            terminal.output(ended_by_signal(15));
+            terminal.detach(Some(DetachCode::Other), "session deleted");
+        }
+        settle(self.cx);
+    }
+
+    /// How far the pane's terminal lifts its shown screen now; `None` before a screen is shown and measured.
+    fn lift(&mut self) -> Option<f32> {
+        let pane = self.pane.clone();
+        self.cx.update(|_, cx| {
+            let terminal = pane.update(cx, |pane, cx| {
+                pane.mounted
+                    .current(cx)
+                    .as_ref()
+                    .map(|mounted| mounted.terminal.clone())
+            });
+            terminal.and_then(|terminal| terminal.read(cx).shown_lift(cx))
+        })
+    }
+
+    /// The pane's terminal's own status line, held or not: the stream's state as the terminal knows it.
+    fn status_words(&mut self) -> Option<String> {
+        let pane = self.pane.clone();
+        self.cx.update(|_, cx| {
+            let terminal = pane.update(cx, |pane, cx| {
+                pane.mounted
+                    .current(cx)
+                    .as_ref()
+                    .map(|mounted| mounted.terminal.clone())
+            });
+            terminal
+                .and_then(|terminal| terminal.read(cx).status_line())
+                .map(|line| line.words.to_string())
+        })
+    }
+
+    /// How many times a fresh frame painted `text`.
+    fn painted_count(&mut self, text: &str) -> usize {
+        painted(&frame(self.cx))
+            .iter()
+            .filter(|painted| *painted == text)
+            .count()
+    }
+
+    /// Whether the last frame drew the element under `selector`.
+    fn drawn(&mut self, selector: &'static str) -> bool {
+        self.cx.debug_bounds(selector).is_some()
+    }
+}
+
+/// SPEC.md, "Lifecycle operations": from the moment a Delete is committed until the helm answers, "a scrim over its
+/// terminal says it again", as an expected wait. Without it a user watching the terminal sees nothing happen for the
+/// seconds an agent takes to stop. The scrim must not take the terminal's keys or presses: the old overlay took no
+/// pointer events, and focus belongs where the user left it. Specified: once a's Delete is confirmed, the scrim is
+/// drawn and "Stopping agent…" is painted twice (row and scrim); a's terminal holds focus and a typed letter reaches
+/// its program; after focus moves to b's menu button, a click on the scrim focuses a's terminal; once the helm
+/// refuses, the scrim is gone.
+#[gpui::test]
+fn a_pending_delete_puts_a_scrim_over_the_terminal_until_the_helm_answers(cx: &mut TestAppContext) {
+    let mut fleet = open_main(cx, a_and_b());
+    fleet.go_live(0);
+    assert!(!fleet.drawn("terminal-delete-scrim"), "the premise");
+
+    let id = fleet.delete_open_session();
+    assert!(fleet.drawn("terminal-delete-scrim"));
+    assert_eq!(fleet.painted_count(STOPPING), 2, "the row and the scrim");
+    assert!(fleet.terminal_focused());
+    keys(fleet.cx, "x");
+    assert_eq!(fleet.input(0), [letter("x", 88)], "keys still reach a");
+
+    click(fleet.cx, "session-menu-b");
+    keys(fleet.cx, "escape");
+    assert!(
+        !fleet.terminal_focused(),
+        "the premise: focus is on b's menu button"
+    );
+    click(fleet.cx, "terminal-delete-scrim");
+    assert!(fleet.terminal_focused(), "the press went through the scrim");
+
+    fleet
+        .helm
+        .reply(id, 409, Some(serde_json::json!("the agent is busy")));
+    settle(fleet.cx);
+    assert!(!fleet.drawn("terminal-delete-scrim"));
+    assert_eq!(fleet.painted_count(STOPPING), 0);
+}
+
+/// SPEC.md: "The terminal's own 'Detached' notice, which the delete itself causes, is held back meanwhile". The Delete
+/// kills the agent and detaches the viewer, and both would otherwise show as failures (an exit line, a red "Session
+/// unavailable" band) under a Delete that is going exactly as asked. Specified: with a's Delete in flight, the agent
+/// ended by signal 15 and the viewer detached with `other`, the terminal's own status line says it is reconnecting
+/// (the premise), yet no exit line is drawn, the band's words are not painted, and the screen is not lifted to make
+/// room for either; the scrim still shows.
+#[gpui::test]
+fn the_terminal_holds_back_what_the_delete_does_to_it(cx: &mut TestAppContext) {
+    let mut fleet = open_main(cx, a_and_b());
+    fleet.go_live(0);
+    fleet.delete_open_session();
+
+    fleet.delete_happens_to(0);
+    assert_eq!(
+        fleet.status_words().as_deref(),
+        Some(RECONNECTING),
+        "the premise"
+    );
+    assert_eq!(fleet.painted_count(RECONNECTING), 0);
+    assert!(!fleet.drawn("terminal-exit"));
+    assert_eq!(fleet.lift(), Some(0.), "no room taken for hidden lines");
+    assert!(fleet.drawn("terminal-delete-scrim"));
+}
+
+/// SPEC.md: "if the delete fails, the row and header come back with the refusal shown, and a held notice appears". A
+/// Delete can fail after it has killed the agent, and then what it did to the terminal is real and stays: the user
+/// needs to see that the agent is gone and the terminal is not live. Specified: with a's Delete in flight and the
+/// agent killed and detached as above, a refusal takes the scrim away and the held exit line appears in the frame the
+/// app draws on its own (checked before any frame the test forces, so a terminal that missed the release would fail),
+/// with the screen lifted for it; the row shows the helm's words and "Session unavailable — reconnecting" is painted.
+#[gpui::test]
+fn a_refused_delete_shows_the_notices_it_held(cx: &mut TestAppContext) {
+    let mut fleet = open_main(cx, a_and_b());
+    fleet.go_live(0);
+    let id = fleet.delete_open_session();
+    fleet.delete_happens_to(0);
+    assert!(!fleet.drawn("terminal-exit"), "the premise: held");
+
+    fleet.helm.reply(
+        id,
+        409,
+        Some(serde_json::json!("the session's tabs did not close")),
+    );
+    settle(fleet.cx);
+    assert!(!fleet.drawn("terminal-delete-scrim"));
+    assert!(fleet.drawn("terminal-exit"));
+    assert!(
+        fleet.lift().is_some_and(|lift| lift > 0.),
+        "the exit line takes its row"
+    );
+    assert_eq!(fleet.painted_count("the session's tabs did not close"), 1);
+    assert_eq!(fleet.painted_count(RECONNECTING), 1);
+}
+
+/// A Delete that succeeds removes its session, and the selection rules open the next one once it has settled
+/// (SPEC.md, "Session list"). Nothing of the deleted session's hold may reach the next terminal: its own exit and
+/// detach are real news. Specified: after a's Delete, a's death and detach, a pushed listing without a and the
+/// helm's success, b is open and its stream attached; once live, no scrim is drawn, and b's own agent ending and its
+/// viewer detaching show the exit line and "Session unavailable — reconnecting".
+#[gpui::test]
+fn after_a_successful_delete_the_next_terminal_shows_normally(cx: &mut TestAppContext) {
+    let mut fleet = open_main(cx, a_and_b());
+    fleet.go_live(0);
+    let id = fleet.delete_open_session();
+    fleet.delete_happens_to(0);
+    fleet.helm.push(CollectionChanges {
+        collection: Collection::Sessions,
+        meta: meta(&["b"]),
+        upsert: Vec::new(),
+        remove: vec!["a".into()],
+    });
+    settle(fleet.cx);
+    fleet.helm.reply(id, 200, None);
+    settle(fleet.cx);
+    assert_eq!(fleet.selected().as_deref(), Some("b"));
+    assert_eq!(fleet.attached(), ["a", "b"]);
+    assert_eq!(fleet.phase(0), FakePhase::Closed);
+
+    fleet.go_live(1);
+    assert!(!fleet.drawn("terminal-delete-scrim"));
+    assert!(fleet.terminal_focused());
+    fleet.delete_happens_to(1);
+    assert_eq!(fleet.painted_count(RECONNECTING), 1);
+    assert!(fleet.drawn("terminal-exit"));
+}
+
+/// The hold and the scrim belong to the open session's own Delete: SPEC.md lets Deletes of other sessions run while
+/// the user works in this one, and what happens to this one's agent then is real news. Specified: with a open and
+/// live, b's Delete confirmed from its row and unanswered, a's agent ending and its viewer detaching show the exit line
+/// and "Session unavailable — reconnecting", and no scrim is drawn.
+#[gpui::test]
+fn a_delete_of_another_session_leaves_the_open_terminal_alone(cx: &mut TestAppContext) {
+    let mut fleet = open_main(cx, a_and_b());
+    fleet.go_live(0);
+    fleet.deletes();
+    click(fleet.cx, "session-menu-b");
+    click(fleet.cx, "session-menu-delete");
+    click(fleet.cx, "prompt-confirm");
+    assert_eq!(
+        fleet.deletes().len(),
+        1,
+        "the premise: b's Delete is in flight"
+    );
+
+    fleet.delete_happens_to(0);
+    assert!(!fleet.drawn("terminal-delete-scrim"));
+    assert_eq!(fleet.painted_count(RECONNECTING), 1);
+    assert!(fleet.drawn("terminal-exit"));
 }
 
 // ---- Resets --------------------------------------------------------------------------------------------------------
