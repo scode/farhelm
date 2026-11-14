@@ -6,7 +6,8 @@
 //!
 //! - **Who opened what.** Opening a layer returns its [`LayerId`], and only that id closes it ([`close`]): nothing
 //!   closes a dialog, menu or confirmation it did not open. The user closes the topmost layer with Escape
-//!   ([`dismiss_top`]) or, for a popover, by clicking outside it. The one exception is a reset of the connection to
+//!   ([`dismiss_top`]) or, for a popover, by clicking outside it; Escape leaves a dialog open while it says it may not
+//!   be dismissed now ([`Dialog::may_dismiss`], an editor with a save in flight). The one exception is a reset of the connection to
 //!   the helm, which closes everything ([`close_all`]).
 //! - **Things the user did not start never open a layer.** Every open takes the [`Mark`] the feature took when the user
 //!   acted, and is refused once the user has moved on since (the focus coordinator's counter). Work that finishes later
@@ -26,7 +27,10 @@
 //!   counts as empty space) keeps focus on the control in use in the dialogs SPEC.md lists, and moves focus to the
 //!   dialog itself in the others ([`Dialog::keeps_focus_on_empty_click`]); a click on a menu's empty space keeps focus
 //!   on its item. Tab stays inside the topmost layer, dialog or menu alike (the focus coordinator walks GPUI's tab
-//!   order within [`trap`]). Closing any layer returns focus to what held it when the layer opened.
+//!   order within [`trap`]). Closing any layer returns focus to what held it when the layer opened, unless a dialog's
+//!   opener named home instead ([`Dialog::returns_to`]). A press reaches a dialog's empty-space rule only after the
+//!   controls under it have handled it, and one that gave focus to a control (a click into a text field) is not a
+//!   press on empty space (the focus coordinator's [`focus::OnPress::Focus`]).
 //! - **One tooltip at a time**, owned by the control that showed it (see [`TooltipOwner`]).
 //!
 //! State is kept per window: multi-window support is a watch-list item, and the one thing it asks of the foundations
@@ -97,6 +101,10 @@ struct Layer {
     container: FocusHandle,
     /// What held focus when the layer opened, so closing it can return focus there.
     opener: Option<WeakFocusHandle>,
+    /// Where closing it returns focus: `opener`, unless its opener named home ([`Dialog::returns_to`]).
+    returns_to: focus::ReturnTo,
+    /// Whether the user may dismiss it right now ([`Dialog::may_dismiss`]); `None` always may.
+    may_dismiss: Option<DismissGuard>,
     /// What Enter does while the dialog itself (not one of its controls) has focus.
     main_action: Option<MainAction>,
     /// What a press on the layer's empty space does to focus.
@@ -107,6 +115,9 @@ struct Layer {
 
 /// A dialog's main action, which Enter presses while the dialog itself has focus.
 pub type MainAction = Rc<dyn Fn(&mut Window, &mut App)>;
+
+/// Whether the user may dismiss a dialog right now ([`Dialog::may_dismiss`]). Asked at the moment of each dismissal.
+pub type DismissGuard = Rc<dyn Fn(&App) -> bool>;
 
 enum Kind {
     Dialog,
@@ -279,6 +290,19 @@ pub struct Dialog {
     /// a click focuses the dialog itself, as a click on a web dialog's background did; Enter then presses its main
     /// action. Per dialog, never a global rule: SPEC.md says which dialogs "do not have this rule yet".
     pub keeps_focus_on_empty_click: bool,
+    /// Where focus goes when the dialog closes with focus inside it: [`focus::ReturnTo::Opener`] (what held focus when
+    /// it opened) for every dialog SPEC.md does not send elsewhere.
+    pub returns_to: focus::ReturnTo,
+    /// Whether the user may dismiss the dialog right now, asked on every dismissal the layer manager performs: Escape,
+    /// wherever focus is inside the dialog, the dialog itself included. While it says no, Escape does nothing at all
+    /// (it closes no tooltip or lower layer either). For a dialog busy with work it must not lose, such as an editor
+    /// whose save is in flight: a guard in the dialog's own view would miss the case where the dialog itself holds
+    /// focus (after a click on its empty space), because the layer manager's element sits around that view.
+    ///
+    /// Only dismissals are guarded. A close the opener makes itself ([`close`], on a save that succeeded or on its own
+    /// Cancel), a subject going away, and a reset of the connection ([`close_all`]) close the dialog whatever this says.
+    /// `None` is always dismissible.
+    pub may_dismiss: Option<DismissGuard>,
 }
 
 /// A popover to open: a menu or a popup list.
@@ -329,6 +353,8 @@ pub fn open_dialog(
         subject,
         main_action,
         keeps_focus_on_empty_click,
+        returns_to,
+        may_dismiss,
     } = dialog;
     open(
         Kind::Dialog,
@@ -338,6 +364,8 @@ pub fn open_dialog(
         subject.into_iter().collect(),
         main_action,
         empty_press(keeps_focus_on_empty_click),
+        returns_to,
+        may_dismiss,
         mark,
         window,
         cx,
@@ -388,6 +416,8 @@ pub fn open_anchored(
         std::iter::once(drawn).chain(subject).collect(),
         main_action,
         empty_press(keeps_focus_on_empty_click),
+        focus::ReturnTo::Opener,
+        None,
         mark,
         window,
         cx,
@@ -417,6 +447,8 @@ pub fn open_popover(
         None,
         // A menu's empty space (a separator, padding) keeps focus on its item.
         focus::OnPress::Keep,
+        focus::ReturnTo::Opener,
+        None,
         mark,
         window,
         cx,
@@ -435,6 +467,8 @@ fn open(
     subjects: Vec<Subject>,
     main_action: Option<MainAction>,
     empty_press: focus::OnPress,
+    returns_to: focus::ReturnTo,
+    may_dismiss: Option<DismissGuard>,
     mark: &Mark,
     window: &mut Window,
     cx: &mut App,
@@ -463,6 +497,8 @@ fn open(
             view,
             container,
             opener,
+            returns_to,
+            may_dismiss,
             main_action,
             empty_press,
             _watches: watches,
@@ -486,7 +522,7 @@ fn close_later(window: AnyWindowHandle, id: LayerId, cx: &mut App) {
 }
 
 /// Close the layer `id`, if it is still open, and anything opened on top of it. If focus was inside what closed, it
-/// returns to what held it when `id` opened.
+/// returns to what held it when `id` opened, or where `id`'s opener said instead ([`Dialog::returns_to`]).
 pub fn close(id: LayerId, window: &mut Window, cx: &mut App) {
     let Some(stack) = stack(window, cx) else {
         return;
@@ -503,12 +539,10 @@ pub fn close(id: LayerId, window: &mut Window, cx: &mut App) {
     let focus_was_inside = closed
         .iter()
         .any(|layer| layer.container.contains_focused(window, cx));
-    if focus_was_inside || window.focused(cx).is_none() {
-        focus::return_to(
-            closed.first().and_then(|layer| layer.opener.as_ref()),
-            window,
-            cx,
-        );
+    if (focus_was_inside || window.focused(cx).is_none())
+        && let Some(bottom) = closed.first()
+    {
+        focus::return_to(bottom.returns_to, bottom.opener.as_ref(), window, cx);
     }
 }
 
@@ -538,14 +572,22 @@ pub fn close_all(cx: &mut App) {
     }
 }
 
-/// The user closes the topmost layer (Escape), or the tooltip if no layer is open. Returns whether anything closed, so
-/// the key can go on to whatever else wants it when nothing did.
+/// The user closes the topmost layer (Escape), or the tooltip if no layer is open. Returns whether Escape was taken, so
+/// the key can go on to whatever else wants it when nothing is open: a topmost layer that may not be dismissed now
+/// ([`Dialog::may_dismiss`]) takes it and stays open.
 pub fn dismiss_top(window: &mut Window, cx: &mut App) -> bool {
     let Some(stack) = stack(window, cx) else {
         return false;
     };
-    if let Some(top) = stack.read(cx).layers.last().map(|layer| layer.id) {
-        close(top, window, cx);
+    let top = stack
+        .read(cx)
+        .layers
+        .last()
+        .map(|layer| (layer.id, layer.dismissible(cx)));
+    if let Some((top, dismissible)) = top {
+        if dismissible {
+            close(top, window, cx);
+        }
         return true;
     }
     stack.update(cx, |stack, cx| {
@@ -775,6 +817,13 @@ pub fn hide_tooltip(owner: &Entity<TooltipOwner>, window: &mut Window, cx: &mut 
             stack.warm = true;
             stack.cool_down = Some(cool_down);
         });
+    }
+}
+
+impl Layer {
+    /// Whether the user may dismiss this layer now: what its guard says, and yes without one.
+    fn dismissible(&self, cx: &App) -> bool {
+        self.may_dismiss.as_ref().is_none_or(|guard| guard(cx))
     }
 }
 

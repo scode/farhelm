@@ -27,7 +27,7 @@ use gpui::{
 use gpui_component::Root;
 
 use crate::components::{Button, HoverHelp, Role};
-use crate::focus::Mark;
+use crate::focus::{Mark, ReturnTo};
 use crate::layers::{self, Dialog};
 use crate::local_state;
 use crate::main_view::MainView;
@@ -569,6 +569,8 @@ fn a_reset_closes_open_dialogs_so_take_back_stays_reachable(cx: &mut TestAppCont
                 subject: None,
                 main_action: None,
                 keeps_focus_on_empty_click: true,
+                returns_to: ReturnTo::Opener,
+                may_dismiss: None,
             },
             &mark,
             window,
