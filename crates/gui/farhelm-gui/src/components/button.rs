@@ -1,6 +1,6 @@
-//! Buttons, drawn as the old stylesheet's `.btn` tiers: ghost (the default), neutral, primary and danger, plus the
-//! compact control that sits on the red banner, the ⋯ that opens a list row's menu, the host rail's square entries, the
-//! removable filter chip, and the button that reads as a link.
+//! Buttons, drawn as the old stylesheet's `.btn` tiers: ghost (the default), neutral, primary and danger, the outlined
+//! danger of a permanent answer, plus the compact control that sits on the red banner, the ⋯ that opens a list row's
+//! menu, the host rail's square entries, the removable filter chip, and the button that reads as a link.
 //!
 //! A button shows its label's text, or other content in its place ([`Button::content`]: a host's mark, a mark beside a
 //! host's name); the label is its accessible name either way. A button that is one of a set of choices says whether
@@ -48,6 +48,13 @@ pub enum Tier {
     Primary,
     /// `.btn-danger`: the solid red fill of a destructive confirmation.
     Danger,
+    /// `.btn-danger.btn-outline`: red text and a red outline on no fill, with a subdued red hover. The permanent answer
+    /// beside a one-off danger answer (the YOLO confirmation's "Start, and don't ask again on this host" beside "Start
+    /// YOLO session anyway"): a filled button draws the reflex click, and the answer that turns a question off for good
+    /// should not be the reflex target, so it keeps the danger tier's color but not its fill. Unavailable, it takes the
+    /// retired fill as [`Tier::Danger`] does; busy, it keeps its outline and loses only its hover, as the old
+    /// `aria-disabled` rule left it.
+    DangerOutline,
     /// `.btn.banner-reclaim`: a compact ghost button for the red banner (the old terminal's "Take control"). It has a
     /// pale red outline and white text so it reads against the banner's fill, a darker red hover, and a white focus
     /// ring because the accent ring is not calibrated for a red background. Use it only on a red banner.
@@ -261,6 +268,13 @@ impl Button {
                 Some(palette.danger_soft),
                 palette.on_fill,
             ),
+            Tier::DangerOutline if self.disabled => retired,
+            Tier::DangerOutline => (
+                None,
+                palette.danger_bg_dim,
+                Some(palette.danger),
+                palette.danger,
+            ),
         }
     }
 }
@@ -283,7 +297,9 @@ impl RenderOnce for Button {
             Tier::RowMenu { .. } => (px(0.), px(ROW_MENU_PAD_X)),
             Tier::Rail | Tier::Link => (px(0.), px(0.)),
             Tier::Chip => (px(CHIP_PAD.0), px(CHIP_PAD.1)),
-            Tier::Ghost | Tier::Neutral | Tier::Primary | Tier::Danger => metrics::BUTTON_PAD,
+            Tier::Ghost | Tier::Neutral | Tier::Primary | Tier::Danger | Tier::DangerOutline => {
+                metrics::BUTTON_PAD
+            }
         };
         let pressed = self.pressed == Some(true);
         let ring_color = match self.tier {
@@ -293,6 +309,7 @@ impl RenderOnce for Button {
             | Tier::Neutral
             | Tier::Primary
             | Tier::Danger
+            | Tier::DangerOutline
             | Tier::Rail
             | Tier::Chip
             | Tier::Link

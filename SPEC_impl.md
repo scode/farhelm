@@ -443,8 +443,10 @@ Owner: the focus coordinator. It implements SPEC.md's "Keyboard focus" as one mo
 (the selected session's terminal), the dialog stack's trap and restore, and the record of who opened what.
 
 It is the only Farhelm code that moves focus. In GPUI, moving focus also redraws the whole window and drops pending
-keystrokes, which is one more reason for one owner. GPUI Kit moves focus inside its own text inputs on user clicks;
-those moves are accepted, and the per-step focus invariant covers them.
+keystrokes, which is one more reason for one owner. While a dialog is open, focus moves only inside it: the one move
+between parts of the topmost layer (along a radio group, into a question drawn inline in the dialog and back out)
+happens only from the control that holds focus. GPUI Kit moves focus inside its own text inputs on user clicks; those
+moves are accepted, and the per-step focus invariant covers them.
 
 GPUI also focuses any element that tracks a focus handle when it is pressed, so tracking focus goes through the
 coordinator too (`focus::track`), which applies its own press rule in place of GPUI's. An element that takes focus when
@@ -484,7 +486,8 @@ Every overlay is anchored to an element, not to coordinates (SPEC.md has no menu
 from a focused terminal goes to its program (SPEC.md); otherwise it closes only the topmost layer, unless a mode SPEC.md
 says captures the keyboard (the quick-launch sequence) is armed, or the topmost dialog's dismissal hook keeps it open,
 when Escape closes nothing, not even a tooltip: an editor whose save is in flight stays, and an editor leaving an
-unsaved draft stays and asks first, then closes itself if the answer says to leave. A dialog's own Close control goes
+unsaved draft stays and asks first, then closes itself if the answer says to leave. A question drawn inline in a dialog
+takes Escape first while focus is in it, as its Cancel, so the dialog stays open. A dialog's own Close control goes
 through the same hook; a close its opener makes, a subject going and a reset do not ask. A dialog that asks for it (the
 quick switcher, as in the old app) also closes on a press on its veil outside it, through Escape's path, so the same
 hook decides; any other dialog's veil only takes the press. Dialogs are centered, or near the window's top for an opener
@@ -535,6 +538,21 @@ Save", the host confirmations' permanent answer, the YOLO confirmation's guarded
 answer follows the same rules: it acts on the frozen value, the first answer pressed wins among all of them, and focus
 never starts on one. Cancel may be relabelled ("Keep editing") or given its own hover help without changing what it
 does.
+
+A question is centered over a veil, anchored beside the control it is about, or drawn inline inside the surface that
+owns it (the launcher's YOLO question in its body, the template editor's leave question at its foot), with the same
+rules in all three. An inline question is not a layer: its owner decides where it is drawn, and the prompt decides how
+it looks and answers. It takes focus on its starting answer when it opens, unless the user has moved on, and an answer
+returns focus to what held it before, inside the owner's dialog. Escape on it is Cancel and does not reach the owner's
+dialog. It draws plain, or loud as the YOLO confirmation is (decided by the migration's orchestrator on 2026-11-14).
+
+An answer whose action can fail keeps its question open, every answer frozen, until the action reports how it went:
+success closes the question as any answer does, and failure shows the reason inside it and arms the answers again
+(SPEC.md: the YOLO question "stays up with the reason" when stopping to ask fails). Focus stays on that answer
+throughout. While the attempt is unsettled, the owner's dismissal hook keeps the owner open, as an editor whose save is
+in flight stays, so the owner cannot close under the running action. Only an inline question may carry one: its owner
+decides its own dismissal, while a question shown as a layer can also close on a press outside it or its subject going,
+which nothing can veto.
 
 Enforced by the prompt being the only type that renders answer buttons for a question, and by a generic test, for every
 prompt kind, that changes the confirmation's subject after it opens, then sends its answers (Cancel, Confirm and an
