@@ -13,14 +13,17 @@
 //! (`layers::any_open`), which is SPEC.md's "A visible modal keeps keyboard ownership".
 //!
 //! The live ground is a column: the posted notices' banners across the whole window, then the sidebar and the pane
-//! side by side below them, so a banner pushes both down rather than covering the list's first row. The sidebar is the
-//! old app's column (`.app-sidebar`): its default width, one level above the ground (`--bg-1`), with a hairline against
-//! the pane.
+//! side by side below them, so a banner pushes both down rather than covering the list's first row. The sidebar
+//! ([`Sidebar`]) draws its own column at the width the user chose, with the divider that changes it, whose grip the row
+//! draws after the pane ([`Sidebar::grip`]). The pane keeps its floor ([`sidebar::MAIN_PANE_MIN_WIDTH`]); in a window
+//! too narrow for both, the row scrolls sideways rather than crushing the pane, as the old `.app-shell` did. Only a
+//! sideways wheel scrolls it, so a wheel over the list or the terminal scrolls only those.
 
 use farhelm_helm_client::ChannelState;
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement, Render, SharedString, Styled, Subscription, Window, div,
+    ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription,
+    Window, div,
 };
 
 use crate::actions::{DeleteSession, QuickSwitcher, RenameSession};
@@ -28,6 +31,7 @@ use crate::components::{Banner, Button, HoverHelp, Role, Tier};
 use crate::notices::{self, Notice};
 use crate::session_list::{self, SessionList};
 use crate::session_pane::SessionPane;
+use crate::sidebar::{self, Sidebar};
 use crate::theme::metrics;
 use crate::{render_count, root, session, theme};
 
@@ -43,6 +47,8 @@ pub struct MainView {
     /// The sidebar's session list, kept for the window's life: it holds only per-UI-session state, which it starts
     /// over by itself after a reset.
     session_list: Entity<SessionList>,
+    /// The sidebar around the list, kept for the window's life like the list.
+    sidebar: Entity<Sidebar>,
     /// The pane beside the list, kept for the window's life like the list: it remakes the selected session's terminal
     /// by itself on every change of selection or UI session.
     session_pane: Entity<SessionPane>,
@@ -59,11 +65,13 @@ impl MainView {
         if let Some(notices) = notices::entity(cx) {
             observed.push(cx.observe(&notices, |_, _, cx| cx.notify()));
         }
+        let session_list = cx.new(SessionList::new);
         MainView {
             _appearance: theme::observe_window(window),
             root: root::attach(window, cx),
             _observed: observed,
-            session_list: cx.new(SessionList::new),
+            sidebar: cx.new(|cx| Sidebar::new(session_list.clone(), cx)),
+            session_list,
             session_pane: cx.new(|cx| SessionPane::new(window, cx)),
         }
     }
@@ -90,15 +98,6 @@ impl Render for MainView {
             .map(|connection| connection.read(cx).state().clone())
             .unwrap_or(ChannelState::Connecting);
         let body = if state == ChannelState::Connected {
-            let sidebar = div()
-                .w(metrics::SIDEBAR_WIDTH)
-                .flex_none()
-                .h_full()
-                .overflow_hidden()
-                .bg(theme::color(palette.bg_1))
-                .border_r_1()
-                .border_color(theme::color(palette.border_sidebar_edge))
-                .child(self.session_list.clone());
             div()
                 .flex()
                 .flex_col()
@@ -106,18 +105,27 @@ impl Render for MainView {
                 .children(notices::posted(cx).into_iter().map(banner))
                 .child(
                     div()
+                        .id("main-shell")
+                        .relative()
                         .flex()
                         .flex_row()
                         .flex_1()
                         .min_h_0()
-                        .child(sidebar)
+                        .overflow_x_scroll()
+                        .restrict_scroll_to_axis()
+                        .child(self.sidebar.clone())
                         .child(
                             div()
+                                .id("main-pane")
                                 .flex_1()
-                                .min_w_0()
+                                .min_w(sidebar::MAIN_PANE_MIN_WIDTH)
                                 .h_full()
                                 .child(self.session_pane.clone()),
-                        ),
+                        )
+                        // Drawn last, so it takes the pointer over the pane's edge. It is placed from the sidebar's
+                        // width, which assumes the sidebar starts at this row's left edge and that the window redraws
+                        // when the width changes (`Sidebar::grip`); rail expansion must keep both true.
+                        .child(self.sidebar.update(cx, |sidebar, cx| sidebar.grip(cx))),
                 )
                 .into_any_element()
         } else {

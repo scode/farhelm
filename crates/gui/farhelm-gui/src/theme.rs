@@ -423,8 +423,9 @@ pub mod metrics {
     pub const TOOLTIP_LINE_HEIGHT: Pixels = px(16.2);
     /// `.farhelm-tooltip`'s `-webkit-line-clamp`: longer help is cut at this many lines.
     pub const TOOLTIP_MAX_LINES: usize = 8;
-    /// `--sidebar-width`: the sidebar column's default width (the old app let the user drag it; this port does not
-    /// yet). It holds the 56-pixel host rail as well as the session list beside it, as the old width did.
+    /// `--sidebar-width`: the sidebar column's default width, which the screenshot goldens draw the session list at.
+    /// It holds the 56-pixel host rail as well as the session list beside it, as the old width did. The app's sidebar
+    /// draws the width the helm stores instead, defaulting to the same 396 pixels (`crate::sidebar`).
     pub const SIDEBAR_WIDTH: Pixels = px(396.);
     /// `--row-slot`: the width of a session row's status and locality columns.
     pub const ROW_SLOT: Pixels = px(12.);

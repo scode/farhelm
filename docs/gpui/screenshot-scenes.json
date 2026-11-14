@@ -291,6 +291,59 @@
       ]
     },
     {
+      "id": "app-sidebar-header",
+      "title": "The sidebar's app header: the wordmark and this build's version, the version's hover help showing",
+      "reference": "main-running-session",
+      "mockup": false,
+      "steps": [
+        [
+          "hover",
+          "id:app-version"
+        ],
+        [
+          "wait",
+          "--text",
+          "This is a development build of Farhelm, not a release."
+        ]
+      ]
+    },
+    {
+      "id": "app-sidebar-resized",
+      "title": "The sidebar widened to 446 pixels with five Right presses on its focused divider (last in its app run, since the width is stored with the helm)",
+      "reference": "main-running-session",
+      "mockup": false,
+      "steps": [
+        [
+          "click",
+          "id:sidebar-divider-grip"
+        ],
+        [
+          "press",
+          "right"
+        ],
+        [
+          "press",
+          "right"
+        ],
+        [
+          "press",
+          "right"
+        ],
+        [
+          "press",
+          "right"
+        ],
+        [
+          "press",
+          "right"
+        ],
+        [
+          "hover",
+          "text:Recently active"
+        ]
+      ]
+    },
+    {
       "id": "app-empty-fleet",
       "title": "The main window over an empty fleet",
       "reference": "empty-fleet",
