@@ -6,12 +6,13 @@ orchestrator owns this index after M1. Every one of the 145 spec files at the re
 one area.
 
 - [Terminal](terminal.md)
-- [Sidebar and host rail](sidebar-and-host-rail.md)
-- [Launcher and templates](launcher-and-templates.md)
+- [Sidebar and session view](sidebar-and-session-view.md)
+- [Launcher](launcher.md)
+- [Templates and quick launch](templates-and-quick-launch.md)
 - [Settings and hosts](settings-and-hosts.md)
-- [Other dialogs](other-dialogs.md)
 - [Desktop integration and Linux packaging](desktop-integration-and-linux-packaging.md)
 - [Approvals and agent-spawned sessions](approvals-and-agent-spawned-sessions.md)
+- [Other dialogs](other-dialogs.md)
 - [Foundations (M1)](foundations.md)
 
 Each row names the spec, its number of tests, what it covers (its first test's title, or its `describe` title where that
