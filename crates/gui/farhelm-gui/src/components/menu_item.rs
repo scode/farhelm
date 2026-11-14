@@ -22,6 +22,12 @@
 //!
 //! Activation follows [`super::Button`]: a click, or Enter or Space while the item has focus (never a held key), and
 //! the focus coordinator's click rule for whether a press moves focus.
+//!
+//! A choice in a select's list is the same item made with [`MenuItem::choice`]: a tick in the icon's place on the
+//! chosen one and an empty slot of the same size on the others, as the platform's pop-up menu marked the chosen
+//! option, and its label kept to one line and cut with an ellipsis, since the list is exactly as wide as its control
+//! ([`crate::layers::Anchor::matching_width`]) and a native menu never wrapped an option. An unavailable choice says
+//! why after its label ([`MenuItem::suffix`]), as the old app's disabled `<option>`s did (" · " and the reason).
 
 use std::rc::Rc;
 
@@ -49,9 +55,14 @@ const DESCRIPTION_SIZE: f32 = 11.;
 #[derive(IntoElement)]
 pub struct MenuItem {
     id: SharedString,
-    icon: Icon,
+    /// `None` for a choice that is not the chosen one: an empty slot as wide as an icon, so labels line up.
+    icon: Option<Icon>,
     label: SharedString,
     description: Option<SharedString>,
+    /// Words drawn after the label on its line ([`MenuItem::suffix`]).
+    suffix: Option<SharedString>,
+    /// Whether this is a choice ([`MenuItem::choice`]), and then whether it is the chosen one.
+    chosen: Option<bool>,
     help: HoverHelp,
     role: Role,
     danger: bool,
@@ -73,9 +84,11 @@ impl MenuItem {
     ) -> Self {
         MenuItem {
             id: id.into(),
-            icon,
+            icon: Some(icon),
             label: label.into(),
             description: None,
+            suffix: None,
+            chosen: None,
             help,
             role,
             danger: false,
@@ -83,6 +96,30 @@ impl MenuItem {
             focus: None,
             on_click: None,
         }
+    }
+
+    /// One choice of a select's list (see the module docs): ticked when `chosen`, with an empty slot in the icon's
+    /// place otherwise, its label on one line cut with an ellipsis, and reported selected or not. The arguments are
+    /// [`MenuItem::new`]'s; `role` is [`Role::MenuListOption`] in a select's list.
+    pub fn choice(
+        id: impl Into<SharedString>,
+        label: impl Into<SharedString>,
+        help: HoverHelp,
+        role: Role,
+        chosen: bool,
+    ) -> Self {
+        let mut item = MenuItem::new(id, Icon::Check, label, help, role);
+        item.icon = chosen.then_some(Icon::Check);
+        item.chosen = Some(chosen);
+        item
+    }
+
+    /// Words drawn after the label on the same line, after a middle dot: why an unavailable choice cannot be chosen
+    /// ("Podman · Needs setup"), as the old app's disabled options read. They are the item's accessible description
+    /// too, so a screen reader hears the reason; give an item a suffix or a [`MenuItem::description`], not both.
+    pub fn suffix(mut self, suffix: impl Into<SharedString>) -> Self {
+        self.suffix = Some(suffix.into());
+        self
     }
 
     /// The line under the label that says what the command does ("Removes the session and its state").
@@ -147,12 +184,23 @@ impl RenderOnce for MenuItem {
         let key_handler = handler.clone();
         let highlight = focus.clone();
 
+        // A choice keeps its label (and any suffix) to one line, cut with an ellipsis: the list is as wide as its
+        // control, and a pop-up menu never wrapped an option.
+        let words: SharedString = match &self.suffix {
+            Some(suffix) => format!("{} · {suffix}", self.label).into(),
+            None => self.label.clone(),
+        };
+        let line = div()
+            .min_w_0()
+            .when(self.chosen.is_some(), |line| line.truncate())
+            .child(words);
         let copy = div()
             .flex()
             .flex_col()
             .gap(px(1.))
             .min_w_0()
-            .child(self.label.clone())
+            .when(self.chosen.is_some(), |copy| copy.flex_1())
+            .child(line)
             .children(self.description.clone().map(|description| {
                 div()
                     .text_size(px(DESCRIPTION_SIZE))
@@ -180,16 +228,19 @@ impl RenderOnce for MenuItem {
             .when(lit, |item| item.bg(theme::color(palette.accent_fill)))
             .when(enabled, |item| item.cursor_pointer())
             .when(!enabled, |item| item.opacity(0.5))
-            .child(
-                svg()
-                    .path(self.icon.path())
+            .child(match self.icon {
+                Some(icon) => svg()
+                    .path(icon.path())
                     .size(px(14.))
                     .flex_none()
                     .mt(px(1.))
-                    .text_color(theme::color(icon_ink)),
-            )
+                    .text_color(theme::color(icon_ink))
+                    .into_any_element(),
+                None => div().size(px(14.)).flex_none().into_any_element(),
+            })
             .child(copy)
-            .when_some(self.description, |item, description| {
+            .when_some(self.chosen, |item, chosen| item.aria_selected(chosen))
+            .when_some(self.description.or(self.suffix), |item, description| {
                 item.aria_description(description)
             });
         if ring {
