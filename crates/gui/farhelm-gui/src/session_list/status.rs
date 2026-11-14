@@ -13,11 +13,25 @@
 //! ([`pulse_opacity`]), at the ticker's shared pulse phase, so every running dot in the list steps together. The pulse
 //! is a claim about the present, so a running session on a host that is not connected draws a grey, still mark, as
 //! SPEC.md asks.
+//!
+//! A session on a host the helm cannot reach (a stale row) keeps its last-known status and also says why it is only
+//! last-known: a neutral cause such as `Waiting for supervisor` or `Host needs update` ([`stale_cause`]), from the
+//! host's connection state and from whether the host list was read at all. SPEC.md, "Session list": such sessions stay
+//! in the list "with a neutral cause mark ... rather than vanishing". Ported from the old app's
+//! `hosts::session_unavailable_cause`. The cause is the app's own wording, never the host's: retry counts and the
+//! transport's error text belong to the session view's card, so a cause stays put while the helm keeps retrying.
+//!
+//! Hover help and accessible descriptions here are the app's own words. A help that ever needs to quote a host value
+//! (an annotation, a launch failure's detail) goes through [`HoverHelp::sentence`](crate::components::HoverHelp), which
+//! escapes it; the wording a row shows on screen draws its host parts through [`Line`] for the same reason.
 
+use farhelm_helm_client::Collections;
 use farhelm_proto::SessionStatus;
-use farhelm_proto::ui_channel::SessionRow;
+use farhelm_proto::tensorlake::LifecycleDirection;
+use farhelm_proto::ui_channel::{Availability, Collection, HostStateView, HostView, SessionRow};
 use gpui::{
-    IntoElement, ParentElement, SharedString, Styled, div, prelude::FluentBuilder as _, px, svg,
+    Div, IntoElement, ParentElement, SharedString, Styled, div, prelude::FluentBuilder as _, px,
+    svg,
 };
 
 use crate::assets::Icon;
@@ -180,7 +194,8 @@ impl Ended {
 
 impl Badge {
     /// The status word for the row's hover help and description: the live word, or the ended word without its host
-    /// details (hover help is the app's own words only). `None` for a status that draws nothing.
+    /// details, which the row already shows in full on its own line (help that quoted them would have to be a
+    /// [`HoverHelp::sentence`](crate::components::HoverHelp) to stay escaped). `None` for a status that draws nothing.
     pub(crate) fn word(badge: Option<&Badge>) -> Option<&'static str> {
         match badge? {
             Badge::Live(live) => Some(live.word()),
@@ -233,8 +248,22 @@ pub(crate) fn unseen(row: &SessionRow) -> bool {
         .is_none_or(|seen| row.info.effective_activity() > seen)
 }
 
-/// What `row`'s status shows. `id` names the ended line's sentence, which needs an element id when it quotes the host.
+/// What `row`'s status shows anywhere but its sidebar row (the quick switcher's rows, the menu header): an exit with no
+/// code reads plain `Exited`. `id` names the ended line's sentence, which needs an element id when it quotes the host.
 pub(crate) fn badge(row: &SessionRow, id: SharedString) -> Option<Badge> {
+    badge_with(row, id, false)
+}
+
+/// What `row`'s status shows in its sidebar row: [`badge`], except that an exit with no code says so,
+/// `Exited (code unknown)`. SPEC.md, "Status": an exit the supervisor did not witness shows "an explicit unknown
+/// otherwise — never a guess", and the row is where the complete ended wording lives; the old app made that change on
+/// the sidebar alone (`rows::session_row_detail`) and kept plain `Exited` in its summary card and menu header.
+pub(crate) fn row_badge(row: &SessionRow, id: SharedString) -> Option<Badge> {
+    badge_with(row, id, true)
+}
+
+/// [`badge`] and [`row_badge`]: `unknown_code` says whether an exit without a code names the code as unknown.
+fn badge_with(row: &SessionRow, id: SharedString, unknown_code: bool) -> Option<Badge> {
     match &row.info.status {
         SessionStatus::Unknown => None,
         SessionStatus::Running | SessionStatus::Waiting | SessionStatus::Idle => {
@@ -242,8 +271,10 @@ pub(crate) fn badge(row: &SessionRow, id: SharedString) -> Option<Badge> {
         }
         SessionStatus::Exited { exit_code } => {
             let mut words = "Exited".to_owned();
-            if let Some(code) = exit_code {
-                words.push_str(&format!(" (code {code})"));
+            match exit_code {
+                Some(code) => words.push_str(&format!(" (code {code})")),
+                None if unknown_code => words.push_str(" (code unknown)"),
+                None => {}
             }
             let line = match &row.info.annotation {
                 Some(annotation) => HostSentence::new(id)
@@ -273,17 +304,96 @@ pub(crate) fn badge(row: &SessionRow, id: SharedString) -> Option<Badge> {
 }
 
 /// The ended wording, drawn as `.session-row-detail .status-badge`: 12-pixel text in the status's color that wraps
-/// rather than truncating, since this is the one place an ended message must stay fully visible.
-pub(crate) fn ended_line(
-    kind: Ended,
-    line: Line,
-    palette: &Palette,
-    selected: bool,
-) -> impl IntoElement {
+/// rather than truncating, since this is the one place an ended message must stay fully visible. A plain element, so
+/// the row can lay it out beside a stale cause on one wrapping line.
+pub(crate) fn ended_line(kind: Ended, line: Line, palette: &Palette, selected: bool) -> Div {
     div()
         .min_w_0()
         .text_size(metrics::TEXT_SM)
         .line_height(px(16.))
         .text_color(crate::theme::color(kind.color(palette, selected)))
         .child(line)
+}
+
+// ---- Stale rows: why a status is only last-known ---------------------------------------------------------------------
+
+/// Where a stale row's host stands in the registry this window holds: the old app's `HostLookup`, which the cause is
+/// read from. The registry read and the host's own state are different claims, so each has its own case: a failed read
+/// says nothing about the host, and a successful read that lacks the host says it was removed.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum HostLookup<'a> {
+    /// No host list has arrived yet.
+    Pending,
+    /// The latest host list read failed, so nothing current can be said about any host.
+    Failed,
+    /// A successful read lists the host.
+    Known(&'a HostView),
+    /// A successful read does not list the host: it was removed from the registry.
+    Absent,
+}
+
+impl<'a> HostLookup<'a> {
+    /// The lookup of registry id `host` in `collections`.
+    pub(crate) fn of(collections: &'a Collections, host: i64) -> Self {
+        let Some(meta) = collections.meta(Collection::Hosts) else {
+            return HostLookup::Pending;
+        };
+        if let Availability::Unavailable { .. } = meta.availability {
+            return HostLookup::Failed;
+        }
+        match collections.get::<HostView>(&HostView::key(host)) {
+            Some(host) => HostLookup::Known(host),
+            None => HostLookup::Absent,
+        }
+    }
+}
+
+/// Why a session's status is only last-known, as its row names it: the old `session_unavailable_cause`, word for word.
+///
+/// A connected host still has stale rows for a moment while the helm's listing catches up (`Refreshing session`), and a
+/// host refused at the handshake for running a newer protocol needs a newer helm, not an update, so it reads
+/// `Host is too new` ([`crate::hosts::offers::runs_newer_version`] is that test, shared with the Hosts panel). The old
+/// table's "unknown state" case has no counterpart: the port's host state is a closed type, so every state it can hold
+/// has its own words here.
+pub(crate) fn cause(lookup: HostLookup<'_>) -> &'static str {
+    let host = match lookup {
+        HostLookup::Pending => return "Checking host",
+        HostLookup::Failed => return "Host state unavailable",
+        HostLookup::Absent => return "Host removed",
+        HostLookup::Known(host) => host,
+    };
+    match &host.state {
+        HostStateView::Connecting { .. } | HostStateView::Unreachable { .. } => {
+            "Waiting for supervisor"
+        }
+        HostStateView::Connected { .. } => "Refreshing session",
+        HostStateView::VersionSkew { .. }
+            if crate::hosts::offers::runs_newer_version(&host.state) =>
+        {
+            "Host is too new"
+        }
+        HostStateView::VersionSkew { .. } => "Host needs update",
+        HostStateView::IdentityMismatch { .. } => "Host identity mismatch",
+        HostStateView::IdentityUnverified { .. } => "Host identity unverified",
+        HostStateView::Duplicate { .. } => "Duplicate host",
+        HostStateView::Suspended { .. } => "Host suspended",
+        HostStateView::Stopped { .. } => "Environment stopped",
+        HostStateView::TensorlakeChanging { direction, .. } => match direction {
+            LifecycleDirection::Suspending => "Host suspending",
+            LifecycleDirection::Resuming => "Host resuming",
+        },
+        HostStateView::Retired { .. } => "Host connection stopped",
+        HostStateView::Deleting { .. } => "Host being deleted",
+    }
+}
+
+/// The cause `row` shows, or `None` for a row whose host is connected and current (not stale), which shows none.
+pub(crate) fn stale_cause(row: &SessionRow, collections: &Collections) -> Option<&'static str> {
+    row.stale
+        .then(|| cause(HostLookup::of(collections, row.host)))
+}
+
+/// The cause's hover help: what the mark means for the row beside it (the old capsule's `data-tooltip`).
+pub(crate) fn cause_help(cause: &str) -> String {
+    format!("{cause}: this is the session's last-known state")
 }

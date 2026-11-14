@@ -58,6 +58,12 @@
 //! redraws a notified view's whole window, re-rendering every uncached view in it and dirtying the notified view's
 //! ancestors, so per-row views would not have limited what a step redraws, only multiplied the notifications.
 //!
+//! The rows' ages ([`age`]) are the other thing that changes with time alone, and they wake the list twice a minute,
+//! not once per row: the list holds the ticker's one [`ticker::Clock`] while any listed row has an age to show, reads
+//! the wall clock once per frame, and every row's age is counted from that one reading. The clock notifies in an
+//! inactive window and under reduced motion too (an age is information, not motion). The list is drawn uncached, which
+//! a view that draws an age must be, since the cache wrapper cannot see the time.
+//!
 //! Each row has an actions menu ([`menu`]) whose commands so far are Rename ([`rename`]), Mark read or Mark unread
 //! ([`seen`], also on a click on the row's status dot), Replace ([`replace`]), Stop ([`stop`]) and Delete ([`delete`]),
 //! and the open session's header (`session_pane/header.rs`) asks the same Stop, Replace and Delete through the same
@@ -87,6 +93,7 @@
 //! control), the status segments, compact rows, marking, pins, the row menu's other commands, and the rail's host
 //! status, the foot's controls other than Hosts and Settings, Add host and expansion.
 
+mod age;
 pub(crate) mod delete;
 pub(crate) mod host_rail;
 pub(crate) mod menu;
@@ -109,6 +116,9 @@ mod list_tests;
 
 #[cfg(test)]
 pub(crate) mod menu_tests;
+
+#[cfg(test)]
+mod row_tests;
 
 #[cfg(test)]
 mod seen_tests;
@@ -167,6 +177,10 @@ pub struct SessionList {
     /// Delete or a Stop in flight, or a Replace that has waited long enough to say so), and worked out at the top of
     /// each frame like `pulse`.
     spinner: Option<delete::Spinner>,
+    /// The ticker's 30-second clock (see the module docs), held exactly while some listed row has an age to show, and
+    /// worked out at the top of each frame like `pulse`. Unlike the pulse it does not depend on the window being
+    /// active: an inactive window still shows its ages.
+    clock: Option<ticker::Clock>,
     /// The virtualized rows' state: their count, measured heights, scroll position and focus handles. Kept in step
     /// with the store by [`SessionList::sync_rows`] at the top of every frame; it holds no session data of its own.
     rows: ListState,
@@ -236,6 +250,7 @@ impl SessionList {
             _observing: observing,
             pulse: None,
             spinner: None,
+            clock: None,
             rows: ListState::new(0, ListAlignment::Top, px(ROW_OVERDRAW)),
             entries: Rc::from([]),
             row_focus: HashMap::new(),
@@ -472,15 +487,16 @@ impl Render for SessionList {
         let Some(store) = session::current_store(cx) else {
             self.pulse = None;
             self.spinner = None;
+            self.clock = None;
             if !self.entries.is_empty() {
                 self.sync_rows(Some(Vec::new()), window, cx);
             }
             return body_row.child(list);
         };
-        // One pass over the listing for what the frame needs from all of it: the keys, and whether any row pulses or
-        // shows a spinner (a pending Delete or Stop, or a Replace that has waited long enough to say so). Everything
-        // else is read row by row, for the rows drawn.
-        let (keys, any_pulse, any_spinner) = {
+        // One pass over the listing for what the frame needs from all of it: the keys, whether any row pulses or
+        // shows a spinner (a pending Delete or Stop, or a Replace that has waited long enough to say so), and whether
+        // any has an activity stamp to show an age for. Everything else is read row by row, for the rows drawn.
+        let (keys, any_pulse, any_spinner, any_stamp) = {
             let listed = selection::listed(store.read(cx).collections());
             let unchanged = listed.len() == self.entries.len()
                 && listed
@@ -499,7 +515,10 @@ impl Render for SessionList {
                     || stop::in_flight(session.key, cx)
                     || outcome::waited_seconds(session.key, operations::Work::Replace, cx).is_some()
             });
-            (keys, any_pulse, any_spinner)
+            let any_stamp = listed
+                .iter()
+                .any(|session| session.row.info.effective_activity() > 0);
+            (keys, any_pulse, any_spinner, any_stamp)
         };
         let pulses = ticker::is_active(window, cx) && any_pulse;
         if pulses != self.pulse.is_some() {
@@ -509,9 +528,13 @@ impl Render for SessionList {
         if spins != self.spinner.is_some() {
             self.spinner = spins.then(|| delete::Spinner::start(window, cx));
         }
+        if any_stamp != self.clock.is_some() {
+            self.clock = any_stamp.then(|| ticker::clock(cx));
+        }
         let steps = row::Steps {
             pulse: self.pulse.as_ref().map_or(0, |pulse| pulse.step(cx)),
             spinner: self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx)),
+            now: age::seconds(ticker::wall_now(cx)),
         };
         if self.sync_rows(keys, window, cx) {
             cx.notify();

@@ -409,8 +409,9 @@ fn remedy(
 }
 
 /// `secs` since the epoch as `YYYY-MM-DD HH:MM:SS UTC`, the old app's unambiguous stamp (`activity::utc_stamp`): a
-/// zone-qualified time needs no time zone database, which the GUI does not carry.
-fn utc_stamp(secs: i64) -> String {
+/// zone-qualified time needs no time zone database, which the GUI does not carry. A session row's age shows its stamp
+/// in the same form, as the old app's did.
+pub(crate) fn utc_stamp(secs: i64) -> String {
     const SECS_PER_DAY: i64 = 86_400;
     // Euclidean division, so a stamp before 1970 still lands on its own day rather than reflecting around the epoch.
     let (year, month, day) = farhelm_proto::time::civil_from_days(secs.div_euclid(SECS_PER_DAY));
