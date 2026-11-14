@@ -31,6 +31,12 @@
 //! the answers again, so the user can pick again. Focus stays on the answer the user pressed throughout, since a busy
 //! button keeps it, and the question never closes and reopens. Only the inline presentation offers it (below).
 //!
+//! A centered question that needs more than lines of text (the host setup confirmation's numbered plan with its Copy
+//! plan button, the host remove confirmation's explanation) carries a body the feature draws ([`Question::body`]), and
+//! the host dialogs' header tile, footer note and width ([`Question::tile`], [`Question::note`], [`Question::width`]).
+//! The body is a view built once, as the question is asked, from the frozen value; its own controls are not answers.
+//! The anchored and inline questions ignore all four. Approved by the GPUI migration's orchestrator on 2026-11-14.
+//!
 //! Where focus starts follows SPEC.md, "Opening and closing": on the confirming button for a question the user just
 //! asked for, on Cancel when that button is disabled, when the action is risky and cannot be undone, or when the
 //! question arrived later. Escape and Cancel close it and return focus to where it was (Escape sends it home instead
@@ -75,8 +81,8 @@
 use std::rc::Rc;
 
 use gpui::{
-    AnyWindowHandle, App, AppContext as _, Context, Entity, FocusHandle, FontWeight,
-    InteractiveElement as _, IntoElement, ParentElement, Render, SharedString,
+    AnyElement, AnyView, AnyWindowHandle, App, AppContext as _, Context, Entity, FocusHandle,
+    FontWeight, InteractiveElement as _, IntoElement, ParentElement, Pixels, Render, SharedString,
     StatefulInteractiveElement as _, Styled, WeakEntity, WeakFocusHandle, Window, div,
     prelude::FluentBuilder as _, px,
 };
@@ -144,8 +150,22 @@ pub struct Question<T> {
     returns_to: ReturnTo,
     /// Drawn inline in the loud look ([`Question::loud`]).
     loud: bool,
+    /// Builds the feature's body from the frozen value when the question opens ([`Question::body`]).
+    body: Option<BuildBody<T>>,
+    /// Draws the header's icon tile ([`Question::tile`]).
+    tile: Option<DrawTile>,
+    /// The footer note beside the answers ([`Question::note`]).
+    note: Option<SharedString>,
+    /// The dialog frame's width in place of the ordinary one ([`Question::width`]).
+    width: Option<Pixels>,
     frozen: T,
 }
+
+/// What [`Question::body`] is handed: called once, when the question opens, with the frozen value.
+type BuildBody<T> = Box<dyn FnOnce(&T, &mut Window, &mut App) -> AnyView>;
+
+/// What [`Question::tile`] is handed: called on every draw, since an element lasts one frame.
+type DrawTile = Rc<dyn Fn(&mut Window, &mut App) -> AnyElement>;
 
 impl<T: Clone + 'static> Question<T> {
     /// A question titled `title` whose confirming answer is `confirm` and acts on `frozen`. Cancel is the other answer.
@@ -167,6 +187,10 @@ impl<T: Clone + 'static> Question<T> {
             keeps_focus_on_empty_click: false,
             returns_to: ReturnTo::Opener,
             loud: false,
+            body: None,
+            tile: None,
+            note: None,
+            width: None,
             frozen,
         }
     }
@@ -268,6 +292,75 @@ impl<T: Clone + 'static> Question<T> {
         self
     }
 
+    /// A body the feature draws, below the lines and above the answers, for a question that needs more than lines of
+    /// text: the host setup confirmation's numbered plan with its Copy plan button, say. `build` runs once, when the
+    /// question is asked, with the frozen value, and returns the view the prompt then draws for as long as it is open.
+    /// It runs even when the question then does not open (the user moved on since the mark), and its view is dropped
+    /// unseen, so it should only build the view:
+    ///
+    /// ```ignore
+    /// Question::new("Set up host", set_up, offer.clone())
+    ///     .body(|offer: &SetupOffer, _, cx| cx.new(|cx| PlanBody::new(offer, cx)))
+    /// ```
+    ///
+    /// A view built once rather than a function drawn every frame, for two reasons. What it shows is fixed at the
+    /// moment the question opens, as the lines are, so the plan the user reads is the plan the answers act on. And
+    /// the body's own controls need state that outlives a frame: a Copy button's focus handle, which must stay the
+    /// same handle for focus to stay on it. The prompt cannot check the first: a view that reads live state when it
+    /// draws (an entity, the store) would show something else, so it holds copies, as the frozen value does.
+    ///
+    /// The body may hold controls that are not answers (Copy plan). They sit in Tab's order between the question's
+    /// text and its answers, since the body is drawn between them; focus still starts where the prompt's rules put it,
+    /// never in the body. Such a control is the feature's own: pressing it never closes the question, and it is not
+    /// one of the answers the first one wins among.
+    ///
+    /// A host value in the body goes through [`crate::host_text`]'s elements
+    /// ([`HostSentence`](crate::host_text::HostSentence), [`element`](crate::host_text::element)), as everywhere else;
+    /// the prompt draws the body as given and cannot check that it did.
+    ///
+    /// Only the centered question draws a body; the anchored and inline questions ignore it, as they ignore the tile
+    /// and the note. No question asked those ways needs one, and each would need more than drawing it: the anchored
+    /// question's amber 12-pixel prose would restyle it, and an inline question returns focus itself only from its
+    /// answers, so Escape with focus on a body control would let focus fall elsewhere in the owner's dialog.
+    pub fn body<V: Into<AnyView>>(
+        mut self,
+        build: impl FnOnce(&T, &mut Window, &mut App) -> V + 'static,
+    ) -> Self {
+        self.body = Some(Box::new(move |frozen, window, cx| {
+            build(frozen, window, cx).into()
+        }));
+        self
+    }
+
+    /// An icon tile left of the title ([`DialogFrame::tile`]): the old host dialogs' host mark. `draw` runs on every
+    /// draw, since a drawn element lasts one frame; it should draw what it captured when the question was built, not
+    /// read live state. The tile is decoration, and only the centered question has one; the others ignore it.
+    pub fn tile<E: IntoElement>(
+        mut self,
+        draw: impl Fn(&mut Window, &mut App) -> E + 'static,
+    ) -> Self {
+        self.tile = Some(Rc::new(move |window, cx| {
+            draw(window, cx).into_any_element()
+        }));
+        self
+    }
+
+    /// A note at the footer's left, beside the answers ([`DialogFrame::note`]): the host confirmations' "Undo "don't
+    /// ask again" with the gear at the foot of the navigation rail". App wording only. Only the centered question has
+    /// a footer; the others ignore it.
+    pub fn note(mut self, note: impl Into<SharedString>) -> Self {
+        self.note = Some(note.into());
+        self
+    }
+
+    /// The dialog's width in place of the ordinary one ([`DialogFrame::width`]): the old host setup confirmation was
+    /// 560 pixels wide, against the ordinary dialog's 480, so its plan's paths wrap where they did. Only the centered
+    /// question takes it; the others ignore it.
+    pub fn width(mut self, width: Pixels) -> Self {
+        self.width = Some(width);
+        self
+    }
+
     /// Escape on the question sends focus home (the selected session's terminal) rather than back to the control that
     /// opened it; every other way it closes (an answer, a press outside it) still returns focus to the opener. SPEC.md,
     /// "Keyboard focus", for the session header's Stop, Restart, Replace and Delete questions: "Escape cancels the
@@ -357,6 +450,8 @@ pub struct Prompt<T: 'static> {
     layer: Option<LayerId>,
     /// How it is drawn.
     shown: Shown,
+    /// The feature's body, built from the frozen value when the question opened ([`Question::body`]).
+    body: Option<AnyView>,
     /// An answer has run (or an attempt succeeded): the question is closed, and every answer does nothing.
     answered: bool,
     /// A fallible answer's attempt is in flight: every answer is frozen until it settles.
@@ -468,7 +563,7 @@ impl<T: Clone + 'static> Prompt<T> {
 }
 
 impl<T: Clone + 'static> Render for Prompt<T> {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::palette(cx);
         if self.shown == Shown::Inline && self.answered {
             return div().into_any_element();
@@ -561,10 +656,20 @@ impl<T: Clone + 'static> Render for Prompt<T> {
             .flex_col()
             .gap(px(8.))
             .text_color(theme::color(palette.fg_0))
-            .children(question.lines.iter().cloned().map(|line| div().child(line)));
+            .children(question.lines.iter().cloned().map(|line| div().child(line)))
+            .children(self.body.clone());
         let mut frame = DialogFrame::new("prompt", question.title.clone(), body, answers);
         if let Some(summary) = &question.summary {
             frame = frame.summary(summary.clone());
+        }
+        if let Some(tile) = &question.tile {
+            frame = frame.tile(tile(window, cx));
+        }
+        if let Some(note) = &question.note {
+            frame = frame.note(note.clone());
+        }
+        if let Some(width) = question.width {
+            frame = frame.width(width);
         }
         frame.into_any_element()
     }
@@ -806,7 +911,7 @@ pub fn ask_inline<T: Clone + 'static>(
     window: &mut Window,
     cx: &mut App,
 ) -> Inline<T> {
-    let (prompt, start) = build(question, Shown::Inline, on_confirm, cx);
+    let (prompt, start) = build(question, Shown::Inline, on_confirm, window, cx);
     let opener = window.focused(cx);
     prompt.update(cx, |prompt, _| {
         prompt.opener = opener.as_ref().map(FocusHandle::downgrade)
@@ -852,7 +957,7 @@ fn ask_inner<T: Clone + 'static>(
         Presentation::Centered => Shown::Centered,
         Presentation::Anchored(_) => Shown::Anchored,
     };
-    let (prompt, start) = build(question, shown, on_confirm, cx);
+    let (prompt, start) = build(question, shown, on_confirm, window, cx);
     let weak = prompt.downgrade();
     let main_action: Option<layers::MainAction> = enabled.then(|| {
         Rc::new(move |window: &mut Window, cx: &mut App| {
@@ -899,11 +1004,13 @@ fn ask_inner<T: Clone + 'static>(
     Some((layer, prompt))
 }
 
-/// The open prompt for `question`, drawn as `shown`, with its answers' focus handles, and the handle focus starts on.
+/// The open prompt for `question`, drawn as `shown`, with its answers' focus handles and its body built from the
+/// frozen value, and the handle focus starts on.
 fn build<T: Clone + 'static>(
     mut question: Question<T>,
     shown: Shown,
     on_confirm: impl FnOnce(T, &mut Window, &mut App) + 'static,
+    window: &mut Window,
     cx: &mut App,
 ) -> (Entity<Prompt<T>>, FocusHandle) {
     let confirm_focus = cx.focus_handle().tab_stop(true);
@@ -917,6 +1024,11 @@ fn build<T: Clone + 'static>(
         .into_iter()
         .map(Some)
         .collect();
+    // Built here, once, from the value the answers act on: what the body shows is fixed from the moment it opens.
+    let body = question
+        .body
+        .take()
+        .map(|build| build(&question.frozen, window, cx));
     let start = if question.starts_focus_on_cancel() {
         cancel_focus.clone()
     } else {
@@ -928,6 +1040,7 @@ fn build<T: Clone + 'static>(
         on_alternatives,
         layer: None,
         shown,
+        body,
         answered: false,
         in_flight: false,
         reason: None,
