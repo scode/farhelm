@@ -681,14 +681,28 @@ systemd or SSH substrate ran.
   `docs/gui-agent.md`; headless on Linux, in the GUI session on a Mac): the run directory's checks (absolute, and
   shallow enough for the deepest socket's path limit), the app's environment (nothing of the caller's display, bus,
   bridge or `FARHELM_*` variables; on Linux the run's own compositor and lavapipe; the run's state directory and
-  supervisor program), the seeding request, that a recorded pid whose start time no longer matches is never signalled
-  (from /proc on Linux, `ps` on macOS, in the C locale and UTC), and the `--lock` rules: held until the holder is
-  stopped, kept by `stop` while part of the run may still be running, given up by a holder whose `start` was killed
-  while it waited, and a lock path that cannot be opened failing at once. Seconds; starts and builds nothing; runs on
-  Linux and macOS. The harness itself is a tool, not a gate: an end-to-end run (`start`, then `stop`) builds the app and
-  needs `mutter`, `dbus-run-session` and lavapipe on Linux, or a logged-in GUI session of the same user on a Mac. Run
-  the tests when the script changes, and an end-to-end run when the script, the bridge's wiring in `farhelm-gui` or
-  `farhelm-desktop`, or the app's startup changes.
+  supervisor program, and the window size and appearance a run asks for), the seeding request, that a recorded pid whose
+  start time no longer matches is never signalled (from /proc on Linux, `ps` on macOS, in the C locale and UTC), and the
+  `--lock` rules: held until the holder is stopped, kept by `stop` while part of the run may still be running, given up
+  by a holder whose `start` was killed while it waited, and a lock path that cannot be opened failing at once. Seconds;
+  starts and builds nothing; runs on Linux and macOS. The harness itself is a tool, not a gate: an end-to-end run
+  (`start`, then `stop`) builds the app and needs `mutter`, `dbus-run-session` and lavapipe on Linux, or a logged-in GUI
+  session of the same user on a Mac. Run the tests when the script changes, and an end-to-end run when the script, the
+  bridge's wiring in `farhelm-gui` or `farhelm-desktop`, or the app's startup changes.
+- `python3 -B scripts/test-gui-screenshot-batch.py` — the page `scripts/gui-screenshot-batch.py` builds to compare the
+  GPUI app with the old app's reference pictures (`docs/gpui/screenshot-batch.md`): unported reference scenes say "not
+  yet ported" and pictures the batch did not take say "not captured in this batch", mockups are labelled, a capture sits
+  next to its reference scene with its variant and real size, touched scenes come first and once, unknown touched ids
+  and a failed capture, start or stop are shown, each golden labelled with its platform, a reference scene missing from
+  the committed scene list (`docs/gpui/screenshot-scenes.json`) is flagged, the list's validation (and the committed
+  list passing it), and the output being outside the checkout and new. Reading PNGs is checked against every row filter,
+  and cropping a Linux capture's window frame against a framed picture and pictures without that frame (left uncropped
+  and reported). The capture step runs against a fake `gui-agent.py`: one app run per variant with its theme, size (on
+  Linux, larger by the frame, cropped back to the variant's size) and lock, `stop` after every `start` that made a run
+  directory (also a failed or interrupted one), a failed start (also with no app scenes), a failed or timed-out step, a
+  failed `stop` or a golden no platform has failing the batch, every platform's goldens copied wherever the batch runs,
+  and run directories removed when clean and kept when not. Seconds; needs neither the app nor the reference set. The
+  batch itself is a tool, not a gate. Run the tests when the script or the scene list changes.
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh` — the curl-installer is POSIX
   `sh` run unread on a fresh machine (`curl | sh`), so a syntax slip or a shellcheck-catchable bug in it gets caught
   before the slower Rust-side asset-table parity test in `assets.rs` would notice. `test-install-sh.sh` is bash, not

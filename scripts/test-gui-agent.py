@@ -149,6 +149,23 @@ class EnvironmentTest(unittest.TestCase):
         self.assertEqual(pairs["FARHELM_DESKTOP_STATE_DIR"], "/tmp/run/state")
         self.assertEqual(pairs["FARHELM_DESKTOP_FARHELM"], "/t/debug/farhelm")
         self.assertEqual(pairs["FARHELM_DESKTOP_AGENT_HELM_FILE"], "/tmp/run/helm.json")
+        self.assertNotIn("FARHELM_DESKTOP_AGENT_WINDOW_SIZE", pairs)
+        self.assertNotIn("FARHELM_DESKTOP_AGENT_APPEARANCE", pairs)
+
+    def test_window_size_and_appearance_reach_the_app(self):
+        """A screenshot batch labels each capture with the theme and size it asked for, so `--window-size` and
+        `--appearance` must reach the app under the names its agent-build startup overrides read."""
+        args = gui_agent.app_env_args(pathlib.Path("/tmp/run"), {"farhelm": "/t/f"}, "900x700", "dark")
+        pairs = dict(arg.split("=", 1) for arg in args[1::2])
+        self.assertEqual(pairs["FARHELM_DESKTOP_AGENT_WINDOW_SIZE"], "900x700")
+        self.assertEqual(pairs["FARHELM_DESKTOP_AGENT_APPEARANCE"], "dark")
+
+    def test_a_malformed_size_is_a_usage_error(self):
+        """A size typo is refused before anything starts, not handed to the app or Mutter."""
+        self.assertEqual(gui_agent.parse_size("900x700"), (900, 700))
+        for bad in ("900", "900x", "x700", "0x700", "-1x700", "900X700", "wide"):
+            with self.assertRaises(gui_agent.UsageError, msg=bad):
+                gui_agent.parse_size(bad)
 
 
 class SeedTest(unittest.TestCase):

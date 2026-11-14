@@ -137,6 +137,7 @@ same pin CI and release builds use; no second clippy run on floating stable is n
 - `python3 -B scripts/test-gui-agent.py`, and one end-to-end run of the GPUI app harness from `.agents/validation.md`
   (`scripts/gui-agent.py <run dir> start`, a `snapshot` and a `screenshot`, then `stop`), which needs `mutter` and
   lavapipe
+- `python3 -B scripts/test-gui-screenshot-batch.py` (the screenshot batch page)
 - The terminal emulator's ignored tests from `.agents/validation.md`, in release: the snapshot spike's full round-trip
   configuration, the review's short scripts and hostile blobs, and the per-terminal memory measurement (on Linux), whose
   assertions fail when an emulator exceeds the crate's stated budget; the workspace batteries skip ignored tests

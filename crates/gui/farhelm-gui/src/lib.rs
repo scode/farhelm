@@ -23,7 +23,9 @@
 //! the rest of actions and keys, the ticker and the notice center.
 //!
 //! The `agent` feature adds the test-automation bridge (`gpui-agent`), which `scripts/gui-agent.py` drives; see
-//! `docs/gui-agent.md`.
+//! `docs/gui-agent.md`. It also makes the app read `agent_startup`'s startup overrides (window size, appearance) from
+//! its environment, which a screenshot batch uses to capture each theme and size; the overrides themselves are also
+//! compiled into test builds, so ordinary test runs cover them.
 
 // The bridge's socket is unauthenticated, and on a Mac the local agent sessions run as the same user, so a build that
 // contains it lets any of them click Allow on its own approval card (SPEC_impl.md, "How the rules are enforced"). Shipped
@@ -37,6 +39,10 @@ compile_error!(
 );
 
 pub mod actions;
+// Test builds too: the parsing and the bootstrap's use of the overrides are tested without the `agent` feature, which
+// no ordinary test run turns on. Only reading the process environment stays agent-only (`agent_startup::from_env`).
+#[cfg(any(feature = "agent", test))]
+pub mod agent_startup;
 pub mod assets;
 pub mod bootstrap;
 pub mod cache;

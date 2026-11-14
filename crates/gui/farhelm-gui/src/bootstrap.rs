@@ -5,11 +5,12 @@
 //! one expects (another GPUI app aborted 176 ms after launch that way). Order matters here. In [`run`], before any of
 //! it, an agent build starts the test-automation bridge (so a run whose window fails to open can still be inspected),
 //! and the host's quit wiring is installed (so a quit requested while the window is still opening is not lost). Then
-//! [`install`]: Kit's own init first (it installs its theme and the text input's actions), then the bundled fonts, then
-//! Farhelm's theme, which re-projects Kit's theme from Farhelm's tokens, then Farhelm's key bindings (after Kit's, so a
-//! deeper Farhelm context wins where both bind a key), the focus coordinator's and the layer manager's registries and,
-//! in test builds, the render counter. Then the coordinator starts following the host's answer for which controls Tab
-//! reaches. Only then does a window open.
+//! [`install`]: in an agent build, the startup overrides a screenshot batch passes (`agent_startup`), so the theme and
+//! the first window see them; then Kit's own init (it installs its theme and the text input's actions), then the
+//! bundled fonts, then Farhelm's theme, which re-projects Kit's theme from Farhelm's tokens, then Farhelm's key bindings
+//! (after Kit's, so a deeper Farhelm context wins where both bind a key), the focus coordinator's and the layer
+//! manager's registries and, in test builds, the render counter. Then the coordinator starts following the host's
+//! answer for which controls Tab reaches. Only then does a window open.
 //!
 //! Nothing here may panic: on macOS this runs inside an AppKit callback, where a panic aborts the process. Failures are
 //! returned, and [`run`] hands them to the host's [`Host::on_startup_failure`], which owns how the process reports them.
@@ -49,11 +50,19 @@ pub const APP_ID: &str = "io.farhelm.Farhelm";
 
 /// Install all app-wide state. Call once, inside the GPUI app, before opening any window.
 pub fn install(cx: &mut App) -> anyhow::Result<()> {
+    #[cfg(feature = "agent")]
+    cx.set_global(crate::agent_startup::from_env()?);
+    install_app_state(cx)
+}
+
+/// Everything [`install`] does after an agent build has read its startup overrides. Split out so a test can install
+/// overrides of its own (tests never set the process environment) and then run exactly what a launch runs.
+pub(crate) fn install_app_state(cx: &mut App) -> anyhow::Result<()> {
     gpui_component::init(cx);
     cx.text_system().add_fonts(assets::ui_fonts())?;
     // The persisted choice comes from the local preference store once it exists; until then every launch starts at
-    // System, the old app's default.
-    theme::install(Preference::System, cx.window_appearance(), cx);
+    // System, the old app's default (an agent run may force light or dark, see `starting_preference`).
+    theme::install(starting_preference(cx), cx.window_appearance(), cx);
     actions::install(cx);
     focus::install(cx);
     layers::install(cx);
@@ -61,18 +70,50 @@ pub fn install(cx: &mut App) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The appearance preference a launch starts with: System, unless an agent run forced one
+/// ([`crate::agent_startup`]). Test builds take this one too, so tests can install overrides; they start at System
+/// unless a test does.
+#[cfg(any(feature = "agent", test))]
+fn starting_preference(cx: &App) -> Preference {
+    crate::agent_startup::current(cx)
+        .preference
+        .unwrap_or(Preference::System)
+}
+
+/// The appearance preference a launch starts with: System, the old app's default.
+#[cfg(not(any(feature = "agent", test)))]
+fn starting_preference(_cx: &App) -> Preference {
+    Preference::System
+}
+
+/// The size a first launch asks for before fitting it to the display: [`DEFAULT_WINDOW_SIZE`], unless an agent run
+/// asked for another ([`crate::agent_startup`]). Test builds take this one too, as with `starting_preference`.
+#[cfg(any(feature = "agent", test))]
+fn first_launch_size(cx: &App) -> Size<gpui::Pixels> {
+    crate::agent_startup::current(cx)
+        .window_size
+        .unwrap_or(DEFAULT_WINDOW_SIZE)
+}
+
+/// The size a first launch asks for before fitting it to the display.
+#[cfg(not(any(feature = "agent", test)))]
+fn first_launch_size(_cx: &App) -> Size<gpui::Pixels> {
+    DEFAULT_WINDOW_SIZE
+}
+
 /// The main window's options: title, app identity, minimum size and a first-launch frame centered on the display.
 pub fn window_options(cx: &App) -> WindowOptions {
     // Never larger than the display: a first launch on a small screen gets the whole screen, not an overflowing frame.
+    let wanted = first_launch_size(cx);
     let first = match cx.primary_display() {
         Some(display) => {
             let screen = display.bounds().size;
             size(
-                DEFAULT_WINDOW_SIZE.width.min(screen.width),
-                DEFAULT_WINDOW_SIZE.height.min(screen.height),
+                wanted.width.min(screen.width),
+                wanted.height.min(screen.height),
             )
         }
-        None => DEFAULT_WINDOW_SIZE,
+        None => wanted,
     };
     WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, first, cx))),
@@ -119,8 +160,9 @@ pub struct Host {
     /// how a windowless failure reaches the user (the desktop binary shows its native refusal and exits); if it
     /// returns, the app quits.
     pub on_startup_failure: Box<dyn FnOnce(String)>,
-    /// Which controls a plain Tab reaches on this platform (decision D-2): the system's Keyboard navigation setting on
-    /// macOS, every control elsewhere. Asked on every Tab and Shift+Tab press, on the main thread; it must answer
+    /// Which controls a plain Tab reaches on this platform: the system's Keyboard navigation setting on macOS, every
+    /// control elsewhere (decided on 2026-11-13 for the GPUI migration: the Mac keeps the old app's behavior, and the
+    /// Linux app follows the GTK/Qt convention because Linux has no such setting). Asked on every Tab and Shift+Tab press, on the main thread; it must answer
     /// quickly and never fail (a setting it cannot read answers the platform's default).
     pub tab_reach: Box<dyn Fn() -> focus::TabReach>,
 }

@@ -6,6 +6,7 @@ it opens a real window in the logged-in GUI session, which this script must run 
 a run starts lives under the run directory you name (which must not exist yet), and `stop` takes all of it down again.
 
     scripts/gui-agent.py RUN_DIR start [--sessions N] [--size WxH (Linux)] [--no-build] [--lock FILE]
+                                       [--window-size WxH] [--appearance light|dark]
     scripts/gui-agent.py RUN_DIR snapshot -i          # any gpui-agent command: click, type, press, wait, screenshot ...
     scripts/gui-agent.py RUN_DIR terminal-text
     scripts/gui-agent.py RUN_DIR stop
@@ -16,9 +17,11 @@ private headless Mutter on its own session bus; launches the app (on that Mutter
 own state directory; and seeds `--sessions` sessions that run the fake agent, through the real helm API. On Linux,
 rendering is Mesa's software Vulkan driver (lavapipe), the same as the screenshot goldens; on a Mac it is Metal.
 `--lock FILE` holds an exclusive `flock` on FILE from before the build until `stop`, for a machine whose one GUI
-session several runs share (the test Mac's convention). Any other verb goes to the vendored `gpui-agent` command line,
-already pointed at this run's app; `gpui-agent --help` and vendor/gpui-agent/README.md list them. docs/gui-agent.md is
-the guide.
+session several runs share (the test Mac's convention). `--window-size` and `--appearance` start the app's window at
+that size and in that palette (agent builds only; `crates/gui/farhelm-gui/src/agent_startup.rs`), so a screenshot batch
+can capture each theme and size; they are test hooks, not the app's own appearance setting. Any other verb goes to the
+vendored `gpui-agent` command line, already pointed at this run's app; `gpui-agent --help` and
+vendor/gpui-agent/README.md list them. docs/gui-agent.md is the guide.
 
 Why Mutter rather than the bridge's own Xvfb: the shipped app is built for Wayland only (the root Cargo.toml's
 `gpui_platform` features), so runs use Wayland to match what users get. Agent builds do also compile GPUI's X11
@@ -67,6 +70,9 @@ MAX_SOCKET_PATH = 103 if sys.platform == "darwin" else 107
 
 # The bridge session's files `stop` removes once the app is down, the same ones the bridge's own `close` removes.
 SESSION_FILES = ("app.pid", "xvfb.pid", "app.sock", "socket", "display", "window", "refs.json")
+
+# Mutter's virtual monitor on Linux when `start` is not given `--size`.
+DEFAULT_MONITOR = "1600x1200"
 
 # How long the app gets to answer on its socket: it starts a helm and a supervisor before the window opens.
 LAUNCH_TIMEOUT_SECONDS = 120
@@ -163,8 +169,20 @@ def bridge_env(
     return env
 
 
-def app_env_args(run: Path, binaries: dict[str, str]) -> list[str]:
-    """The `--env` arguments `gpui-agent launch` passes to the app only: its state, its CLI and the helm file."""
+def parse_size(text: str) -> tuple[int, int]:
+    """`WIDTHxHEIGHT` as two positive integers; a UsageError for anything else."""
+    width, sep, height = text.partition("x")
+    if not (sep and width.isdigit() and height.isdigit() and int(width) > 0 and int(height) > 0):
+        raise UsageError(f"a size is WIDTHxHEIGHT in pixels, not {text!r}")
+    return int(width), int(height)
+
+
+def app_env_args(
+    run: Path, binaries: dict[str, str], window_size: str | None = None, appearance: str | None = None
+) -> list[str]:
+    """The `--env` arguments `gpui-agent launch` passes to the app only: its state, its CLI and the helm file, plus the
+    first window's size and a forced appearance when the run asks for them (unset otherwise, so the app starts at its
+    own default size in the system's appearance)."""
     pairs = {
         # The app's state directory: never the default one, which could be a real installation's.
         "FARHELM_DESKTOP_STATE_DIR": str(run / "state"),
@@ -174,6 +192,11 @@ def app_env_args(run: Path, binaries: dict[str, str]) -> list[str]:
         # (crates/farhelm-desktop/src/agent.rs).
         "FARHELM_DESKTOP_AGENT_HELM_FILE": str(run / "helm.json"),
     }
+    # Read by the GUI's agent-build startup overrides (crates/gui/farhelm-gui/src/agent_startup.rs).
+    if window_size is not None:
+        pairs["FARHELM_DESKTOP_AGENT_WINDOW_SIZE"] = window_size
+    if appearance is not None:
+        pairs["FARHELM_DESKTOP_AGENT_APPEARANCE"] = appearance
     args: list[str] = []
     for key, value in pairs.items():
         args += ["--env", f"{key}={value}"]
@@ -569,7 +592,13 @@ def start(run: Path, args: list[str]) -> int:
         type=Path,
         help="hold an exclusive flock on this file from before the build until `stop` (a shared GUI session's lock)",
     )
+    parser.add_argument("--window-size", help="the app window's first size, WxH (agent-build test hook)")
+    parser.add_argument(
+        "--appearance", choices=("light", "dark"), help="start the app in this palette (agent-build test hook)"
+    )
     options = parser.parse_args(args)
+    if options.window_size:
+        parse_size(options.window_size)
     mac = sys.platform == "darwin"
     if mac:
         # The window opens in the console's GUI session, so this must run as the user logged in there (SSH is fine:
@@ -585,6 +614,15 @@ def start(run: Path, args: list[str]) -> int:
         missing = [path for path in (LAVAPIPE_ICD, MESA_EGL_VENDOR) if not Path(path).exists()]
         if missing:
             raise UsageError(f"the software renderer is not installed: {', '.join(missing)} missing")
+        if options.window_size:
+            # Mutter never grows its virtual monitor, and the app fits a first window to the display, so a window
+            # larger than the monitor would open smaller than asked and be captured under the wrong size.
+            monitor = options.size or DEFAULT_MONITOR
+            (want_w, want_h), (have_w, have_h) = parse_size(options.window_size), parse_size(monitor)
+            if want_w > have_w or want_h > have_h:
+                raise UsageError(
+                    f"--window-size {options.window_size} does not fit Mutter's {monitor} monitor; pass --size"
+                )
     run.mkdir(mode=0o700)
     for sub in ("agent", "logs") if mac else ("runtime", "agent", "logs"):
         (run / sub).mkdir(mode=0o700)
@@ -616,14 +654,21 @@ def start(run: Path, args: list[str]) -> int:
     if not mac:
         display = display_name(uuid.uuid4().hex[:8])
         record.update({"runtime": str(run / "runtime"), "display": display})
-        size = options.size or "1600x1200"
+        size = options.size or DEFAULT_MONITOR
         mutter = start_mutter(run, run / "runtime", display, mutter_command(display, size), dict(os.environ))
         record.update({"mutter": {"pid": mutter["pid"], "start": mutter["start"]}, "dbus": mutter["dbus"]})
     save()
     launched = cli(
         run,
         record,
-        ["launch", "--timeout", str(LAUNCH_TIMEOUT_SECONDS), *app_env_args(run, binaries), "--", binaries["desktop"]],
+        [
+            "launch",
+            "--timeout",
+            str(LAUNCH_TIMEOUT_SECONDS),
+            *app_env_args(run, binaries, options.window_size, options.appearance),
+            "--",
+            binaries["desktop"],
+        ],
     )
     # The app's identity, recorded whether or not the launch succeeded (a launch that timed out can leave the app
     # running), so `stop` signals it only while that pid is still this app.
