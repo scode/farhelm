@@ -16,9 +16,9 @@
 //! context. A menu sets [`MENU_CONTEXT`], where Up and Down walk its items.
 //!
 //! Extension points (`docs/gpui/foundation-ownership.md`), besides an action and its binding in [`CONTEXT`]: a row in
-//! [`TERMINAL_KEYS`], with a row in [`TERMINAL_BINDINGS`] once the terminal command it names has an action, a row in
-//! [`PHYSICAL_KEYS`] for a shortcut SPEC.md matches by key position, an action in `ONCE_PER_PRESS`, and a chord in
-//! `TEXT_FIELD_KEYS` for an app shortcut SPEC.md says a text field keeps.
+//! [`TERMINAL_KEYS`] (with its action, once the terminal command it names has one), a row in [`PHYSICAL_KEYS`] for a
+//! shortcut SPEC.md matches by key position, an action in `ONCE_PER_PRESS`, and a chord in `TEXT_FIELD_KEYS` for an app
+//! shortcut SPEC.md says a text field keeps.
 //!
 //! ## A focused terminal
 //!
@@ -195,8 +195,8 @@ actions!(
         /// (`ONCE_PER_PRESS`).
         QuickSwitcher,
         /// Paste the clipboard's text into the focused terminal, as a paste its program can tell from typing. The
-        /// terminal handles it; its keys are in [`TERMINAL_BINDINGS`], and a menu item that dispatches it reaches the
-        /// focused terminal the same way.
+        /// terminal handles it; its keys are its rows of [`TERMINAL_KEYS`], and a menu item that dispatches it reaches
+        /// the focused terminal the same way.
         Paste,
         /// Open the Keyboard shortcuts dialog (SPEC.md, "Desktop window chrome": Cmd+/ on a Mac, Ctrl+Shift+/ on
         /// Linux, by the physical Slash key; a row in [`PHYSICAL_KEYS`]). Runs once per press (`ONCE_PER_PRESS`).
@@ -211,46 +211,12 @@ actions!(
     ]
 );
 
-/// The terminal's own commands that have an action: each binds its chords on each platform in [`TERMINAL_CONTEXT`],
-/// and every chord must be a [`KeyOwner::Terminal`] row of [`TERMINAL_KEYS`] (the keymap tests check both). The
-/// terminal element handles the action, so the binding takes the key before the terminal's key listener would drop it.
-///
-/// [`install`] binds these after the table's `NoAction` rows, because GPUI ranks bindings of equal depth latest first
-/// and a `NoAction` hides every binding ranked after it.
-pub const TERMINAL_BINDINGS: &[TerminalBinding] = &[
-    // One entry per line, the shape the lists areas append to keep.
-    TerminalBinding {
-        mac: &[PASTE_MAC],
-        linux: &[PASTE_LINUX, PASTE_LINUX_INSERT],
-        bind: |chord| KeyBinding::new(chord, Paste, Some(TERMINAL_CONTEXT)),
-    },
-];
-
 /// Paste's chords. The Mac's is the system's; the old app's terminal got it from WebKit. Linux has two because the
 /// desktop terminals there do (Ctrl+Shift+V, since plain Ctrl+V is the program's, and Shift+Insert); the old app had
 /// no Linux window, so this is the GPUI migration's choice, recorded in the terminal area's goal on 2026-11-14.
 const PASTE_MAC: &str = "cmd-v";
 const PASTE_LINUX: &str = "ctrl-shift-v";
 const PASTE_LINUX_INSERT: &str = "shift-insert";
-
-/// One of the terminal's own commands with an action, in [`TERMINAL_BINDINGS`]: its chords on each platform, and the
-/// binding of one chord to its action in [`TERMINAL_CONTEXT`] (a function rather than the action itself, because
-/// GPUI builds a binding from a concrete action type; a test reads the action back off a built binding).
-pub struct TerminalBinding {
-    pub mac: &'static [&'static str],
-    pub linux: &'static [&'static str],
-    pub bind: fn(&'static str) -> KeyBinding,
-}
-
-impl TerminalBinding {
-    /// The chords on `platform`.
-    pub fn chords(&self, platform: Platform) -> &'static [&'static str] {
-        match platform {
-            Platform::Mac => self.mac,
-            Platform::Linux => self.linux,
-        }
-    }
-}
 
 /// Start the template that holds number key `digit` (SPEC.md, "Template number shortcuts": Cmd+digit on a Mac,
 /// Ctrl+Shift+digit on Linux, by the physical digit key; ten rows in [`PHYSICAL_KEYS`]). One action carries the digit,
@@ -296,10 +262,10 @@ pub fn install(cx: &mut App) {
     // in `CONTEXT`, and those bindings must keep working from a terminal.
     //
     // Binding order matters in the terminal's own context too. GPUI ranks bindings of equal depth by when they were
-    // added, latest first, and a `NoAction` suppresses everything ranked after it. So the terminal's own actions
-    // (`TERMINAL_BINDINGS`) work only because they are bound after these rows; bound before them, their keys would
-    // silently do nothing. The same ranking lets a binding with no context that is added after this one beat a row
-    // here; the keymap walk test catches that case.
+    // added, latest first, and a `NoAction` suppresses everything ranked after it. So the terminal's own actions (the
+    // rows' `bind`) work only because they are bound after these rows; bound before them, their keys would silently do
+    // nothing. The same ranking lets a binding with no context that is added after this one beat a row here; the keymap
+    // walk test catches that case.
     cx.bind_keys(
         TERMINAL_KEYS
             .iter()
@@ -307,11 +273,9 @@ pub fn install(cx: &mut App) {
             .filter_map(|key| key.chord(THIS_PLATFORM))
             .map(|chord| KeyBinding::new(chord, NoAction, Some(TERMINAL_CONTEXT))),
     );
-    cx.bind_keys(TERMINAL_BINDINGS.iter().flat_map(|binding| {
-        binding
-            .chords(THIS_PLATFORM)
-            .iter()
-            .map(|chord| (binding.bind)(chord))
+    cx.bind_keys(TERMINAL_KEYS.iter().filter_map(|key| {
+        let chord = key.chord(THIS_PLATFORM)?;
+        key.bind.map(|bind| bind(chord))
     }));
     let interceptor = cx.intercept_keystrokes(intercept);
     cx.set_global(KeyInterceptor {
@@ -405,9 +369,10 @@ pub enum KeyOwner {
     /// binds it in [`CONTEXT`]; until that feature exists the key reaches the terminal, which must still not send it.
     App,
     /// The terminal's own command, such as scrolling a page: it never reaches the program, and nothing outside the
-    /// terminal takes it. Until the terminal binds an action for one, the key reaches the terminal's listener, which
-    /// drops it. (`farhelm-input-mapping` still classifies paging and select all as well; its own copy of that rule
-    /// goes when the keymap takes it over, and a test compares the two meanwhile.)
+    /// terminal takes it. Once the command has an action, its row's [`TerminalKey::bind`] binds the key to it in
+    /// [`TERMINAL_CONTEXT`]; until then the key reaches the terminal's listener, which drops it.
+    /// (`farhelm-input-mapping` still classifies paging and select all as well; its own copy of that rule goes when the
+    /// keymap takes it over, and a test compares the two meanwhile.)
     Terminal,
     /// The program in the terminal. Every key not in [`TERMINAL_KEYS`] is the program's; the table lists the ones that
     /// some binding outside the terminal would otherwise take.
@@ -415,13 +380,20 @@ pub enum KeyOwner {
 }
 
 /// One row of [`TERMINAL_KEYS`]: a chord in GPUI's keystroke syntax on each platform (`None` where the platform has no
-/// such chord), who owns it, and what it is.
+/// such chord), who owns it, what it is, and, for a terminal command that has an action, how its chord binds to it.
 #[derive(Clone, Copy, Debug)]
 pub struct TerminalKey {
     pub mac: Option<&'static str>,
     pub linux: Option<&'static str>,
     pub owner: KeyOwner,
     pub what: &'static str,
+    /// For a [`KeyOwner::Terminal`] row whose command has an action: binds a chord of the row to that action in
+    /// [`TERMINAL_CONTEXT`], so the binding takes the key before the terminal's listener would drop it (a function
+    /// rather than the action itself, because GPUI builds a binding from a concrete action type; a test reads the
+    /// action back off a built binding). [`install`] binds it after the table's `NoAction` rows, because GPUI ranks
+    /// bindings of equal depth latest first and a `NoAction` hides every binding ranked after it. `None` on every
+    /// other row; the keymap tests fail on one outside a terminal row.
+    pub bind: Option<fn(&'static str) -> KeyBinding>,
 }
 
 impl TerminalKey {
@@ -439,8 +411,8 @@ impl TerminalKey {
 ///
 /// The app shortcuts are the ones SPEC.md says work from a focused terminal or never reach its program, with the old
 /// app's modifiers at the reference commit: Command on a Mac, Ctrl+Shift on Linux. The terminal's own keys are the old
-/// grid terminal's (Shift+PageUp/PageDown, and Cmd+A on a Mac), plus the Mac's Cmd+C and Cmd+V, which were WebKit's copy
-/// and paste in the old app's terminal, and Linux's paste chords (see [`TERMINAL_BINDINGS`]). Linux has no copy chord
+/// grid terminal's (Shift+PageUp/PageDown, and Cmd+A on a Mac), plus the Mac's Cmd+C and Cmd+V, which were WebKit's
+/// copy and paste in the old app's terminal, and Linux's paste chords (the paste rows below). Linux has no copy chord
 /// here yet: neither SPEC.md nor the old app's terminal settles one, so it waits for the copy work.
 ///
 /// NOTE: Not in this table, because a key binding cannot express them: the number keys (Cmd or Ctrl+Shift with 0-9),
@@ -463,6 +435,7 @@ pub const TERMINAL_KEYS: &[TerminalKey] = &[
         linux: None,
         owner: KeyOwner::App,
         what: "open New",
+        bind: None,
     },
     app("cmd-w", "ctrl-shift-backspace", "delete the open session"),
     app(
@@ -496,12 +469,14 @@ pub const TERMINAL_KEYS: &[TerminalKey] = &[
         linux: Some(PASTE_LINUX),
         owner: KeyOwner::Terminal,
         what: "paste into the terminal",
+        bind: Some(bind_paste),
     },
     TerminalKey {
         mac: None,
         linux: Some(PASTE_LINUX_INSERT),
         owner: KeyOwner::Terminal,
         what: "paste into the terminal (Shift+Insert, which the program no longer gets)",
+        bind: Some(bind_paste),
     },
     // Keys the program gets that something outside the terminal binds.
     both(
@@ -535,14 +510,21 @@ pub const TERMINAL_KEYS: &[TerminalKey] = &[
         linux: Some("ctrl-c"),
         owner: KeyOwner::Program,
         what: "Ctrl+C, the program's interrupt (GPUI Kit's root binds it to its Copy off macOS)",
+        bind: None,
     },
     TerminalKey {
         mac: Some("cmd-alt-i"),
         linux: Some("ctrl-shift-i"),
         owner: KeyOwner::Program,
         what: "GPUI Kit's inspector toggle, bound in debug builds only",
+        bind: None,
     },
 ];
+
+/// Paste's binding, for its rows of [`TERMINAL_KEYS`].
+fn bind_paste(chord: &'static str) -> KeyBinding {
+    KeyBinding::new(chord, Paste, Some(TERMINAL_CONTEXT))
+}
 
 /// An app shortcut: Command on a Mac, Ctrl+Shift on Linux.
 const fn app(mac: &'static str, linux: &'static str, what: &'static str) -> TerminalKey {
@@ -551,6 +533,7 @@ const fn app(mac: &'static str, linux: &'static str, what: &'static str) -> Term
         linux: Some(linux),
         owner: KeyOwner::App,
         what,
+        bind: None,
     }
 }
 
@@ -561,6 +544,7 @@ const fn both(chord: &'static str, owner: KeyOwner, what: &'static str) -> Termi
         linux: Some(chord),
         owner,
         what,
+        bind: None,
     }
 }
 
@@ -571,6 +555,7 @@ const fn mac_only(chord: &'static str, owner: KeyOwner, what: &'static str) -> T
         linux: None,
         owner,
         what,
+        bind: None,
     }
 }
 

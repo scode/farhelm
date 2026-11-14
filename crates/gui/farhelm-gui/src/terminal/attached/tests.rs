@@ -1087,9 +1087,11 @@ fn a_held_app_shortcut_never_reaches_the_program(cx: &mut TestAppContext) {
 
 /// This platform's paste chords, as the keymap binds them.
 fn paste_chords() -> Vec<&'static str> {
-    crate::actions::TERMINAL_BINDINGS
+    crate::actions::TERMINAL_KEYS
         .iter()
-        .flat_map(|binding| binding.chords(THIS_PLATFORM).iter().copied())
+        .filter_map(|key| Some((key.chord(THIS_PLATFORM)?, key.bind?)))
+        .filter(|(chord, bind)| bind(chord).action().partial_eq(&crate::actions::Paste))
+        .map(|(chord, _)| chord)
         .collect()
 }
 
