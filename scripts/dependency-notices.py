@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Generate, or check, the dependency license notices that `farhelm licenses` prints.
 
-Every shipped Farhelm binary carries the license notices of the crates compiled into it (decision D-18): the MIT, BSD,
-ISC, Apache and other licenses those crates are under all require their notice to travel with copies of the code.
+Every shipped Farhelm binary carries the license notices of the crates compiled into it (the maintainer decided this on
+2026-11-13): the MIT, BSD, ISC, Apache and other licenses those crates are under all require their notice to travel with
+copies of the code.
 `crates/farhelm/notices/dependencies.txt` holds them, checked in so a release needs no extra step, and `farhelm`
 embeds it at build time. This script is the only way that file is written:
 

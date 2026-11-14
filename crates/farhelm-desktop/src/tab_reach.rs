@@ -1,8 +1,11 @@
-//! Which controls a plain Tab reaches, read from the platform for the GUI's focus coordinator (decision D-2).
+//! Which controls a plain Tab reaches, read from the platform for the GUI's focus coordinator.
 //!
 //! On macOS, Tab follows the system's Keyboard navigation setting exactly as the old app did, because WebKit followed
 //! it: with the setting off (the system default), Tab reaches text fields and pop-ups only and Option-Tab reaches
-//! buttons too; with it on, Tab reaches every control. Linux has no such setting, and Tab reaches every control there.
+//! buttons too; with it on, Tab reaches every control. Linux has no such setting, and Tab reaches every control there,
+//! the GTK and Qt convention. The migration's orchestrator decided this on 2026-11-13: the Mac keeps the old app's
+//! behavior (the GPUI app ports the old one rather than redesigning it), and Linux, where the old app never shipped,
+//! follows its platform.
 //!
 //! The read lives in this binary rather than the GUI crate because it needs platform code, and the GUI crates carry no
 //! platform crates of their own. The coordinator asks on every Tab and Shift+Tab press, so a change made while the app
@@ -70,7 +73,7 @@ mod macos {
 mod tests {
     use super::*;
 
-    /// The mapping from the stored preference to Tab's reach is the whole D-2 rule on macOS; a wrong bit here would
+    /// The mapping from the stored preference to Tab's reach is the whole macOS rule; a wrong bit here would
     /// silently make Tab skip buttons for a keyboard-only user who turned Keyboard navigation on.
     #[farhelm_testtrace::test]
     fn the_keyboard_navigation_bit_decides_what_tab_reaches() {

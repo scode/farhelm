@@ -469,8 +469,9 @@ jobs:
           python3 -B scripts/test-check-crate-layering.py
           python3 -B scripts/check-crate-layering.py
       # The dependency license notices `farhelm licenses` prints are generated
-      # from Cargo.lock and checked in (decision D-18); a dependency change
-      # that does not regenerate them fails here, naming the command to run.
+      # from Cargo.lock and checked in (the maintainer decided on 2026-11-13
+      # that every shipped binary carries them); a dependency change that
+      # does not regenerate them fails here, naming the command to run.
       # cargo-about also only reads metadata and the crates' license files,
       # after one `cargo fetch`, so it shares this compile-free job too.
       - name: Check the dependency license notices
