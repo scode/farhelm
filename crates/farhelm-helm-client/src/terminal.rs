@@ -103,7 +103,8 @@ pub enum StreamState {
     Refused {
         status: u16,
     },
-    /// [`TerminalHandle::close`] was called, or every handle was dropped. Final.
+    /// [`TerminalHandle::close`] was called, every handle was dropped, or the stream was handed out already over
+    /// ([`closed_terminal`]). Final.
     Closed,
 }
 
@@ -193,6 +194,18 @@ pub fn open_terminal(
         reconnecting_shown: false,
     };
     tokio::spawn(stream.run());
+    (handle, events)
+}
+
+/// A stream that is already over: its feed holds only [`StreamState::Closed`] and its handle's requests go nowhere.
+/// Opens no socket and needs no runtime.
+///
+/// For a caller that must hand out a stream where none may be opened, such as the GUI after a reset retired the UI
+/// session a terminal view was made for: the view then sees the same final state as for a stream it closed itself.
+pub fn closed_terminal() -> (TerminalHandle, TerminalEvents) {
+    let (handle, events, _requests, events_tx) = stream_channels(1);
+    // The feed has room for exactly this one event, and its receiver is `events`, which is still here.
+    let _ = events_tx.try_send(TerminalEvent::State(StreamState::Closed));
     (handle, events)
 }
 
