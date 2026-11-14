@@ -23,8 +23,10 @@ use gpui::{
 };
 
 use crate::actions::{
-    CONTEXT, DeleteSession, KeyOwner, RenameSession, TERMINAL_BINDINGS, TERMINAL_CONTEXT,
-    TERMINAL_KEYS, TEXT_INPUT_CONTEXT, THIS_PLATFORM, owner_on, terminal_key_owner,
+    CONTEXT, DecreaseTerminalTextSize, DeleteSession, IncreaseTerminalTextSize, KeyOwner,
+    PHYSICAL_KEYS, PhysicalKey, RenameSession, ShowKeyboardShortcuts, TERMINAL_BINDINGS,
+    TERMINAL_CONTEXT, TERMINAL_KEYS, TEXT_INPUT_CONTEXT, THIS_PLATFORM, TemplateNumberKey,
+    owner_on, physical_key_at, physical_on, terminal_key_owner,
 };
 use crate::components::{Button, HoverHelp, Role, TextInput, TextInputState};
 use crate::focus::{self, OnPress};
@@ -47,8 +49,11 @@ struct Scene {
     received: Rc<RefCell<Vec<Keystroke>>>,
     /// How many times a [`Probe`] binding ran: a test binds one to an app shortcut to see it still works.
     probes: Rc<Cell<usize>>,
-    /// The name of every session shortcut action that ran, in order: what the session list's handlers will see.
+    /// The name of every session shortcut action that ran, in order: what the session list's handlers will see. The
+    /// physical-key shortcuts' actions are recorded here too.
     ran: Rc<RefCell<Vec<&'static str>>>,
+    /// The digit of every [`TemplateNumberKey`] that ran, in order.
+    digits: Rc<RefCell<Vec<u8>>>,
 }
 
 impl Render for Scene {
@@ -56,6 +61,12 @@ impl Render for Scene {
         let received = self.received.clone();
         let probes = self.probes.clone();
         let (deletes, renames) = (self.ran.clone(), self.ran.clone());
+        let (shortcuts, bigger, smaller, numbers) = (
+            self.ran.clone(),
+            self.ran.clone(),
+            self.ran.clone(),
+            (self.ran.clone(), self.digits.clone()),
+        );
         let content = div()
             .size_full()
             .flex()
@@ -64,6 +75,19 @@ impl Render for Scene {
             .on_action(move |_: &Probe, _, _| probes.set(probes.get() + 1))
             .on_action(move |action: &DeleteSession, _, _| deletes.borrow_mut().push(action.name()))
             .on_action(move |action: &RenameSession, _, _| renames.borrow_mut().push(action.name()))
+            .on_action(move |action: &ShowKeyboardShortcuts, _, _| {
+                shortcuts.borrow_mut().push(action.name())
+            })
+            .on_action(move |action: &IncreaseTerminalTextSize, _, _| {
+                bigger.borrow_mut().push(action.name())
+            })
+            .on_action(move |action: &DecreaseTerminalTextSize, _, _| {
+                smaller.borrow_mut().push(action.name())
+            })
+            .on_action(move |action: &TemplateNumberKey, _, _| {
+                numbers.0.borrow_mut().push(action.name());
+                numbers.1.borrow_mut().push(action.digit);
+            })
             .child(
                 Button::new(
                     "control",
@@ -98,6 +122,7 @@ struct Opened<'a> {
     received: Rc<RefCell<Vec<Keystroke>>>,
     probes: Rc<Cell<usize>>,
     ran: Rc<RefCell<Vec<&'static str>>>,
+    digits: Rc<RefCell<Vec<u8>>>,
 }
 
 /// Open the scene through the shared harness. Nothing holds focus but the root until a test focuses something.
@@ -110,14 +135,16 @@ fn open(cx: &mut TestAppContext) -> Opened<'_> {
         received: Rc::new(RefCell::new(Vec::new())),
         probes: Rc::new(Cell::new(0)),
         ran: Rc::new(RefCell::new(Vec::new())),
+        digits: Rc::new(RefCell::new(Vec::new())),
     });
-    let (terminal, received, probes, ran) = cx.update(|_, cx| {
+    let (terminal, received, probes, ran, digits) = cx.update(|_, cx| {
         let scene = scene.read(cx);
         (
             scene.terminal.clone(),
             scene.received.clone(),
             scene.probes.clone(),
             scene.ran.clone(),
+            scene.digits.clone(),
         )
     });
     Opened {
@@ -126,6 +153,7 @@ fn open(cx: &mut TestAppContext) -> Opened<'_> {
         received,
         probes,
         ran,
+        digits,
     }
 }
 
@@ -796,4 +824,498 @@ fn the_linux_delete_chord_leaves_this_field_alone(
     );
     test_support::keys(cx, chord);
     assert_eq!(ran.get(), 1, "outside a text field the chord runs Delete");
+}
+
+// ---- Shortcuts matched by the physical key ---------------------------------------------------------------------------
+
+/// The native identity of the key a US layout prints `us` on, unshifted, on `platform`: written out from the
+/// platforms' own tables (XKB position names; macOS `kVK_ANSI_*` virtual keycodes), independently of the table under
+/// test, so a wrong code in a row fails here.
+fn identity(platform: Platform, us: &str) -> gpui::NativeKeyIdentity {
+    let (xkb, mac) = match us {
+        "1" => ("AE01", 0x12),
+        "2" => ("AE02", 0x13),
+        "3" => ("AE03", 0x14),
+        "4" => ("AE04", 0x15),
+        "5" => ("AE05", 0x17),
+        "6" => ("AE06", 0x16),
+        "7" => ("AE07", 0x1A),
+        "8" => ("AE08", 0x1C),
+        "9" => ("AE09", 0x19),
+        "0" => ("AE10", 0x1D),
+        "-" => ("AE11", 0x1B),
+        "=" => ("AE12", 0x18),
+        "/" => ("AB10", 0x2C),
+        other => panic!("no oracle entry for {other}"),
+    };
+    match platform {
+        Platform::Linux => gpui::NativeKeyIdentity::Xkb(xkb.into()),
+        Platform::Mac => gpui::NativeKeyIdentity::Mac(mac),
+    }
+}
+
+/// What a US layout prints on the key printing `us` unshifted, with Shift held.
+fn shifted(us: &str) -> &'static str {
+    match us {
+        "1" => "!",
+        "2" => "@",
+        "3" => "#",
+        "4" => "$",
+        "5" => "%",
+        "6" => "^",
+        "7" => "&",
+        "8" => "*",
+        "9" => "(",
+        "0" => ")",
+        "-" => "_",
+        "=" => "+",
+        "/" => "?",
+        other => panic!("no shifted character for {other}"),
+    }
+}
+
+/// A key-down as the platform delivers it, with a native identity: `printed` is the logical key the layout produced,
+/// `modifiers` the logical keystroke's modifiers (GPUI drops Shift from a symbol there) and `shift` the original Shift.
+fn native_down(
+    identity: gpui::NativeKeyIdentity,
+    printed: &str,
+    modifiers: gpui::Modifiers,
+    shift: bool,
+    held: bool,
+) -> KeyDownEvent {
+    KeyDownEvent {
+        native_key: Some(gpui::NativeKey { identity, shift }),
+        keystroke: Keystroke {
+            modifiers,
+            key: printed.to_string(),
+            key_char: None,
+        },
+        is_held: held,
+        prefer_character_input: false,
+    }
+}
+
+/// The key-down a US layout delivers for `row` on `platform`: the oracle's identity for its key, its modifiers, and
+/// the symbol the layout prints with Shift held when the row holds Shift, with Shift dropped from the logical modifiers
+/// as GPUI does for a symbol.
+fn us_down(platform: Platform, row: &PhysicalKey, held: bool) -> KeyDownEvent {
+    let chord = row.modifiers(platform);
+    let printed = if chord.shift {
+        shifted(row.key.us)
+    } else {
+        row.key.us
+    };
+    let modifiers = gpui::Modifiers {
+        platform: chord.command,
+        control: chord.control,
+        ..Default::default()
+    };
+    native_down(
+        identity(platform, row.key.us),
+        printed,
+        modifiers,
+        chord.shift,
+        held,
+    )
+}
+
+/// The row whose action is `action`.
+fn row_of(action: &dyn gpui::Action) -> &'static PhysicalKey {
+    PHYSICAL_KEYS
+        .iter()
+        .find(|row| row.action.partial_eq(action))
+        .expect("the table has the row")
+}
+
+/// SPEC.md matches the number keys, Keyboard shortcuts and terminal text size by the key's position. Every row's
+/// identities agree with the platforms' tables, and every row answers its own chord on both platforms, from the native
+/// identity a real key carries, and from the logical key alone when the event has no identity (the bridge's and the
+/// tests' injected keys). The Mac's rows are checked here on Linux through the platform parameter, as the terminal key
+/// table's are, so no Mac-only code is needed.
+#[gpui::test]
+fn every_physical_row_answers_its_own_chord_on_both_platforms(_: &mut TestAppContext) {
+    for row in PHYSICAL_KEYS {
+        let key = row.key.us;
+        assert_eq!(
+            (identity(Platform::Linux, key), identity(Platform::Mac, key)),
+            (
+                gpui::NativeKeyIdentity::Xkb(row.key.xkb.into()),
+                gpui::NativeKeyIdentity::Mac(row.key.mac)
+            ),
+            "the row for {key} names the platforms' identities of that key"
+        );
+        for platform in [Platform::Mac, Platform::Linux] {
+            let found = physical_on(platform, &us_down(platform, row, false));
+            assert!(
+                found.is_some_and(|found| found.action.partial_eq(row.action)),
+                "{platform:?}: {key} with {:?} runs {}",
+                row.modifiers(platform),
+                row.action.name()
+            );
+            let chord = row.modifiers(platform);
+            let logical = down(Keystroke {
+                modifiers: gpui::Modifiers {
+                    platform: chord.command,
+                    control: chord.control,
+                    shift: chord.shift,
+                    ..Default::default()
+                },
+                key: key.to_string(),
+                key_char: None,
+            });
+            assert!(
+                physical_on(platform, &logical)
+                    .is_some_and(|found| found.action.partial_eq(row.action)),
+                "{platform:?}: without a native identity, {key} falls back to its US key"
+            );
+        }
+    }
+}
+
+/// "Independent of the printed character": on a French layout the key at 1's position prints `&` (the Mac event
+/// below) and `1` only with Shift (the Linux one), and on a German layout the key at the US slash's position prints
+/// `-` (`_` with Shift). The position decides, so the first is number
+/// key 1 and the second Keyboard shortcuts; read by what they print, the first would be no shortcut and the second
+/// would be no shortcut either. That a present identity is never second-guessed by the printed character is what the
+/// keypad cases in the next test pin.
+#[gpui::test]
+fn the_position_decides_whatever_the_layout_prints(_: &mut TestAppContext) {
+    let command = gpui::Modifiers {
+        platform: true,
+        ..Default::default()
+    };
+    let control = gpui::Modifiers {
+        control: true,
+        ..Default::default()
+    };
+    let french_one_mac = native_down(identity(Platform::Mac, "1"), "&", command, false, false);
+    let french_one_linux = native_down(identity(Platform::Linux, "1"), "1", control, true, false);
+    for (platform, event) in [
+        (Platform::Mac, french_one_mac),
+        (Platform::Linux, french_one_linux),
+    ] {
+        assert!(
+            physical_key_at(&event)
+                .is_some_and(|row| row.action.partial_eq(&TemplateNumberKey { digit: 1 })),
+            "{platform:?}: the key at 1's position is number key 1's"
+        );
+        assert!(
+            physical_on(platform, &event)
+                .is_some_and(|row| row.action.partial_eq(&TemplateNumberKey { digit: 1 })),
+            "{platform:?}: the key at 1's position is number key 1 whatever it prints"
+        );
+    }
+    let german_slash = native_down(identity(Platform::Linux, "/"), "_", control, true, false);
+    assert!(
+        physical_on(Platform::Linux, &german_slash)
+            .is_some_and(|row| row.action.partial_eq(&ShowKeyboardShortcuts)),
+        "the key at the US slash's position opens Keyboard shortcuts though it prints a minus"
+    );
+}
+
+/// SPEC.md: "the numeric keypad is excluded", and Keyboard shortcuts match "with no extra modifiers". A keypad digit
+/// with the number-key modifiers is not a number key, even though it prints the digit (so a fallback that ran despite
+/// the identity would take it), and a row's key with one modifier too many (Option, Fn, Shift on a Mac's number key,
+/// Ctrl beside Command) is not that row.
+#[gpui::test]
+fn keypad_digits_and_extra_modifiers_do_not_match(_: &mut TestAppContext) {
+    let mods = |platform, control, alt, shift, function| gpui::Modifiers {
+        platform,
+        control,
+        alt,
+        shift,
+        function,
+    };
+    let keypad_linux = native_down(
+        gpui::NativeKeyIdentity::Xkb("KP1".into()),
+        "1",
+        mods(false, true, false, false, false),
+        true,
+        false,
+    );
+    let keypad_mac = native_down(
+        gpui::NativeKeyIdentity::Mac(0x53),
+        "1",
+        mods(true, false, false, false, false),
+        false,
+        false,
+    );
+    assert!(physical_key_at(&keypad_linux).is_none() && physical_key_at(&keypad_mac).is_none());
+    assert!(physical_on(Platform::Linux, &keypad_linux).is_none());
+    assert!(physical_on(Platform::Mac, &keypad_mac).is_none());
+    let (one_linux, one_mac) = (identity(Platform::Linux, "1"), identity(Platform::Mac, "1"));
+    let slash_mac = identity(Platform::Mac, "/");
+    for (platform, event) in [
+        (
+            Platform::Linux,
+            native_down(
+                one_linux.clone(),
+                "!",
+                mods(false, true, true, false, false),
+                true,
+                false,
+            ),
+        ),
+        (
+            Platform::Linux,
+            native_down(
+                one_linux.clone(),
+                "!",
+                mods(false, true, false, false, true),
+                true,
+                false,
+            ),
+        ),
+        (
+            Platform::Linux,
+            native_down(
+                one_linux,
+                "1",
+                mods(false, true, false, false, false),
+                false,
+                false,
+            ),
+        ),
+        (
+            Platform::Mac,
+            native_down(
+                one_mac.clone(),
+                "!",
+                mods(true, false, false, false, false),
+                true,
+                false,
+            ),
+        ),
+        (
+            Platform::Mac,
+            native_down(
+                one_mac,
+                "1",
+                mods(true, true, false, false, false),
+                false,
+                false,
+            ),
+        ),
+        (
+            Platform::Mac,
+            native_down(
+                slash_mac,
+                "/",
+                mods(true, false, true, false, false),
+                false,
+                false,
+            ),
+        ),
+    ] {
+        assert!(
+            physical_on(platform, &event).is_none(),
+            "{platform:?}: {event:?} matches no row"
+        );
+    }
+}
+
+/// The point of the table, where it matters most: with a terminal focused, each row's chord, as a real key event
+/// carrying its native identity, runs the row's action and never reaches the terminal (and so never its program).
+/// Before the table these chords went to the program (Ctrl+Shift+- is readline's undo on Linux, which SPEC.md lets
+/// text size take over).
+#[gpui::test]
+fn every_physical_shortcut_runs_from_a_focused_terminal_and_never_reaches_it(
+    cx: &mut TestAppContext,
+) {
+    let mut opened = open(cx);
+    opened.focus_terminal();
+    for row in PHYSICAL_KEYS {
+        opened.ran.borrow_mut().clear();
+        opened.digits.borrow_mut().clear();
+        opened.cx.simulate_event(us_down(THIS_PLATFORM, row, false));
+        test_support::settle(opened.cx);
+        assert_eq!(
+            *opened.ran.borrow(),
+            [row.action.name()],
+            "{} ran its action once",
+            row.key.us
+        );
+        if let Some(number) = row.action.as_any().downcast_ref::<TemplateNumberKey>() {
+            assert_eq!(
+                *opened.digits.borrow(),
+                [number.digit],
+                "the number key carried its digit"
+            );
+        }
+    }
+    assert!(
+        opened.received.borrow().is_empty(),
+        "no physical shortcut reached the terminal: {:?}",
+        opened.received.borrow()
+    );
+    assert!(opened.terminal_focused(), "the terminal kept focus");
+}
+
+/// SPEC.md: number keys and Keyboard shortcuts act once per held press ("held keys act once"; "repeat ... do not open
+/// it"), while text size steps on every repeat of a held chord, as the old app did (its terminal script stepped with no
+/// repeat check). Neither the press nor any repeat reaches the terminal.
+#[gpui::test]
+fn a_held_number_key_acts_once_and_a_held_text_size_chord_repeats(cx: &mut TestAppContext) {
+    let mut opened = open(cx);
+    opened.focus_terminal();
+    for (row, runs) in [
+        (row_of(&TemplateNumberKey { digit: 4 }), 1),
+        (row_of(&ShowKeyboardShortcuts), 1),
+        (row_of(&IncreaseTerminalTextSize), 3),
+        (row_of(&DecreaseTerminalTextSize), 3),
+    ] {
+        opened.ran.borrow_mut().clear();
+        for held in [false, true, true] {
+            opened.cx.simulate_event(us_down(THIS_PLATFORM, row, held));
+            test_support::settle(opened.cx);
+        }
+        assert_eq!(
+            opened.runs_of(row.action.name()),
+            runs,
+            "holding {} ran {runs} times",
+            row.key.us
+        );
+    }
+    assert!(
+        opened.received.borrow().is_empty(),
+        "no press or repeat reached the terminal"
+    );
+}
+
+/// Keys the bridge injects and simulated test keys carry no native identity, and the table falls back to the logical
+/// key for them, so an end-to-end step can press these shortcuts. Typed here as plain keystrokes, which is what the
+/// bridge sends.
+#[gpui::test]
+fn a_shortcut_without_a_native_identity_falls_back_to_the_logical_key(cx: &mut TestAppContext) {
+    let mut opened = open(cx);
+    opened.focus_terminal();
+    let (number, text_size) = match THIS_PLATFORM {
+        Platform::Mac => ("cmd-7", "cmd-shift-="),
+        Platform::Linux => ("ctrl-shift-7", "ctrl-shift-="),
+    };
+    test_support::keys(opened.cx, number);
+    test_support::keys(opened.cx, text_size);
+    assert_eq!(*opened.digits.borrow(), [7], "{number} ran number key 7");
+    assert_eq!(
+        opened.runs_of(IncreaseTerminalTextSize.name()),
+        1,
+        "{text_size} stepped the text size"
+    );
+    assert!(
+        opened.received.borrow().is_empty(),
+        "neither reached the terminal"
+    );
+}
+
+/// The table takes only its exact chords. The same keys with no modifiers, with Shift alone, or (on Linux) with Ctrl
+/// alone are the program's: a shell reads digits, `!`, `=` and `/` all the time, and Ctrl+digit too.
+#[gpui::test]
+fn keys_at_those_positions_without_the_chord_reach_the_program(cx: &mut TestAppContext) {
+    let mut opened = open(cx);
+    opened.focus_terminal();
+    let control = gpui::Modifiers {
+        control: true,
+        ..Default::default()
+    };
+    let plain = gpui::Modifiers::default();
+    let events = [
+        native_down(identity(THIS_PLATFORM, "1"), "1", plain, false, false),
+        native_down(identity(THIS_PLATFORM, "1"), "!", plain, true, false),
+        native_down(identity(THIS_PLATFORM, "1"), "1", control, false, false),
+        native_down(identity(THIS_PLATFORM, "="), "=", plain, false, false),
+        native_down(identity(THIS_PLATFORM, "/"), "/", plain, false, false),
+    ];
+    for event in &events {
+        opened.cx.simulate_event(event.clone());
+        test_support::settle(opened.cx);
+    }
+    assert!(
+        opened.ran.borrow().is_empty(),
+        "no shortcut ran: {:?}",
+        opened.ran.borrow()
+    );
+    let received: Vec<String> = opened
+        .received
+        .borrow()
+        .iter()
+        .map(|key| key.key.clone())
+        .collect();
+    assert_eq!(
+        received,
+        ["1", "!", "1", "=", "/"],
+        "every key reached the terminal"
+    );
+}
+
+/// The docs promise more than the terminal case: a row's key goes no further even where nothing handles its action
+/// yet, and a focused text field never sees it. Specified: in a window with no handler for any physical-key action, with
+/// a text field focused, a typed letter reaches the field (its text, and a key listener around it, see it), while a
+/// number-key chord and a text-size chord reach neither, and the field keeps focus.
+#[gpui::test]
+fn a_physical_shortcut_with_no_handler_never_reaches_a_focused_text_field(cx: &mut TestAppContext) {
+    let field: Rc<RefCell<Option<TextInputState>>> = Rc::new(RefCell::new(None));
+    let seen: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+    let (kept, heard) = (field.clone(), seen.clone());
+    let cx = test_support::open(cx, move |window, cx| {
+        let state = kept
+            .borrow_mut()
+            .get_or_insert_with(|| TextInputState::new(window, cx))
+            .clone();
+        let heard = heard.clone();
+        div()
+            .child(
+                div()
+                    .debug_selector(|| "field-box".into())
+                    // Every key-down the field does not stop passes here on its way out: what reached the field.
+                    .on_key_down(move |event, _, _| {
+                        heard.borrow_mut().push(event.keystroke.key.clone())
+                    })
+                    .w(px(120.))
+                    .child(TextInput::new(
+                        "field",
+                        &state,
+                        "Filter",
+                        HoverHelp::tooltip("A test field"),
+                    )),
+            )
+            .into_any_element()
+    });
+    let state = field.borrow().clone().expect("the field was drawn");
+    test_support::click(cx, "field-box");
+    test_support::keys(cx, "a");
+    assert_eq!(
+        cx.update(|_, cx| state.text(cx)).as_ref(),
+        "a",
+        "the premise: the field takes typing"
+    );
+    assert_eq!(
+        *seen.borrow(),
+        ["a"],
+        "the premise: the listener around the field hears its keys"
+    );
+    for action in [
+        &TemplateNumberKey { digit: 2 } as &dyn gpui::Action,
+        &IncreaseTerminalTextSize,
+    ] {
+        cx.simulate_event(us_down(THIS_PLATFORM, row_of(action), false));
+        test_support::settle(cx);
+    }
+    assert_eq!(
+        *seen.borrow(),
+        ["a"],
+        "neither chord reached the field: {:?}",
+        seen.borrow()
+    );
+    assert_eq!(
+        cx.update(|_, cx| state.text(cx)).as_ref(),
+        "a",
+        "and neither typed into it"
+    );
+    let stack = cx.update(|window, _| window.context_stack());
+    assert!(
+        stack
+            .iter()
+            .any(|context| context.contains(TEXT_INPUT_CONTEXT)),
+        "the field kept focus: {stack:?}"
+    );
 }
