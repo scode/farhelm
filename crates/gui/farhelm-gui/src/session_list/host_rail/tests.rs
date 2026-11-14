@@ -6,15 +6,14 @@
 //! Like the list's other tests, these run the real main view over the helm client's fake, which hands the test every
 //! command the window sent, and read controls from GPUI's driver record of the frame by their ids (`host-rail-all`,
 //! `host-rail-host-<id>`, `host-filter-chip`). The rules that are pure functions (the choice's bookkeeping, a host's
-//! identity, its tint) are tested as such. The one test whose outcome is layout (the rail's width, the list beside it
-//! and a caption cut short) uses the real text system, since the test context's fake one gives every character the
-//! same width.
+//! identity) are tested as such; a host's mark and its tint are tested where they live, in `hosts/identity/tests.rs`.
+//! The one test whose outcome is layout (the rail's width, the list beside it and a caption cut short) uses the real
+//! text system, since the test context's fake one gives every character the same width.
 
 use std::sync::Arc;
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
-use farhelm_proto::host_appearance::{HostColor, HostIcon};
 use farhelm_proto::ui_channel::{
     Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, HostView,
     KeyedEntry, ListCounts, SESSION_QUERY_PATH,
@@ -26,13 +25,14 @@ use gpui::{
 use gpui_component::Root;
 use serde_json::{Value, json};
 
-use super::{Choice, LOCAL_NAME, empty_host, identity, refusal_words, tint};
+use super::{Choice, empty_host, identity, refusal_words};
 use crate::host_text::HostText;
 use crate::host_text::tests::SPOOFING_CORPUS;
+use crate::hosts::identity::LOCAL_NAME;
 use crate::main_view::MainView;
 use crate::session_list::tests::{change, listing, open_main, painted, preferences, session};
 use crate::test_support::{self, focused_id, frame, meta};
-use crate::{assets, bootstrap, layers, theme};
+use crate::{assets, bootstrap, layers};
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
 
@@ -1098,7 +1098,7 @@ fn a_long_host_list_scrolls_above_the_foot_which_stays_put(cx: &mut TestAppConte
     assert_eq!(foot.1.bottom(), px(500. - 8.));
 }
 
-// ---- Names and marks as pure functions -----------------------------------------------------------------------------
+// ---- Names as pure functions ---------------------------------------------------------------------------------------
 
 /// The identity rule the avatar and the chip share (the old `rail_identity`): only the local host under the registry's
 /// own name reads "Local (this machine)"; an alias stays the user's word; a remote host's destination is added only
@@ -1117,39 +1117,6 @@ fn identity_names_local_and_adds_a_destination_only_when_it_differs() {
     let mut posing = remote(2, "ops@build.example");
     posing.name = LOCAL_NAME.to_owned();
     assert_eq!(name(posing), "this machine (ops@build.example)");
-}
-
-/// A host's color names a palette token by its place in the color list (SPEC.md: host colors identify hosts), and the
-/// default color is the ordinary foreground. A tint written per color must stay in step with that list. Specified: for
-/// every color but the default, the tint is the palette's host entry at its place in `HostColor::ALL` less one, in both
-/// appearances.
-#[test]
-fn each_host_color_tints_with_its_palette_entry() {
-    for palette in [&theme::DARK, &theme::LIGHT] {
-        assert_eq!(tint(HostColor::Default, palette), palette.fg_0);
-        for (place, color) in HostColor::ALL.iter().enumerate().skip(1) {
-            assert_eq!(tint(*color, palette), palette.host[place - 1], "{color:?}");
-        }
-    }
-}
-
-/// Every shape a user can pick draws its own bundled drawing, so no two hosts' shapes collapse into one and none is
-/// missing. Specified: the sixteen `HostIcon`s map to sixteen distinct bundled SVGs.
-#[test]
-fn every_host_shape_has_its_own_bundled_drawing() {
-    let paths: std::collections::HashSet<&str> = HostIcon::ALL
-        .iter()
-        .map(|icon| super::glyph(*icon).path())
-        .collect();
-    assert_eq!(paths.len(), HostIcon::ALL.len());
-    for path in paths {
-        assert!(
-            gpui::AssetSource::load(&assets::Assets, path)
-                .unwrap()
-                .is_some(),
-            "{path} is bundled"
-        );
-    }
 }
 
 // ---- Layout, with the real text system -----------------------------------------------------------------------------

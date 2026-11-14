@@ -51,8 +51,8 @@ use crate::components::{
 };
 use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
+use crate::hosts::identity::display_name;
 use crate::layers::{self, Dialog, DialogPlacement, LayerId, MainAction};
-use crate::session_list::host_rail::display_name;
 use crate::store::HelmStore;
 use crate::theme::{self, metrics};
 use crate::{operations, session};

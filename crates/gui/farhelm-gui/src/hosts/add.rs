@@ -72,10 +72,10 @@ use crate::components::{Button, DialogFrame, HoverHelp, Role, TextInput, TextInp
 use crate::drafts::DraftInput;
 use crate::focus::{self, Mark, ReturnTo};
 use crate::host_text::{HostSentence, HostText};
+use crate::hosts::identity::{display_name, host_mark};
 use crate::layers::{self, Dialog, LayerId, MainAction};
 use crate::operations::{Command, OpKey, Outcome, Settled, Work};
 use crate::session;
-use crate::session_list::host_rail::{display_name, host_mark};
 use crate::theme::{self, metrics};
 
 /// `.host-add-dialog`'s width.

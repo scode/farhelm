@@ -16,8 +16,9 @@ use farhelm_proto::tensorlake::LifecycleDirection;
 use farhelm_proto::ui_channel::{ConnectionStage, HostStateView, HostView, RefreshView};
 use gpui::SharedString;
 
-use super::offers::runs_newer_version;
+use super::utc_stamp;
 use crate::host_text::{HostSentence, HostText};
+use crate::hosts::offers::runs_newer_version;
 
 #[cfg(test)]
 mod tests;
@@ -406,16 +407,4 @@ fn remedy(
         }
         HostStateView::Deleting { failure: Some(_) } => Some(line.text("Retry to delete it again")),
     }
-}
-
-/// `secs` since the epoch as `YYYY-MM-DD HH:MM:SS UTC`, the old app's unambiguous stamp (`activity::utc_stamp`): a
-/// zone-qualified time needs no time zone database, which the GUI does not carry. A session row's age shows its stamp
-/// in the same form, as the old app's did.
-pub(crate) fn utc_stamp(secs: i64) -> String {
-    const SECS_PER_DAY: i64 = 86_400;
-    // Euclidean division, so a stamp before 1970 still lands on its own day rather than reflecting around the epoch.
-    let (year, month, day) = farhelm_proto::time::civil_from_days(secs.div_euclid(SECS_PER_DAY));
-    let of_day = secs.rem_euclid(SECS_PER_DAY);
-    let (hour, minute, second) = (of_day / 3_600, (of_day % 3_600) / 60, of_day % 60);
-    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02} UTC")
 }

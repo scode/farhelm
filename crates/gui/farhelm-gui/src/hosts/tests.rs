@@ -391,9 +391,9 @@ fn a_failed_read_keeps_the_rows_it_had_and_says_so(cx: &mut TestAppContext) {
 
 /// Why this matters: the row names a host the way the user knows it (the alias, or "Local (this machine)" for the
 /// helm's own machine under the registry's name), with its identity mark saying where it is, and its phase words are
-/// its status at a glance. The words for every phase are pinned by `phase/tests.rs`; this proves the row draws them.
-/// Specified: the local host, an aliased remote with an old build and a connecting unaliased remote are each named by
-/// their shown name, their marks by "Local" or "Remote", and their statuses by their phase words.
+/// its status at a glance. The words for every phase are pinned by `identity/phase/tests.rs`; this proves the row draws
+/// them. Specified: the local host, an aliased remote with an old build and a connecting unaliased remote are each
+/// named by their shown name, their marks by "Local" or "Remote", and their statuses by their phase words.
 #[gpui::test]
 fn every_row_shows_its_name_mark_and_phase_words(cx: &mut TestAppContext) {
     let mut old = connected();
