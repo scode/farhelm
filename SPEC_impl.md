@@ -480,8 +480,15 @@ A focus move made by the keyboard or by the app, never by a pointer press or hov
 container around the focused control that opted in (`focus::scroll_region`, as the dialog frame's body and card do),
 innermost first, by the least distance that shows the whole control, as a browser's scroll-into-view does. It works from
 where controls were last drawn, moved by any scroll since, and asks for its own frame; virtualized lists keep their own
-reveal. A control focused before it is first drawn (a layer's start) has no position and is not scrolled to; its owner
-scrolls it, as Settings' trust hints and the archive's global confirmation will need to (SPEC.md).
+reveal. A control focused before it is first drawn (a layer's start) has no position and is not scrolled to; the
+archive's global confirmation, whose actions SPEC.md brings into view when it opens, still needs a way to scroll a
+layer's start into view. On the page, a result that arrives later moves focus with `focus::focus_control`. Inside the
+open dialog, a move to another control goes through `focus::focus_in_layer`, for a result that arrives later (Settings
+moving to an agent's switch once its trust read answers) or for the user's own action there (the launcher's Custom
+choice moving into its flags field). Both do nothing once the user has moved on since the action, and both scroll the
+control into view. `focus_in_layer` also does nothing once focus has left that dialog or for a control not drawn in it,
+so a target the action makes appear is moved to from the next frame. `focus::move_within_control`, which carries focus
+along inside one control as part of the key the user pressed there, scrolls nothing.
 
 Enforced by clippy `disallowed-methods` on GPUI's focus calls and on `track_focus` everywhere in the GUI crates except
 the coordinator, and by the focus invariant that in-process tests check after every step: exactly one focused element,
