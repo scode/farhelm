@@ -7,8 +7,8 @@
 //! outlived the view) is a detached task, which the GUI lints ban. Here the task is held by the [`Operations`] of the
 //! current UI session, under the [`OpKey`] of what it acts on, until it settles or a reset retires the store.
 //!
-//! What work acts on is named by an [`OpKey`]: a session, a host, a template, the preferences, or a launch that has no
-//! session yet. Keys of different kinds never collide, so a host and a session with the same id string are independent.
+//! What work acts on is named by an [`OpKey`]: a session, a host, a template, the preferences, or a launch or a host
+//! being added, neither of which has its id yet. Keys of different kinds never collide, so a host and a session with the same id string are independent.
 //!
 //! Here's the TLDR of the rules:
 //!
@@ -91,6 +91,7 @@ enum Key {
     Template(String),
     Preferences,
     Launch(u64),
+    HostAdd(u64),
 }
 
 impl OpKey {
@@ -121,6 +122,13 @@ impl OpKey {
     pub fn launch(n: u64) -> OpKey {
         OpKey(Key::Launch(n))
     }
+
+    /// Adding a host, sent before the host has a registry id: it gets one when the helm registers it, which is when it
+    /// accepts the setup (202), or straight away when the probe finds the host already set up (200). `n` follows
+    /// [`OpKey::launch`]'s rule: unique for the life of the UI session's store, from a counter kept beside it.
+    pub fn host_add(n: u64) -> OpKey {
+        OpKey(Key::HostAdd(n))
+    }
 }
 
 /// One command to the helm, with the work it does and how a refusal without words names it. Built where its feature
@@ -141,8 +149,8 @@ impl Command {
     /// A command doing `work`: `method` on `path` with `body`, and `shown` as a refusal without words names it (the
     /// method and route, with any internal id hidden, as `POST /api/sessions/[session]/rename`).
     ///
-    /// NOTE: Only for a route that answers done or refused. A route that can answer 202 (accepted long work) would be
-    /// reported done here before its work succeeded ([`Outcome::Done`]'s NOTE); the accepted outcome comes first.
+    /// A route that answers 202 (accepted long work, such as host setup or a confirmed Update) settles as
+    /// [`Outcome::Accepted`], never as done: its result arrives later in the helm's pushed state.
     pub fn new(
         work: Work,
         method: Method,
@@ -174,13 +182,15 @@ impl Command {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Outcome {
     /// The helm did it, and the store already shows the effects (the channel orders a reply after the changes it
-    /// caused). The body is the route's own reply (the renamed session, a Delete's outcome with its notice).
-    ///
-    /// NOTE: Every 2xx is done, which is right only because no command sent through the store goes to a route that
-    /// answers 202 (accepted long work, whose success is not implied). Some helm routes do (host setup and update,
-    /// for instance); the first feature that sends one through the store adds the accepted outcome here first, as
-    /// [`Command::new`] says.
+    /// caused). The body is the route's own reply (the renamed session, a Delete's outcome with its notice). Every 2xx
+    /// but 202.
     Done(Option<Value>),
+    /// The helm accepted long work it carries on with (202): the key is no longer busy and nothing failed, but success
+    /// is not implied, and no per-operation result is kept here. For host setup, a confirmed Update and a confirmed
+    /// Uninstall, the progress and result arrive in the hosts' pushed progress, which is where a feature shows them;
+    /// a route whose result is not pushed (a recipe build) needs its own way to learn it. The body is the route's own
+    /// reply (`{host_id, run_id}` for the host routes).
+    Accepted(Option<Value>),
     /// The helm refused, in its own words, which may quote host values (a supervisor's refusal names the title it
     /// refused), so they are host text. A host timeout is a refusal too, though the work goes on behind it.
     Refused(HostText),
@@ -193,6 +203,7 @@ impl Outcome {
     /// nothing.
     fn from_reply(reply: Reply, shown: &str) -> Outcome {
         match reply.status {
+            202 => Outcome::Accepted(reply.body),
             200..=299 => Outcome::Done(reply.body),
             status => {
                 let words = match reply.body {

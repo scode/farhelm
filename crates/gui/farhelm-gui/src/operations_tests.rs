@@ -518,6 +518,75 @@ fn save_on(path: &[&str], shown: &'static str) -> Command {
     Command::new(Work::Save, Method::Put, path, Some(json!({})), shown)
 }
 
+/// Adding a host and a confirmed Update answer 202: the helm accepted long work and carries on with it, reporting its
+/// progress and result in the hosts it pushes. Settling that as done would claim a success nobody has seen yet, and
+/// keeping the key busy would block the next action until the work ends. A new host has no id until the helm accepts
+/// it, so its work goes under a key of its own. Specified: a host addition under `OpKey::host_add` settles on a 202 as
+/// accepted with the reply's body, its key is no longer busy, and nothing is recorded as a failure; a second addition
+/// under another number runs beside the first; and any other 2xx (a 201) still settles as done.
+#[gpui::test]
+fn an_accepted_reply_ends_the_work_without_claiming_success_or_failure(cx: &mut TestAppContext) {
+    let (mut fake, _connection) = connected(&[], cx);
+    let operations = operations(cx);
+    let delivered = Delivered::default();
+    let (first, second) = (OpKey::host_add(1), OpKey::host_add(2));
+    let add = || {
+        let path = ApiPath::api(&["hosts", "provision"]).unwrap();
+        Command::new(
+            Work::Save,
+            Method::Post,
+            path,
+            Some(json!({})),
+            "POST /api/hosts/provision",
+        )
+    };
+    start_on(&operations, &first, add(), "add first", &delivered, cx).unwrap();
+    start_on(&operations, &second, add(), "add second", &delivered, cx).unwrap();
+    assert_eq!(
+        cx.update(|cx| operations.read(cx).in_flight(&first)),
+        Some(Work::Save),
+        "the premise: the first addition holds its key"
+    );
+    cx.run_until_parked();
+    let sent = fake.commands();
+    assert_eq!(
+        sent.len(),
+        2,
+        "the premise: both additions reached the helm"
+    );
+    fake.reply(
+        sent[0].id,
+        202,
+        Some(json!({ "host_id": "h1", "run_id": "r1" })),
+    );
+    fake.reply(sent[1].id, 201, Some(json!({})));
+    cx.run_until_parked();
+    let outcomes: Vec<_> = delivered
+        .borrow()
+        .iter()
+        .map(|(label, settled)| (*label, settled.outcome.clone()))
+        .collect();
+    assert_eq!(
+        outcomes,
+        vec![
+            (
+                "add first",
+                Outcome::Accepted(Some(json!({ "host_id": "h1", "run_id": "r1" })))
+            ),
+            ("add second", Outcome::Done(Some(json!({})))),
+        ]
+    );
+    cx.update(|cx| {
+        let operations = operations.read(cx);
+        assert_eq!(
+            operations.in_flight(&first),
+            None,
+            "the accepted work no longer holds its key"
+        );
+        assert_eq!(operations.failure(&first), None, "and nothing failed");
+    });
+}
+
 /// Settings saves the preferences and a host's settings, templates saves a template, and none of them is a session;
 /// before the store took keys of other kinds, such work could not use it, and its busy state and refusals had nowhere
 /// to live. Specified: work keyed by a host and by a template runs beside a session's, all three named by the same id
