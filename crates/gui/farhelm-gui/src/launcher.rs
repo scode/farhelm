@@ -7,6 +7,7 @@
 //! - [`draft`]: what the launcher holds, and every edit to it, with no GPUI types.
 //! - [`request`]: whether a draft can launch, the one reason it cannot, and the request body it sends.
 //! - [`view`]: the launcher's dialog, drawing a draft and turning the user's input into its edits.
+//! - `words`: the launcher's names for agent choices and its permission help, ported from the old launcher.
 //!
 //! The launcher's seams, which the templates-and-quick-launch work plugs into rather than adding a mechanism of its
 //! own:
@@ -27,6 +28,7 @@
 pub mod draft;
 pub mod request;
 pub mod view;
+mod words;
 
 #[cfg(test)]
 mod draft_tests;

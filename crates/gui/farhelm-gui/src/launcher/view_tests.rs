@@ -122,6 +122,14 @@ fn has_node(cx: &mut VisualTestContext, id: &str) -> bool {
         .any(|node| node.element_id.as_deref() == Some(id))
 }
 
+/// The checked state an element under `id` reports in a fresh frame.
+fn toggled(cx: &mut VisualTestContext, id: &str) -> Option<gpui::Toggled> {
+    test_support::frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(id))
+        .and_then(|node| node.toggled)
+}
+
 /// The accessible name of the element drawn under `id` in a fresh frame.
 fn name_of(cx: &mut VisualTestContext, id: &str) -> Option<String> {
     test_support::frame(cx)
@@ -457,5 +465,405 @@ fn a_wrapper_prefix_that_does_not_parse_is_said_at_once(cx: &mut TestAppContext)
     assert!(
         has_node(cx, "launcher-wrapper-error"),
         "an unclosed quote is said under the field"
+    );
+}
+
+// ---- The Agent tab's choices -----------------------------------------------------------------------------------------
+
+/// Answer the launcher's catalog read with `rows` (`GET /api/launch-catalog`), or with a 500 when `rows` is `None`.
+/// The fake answers commands in the order they were sent, so every other command sent since the last call (the main
+/// view's own) is answered too, in its place, with a plain success, as the helm answers them.
+fn answer_catalog(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    rows: Option<serde_json::Value>,
+) {
+    cx.run_until_parked();
+    let mut read = false;
+    for command in helm.commands() {
+        if command.path.ends_with("launch-catalog") {
+            read = true;
+            match &rows {
+                Some(rows) => helm.reply(command.id, 200, Some(rows.clone())),
+                None => helm.reply(command.id, 500, None),
+            }
+        } else {
+            helm.reply(command.id, 200, None);
+        }
+    }
+    assert!(read, "the premise: the launcher read the catalog");
+    settle(cx);
+}
+
+/// A catalog with one Codex model offering `efforts`.
+fn codex_catalog(efforts: &[&str]) -> serde_json::Value {
+    serde_json::json!([{ "id": "gpt-5", "harness": "codex", "efforts": efforts }])
+}
+
+/// Whether a fresh frame painted `words` anywhere.
+fn painted(cx: &mut VisualTestContext, words: &str) -> bool {
+    test_support::frame(cx)
+        .into_iter()
+        .any(|node| node.texts.iter().any(|text| text.text.contains(words)))
+}
+
+/// A harness chip chooses its agent type, which then offers its own effort and permissions (SPEC.md, "Creation": the
+/// Agent tab's choices follow the agent type; the old launcher's harness row, effort and permission segments). Why
+/// this matters: an effort or a permission the agent type does not offer would be refused at launch with no way to
+/// see why. Specified: before any agent type, effort offers only Default and permissions Guarded and YOLO; after Codex,
+/// with a catalog model offering low, medium and high, effort offers Default and those three, and permissions Guarded,
+/// YOLO and Custom with the "About permission modes" help beside them.
+#[gpui::test]
+fn a_harness_chip_chooses_the_agent_and_its_offered_choices(cx: &mut TestAppContext) {
+    let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    answer_catalog(
+        &mut helm,
+        cx,
+        Some(codex_catalog(&["low", "medium", "high"])),
+    );
+    assert!(has_node(cx, "launcher-effort-Default") && !has_node(cx, "launcher-effort-High"));
+    assert!(
+        has_node(cx, "launcher-permissions-Guarded") && has_node(cx, "launcher-permissions-YOLO")
+    );
+    assert_eq!(
+        toggled(cx, "launcher-permissions-Guarded"),
+        Some(gpui::Toggled::True),
+        "before any agent type, New's default asks for Guarded and shows it chosen"
+    );
+    assert!(
+        !has_node(cx, "launcher-permissions-Custom"),
+        "Custom waits for an agent type that offers it"
+    );
+
+    test_support::click(cx, "launcher-harness-Codex");
+    assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Codex));
+    for effort in ["Default", "Low", "Medium", "High"] {
+        let id = format!("launcher-effort-{effort}");
+        assert!(has_node(cx, &id), "effort {effort} is offered");
+    }
+    for permission in ["Guarded", "YOLO", "Custom"] {
+        let id = format!("launcher-permissions-{permission}");
+        assert!(has_node(cx, &id), "permission {permission} is offered");
+    }
+    assert!(has_node(cx, "launcher-permission-help"));
+    test_support::click(cx, "launcher-effort-High");
+    assert_eq!(draft(cx).agent.effort, Some(LaunchEffort::High));
+}
+
+/// More than five effort choices, Default included, are a select instead of segments, as the old launcher switched to
+/// a native select past five.
+#[gpui::test]
+fn many_efforts_are_a_select(cx: &mut TestAppContext) {
+    let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    answer_catalog(
+        &mut helm,
+        cx,
+        Some(codex_catalog(&["low", "medium", "high", "xhigh", "max"])),
+    );
+    test_support::click(cx, "launcher-harness-Codex");
+    assert!(
+        has_node(cx, "launcher-effort"),
+        "the effort control is drawn"
+    );
+    assert!(
+        !has_node(cx, "launcher-effort-Default"),
+        "and it is not segments"
+    );
+}
+
+/// Enter on a harness chip chooses it and then presses Launch (SPEC.md, "Creation": "Enter on a choice button ...
+/// applies that choice and then launches"). Specified, with no host chosen so the press is refused and says why: Tab
+/// from the focused Codex chip reaches Claude, and Enter there chooses Claude and shows the refusal.
+#[gpui::test]
+fn enter_on_a_harness_chip_chooses_it_and_presses_launch(cx: &mut TestAppContext) {
+    let (_helm, cx) = launcher_on(cx, LaunchDraft::new(None, "~".into(), None));
+    test_support::click(cx, "launcher-harness-Codex");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("launcher-harness-Codex"),
+        "the premise: the click focused the chip"
+    );
+    keys(cx, "tab");
+    assert_eq!(focused_id(cx).as_deref(), Some("launcher-harness-Claude"));
+    assert_eq!(shown_refusal(cx), None, "nothing said before the press");
+    keys(cx, "enter");
+    assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Claude));
+    assert!(
+        shown_refusal(cx).is_some(),
+        "the press said why nothing launched"
+    );
+}
+
+/// Choosing Custom opens its flags editor, which shows the words the flags parse to, or why they do not. Enter on the
+/// Custom segment only chooses: a Custom choice has no flags yet, so launching from it could only fail. Specified, on
+/// Codex: Enter on the focused Custom segment chooses Custom and says nothing beside Launch; in the flags field,
+/// `--a 'b c'` shows its two words, apart, and an unclosed quote shows the error instead.
+#[gpui::test]
+fn custom_opens_its_flags_editor_and_enter_there_only_chooses(cx: &mut TestAppContext) {
+    // No host, so a press would be refused and say so: the check that Enter on Custom pressed nothing means something.
+    let (_helm, cx) = launcher_on(cx, LaunchDraft::new(None, "~".into(), None));
+    test_support::click(cx, "launcher-harness-Codex");
+    test_support::click(cx, "launcher-permissions-YOLO");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("launcher-permissions-YOLO"),
+        "the premise: the click focused YOLO"
+    );
+    keys(cx, "tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("launcher-permissions-Custom")
+    );
+    keys(cx, "enter");
+    assert_eq!(draft(cx).agent.permissions, Some(LaunchPermission::Custom));
+    assert_eq!(
+        shown_refusal(cx),
+        None,
+        "Enter on Custom did not press Launch"
+    );
+    test_support::click(cx, "launcher-flags-row");
+    assert!(
+        read(cx, |launcher, window, cx| launcher
+            .flags
+            .focus_handle(cx)
+            .is_focused(window)),
+        "the premise: the click focused the flags field"
+    );
+    keys(cx, "- - a space ' b space c '");
+    assert_eq!(draft(cx).agent.permission_flags, "--a 'b c'");
+    assert_eq!(
+        name_of(cx, "launcher-flag-words").as_deref(),
+        Some("Permission arguments: --a, b c")
+    );
+    keys(cx, "space '");
+    assert!(has_node(cx, "launcher-flags-error") && !has_node(cx, "launcher-flag-words"));
+}
+
+/// Switching to an agent type that cannot keep a deliberate choice says what it cleared, under the agent choices, as
+/// the old launcher's choice error did. Specified: High effort chosen on Codex, then Cursor (which offers no effort):
+/// the effort is cleared and a notice says so; Cursor's note about tracking and Resume shows too.
+#[gpui::test]
+fn a_switch_that_clears_a_choice_says_so(cx: &mut TestAppContext) {
+    let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    answer_catalog(
+        &mut helm,
+        cx,
+        Some(codex_catalog(&["low", "medium", "high"])),
+    );
+    test_support::click(cx, "launcher-harness-Codex");
+    test_support::click(cx, "launcher-effort-High");
+    assert!(
+        !has_node(cx, "launcher-choice-notice"),
+        "the premise: nothing to say yet"
+    );
+    test_support::click(cx, "launcher-harness-Cursor");
+    assert_eq!(draft(cx).agent.effort, None);
+    assert!(
+        has_node(cx, "launcher-choice-notice"),
+        "the cleared effort is said"
+    );
+    assert!(!drawn(cx, "launcher-effort-row"), "Cursor offers no effort");
+    assert!(painted(
+        cx,
+        "Cursor session tracking and Resume are not supported."
+    ));
+}
+
+/// A failed catalog read says so with the read's own words beside Retry, and Retry reads it again, the line going away
+/// while the new read is out (the old launcher's "Model catalog unavailable"). Why this matters: without it a failed
+/// read leaves the model choices silently empty, and the only way to try again was to reopen the launcher and lose the
+/// draft.
+#[gpui::test]
+fn a_failed_catalog_read_says_so_and_retry_reads_it_again(cx: &mut TestAppContext) {
+    let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    answer_catalog(&mut helm, cx, None);
+    let said = name_of(cx, "launcher-catalog-error").unwrap_or_default();
+    assert!(said.starts_with("Model catalog unavailable: "), "{said}");
+    test_support::click(cx, "launcher-catalog-retry");
+    assert!(
+        !has_node(cx, "launcher-catalog-error"),
+        "the line goes while the read is out"
+    );
+    answer_catalog(&mut helm, cx, Some(codex_catalog(&["high"])));
+    assert!(
+        !has_node(cx, "launcher-catalog-error"),
+        "a good read says nothing"
+    );
+}
+
+/// Each agent type offers exactly its own permission vocabulary and shows exactly one segment chosen, its omitted
+/// default with nothing chosen by hand (the old specs `guarded-permissions`, `omp-composer`, `goose-pi-composer` and
+/// `grok-composer`, their launcher cases). Why this matters: a mode an agent does not have would be refused at launch,
+/// and a missing one could not be chosen. Specified, choosing each chip in turn in one launcher: the segments offered,
+/// in order, the one shown chosen, and whether effort is offered at all.
+#[gpui::test]
+fn each_agent_type_offers_its_own_permission_vocabulary(cx: &mut TestAppContext) {
+    let all = [
+        "Agent's own setting",
+        "Guarded",
+        "YOLO",
+        "Custom",
+        "Approve",
+        "Smart approve",
+        "Chat",
+    ];
+    let cases: [(&'static str, &[&str], &str, bool); 9] = [
+        (
+            "launcher-harness-Codex",
+            &["Guarded", "YOLO", "Custom"],
+            "Guarded",
+            true,
+        ),
+        (
+            "launcher-harness-Claude",
+            &["Guarded", "YOLO", "Custom"],
+            "Guarded",
+            true,
+        ),
+        (
+            "launcher-harness-Muse",
+            &["Guarded", "YOLO", "Custom"],
+            "Guarded",
+            true,
+        ),
+        (
+            "launcher-harness-Cursor",
+            &["Agent's own setting", "YOLO", "Custom"],
+            "Agent's own setting",
+            false,
+        ),
+        (
+            "launcher-harness-Grok",
+            &["Guarded", "YOLO", "Custom"],
+            "Guarded",
+            false,
+        ),
+        (
+            "launcher-harness-Goose",
+            &["YOLO", "Approve", "Smart approve", "Chat"],
+            "YOLO",
+            true,
+        ),
+        ("launcher-harness-Pi", &["YOLO"], "YOLO", true),
+        (
+            "launcher-harness-OMP",
+            &["Guarded", "YOLO", "Custom", "Approve"],
+            "Guarded",
+            true,
+        ),
+        ("launcher-harness-OpenCode", &["YOLO"], "YOLO", false),
+    ];
+    let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    for (chip, offered, shown, effort) in cases {
+        test_support::click(cx, chip);
+        assert!(
+            !draft(cx).agent.permissions_explicit,
+            "{chip}: the premise: no permission chosen by hand, so the chosen segment is the draft's default"
+        );
+        let nodes = test_support::frame(cx);
+        let segment = |label: &str| {
+            let id = format!("launcher-permissions-{label}");
+            nodes
+                .iter()
+                .find(|node| node.element_id.as_deref() == Some(id.as_str()))
+                .cloned()
+        };
+        let drawn_now: Vec<&str> = all
+            .iter()
+            .copied()
+            .filter(|label| segment(label).is_some())
+            .collect();
+        assert_eq!(drawn_now, offered, "{chip}: the permissions offered");
+        let chosen: Vec<&str> = drawn_now
+            .iter()
+            .copied()
+            .filter(|label| {
+                segment(label).and_then(|node| node.toggled) == Some(gpui::Toggled::True)
+            })
+            .collect();
+        assert_eq!(chosen, [shown], "{chip}: exactly {shown} shows as chosen");
+        assert_eq!(
+            drawn(cx, "launcher-effort-row"),
+            effort,
+            "{chip}: effort offered"
+        );
+    }
+}
+
+/// Effort stays segments up to five options, Default included, and becomes a select past that, as the old launcher's
+/// `efforts.len() + 1 > 5`. Specified at the boundary: four offered efforts are five segments.
+#[gpui::test]
+fn five_effort_options_are_still_segments(cx: &mut TestAppContext) {
+    let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    answer_catalog(
+        &mut helm,
+        cx,
+        Some(codex_catalog(&["low", "medium", "high", "xhigh"])),
+    );
+    test_support::click(cx, "launcher-harness-Codex");
+    for effort in ["Default", "Low", "Medium", "High", "xhigh"] {
+        let id = format!("launcher-effort-{effort}");
+        assert!(has_node(cx, &id), "effort {effort} is a segment");
+    }
+}
+
+/// An effort the launch already carries stays offered, in its place, when the model does not offer it (old
+/// `displayed_efforts`), so a Clone of an older launch shows what it will send and can keep it. Specified: a Clone of
+/// a Codex launch with Max effort, against a catalog whose Codex model offers only low, medium and high, offers Max
+/// after High, chosen.
+#[gpui::test]
+fn a_carried_effort_the_model_does_not_offer_stays_offered(cx: &mut TestAppContext) {
+    let source = super::draft_tests::session(codex(None, Some(LaunchEffort::Max), None));
+    let (mut helm, cx) = launcher_on(cx, LaunchDraft::clone_of(&source, Some(1)));
+    answer_catalog(
+        &mut helm,
+        cx,
+        Some(codex_catalog(&["low", "medium", "high"])),
+    );
+    assert_eq!(
+        toggled(cx, "launcher-effort-Max"),
+        Some(gpui::Toggled::True)
+    );
+    let order: Vec<String> = test_support::frame(cx)
+        .into_iter()
+        .filter_map(|node| node.element_id.map(|id| id.to_string()))
+        .filter(|id| id.starts_with("launcher-effort-") && !id.ends_with("-row"))
+        .collect();
+    assert_eq!(
+        order,
+        [
+            "launcher-effort-Default",
+            "launcher-effort-Low",
+            "launcher-effort-Medium",
+            "launcher-effort-High",
+            "launcher-effort-Max"
+        ]
+    );
+}
+
+/// Restart with's stored effort stays offered beside the ones the model offers, even after the user picks another, so
+/// going back to the session's own effort is one click (old `displayed_efforts`'s baseline). Specified: Restart with a
+/// Codex session stored with Max, against a catalog whose model offers low, medium and high: after choosing Default,
+/// Max is still a segment.
+#[gpui::test]
+fn restart_with_keeps_its_stored_effort_offered(cx: &mut TestAppContext) {
+    let mut source = super::draft_tests::session(codex(None, Some(LaunchEffort::Max), None));
+    source.restart_offer = RestartOffer::Resume;
+    let restart = LaunchDraft::restart_with("missing", &source, Some(1)).unwrap();
+    let (mut helm, cx) = launcher_on(cx, restart);
+    answer_catalog(
+        &mut helm,
+        cx,
+        Some(codex_catalog(&["low", "medium", "high"])),
+    );
+    test_support::click(cx, "launcher-effort-Default");
+    assert_eq!(
+        draft(cx).agent.effort,
+        None,
+        "the premise: Default is chosen"
+    );
+    assert!(
+        has_node(cx, "launcher-effort-Max"),
+        "the stored Max is still offered"
     );
 }
