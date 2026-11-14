@@ -7,6 +7,7 @@ a run starts lives under the run directory you name (which must not exist yet), 
 
     scripts/gui-agent.py RUN_DIR start [--sessions N | --fleet KIND,...] [--size WxH (Linux)] [--no-build]
                                        [--lock FILE] [--window-size WxH] [--appearance light|dark]
+                                       [--scripted-hosts]
     scripts/gui-agent.py RUN_DIR snapshot -i          # any gpui-agent command: click, type, press, wait, screenshot ...
     scripts/gui-agent.py RUN_DIR terminal-text [--wait TEXT [--timeout SECONDS]]
     scripts/gui-agent.py RUN_DIR stop
@@ -21,8 +22,10 @@ rendering is Mesa's software Vulkan driver (lavapipe), the same as the screensho
 `--lock FILE` holds an exclusive `flock` on FILE from before the build until `stop`, for a machine whose one GUI
 session several runs share (the test Mac's convention). `--window-size` and `--appearance` start the app's window at
 that size and in that palette (agent builds only; `crates/gui/farhelm-gui/src/agent_startup.rs`), so a screenshot batch
-can capture each theme and size; they are test hooks, not the app's own appearance setting. Any other verb goes to the
-vendored `gpui-agent` command line, already pointed at this run's app; `gpui-agent --help` and
+can capture each theme and size; they are test hooks, not the app's own appearance setting. `--scripted-hosts` makes
+the helm fake every command it runs on a host (setup, Update and the rest) with its scripted provisioning backend
+(SCRIPTED_HOSTS_ENV, debug builds only), controlled with `script_hosts`. Any other verb goes to the vendored
+`gpui-agent` command line, already pointed at this run's app; `gpui-agent --help` and
 vendor/gpui-agent/README.md list them. docs/gui-agent.md is the guide.
 
 Why Mutter rather than the bridge's own Xvfb: the shipped app is built for Wayland only (the root Cargo.toml's
@@ -179,12 +182,55 @@ def parse_size(text: str) -> tuple[int, int]:
     return int(width), int(height)
 
 
+# The scripted provisioning backend's switch, read by debug builds of the helm (`ProductionProvisioning::new` in
+# crates/farhelm-helm/src/provisioning/service.rs), and the marker its directory must hold (`E2E_BACKEND_MARKER` in
+# provisioning/e2e.rs). Both must match the helm's exactly.
+SCRIPTED_HOSTS_ENV = "FARHELM_E2E_PROVISIONING_BACKEND_DIR"
+SCRIPTED_HOSTS_MARKER = "farhelm-e2e-provisioning-v1\n"
+
+
+def scripted_hosts_dir(run: Path) -> Path:
+    """Where `start --scripted-hosts` puts the scripted provisioning backend's directory: inside the app's state
+    directory, because the helm refuses a backend directory outside its own state."""
+    return run / "state" / "scripted-hosts"
+
+
+def prepare_scripted_hosts(run: Path) -> Path:
+    """Create the scripted backend's directory with its marker and an empty `config.json` (every host absent, so a
+    probe offers a setup plan and every step succeeds), and return it. Steps control the fake hosts with
+    `script_hosts`; the helm appends what it did to `events.jsonl` beside it."""
+    directory = scripted_hosts_dir(run)
+    # The app would create its state directory private; created first here, it must be just as private.
+    directory.parent.mkdir(mode=0o700, exist_ok=True)
+    directory.mkdir(mode=0o700)
+    (directory / "ENABLED").write_text(SCRIPTED_HOSTS_MARKER)
+    script_hosts(run, {})
+    return directory
+
+
+def script_hosts(run: Path, config: dict) -> None:
+    """Replace what the run's fake hosts do (docs/gui-agent.md, "Scripted hosts" has the format).
+
+    The helm rereads `config.json` at every probe and step, and every 20 ms while a step is held, so a file rewritten in
+    place could be read half-written and fail a step the test never meant to fail. The new file is written beside it and
+    renamed over it, which the helm sees whole or not at all (the old browser suite wrote it the same way)."""
+    directory = scripted_hosts_dir(run)
+    staged = directory / "config.json.new"
+    staged.write_text(json.dumps(config, indent=2) + "\n")
+    os.replace(staged, directory / "config.json")
+
+
 def app_env_args(
-    run: Path, binaries: dict[str, str], window_size: str | None = None, appearance: str | None = None
+    run: Path,
+    binaries: dict[str, str],
+    window_size: str | None = None,
+    appearance: str | None = None,
+    scripted_hosts: Path | None = None,
 ) -> list[str]:
     """The `--env` arguments `gpui-agent launch` passes to the app only: its state, its CLI and the helm file, plus the
-    first window's size and a forced appearance when the run asks for them (unset otherwise, so the app starts at its
-    own default size in the system's appearance)."""
+    first window's size, a forced appearance and the scripted provisioning backend's directory when the run asks for
+    them (unset otherwise, so the app starts at its own default size in the system's appearance and sets up hosts for
+    real)."""
     pairs = {
         # The app's state directory: never the default one, which could be a real installation's.
         "FARHELM_DESKTOP_STATE_DIR": str(run / "state"),
@@ -199,6 +245,8 @@ def app_env_args(
         pairs["FARHELM_DESKTOP_AGENT_WINDOW_SIZE"] = window_size
     if appearance is not None:
         pairs["FARHELM_DESKTOP_AGENT_APPEARANCE"] = appearance
+    if scripted_hosts is not None:
+        pairs[SCRIPTED_HOSTS_ENV] = str(scripted_hosts)
     args: list[str] = []
     for key, value in pairs.items():
         args += ["--env", f"{key}={value}"]
@@ -712,6 +760,11 @@ def start(run: Path, args: list[str]) -> int:
     parser.add_argument(
         "--appearance", choices=("light", "dark"), help="start the app in this palette (agent-build test hook)"
     )
+    parser.add_argument(
+        "--scripted-hosts",
+        action="store_true",
+        help="fake the commands the helm runs on hosts with its scripted backend (see docs/gui-agent.md)",
+    )
     options = parser.parse_args(args)
     if options.window_size:
         parse_size(options.window_size)
@@ -774,6 +827,7 @@ def start(run: Path, args: list[str]) -> int:
         mutter = start_mutter(run, run / "runtime", display, mutter_command(display, size), dict(os.environ))
         record.update({"mutter": {"pid": mutter["pid"], "start": mutter["start"]}, "dbus": mutter["dbus"]})
     save()
+    scripted_hosts = prepare_scripted_hosts(run) if options.scripted_hosts else None
     launched = cli(
         run,
         record,
@@ -781,7 +835,7 @@ def start(run: Path, args: list[str]) -> int:
             "launch",
             "--timeout",
             str(LAUNCH_TIMEOUT_SECONDS),
-            *app_env_args(run, binaries, options.window_size, options.appearance),
+            *app_env_args(run, binaries, options.window_size, options.appearance, scripted_hosts),
             "--",
             binaries["desktop"],
         ],

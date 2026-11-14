@@ -18,11 +18,14 @@ use tokio::io::AsyncWriteExt;
 pub(super) const E2E_BACKEND_ENV: &str = "FARHELM_E2E_PROVISIONING_BACKEND_DIR";
 const E2E_BACKEND_MARKER: &str = "farhelm-e2e-provisioning-v1\n";
 
-/// One explicit, filesystem-controlled backend for unit tests.
+/// One explicit, filesystem-controlled backend for unit tests and the GPUI
+/// app's end-to-end runs.
 ///
-/// The removed browser suite enabled it at runtime in the ordinary debug
-/// binary through an environment variable; now only tests construct it, and
-/// it still requires a marker inside the helm's private state directory. The
+/// Unit tests construct it directly. A debug build of the helm also selects
+/// it at startup when [`E2E_BACKEND_ENV`] names its directory (see
+/// `ProductionProvisioning::new`), which is how `scripts/gui-agent.py start
+/// --scripted-hosts` gives the GPUI app fake SSH hosts; either way it
+/// requires a marker inside the helm's private state directory. The
 /// seam ends at [`ProvisioningBackend`]: HTTP routing, authentication,
 /// one-use plans, registration, progress retention, and feed bumps remain the
 /// shipped implementation.
@@ -263,7 +266,7 @@ impl ProvisioningBackend for E2eProvisioningBackend {
         Ok(self.behavior(target).await?.home.into())
     }
 
-    /// The browser seam models the explicit checkpoint-safety result and its
+    /// The scripted backend models the explicit checkpoint-safety result and its
     /// failure propagation, not a remote filesystem or real supervisor boot.
     /// Production command tests and the two-clone gate supply those proofs.
     async fn finish_snapshot_install(
@@ -369,7 +372,7 @@ impl ProvisioningBackend for E2eProvisioningBackend {
         _mode: u32,
         _expected: Option<Option<&str>>,
     ) -> Result<ActionOutcome, BackendFailure> {
-        // This browser fixture records workflow only; owned-filesystem and real
+        // This fixture records workflow only; owned-filesystem and real
         // finishing-command tests exercise the content precondition itself.
         // Proxy files reuse the credential byte installer. Keep their fault
         // boundary separate so a unit-install fault still tests installation,
@@ -424,7 +427,7 @@ impl ProvisioningBackend for E2eProvisioningBackend {
     /// own canonical path, and the unit running under provisioning's kill
     /// policy, so an injected UNINSTALL plans its full step list. The steps
     /// themselves are simulated like every other action, which is what keeps
-    /// a browser spec's real remote supervisor running while the panel
+    /// an end-to-end run's real remote supervisor running while the panel
     /// uninstalls it.
     async fn inspect_uninstall(
         &self,
@@ -504,10 +507,10 @@ impl ProvisioningBackend for E2eProvisioningBackend {
     }
 
     /// The e2e fixture never stands in for a machine whose units
-    /// `farhelm helm setup` owns: the browser suite drives the hosts
+    /// `farhelm helm setup` owns: end-to-end runs drive the hosts
     /// panel, and a scripted refusal there would test the fixture rather
     /// than the panel. Answering "no such unit" keeps the local row on the
-    /// path the suite exercises.
+    /// path those runs exercise.
     async fn read_user_unit(&self, _name: &str) -> Result<Option<String>, BackendFailure> {
         Ok(None)
     }
@@ -521,7 +524,7 @@ impl ProvisioningBackend for E2eProvisioningBackend {
 }
 
 /// The E2E backend still exercises payload staging, but uses its small marker
-/// as inert content so browser tests measure provisioning rather than copying
+/// as inert content so end-to-end runs measure provisioning rather than copying
 /// the running debug executable for every simulated host.
 #[derive(Debug)]
 pub(super) struct E2ePayloads(pub(super) PathBuf);
