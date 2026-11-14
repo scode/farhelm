@@ -4,9 +4,10 @@
 //! NOTE: Only agent builds (the `agent` feature, which optimized builds refuse) read these values. The rest of this
 //! module is compiled into every build, so that the bootstrap has one way to read the overrides and ordinary test runs
 //! check the parsing and the bootstrap's use of it, but nothing installs overrides outside an agent build unless a test
-//! does. These are test hooks, not settings: the real appearance choice is the user's
-//! preference, which the helm's preferences will hold (the maintainer decided on 2026-11-13 that appearance is a helm
-//! preference, not a per-device one), and the window's real size is its saved frame or the first-launch default.
+//! does. These are test hooks, not settings: the real appearance choice is the user's preference, which the helm's
+//! preferences hold (the maintainer decided on 2026-11-13 that appearance is a helm preference, not a per-device one),
+//! and a forced appearance wins over that stored choice for as long as the run lasts; the window's real size is its
+//! saved frame or the first-launch default.
 //! Nothing here is persisted, and the app never offers it.
 //!
 //! The harness (`scripts/gui-agent.py start --window-size WxH --appearance light|dark`) passes the values through the
@@ -36,7 +37,8 @@ use crate::theme::Preference;
 /// The first window's size, as `WIDTHxHEIGHT` in logical pixels (for example `900x700`).
 pub const WINDOW_SIZE_ENV: &str = "FARHELM_DESKTOP_AGENT_WINDOW_SIZE";
 
-/// The appearance the app starts in, `light` or `dark`, whatever the system's appearance is.
+/// The appearance the app starts in and keeps for the run, `light` or `dark`, whatever the system's appearance or the
+/// helm's stored choice is.
 pub const APPEARANCE_ENV: &str = "FARHELM_DESKTOP_AGENT_APPEARANCE";
 
 /// What an agent run asked the app to start with. Installed as a global by the bootstrap before anything reads it.
@@ -44,7 +46,8 @@ pub const APPEARANCE_ENV: &str = "FARHELM_DESKTOP_AGENT_APPEARANCE";
 pub struct Overrides {
     /// Replaces the first-launch size; still fitted to the display like the default.
     pub window_size: Option<Size<Pixels>>,
-    /// Replaces the starting preference (System), so the system's appearance no longer decides the palette.
+    /// Replaces the starting preference (System) for the whole run: neither the system's appearance nor the helm's
+    /// stored choice decides the palette.
     pub preference: Option<Preference>,
 }
 
