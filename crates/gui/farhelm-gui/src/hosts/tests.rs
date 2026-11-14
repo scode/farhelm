@@ -230,23 +230,47 @@ pub(crate) fn reference_hosts() -> Vec<HostView> {
 struct Harness {
     panel: Entity<HostsPanel>,
     root: root::Attachment,
+    /// The panel's width, as the sidebar's column gives it, or `None` to fill the window.
+    column: Option<gpui::Pixels>,
 }
 
 impl Render for Harness {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        root::wrap(
-            div().size_full().child(self.panel.clone()),
-            &self.root,
-            window,
-            cx,
-        )
+        let panel = match self.column {
+            Some(width) => div().w(width).h_full().child(self.panel.clone()),
+            None => div().size_full().child(self.panel.clone()),
+        };
+        root::wrap(panel, &self.root, window, cx)
     }
 }
 
-/// The panel over the fake helm, connected with `snapshot`, in an active window, checked once settled.
-fn open_panel(
+/// The panel over the fake helm, connected with `snapshot`, in an active window, checked once settled. Shared with the
+/// host menu's and the host settings dialog's tests, which open both from a row.
+pub(crate) fn open_panel(
     cx: &mut TestAppContext,
     snapshot: Vec<CollectionState>,
+) -> (FakeHelm, Entity<HostsPanel>, &mut VisualTestContext) {
+    open_panel_with(cx, snapshot, None)
+}
+
+/// [`open_panel`] in a column of the sidebar's width (less the rail's), as the app draws it, so a row's menu opens beside
+/// the panel with room to spare instead of being pushed back over the panel's right edge by the window's.
+pub(crate) fn open_panel_in_column(
+    cx: &mut TestAppContext,
+    snapshot: Vec<CollectionState>,
+) -> (FakeHelm, Entity<HostsPanel>, &mut VisualTestContext) {
+    open_panel_with(
+        cx,
+        snapshot,
+        Some(crate::theme::metrics::SIDEBAR_WIDTH - px(56.)),
+    )
+}
+
+/// [`open_panel`] with the panel `column` wide, or filling the window.
+fn open_panel_with(
+    cx: &mut TestAppContext,
+    snapshot: Vec<CollectionState>,
+    column: Option<gpui::Pixels>,
 ) -> (FakeHelm, Entity<HostsPanel>, &mut VisualTestContext) {
     let (mut fake, _connection) = started(cx);
     fake.connect(snapshot);
@@ -254,6 +278,7 @@ fn open_panel(
     let (harness, window) = test_support::open_view(cx, |window, cx| Harness {
         panel: cx.new(HostsPanel::new),
         root: root::attach(window, cx),
+        column,
     });
     let panel = window.update(|_, cx| harness.read(cx).panel.clone());
     (fake, panel, window)
@@ -674,6 +699,7 @@ fn a_long_name_gives_way_before_the_phase_words() {
             let harness = cx.new(|cx| Harness {
                 panel,
                 root: root::attach(window, cx),
+                column: None,
             });
             cx.new(|cx| Root::new(harness, window, cx))
         })

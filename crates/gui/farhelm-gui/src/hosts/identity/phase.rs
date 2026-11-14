@@ -23,6 +23,17 @@ use crate::hosts::offers::runs_newer_version;
 #[cfg(test)]
 mod tests;
 
+/// The build a host reports itself running: a connected host's, or the one a skewed host gave at the handshake. `None`
+/// in every other phase, where nothing the host said is current. The host settings' header and the host menu's header
+/// both show it, so they cannot disagree on which phases count.
+pub(crate) fn reported_build(state: &HostStateView) -> Option<&str> {
+    match state {
+        HostStateView::Connected { build_version, .. } => Some(build_version),
+        HostStateView::VersionSkew { peer_build, .. } => Some(peer_build),
+        _ => None,
+    }
+}
+
 /// The phase words of a host, as the row shows them beside its dot. A host running a newer Farhelm reads "Too new"
 /// whatever its phase (connected or refused at the handshake), before its own words.
 pub(crate) fn words(state: &HostStateView) -> &'static str {

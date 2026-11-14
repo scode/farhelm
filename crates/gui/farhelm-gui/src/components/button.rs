@@ -1,7 +1,7 @@
 //! Buttons, drawn as the old stylesheet's `.btn` tiers: ghost (the default), neutral, primary and danger, the outlined
 //! danger of a permanent answer, plus the compact control that sits on the red banner, the ⋯ that opens a list row's
-//! menu, the host rail's square entries, the removable filter chip, the button that reads as a link, and an entry of a
-//! navigation list such as Settings' sections.
+//! menu, the host rail's square entries, the removable filter chip, the button that reads as a link, an entry of a
+//! navigation list such as Settings' sections, and the two swatches of the host settings' appearance picker.
 //!
 //! A button shows its label's text, or other content in its place ([`Button::content`]: a host's mark, a mark beside a
 //! host's name); the label is its accessible name either way. A button that is one of a set of choices says whether
@@ -102,6 +102,16 @@ pub enum Tier {
     /// the monospace face, given as [`Button::content`]) is the quiet `--fg-2` with no key and the accent once one is
     /// bound (`bound`). The same hover note as [`Tier::QuickMark`].
     NumberKey { bound: bool },
+    /// `.host-icon-choice`: one of the host settings' icon choices, a 36-pixel square on the well with a dim edge, its
+    /// content (the host's mark) centered, and the control hover fill under the pointer. Chosen
+    /// ([`Button::pressed`]), it takes the accent fill with the accent edge, as a [`Tier::Nav`] entry does, and keeps
+    /// the fill's hover. The content is the caller's, so a chosen choice draws its mark in the inverse ink itself (the
+    /// old sheet's one `!important` over the mark's own tint).
+    IconChoice,
+    /// `.host-color-choice`: one of the host settings' color choices, a 26-pixel circle with 3 pixels around its
+    /// content (the color's swatch), no fill or edge at rest and no hover fill. Chosen, it takes the accent fill inside
+    /// an edge in the inverse ink.
+    ColorChoice,
 }
 
 /// The [`Tier::QuickMark`] box's padding, vertical then horizontal (`.templates-quick-mark`: `10px 5px`).
@@ -121,6 +131,11 @@ const CHIP_PAD: (f32, f32) = (4., 6.);
 const NAV_PAD: (f32, f32) = (8., 10.);
 /// The [`Tier::Nav`] label's line height.
 const NAV_LINE_HEIGHT: f32 = 16.;
+/// The [`Tier::IconChoice`] square's side (`.host-icon-choice`'s `max-width: 36px` with `aspect-ratio: 1`).
+const ICON_CHOICE_SIZE: f32 = 36.;
+/// The [`Tier::ColorChoice`] circle's side and the room around its swatch.
+const COLOR_CHOICE_SIZE: f32 = 26.;
+const COLOR_CHOICE_PAD: f32 = 3.;
 
 /// A compact button's padding, vertical then horizontal: `.titlebar-actions .btn`'s `padding: 2px 8px`, the session
 /// header's actions.
@@ -343,6 +358,22 @@ impl Button {
                 palette.on_fill,
             );
         }
+        if self.pressed == Some(true) && self.tier == Tier::IconChoice {
+            return (
+                Some(palette.accent_fill),
+                palette.accent_fill_hover,
+                Some(palette.accent_edge),
+                palette.on_fill,
+            );
+        }
+        if self.pressed == Some(true) && self.tier == Tier::ColorChoice {
+            return (
+                Some(palette.accent_fill),
+                palette.accent_fill,
+                Some(palette.on_fill),
+                palette.on_fill,
+            );
+        }
         if self.pressed == Some(true) {
             return (
                 Some(palette.accent_fill),
@@ -393,6 +424,13 @@ impl Button {
             ),
             Tier::Rail => (None, palette.bg_2, None, palette.fg_1),
             Tier::Nav => (None, palette.control_hover, None, palette.fg_0),
+            Tier::IconChoice => (
+                Some(palette.well),
+                palette.control_hover,
+                Some(palette.border_dim),
+                palette.fg_0,
+            ),
+            Tier::ColorChoice => (None, theme::TRANSPARENT, None, palette.fg_0),
             Tier::Link => (None, theme::TRANSPARENT, None, palette.link),
             Tier::Primary if self.disabled || self.busy || self.refused => retired,
             Tier::Danger if self.disabled || self.busy || self.refused => retired,
@@ -445,7 +483,8 @@ impl RenderOnce for Button {
             Tier::Ghost | Tier::Neutral | Tier::Primary | Tier::Danger if self.compact => {
                 (px(COMPACT_PAD.0), px(COMPACT_PAD.1))
             }
-            Tier::Rail | Tier::Link => (px(0.), px(0.)),
+            Tier::Rail | Tier::Link | Tier::IconChoice => (px(0.), px(0.)),
+            Tier::ColorChoice => (px(COLOR_CHOICE_PAD), px(COLOR_CHOICE_PAD)),
             Tier::Chip => (px(CHIP_PAD.0), px(CHIP_PAD.1)),
             Tier::Nav => (px(NAV_PAD.0), px(NAV_PAD.1)),
             Tier::QuickMark { .. } => (px(QUICK_MARK_PAD.0), px(QUICK_MARK_PAD.1)),
@@ -475,6 +514,8 @@ impl RenderOnce for Button {
             | Tier::Nav
             | Tier::QuickMark { .. }
             | Tier::NumberKey { .. }
+            | Tier::IconChoice
+            | Tier::ColorChoice
             | Tier::RowMenu { on_fill: false } => palette.accent,
         };
         // An icon-only button is otherwise as high as its icon plus its padding and square; the row menu's box is the
@@ -484,9 +525,13 @@ impl RenderOnce for Button {
             Tier::Rail => (pad_x, Some(px(RAIL_SIZE))),
             // The bolt keeps its tall, narrow box (`padding: 10px 5px`), not the square an icon-only button gets.
             Tier::QuickMark { .. } => (pad_x, None),
+            Tier::IconChoice => (pad_x, Some(px(ICON_CHOICE_SIZE))),
+            Tier::ColorChoice => (pad_x, Some(px(COLOR_CHOICE_SIZE))),
             _ if self.show_label || self.content.is_some() => (pad_x, None),
             _ => (pad_y, None),
         };
+        // A rail entry and an appearance choice are squares that never give up their width.
+        let square = matches!(self.tier, Tier::Rail | Tier::IconChoice | Tier::ColorChoice);
         let enabled = !self.disabled;
         // A busy button stays focusable (`enabled`), but nothing it does acts then (`active`).
         let active = enabled && !self.busy;
@@ -518,8 +563,8 @@ impl RenderOnce for Button {
             .py(pad_y)
             .px(pad_x)
             .when_some(height, |button, height| button.h(height))
-            .when(self.tier == Tier::Rail, |button| {
-                button.w(px(RAIL_SIZE)).flex_none()
+            .when_some(height.filter(|_| square), |button, side| {
+                button.w(side).flex_none()
             })
             // A chip yields its width to the row it sits in (`min-width: 0; max-width: 100%`), and its content cuts
             // the host's name short.
@@ -536,7 +581,11 @@ impl RenderOnce for Button {
                     Toggled::False
                 })
             })
-            .rounded(metrics::RADIUS_SM)
+            .rounded(if self.tier == Tier::ColorChoice {
+                px(COLOR_CHOICE_SIZE / 2.)
+            } else {
+                metrics::RADIUS_SM
+            })
             // `.inline-link` has no edge at all (`border: 0`), so it sits on the text line like the words around it;
             // every other tier keeps the 1-pixel edge.
             .when(self.tier != Tier::Link, |button| button.border_1())
@@ -615,6 +664,8 @@ impl RenderOnce for Button {
                     | Tier::Nav
                     | Tier::QuickMark { .. }
                     | Tier::NumberKey { .. }
+                    | Tier::IconChoice
+                    | Tier::ColorChoice
             )
         {
             button = button.opacity(0.5);
