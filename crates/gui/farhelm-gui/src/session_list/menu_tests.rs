@@ -24,7 +24,7 @@ use super::tests::{
 };
 use crate::actions::{DELETE_SESSION_CHORD as DELETE_CHORD, RENAME_SESSION_SHORTCUT_NAME};
 use crate::operations::Command;
-use crate::session_tests::meta;
+use crate::test_support::meta;
 use crate::{layers, session, test_support};
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
@@ -408,7 +408,7 @@ fn skipped_confirmations_delete_on_the_click_with_the_rows_guard(cx: &mut TestAp
 ///
 /// At this real question the second click finds the question closed and its view already released, which is what
 /// stops it here; the prompt's own first-answer guard, which matters when both answers reach a prompt that is still
-/// alive, is tested by `foundation_tests::a_confirmation_acts_only_on_what_it_showed` (a hand mutant that removed the
+/// alive, is tested by `prompt_tests::a_confirmation_acts_only_on_what_it_showed` (a hand mutant that removed the
 /// guard failed only that test).
 #[gpui::test]
 fn a_question_answers_once_for_what_it_showed_even_after_the_session_changed(

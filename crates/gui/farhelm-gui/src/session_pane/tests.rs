@@ -32,8 +32,8 @@ use crate::main_view::MainView;
 use crate::session::Connection;
 use crate::session_list::SessionList;
 use crate::session_list::tests::{frame, listing, painted, preferences, session};
-use crate::session_tests::{meta, started};
 use crate::test_support::{self, click, keys, settle};
+use crate::test_support::{meta, started};
 use crate::{focus, local_state, root};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------

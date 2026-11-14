@@ -21,17 +21,35 @@
 //! [`root::attach`] and [`root::wrap`] and opens it with [`open_view`], or [`another_window`] for a second window, so
 //! that its window and its checks are the same as everyone else's. The self-tests at the end of this file make every
 //! step helper prove that it checks.
+//!
+//! Between the step helpers and the self-tests sit the fixtures that several test modules share: the focus handles,
+//! buttons, dialogs, menus and questions that the focus, layer and prompt tests open, and the fake helm with the app
+//! serving it, which the UI-session, store and layer tests use and the operation store's and the areas' tests build on
+//! (`started`, `sessions`, `meta`, `session_entry`). A fixture that only one test module uses stays in that module.
 
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
+use farhelm_helm_client::collections::decode_state;
+use farhelm_helm_client::fake::FakeHelm;
+use farhelm_helm_client::{ChannelState, PushedState};
+use farhelm_proto::ui_channel::{
+    Availability, Collection, CollectionMeta, CollectionState, KeyedEntry,
+};
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, Context, Entity, HeadlessAppContext, IntoElement,
-    Modifiers, ParentElement as _, Pixels, Point, Render, Styled as _, TestAppContext,
-    VisualTestContext, Window, div, px,
+    AnyElement, App, AppContext as _, Bounds, Context, Entity, FocusHandle, HeadlessAppContext,
+    InteractiveElement as _, IntoElement, Modifiers, ParentElement as _, Pixels, Point, Render,
+    Styled as _, TestAppContext, VisualTestContext, Window, div, px,
 };
 use gpui_component::Root;
 
+use crate::components::{Button, HoverHelp, Role, Tier};
+use crate::focus::Mark;
+use crate::layers::{Anchor, Dialog, LayerId, Popover};
+use crate::prompt::{Answer, Question};
+use crate::session::{self, Connection, UiSession};
 use crate::{assets, bootstrap, focus, layers, render_count, root};
 
 /// Install the app-wide state a test needs, as the real bootstrap does, on a fake-platform test context.
@@ -230,6 +248,268 @@ pub fn bounds(cx: &mut VisualTestContext, selector: &'static str) -> Bounds<Pixe
 /// The center of the element drawn under `selector`; see [`bounds`].
 pub fn center(cx: &mut VisualTestContext, selector: &'static str) -> Point<Pixels> {
     bounds(cx, selector).center()
+}
+
+// ---- Shared fixtures of the focus, layer and prompt tests -----------------------------------------------------------
+
+/// A tab-stop focus handle the test owns, to give a control and then ask whether it is focused.
+pub(crate) fn handle(cx: &mut VisualTestContext) -> FocusHandle {
+    cx.update(|_, cx| cx.focus_handle().tab_stop(true))
+}
+
+/// Whether `handle` holds the window's focus now.
+pub(crate) fn focused(cx: &mut VisualTestContext, handle: &FocusHandle) -> bool {
+    cx.update(|window, _| handle.is_focused(window))
+}
+
+/// A button the test can find (`id` is its selector) and whose focus handle it holds.
+pub(crate) fn button(id: &'static str, focus: &FocusHandle) -> Button {
+    Button::new(id, id, HoverHelp::tooltip("A test control"), Role::Button).focus(focus)
+}
+
+/// A dialog's content view: some buttons, drawn under its own selector.
+pub(crate) struct Panel {
+    pub(crate) controls: Vec<(&'static str, FocusHandle)>,
+    pub(crate) shown: Rc<Cell<bool>>,
+}
+
+impl Render for Panel {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let shown = self.shown.get();
+        div()
+            .debug_selector(|| "panel".into())
+            .w(px(300.))
+            .p(px(20.))
+            .flex()
+            .gap(px(8.))
+            .children(
+                self.controls
+                    .iter()
+                    // The last control can be taken away, to test a focused control disappearing.
+                    .enumerate()
+                    .filter(|(index, _)| shown || *index + 1 < self.controls.len())
+                    .map(|(_, (id, focus))| button(id, focus)),
+            )
+    }
+}
+
+/// Open a dialog of `controls`, starting on `start`, for a mark taken now.
+pub(crate) fn open_dialog(
+    cx: &mut VisualTestContext,
+    controls: Vec<(&'static str, FocusHandle)>,
+    start: &FocusHandle,
+) -> (LayerId, FocusHandle, Rc<Cell<bool>>) {
+    open_dialog_returning(cx, controls, start, focus::ReturnTo::Opener)
+}
+
+/// [`open_dialog`], returning focus where `returns_to` says when it closes.
+pub(crate) fn open_dialog_returning(
+    cx: &mut VisualTestContext,
+    controls: Vec<(&'static str, FocusHandle)>,
+    start: &FocusHandle,
+    returns_to: focus::ReturnTo,
+) -> (LayerId, FocusHandle, Rc<Cell<bool>>) {
+    let shown = Rc::new(Cell::new(true));
+    let container = handle(cx);
+    let (start, kept, panel_shown) = (start.clone(), container.clone(), shown.clone());
+    let id = cx.update(move |window, cx| {
+        let view = cx.new(|_| Panel {
+            controls,
+            shown: panel_shown,
+        });
+        let mark = Mark::take(cx);
+        layers::open_dialog(
+            Dialog {
+                view: view.into(),
+                container: kept,
+                start,
+                subject: None,
+                main_action: None,
+                keeps_focus_on_empty_click: true,
+                returns_to,
+                may_dismiss: None,
+            },
+            &mark,
+            window,
+            cx,
+        )
+    });
+    cx.run_until_parked();
+    check(cx);
+    match id {
+        Some(id) => (id, container, shown),
+        None => panic!("the dialog did not open"),
+    }
+}
+
+/// Whether the layer `id` is still open.
+pub(crate) fn is_open(cx: &mut VisualTestContext, id: LayerId) -> bool {
+    cx.update(|window, cx| layers::is_open(id, window, cx))
+}
+
+/// Make the coordinator follow `reach` for which controls Tab reaches, as the bootstrap does with the host's answer.
+pub(crate) fn follow(cx: &mut VisualTestContext, reach: &Rc<Cell<focus::TabReach>>) {
+    let reach = reach.clone();
+    cx.update(move |_, cx| focus::follow_tab_reach(Rc::new(move || reach.get()), cx));
+}
+
+/// What a test dialog or question is about.
+pub(crate) struct Thing {
+    pub(crate) name: String,
+}
+
+/// A popover menu's own content: its items.
+struct Menu {
+    items: Vec<(&'static str, FocusHandle)>,
+}
+
+impl Render for Menu {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        layers::panel(cx)
+            .debug_selector(|| "menu".into())
+            .w(px(160.))
+            .children(self.items.iter().map(|(id, focus)| button(id, focus)))
+    }
+}
+
+/// Draw an anchor element under `selector` and hand its anchor out through `out`, as a row's menu button will.
+pub(crate) fn anchor_element(
+    selector: &'static str,
+    out: &Rc<RefCell<Option<Anchor>>>,
+    window: &mut Window,
+    cx: &mut App,
+) -> gpui::Div {
+    let anchor = Anchor::for_element(format!("{selector}-anchor"), window, cx);
+    out.replace(Some(anchor.clone()));
+    div()
+        .relative()
+        .debug_selector(move || selector.into())
+        .w(px(80.))
+        .child(div().h(px(24.)))
+        .child(anchor.track())
+}
+
+/// Open a menu of `items` below `anchor`, starting on the first, for a mark taken now.
+pub(crate) fn open_menu(
+    cx: &mut VisualTestContext,
+    anchor: Anchor,
+    items: Vec<(&'static str, FocusHandle)>,
+) -> LayerId {
+    let start = items[0].1.clone();
+    let id = cx.update(move |window, cx| {
+        let view = cx.new(|_| Menu { items });
+        let mark = Mark::take(cx);
+        layers::open_popover(
+            Popover {
+                view: view.into(),
+                container: cx.focus_handle(),
+                start,
+                anchor,
+            },
+            &mark,
+            window,
+            cx,
+        )
+    });
+    cx.run_until_parked();
+    check(cx);
+    match id {
+        Some(id) => id,
+        None => panic!("the menu did not open"),
+    }
+}
+
+/// A question about a thing, frozen at `name`.
+pub(crate) fn question(name: &str) -> Question<String> {
+    Question::new(
+        "Delete it?",
+        Answer {
+            label: "Delete".into(),
+            help: HoverHelp::tooltip("Delete it for good"),
+            tier: Tier::Danger,
+        },
+        name.to_string(),
+    )
+    .summary(name.to_string())
+    .line("Its history is removed.")
+}
+
+// ---- The fake helm, and the app serving it --------------------------------------------------------------------------
+
+/// The sessions collection's metadata for a complete, available listing in the order `order`.
+pub(crate) fn meta(order: &[&str]) -> CollectionMeta {
+    CollectionMeta {
+        availability: Availability::Available,
+        order: order.iter().map(|key| key.to_string()).collect(),
+        counts: None,
+    }
+}
+
+/// A session row under `key`: the helm's own pinned list fixture, so the test follows the wire shape the helm serves.
+pub(crate) fn session_entry(key: &str) -> KeyedEntry {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../farhelm-helm/http-contract/session-list.json"
+    ))
+    .unwrap();
+    KeyedEntry {
+        key: key.into(),
+        value: fixture["sessions"][0].clone(),
+    }
+}
+
+/// The sessions collection holding rows under `keys`, in that order.
+pub(crate) fn sessions(keys: &[&str]) -> CollectionState {
+    CollectionState {
+        collection: Collection::Sessions,
+        meta: meta(keys),
+        entries: keys.iter().map(|key| session_entry(key)).collect(),
+    }
+}
+
+/// The app, bootstrapped as for real, serving the fake helm's channel. The channel starts `Connecting`.
+pub(crate) fn started(cx: &mut TestAppContext) -> (FakeHelm, Entity<Connection>) {
+    install(cx);
+    let (fake, handle, events) = FakeHelm::new();
+    let connection = cx.update(|cx| session::start(handle, events, None, cx));
+    cx.run_until_parked();
+    (fake, connection)
+}
+
+/// The connection's channel state now.
+pub(crate) fn state(connection: &Entity<Connection>, cx: &mut TestAppContext) -> ChannelState {
+    cx.update(|cx| connection.read(cx).state().clone())
+}
+
+/// The connection's current UI session; `None` while the window is inert (before the first snapshot, after a reset).
+pub(crate) fn current(
+    connection: &Entity<Connection>,
+    cx: &mut TestAppContext,
+) -> Option<Entity<UiSession>> {
+    cx.update(|cx| connection.read(cx).session().cloned())
+}
+
+/// The quiet-point consistency check (SPEC_impl.md, "What is pushed"): the current session's store must equal a fresh
+/// decode of `expected`, the whole state the helm holds now.
+pub(crate) fn check_store(
+    connection: &Entity<Connection>,
+    expected: &[CollectionState],
+    cx: &mut TestAppContext,
+) {
+    let fresh: Vec<PushedState> = expected
+        .iter()
+        .cloned()
+        .map(|state| decode_state(state).unwrap())
+        .collect();
+    let differences = cx.update(|cx| {
+        let session = connection.read(cx).session().unwrap().clone();
+        let store = session.read(cx).store().clone();
+        store.read(cx).collections().check_against(&fresh)
+    });
+    assert_eq!(
+        differences,
+        Vec::<String>::new(),
+        "the store matches a fresh snapshot"
+    );
 }
 
 // ---- Self-tests: every step helper checks ----------------------------------------------------------------------------

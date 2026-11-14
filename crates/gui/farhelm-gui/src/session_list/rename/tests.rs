@@ -22,7 +22,7 @@ use crate::main_view::MainView;
 use crate::operations::Command;
 use crate::session;
 use crate::session_list::tests::{Fixture, listing, preferences, session};
-use crate::session_tests::started;
+use crate::test_support::started;
 use crate::test_support::{self, keys, settle};
 
 /// The editor [`super::open`] opened last, recorded in test builds only, so a test can read its draft and field.
