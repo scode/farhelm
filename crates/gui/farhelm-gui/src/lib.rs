@@ -37,6 +37,7 @@
 //! - [`terminal`]: a session terminal's renderer, an uncached view that owns its grid model.
 //! - [`marks`]: the agent harnesses' marks as plain geometry, kept from the old Dioxus UI.
 //! - [`launcher`]: the session launcher (New, Clone, Replace with, Restart with).
+//! - [`templates`]: launch templates and what launches from them (applying templates to the launcher's draft, so far).
 //! - [`desktop`]: the desktop integration: the menu bar, quitting when the main window closes, the window's saved
 //!   frame, its title band and decorations, and the open-source notices.
 //!
@@ -78,6 +79,7 @@ pub mod session_pane;
 pub mod settings;
 pub mod sidebar;
 pub mod store;
+pub mod templates;
 pub mod terminal;
 pub mod theme;
 pub mod ticker;

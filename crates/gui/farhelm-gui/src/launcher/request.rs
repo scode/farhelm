@@ -208,7 +208,7 @@ impl LaunchDraft {
 
     /// The initial prompt this launch sends: only on the Agent tab, only when the agent type can take one (or none is
     /// chosen yet), and only when it is not empty. Text kept while that does not hold stays in the draft unsent.
-    pub(super) fn active_prompt(&self) -> Option<&str> {
+    pub fn active_prompt(&self) -> Option<&str> {
         let supported = self
             .agent
             .harness
