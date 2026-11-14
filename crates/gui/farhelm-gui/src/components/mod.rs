@@ -20,6 +20,7 @@ mod dialog;
 mod list_row;
 mod menu_item;
 mod option_row;
+mod scrollbar;
 mod status_mark;
 mod text_input;
 
@@ -35,6 +36,7 @@ pub use gpui::Role;
 pub use list_row::ListRow;
 pub use menu_item::MenuItem;
 pub use option_row::OptionRow;
+pub use scrollbar::{SCROLLBAR_WIDTH, Scrollbar, ScrollbarEvent, ScrollbarLines};
 pub use status_mark::StatusMark;
 pub use text_input::{TextInput, TextInputEvent, TextInputState, Vertical};
 
