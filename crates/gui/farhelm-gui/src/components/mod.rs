@@ -6,8 +6,9 @@
 //! to find controls. Colors come only from theme tokens ([`crate::theme`]), and hover help is drawn by the layer
 //! manager ([`crate::layers`]), never by a component itself.
 //!
-//! Among the controls, GPUI Kit is used only for the text input (Kit's `Input`, with its right-click menu turned off as
-//! in the old app's release builds). Buttons and the dialog frame are plain GPUI, which matches the old stylesheet's
+//! Among the controls, GPUI Kit is used only for the text input (Kit's `Input`, or its `Textarea` held to one row for a
+//! field that must keep pasted line breaks, both with the right-click menu turned off as in the old app's release
+//! builds). Buttons and the dialog frame are plain GPUI, which matches the old stylesheet's
 //! control tiers exactly and keeps Kit's own focus and overlay machinery out of them. Outside this module Kit appears
 //! only where SPEC_impl.md allows it: its `Root` around the window (the bootstrap and the screenshot goldens) and the
 //! projection of Farhelm's tokens onto Kit's theme (the theme module), which Kit's input reads.

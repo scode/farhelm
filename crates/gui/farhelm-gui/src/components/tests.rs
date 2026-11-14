@@ -1,9 +1,10 @@
 //! Behavior tests for the components, on GPUI's simulated platform.
 //!
 //! These cover what a component promises beyond its looks (the goldens pin those): activation, the disabled state,
-//! hover help reaching the layer manager and leaving with its control, and the dialog frame keeping its answers
-//! reachable. Each test opens its window through the shared harness ([`crate::test_support::open`]), and each step ends
-//! with its invariant checks (the focus coordinator's and the layer manager's rules).
+//! hover help reaching the layer manager and leaving with its control, the dialog frame keeping its answers reachable,
+//! and the text input's events, with the line breaks only the field that keeps them keeps. Each test opens its window
+//! through the shared harness ([`crate::test_support::open`]), and each step ends with its invariant checks (the focus
+//! coordinator's and the layer manager's rules).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -298,10 +299,15 @@ fn a_frame_too_tall_for_the_window_scrolls_as_a_whole(cx: &mut TestAppContext) {
 
 // ---- The text input's events and the dialog's Close ---------------------------------------------------------------
 
-/// A view that owns a text input's state, as an editor does, and records every event the input reports.
+/// How a test makes a field's state: [`TextInputState::new`] or [`TextInputState::new_keeping_line_breaks`].
+type MakeState = fn(&mut Window, &mut gpui::App) -> TextInputState;
+
+/// A view that owns a text input's state, as an editor does, and records every event the input reports. It is drawn
+/// 200 pixels wide under `selector`.
 struct Field {
     state: TextInputState,
     events: Rc<RefCell<Vec<TextInputEvent>>>,
+    selector: &'static str,
     _events: Subscription,
 }
 
@@ -311,13 +317,25 @@ impl Field {
         window: &mut Window,
         cx: &mut Context<Field>,
     ) -> Field {
-        let state = TextInputState::new(window, cx);
+        Field::made(TextInputState::new, "field-box", events, window, cx)
+    }
+
+    /// A field whose state `make` makes, drawn under `selector`.
+    fn made(
+        make: MakeState,
+        selector: &'static str,
+        events: &Rc<RefCell<Vec<TextInputEvent>>>,
+        window: &mut Window,
+        cx: &mut Context<Field>,
+    ) -> Field {
+        let state = make(window, cx);
         let subscription = state.subscribe(window, cx, |field: &mut Field, event, _, _| {
             field.events.borrow_mut().push(event)
         });
         Field {
             state,
             events: events.clone(),
+            selector,
             _events: subscription,
         }
     }
@@ -325,8 +343,9 @@ impl Field {
 
 impl Render for Field {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let selector = self.selector;
         div()
-            .debug_selector(|| "field-box".into())
+            .debug_selector(move || selector.into())
             .w(px(200.))
             .child(TextInput::new(
                 "field",
@@ -480,4 +499,174 @@ fn the_dialog_close_comes_first_in_tab_order_and_runs_its_handler(cx: &mut TestA
     redraw(cx);
     click(cx, "rename-close");
     assert_eq!(closed.get(), 3, "a disabled Close ignored the click");
+}
+
+// ---- The field that keeps line breaks -------------------------------------------------------------------------------
+
+/// Paste, as the platform's shortcut does in a text field.
+const PASTE: &str = if cfg!(target_os = "macos") {
+    "cmd-v"
+} else {
+    "ctrl-v"
+};
+
+/// Select the whole text, as the platform's shortcut does in a text field.
+const SELECT_ALL: &str = if cfg!(target_os = "macos") {
+    "cmd-a"
+} else {
+    "ctrl-a"
+};
+
+/// Enter with the platform modifier, which Kit binds to its secondary Enter.
+const PLATFORM_ENTER: &str = if cfg!(target_os = "macos") {
+    "cmd-enter"
+} else {
+    "ctrl-enter"
+};
+
+/// Open a window drawing one [`Field`] per `(selector, make)` pair, in a column, and hand back the fields once drawn.
+fn open_fields<'a>(
+    cx: &'a mut TestAppContext,
+    fields: &'static [(&'static str, MakeState)],
+) -> (&'a mut VisualTestContext, Vec<gpui::Entity<Field>>) {
+    let made: Rc<RefCell<Vec<gpui::Entity<Field>>>> = Rc::new(RefCell::new(Vec::new()));
+    let kept = made.clone();
+    let cx = open(cx, move |window, cx| {
+        let mut kept = kept.borrow_mut();
+        if kept.is_empty() {
+            for (selector, make) in fields {
+                let events = Rc::new(RefCell::new(Vec::new()));
+                kept.push(cx.new(|cx| Field::made(*make, selector, &events, window, cx)));
+            }
+        }
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .children(kept.iter().cloned())
+            .into_any_element()
+    });
+    let fields = made.borrow().clone();
+    (cx, fields)
+}
+
+/// The text a field holds and the events it reported since the last call, which clears them.
+fn take(cx: &mut VisualTestContext, field: &gpui::Entity<Field>) -> (String, Vec<TextInputEvent>) {
+    cx.update(|_, cx| {
+        let field = field.read(cx);
+        let events = field.events.borrow_mut().drain(..).collect();
+        (field.state.text(cx).to_string(), events)
+    })
+}
+
+/// Why this matters: SPEC.md refuses a supplied session title that holds a newline, and the refusal belongs to the
+/// supervisor. A field that quietly dropped a pasted line break would save "fixbug" for a pasted "fix\nbug": a title
+/// the user never typed, saved without a word, which is what the old Rename field's textarea existed to prevent. The
+/// old field also stayed one row tall on purpose, rather than growing to show the pasted lines.
+///
+/// Specification: a paste of "fix\nbug" into the field from `new_keeping_line_breaks` leaves exactly that text and
+/// reports one `Changed`, and the field stays as tall as before; the same paste into the single-line field leaves
+/// "fixbug" (the stripping this variant exists to avoid). `set_text` with a line break keeps it and reports nothing.
+#[gpui::test]
+fn a_pasted_line_break_is_kept_in_a_field_that_stays_one_row(cx: &mut TestAppContext) {
+    let (cx, fields) = open_fields(
+        cx,
+        &[
+            ("kept", TextInputState::new_keeping_line_breaks),
+            ("stripped", TextInputState::new),
+        ],
+    );
+    let (kept, stripped) = (&fields[0], &fields[1]);
+    let one_row = bounds(cx, "kept").size.height;
+    cx.update(|_, cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string("fix\nbug".into())));
+
+    click(cx, "kept");
+    keys(cx, PASTE);
+    assert_eq!(
+        take(cx, kept),
+        ("fix\nbug".into(), vec![TextInputEvent::Changed]),
+        "the paste kept its line break and was reported once"
+    );
+    assert_eq!(
+        bounds(cx, "kept").size.height,
+        one_row,
+        "the field stayed one row"
+    );
+
+    click(cx, "stripped");
+    keys(cx, PASTE);
+    assert_eq!(
+        take(cx, stripped).0,
+        "fixbug",
+        "the single-line field strips the same paste"
+    );
+
+    cx.update(|window, cx| {
+        let state = kept.read(cx).state.clone();
+        state.set_text("pushed\nvalue", window, cx);
+    });
+    cx.run_until_parked();
+    check(cx);
+    assert_eq!(
+        take(cx, kept),
+        ("pushed\nvalue".into(), vec![]),
+        "a value set by the owner keeps its line break and is not an edit"
+    );
+}
+
+/// Why this matters: the field keeps line breaks only so that a paste reaches the supervisor intact; typing must not
+/// be able to make one, or the Rename editor would turn a user's Enter (meant to save) into a title the supervisor
+/// refuses. Kit's text area breaks the line on Shift+Enter even when Enter submits, and GPUI types Enter's character
+/// into the field after Kit submits, so both had to be taken away.
+///
+/// Specification: in the field from `new_keeping_line_breaks` holding typed text, Enter, Shift+Enter and the platform
+/// modifier's Enter each report `Submitted` and nothing else and leave the text as it was, also with the whole text
+/// selected; Tab moves focus on to the next field rather than typing a tab.
+#[gpui::test]
+fn typing_enter_in_the_field_that_keeps_line_breaks_submits_and_inserts_nothing(
+    cx: &mut TestAppContext,
+) {
+    let (cx, fields) = open_fields(
+        cx,
+        &[
+            ("kept", TextInputState::new_keeping_line_breaks),
+            ("next", TextInputState::new),
+        ],
+    );
+    let kept = &fields[0];
+    click(cx, "kept");
+    keys(cx, "a b");
+    assert_eq!(
+        take(cx, kept),
+        (
+            "ab".into(),
+            vec![TextInputEvent::Changed, TextInputEvent::Changed]
+        ),
+        "the premise: typing reaches the field"
+    );
+
+    for chord in ["enter", "shift-enter", PLATFORM_ENTER] {
+        keys(cx, chord);
+        assert_eq!(
+            take(cx, kept),
+            ("ab".into(), vec![TextInputEvent::Submitted]),
+            "{chord} submitted and inserted nothing"
+        );
+        keys(cx, SELECT_ALL);
+        keys(cx, chord);
+        assert_eq!(
+            take(cx, kept),
+            ("ab".into(), vec![TextInputEvent::Submitted]),
+            "{chord} with the text selected submitted and replaced nothing"
+        );
+        keys(cx, "end");
+    }
+
+    keys(cx, "tab x");
+    assert_eq!(take(cx, kept).0, "ab", "Tab typed nothing into the field");
+    assert_eq!(
+        take(cx, &fields[1]).0,
+        "x",
+        "Tab moved focus on to the next field"
+    );
 }
