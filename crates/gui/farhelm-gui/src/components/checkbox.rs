@@ -265,7 +265,13 @@ impl RenderOnce for Checkbox {
             control.on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
         };
         let on_space = toggle.clone();
-        control
+        // A click toggles; GPUI's keyboard "click" (the release of an Enter or Space pressed on the focused element) does
+        // not, through the shared click rule: it would toggle a second time after Space, whose key handler below already
+        // ran on the press, and toggle on Enter, which a checkbox must leave to the form around it.
+        let on_click = toggle.map(|(handler, next)| -> super::Handler {
+            Rc::new(move |_, window, cx| handler(next, window, cx))
+        });
+        super::activate_on_click(control, on_click)
             // Space only, as the native checkbox: Enter goes on to the form (here, whatever holds the control). A held
             // or modified Space does nothing, as with every control's keys.
             .on_key_down(move |event, window, cx| {
@@ -279,16 +285,6 @@ impl RenderOnce for Checkbox {
                     cx.stop_propagation();
                     handler(*next, window, cx);
                 }
-            })
-            // A click toggles; a keyboard "click" does not. GPUI turns the release of an Enter or Space pressed on the
-            // focused element into a click, which would toggle a second time after Space (the key handler above already
-            // ran on the press) and toggle on Enter, which a checkbox must leave to the form around it.
-            .when_some(toggle, |control, (handler, next)| {
-                control.on_click(move |event, window, cx| {
-                    if !event.is_keyboard() {
-                        handler(next, window, cx);
-                    }
-                })
             })
     }
 }

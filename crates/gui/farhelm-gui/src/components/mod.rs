@@ -99,6 +99,33 @@ pub(crate) fn with_hover_help<E: StatefulInteractiveElement>(
 /// A control's activation handler: what a click, or Enter or Space while the control has focus, does.
 pub(crate) type Handler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
+/// Make a pointer click on `element` run `handler`: the click half of the controls' activation rule, beside
+/// [`activate_on_enter_or_space`]'s keys. GPUI also reports the release of an Enter or Space pressed on the focused
+/// element as a click; that one is ignored here, because the key handler already ran on the press, and running again
+/// on the release would act twice for one key press wherever focus stays on the control.
+///
+/// The held key is the case that matters most. The key handler skips a held key's repeats, but GPUI arms its click on
+/// a repeat too, so without this filter a held Enter that answered one question would answer the next question its
+/// focus landed on when the key came up, which SPEC.md rules out ("Repeated or composing Enter cannot answer the new
+/// question").
+///
+/// Only the keyboard click is dropped. A screen reader's activation and the test bridge's `click` both arrive as a
+/// pointer press and release at the control, so they still run `handler`; do not narrow the filter further to catch
+/// them.
+pub(crate) fn activate_on_click<E: StatefulInteractiveElement>(
+    element: E,
+    handler: Option<Handler>,
+) -> E {
+    match handler {
+        Some(handler) => element.on_click(move |event, window, cx| {
+            if !event.is_keyboard() {
+                handler(event, window, cx);
+            }
+        }),
+        None => element,
+    }
+}
+
 /// Make Enter and Space activate `element`, the focused control, the way a click does: the key rule the buttons and
 /// menu items share, so they cannot drift apart on it. (The checkbox takes Space only, as a native checkbox did.)
 ///
