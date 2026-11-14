@@ -8,12 +8,19 @@
 //!
 //! The list also owns the selection rules ([`selection`]), and applies them from observers, never from drawing: it
 //! settles the selection and the open session's seen mark ([`SessionList::settle`]) whenever the connection changes (a
-//! new UI session after a reset, or none while the window is inert), the selection changes, or the current UI session's
-//! store applies a pushed change. GPUI draws nothing for a window that is hidden, minimized or behind other windows,
-//! and SPEC.md, "Status", wants a session open in a window behind other apps recorded as seen the same way as one in
-//! a focused window; work driven by frames would wait until the window showed again. Each settle recomputes from the
-//! state as it is then. A settle that changes the selection notifies the selection's observers, the list among them,
-//! and that second settle finds nothing to do.
+//! new UI session after a reset, or none while the window is inert), the selection changes, the current UI session's
+//! store applies a pushed change, or its operation store starts or settles a request. GPUI draws nothing for a window
+//! that is hidden, minimized or behind other windows, and SPEC.md, "Status", wants a session open in a window behind
+//! other apps recorded as seen the same way as one in a focused window; work driven by frames would wait until the
+//! window showed again. Each settle recomputes from the state as it is then. A settle that changes the selection
+//! notifies the selection's observers, the list among them, and that second settle finds nothing to do.
+//!
+//! The list follows the connection and the current store through [`session::observe_current`], which moves its store
+//! subscription to each new UI session's store, so the list never observes a store a reset retired and never misses
+//! the first change of the one that replaced it. What the list keeps for one UI session (the seen mark's memory, the
+//! row menus and the layers they opened, the host rail's choice, whether the Hosts panel shows, and the subscription to
+//! the operation store, which `observe_current` does not follow) lives in a [`PerSession`], which starts it over when
+//! the session changes.
 //!
 //! The rows are virtualized: they are drawn by GPUI's variable-height `list`, which builds only the rows in view and a
 //! few beyond its edges, so a redraw costs the rows on screen, not the fleet. The list is drawn uncached (the
@@ -166,8 +173,11 @@ const ROW_HEIGHT_HINT: f32 = 50.;
 pub struct SessionList {
     /// The state that belongs to the current UI session alone, started over after a reset.
     current: PerSession<Current>,
-    /// Settle on a change of the connection and of the selection (which also redraws the list).
-    _observing: Vec<Subscription>,
+    /// Settles on every change of the connection and of the current UI session's store. Following the store across
+    /// resets is this handle's job, so no store subscription of the list can outlive the session it was made under.
+    _following: session::ObservingCurrent,
+    /// Settles on a change of the selection, and redraws the list, which draws the selected row.
+    _selection: Subscription,
     /// The pulse's ticks (see the module docs), held exactly while the window is active and some listed row pulses.
     /// Taken and dropped at the top of each frame, before the frame reads its step, as the terminal cursor's blink
     /// is: everything that decides it (the store, the connection, the window's activation) redraws the list when it
@@ -219,14 +229,13 @@ pub struct SessionList {
 /// What the list keeps for one UI session.
 #[derive(Default)]
 struct Current {
-    /// Settles on every change the session's store applies. Made by the first settle under the session; dropped with
-    /// this state when the session changes, so a retired store is never observed.
-    store: Option<Subscription>,
     /// What the open session's automatic seen mark last acted on: after a reset it starts over, so the open session is
     /// marked again if it is unseen.
     stamped: Stamped,
     /// Settles whenever the session's operation store changes, so the selection held back for a Delete moves on once
-    /// the Delete settles. Made and dropped like `store`.
+    /// the Delete settles. Made by the first settle under the session and dropped with this state when the session
+    /// changes, so a retired operation store is never observed. It is here rather than behind
+    /// [`session::observe_current`] because that follows the store only.
     operations: Option<Subscription>,
     /// The rows' menu buttons and the layers they opened, shared with the item callback that draws the rows.
     rows: menu::SharedRows,
@@ -240,17 +249,20 @@ struct Current {
 
 impl SessionList {
     /// The list, settled once when it is made and again on every change it observes.
+    ///
+    /// The settle at the end runs while the list is being made. [`session::observe_current`]'s own first call comes
+    /// only after the update that made the list, and settles again from the state as it is then, which unless
+    /// something changed in between finds nothing to do.
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let mut observing = vec![cx.observe_global::<LocalState>(|list, cx| {
+        let selection = cx.observe_global::<LocalState>(|list, cx| {
             cx.notify();
             list.settle(cx);
-        })];
-        if let Some(connection) = session::connection(cx) {
-            observing.push(cx.observe(&connection, |list, _, cx| list.settle(cx)));
-        }
+        });
+        let following = session::observe_current(cx, |list: &mut Self, cx| list.settle(cx));
         let mut list = SessionList {
             current: PerSession::default(),
-            _observing: observing,
+            _following: following,
+            _selection: selection,
             pulse: None,
             spinner: None,
             clock: None,
@@ -281,9 +293,6 @@ impl SessionList {
         let Some(store) = session::current_store(cx) else {
             return;
         };
-        if current.store.is_none() {
-            current.store = Some(cx.observe(&store, |list, _, cx| list.settle(cx)));
-        }
         if current.operations.is_none()
             && let Some(operations) = session::current_operations(cx)
         {

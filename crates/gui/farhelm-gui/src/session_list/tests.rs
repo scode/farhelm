@@ -522,6 +522,47 @@ fn a_new_snapshot_without_a_break_starts_the_seen_memory_over(cx: &mut TestAppCo
     assert_eq!(sent(&mut fake), [seen("b", 100)]);
 }
 
+/// A reset replaces the store under the list, which is not rebuilt, so the list has to hear the new store's changes
+/// and stop hearing the retired one's (it follows the store through `session::observe_current`). The reset tests above
+/// settle only on the new snapshot itself, which the connection's own notification covers; a list still subscribed to
+/// the first store would pass them and then ignore every push after a reconnect. Specified: with a open, after a break
+/// and a new snapshot of a, b and c that keeps a open, a complete pushed listing without a opens the newest-created
+/// remaining session, c, and remembers it.
+#[gpui::test]
+fn after_a_reset_a_pushed_change_still_settles_the_selection(cx: &mut TestAppContext) {
+    let snapshot = || {
+        vec![
+            listing(
+                &["a", "b", "c"],
+                &[
+                    session("a"),
+                    session("b").created(200),
+                    session("c").created(300),
+                ],
+            ),
+            preferences(&[], Some("a")),
+        ]
+    };
+    let (mut fake, cx) = open_main(cx, snapshot());
+    assert_eq!(selected(cx).as_deref(), Some("a"), "the premise: a is open");
+
+    fake.break_channel();
+    cx.run_until_parked();
+    fake.connect(snapshot());
+    cx.run_until_parked();
+    assert_eq!(
+        selected(cx).as_deref(),
+        Some("a"),
+        "the premise: a is still open under the new UI session"
+    );
+    sent(&mut fake);
+
+    fake.push(change(listing_meta(&["b", "c"], 2, false), &[], &["a"]));
+    cx.run_until_parked();
+    assert_eq!(selected(cx).as_deref(), Some("c"));
+    assert_eq!(sent(&mut fake), [remembered("c")]);
+}
+
 /// Session titles, host names and directories are host text: a title could carry a direction override or a zero-width
 /// character to pose as another session. Specified: for each spoofing string, a row titled with it paints the escaped
 /// form, names its open control with the escaped form, and paints nothing holding a presentation-unsafe character;
