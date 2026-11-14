@@ -3,9 +3,9 @@
 //! NOTE: This is cut to what the first milestone's slice needs (the migration's orchestrator trimmed it on 2026-11-13):
 //! attach a terminal, show its output, say when it is not live, take focus and send the program its keys. The terminal
 //! area added paste, committed text from the platform's text input, focus reports, scrollback, the local selection,
-//! mouse reporting and printed web links since. The disclosure of a program's hyperlink's target, file links and the
-//! reconnect display with its phase and Retry come later in that work. The session pane ([`crate::session_pane`])
-//! mounts one for the selected session.
+//! mouse reporting, and web links with a program's hyperlink's destination display since. File links and the reconnect
+//! display with its phase and Retry come later in that work. The session pane ([`crate::session_pane`]) mounts one for
+//! the selected session.
 //!
 //! [`AttachedTerminal`] owns one stream ([`TerminalHandle`] and [`TerminalEvents`]) and the [`TerminalView`]s that show
 //! it. Here's the TLDR of what it adds on top of the stream and the renderer, each a rule the old app or the GPUI
@@ -130,8 +130,9 @@ use crate::assets::TERMINAL_FONT;
 use crate::components::{
     Banner, Button, HoverHelp, Role, SCROLLBAR_WIDTH, Scrollbar, ScrollbarEvent,
 };
-use crate::focus::{self, OnPress};
+use crate::focus::{self, Mark, OnPress};
 use crate::host_text::{HostSentence, HostText};
+use crate::layers::{self, Anchor, LayerId, Popover};
 use crate::render_count;
 use crate::session::{self, UiSession};
 use crate::{theme, ticker};
@@ -239,6 +240,23 @@ pub struct AttachedTerminal {
     select: Option<SelectGesture>,
     /// A primary press on a link, until its release decides whether it was a click.
     link_press: Option<LinkPress>,
+    /// Where the pointer last rested over the grid (window coordinates), by which a destination display is anchored.
+    hover_point: Option<Point<Pixels>>,
+    /// The destination display of the program hyperlink the pointer rests on, and the anchor it is drawn by.
+    disclosure: Option<Disclosure>,
+    /// The anchor the current display is drawn by, built as the owner draws.
+    disclosure_anchor: Option<Anchor>,
+    /// How many displays this terminal has opened, which numbers the next.
+    disclosure_count: u64,
+    /// Whether a click starting with the press now being handled may open the link it is on, decided in the press's
+    /// capture phase ([`AttachedTerminal::click_admitted`]) and moved into its [`LinkPress`] as the press is handled.
+    press_admitted: bool,
+    /// The explanation of a refused link click, shown at the top of the terminal until the next press there.
+    refusal: Option<SharedString>,
+    /// Set by a refused click and cleared once the pointer moves to another cell: while set, no destination display
+    /// shows, so the refusal's advice (enlarge the window and hover again) means hovering again, as in the old app,
+    /// and the display that was not fully visible does not keep sitting over the explanation.
+    refusal_raised: bool,
     /// The buttons held in a press the program's mouse reporting took, as a bit per button (1 left, 2 middle, 4
     /// right); 0 while none is. Moves and releases go to the program until the last of them comes up.
     reporting: u8,
@@ -331,6 +349,13 @@ impl AttachedTerminal {
             scrollbar_hold: None,
             select: None,
             link_press: None,
+            hover_point: None,
+            disclosure: None,
+            disclosure_anchor: None,
+            disclosure_count: 0,
+            press_admitted: false,
+            refusal: None,
+            refusal_raised: false,
             reporting: 0,
             mouse_dedupe: MouseDeduper::default(),
             retired,
@@ -1391,6 +1416,8 @@ impl Render for AttachedTerminal {
                 .w(px(SCROLLBAR_WIDTH))
                 .child(self.scrollbar_element(view, cx))
         });
+        let disclosure_anchor = self.place_disclosure(window, cx);
+        let refusal = self.refusal_line(cx);
         let hovering_link = self
             .committed
             .as_ref()
@@ -1405,6 +1432,14 @@ impl Render for AttachedTerminal {
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::select_all))
             .on_action(cx.listener(Self::copy_selection))
+            // Before anything handles the press (the layer manager closes popovers on a press outside them, the
+            // destination display among them), decide whether a click on a link starting here may open it.
+            .capture_any_mouse_down(cx.listener(|owner, event: &MouseDownEvent, window, cx| {
+                owner.press_admitted = event.button == MouseButton::Left
+                    && owner
+                        .pressed_link(event.position, cx)
+                        .is_some_and(|link| owner.click_admitted(&link, window, cx));
+            }))
             .on_any_mouse_down(cx.listener(Self::press))
             // A link under the pointer shows the pointing hand, as the old app's hovered links did.
             .when(hovering_link, |body| body.cursor_pointer())
@@ -1450,7 +1485,9 @@ impl Render for AttachedTerminal {
                     .size_full()
                     .overflow_hidden()
                     .child(room)
-                    .children(screen),
+                    .children(screen)
+                    .children(disclosure_anchor)
+                    .children(refusal),
             )
             .children(scrollbar);
         let body = focus::track(body, &self.focus, OnPress::Focus);
@@ -1526,11 +1563,13 @@ impl LinkClick {
 struct LinkPress {
     link: TerminalLink,
     at: Point<Pixels>,
+    /// Whether a click may open the link, decided before anything the press did could change it (closing popovers,
+    /// the destination display among them); see [`AttachedTerminal::click_admitted`].
+    admitted: bool,
 }
 
 /// The web address a click on `link` opens: a printed address by the strict rule for text, a program's hyperlink by
-/// its parsed scheme (the grid model's `web_target`; no caller opens a program's hyperlink until its disclosure is
-/// built). `None` for anything else, which a click never opens.
+/// its parsed scheme (the grid model's `web_target`). `None` for anything else, which a click never opens.
 fn link_web_target(link: &TerminalLink) -> Option<String> {
     let plain = link.kind == LinkKind::Text;
     web_target(&link.uri, plain).map(|url| url.to_string())
@@ -1571,9 +1610,17 @@ impl AttachedTerminal {
         })
     }
 
-    /// The pointer rests on `position` with no press under way: tell the view, which finds the link there.
+    /// The pointer rests on `position` with no press under way: tell the view, which finds the link there. Reaching
+    /// another cell counts as hovering again after a refused click, so destination displays show again.
     fn hover_link_at(&mut self, position: Option<Point<Pixels>>, cx: &mut Context<Self>) {
+        let was = self
+            .hover_point
+            .and_then(|position| self.link_cell(position, cx));
+        self.hover_point = position;
         let cell = position.and_then(|position| self.link_cell(position, cx));
+        if cell != was {
+            self.refusal_raised = false;
+        }
         if let Some(view) = self.committed.clone() {
             let before = view.read(cx).hovered_link().is_some();
             view.update(cx, |view, cx| view.set_hover(cell, cx));
@@ -1596,12 +1643,9 @@ impl AttachedTerminal {
 
     /// Whether a primary press on `link` under mouse reporting is withheld from the program: in intercept mode, for a
     /// link Farhelm would open, the press and its drag and release are Farhelm's alone (the old app's
-    /// `interceptLinkPress`). Only a printed web address counts until a program's hyperlink can open (with its
-    /// disclosure); withholding a press Farhelm then did nothing with would swallow the click.
+    /// `interceptLinkPress`): a printed web address or a program's hyperlink to one.
     fn withholds_press(link: &TerminalLink, cx: &App) -> bool {
-        LinkClick::current(cx) == LinkClick::Intercept
-            && link.kind == LinkKind::Text
-            && link_web_target(link).is_some()
+        LinkClick::current(cx) == LinkClick::Intercept && link_web_target(link).is_some()
     }
 
     /// The pointer moved during a press on a link: once it is farther than [`CLICK_JITTER`] from the press, the press
@@ -1618,8 +1662,8 @@ impl AttachedTerminal {
 
     /// The primary button came up: a press on a link that is released on the same link, still in the text, within
     /// the jitter, with nothing selected, is a click, and opens the link's web address in the browser with no prompt
-    /// (SPEC.md) unless the link choice leaves clicks to the program. A program's hyperlink (OSC 8) does not open yet:
-    /// it opens only while the disclosure of its real target is shown, which comes with the disclosure work.
+    /// (SPEC.md) unless the link choice leaves clicks to the program. A program's hyperlink (OSC 8) opens only while its
+    /// destination display is fully visible; otherwise the click is refused, and says why at the top of the terminal.
     fn link_released(&mut self, event: &MouseUpEvent, cx: &mut Context<Self>) {
         let Some(press) = self.link_press.take() else {
             return;
@@ -1637,13 +1681,240 @@ impl AttachedTerminal {
         if still.as_ref() != Some(&press.link)
             || view.read(cx).selected_text().is_some()
             || LinkClick::current(cx) == LinkClick::Program
-            || press.link.kind != LinkKind::Text
         {
             return;
         }
-        if let Some(target) = link_web_target(&press.link) {
-            cx.open_url(&target);
+        // A link that is not a web address (a program's `file://` hyperlink, say) opens nothing, and says nothing.
+        let Some(target) = link_web_target(&press.link) else {
+            return;
+        };
+        if !press.admitted {
+            self.refusal = Some(DISCLOSURE_REFUSAL.into());
+            self.refusal_raised = true;
+            cx.notify();
+            return;
         }
+        cx.open_url(&target);
+    }
+}
+
+/// What a click on a program's hyperlink says when its destination display was not fully visible (the old app's
+/// refusal, `admitDisclosure` in terminal-files.js; the form for a display another surface covers is not built yet).
+const DISCLOSURE_REFUSAL: &str =
+    "cannot open: full link details are not visible; enlarge the window and hover again";
+
+/// Where the destination display's anchor sits against the pointer: its left edge 12 pixels right of it, spanning from
+/// 4 pixels above to 12 below. The layer manager puts a popover 4 pixels past its anchor, so the display's top lands 16
+/// pixels below the pointer, or its bottom 8 pixels above it when there is no room below: the old `showLinkTarget`'s
+/// offsets.
+const DISCLOSURE_OFFSET_X: f32 = 12.;
+const DISCLOSURE_ABOVE: f32 = 4.;
+const DISCLOSURE_BELOW: f32 = 12.;
+
+/// The destination display of the program hyperlink the pointer rests on.
+struct Disclosure {
+    /// The hyperlink it is for.
+    link: TerminalLink,
+    /// Where the pointer was when it opened, which it stays anchored by while the pointer rests on the link.
+    at: Point<Pixels>,
+    /// Which display this is, counting every one this terminal opened: its anchor's key, so each display has an anchor
+    /// of its own and a new one never reuses an old one's.
+    generation: u64,
+    /// Its layer once opened. A display whose layer has closed (a press elsewhere, Escape, a reset) shows nothing.
+    layer: Option<LayerId>,
+    /// Where the display was last drawn; a click checks it was fully visible.
+    drawn: super::disclosure::Drawn,
+}
+
+impl AttachedTerminal {
+    /// The hovered link, when it is a program's hyperlink to a web address: the one kind of link that shows its
+    /// destination before a click opens it.
+    fn disclosed_link(&self, cx: &App) -> Option<TerminalLink> {
+        let view = self.committed.as_ref()?.read(cx);
+        view.hovered_link()
+            .filter(|link| {
+                matches!(link.kind, LinkKind::Osc { .. }) && link_web_target(link).is_some()
+            })
+            .cloned()
+    }
+
+    /// Keep the destination display in step with the hovered link, as the owner draws, and return the anchor to draw.
+    ///
+    /// A hyperlink under the pointer gets a display, opened after this frame once its anchor has been drawn. Another
+    /// link (the next row of a wrapped one counts as another, since each row is its own link to the grid model), no
+    /// link, or a display whose layer has closed while the pointer rests and no press is under way gets a fresh one or
+    /// none. No display shows after a refused click until the pointer moves to another cell, and none opens while a
+    /// dialog or menu holds the keyboard.
+    fn place_disclosure(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let pressing = self.link_press.is_some() || self.select.is_some() || self.reporting != 0;
+        let wanted = self.disclosed_link(cx).filter(|_| !self.refusal_raised);
+        let current = self.disclosure.as_ref().is_some_and(|shown| {
+            wanted.as_ref() == Some(&shown.link)
+                && (pressing
+                    || shown
+                        .layer
+                        .is_none_or(|layer| layers::is_open(layer, window, cx)))
+        });
+        if !current {
+            let old = self.disclosure.take().and_then(|shown| shown.layer);
+            if let (Some(link), Some(at)) = (wanted, self.hover_point) {
+                self.disclosure_count += 1;
+                let generation = self.disclosure_count;
+                self.disclosure = Some(Disclosure {
+                    link,
+                    at,
+                    generation,
+                    layer: None,
+                    drawn: super::disclosure::Drawn::default(),
+                });
+            }
+            let opening = self.disclosure.as_ref().map(|shown| shown.generation);
+            let mark = Mark::take(cx);
+            let owner = cx.weak_entity();
+            window.defer(cx, move |window, cx| {
+                // The layer manager also closes the old display once its anchor is no longer drawn; closing it here
+                // takes it away in the same frame the new one opens.
+                if let Some(old) = old {
+                    layers::close(old, window, cx);
+                }
+                if let Some(generation) = opening {
+                    let _ = owner.update(cx, |owner, cx| {
+                        owner.open_disclosure(generation, &mark, window, cx)
+                    });
+                }
+            });
+        }
+        self.disclosure_anchor_element(window, cx)
+    }
+
+    /// The zero-width element the current display is anchored to, drawn by the pointer where the display opened.
+    fn disclosure_anchor_element(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let shown = self.disclosure.as_ref()?;
+        let origin = self.grid_origin?;
+        let anchor = Anchor::for_element(
+            gpui::ElementId::Name(format!("terminal-link-disclosure-{}", shown.generation).into()),
+            window,
+            cx,
+        );
+        self.disclosure_anchor = Some(anchor.clone());
+        Some(
+            div()
+                .absolute()
+                .left(shown.at.x - origin.x + px(DISCLOSURE_OFFSET_X))
+                .top(shown.at.y - origin.y - px(DISCLOSURE_ABOVE))
+                .w(px(0.))
+                .h(px(DISCLOSURE_ABOVE + DISCLOSURE_BELOW))
+                .child(anchor.track())
+                .into_any_element(),
+        )
+    }
+
+    /// Open display `generation`, if it is still the one wanted: a popover that takes no focus, on the anchor drawn in
+    /// the frame that asked. A display that is still wanted but cannot open (a dialog or menu holds the keyboard, or its
+    /// anchor or view is gone) is dropped rather than left pending, so the next frame asks again: left pending, it would count as current for
+    /// as long as the same link stays hovered, showing nothing and refusing every click on it.
+    fn open_disclosure(
+        &mut self,
+        generation: u64,
+        mark: &Mark,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let pending = self
+            .disclosure
+            .as_ref()
+            .is_some_and(|shown| shown.generation == generation && shown.layer.is_none());
+        if !pending {
+            return;
+        }
+        match self.open_layer(mark, window, cx) {
+            Some(layer) => {
+                if let Some(shown) = &mut self.disclosure {
+                    shown.layer = Some(layer);
+                }
+            }
+            None => self.disclosure = None,
+        }
+    }
+
+    /// The layer of the pending display, opened now; `None` when it may not open. No display opens while a dialog or
+    /// menu holds the keyboard: it would float above it, for a hover that started before it or that a menu (which has
+    /// no veil) lets through. The display follows the hover once the dialog or menu closes.
+    fn open_layer(
+        &self,
+        mark: &Mark,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<LayerId> {
+        if layers::focus_layer_open(window, cx) {
+            return None;
+        }
+        let shown = self.disclosure.as_ref()?;
+        let view = self.committed.clone()?;
+        let anchor = self.disclosure_anchor.clone()?;
+        let text = view.read(cx).link_disclosure(&shown.link)?;
+        let drawn = shown.drawn.clone();
+        let content = cx.new(|_| super::disclosure::DisclosureView::new(&text, drawn));
+        let popover = Popover {
+            view: content.into(),
+            container: cx.focus_handle(),
+            start: None,
+            anchor,
+        };
+        layers::open_popover(popover, mark, window, cx)
+    }
+
+    /// Whether a click on `link` that starts now may open it, decided at the press, before anything the press does
+    /// (closing popovers, among them this display) can change it: a printed web address always may; a program's
+    /// hyperlink only while its destination display, for this very link, is open and was fully visible (inside the
+    /// window) when last drawn (SPEC.md: the hover display counts as disclosing the target only while fully visible).
+    fn click_admitted(&self, link: &TerminalLink, window: &Window, cx: &App) -> bool {
+        match link.kind {
+            LinkKind::Text => true,
+            LinkKind::Osc { .. } => self.disclosure.as_ref().is_some_and(|shown| {
+                shown.link == *link
+                    && shown
+                        .layer
+                        .is_some_and(|layer| layers::is_open(layer, window, cx))
+                    && super::disclosure::fully_visible(&shown.drawn)
+            }),
+        }
+    }
+
+    /// The refused click's explanation, drawn at the top of the grid's area until the next press there (the old app's
+    /// `.terminal-file-message`: a status line clear of the newest output at the bottom, at most three lines tall). The
+    /// display it is about is closed while it shows, so nothing covers it.
+    fn refusal_line(&self, cx: &App) -> Option<AnyElement> {
+        let text = self.refusal.clone()?;
+        let palette = theme::palette(cx);
+        Some(
+            div()
+                .id("terminal-link-refusal")
+                .debug_selector(|| "terminal-link-refusal".into())
+                .role(Role::Status)
+                .aria_label(text.clone())
+                .absolute()
+                .top(px(4.))
+                .left(px(4.))
+                .right(px(4.))
+                .px(px(6.))
+                .py(px(4.))
+                .max_h(px(54.))
+                .overflow_hidden()
+                .bg(theme::color(palette.bg_2))
+                .text_color(theme::color(palette.fg_1))
+                .text_size(theme::metrics::TEXT_SM)
+                .child(text)
+                .into_any_element(),
+        )
     }
 }
 
@@ -1912,6 +2183,10 @@ impl AttachedTerminal {
     /// MIT, notices in `farhelm-input-mapping`'s LICENSE-PORTED). Under mouse reporting a press without the forcing
     /// modifier, of any button, is the program's ([`AttachedTerminal::report_press`]) and selects nothing.
     fn press(&mut self, event: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        // A refused click's explanation stays until the next press in the terminal, as the old app's did.
+        if self.refusal.take().is_some() {
+            cx.notify();
+        }
         let Some(view) = self.committed.clone() else {
             return;
         };
@@ -1925,9 +2200,11 @@ impl AttachedTerminal {
         } else {
             None
         };
+        let admitted = std::mem::take(&mut self.press_admitted);
         self.link_press = link.clone().map(|link| LinkPress {
             link,
             at: event.position,
+            admitted,
         });
         if tracking && !forced {
             // A press on a web link Farhelm opens is withheld from the program, in intercept mode, with its drag and
@@ -2432,4 +2709,29 @@ mod probe {
         }
         fallback?.read(cx).terminal_text(cx)
     }
+
+    /// Whether any live owner's view says the pointer rests on a link: a test's premise that a terminal it cannot
+    /// reach directly (inside the main view) is seeing the hover it then checks the consequences of.
+    #[cfg(test)]
+    pub(crate) fn any_hovered_link(cx: &App) -> bool {
+        cx.try_global::<Owners>().is_some_and(|owners| {
+            owners
+                .0
+                .iter()
+                .filter_map(|owner| owner.upgrade())
+                .any(|owner| {
+                    owner
+                        .read(cx)
+                        .committed
+                        .as_ref()
+                        .is_some_and(|view| view.read(cx).hovered_link().is_some())
+                })
+        })
+    }
+}
+
+/// Whether any terminal says the pointer rests on a link ([`probe::any_hovered_link`]), for tests outside this module.
+#[cfg(test)]
+pub(crate) fn any_hovered_link(cx: &App) -> bool {
+    probe::any_hovered_link(cx)
 }

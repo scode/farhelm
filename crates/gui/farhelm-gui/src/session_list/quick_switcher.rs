@@ -163,12 +163,13 @@ pub(crate) fn ranked(sessions: &[SessionRow], query: &str) -> Vec<usize> {
 /// The shortcut ([`crate::actions::QuickSwitcher`]): open the switcher on top of the window's page. The main view calls
 /// it for the action wherever focus is, and the action is taken whatever this does, as `ONCE_PER_PRESS` requires.
 ///
-/// Does nothing while any dialog or menu is open (SPEC.md: "It does nothing while another modal is open"), while the
-/// window is inert, or before the snapshot has brought the helm's preferences.
+/// Does nothing while a dialog or menu holds the keyboard (SPEC.md: "It does nothing while another modal is open"; a
+/// popover that never takes focus, such as a terminal link's destination display, is not a modal), while the window is
+/// inert, or before the snapshot has brought the helm's preferences.
 pub(crate) fn open(window: &mut Window, cx: &mut App) {
     // A key pressed inside a layer reaches the main view's ground too, since the overlay is drawn inside it; this is
     // what keeps a second switcher from opening over the first, or over any other dialog or menu.
-    if layers::any_open(window, cx) {
+    if layers::focus_layer_open(window, cx) {
         return;
     }
     let Some(current) = session::connection(cx).and_then(|c| c.read(cx).session().cloned()) else {
