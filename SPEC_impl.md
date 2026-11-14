@@ -6464,18 +6464,32 @@ the generic package and the Mac loses its window; delete the `dist = false` and 
 Native glue (dock/menu integration, plus whatever proves genuinely necessary — see the clipboard note in the Dioxus
 risks) lives behind a feature flag in farhelm-ui, kept deliberately thin.
 
-The native desktop stores a versioned physical-pixel outer-frame rectangle and maximized flag separately from client
-credentials. Bootstrap's already resolved state directory is reused, so persistence cannot silently move to the current
-working directory if path resolution fails again. A missing file keeps the first-run window builder defaults; corrupt,
-unsupported, or display-unsafe state gets a monitor-fitting centered fallback. The geometry check requires the complete
-saved frame to fit one connected monitor and avoids arithmetic overflow. Tao provides monitor rectangles rather than
-work areas, so the fallback caps its size and a real macOS display/decorations check remains necessary. Wayland's raw
-window handle marks positions as unreliable: its move events do not replace the remembered position, and restore keeps a
-usable saved size while preserving maximization while the compositor chooses placement. Restore converts the saved outer
-size through Tao's inner-size API using the current outer-minus-inner decoration extent; a real macOS
-display/decorations check remains necessary. Fullscreen observations never replace the last ordinary frame or maximize
-state. The final state is written through a private sibling file and rename on close, with one best-effort retry at
-event-loop teardown; the rename is atomic for readers but parent-directory durability across a machine crash is best
+The native desktop stores a versioned window rectangle and maximized flag (`desktop-window.json`, version 3) separately
+from client credentials, in the logical pixels GPUI reports for windows and displays alike. The old app stored physical
+pixels (version 2); GPUI reports no scale factor for a display, and a window's only once it is open, so a physical frame
+could not be converted back before the window opens, nor across displays with different scales. A version 2 record
+therefore reads as unusable and takes the fallback once. Bootstrap's already resolved state directory is reused, so
+persistence cannot silently move to the current working directory if path resolution fails again. A missing file keeps
+the first-run defaults; corrupt, unsupported, or display-unsafe state gets a monitor-fitting centered fallback. The
+geometry check requires the complete saved frame to fit one connected monitor and avoids arithmetic overflow. It uses
+the displays' full bounds, not their work areas (GPUI's visible bounds), as the old app did, so the fallback caps its
+size. The frame saved is the window's origin with its content size, because GPUI opens a macOS window by its content
+rectangle. On macOS GPUI reports every display at the origin and a window's position relative to the display it is on,
+and opens a window on the primary display unless told otherwise, so only the primary display is considered and a
+position counts only while the window is on it: a window last moved to another display reopens on the primary one, where
+the old app, which saved global positions, put it back on that display. On Wayland, which reports no global window
+positions, a reported position never replaces the remembered one, and restore keeps a usable saved size and the
+maximized state while the compositor chooses placement. Fullscreen observations never replace the last ordinary frame or
+maximize state, and a window restored maximized is not followed until it reports itself maximized. On macOS a window
+within two points of its display's visible area counts as maximized, because GPUI's own check wants an exact match and a
+window GPUI zoomed as it opened comes out a point short; the cost is that a window sized by hand to fill the display is
+remembered as zoomed. The window side (`crates/gui/farhelm-gui/src/desktop.rs`) only forwards what the window reports;
+the rules live in the desktop crate (`window_state.rs`'s `FrameKeeper`). Only the report the window settles on counts
+(macOS reports each step of a zoom's animation as an ordinary frame, which must not become the remembered one); it is
+written through a private sibling file and rename once the window has stayed unchanged for a second (so a drag is
+written once, when it ends), and the quit handler writes whatever is still pending: GPUI gives the quit handlers 200 ms
+in all, which rules out the old app's single write on close. A crash within about a second of a move or resize can lose
+that last change. The rename is atomic for readers but parent-directory durability across a machine crash is best
 effort. Failures warn without preventing startup.
 
 Every pre-window desktop refusal prints one plain `farhelm-desktop: ...` stderr line and exits 1, and on macOS also
