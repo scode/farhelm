@@ -1,3 +1,4 @@
+// Modified for Farhelm: changed or added by the patch layers in vendor/patches/gpui/ (vendor/README.md, "GPUI").
 //! Turns a frame record into the outline an agent reads, with a ref for each line.
 
 use gpui_agent_protocol::{RawNode, RawTree, Rect};
@@ -298,6 +299,11 @@ impl<'a> Frame<'a> {
         if let Some(checked) = &node.checked {
             states.push(checked.clone());
         }
+        // Only the selected element is marked: every other item of a list says it is not selected,
+        // and marking each of them would bury the one line that matters.
+        if node.selected == Some(true) {
+            states.push("selected".into());
+        }
         if node.visible.area() + 0.5 < node.bounds.area() {
             states.push("clipped".into());
         }
@@ -480,6 +486,7 @@ mod tests {
             value: None,
             disabled: false,
             checked: None,
+            selected: None,
         }
     }
 
@@ -637,12 +644,22 @@ mod tests {
         tree.nodes[1].label = Some("Add one".into());
         tree.nodes[4].checked = Some("checked".into());
         tree.nodes[4].disabled = true;
+        tree.nodes[4].selected = Some(true);
+        tree.nodes[1].selected = Some(false);
         let snapshot = build(&tree, &Options::default());
         assert_eq!(snapshot.entries[0].name, "Add one");
         let row = snapshot.entries.iter().find(|e| e.name == "row 1").unwrap();
         assert_eq!(
             row.states,
-            vec!["disabled".to_string(), "checked".to_string()]
+            vec![
+                "disabled".to_string(),
+                "checked".to_string(),
+                "selected".to_string()
+            ]
+        );
+        assert!(
+            snapshot.entries[0].states.is_empty(),
+            "not selected is not marked"
         );
     }
 

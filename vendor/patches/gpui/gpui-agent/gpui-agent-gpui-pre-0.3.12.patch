@@ -53,7 +53,7 @@ index 66ddd58..60889e1 100644
  use gpui::{
      App, KeybindingKeystroke, Keystroke, Modifiers, Pixels, PlatformInput, Point, ScrollDelta,
 diff --git a/gpui/gpui-agent/src/lib.rs b/gpui/gpui-agent/src/lib.rs
-index bc373db..5c29248 100644
+index e494d53..7401040 100644
 --- a/gpui/gpui-agent/src/lib.rs
 +++ b/gpui/gpui-agent/src/lib.rs
 @@ -3,10 +3,22 @@

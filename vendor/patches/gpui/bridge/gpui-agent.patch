@@ -1,0 +1,75 @@
+diff --git a/crates/cli/src/snapshot.rs b/crates/cli/src/snapshot.rs
+index e5fe616..a2dda0f 100644
+--- a/crates/cli/src/snapshot.rs
++++ b/crates/cli/src/snapshot.rs
+@@ -298,6 +298,11 @@ impl<'a> Frame<'a> {
+         if let Some(checked) = &node.checked {
+             states.push(checked.clone());
+         }
++        // Only the selected element is marked: every other item of a list says it is not selected,
++        // and marking each of them would bury the one line that matters.
++        if node.selected == Some(true) {
++            states.push("selected".into());
++        }
+         if node.visible.area() + 0.5 < node.bounds.area() {
+             states.push("clipped".into());
+         }
+@@ -480,6 +485,7 @@ mod tests {
+             value: None,
+             disabled: false,
+             checked: None,
++            selected: None,
+         }
+     }
+ 
+@@ -637,12 +643,22 @@ mod tests {
+         tree.nodes[1].label = Some("Add one".into());
+         tree.nodes[4].checked = Some("checked".into());
+         tree.nodes[4].disabled = true;
++        tree.nodes[4].selected = Some(true);
++        tree.nodes[1].selected = Some(false);
+         let snapshot = build(&tree, &Options::default());
+         assert_eq!(snapshot.entries[0].name, "Add one");
+         let row = snapshot.entries.iter().find(|e| e.name == "row 1").unwrap();
+         assert_eq!(
+             row.states,
+-            vec!["disabled".to_string(), "checked".to_string()]
++            vec![
++                "disabled".to_string(),
++                "checked".to_string(),
++                "selected".to_string()
++            ]
++        );
++        assert!(
++            snapshot.entries[0].states.is_empty(),
++            "not selected is not marked"
+         );
+     }
+ 
+diff --git a/crates/protocol/src/lib.rs b/crates/protocol/src/lib.rs
+index 2962db6..116e03d 100644
+--- a/crates/protocol/src/lib.rs
++++ b/crates/protocol/src/lib.rs
+@@ -246,6 +246,10 @@ pub struct RawNode {
+     /// `checked`, `unchecked` or `mixed`, for elements with a checked state.
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub checked: Option<String>,
++    /// Whether the element is selected, for elements where selection applies, such as a list's
++    /// items: `false` only when the element says it is not selected.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub selected: Option<bool>,
+     #[serde(default)]
+     pub flags: Flags,
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+diff --git a/gpui/gpui-agent/src/lib.rs b/gpui/gpui-agent/src/lib.rs
+index bc373db..e494d53 100644
+--- a/gpui/gpui-agent/src/lib.rs
++++ b/gpui/gpui-agent/src/lib.rs
+@@ -394,6 +394,7 @@ fn tree(window: &mut Window, cx: &mut App) -> Result<serde_json::Value, Refusal>
+                 }
+                 .to_string()
+             }),
++            selected: node.selected,
+             flags: Flags {
+                 click: node.flags.click,
+                 mouse: node.flags.mouse,

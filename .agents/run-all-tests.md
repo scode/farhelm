@@ -132,8 +132,8 @@ same pin CI and release builds use; no second clippy run on floating stable is n
 - The vendored terminal crates' three recorded test commands from `.agents/validation.md` (`vendor/vte`,
   `vendor/alacritty_terminal`, and both together in `vendor/pair-tests`), which the sweep's workspace batteries never
   reach
-- The vendored GPUI core's recorded native-key test from `.agents/validation.md` (`vendor/gpui-pre`), which the
-  workspace batteries never reach either
+- The vendored GPUI core's recorded native-key and driver record tests from `.agents/validation.md` (`vendor/gpui-pre`),
+  which the workspace batteries never reach either
 - The GPUI app's screenshot goldens from `.agents/validation.md` (`scripts/check-gui-goldens.py`), ignored in the
   workspace batteries because they need the software renderer the script selects
 - `python3 -B scripts/test-gui-agent.py`, and one end-to-end run of the GPUI app harness from `.agents/validation.md`

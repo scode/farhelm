@@ -4340,6 +4340,7 @@ impl Window {
                 .map(|value| value.to_string().into()),
             disabled: a11y.as_ref().is_some_and(|(_, node)| node.is_disabled()),
             toggled: a11y.as_ref().and_then(|(_, node)| node.toggled()),
+            selected: a11y.as_ref().and_then(|(_, node)| node.is_selected()),
             flags: DriverFlags::default(),
             key_context: None,
             focus: None,

@@ -407,6 +407,7 @@ fn tree(window: &mut Window, cx: &mut App) -> Result<serde_json::Value, Refusal>
                 }
                 .to_string()
             }),
+            selected: node.selected,
             flags: Flags {
                 click: node.flags.click,
                 mouse: node.flags.mouse,
