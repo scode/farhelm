@@ -37,21 +37,11 @@
 //! its environment, which a screenshot batch uses to capture each theme and size; the rest of that module is compiled
 //! into every build, so ordinary test runs cover it.
 
-// The bridge's socket is unauthenticated, and on a Mac the local agent sessions run as the same user, so a build that
-// contains it lets any of them click Allow on its own approval card (SPEC_impl.md, "How the rules are enforced"). Shipped
-// builds and devbuilds are optimized builds (`--release`, or the `dist` profile that inherits from it), so refusing the
-// feature wherever debug assertions are off keeps it out of both without having to name each profile. A debug build
-// that turns debug assertions off by hand is refused too, which costs nothing: the bridge is only for development runs.
-#[cfg(all(feature = "agent", not(debug_assertions)))]
-compile_error!(
-    "the `agent` feature (the test-automation bridge) is for debug builds only; it must never reach a release or \
-     devbuild, whose optimized profiles turn debug assertions off"
-);
-
 pub mod actions;
 // Every build, so the bootstrap reads the overrides one way whatever the features: they are installed only by an agent
 // build, which alone reads the process environment (`agent_startup::from_env`), and every other build finds none and
-// starts with the defaults. Ordinary test runs, which never turn on the `agent` feature, cover the rest.
+// starts with the defaults. Ordinary test runs, which never turn on the `agent` feature, cover the rest. The module
+// also holds the guard that refuses the `agent` feature in optimized builds, so it must stay unconditional.
 pub mod agent_startup;
 pub mod assets;
 pub mod bootstrap;

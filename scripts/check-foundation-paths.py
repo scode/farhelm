@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
-"""Refuse an area PR that changes a GPUI foundation's paths in a way no extension point allows.
+"""Refuse an area PR that changes a GPUI foundation's rule-carrying paths in a way no extension point allows.
 
 The GPUI app's app-wide concerns each have one owner (SPEC_impl.md, "GUI architecture"), and
 `docs/gpui/foundation-ownership.md` says which paths each owner holds. An area may add to a few of those paths without
-asking, in the shapes the table's extension points describe; every other change to an owned path is a foundation-change
-request to the orchestrator. This script is the landing step's mechanical half of that rule. It reads the changed paths
-between two revisions and, for each one inside an owned path, decides whether an extension point admits the change.
+asking, in the shapes the table's extension points describe, and may change the shared wiring among them (the main
+view, the components, the bindings and the like) when the change follows the pattern already there; every other change
+to an owned path is a foundation-change request to the orchestrator. This script is the landing step's mechanical half
+of that rule. It reads the changed paths between two revisions and, for each one inside an owned path, decides whether
+an extension point admits the change, and which admitted changes the review gate must look at.
 
 The markdown file is the only source of the rules: the main table's second column gives each foundation's owned paths,
-and the "Extension point rules" table gives each extension point's path and rule. Here's the TLDR of the two rules:
+and the "Extension point rules" table gives each extension point's path and rule. Here's the TLDR of the three rules:
 
 - `new-files` (on a directory, written with a trailing `/`): admits only files that the diff adds under it.
 - `append-only` (on a file): admits a change to an existing file that adds at least one line and removes none, as git's
   numstat counts them. A changed line is a removal plus an addition, so it is refused; so are a binary change, a mode
   change on its own, and the file's deletion.
+- `reported` (on a file or a directory): admits any change except a deletion, and prints it as `reported` rather than
+  `allowed`. The script cannot tell wiring from a rule change in these files, so the review gate judges each reported
+  touch: one that follows the pattern lands, one that changes a rule is still a request. A deletion is refused because
+  the table may name the file (the next check would stop on it) and other areas build on it.
 
-A rule admits a shape of change, not its content, so review still checks that an admitted addition follows the pattern
+A rule admits a shape of change, not its content, so review still checks that an admitted change follows the pattern
 the table describes. Renames are not detected (`--no-renames`): a rename is the deletion of its old path and the
 addition of its new one, which is what the rules care about.
 
@@ -32,9 +38,9 @@ renamed without updating the table stops the check instead of silently losing it
 
 `--owner` is for a foundation PR made by the owner: it reports what would have been refused and exits 0.
 
-Exit status: 0 when nothing is refused (or under `--owner`), 1 when something is refused, 2 when the check cannot judge
-(a git failure, a malformed table, or anything unexpected). `scripts/test-check-foundation-paths.py` covers it against
-temporary git repositories.
+Exit status: 0 when nothing is refused (or under `--owner`), whatever was reported, 1 when something is refused, 2
+when the check cannot judge (a git failure, a malformed table, or anything unexpected).
+`scripts/test-check-foundation-paths.py` covers it against temporary git repositories.
 """
 from __future__ import annotations
 
@@ -46,7 +52,7 @@ import subprocess
 import sys
 
 TABLE = "docs/gpui/foundation-ownership.md"
-RULE_NAMES = ("new-files", "append-only")
+RULE_NAMES = ("new-files", "append-only", "reported")
 PREFIX = "check-foundation-paths"
 
 
@@ -230,17 +236,26 @@ VERBS = {"A": "adds the file", "M": "modifies the file", "D": "deletes the file"
 
 @dataclasses.dataclass(frozen=True)
 class Verdict:
-    """What the check says about one changed owned path: allowed or not, and which rule decided."""
+    """What the check says about one changed owned path: allowed or not, whether the review gate must judge it, and
+    which rule decided.
+
+    `reported` implies `allowed`: a reported touch never changes the exit status, it only puts the change in front of
+    the review gate.
+    """
 
     foundation: str
     path: str
     allowed: bool
     rule: str
     reason: str
+    reported: bool = False
 
     def line(self, owner: bool) -> str:
-        """The report line: `allowed`, `refused`, or under `--owner` `would refuse`."""
-        word = "allowed" if self.allowed else ("would refuse" if owner else "refused")
+        """The report line: `allowed`, `reported`, `refused`, or under `--owner` `would refuse`."""
+        if self.allowed:
+            word = "reported" if self.reported else "allowed"
+        else:
+            word = "would refuse" if owner else "refused"
         return f"{word}: {self.foundation}: {self.path}: {self.rule}: {self.reason}"
 
 
@@ -251,12 +266,24 @@ def judge(change: Change, foundations: list[Foundation]) -> Verdict | None:
     if owner is None:
         return None
     verb = VERBS.get(change.status, f"changes the file (git status {change.status})")
-    # The most specific extension point decides: `components/mod.rs` is append-only although the `components/`
-    # directory around it admits only new files, and a file path is always longer than a directory covering it.
+    # The most specific extension point decides: in the tests' fixture `src/widgets/mod.rs` is append-only although the
+    # `src/widgets/` directory around it admits only new files, and a file path is always longer than a directory
+    # covering it.
     matching = [extension for extension in owner.extensions if covers(extension.path, change.path)]
     if not matching:
         return Verdict(owner.name, change.path, False, "no extension point", verb)
     extension = max(matching, key=lambda extension: len(extension.path))
+    if extension.rule == "reported":
+        # A deletion (or a rename, which is a deletion here since renames are not detected) is a request: a file the
+        # table names would stop the next check as a malformed table, and one under a reported directory (an existing
+        # component, say) is wiring other areas build on.
+        if change.status == "D":
+            return Verdict(owner.name, change.path, False, extension.rule, verb)
+        if change.status != "M":
+            return Verdict(owner.name, change.path, True, extension.rule, verb, reported=True)
+        counts = f"adds {change.added} lines and removes {change.deleted}"
+        reason = "binary change" if change.deleted is None else counts
+        return Verdict(owner.name, change.path, True, extension.rule, reason, reported=True)
     if extension.rule == "new-files":
         return Verdict(owner.name, change.path, change.status == "A", extension.rule, verb)
     # The table check guarantees an append-only file exists at the base, so the only whole-file change is a deletion.
@@ -273,7 +300,7 @@ def run(argv: list[str] | None = None) -> int:
     """Judge the diff between `--base` and `--head` and print one line per owned path it touches, then a summary.
 
     Every owned path touched gets a line, allowed ones included, so a landing log shows which touches an extension
-    point covered as well as which need a request. Paths no foundation owns are not listed.
+    point covered, which the review gate must judge, and which need a request. Paths no foundation owns are not listed.
     """
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--base", default="origin/main", help="the revision the PR lands on (default: origin/main)")
@@ -295,11 +322,18 @@ def run(argv: list[str] | None = None) -> int:
     for verdict in verdicts:
         print(verdict.line(args.owner))
     refused = sum(not verdict.allowed for verdict in verdicts)
-    summary = f"{head} against {base}: {len(verdicts)} owned paths touched, {len(verdicts) - refused} allowed"
+    reported = sum(verdict.reported for verdict in verdicts)
+    allowed = len(verdicts) - refused - reported
+    summary = f"{head} against {base}: {len(verdicts)} owned paths touched, {allowed} allowed, {reported} reported"
     if args.owner:
         print(f"{PREFIX}: {summary}, {refused} would be refused without --owner")
         return 0
     print(f"{PREFIX}: {summary}, {refused} refused")
+    if reported:
+        print(
+            f"{PREFIX}: the review gate checks that each reported change follows the pattern already there; one that "
+            f"changes a rule is a foundation-change request (see {TABLE})"
+        )
     if refused:
         print(
             f"{PREFIX}: request each refused change from the orchestrator (a foundation-change request in the area's "

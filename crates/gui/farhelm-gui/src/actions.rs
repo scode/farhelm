@@ -217,8 +217,8 @@ pub fn install(cx: &mut App) {
 /// open). The guard judges a repeat by the first binding GPUI tries for the key; a handler that declined would send
 /// the press on to the next binding or to the key listeners, and its repeats would not follow it there.
 const ONCE_PER_PRESS: &[&dyn Action] = &[
-    // One entry per line, so that a new shortcut only adds a line (the append-only extension point in
-    // `docs/gpui/foundation-ownership.md`); this comment is also what keeps rustfmt from joining the entries.
+    // One entry per line, so that a new shortcut only adds a line (the shape `docs/gpui/foundation-ownership.md` asks
+    // of the lists areas append to); this comment is also what keeps rustfmt from joining the entries.
     &DeleteSession,
     &RenameSession,
 ];
