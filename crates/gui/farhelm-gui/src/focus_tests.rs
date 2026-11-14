@@ -1232,6 +1232,90 @@ fn a_click_focuses_a_button_only_where_the_platform_rule_says(cx: &mut TestAppCo
     assert_eq!(presses.get(), 2);
 }
 
+/// Press and release `button` at the center of what is drawn under `selector`, and check.
+fn press_with(cx: &mut VisualTestContext, selector: &'static str, button: MouseButton) {
+    let at = center(cx, selector);
+    cx.simulate_mouse_down(at, button, Modifiers::none());
+    cx.simulate_mouse_up(at, button, Modifiers::none());
+    check(cx);
+}
+
+/// A terminal takes focus from a press of any button, as the old one did on every mousedown, while a button takes it
+/// from a primary press only. The terminal half matters because under mouse reporting a right or middle click into a
+/// full-screen program is the program's, and the keys typed next must reach it too, not the control that held focus.
+/// The button half is the old app's rule (its buttons took no focus from a right click), and also proves GPUI's own
+/// focus-on-press is suppressed for every button: it ignores which button went down, and once focused a button on a
+/// right press under either platform rule. The Linux click rule is applied, where a primary press does focus a button,
+/// so the right press not focusing it is the button rule and not the macOS one.
+#[gpui::test]
+fn a_right_or_middle_press_focuses_a_terminal_but_not_a_button(cx: &mut TestAppContext) {
+    let (cx, items) = open_terminals(cx, &["button"], &["terminal"]);
+    let ((button, _), (terminal, _)) = (drawn(&items, "button"), drawn(&items, "terminal"));
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    assert!(
+        !focused(cx, &button) && !focused(cx, &terminal),
+        "the premise: only the root holds focus"
+    );
+
+    press_with(cx, "button", MouseButton::Right);
+    assert!(
+        !focused(cx, &button),
+        "a right press does not focus a button"
+    );
+    press_with(cx, "terminal", MouseButton::Right);
+    assert!(focused(cx, &terminal), "a right press focuses the terminal");
+    press_with(cx, "button", MouseButton::Right);
+    assert!(
+        focused(cx, &terminal),
+        "a right press on a button leaves focus where it was"
+    );
+
+    click(cx, "button");
+    assert!(
+        focused(cx, &button),
+        "a primary press still focuses a button under the Linux rule"
+    );
+    press_with(cx, "terminal", MouseButton::Middle);
+    assert!(
+        focused(cx, &terminal),
+        "a middle press focuses the terminal"
+    );
+    click(cx, "button");
+    click(cx, "terminal");
+    assert!(
+        focused(cx, &terminal),
+        "a primary press still focuses the terminal"
+    );
+}
+
+/// A right press on a button inside a dialog that takes focus from its empty space passes through to the dialog, as a
+/// primary press on a macOS button does: no button but the primary one focuses a control, so the press is not the
+/// button's. Without this the outcome would hang on whether the button already held focus (a right press on the focused
+/// one would count as the button keeping focus, on any other as the dialog's), under the Linux rule where a primary
+/// press is the button's.
+///
+/// Specification: in such a dialog under the Linux click rule, with focus on a button, a right press on that button
+/// focuses the dialog.
+#[gpui::test]
+fn a_right_press_on_a_focused_button_in_a_dialog_focuses_the_dialog(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    let control = handle(cx);
+    let (container, _, _) = open_placed_dialog_with(
+        cx,
+        vec![("control", 10., PlacedKind::Button(control.clone()))],
+        &control,
+        false,
+    );
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    assert!(focused(cx, &control), "the premise: the button has focus");
+
+    press_with(cx, "control", MouseButton::Right);
+    assert!(
+        focused(cx, &container),
+        "the right press was not the button's, so the dialog took focus"
+    );
+}
+
 /// Enter and Space activate a focused button, but a held key does not repeat it: SPEC.md, "Repeated or composing Enter
 /// cannot answer the new question". The ring shows only after keyboard input.
 #[gpui::test]

@@ -3142,8 +3142,12 @@ fn a_select_made_unavailable_while_its_list_is_open_closes_the_list(cx: &mut Tes
 /// only on the click, a press dragged off the control before its release (no click) would leave the list open with
 /// focus outside it, and the arrow keys would reach nothing in it.
 ///
+/// A right press makes no click at all, and focuses the control as any press does, so it must close the list too, or
+/// the list stays open with focus outside it; the next click must still open the list.
+///
 /// Specified: with the list open, a press on the closed control released elsewhere closes the list; the next click on
-/// the control opens it again.
+/// the control opens it again. With the list open, a right press on the control closes it with focus on the control;
+/// the next click opens it again.
 #[gpui::test]
 fn a_press_on_the_closed_control_closes_its_open_list(cx: &mut TestAppContext) {
     let (cx, _, _) = open_picker(cx, Some("medium"), plain);
@@ -3158,6 +3162,18 @@ fn a_press_on_the_closed_control_closes_its_open_list(cx: &mut TestAppContext) {
     assert!(!list_open(cx), "the press closed the list");
     click(cx, "effort");
     assert!(list_open(cx), "the next click opened it again");
+
+    cx.simulate_mouse_down(control.center(), MouseButton::Right, Modifiers::none());
+    cx.simulate_mouse_up(control.center(), MouseButton::Right, Modifiers::none());
+    check(cx);
+    assert!(!list_open(cx), "a right press closed the list");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("effort"),
+        "and focus is on the closed control, not lost with the list"
+    );
+    click(cx, "effort");
+    assert!(list_open(cx), "the next click after it opened the list");
 }
 
 /// A dialog's content for the empty-space test: a select drawn 240 pixels wide with room around it, under
