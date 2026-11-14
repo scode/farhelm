@@ -14,8 +14,8 @@
 //!   the click from a row that may have moved on (SPEC.md, "Confirmed 2026-10-01").
 //! - **The operation store carries the request.** Delete is refused while the session has any request in flight, a
 //!   Rename included (SPEC.md: "a pending request refuses another lifecycle action"). The store keeps the guard the
-//!   request was sent with ([`Work::Delete`]) and a refusal until the session's next operation starts, and the row reads
-//!   both back from it while drawing ([`in_flight`], [`failure_line`]).
+//!   request was sent with ([`Work::Delete`]) and its refusal, and the row reads both back from it while drawing
+//!   ([`in_flight`], and the row's line in [`super::outcome`], which says how long a refusal stays).
 //! - **A pending Delete shows as an expected wait.** The row shows a spinner and what is happening in place of its
 //!   title, in the accent rather than in danger red (the user just confirmed this, so the wait is the outcome they asked
 //!   for), and in the fill's ink on the selected row. The title stays the row's accessible name. The spinner turns one
@@ -35,20 +35,18 @@ use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::DeleteGuard;
 use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
-    App, AppContext as _, Context, Div, ElementId, Entity, FontWeight, Hsla, InteractiveElement,
+    App, AppContext as _, Context, ElementId, Entity, FontWeight, Hsla, InteractiveElement,
     IntoElement, ParentElement, Pixels, Role, SharedString, StatefulInteractiveElement as _,
     Styled, Subscription, Svg, Transformation, Window, div, px, radians, svg,
 };
 
-use super::SessionList;
-use super::menu::Opened;
+use super::{SessionList, menu};
 use crate::assets::Icon;
 use crate::components::{HoverHelp, Tier};
 use crate::focus::Mark;
-use crate::host_text::{self, HostSentence, HostText};
-use crate::layers::Subject;
+use crate::host_text::{HostSentence, HostText};
 use crate::operations::{Command, OpKey, Work};
-use crate::prompt::{self, Answer, Question};
+use crate::prompt::{Answer, Question};
 use crate::theme::{self, metrics};
 use crate::{local_state, session, ticker};
 
@@ -93,7 +91,16 @@ pub(super) fn consequence(row: &SessionRow) -> String {
         }
         SessionStatus::Error { .. } => "the agent never started; deleting discards the session:",
     };
-    match row.info.tabs.len() {
+    with_tabs("deleting", row.info.tabs.len(), agent)
+}
+
+/// A destructive question's consequence for a session with `tabs` terminal tabs: the tab clause first, saying that
+/// `verb` ("deleting", "replacing") closes them with everything in them, then the `agent` clause after a semicolon; with
+/// no tabs, the agent clause alone, capitalized. Delete and Replace share the shape, as the old app's `with_tabs` made
+/// them, so the two questions cannot drift apart in how they warn about tabs. The agent clauses are the app's own
+/// lowercase words, never host text, so capitalizing the first letter is safe.
+pub(super) fn with_tabs(verb: &str, tabs: usize, agent: &str) -> String {
+    match tabs {
         0 => {
             let mut chars = agent.chars();
             chars.next().map_or_else(String::new, |first| {
@@ -101,10 +108,10 @@ pub(super) fn consequence(row: &SessionRow) -> String {
             })
         }
         1 => format!(
-            "1 terminal tab is still open, and deleting closes it with everything running in it; {agent}"
+            "1 terminal tab is still open, and {verb} closes it with everything running in it; {agent}"
         ),
         tabs => format!(
-            "{tabs} terminal tabs are still open, and deleting closes them with everything running in them; {agent}"
+            "{tabs} terminal tabs are still open, and {verb} closes them with everything running in them; {agent}"
         ),
     }
 }
@@ -184,61 +191,25 @@ impl SessionList {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(store) = session::current_store(cx) else {
+        let Some(target) = menu::actionable(key, cx) else {
             return;
         };
-        let collections = store.read(cx).collections();
-        let Some(row) = collections.get::<SessionRow>(key).cloned() else {
-            return;
-        };
-        if busy(key, cx) {
-            return;
-        }
-        let guard = guard(&row);
-        let skipped = super::selection::preferences(collections)
-            .is_some_and(|preferences| preferences.skip_session_confirmations == Some(true));
-        if shows_nothing_alive(&row) || skipped {
+        let row = &target.row;
+        let guard = guard(row);
+        if shows_nothing_alive(row) || target.skips_questions {
             send_delete(key, guard, cx);
             return;
         }
-        let on_confirm = |frozen: Frozen, _: &mut Window, cx: &mut App| {
-            send_delete(&frozen.key, frozen.guard, cx);
-        };
-        // Beside the row's menu button only while the row is in the list's view: a row scrolled away may still be
-        // drawn just past the list's edge, and a question beside it would sit next to nothing the user can see.
-        let anchor = if self.row_in_view(key) {
-            self.current.current(cx).rows.borrow().anchor(key)
-        } else {
-            None
-        };
-        let asked = anchor.and_then(|anchor| {
-            prompt::ask_anchored(
-                question(key, &row, guard),
-                anchor,
-                Subject::session(key, cx),
-                mark,
-                on_confirm,
-                window,
-                cx,
-            )
-        });
-        let asked = asked.or_else(|| {
-            prompt::ask(
-                question(key, &row, guard),
-                Subject::session(key, cx),
-                mark,
-                on_confirm,
-                window,
-                cx,
-            )
-        });
-        if let Some(layer) = asked {
-            self.current
-                .current(cx)
-                .rows
-                .borrow_mut()
-                .opened(key, layer, Opened::Question);
-        }
+        self.ask_about_row(
+            key,
+            || question(key, row, guard),
+            mark,
+            |frozen: Frozen, _: &mut Window, cx: &mut App| {
+                send_delete(&frozen.key, frozen.guard, cx)
+            },
+            window,
+            cx,
+        );
     }
 }
 
@@ -292,8 +263,9 @@ fn send_delete(key: &str, guard: DeleteGuard, cx: &mut App) {
 
 // ---- What the row shows ----------------------------------------------------------------------------------------------
 
-/// Whether `key` has any request in flight, a Rename as much as a Delete: then its Delete is refused, and its menu
-/// draws Delete unavailable.
+/// Whether `key` has any request in flight, whatever its kind: then every lifecycle command of the session (Rename,
+/// Replace, Stop and Delete) is refused ([`super::menu::actionable`]) and its menu draws them unavailable, as SPEC.md's
+/// "a pending request refuses another lifecycle action" asks.
 pub(super) fn busy(key: &str, cx: &App) -> bool {
     session::current_operations(cx).is_some_and(|operations| {
         operations
@@ -418,42 +390,6 @@ pub(crate) fn spinner_icon(step: u8, size: Pixels, ink: Hsla) -> Svg {
         )))
 }
 
-/// The last refusal of `key`'s work, as the row shows it under its lines until the session's next operation starts:
-/// the helm's words, which may quote a host, in `.action-error`'s 12-pixel red, or in the fill's ink on the selected
-/// row (`.session-row.selected .action-error`).
-pub(super) fn failure_line(key: &str, selected: bool, cx: &App) -> Option<Div> {
-    let operations = session::current_operations(cx)?;
-    let message = operations
-        .read(cx)
-        .failure(&OpKey::session(key))?
-        .message
-        .clone();
-    Some(failure_text(
-        &message,
-        refusal_ink(selected, theme::palette(cx)),
-    ))
-}
-
-/// The ink of the row's refusal line: `.action-error`'s red, or the fill's ink on the selected row, where red on the
-/// accent fill is hard to read.
-fn refusal_ink(selected: bool, palette: &theme::Palette) -> theme::Token {
-    if selected {
-        palette.on_fill
-    } else {
-        palette.danger
-    }
-}
-
-/// A refusal's words in `.action-error`'s look and `ink`, for the row and its menu alike.
-pub(super) fn failure_text(message: &HostText, ink: theme::Token) -> Div {
-    host_text::element(message)
-        .pt(px(2.))
-        .pb(px(8.))
-        .px(px(14.))
-        .text_size(metrics::TEXT_SM)
-        .text_color(theme::color(ink))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -477,17 +413,6 @@ mod tests {
             let built = command("a", guard).unwrap();
             assert_eq!(built.work(), Work::Delete(guard));
             assert_eq!(built.path().as_str(), path, "{guard:?}");
-        }
-    }
-
-    /// A refusal on the selected row was once drawn red on the accent fill, near unreadable; the old sheet switched it
-    /// to the fill's ink (`.session-row.selected .action-error`). Specified, in both palettes: the fill's ink when
-    /// selected, `--danger` otherwise.
-    #[test]
-    fn a_refusal_on_the_selected_row_takes_the_fills_ink() {
-        for palette in [&theme::DARK, &theme::LIGHT] {
-            assert_eq!(refusal_ink(true, palette), palette.on_fill);
-            assert_eq!(refusal_ink(false, palette), palette.danger);
         }
     }
 }

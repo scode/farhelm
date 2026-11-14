@@ -58,13 +58,16 @@
 //! redraws a notified view's whole window, re-rendering every uncached view in it and dirtying the notified view's
 //! ancestors, so per-row views would not have limited what a step redraws, only multiplied the notifications.
 //!
-//! Each row has an actions menu ([`menu`]) whose commands so far are Rename ([`rename`]) and Delete ([`delete`]); the
-//! Rename and Delete shortcuts reach them for the open session ([`rename::open_for_selected`],
-//! [`SessionList::delete_selected`]). A row's menu button and its anchor exist only while the row is drawn, so a menu
-//! whose row scrolls well out of view closes, and the Delete shortcut asks about a row out of view in a centered
-//! question. While any Delete is in flight, the selection rules hold back their automatic choice, so a list that loses
-//! its open session to that Delete opens the next one only once every Delete has settled. A pending Delete's spinner turns from one handle the list holds, the way the pulse
-//! does ([`delete::Spinner`]).
+//! Each row has an actions menu ([`menu`]) whose commands so far are Rename ([`rename`]), Replace ([`replace`]), Stop
+//! ([`stop`]) and Delete ([`delete`]); the Rename and Delete shortcuts reach them for the open session
+//! ([`rename::open_for_selected`], [`SessionList::delete_selected`]). What a row says about its operations beyond
+//! "in flight" (a refusal, a success's notice, how long a Replace has waited) is [`outcome`]'s. While any Delete is in
+//! flight, the selection rules hold back their automatic choice, so a list that loses its open session to that Delete
+//! opens the next one only once every Delete has settled; a Stop or a Replace holds nothing back, with one exception
+//! for the open session's own Replace ([`selection`], "A Replace keeps its own source open until it answers"). Every
+//! pending Delete's, Stop's and long Replace's spinner turns from one handle the list holds, the way the pulse does
+//! ([`delete::Spinner`]). A row's menu button and its anchor exist only while the row is drawn, so a menu whose row
+//! scrolls well out of view closes, and a question about a row out of view is asked centered.
 //!
 //! The Rename editor the list owns is a dialog rather than part of a row, so a listing that changes under it never
 //! moves its field.
@@ -77,11 +80,17 @@
 
 pub(crate) mod delete;
 mod menu;
+pub(crate) mod outcome;
 pub(crate) mod quick_switcher;
 pub(crate) mod rename;
+pub(crate) mod replace;
 mod row;
 mod selection;
 mod status;
+pub(crate) mod stop;
+
+#[cfg(test)]
+mod lifecycle_tests;
 
 #[cfg(test)]
 mod list_tests;
@@ -138,8 +147,9 @@ pub struct SessionList {
     /// is: everything that decides it (the store, the connection, the window's activation) redraws the list when it
     /// changes, so working it out there cannot miss a change.
     pulse: Option<ticker::Pulsing>,
-    /// The pending Deletes' spinner, held exactly while the window is active and some listed row has a Delete in
-    /// flight, and worked out at the top of each frame like `pulse`.
+    /// The pending operations' spinner, held exactly while the window is active and some listed row shows one (a
+    /// Delete or a Stop in flight, or a Replace that has waited long enough to say so), and worked out at the top of
+    /// each frame like `pulse`.
     spinner: Option<delete::Spinner>,
     /// The virtualized rows' state: their count, measured heights, scroll position and focus handles. Kept in step
     /// with the store by [`SessionList::sync_rows`] at the top of every frame; it holds no session data of its own.
@@ -223,9 +233,10 @@ impl SessionList {
         let collections = store.read(cx).collections();
         let listed = selection::listed(collections);
         let selected = local_state::selected(cx);
-        let gone = selected
-            .as_deref()
-            .is_some_and(|key| session::listing_proves_gone(collections, key));
+        // `selection`'s "A Replace keeps its own source open until it answers".
+        let gone = selected.as_deref().is_some_and(|key| {
+            session::listing_proves_gone(collections, key) && !replace::in_flight(key, cx)
+        });
         let change = selection::hold_for_deletes(
             selection::settle(
                 selected.as_deref(),
@@ -414,8 +425,9 @@ impl Render for SessionList {
             return list;
         };
         // One pass over the listing for what the frame needs from all of it: the keys, and whether any row pulses or
-        // shows a pending Delete. Everything else is read row by row, for the rows drawn.
-        let (keys, any_pulse, any_delete) = {
+        // shows a spinner (a pending Delete or Stop, or a Replace that has waited long enough to say so). Everything
+        // else is read row by row, for the rows drawn.
+        let (keys, any_pulse, any_spinner) = {
             let listed = selection::listed(store.read(cx).collections());
             let unchanged = listed.len() == self.entries.len()
                 && listed
@@ -429,22 +441,24 @@ impl Render for SessionList {
                     .collect::<Vec<String>>()
             });
             let any_pulse = listed.iter().any(|session| status::pulses(session.row));
-            let any_delete = listed
-                .iter()
-                .any(|session| delete::in_flight(session.key, cx).is_some());
-            (keys, any_pulse, any_delete)
+            let any_spinner = listed.iter().any(|session| {
+                delete::in_flight(session.key, cx).is_some()
+                    || stop::in_flight(session.key, cx)
+                    || outcome::replace_seconds(session.key, cx).is_some()
+            });
+            (keys, any_pulse, any_spinner)
         };
         let pulses = ticker::is_active(window, cx) && any_pulse;
         if pulses != self.pulse.is_some() {
             self.pulse = pulses.then(|| ticker::pulse(window, cx));
         }
-        let deleting = ticker::is_active(window, cx) && any_delete;
-        if deleting != self.spinner.is_some() {
-            self.spinner = deleting.then(|| delete::Spinner::start(window, cx));
+        let spins = ticker::is_active(window, cx) && any_spinner;
+        if spins != self.spinner.is_some() {
+            self.spinner = spins.then(|| delete::Spinner::start(window, cx));
         }
         let steps = row::Steps {
             pulse: self.pulse.as_ref().map_or(0, |pulse| pulse.step(cx)),
-            delete: self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx)),
+            spinner: self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx)),
         };
         if self.sync_rows(keys, window, cx) {
             cx.notify();

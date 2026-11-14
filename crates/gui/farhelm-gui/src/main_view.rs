@@ -75,6 +75,11 @@ impl MainView {
     pub(crate) fn session_pane(&self) -> &Entity<SessionPane> {
         &self.session_pane
     }
+
+    /// The session list, for tests that ask it for a row's action the way its menu does.
+    pub(crate) fn session_list(&self) -> &Entity<SessionList> {
+        &self.session_list
+    }
 }
 
 impl Render for MainView {
