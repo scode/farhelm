@@ -612,7 +612,10 @@ answers, while focus still starts where the rules above put it. The prompt canno
 draws host values there through the host-text element as it would anywhere else. A centered question also takes the host
 dialogs' header tile, footer note and width, passed through to the dialog frame. The anchored and inline questions take
 none of the four: no question asked those ways needs them, the anchored look would restyle a body, and an inline
-question returns focus itself only from its answers.
+question returns focus itself only from its answers. Those four, the loud look (inline only) and the empty-click and
+Escape-home rules (the layers only; an inline question leaves both to its owner's dialog) fail a debug build when set on
+a question asked a way that ignores them, so a question moved to another presentation fails a debug run, and so its
+tests, instead of losing one unseen.
 
 A question is centered over a veil, anchored beside the control it is about, or drawn inline inside the surface that
 owns it (the launcher's YOLO question in its body, the template editor's leave question at its foot), with the same
