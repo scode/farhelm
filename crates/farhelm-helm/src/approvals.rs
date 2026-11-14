@@ -51,6 +51,54 @@
 //! agent request from that host, listings included, is refused with the slots'
 //! ordinary "too many in flight" message; SPEC_impl.md records that as
 //! accepted.
+//!
+//! # Interim: the desktop app has no approval cards yet
+//!
+//! NOTE: This section, and everything it names, exists only until the
+//! desktop app's approvals area lands. The maintainer decided on 2026-11-13
+//! that until then the helm refuses a request that needs the user's
+//! approval at once, as if no window were open, even while the desktop app's
+//! window holds the seat. The window cannot show a card, so without this the
+//! agent would sit blocked for the whole nine-minute wait on a card nobody
+//! can see. Requests a host's "without asking" settings let through are
+//! untouched, which is how the maintainer keeps agents working where he
+//! dogfoods the app.
+//!
+//! The behavior is the no-window path's (refused at once, `Unavailable`, no
+//! card, nothing logged as waiting), but the message is its own,
+//! [`WINDOW_WITHOUT_CARDS_REFUSAL`]: the no-window message tells the agent
+//! to have the user open Farhelm, which is already open. A window that is
+//! not connected (displaced, or reconnecting) still gets the ordinary
+//! no-window refusal, so [`gui_connected`] is unchanged.
+//!
+//! The switch is one flag, `window_without_cards`, set by
+//! [`Approvals::set_window_without_cards`] for the desktop app's embedded
+//! helm only (`ServingMode::window_without_cards`, called by
+//! `serve_with_ready`) and read only by [`ask_with_answer`]. Nothing else
+//! can answer a card today: the command line has no answer command, an agent
+//! never answers its own request, and the answer route takes the helm's
+//! credential, which only the desktop app holds. A standalone
+//! `farhelm helm run` keeps the card path because no UI attaches to it in
+//! production; the end-to-end tests attach a stand-in UI to one through the
+//! test credential and answer its cards over HTTP, and they keep covering the
+//! card path that way. If a remote helm that a desktop app attaches to ever
+//! arrives before the approvals area, it needs the flag too.
+//!
+//! The agent instructions every host's `farhelm` prints are deliberately
+//! left listing only the lasting approval refusals: this one is temporary,
+//! and its message explains itself to the agent that hits it.
+//!
+//! To remove it once the app shows cards, delete everything named
+//! `window_without_cards` (the field, its setter, the `ServingMode` method
+//! and its test, the call in `serve_with_ready`, the check in
+//! [`ask_with_answer`], the constant, the `rest_harness::FleetBuilder`
+//! option and the UI channel test that uses it), put
+//! `tests::{stop_action, Refusal, refusal_of}` back to private (widened only
+//! for that test), and remove the interim text in SPEC.md ("Agent-spawned
+//! sessions" and its pointer in "One GUI at a time"), SPEC_impl.md ("The
+//! seat: one UI per helm" and the "A GUI is connected" paragraph) and the
+//! interim paragraph of `releasing/changelog.d/gpui-desktop.md` (or, if a
+//! release has shipped it, add an entry saying approval cards are back).
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
@@ -73,6 +121,15 @@ use farhelm_proto::SessionRef;
 /// The refusal when no GUI is connected to ask in.
 pub(crate) const NO_GUI_REFUSAL: &str = "no Farhelm window is open to ask the user for approval, \
      so nothing was done; open Farhelm and retry";
+
+/// The refusal while the desktop app's window holds the seat but cannot
+/// show approval cards. Interim; see the module docs, "Interim: the desktop
+/// app has no approval cards yet". Worded for the agent that reads it: the
+/// window is open, so "open Farhelm" would be wrong, and the host settings
+/// cannot be changed from the new app yet, so it says only that they decide.
+pub(crate) const WINDOW_WITHOUT_CARDS_REFUSAL: &str = "the Farhelm window cannot show \
+     approval requests yet, so nothing was done; until it can, a request that needs approval \
+     runs only if this host's \"without asking\" settings already allow it";
 
 /// The refusal when the asking session is being deleted. Worded as the
 /// request rather than the outcome: a guarded delete can still be refused by
@@ -141,6 +198,11 @@ pub(crate) struct Approvals {
     /// [`farhelm_proto::approvals::APPROVAL_WAIT`] in production, shorter in
     /// tests that observe the expiry (`rest_harness::FleetBuilder::approval_wait`).
     wait: Duration,
+    /// Whether the window holding the seat cannot show cards, so that a
+    /// request needing approval is refused at once rather than carded. Set
+    /// only for the desktop app's embedded helm. Interim; see the module
+    /// docs, "Interim: the desktop app has no approval cards yet".
+    window_without_cards: bool,
     inner: Mutex<Inner>,
     /// Where a test parks an approved host change; see [`HostWriteGate`].
     #[cfg(test)]
@@ -164,10 +226,22 @@ impl Approvals {
     pub(crate) fn new(wait: Duration) -> Approvals {
         Approvals {
             wait,
+            window_without_cards: false,
             inner: Mutex::new(Inner::default()),
             #[cfg(test)]
             host_write_gate: Mutex::new(None),
         }
+    }
+
+    /// Treat the seat's holder as a window that cannot show cards: every
+    /// request that needs approval is refused at once with
+    /// [`WINDOW_WITHOUT_CARDS_REFUSAL`] while a window is connected, and with
+    /// the ordinary no-window refusal while none is. Requests a host setting
+    /// waives still run. Interim, until the desktop app's approvals area
+    /// lands; see the module docs, "Interim: the desktop app has no approval
+    /// cards yet".
+    pub(crate) fn set_window_without_cards(&mut self) {
+        self.window_without_cards = true;
     }
 
     /// Park the next approved host change for `host` at its gate: see
@@ -371,6 +445,8 @@ pub(crate) fn gui_connected(state: &AppState) -> bool {
 /// may be carried out, and its message is what the asking CLI shows:
 ///
 /// - no GUI connected: `Unavailable`, at once (see [`gui_connected`]);
+/// - a window that cannot show cards (interim, the desktop app's helm):
+///   `Unavailable`, at once, with [`WINDOW_WITHOUT_CARDS_REFUSAL`];
 /// - the asking session being deleted: `Unauthorized`, at once or during the
 ///   wait;
 /// - the requesting connection gone during the wait: `Unavailable`;
@@ -474,6 +550,15 @@ pub(crate) async fn ask_with_answer(
     }
     if !gui_connected(state) {
         return Err(refusal(ErrorKind::Unavailable, NO_GUI_REFUSAL.to_string()));
+    }
+    // Interim: a connected window that cannot show the card is refused the
+    // same way, with its own message (module docs, "Interim: the desktop app
+    // has no approval cards yet").
+    if state.approvals.window_without_cards {
+        return Err(refusal(
+            ErrorKind::Unavailable,
+            WINDOW_WITHOUT_CARDS_REFUSAL.to_string(),
+        ));
     }
     let host_name = crate::aggregate::host_display_name(
         row.kind,
@@ -1114,7 +1199,7 @@ pub(crate) mod tests {
         .to_string()
     }
 
-    fn stop_action() -> ApprovalAction {
+    pub(crate) fn stop_action() -> ApprovalAction {
         ApprovalAction::Stop {
             target: ApprovalSession {
                 id: "00000001-0000-4000-8000-000000000000:target".to_string(),
@@ -1548,12 +1633,12 @@ pub(crate) mod tests {
     }
 
     /// The kind and message of a refusal `ask` made itself.
-    struct Refusal {
-        kind: ErrorKind,
-        message: String,
+    pub(crate) struct Refusal {
+        pub(crate) kind: ErrorKind,
+        pub(crate) message: String,
     }
 
-    fn refusal_of(result: anyhow::Result<()>) -> Refusal {
+    pub(crate) fn refusal_of(result: anyhow::Result<()>) -> Refusal {
         let error = result.expect_err("refused");
         let refusal = error
             .downcast_ref::<crate::SupervisorError>()

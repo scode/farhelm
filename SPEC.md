@@ -4031,6 +4031,17 @@ it returns the session the first approval created rather than creating another. 
 fresh request with the ordinary approval rules. A host's sessions can keep only a few cards waiting at a time; a
 misbehaving host that keeps asking is answered by denying its cards or removing the host, and that nuisance is accepted.
 
+NOTE: The desktop app cannot show approval cards yet. Until its approvals area lands, a request that needs approval is
+refused at once while the desktop app's window is connected, as if no window were open: nothing is done and no card is
+kept waiting. Its message says that the Farhelm window cannot show approval requests yet and that a request that needs
+approval runs only if the host's "without asking" settings already allow it, rather than telling the user to open
+Farhelm. With no window connected, the no-window message above applies as before. Requests that a host's "without
+asking" settings let through are not affected; the requests no setting waives (host additions, edits and removals,
+launches with a wrapper prefix the agent supplied, new disposable environments, and template writes that leave a wrapper
+prefix in the template) are always refused meanwhile. Decided by the maintainer on 2026-11-13, so that agents fail fast
+rather than sit blocked for nine minutes on a card nobody can see while the new app is dogfooded; this NOTE goes when
+the cards return.
+
 A waiting card's session targets and GUI Delete and Replace confirmations keep the full reference they showed. Removing
 and re-adding a host creates a new entry UUID, so an old confirmation cannot reach it even if it reports the same bare
 session ID. Retargeting or adopting behind the same entry preserves its UUID and the existing same-entry rules.
@@ -5017,9 +5028,10 @@ and goes wholly inert, its terminals included. It does not reconnect on its own 
 until the user explicitly takes the seat back from that window, which displaces the other one in turn. Only the helm's
 own word that another UI took the seat counts as a takeover; a connection that merely drops is a reset (Losing the
 connection to the helm). Agent approvals follow the seat: a window holding it is an open Farhelm window for approval
-requests, and a displaced or disconnected one is not (Agent-spawned sessions). Farhelm adds nothing to cope with several
-UIs at once. If enforcing the seat ever turns complicated, the maintainer accepted deferring the enforcement, but not
-the assumption of a single UI.
+requests, and a displaced or disconnected one is not (Agent-spawned sessions; until the desktop app can show approval
+cards, its window does not count either, see the NOTE there). Farhelm adds nothing to cope with several UIs at once. If
+enforcing the seat ever turns complicated, the maintainer accepted deferring the enforcement, but not the assumption of
+a single UI.
 
 With the helm embedded in the app and its credential handed only to that app's window (see Security), a second UI cannot
 arise today. The seat is enforced for a future remote helm, and the test harness exercises it.

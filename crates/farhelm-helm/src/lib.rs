@@ -561,6 +561,23 @@ enum ServingMode {
     Embedded,
 }
 
+impl ServingMode {
+    /// Whether this helm's window cannot show approval cards, so that
+    /// requests needing approval are refused at once instead of carded.
+    ///
+    /// Interim, until the desktop app's approvals area lands (`approvals`,
+    /// "Interim: the desktop app has no approval cards yet"): true for the
+    /// desktop app's embedded helm, whose window holds the seat but has no
+    /// cards. A standalone helm has no window in production and keeps the
+    /// card path, which the end-to-end tests drive through a stand-in UI.
+    fn window_without_cards(self) -> bool {
+        match self {
+            ServingMode::Embedded => true,
+            ServingMode::Standalone => false,
+        }
+    }
+}
+
 impl AppState {
     /// Both providers' artifact tasks and Settings projections use this one
     /// registry; its legacy Tensorlake owner does not create another engine.
@@ -1605,6 +1622,14 @@ async fn serve_with_ready(
         sources,
     )?;
     app.link_opener = link_opener;
+    // Interim, until the desktop app's approvals area lands: its window holds
+    // the seat but cannot show a card, so requests that need approval are
+    // refused at once (`approvals`, "Interim: the desktop app has no approval
+    // cards yet"). Set before the state is shared and before the agent
+    // request handler is published below, so no request sees it unset.
+    if mode.window_without_cards() {
+        app.approvals.set_window_without_cards();
+    }
     if let Some(downloads) = downloads {
         app.downloads_dir = Some(downloads.directory);
         app.file_opener = Some(downloads.opener);
@@ -2202,6 +2227,23 @@ mod tests {
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
         assert_eq!(after, 29, "the refused helm must not migrate helm.db");
+    }
+
+    /// Interim, until the desktop app's approvals area lands: only the
+    /// desktop app's embedded helm treats its window as one without approval
+    /// cards; a standalone `farhelm helm run` keeps the card path.
+    ///
+    /// Why: the embedded helm's startup is the one place this switch is set,
+    /// and no fixture runs a real embedded helm through an agent request, so
+    /// without this a lost `Embedded` arm would leave agents in the desktop
+    /// app waiting nine minutes on a card nobody can see, with every other
+    /// test green. The standalone half guards the end-to-end tests' card path.
+    /// Remove with the switch (`approvals`, "Interim: the desktop app has no
+    /// approval cards yet").
+    #[farhelm_testtrace::test]
+    fn only_the_desktop_apps_helm_has_a_window_without_cards() {
+        assert!(crate::ServingMode::Embedded.window_without_cards());
+        assert!(!crate::ServingMode::Standalone.window_without_cards());
     }
 
     /// A successor must stay excluded after serving ends while the old runtime

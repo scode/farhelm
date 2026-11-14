@@ -1312,6 +1312,116 @@ async fn approvals_follow_the_seat_through_connect_disconnect_and_takeover() {
     assert!(crate::approvals::gui_connected(&harness.state));
 }
 
+/// Interim, until the desktop app's approvals area lands: on a helm built
+/// like the desktop app's, a connected UI channel holding the seat does not
+/// make a request that needs approval wait. It is refused at once, as
+/// Unavailable with the window-without-cards message rather than the
+/// no-window one (which would tell the user to open the window they have
+/// open), and no card is listed, while a request the host's "without asking"
+/// setting waives is still allowed. Before any window connects, the same
+/// helm gives the ordinary no-window refusal.
+///
+/// Why: the maintainer decided on 2026-11-13 that the helm must not queue a
+/// card the desktop app cannot show; the agent would otherwise wait out the
+/// whole nine minutes and fail as not answered. The second half guards the
+/// other side of that decision: the host settings are how agents keep
+/// working while the app is dogfooded, so the interim rule must not reach
+/// them. Remove this test with the rule (`approvals`, "Interim: the desktop
+/// app has no approval cards yet").
+#[farhelm_testtrace::test]
+async fn a_window_without_cards_refuses_at_once_while_holding_the_seat() {
+    use crate::approvals::tests::{local_origin, refusal_of, stop_action};
+    let mut harness = rest_harness::FleetBuilder::new()
+        .await
+        .window_without_cards()
+        .local(rest_harness::HostScript {
+            identity: Some("local-identity".to_string()),
+            sessions: vec![rest_harness::session("asker", 1_700_000_000)],
+            ..rest_harness::HostScript::default()
+        })
+        .await
+        .start()
+        .await;
+    let local = rest_harness::local_id(&harness.store).await;
+    harness.await_refreshed(local).await;
+    let addr = harness.serve().await;
+    let origin = local_origin(&harness).await;
+    let row = harness
+        .store
+        .list_hosts()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|row| row.id == local)
+        .unwrap();
+    assert!(
+        !row.commands_without_asking && !row.own_sessions_without_asking,
+        "premise: the host asks before agent commands"
+    );
+
+    // With no window connected the ordinary no-window refusal still applies:
+    // its "open Farhelm" advice is right then, and only a connected window
+    // gets the interim message.
+    let alone = refusal_of(
+        crate::approvals::ask(&harness.state, origin, "asker", false, stop_action()).await,
+    );
+    assert_eq!(alone.message, crate::approvals::NO_GUI_REFUSAL);
+
+    // A real channel, not a test hold: the snapshot shows it is serving, and
+    // the channel takes the seat before its upgrade completes.
+    let mut ui = WsTestClient::connect(addr, UI_CHANNEL).await;
+    let _snapshot = recv_message(&mut ui).await;
+    assert!(
+        harness.state.manager.ui_seat().is_held(),
+        "premise: the UI channel holds the seat"
+    );
+
+    // Bounded well below the approval wait, so a request that was carded
+    // instead of refused fails here rather than after nine minutes.
+    let asked = tokio::time::timeout(
+        NOTICE,
+        crate::approvals::ask(&harness.state, origin, "asker", false, stop_action()),
+    )
+    .await
+    .expect("refused at once, not left waiting for a card");
+    let refused = refusal_of(asked);
+    assert_eq!(refused.kind, farhelm_proto::ErrorKind::Unavailable);
+    assert_eq!(
+        refused.message,
+        crate::approvals::WINDOW_WITHOUT_CARDS_REFUSAL
+    );
+    assert!(harness.state.approvals.list().is_empty(), "no card listed");
+
+    harness
+        .store
+        .set_commands_without_asking(local, true)
+        .await
+        .unwrap();
+    tokio::time::timeout(
+        NOTICE,
+        crate::approvals::ask(&harness.state, origin, "asker", false, stop_action()),
+    )
+    .await
+    .expect("a waived request is answered at once")
+    .expect("the host setting still lets the request run");
+
+    // The refusal above must not have come from the channel going away. The
+    // host setting's change is pushed to the channel too, so pushes may come
+    // ahead of the pong.
+    send_message(&mut ui, &ClientMessage::Ping { n: 1 }).await;
+    loop {
+        match recv_message(&mut ui).await {
+            ServerMessage::Pong { n: 1 } => break,
+            ServerMessage::Changes(_) => continue,
+            other => panic!("expected the pong, got {other:?}"),
+        }
+    }
+    assert!(
+        harness.state.manager.ui_seat().is_held(),
+        "the UI channel held the seat throughout"
+    );
+}
+
 /// The session-list query is this channel's state: setting it re-serves the
 /// list filtered, and a word the list route refuses is refused here too,
 /// leaving the old query in force.
