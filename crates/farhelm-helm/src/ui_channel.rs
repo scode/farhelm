@@ -407,9 +407,24 @@ pub(crate) struct Channel {
     /// with, so every routed request passes the same authentication.
     authorization: HeaderValue,
     collections: Vec<CollectionSpec>,
+    /// The session list's query: its filters come from the GUI's
+    /// [`SESSION_QUERY_PATH`] command, and so does its sort while that
+    /// command names one; otherwise the sort follows the stored list order
+    /// ([`Channel::follow_stored_order`]).
     query: SessionQuery,
+    /// Whether the sort follows the stored list-order preference: true while
+    /// the GUI's current query names no sort of its own, including before
+    /// the GUI has sent any query.
+    sort_follows_preference: bool,
     sent: BTreeMap<Collection, Sent>,
 }
+
+/// The list order a channel uses when the helm has none stored, or has one
+/// this build does not serve: most recent activity, which SPEC.md ("Session
+/// list") says is what a client shows until someone picks otherwise. Not the
+/// list route's own default (creation order), which stays what an HTTP caller
+/// that names no order gets.
+const DEFAULT_LIST_ORDER: crate::store::ListSort = crate::store::ListSort::Activity;
 
 /// A routed command in flight: the future that runs it through the router
 /// and yields its reply. Channel-local commands never become one; [`run`]
@@ -440,6 +455,7 @@ impl Channel {
             authorization,
             collections,
             query: SessionQuery::default(),
+            sort_follows_preference: true,
             sent: BTreeMap::new(),
         }
     }
@@ -485,8 +501,58 @@ impl Channel {
         (spec.split)(body)
     }
 
+    /// Sort the session list in the order the helm has stored as the shared
+    /// list-order preference, read afresh, unless the GUI's own query has
+    /// named a sort. Runs before every read of the collections: the first
+    /// snapshot and every re-projection.
+    ///
+    /// Without this, every channel would open in creation order and the GUI
+    /// would have to send a query to correct it: the list would visibly
+    /// reorder after every connect, and every reset (a new channel) would put
+    /// it back in the wrong order until the query was answered. Reading it
+    /// again on every re-projection is what makes a change to the preference
+    /// made elsewhere (another client, an agent, the command line) move the
+    /// open list, as SPEC.md ("Session list") asks of every shared preference:
+    /// a preference write bumps the fleet feed, and the re-projection that
+    /// follows reads the new order. The read is one more GET of a helm-local
+    /// row per re-projection.
+    ///
+    /// The stored word is read through the preferences route, like every
+    /// other read the channel makes. A word this build does not serve (a newer
+    /// build can have stored it), no word, or a failed read all use
+    /// [`DEFAULT_LIST_ORDER`]: the list must never fail to load because of a
+    /// remembered order. Only the sort is set; filters stay as the GUI set
+    /// them. A channel that pushes no session list reads nothing.
+    async fn follow_stored_order(&mut self) {
+        if !self.sort_follows_preference
+            || !self
+                .collections
+                .iter()
+                .any(|spec| spec.collection == Collection::Sessions)
+        {
+            return;
+        }
+        let stored = match self.request(Method::GET, "/api/preferences", None) {
+            Ok(request) => {
+                let (status, body) = route(self.router.clone(), request).await;
+                status
+                    .is_success()
+                    .then(|| serde_json::from_slice::<Value>(&body).ok())
+                    .flatten()
+                    .and_then(|body| body["list_sort"].as_str().map(str::to_owned))
+            }
+            Err(_) => None,
+        };
+        let sort = stored
+            .as_deref()
+            .and_then(crate::store::parse_sort_key)
+            .unwrap_or(DEFAULT_LIST_ORDER);
+        self.query.sort = Some(sort.key().to_owned());
+    }
+
     /// Every collection as it stands, recording it as sent.
     pub(crate) async fn snapshot(&mut self) -> ServerMessage {
+        self.follow_stored_order().await;
         let mut collections = Vec::new();
         for spec in self.collections.clone() {
             let read = self.read(&spec, &self.query).await;
@@ -522,6 +588,7 @@ impl Channel {
 
     /// Re-read every collection and return the changes to push.
     pub(crate) async fn changes(&mut self) -> Vec<ServerMessage> {
+        self.follow_stored_order().await;
         let mut messages = Vec::new();
         for spec in self.collections.clone() {
             let read = self.read(&spec, &self.query).await;
@@ -612,6 +679,12 @@ impl Channel {
         if !status.is_success() {
             return (Vec::new(), reply(status, reply_body(&body)));
         }
+        // A query that names a sort takes the order over from the stored
+        // preference; a later one without a sort (the GUI clearing a filter,
+        // say) hands it back, rather than leaving the list in the list
+        // route's default order, which is neither what the user stored nor
+        // what the GUI last named.
+        self.sort_follows_preference = query.sort.is_none();
         self.query = query;
         let changes = self.changes().await;
         (changes, reply(StatusCode::NO_CONTENT, None))

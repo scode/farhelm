@@ -285,8 +285,11 @@ reply body is the result. Data the old GUI polled stays a query that the GUI iss
 replicated collection.
 
 The session list is a query. Its filter, sort and cap are this channel's state, set by a command, and the helm keeps
-serving the filtered, capped view with its `total`, `matching` and `truncated` counts. Collections carry their metadata:
-completeness or unavailability, counts and order.
+serving the filtered, capped view with its `total`, `matching` and `truncated` counts. A channel starts unfiltered, in
+the list order stored as the shared preference (most recent activity when none is stored or this build does not serve
+the stored word), so its first snapshot, a reset's included, is already in the user's order without a query from the
+GUI. Until a query from the GUI names a sort of its own, the channel keeps following that preference, so a change made
+elsewhere reorders the open list. Collections carry their metadata: completeness or unavailability, counts and order.
 
 Changes are sent per collection, keyed by id, and an entry is always replaced whole; there are no field-level patches.
 The GUI applies every collection's changes with one generic piece of code, not code per kind. The helm finds changes by

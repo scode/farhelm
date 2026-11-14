@@ -1692,7 +1692,17 @@ impl SessionFilter {
     }
 }
 
-impl ListSort {}
+impl ListSort {
+    /// The `?sort=` word for this order, and the exact inverse of [`parse_sort_key`], so a caller that needs the word
+    /// (the UI channel's starting order, say) names a variant and the compiler holds it to the vocabulary.
+    pub fn key(self) -> &'static str {
+        match self {
+            ListSort::Created => "created",
+            ListSort::Activity => "activity",
+            ListSort::Title => "title",
+        }
+    }
+}
 
 /// One host to guarantee registered — the `--ensure-hosts` entry as
 /// [`HelmStore::ensure_ssh_hosts`] consumes it.
@@ -21613,6 +21623,7 @@ mod tests {
                 Some(sort),
                 "{word:?} must parse to {sort:?}"
             );
+            assert_eq!(sort.key(), word, "{sort:?} spells itself {word:?}");
         }
         assert_eq!(
             ListSort::default(),
