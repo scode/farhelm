@@ -15,10 +15,11 @@
 //!   and closes when the element is no longer drawn (a deleted row's menu). A layer may also name a [`Subject`], an
 //!   entity whose release closes it (a confirmation about a session that was deleted elsewhere). Every overlay is
 //!   anchored to an element: SPEC.md has no menu opened at a pointer position.
-//! - **A dialog is modal.** It draws a veil over the window that takes every click, and a click on its empty space
-//!   keeps focus on the control in use. Tab stays inside the topmost layer, dialog or menu alike (the focus
-//!   coordinator walks GPUI's tab order within [`trap`]). Closing any layer returns focus to what held it when the layer
-//!   opened.
+//! - **A dialog is modal.** It draws a veil over the window that takes every click. A click on its empty space (label
+//!   text included, decision D-15) keeps focus on the control in use in the dialogs SPEC.md lists, and moves focus to
+//!   the dialog itself in the others ([`Dialog::keeps_focus_on_empty_click`]); a click on a menu's empty space keeps
+//!   focus on its item. Tab stays inside the topmost layer, dialog or menu alike (the focus coordinator walks GPUI's
+//!   tab order within [`trap`]). Closing any layer returns focus to what held it when the layer opened.
 //! - **One tooltip at a time**, owned by the control that showed it (see [`TooltipOwner`]).
 //!
 //! State is kept per window: multi-window support is a watch-list item, and the one thing it asks of the foundations
@@ -75,6 +76,8 @@ struct Layer {
     opener: Option<WeakFocusHandle>,
     /// What Enter does while the dialog itself (not one of its controls) has focus.
     main_action: Option<MainAction>,
+    /// What a press on the layer's empty space does to focus.
+    empty_press: focus::OnPress,
     /// Closes the layer when its subject or anchor is released.
     _subject: Option<Subscription>,
 }
@@ -226,6 +229,13 @@ pub struct Dialog {
     /// What Enter does while the dialog itself has focus: its enabled main action, if it has exactly one (SPEC.md:
     /// "If a dialog container itself has focus, Enter presses its enabled main action"). `None` does nothing.
     pub main_action: Option<MainAction>,
+    /// Whether a primary click on the dialog's empty space (or its label text, decision D-15) keeps focus on the control
+    /// in use. SPEC.md, "Opening and closing", lists the dialogs that do: the session launcher, Restart with, the dialogs
+    /// that share the host and Settings installer, and the session row and header Stop, Restart, Replace and Delete
+    /// questions. Every other dialog passes `false`, and such a click focuses the dialog itself, as a click on a web
+    /// dialog's background did; Enter then presses its main action. Per dialog, never a global rule: SPEC.md says
+    /// which dialogs "do not have this rule yet".
+    pub keeps_focus_on_empty_click: bool,
 }
 
 /// A popover to open: a menu or a popup list.
@@ -254,7 +264,13 @@ pub fn open_dialog(
         start,
         subject,
         main_action,
+        keeps_focus_on_empty_click,
     } = dialog;
+    let empty_press = if keeps_focus_on_empty_click {
+        focus::OnPress::Keep
+    } else {
+        focus::OnPress::Focus
+    };
     open(
         Kind::Dialog,
         view,
@@ -262,6 +278,7 @@ pub fn open_dialog(
         start,
         subject,
         main_action,
+        empty_press,
         mark,
         window,
         cx,
@@ -293,6 +310,8 @@ pub fn open_popover(
         start,
         Some(subject),
         None,
+        // A menu's empty space (a separator, padding) keeps focus on its item.
+        focus::OnPress::Keep,
         mark,
         window,
         cx,
@@ -310,6 +329,7 @@ fn open(
     start: FocusHandle,
     subject: Option<Subject>,
     main_action: Option<MainAction>,
+    empty_press: focus::OnPress,
     mark: &Mark,
     window: &mut Window,
     cx: &mut App,
@@ -335,6 +355,7 @@ fn open(
             container,
             opener,
             main_action,
+            empty_press,
             _subject: subject,
         });
         // A layer covers the tooltip of whatever is under it.
@@ -607,9 +628,9 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
         let content = div()
             .id(ElementId::Name(format!("layer-{}", id.0).into()))
             .debug_selector(move || format!("layer-{}", id.0));
-        // A press that no control inside the layer took (empty space, a label) keeps focus on the control in use,
-        // instead of moving it to the layer's container (SPEC.md, "Opening and closing").
-        let content = focus::track(content, &layer.container, focus::OnPress::Keep)
+        // A press that no control inside the layer took (empty space, a label) keeps focus on the control in use, or
+        // moves it to the layer itself, as the layer was opened to do (SPEC.md, "Opening and closing").
+        let content = focus::track(content, &layer.container, layer.empty_press)
             // Enter on the dialog itself presses its main action; a held or modified Enter does not.
             .on_key_down(move |event, window, cx| {
                 if event.keystroke.key == "enter"
