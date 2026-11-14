@@ -35,12 +35,14 @@ GIT = [
 # The fixture's ownership, as (name, owned paths, extension points). Widgets has a new-files directory with an
 # append-only file inside it, so the most specific extension point must decide; Theme has an append-only file; Focus
 # owns a file with no extension point and a root-level file (no `/`) to check that the table parser finds it; Rules
-# owns the table itself, as Enforcement does in the real one.
+# owns the table itself, as Enforcement does in the real one; Wiring is the reported tier, a file (as the main view is)
+# and a directory (as the components are). Tests that build a table from a prefix of this list rely on its order.
 FIXTURE = [
     ("Widgets", ["src/widgets/"], [("src/widgets/", "new-files"), ("src/widgets/mod.rs", "append-only")]),
     ("Theme", ["src/theme.rs"], [("src/theme.rs", "append-only")]),
     ("Focus", ["src/focus.rs", "deny.toml"], []),
     ("Rules", ["docs/gpui/foundation-ownership.md"], []),
+    ("Wiring", ["src/main_view.rs", "src/kit/"], [("src/main_view.rs", "reported"), ("src/kit/", "reported")]),
 ]
 TABLE = "docs/gpui/foundation-ownership.md"
 
@@ -69,6 +71,8 @@ class Repo:
         self.write("src/theme.rs", "const A: u8 = 1;\nconst B: u8 = 2;\n")
         self.write("src/focus.rs", "fn focus() {}\n")
         self.write("src/area.rs", "fn area() {}\n")
+        self.write("src/main_view.rs", "fn ground() {}\nfn overlay() {}\n")
+        self.write("src/kit/row.rs", "fn row() {}\n")
         self.write("deny.toml", "")
         self.write(TABLE, table_md(FIXTURE))
         self.commit("base")
@@ -173,7 +177,7 @@ class FoundationPathsTest(unittest.TestCase):
         self.repo.commit("area work")
         result = self.repo.check()
         self.assertVerdict(result, code=0)
-        self.assertIn(": 0 owned paths touched, 0 allowed, 0 refused", result.stdout)
+        self.assertIn(": 0 owned paths touched, 0 allowed, 0 reported, 0 refused", result.stdout)
 
     def test_owner_reports_without_refusing(self):
         """A foundation PR by its owner sees what an area PR would have been refused, and passes."""
@@ -181,6 +185,82 @@ class FoundationPathsTest(unittest.TestCase):
         self.repo.commit("owner change")
         line = "would refuse: Focus: src/focus.rs: no extension point: modifies the file"
         self.assertVerdict(self.repo.check("--owner"), line, code=0)
+
+    def test_a_reported_file_admits_a_changed_line_and_reports_it(self):
+        """The reported tier exists because shared wiring (a main view layout change, a rewrapped `use` line) cannot
+        be told from a rule change by line counts, and refusing it made nearly every slice PR a request. Specified: a
+        change that removes lines from a reported file passes (exit 0), printed as `reported` with its counts, and the
+        summary counts it apart from allowed touches and says the review gate judges it."""
+        self.repo.write("src/main_view.rs", "fn ground() { sidebar() }\nfn overlay() {}\n")
+        self.repo.commit("lay out the main view")
+        result = self.repo.check()
+        self.assertVerdict(result, "reported: Wiring: src/main_view.rs: reported: adds 1 lines and removes 1", code=0)
+        self.assertIn(": 1 owned paths touched, 0 allowed, 1 reported, 0 refused", result.stdout)
+        self.assertIn("the review gate checks that each reported change follows the pattern", result.stdout)
+
+    def test_a_reported_directory_reports_new_and_changed_files(self):
+        """An additive builder method on an existing component and a new component are both wiring the review gate
+        looks at. Specified: under a reported directory, a changed file and an added file are each reported, and the
+        run passes."""
+        self.repo.write("src/kit/row.rs", "fn row() {}\nfn row_compact() {}\n")
+        self.repo.write("src/kit/toggle.rs", "fn toggle() {}\n")
+        self.repo.commit("extend the kit")
+        self.assertVerdict(
+            self.repo.check(),
+            "reported: Wiring: src/kit/row.rs: reported: adds 1 lines and removes 0",
+            "reported: Wiring: src/kit/toggle.rs: reported: adds the file",
+            code=0,
+        )
+
+    def test_deleting_a_reported_file_is_refused(self):
+        """Reported admits changes, not removals: a deleted file the table names would stop every later check as a
+        malformed table, and a deleted component takes wiring from other areas. Specified: deleting a reported file,
+        named or under a reported directory, is refused."""
+        self.repo.git("rm", "-q", "src/main_view.rs", "src/kit/row.rs")
+        self.repo.commit("delete wiring")
+        self.assertVerdict(
+            self.repo.check(),
+            "refused: Wiring: src/main_view.rs: reported: deletes the file",
+            "refused: Wiring: src/kit/row.rs: reported: deletes the file",
+            code=1,
+        )
+
+    def test_a_reported_touch_does_not_hide_a_refusal(self):
+        """A PR that changes wiring and a rule owner together must still be refused for the rule owner, and under
+        `--owner` the reported line reads the same while the refusal becomes `would refuse`."""
+        self.repo.write("src/main_view.rs", "fn ground() {}\n")
+        self.repo.write("src/focus.rs", "fn focus() { moved() }\n")
+        self.repo.commit("wiring and a rule")
+        reported = "reported: Wiring: src/main_view.rs: reported: adds 0 lines and removes 1"
+        self.assertVerdict(
+            self.repo.check(), reported, "refused: Focus: src/focus.rs: no extension point: modifies the file", code=1
+        )
+        self.assertVerdict(
+            self.repo.check("--owner"),
+            reported,
+            "would refuse: Focus: src/focus.rs: no extension point: modifies the file",
+            code=0,
+        )
+
+    def test_a_binary_change_to_a_reported_file_is_reported(self):
+        """git counts no lines for a binary change, which append-only must refuse, but reported never needed the counts:
+        the review gate looks at the change itself. Specified: a binary change to a reported file passes and is printed
+        as `reported` with `binary change` as its reason."""
+        self.repo.write("src/main_view.rs", b"fn ground() {}\n\x00binary\n")
+        self.repo.commit("binary main view")
+        self.assertVerdict(self.repo.check(), "reported: Wiring: src/main_view.rs: reported: binary change", code=0)
+
+    def test_a_pr_cannot_move_a_rule_owner_into_the_reported_tier(self):
+        """The reported tier is the easiest rule to widen into: one table row would turn a rule owner into wiring that
+        always passes. Specified: a PR that adds a `reported` row for `src/focus.rs` to its own table and rewrites the
+        file is judged by the base's table, which has no rule for it, and is refused (exit 1)."""
+        widened = [*FIXTURE[:2], ("Focus", ["src/focus.rs", "deny.toml"], [("src/focus.rs", "reported")]), *FIXTURE[3:]]
+        self.repo.write(TABLE, table_md(widened))
+        self.repo.write("src/focus.rs", "fn focus() { rewritten_by_an_area() }\n")
+        self.repo.commit("report focus")
+        self.assertVerdict(
+            self.repo.check(), "refused: Focus: src/focus.rs: no extension point: modifies the file", code=1
+        )
 
     def test_renames_count_as_a_deletion_and_an_addition(self):
         """Moving a control out of the owned directory deletes an owned file (refused); moving an area file into a
@@ -369,7 +449,7 @@ class TableTest(unittest.TestCase):
     def test_root_level_files_and_asides_parse(self):
         """`deny.toml` has no `/` but is a path; `<U+XXXX>` in the same column is not."""
         foundations = checker.parse_table(table_md(FIXTURE), {"src/widgets/mod.rs", "src/theme.rs", "src/focus.rs",
-                                                              "deny.toml", TABLE})
+                                                              "deny.toml", TABLE, "src/main_view.rs", "src/kit/row.rs"})
         self.assertEqual(foundations[2].owned, ["src/focus.rs", "deny.toml"])
 
     def test_the_checked_in_table_is_valid(self):

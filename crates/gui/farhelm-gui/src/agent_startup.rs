@@ -14,6 +14,21 @@
 //! (`crates/farhelm-desktop/src/agent.rs`). With both unset an agent build starts like any other. A value that does not
 //! parse fails startup rather than being ignored, so a batch never captures the default look under a wrong label.
 
+// The bridge's socket is unauthenticated, and on a Mac the local agent sessions run as the same user, so a build that
+// contains it lets any of them click Allow on its own approval card (SPEC_impl.md, "How the rules are enforced"). Shipped
+// builds and devbuilds are optimized builds (`--release`, or the `dist` profile that inherits from it), so refusing the
+// feature wherever debug assertions are off keeps it out of both without having to name each profile. A debug build
+// that turns debug assertions off by hand is refused too, which costs nothing: the bridge is only for development runs.
+//
+// The guard lives here rather than in the crate root because this module is compiled into every build and is the
+// bridge's own, in the refused tier of `docs/gpui/foundation-ownership.md`; the crate root is reported wiring, where
+// a change that dropped the guard would be caught only by review.
+#[cfg(all(feature = "agent", not(debug_assertions)))]
+compile_error!(
+    "the `agent` feature (the test-automation bridge) is for debug builds only; it must never reach a release or \
+     devbuild, whose optimized profiles turn debug assertions off"
+);
+
 use gpui::{App, Global, Pixels, Size, px, size};
 
 use crate::theme::Preference;
