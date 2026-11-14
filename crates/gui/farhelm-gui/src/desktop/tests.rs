@@ -303,3 +303,30 @@ impl gpui::Render for Blank {
         div()
     }
 }
+
+/// The window commands must act when they arrive the way a menu click or a key does: GPUI dispatches those from inside
+/// the active window's own update, and a handler that updated that window directly did nothing at all (Zoom, Minimize
+/// and Toggle Full Screen were dead in the real menu bar). Specified: Toggle Full Screen dispatched through the focused
+/// window puts it in full screen, and again takes it out. (Full screen is the one window command GPUI's test platform
+/// carries out; the others share the same path.)
+#[gpui::test]
+fn a_window_command_dispatched_in_the_window_acts_on_it(cx: &mut TestAppContext) {
+    test_support::install(cx);
+    let (_, window) = test_support::open_view(cx, |_, _| Blank);
+    let fullscreen =
+        |window: &mut gpui::VisualTestContext| window.update(|window, _| window.is_fullscreen());
+    assert!(
+        !fullscreen(window),
+        "the premise: the window starts windowed"
+    );
+    assert!(
+        window.update(|window, cx| cx.active_window() == Some(window.window_handle())),
+        "the premise: it is the active window, which the command acts on"
+    );
+    window.dispatch_action(ToggleFullScreen);
+    test_support::settle(window);
+    assert!(fullscreen(window), "Toggle Full Screen entered full screen");
+    window.dispatch_action(ToggleFullScreen);
+    test_support::settle(window);
+    assert!(!fullscreen(window), "and left it again");
+}
