@@ -75,9 +75,9 @@ pub(crate) fn install_app_state(cx: &mut App) -> anyhow::Result<()> {
     gpui_component::init(cx);
     cx.text_system().add_fonts(assets::ui_fonts())?;
     cx.text_system().add_fonts(assets::terminal_fonts())?;
-    // The persisted choice will come from the helm's preferences (the maintainer decided on 2026-11-13 that appearance
-    // is a helm preference, not a per-device one); until then every launch starts at System, the old app's default (an
-    // agent run may force light or dark, see `starting_preference`).
+    // Every launch starts at System, the old app's default, until the first snapshot brings the choice stored in the
+    // helm's preferences, which the main view then follows (`settings::follow_stored_appearance`). An agent run may
+    // force light or dark instead, and then keeps it for the whole run (see `starting_preference`).
     theme::install(starting_preference(cx), cx.window_appearance(), cx);
     actions::install(cx);
     focus::install(cx);
@@ -137,7 +137,7 @@ fn report_if_missing<T>(present: bool) {
 
 /// The appearance preference a launch starts with: System, the old app's default, unless an agent run forced one
 /// ([`crate::agent_startup`]). Only agent builds install overrides from the environment, so every other launch starts
-/// at System; a test may install overrides of its own.
+/// at System until the first snapshot brings the stored choice; a test may install overrides of its own.
 fn starting_preference(cx: &App) -> Preference {
     crate::agent_startup::current(cx)
         .preference

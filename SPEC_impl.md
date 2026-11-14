@@ -367,12 +367,12 @@ owned paths in `docs/gpui/foundation-ownership.md`), which is not a device-local
 one. The window itself, its size included, is not part of the UI session and is untouched. The settings the old app kept
 per device (appearance, sidebar width, host rail, status sounds, terminal text size) become helm preferences in the new
 app, so they return with the new snapshot like the rest of the helm's state (maintainer decision, 2026-11-13). SPEC.md
-no longer calls the sidebar width per device; it still calls the others per device until the changes that move them. The
-store fed by the channel holds only helm state. Half-typed drafts do not survive, and neither do open dialogs and menus:
-going inert closes every layer through the layer manager (`layers::close_all`). Menus would close anyway with the ground
-they are anchored to, but a dialog closes only when its opener or its subject says so, and one left open would keep its
-veil over the inert window, taking the clicks and Tab presses meant for Take back or Retry. Work the helm accepted
-continues independently of the reset.
+no longer calls the sidebar width or appearance per device; it still calls the others per device until the changes that
+move them. The store fed by the channel holds only helm state. Half-typed drafts do not survive, and neither do open
+dialogs and menus: going inert closes every layer through the layer manager (`layers::close_all`). Menus would close
+anyway with the ground they are anchored to, but a dialog closes only when its opener or its subject says so, and one
+left open would keep its veil over the inert window, taking the clicks and Tab presses meant for Take back or Retry.
+Work the helm accepted continues independently of the reset.
 
 What never gets written again on the GUI side: lost-reply reconciliation, retry keys, request fences, outcome-unknown
 reports, and their tests. On the helm side only machinery that existed solely for the old GUI goes; idempotency the
