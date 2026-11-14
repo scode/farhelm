@@ -273,6 +273,16 @@
       "reference": "rename-dialog"
     },
     {
+      "golden": "checkbox",
+      "title": "The checkbox, off, on, and on but unavailable",
+      "reference": null
+    },
+    {
+      "golden": "switch",
+      "title": "The Settings switch, off, on, and on but unavailable",
+      "reference": "settings-notifications"
+    },
+    {
       "golden": "text-input-growing",
       "title": "The growing multi-line text box, grown to its text and held at its cap",
       "reference": "launcher-scrolled-end"

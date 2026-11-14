@@ -369,6 +369,8 @@ pub mod metrics {
     pub const RADIUS_SM: Pixels = px(3.);
     /// `--radius-md`: panels, cards, dialogs, tooltips.
     pub const RADIUS_MD: Pixels = px(4.);
+    /// `--radius-lg`: pill-ish shapes (the Settings switch's track).
+    pub const RADIUS_LG: Pixels = px(8.);
     /// The common control text size (`.btn`, `.menu-item`, tooltips, dialog summaries).
     pub const TEXT_SM: Pixels = px(12.);
     /// Row titles and settings choices.

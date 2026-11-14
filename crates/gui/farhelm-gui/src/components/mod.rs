@@ -15,6 +15,7 @@
 
 mod banner;
 mod button;
+mod checkbox;
 mod dialog;
 mod list_row;
 mod menu_item;
@@ -26,6 +27,7 @@ mod tests;
 
 pub use banner::Banner;
 pub use button::{Button, IconButton, Tier};
+pub use checkbox::Checkbox;
 pub use dialog::DialogFrame;
 pub(crate) use dialog::dialog_shadow;
 pub use gpui::Role;
@@ -97,8 +99,8 @@ pub(crate) fn with_hover_help<E: StatefulInteractiveElement>(
 /// A control's activation handler: what a click, or Enter or Space while the control has focus, does.
 pub(crate) type Handler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
-/// Make Enter and Space activate `element`, the focused control, the way a click does: the one key rule every control
-/// shares, so the controls cannot drift apart on it.
+/// Make Enter and Space activate `element`, the focused control, the way a click does: the key rule the buttons and
+/// menu items share, so they cannot drift apart on it. (The checkbox takes Space only, as a native checkbox did.)
 ///
 /// A held key does not repeat the activation and a modified key (Shift+Enter, say) is not an activation: SPEC.md,
 /// "Repeated or composing Enter cannot answer the new question", whose case is a held Enter that confirmed a question

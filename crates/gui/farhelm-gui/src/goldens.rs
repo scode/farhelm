@@ -30,7 +30,7 @@ use farhelm_proto::DeleteGuard;
 
 use crate::assets::Icon;
 use crate::components::{
-    Button, DialogFrame, HoverHelp, IconButton, Role, TextInput, TextInputState, Tier,
+    Button, Checkbox, DialogFrame, HoverHelp, IconButton, Role, TextInput, TextInputState, Tier,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -115,6 +115,38 @@ impl Render for SceneView {
 
 /// Scenes with nothing to set up.
 fn no_setup(_: &SceneState, _: &mut Window, _: &mut App) {}
+
+/// The checkbox, off, on, and on but unavailable: the old app's native checkbox tinted with the accent.
+fn checkboxes(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    let help = || HoverHelp::tooltip("Golden scene control");
+    let checkbox =
+        |id: &'static str, label: &'static str| Checkbox::new(id, label, help(), Role::CheckBox);
+    div()
+        .flex()
+        .gap(px(16.))
+        .items_center()
+        .child(checkbox("off", "Resume"))
+        .child(checkbox("on", "Resume").checked(true))
+        .child(checkbox("on-off", "Resume").checked(true).disabled(true))
+        .into_any_element()
+}
+
+/// The Settings switch, off, on, and on but unavailable (`.control-switch` in the old stylesheet).
+fn switches(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    let help = || HoverHelp::tooltip("Golden scene control");
+    let switch =
+        |id: &'static str| Checkbox::new(id, "Play a sound", help(), Role::Switch).switch();
+    // Each in a box as wide as a narrow Settings row, since a switch row spans its container.
+    let row = |switch: Checkbox| div().w(px(200.)).child(switch);
+    div()
+        .flex()
+        .gap(px(24.))
+        .items_center()
+        .child(row(switch("off")))
+        .child(row(switch("on").checked(true)))
+        .child(row(switch("on-off").checked(true).disabled(true)))
+        .into_any_element()
+}
 
 /// Every button tier, a disabled main action and an icon button, in one row.
 fn buttons(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
@@ -1067,6 +1099,18 @@ static SCENES: &[Scene] = &[
         size: (320., 140.),
         draw: kept_line_breaks,
         setup: kept_line_breaks_setup,
+    },
+    Scene {
+        name: "checkbox",
+        size: (360., 48.),
+        draw: checkboxes,
+        setup: no_setup,
+    },
+    Scene {
+        name: "switch",
+        size: (700., 48.),
+        draw: switches,
+        setup: no_setup,
     },
     Scene {
         name: "text-input-growing",
