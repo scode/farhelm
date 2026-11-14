@@ -2380,22 +2380,22 @@ client of this helm; existing controls with a natural place in the main UI stay 
 every client reads the helm's preference once after connecting and writes it on change, so a window opens in the same
 order and on the same session after a reconnect as before it. Per-client persistence — a desktop state file, anything
 that lets two clients remember different answers — is not wanted for these shared preferences, including welcome-card
-and announcement dismissal (appearance, sidebar width, host rail expansion, terminal text size and sound switches, by
-contrast, are deliberately per device; see Session list, Terminal experience and Status). A client that asks the helm
-for no particular order gets creation time. No mandatory hierarchy. Sessions may carry an optional parent reference
-usable by the API, but parentage does not nest the list and implies nothing about VCS state. Parent tracking is not
-comprehensive: `farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the
-asking session.
+and announcement dismissal (appearance, host rail expansion, terminal text size and sound switches, by contrast, are
+deliberately per device; see Session list, Terminal experience and Status). A client that asks the helm for no
+particular order gets creation time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by
+the API, but parentage does not nest the list and implies nothing about VCS state. Parent tracking is not comprehensive:
+`farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the asking session.
 
 The sidebar can be resized by dragging its right edge, between 296px and 656px, with 396px as the default. Its 56px host
 rail leaves the session column between 240px and 600px, with 340px as the default. Double-click the edge to reset it, or
-focus the separator and use Left and Right to step by 10px. Its width is remembered per device, like terminal text size:
-it is about the screen in front of the user, rather than a preference all clients should share. The main pane keeps its
-320px floor; a narrower window scrolls horizontally. Expanding the rail adds 164px to the sidebar's shown width and
-takes that space from the main pane, preserving the session column's width when there is room. In narrower windows the
-sidebar grows only as far as the window allows while leaving the main pane its minimum width; the session column gives
-up the remainder. Collapsing gives the width back. The stored resize width and its range keep their meaning, independent
-of rail expansion.
+focus the separator and use Left and Right to step by 10px. Decided by the maintainer on 2026-11-13: the width is a helm
+preference shared by every client, written when a drag ends and on each double-click or step; it starts at the default
+with the desktop app, which carries over no width an earlier app remembered. The main pane keeps its 320px floor; a
+narrower window scrolls horizontally. Expanding the rail adds 164px to the sidebar's shown width and takes that space
+from the main pane, preserving the session column's width when there is room. In narrower windows the sidebar grows only
+as far as the window allows while leaving the main pane its minimum width; the session column gives up the remainder.
+Collapsing gives the width back. The stored resize width and its range keep their meaning, independent of rail
+expansion.
 
 Host setup, removal, uninstall and refusal dialogs normally pin their header and answers. A window too short to fit them
 scrolls the whole card, so every explanation and control stays reachable. A shortened heading retains the full
