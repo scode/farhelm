@@ -93,7 +93,10 @@ pub enum Icon {
 
 impl Icon {
     /// Every icon, for the asset listing and the test that each one is bundled.
-    pub const ALL: [Icon; 9] = [
+    ///
+    /// A slice, one entry per line, so that a new icon only adds a line: the extension point in
+    /// `docs/gpui/foundation-ownership.md` is append-only, and a length in the type would change with every addition.
+    pub const ALL: &[Icon] = &[
         Icon::Close,
         Icon::More,
         Icon::Trash,
@@ -155,7 +158,8 @@ impl AssetSource for Assets {
 
     fn list(&self, path: &str) -> gpui::Result<Vec<SharedString>> {
         Ok(Icon::ALL
-            .into_iter()
+            .iter()
+            .copied()
             .map(Icon::path)
             .filter(|asset| asset.starts_with(path))
             .map(SharedString::from)

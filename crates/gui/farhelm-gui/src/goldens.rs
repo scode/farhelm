@@ -1008,7 +1008,11 @@ fn session_lists(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement
         .into_any_element()
 }
 
-static SCENES: [Scene; 22] = [
+/// Every golden scene. A slice, one scene per entry, so that a new scene only adds lines (the append-only extension
+/// point in `docs/gpui/foundation-ownership.md`). A length in the type changed with every addition, and during two
+/// rebases jj's automatic merge left that length wrong without a conflict marker; both were caught and fixed by hand
+/// before building.
+static SCENES: &[Scene] = &[
     Scene {
         name: "buttons",
         size: (560., 64.),
@@ -1180,7 +1184,7 @@ fn component_goldens() -> anyhow::Result<()> {
         std::fs::create_dir_all(&references)?;
     }
     let mut failures = Vec::new();
-    for scene in &SCENES {
+    for scene in SCENES {
         for (appearance, preference) in [("light", Preference::Light), ("dark", Preference::Dark)] {
             let name = format!("{}--{appearance}.png", scene.name);
             let mut cx = test_support::headless()?;
