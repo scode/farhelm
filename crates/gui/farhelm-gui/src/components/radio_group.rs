@@ -534,17 +534,8 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
             // Tests find a control by its id; this records nothing outside test builds.
             .debug_selector(|| self.id.to_string())
             .when(named, |group| {
-                group
-                    .role(self.role)
-                    .aria_label(self.label.clone())
-                    // The group's help is its accessible description, as every control's is (`HoverHelp`). Its hover
-                    // listener cannot go on this element (see the surface below), so the text is read here directly
-                    // rather than through `with_hover_help`, which would add that listener; this module sits inside
-                    // the one that keeps the text private, and the surface still wires the help through the shared
-                    // rule.
-                    .aria_description(self.help.description())
+                group.role(self.role).aria_label(self.label.clone())
             })
-            .relative()
             .flex()
             .map(|group| {
                 if stacked {
@@ -565,21 +556,11 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
                 .rounded(metrics::RADIUS_MD)
                 .bg(theme::color(palette.well)),
         };
-        // The group's own hover help is wired to a surface laid over the whole group, after the options, because GPUI
-        // tells hover listeners about a pointer move from the last drawn to the first: drawn last, this surface hears
-        // first, so an option's help, heard after it, wins whenever the pointer is over an option. Wired on the group
-        // itself, it would be heard after the options and replace their help. The group's help shows when the pointer
-        // reaches a gap or the edge from outside the group; moving from an option onto a gap does not bring it back,
-        // since the surface was hovered all along and hears no new hover. The surface takes no presses, so clicks reach
-        // the options under it. Its id is an integer, which no option's `Name` id (`<id>-<label>`) can equal.
-        let surface = div()
-            .id(ElementId::Integer(0))
-            .absolute()
-            .top_0()
-            .left_0()
-            .size_full();
-        let surface = super::with_hover_help(surface, &self.id, &self.help, false, window, cx);
-        group.children(options).child(surface)
+        // The group's help shows over its gaps and edge, and an option's over the option: the layer manager shows the
+        // innermost control's help (`with_hover_help`). It is also the group's accessible description, as every
+        // control's is, except for the generic container, which takes no description (module docs).
+        let group = super::with_hover_help(group, &self.id, &self.help, named, window, cx);
+        group.children(options)
     }
 }
 

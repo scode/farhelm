@@ -544,16 +544,25 @@ otherwise shows the pill again on the new anchor when a session opens or closes.
 replaces, and hiding takes down only the pill that show returned; `layers::show_pill` says when a second pill would need
 a slot of its own.
 
+One tooltip shows at a time. When a control with hover help sits inside another that has its own (a session row's marks
+inside the row), the innermost one under the pointer shows its help, as the old app's tooltip took the help nearest the
+element under the pointer, and moving from it back onto the control around it shows that control's help. GPUI reports
+hovers in an order that depends on why they changed (last drawn first on a pointer move, in drawing order when a frame
+moves controls under a still pointer), and a pointer moving back onto the outer control tells only the inner one, so the
+layer manager decides from every hovered control once each event has been handled, never from whichever hover arrived
+last.
+
 Enforced by clippy bans on GPUI's `deferred` and `anchored` outside the layer manager; by `disallowed-types` on GPUI
 Kit's Dialog, Sheet, Popover, HoverCard, PopupMenu, ContextMenu, DropdownMenu, Notification and Tooltip, and its Select,
 Combobox and DatePicker, which draw their dropdowns through `deferred` and `anchored` (dropdowns go through the layer
 manager instead); by `disallowed-methods` on Kit's `open_dialog`, `open_sheet` and `push_notification`, the
 `.tooltip(..)` methods on Kit controls, and the `context_menu` and `dropdown_menu` extension methods; and by the overlay
 invariant checked after every test step (every open popover's anchor was drawn, and a popover that never takes focus
-does not hold it). The Kit bans apply inside the component layer too: only the layer manager draws overlays. Kit Input's
-built-in right-click menu is disabled, matching today's app, whose release builds have no context menu. That a pill's
-view takes no input is held by review: the layer manager cannot see inside it, and its tests show a press passing
-through a view that asks for nothing.
+does not hold it); the nested hover help rule by tests of a pointer landing on the inner control in one move, moving
+between it and the outer one, a frame drawing both under a still pointer, and the inner one going away. The Kit bans
+apply inside the component layer too: only the layer manager draws overlays. Kit Input's built-in right-click menu is
+disabled, matching today's app, whose release builds have no context menu. That a pill's view takes no input is held by
+review: the layer manager cannot see inside it, and its tests show a press passing through a view that asks for nothing.
 
 ### Questions: the prompt
 

@@ -446,6 +446,393 @@ fn a_tooltip_closes_when_its_control_is_no_longer_drawn(cx: &mut TestAppContext)
     assert_eq!(tooltip(cx), None, "its tooltip went with it");
 }
 
+// ---- Nested hover help ----------------------------------------------------------------------------------------------
+
+/// The row's help in the nested hover help tests.
+const ROW_HELP: &str = "Open this session";
+/// The row's help once its session has changed (a session row's help follows its status).
+const ROW_HELP_LATER: &str = "Stopped; open this session";
+/// The help of the mark inside that row.
+const MARK_HELP: &str = "Last activity 12:00";
+
+/// A session row's shape, for the nested hover help tests: a row control with help of its own, holding a mark with
+/// its own after a title, as the session list's age and live dot sit inside their row. The row is drawn while `row`
+/// holds and the mark while `mark` does, and the row's help is whatever `row_help` holds when it is drawn. The row
+/// stands 40 pixels in from the window's corner, so (1, 1) is over neither, and its 12-pixel left padding is over the
+/// row alone.
+fn nested_help(
+    row: Rc<Cell<bool>>,
+    mark: Rc<Cell<bool>>,
+    row_help: Rc<Cell<&'static str>>,
+) -> impl Fn(&mut Window, &mut gpui::App) -> gpui::AnyElement + 'static {
+    move |_, _| {
+        let line = div()
+            .flex()
+            .gap(px(8.))
+            .child("Title")
+            .when(mark.get(), |line| {
+                line.child(super::StatusMark::new(
+                    "age",
+                    "Age",
+                    HoverHelp::tooltip(MARK_HELP),
+                    Role::Status,
+                    "2m",
+                ))
+            });
+        div()
+            .pt(px(40.))
+            .pl(px(40.))
+            .w(px(340.))
+            .when(row.get(), |area| {
+                area.child(
+                    super::ListRow::new(
+                        "row",
+                        "Session",
+                        HoverHelp::tooltip(row_help.get()),
+                        Role::Button,
+                    )
+                    .line(line),
+                )
+            })
+            .into_any_element()
+    }
+}
+
+/// The row's help as a cell [`nested_help`] reads, starting at [`ROW_HELP`].
+fn row_help() -> Rc<Cell<&'static str>> {
+    Rc::new(Cell::new(ROW_HELP))
+}
+
+/// Open [`nested_help`] with the row and its mark drawn, the row's help read from `help`, and the pointer resting over
+/// neither.
+fn open_nested<'a>(
+    cx: &'a mut TestAppContext,
+    help: Rc<Cell<&'static str>>,
+) -> &'a mut VisualTestContext {
+    let cx = open(
+        cx,
+        nested_help(Rc::new(Cell::new(true)), Rc::new(Cell::new(true)), help),
+    );
+    cx.simulate_mouse_move(point(px(1.), px(1.)), None, Modifiers::none());
+    check(cx);
+    cx
+}
+
+/// The mark's center, after checking the fixture's premise that the mark lies inside its row, without which the tests
+/// would no longer be about nesting.
+fn on_mark_in_row(cx: &mut VisualTestContext) -> gpui::Point<gpui::Pixels> {
+    let on_mark = center(cx, "age");
+    assert!(
+        bounds(cx, "row").contains(&on_mark),
+        "the premise: the mark lies inside the row"
+    );
+    on_mark
+}
+
+/// A point over the row alone: in its left padding, level with the mark.
+fn on_row_only(cx: &mut VisualTestContext) -> gpui::Point<gpui::Pixels> {
+    let (row, mark) = (bounds(cx, "row"), center(cx, "age"));
+    assert!(
+        mark.x > row.left() + px(12.),
+        "the premise: the mark is clear of the row's padding"
+    );
+    point(row.left() + px(4.), mark.y)
+}
+
+/// A pointer that lands on a mark inside a row in one move (a fast mouse, the bridge's hover) makes the row and the
+/// mark hovered on the same frame, and GPUI tells the row last. The mark's help is what the user pointed at: with the
+/// last news winning, the row's help covered every mark's (the session row's live dot, age and stale cause).
+/// Specified: from outside both, one move onto the mark shows the mark's help after the hover delay, and one move from
+/// the mark back out of both takes it down.
+#[gpui::test]
+fn a_pointer_landing_on_a_mark_inside_a_row_shows_the_marks_help(cx: &mut TestAppContext) {
+    let cx = open_nested(cx, row_help());
+    assert_eq!(tooltip(cx), None, "the premise: no help shows");
+
+    let on_mark = on_mark_in_row(cx);
+    cx.simulate_mouse_move(on_mark, None, Modifiers::none());
+    check(cx);
+    assert_eq!(tooltip(cx), None, "nothing shows before the hover delay");
+    wait_hover_delay(cx);
+    assert_eq!(
+        tooltip(cx).as_deref(),
+        Some(MARK_HELP),
+        "the mark's help, not the row's"
+    );
+
+    cx.simulate_mouse_move(point(px(1.), px(1.)), None, Modifiers::none());
+    check(cx);
+    assert_eq!(tooltip(cx), None, "leaving both hid it");
+    wait_hover_delay(cx);
+    assert_eq!(tooltip(cx), None, "and nothing came back");
+}
+
+/// Moving between a mark and the row around it shows the help of whichever is under the pointer. The way back is the
+/// case GPUI does not announce: the row was hovered all along, so only the mark hears that the pointer left it, and the
+/// row's help never came back. The row's help on the way back is what it says then, not what it said when the pointer
+/// first came onto it: a session row's help follows its status, which can change while the pointer rests on a mark.
+/// Specified: resting on the row alone shows the row's help; moving onto the mark shows the mark's at once (a tooltip
+/// is already showing); moving back onto the row alone shows the row's at once; and after the row's help changes
+/// while the pointer is on the mark, moving back onto the row shows the new help.
+#[gpui::test]
+fn moving_between_a_mark_and_its_row_shows_the_help_under_the_pointer(cx: &mut TestAppContext) {
+    let help = row_help();
+    let cx = open_nested(cx, help.clone());
+    let on_row = on_row_only(cx);
+    cx.simulate_mouse_move(on_row, None, Modifiers::none());
+    wait_hover_delay(cx);
+    assert_eq!(
+        tooltip(cx).as_deref(),
+        Some(ROW_HELP),
+        "the premise: the row's help shows"
+    );
+
+    let on_mark = on_mark_in_row(cx);
+    cx.simulate_mouse_move(on_mark, None, Modifiers::none());
+    check(cx);
+    assert_eq!(
+        tooltip(cx).as_deref(),
+        Some(MARK_HELP),
+        "row to mark: the mark's help, at once"
+    );
+
+    cx.simulate_mouse_move(on_row, None, Modifiers::none());
+    check(cx);
+    assert_eq!(
+        tooltip(cx).as_deref(),
+        Some(ROW_HELP),
+        "mark to row: the row's help, at once"
+    );
+
+    cx.simulate_mouse_move(on_mark, None, Modifiers::none());
+    check(cx);
+    help.set(ROW_HELP_LATER);
+    redraw(cx);
+    assert_eq!(
+        tooltip(cx).as_deref(),
+        Some(MARK_HELP),
+        "the premise: the mark's help shows while the row's changes"
+    );
+    cx.simulate_mouse_move(on_row, None, Modifiers::none());
+    check(cx);
+    assert_eq!(
+        tooltip(cx).as_deref(),
+        Some(ROW_HELP_LATER),
+        "mark to row: the row's help as it is now"
+    );
+}
+
+/// A pointer move, a press and a release can reach the app in one update, before the move's hover news has settled:
+/// the test bridge sends a click that way. The press must still put away the help of the control it lands on, the
+/// innermost one, not the one around it; an in-app drive found a radio option's help showing right after a bridge
+/// click on it. Specified: a move from outside onto a mark inside a row, a press and a release sent in one update leave
+/// no help showing after the hover delay.
+#[gpui::test]
+fn a_press_in_the_same_update_as_the_move_onto_a_mark_puts_the_marks_help_away(
+    cx: &mut TestAppContext,
+) {
+    let cx = open_nested(cx, row_help());
+    let on_mark = on_mark_in_row(cx);
+    cx.update(|window, cx| {
+        window.dispatch_event(
+            gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+                position: on_mark,
+                pressed_button: None,
+                modifiers: Modifiers::none(),
+            }),
+            cx,
+        );
+        window.dispatch_event(
+            gpui::PlatformInput::MouseDown(gpui::MouseDownEvent {
+                button: MouseButton::Left,
+                position: on_mark,
+                modifiers: Modifiers::none(),
+                click_count: 1,
+                first_mouse: false,
+            }),
+            cx,
+        );
+        window.dispatch_event(
+            gpui::PlatformInput::MouseUp(gpui::MouseUpEvent {
+                button: MouseButton::Left,
+                position: on_mark,
+                modifiers: Modifiers::none(),
+                click_count: 1,
+            }),
+            cx,
+        );
+    });
+    check(cx);
+    wait_hover_delay(cx);
+    assert_eq!(tooltip(cx), None, "the press put the mark's help away");
+}
+
+/// A frame that brings a row and its mark under a still pointer (a scroll, a row appearing) tells GPUI's hover
+/// listeners in drawing order, row first: the reverse of a pointer move's order, so a rule built for one alone gets the
+/// other wrong. Specified: with the pointer resting where the mark will be, drawing the row shows the mark's help after
+/// the hover delay.
+#[gpui::test]
+fn a_mark_drawn_under_a_still_pointer_shows_its_help_over_its_rows(cx: &mut TestAppContext) {
+    let row = Rc::new(Cell::new(true));
+    let cx = open(
+        cx,
+        nested_help(row.clone(), Rc::new(Cell::new(true)), row_help()),
+    );
+    let on_mark = center(cx, "age");
+    row.set(false);
+    redraw(cx);
+    cx.simulate_mouse_move(on_mark, None, Modifiers::none());
+    wait_hover_delay(cx);
+    assert_eq!(
+        tooltip(cx),
+        None,
+        "the premise: nothing is under the pointer"
+    );
+
+    row.set(true);
+    redraw(cx);
+    assert!(
+        bounds(cx, "age").contains(&on_mark),
+        "the premise: the mark is drawn under the pointer"
+    );
+    wait_hover_delay(cx);
+    assert_eq!(tooltip(cx).as_deref(), Some(MARK_HELP));
+}
+
+/// A mark that stops being drawn while the pointer rests on it (a session's live dot going when it stops) takes its
+/// help with it, and no hover event says the pointer is now over the row alone. The same frame changes the row's help
+/// (the row's words follow the session's status), and with the pointer still no move brings the new words, so the
+/// row's help that comes back must be the one it was drawn with. Specified: the mark's help goes when the mark does,
+/// and the row's new help shows after the hover delay.
+#[gpui::test]
+fn a_mark_no_longer_drawn_under_the_pointer_gives_its_row_its_help_back(cx: &mut TestAppContext) {
+    let mark = Rc::new(Cell::new(true));
+    let help = row_help();
+    let cx = open(
+        cx,
+        nested_help(Rc::new(Cell::new(true)), mark.clone(), help.clone()),
+    );
+    let on_mark = center(cx, "age");
+    cx.simulate_mouse_move(on_mark, None, Modifiers::none());
+    wait_hover_delay(cx);
+    assert_eq!(
+        tooltip(cx).as_deref(),
+        Some(MARK_HELP),
+        "the premise: the mark's help shows"
+    );
+
+    mark.set(false);
+    help.set(ROW_HELP_LATER);
+    redraw(cx);
+    assert!(
+        cx.debug_bounds("age").is_none() && bounds(cx, "row").contains(&on_mark),
+        "the premise: the mark is gone and the pointer is over the row"
+    );
+    assert_eq!(tooltip(cx), None, "the mark's help went with it");
+    wait_hover_delay(cx);
+    assert_eq!(tooltip(cx).as_deref(), Some(ROW_HELP_LATER));
+}
+
+/// Two buttons side by side with help of their own, for the tests of a pointer moving inside one control.
+fn two_buttons() -> impl Fn(&mut Window, &mut gpui::App) -> gpui::AnyElement + 'static {
+    |_, _| {
+        div()
+            .flex()
+            .gap(px(8.))
+            .child(Button::new(
+                "save",
+                "Save",
+                HoverHelp::tooltip("Save the title"),
+                Role::Button,
+            ))
+            .child(Button::new(
+                "rename",
+                "Rename",
+                HoverHelp::tooltip("Give it a new title"),
+                Role::Button,
+            ))
+            .into_any_element()
+    }
+}
+
+/// Points inside the control drawn under `selector`, a few pixels either side of its center, for a pointer moving
+/// within it.
+fn inside(cx: &mut VisualTestContext, selector: &'static str) -> [gpui::Point<gpui::Pixels>; 3] {
+    let at = bounds(cx, selector);
+    let center = at.center();
+    let points = [
+        center,
+        point(center.x + px(3.), center.y),
+        point(center.x - px(3.), center.y),
+    ];
+    assert!(
+        points.iter().all(|point| at.contains(point)),
+        "the premise: every point is inside {selector}"
+    );
+    points
+}
+
+/// Every pointer move over a control with help reaches the layer manager now, and what keeps a move inside the same
+/// control from acting is that its help is still the one the pointer calls for. Without that, each move over a showing
+/// tooltip would show it again and redraw the window, the cost the cached list's tests guard against at another level.
+/// Specified: moving inside a control while its help shows keeps that help and draws no frame.
+#[gpui::test]
+fn moving_inside_a_control_whose_help_shows_redraws_nothing(cx: &mut TestAppContext) {
+    let cx = open(cx, two_buttons());
+    let [first, _, third] = inside(cx, "save");
+    cx.simulate_mouse_move(first, None, Modifiers::none());
+    wait_hover_delay(cx);
+    assert_eq!(
+        tooltip(cx).as_deref(),
+        Some("Save the title"),
+        "the premise: its help shows"
+    );
+
+    cx.update(|_, cx| crate::render_count::reset(cx));
+    cx.simulate_mouse_move(third, None, Modifiers::none());
+    check(cx);
+    assert_eq!(tooltip(cx).as_deref(), Some("Save the title"));
+    assert_eq!(
+        cx.update(|_, cx| crate::render_count::count("scene", cx)),
+        0,
+        "a move inside the control drew no frame"
+    );
+}
+
+/// A press puts a control's help away, as the old app's `tooltip.js` did on any `pointerdown`, and it stays away while
+/// the pointer rests there: a Settings section button's tooltip otherwise came back over the section it had just
+/// opened. Specified: with a control's help showing, a click takes it down; a move inside the control and the hover
+/// delay show nothing; moving onto the other control shows that one's help after the delay.
+#[gpui::test]
+fn a_press_puts_a_controls_help_away_while_the_pointer_rests_on_it(cx: &mut TestAppContext) {
+    let cx = open(cx, two_buttons());
+    let [first, second, _] = inside(cx, "save");
+    cx.simulate_mouse_move(first, None, Modifiers::none());
+    wait_hover_delay(cx);
+    assert_eq!(
+        tooltip(cx).as_deref(),
+        Some("Save the title"),
+        "the premise: its help shows"
+    );
+
+    cx.simulate_click(first, Modifiers::none());
+    check(cx);
+    assert_eq!(tooltip(cx), None, "the press put it away");
+    cx.simulate_mouse_move(second, None, Modifiers::none());
+    wait_hover_delay(cx);
+    assert_eq!(
+        tooltip(cx),
+        None,
+        "resting on the control brought nothing back"
+    );
+
+    let on_rename = center(cx, "rename");
+    cx.simulate_mouse_move(on_rename, None, Modifiers::none());
+    check(cx);
+    wait_hover_delay(cx);
+    assert_eq!(tooltip(cx).as_deref(), Some("Give it a new title"));
+}
+
 /// The value the host-sentence help test below names: a direction override, markup-like text and a newline, which
 /// would reverse, pose as formatting or forge a second line if they reached the tooltip raw.
 const SPOOFED_HOST: &str = "a\u{202E}<b>\n";
@@ -2278,11 +2665,11 @@ fn a_radio_group_reports_its_role_and_which_option_is_chosen(cx: &mut TestAppCon
     }
 }
 
-/// Every option has help of its own, and so does the group; the group's must never cover an option's, because GPUI
-/// tells the group about a pointer move after its options, so help wired to the group itself would replace the
-/// option's on every move straight onto it. Specified: a pointer moving from empty space straight onto B shows B's help
-/// after the hover delay; resting on the group's edge, outside every option, shows the group's; moving on from there
-/// onto A shows A's at once.
+/// Every option has help of its own, and so does the group around them; the group's must never cover an option's.
+/// GPUI tells the group about a pointer move after its options, so with the last news winning, the group's help would
+/// replace the option's on every move straight onto it. Specified: a pointer moving from empty space straight onto B
+/// shows B's help after the hover delay; resting on the group's edge, outside every option, shows the group's; moving
+/// on from there onto A shows A's at once, and moving from A back onto the edge shows the group's again at once.
 #[gpui::test]
 fn an_options_help_wins_over_the_groups_which_shows_at_its_edge(cx: &mut TestAppContext) {
     let options = &[("A", false), ("B", false)];
@@ -2317,6 +2704,17 @@ fn an_options_help_wins_over_the_groups_which_shows_at_its_edge(cx: &mut TestApp
         tooltip(cx),
         Some("Use A".into()),
         "A's help replaced it at once"
+    );
+    cx.simulate_mouse_move(
+        point(group.left() + px(2.), group.center().y),
+        None,
+        Modifiers::none(),
+    );
+    check(cx);
+    assert_eq!(
+        tooltip(cx),
+        Some("Pick a theme".into()),
+        "back on the edge, the group's help came back at once"
     );
 }
 
