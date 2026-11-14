@@ -32,7 +32,7 @@
 //!   that list: a successful Rename closes its editor either way, as the field's docs say.
 //! - A refusal is reported where its subject is shown: [`Operations::failure`] keeps the helm's words until the next
 //!   operation on that key starts (SPEC.md, for sessions: "A failure or partial result appears on the source
-//!   session's row"). Nothing here retries.
+//!   session's row"). A partial result goes in the same place ([`Operations::note`]). Nothing here retries.
 //!
 //! A reset retires the store with its UI session ([`crate::session`]): every task, and with it every completion
 //! callback, is dropped, as are the recorded failures. A completion that was already on its way reaches nobody, and
@@ -227,7 +227,8 @@ pub struct Settled {
     pub user_moved_on: bool,
 }
 
-/// A refusal recorded on the key it was for, for whatever shows that subject (a session's row, an editor) to show.
+/// A refusal, or a partial result ([`Operations::note`]), recorded on the key it was for, for whatever shows that
+/// subject (a session's row, an editor) to show.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Failure {
     pub work: Work,
@@ -253,7 +254,8 @@ struct InFlight {
     _task: Task<()>,
 }
 
-/// The operation store of one UI session: the work in flight on each key, and the last refusal of each.
+/// The operation store of one UI session: the work in flight on each key, and the last refusal or partial result of
+/// each.
 ///
 /// Views read it while drawing, through [`crate::session::current_operations`], and keep no handle across draws, as
 /// with the store. Every change notifies, so a row drawn busy redraws when its operation settles.
@@ -287,8 +289,8 @@ impl Operations {
         self.in_flight.values().any(|running| matches(running.work))
     }
 
-    /// The last refusal of work on `key`, until the next operation on it starts. A key whose subject is gone (a deleted
-    /// session) keeps its entry until the UI session resets; nothing draws it, since nothing asks.
+    /// The last refusal or partial result of work on `key`, until the next operation on it starts. A key whose subject
+    /// is gone (a deleted session) keeps its entry until the UI session resets; nothing draws it, since nothing asks.
     pub fn failure(&self, key: &OpKey) -> Option<&Failure> {
         self.failures.get(key)
     }
@@ -373,6 +375,27 @@ impl Operations {
             outcome,
             user_moved_on: focus::has_moved_on(mark, cx),
         })
+    }
+
+    /// Record a partial result of `work` on `key` in the place a refusal goes ([`Operations::failure`]), with the same
+    /// lifetime: the key's next [`Operations::start`] or a reset clears it. For work the helm accepted that still left
+    /// something for the user to read: a Stop whose host could not close a tab, a Replace whose removal of its source
+    /// reported something. It replaces whatever the key held. A retired store records nothing.
+    ///
+    /// Call it from the completion of the work it reports: a note recorded while newer work runs on the key would
+    /// outlive that work, since a successful finish does not clear the slot.
+    pub fn note(
+        &mut self,
+        key: &OpKey,
+        work: Work,
+        message: HostText,
+        cx: &mut Context<Operations>,
+    ) {
+        if self.retired {
+            return;
+        }
+        self.failures.insert(key.clone(), Failure { work, message });
+        cx.notify();
     }
 
     /// The reset retired this store's UI session: drop every waiting task and recorded failure, and start nothing

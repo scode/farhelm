@@ -22,7 +22,7 @@ use crate::components::{HoverHelp, TextInput, TextInputState};
 use crate::drafts::{self, Draft, DraftInput};
 use crate::host_text::HostText;
 use crate::main_view::MainView;
-use crate::operations::{Command, NotStarted, OpKey, Operations, Outcome, Settled, Work};
+use crate::operations::{Command, Failure, NotStarted, OpKey, Operations, Outcome, Settled, Work};
 use crate::session::{self, Connection};
 use crate::test_support::{self, keys, meta, session_entry, sessions, started};
 
@@ -317,6 +317,65 @@ fn work_started_from_a_view_settles_after_the_view_is_gone(cx: &mut TestAppConte
             Some((Work::Rename, HostText::from_host("refused")))
         );
     });
+}
+
+/// A Stop whose host could not close a tab, or a Replace whose removal of its source reported something, succeeded but
+/// left words the row must show, in the place and for as long as a refusal's words. Specified: a note on a key shows as
+/// its failure with the work and words given; a second note replaces it; starting work on the key clears it; and a
+/// note on a retired store records nothing.
+#[gpui::test]
+fn a_partial_result_shows_where_a_refusal_does_until_the_next_start(cx: &mut TestAppContext) {
+    let (mut fake, _connection) = connected(&["a"], cx);
+    let first = operations(cx);
+    let key = OpKey::session("a");
+    // Stop and Replace, the notes' first users, have no work kind yet; any kind shows the same way.
+    let note = |operations: &Entity<Operations>, words: &str, cx: &mut TestAppContext| {
+        let message = HostText::from_host(words);
+        cx.update(|cx| {
+            operations.update(cx, |operations, cx| {
+                operations.note(&key, Work::Save, message, cx)
+            })
+        });
+    };
+    note(&first, "the tab stayed open", cx);
+    note(&first, "the host kept one tab", cx);
+    assert_eq!(
+        cx.update(|cx| first.read(cx).failure(&key).cloned()),
+        Some(Failure {
+            work: Work::Save,
+            message: HostText::from_host("the host kept one tab"),
+        }),
+        "the later note is what the row shows"
+    );
+    let delivered = Delivered::default();
+    start(
+        &first,
+        ("a", rename("a", "new")),
+        "rename a",
+        &delivered,
+        cx,
+    )
+    .unwrap();
+    assert_eq!(
+        cx.update(|cx| first.read(cx).failure(&key).cloned()),
+        None,
+        "starting work on the key cleared the note"
+    );
+
+    fake.break_channel();
+    fake.connect(vec![sessions(&["a"])]);
+    cx.run_until_parked();
+    assert_eq!(
+        start(&first, ("a", rename("a", "late")), "late", &delivered, cx),
+        Err(NotStarted::Retired),
+        "the premise: the reconnect retired the first store"
+    );
+    note(&first, "after the reset", cx);
+    assert_eq!(
+        cx.update(|cx| first.read(cx).failure(&key).cloned()),
+        None,
+        "the retired store recorded nothing"
+    );
 }
 
 /// A reset drops the UI's waiting, never the helm's work: SPEC_impl.md says dropping a waiter never cancels work the
