@@ -89,6 +89,8 @@ pub enum Icon {
     /// A ring with one solid quarter: work under way that the user is waiting for (a Delete). Drawn turned a step at a
     /// time, never still-shaped like a status mark.
     Spinner,
+    /// A tick: the mark in a checked checkbox (drawn for this app, in the shape of the platform checkbox's tick).
+    Check,
 }
 
 impl Icon {
@@ -106,6 +108,7 @@ impl Icon {
         Icon::StatusUnseen,
         Icon::StatusIdle,
         Icon::Spinner,
+        Icon::Check,
     ];
 }
 
@@ -122,6 +125,7 @@ impl Icon {
             Icon::StatusUnseen => "icons/status-unseen.svg",
             Icon::StatusIdle => "icons/status-idle.svg",
             Icon::Spinner => "icons/spinner.svg",
+            Icon::Check => "icons/check.svg",
         }
     }
 }
@@ -146,6 +150,7 @@ impl Assets {
             "icons/status-unseen.svg" => Some(include_bytes!("../assets/icons/status-unseen.svg")),
             "icons/status-idle.svg" => Some(include_bytes!("../assets/icons/status-idle.svg")),
             "icons/spinner.svg" => Some(include_bytes!("../assets/icons/spinner.svg")),
+            "icons/check.svg" => Some(include_bytes!("../assets/icons/check.svg")),
             _ => None,
         }
     }

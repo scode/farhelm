@@ -19,11 +19,13 @@ use gpui::{
 use gpui::prelude::FluentBuilder as _;
 
 use super::{
-    Button, DialogFrame, HoverHelp, OptionRow, Role, TextInput, TextInputEvent, TextInputState,
-    Tier, Vertical,
+    Button, Checkbox, DialogFrame, HoverHelp, OptionRow, Role, TextInput, TextInputEvent,
+    TextInputState, Tier, Vertical,
 };
 use crate::layers;
-use crate::test_support::{advance, bounds, center, check, click, frame, keys, open, redraw};
+use crate::test_support::{
+    advance, bounds, center, check, click, focused_id, frame, keys, open, redraw,
+};
 
 /// A click activates an enabled button, and a disabled one ignores it: the old app's disabled buttons were inert, and a
 /// dimmed button that still acted would send a command the user was told was unavailable.
@@ -924,4 +926,180 @@ fn an_option_row_activates_on_a_click_and_never_takes_focus(cx: &mut TestAppCont
         row,
         Some((Some(Role::ListBoxOption), Some("First result".into())))
     );
+}
+
+// ---- The checkbox and the switch ----------------------------------------------------------------------------------
+
+/// Open a window drawing one checkbox under `resume` whose checked state lives in `checked`, toggled by its handler,
+/// inside a parent that counts the Enter presses reaching it, with the switch look when `switch` and unavailable while
+/// `disabled` holds. Hands back the Enter count.
+fn open_checkbox<'a>(
+    cx: &'a mut TestAppContext,
+    checked: &Rc<Cell<bool>>,
+    disabled: &Rc<Cell<bool>>,
+    switch: bool,
+) -> (&'a mut VisualTestContext, Rc<Cell<usize>>) {
+    let enters = Rc::new(Cell::new(0));
+    let (state, off, heard) = (checked.clone(), disabled.clone(), enters.clone());
+    let cx = open(cx, move |_, _| {
+        let (state, heard) = (state.clone(), heard.clone());
+        let role = if switch { Role::Switch } else { Role::CheckBox };
+        let checkbox = Checkbox::new("resume", "Resume", HoverHelp::tooltip("Resume it"), role)
+            .checked(state.get())
+            .disabled(off.get())
+            .on_toggle(move |next, _, _| state.set(next));
+        let checkbox = if switch { checkbox.switch() } else { checkbox };
+        div()
+            .on_key_down(move |event: &gpui::KeyDownEvent, _, _| {
+                if event.keystroke.key == "enter" {
+                    heard.set(heard.get() + 1);
+                }
+            })
+            .child(checkbox)
+            .into_any_element()
+    });
+    (cx, enters)
+}
+
+/// The old app's checkboxes and Settings switches were native checkboxes, and a setting that toggled on Enter, or did
+/// not toggle on a click on its words, would surprise anyone who used the old one; an unavailable one must not change
+/// a setting at all. Specified, for both looks: a click on the control and a click on its words each toggle it,
+/// handing the owner the new value; with focus on it, a press of Space toggles it once (its release and a held repeat
+/// do not toggle it again) and Enter, pressed and released, does not (it goes on to what holds it); while unavailable,
+/// neither a click nor Space toggles it.
+#[gpui::test]
+fn a_checkbox_toggles_on_a_click_or_space_and_not_on_enter(cx: &mut TestAppContext) {
+    for switch in [false, true] {
+        let look = if switch { "switch" } else { "checkbox" };
+        let checked = Rc::new(Cell::new(false));
+        let disabled = Rc::new(Cell::new(false));
+        let (cx, enters) = open_checkbox(cx, &checked, &disabled, switch);
+        click(cx, "resume");
+        assert!(checked.get(), "{look}: a click turned it on");
+        let words = bounds(cx, "resume");
+        let near_end = if switch {
+            words.left() + px(4.)
+        } else {
+            words.right() - px(4.)
+        };
+        cx.simulate_click(gpui::point(near_end, words.center().y), Modifiers::none());
+        check(cx);
+        assert!(!checked.get(), "{look}: a click on its words turned it off");
+
+        // The tests run under Linux's rule, where a click focuses a control: the clicks above left focus on it.
+        assert_eq!(
+            focused_id(cx).as_deref(),
+            Some("resume"),
+            "{look}: the premise: it has focus"
+        );
+        press(cx, "space", false);
+        assert!(checked.get(), "{look}: Space turned it on");
+        // Draw the new state before the release, so a toggle on the release would turn it off again rather than set
+        // the value it already has.
+        redraw(cx);
+        release(cx, "space");
+        assert!(
+            checked.get(),
+            "{look}: releasing Space did not toggle it back"
+        );
+        press(cx, "space", true);
+        assert!(
+            checked.get(),
+            "{look}: a held Space did not toggle it again"
+        );
+        release(cx, "space");
+        press(cx, "enter", false);
+        release(cx, "enter");
+        assert!(
+            checked.get(),
+            "{look}: Enter, pressed and released, did not toggle it"
+        );
+        assert_eq!(enters.get(), 1, "{look}: Enter went on to what holds it");
+
+        disabled.set(true);
+        redraw(cx);
+        click(cx, "resume");
+        press(cx, "space", false);
+        release(cx, "space");
+        assert!(
+            checked.get(),
+            "{look}: unavailable, neither a click nor Space toggled it"
+        );
+    }
+}
+
+/// Press `chord` (with `held`, as an auto-repeat of a key already down), as the platform reports a key-down.
+fn press(cx: &mut VisualTestContext, chord: &'static str, held: bool) {
+    cx.simulate_event(gpui::KeyDownEvent {
+        native_key: None,
+        keystroke: gpui::Keystroke::parse(chord).unwrap(),
+        is_held: held,
+        prefer_character_input: false,
+    });
+    cx.run_until_parked();
+    check(cx);
+}
+
+/// Release `chord`. GPUI turns the release of an Enter or Space pressed on a focused element into a click, which only a
+/// test that sends the release can see.
+fn release(cx: &mut VisualTestContext, chord: &'static str) {
+    cx.simulate_event(gpui::KeyUpEvent {
+        native_key: None,
+        keystroke: gpui::Keystroke::parse(chord).unwrap(),
+    });
+    cx.run_until_parked();
+    check(cx);
+}
+
+/// On macOS with Keyboard navigation off, Tab reaches text fields and pop-ups only, and WebKit treated a checkbox as a
+/// button there, so Tab skipped it (SPEC.md, "Keyboard focus"); with every control reached, as on Linux, Tab lands on it.
+/// A checkbox given the pop-up rule instead would be a Tab stop a Mac user never had. Specified: with Tab reaching text
+/// fields and pop-ups only, Tab from nothing focused does not focus the checkbox; with every control reached, it does.
+#[gpui::test]
+fn tab_reaches_a_checkbox_only_where_it_reaches_every_control(cx: &mut TestAppContext) {
+    let checked = Rc::new(Cell::new(false));
+    let disabled = Rc::new(Cell::new(false));
+    let (cx, _) = open_checkbox(cx, &checked, &disabled, false);
+    let reach = Rc::new(Cell::new(crate::focus::TabReach::TextFieldsAndPopups));
+    crate::test_support::follow(cx, &reach);
+    assert_eq!(focused_id(cx), None, "the premise: nothing has focus yet");
+    keys(cx, "tab");
+    assert_ne!(focused_id(cx).as_deref(), Some("resume"), "Tab skipped it");
+    reach.set(crate::focus::TabReach::EveryControl);
+    keys(cx, "tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("resume"),
+        "with every control reached, Tab focused it"
+    );
+}
+
+/// Assistive technology and the test bridge read a checkbox's state from its role and its checked state; a control
+/// drawn checked but reported unchecked would tell a screen reader the opposite of the screen. Specified: the checkbox
+/// reports the check box role and the switch the switch role, each with its label as its name, and each reports
+/// checked or not checked as drawn.
+#[gpui::test]
+fn a_checkbox_reports_its_role_and_whether_it_is_checked(cx: &mut TestAppContext) {
+    for (switch, role) in [(false, Role::CheckBox), (true, Role::Switch)] {
+        let checked = Rc::new(Cell::new(false));
+        let disabled = Rc::new(Cell::new(false));
+        let (cx, _) = open_checkbox(cx, &checked, &disabled, switch);
+        for on in [false, true] {
+            checked.set(on);
+            let node = frame(cx)
+                .into_iter()
+                .find(|node| node.element_id.as_deref() == Some("resume"))
+                .map(|node| (node.role, node.label, node.toggled));
+            let toggled = if on {
+                gpui::Toggled::True
+            } else {
+                gpui::Toggled::False
+            };
+            assert_eq!(
+                node,
+                Some((Some(role), Some("Resume".into()), Some(toggled))),
+                "switch: {switch}, checked: {on}"
+            );
+        }
+    }
 }
