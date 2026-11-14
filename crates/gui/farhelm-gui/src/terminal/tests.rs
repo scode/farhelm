@@ -49,6 +49,7 @@ fn fed(recording: &str, replay_complete: bool) -> TerminalView {
     }
     let damage = view.model.take_damage();
     view.update_grid(damage);
+    view.update_shown();
     view
 }
 
@@ -206,7 +207,8 @@ fn the_cache_keeps_wire_columns_and_the_placeholder_hides_the_replay() {
 fn a_cursor_covers_a_wide_characters_whole_box() {
     let view = fed(MATRIX, true);
     let element = TerminalElement {
-        rows: view.rows.clone(),
+        rows: view.shown.clone(),
+        cursor_row: None,
         cols: view.cols,
         cursor: view.cursor,
         visible: view.visible,
@@ -214,12 +216,13 @@ fn a_cursor_covers_a_wide_characters_whole_box() {
         metrics: view.metrics,
         phase: view.phase,
         cell: Size::default(),
+        notice: None,
     };
     let mut cursor = view.cursor.unwrap();
     (cursor.x, cursor.y) = (1, 11);
-    assert_eq!(element.cursor_cell(cursor), (0, 2));
+    assert_eq!(element.cursor_cell(cursor, 11), (0, 2));
     (cursor.x, cursor.y) = (7, 14);
-    assert_eq!(element.cursor_cell(cursor), (7, 1));
+    assert_eq!(element.cursor_cell(cursor, 14), (7, 1));
 }
 
 /// Damage is final-coordinate: a frame that shifts the screen by one keeps the shifted row's cache entry (its shaped
@@ -486,6 +489,203 @@ fn shown_output_redraws_and_hidden_output_does_not(cx: &mut TestAppContext) {
             .read_with(cx, |view, _| view.terminal_text())
             .unwrap()
             .contains("new")
+    );
+}
+
+// ---- Scrollback ------------------------------------------------------------------------------------------------------
+
+/// The view's first lines of text, for the scrollback tests.
+fn shown_lines(terminal: &Entity<TerminalView>, cx: &mut TestAppContext) -> Vec<String> {
+    terminal
+        .read_with(cx, |view, _| view.terminal_text())
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// A terminal attached with the ATTACH fixture: a 4-row screen with three history lines kept (an empty one,
+/// "three", "four"; "one" fell off the 3-line cap).
+fn attached_with_history(cx: &mut TestAppContext) -> Entity<TerminalView> {
+    let (terminal, _window) = terminal_window(cx);
+    terminal.update(cx, |view, cx| {
+        let (_, applied) = view.apply(messages(ATTACH), cx);
+        applied.unwrap();
+        view.mark_replay_complete(cx).unwrap();
+    });
+    cx.run_until_parked();
+    terminal
+}
+
+/// Scrollback is a window of the screen's height onto history then the screen (SPEC.md, "Terminal experience":
+/// scrollback stays viewable): scrolling back shows the history lines above the screen, it stops at the oldest line
+/// kept, and following again shows the live screen. Scrolled back, new history does not move the view off the text
+/// it shows (it is anchored to the line, as in the old app), even when the oldest line falls off the cap.
+#[gpui::test]
+fn the_view_scrolls_into_history_and_stays_on_its_lines(cx: &mut TestAppContext) {
+    let terminal = attached_with_history(cx);
+    let screen = shown_lines(&terminal, cx);
+    assert_eq!(
+        screen[0], "$ echo",
+        "the premise: following shows the screen"
+    );
+
+    terminal.update(cx, |view, cx| view.scroll_lines(-2, cx));
+    cx.run_until_parked();
+    let lines = shown_lines(&terminal, cx);
+    assert_eq!(&lines[..3], ["three", "four", "$ echo"]);
+    assert!(!terminal.read_with(cx, |view, _| view.is_following()));
+
+    terminal.update(cx, |view, cx| view.scroll_lines(-10, cx));
+    cx.run_until_parked();
+    assert_eq!(
+        &shown_lines(&terminal, cx)[..3],
+        ["", "three", "four"],
+        "stops at the oldest line kept"
+    );
+
+    terminal.update(cx, |view, cx| view.scroll_lines(1, cx));
+    let history: GridOutput = serde_json::from_value(serde_json::json!({
+        "t":"history","first":44,"rows":[{"w":false,"r":[[0,4,"five",[0,-1,-1]]]}],"cols":20
+    }))
+    .unwrap();
+    terminal.update(cx, |view, cx| {
+        let (_, applied) = view.apply([history], cx);
+        applied.unwrap();
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        shown_lines(&terminal, cx)[0],
+        "three",
+        "the view stays on its line while history grows and the oldest falls off"
+    );
+
+    terminal.update(cx, |view, cx| view.follow(cx));
+    cx.run_until_parked();
+    assert_eq!(shown_lines(&terminal, cx)[0], "$ echo");
+    assert!(terminal.read_with(cx, |view, _| view.is_following()));
+}
+
+/// When recovery lost some history, the notice "Some earlier output could not be recovered" is the line above the
+/// oldest history line (SPEC.md, "Terminal experience"; the old app's view), reached by scrolling to the top, and
+/// never on the alternate screen, which shows no history.
+#[gpui::test]
+fn trimmed_history_shows_its_notice_above_the_oldest_line(cx: &mut TestAppContext) {
+    let terminal = attached_with_history(cx);
+    let trimmed = |alt: bool| -> GridOutput {
+        serde_json::from_value(
+            serde_json::json!({"t":"state","mouse":"off","focus":false,"alt_screen":alt,
+            "default_fg":null,"default_bg":null,"history_trimmed":true,"exit":null}),
+        )
+        .unwrap()
+    };
+    terminal.update(cx, |view, cx| {
+        let (_, applied) = view.apply([trimmed(false)], cx);
+        applied.unwrap();
+        view.scroll_lines(-10, cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(&shown_lines(&terminal, cx)[..2], [TRIMMED_TEXT, ""]);
+
+    terminal.update(cx, |view, cx| {
+        let (_, applied) = view.apply([trimmed(true)], cx);
+        applied.unwrap();
+        view.scroll_lines(-10, cx);
+    });
+    cx.run_until_parked();
+    assert!(
+        terminal.read_with(cx, |view, _| view.is_following()),
+        "the alternate screen has nothing to scroll to"
+    );
+    assert!(!shown_lines(&terminal, cx).contains(&TRIMMED_TEXT.to_owned()));
+}
+
+/// The wheel moves the view by whole lines and keeps the part of a line it moved past, so a trackpad's small steps
+/// add up instead of being lost, as the old app's wheel did; a step at another cell height starts afresh.
+#[gpui::test]
+fn wheel_pixels_add_up_to_whole_lines(cx: &mut TestAppContext) {
+    let terminal = attached_with_history(cx);
+    let cell = 20.;
+    terminal.update(cx, |view, cx| view.scroll_pixels(8., cell, cx));
+    cx.run_until_parked();
+    assert!(
+        terminal.read_with(cx, |view, _| view.is_following()),
+        "under half a line moves nothing"
+    );
+    terminal.update(cx, |view, cx| view.scroll_pixels(8., cell, cx));
+    cx.run_until_parked();
+    assert_eq!(
+        shown_lines(&terminal, cx)[0],
+        "four",
+        "two steps of 8 pixels make a line"
+    );
+    terminal.update(cx, |view, cx| view.scroll_pixels(-40., cell, cx));
+    cx.run_until_parked();
+    assert!(terminal.read_with(cx, |view, _| view.is_following()));
+}
+
+/// Scrolled back, the cursor is drawn on its screen row where that row now shows, lower by the lines scrolled, and not
+/// at all once its row has left the view; drawn at its screen position instead, it would sit on a history line the
+/// program cannot write to.
+#[gpui::test]
+fn the_cursor_moves_down_with_its_row_when_scrolled_back(cx: &mut TestAppContext) {
+    let terminal = attached_with_history(cx);
+    let cursor_row = |cx: &mut TestAppContext| terminal.read_with(cx, |view, _| view.cursor_row());
+    assert_eq!(
+        cursor_row(cx),
+        Some(2),
+        "the premise: the fixture's cursor is on screen row 2 of 4"
+    );
+    terminal.update(cx, |view, cx| view.scroll_lines(-1, cx));
+    assert_eq!(cursor_row(cx), Some(3));
+    terminal.update(cx, |view, cx| view.scroll_lines(-1, cx));
+    assert_eq!(cursor_row(cx), None, "its row is below the view");
+}
+
+/// Each way the view moves redraws it, and so does output while it is scrolled back, since new history moves the
+/// screen down under a view anchored to its line; output it does not show while it follows still redraws nothing.
+/// The other scrollback tests read the view's rows, which it rebuilds whether or not it asks for a frame, so without
+/// this a lost notify would leave the window showing stale rows and every test passing.
+#[gpui::test]
+fn scrolling_and_output_while_scrolled_back_redraw(cx: &mut TestAppContext) {
+    let terminal = attached_with_history(cx);
+    let history = |first: u64| -> GridOutput {
+        serde_json::from_value(serde_json::json!({
+            "t":"history","first":first,"rows":[{"w":false,"r":[[0,4,"more",[0,-1,-1]]]}],"cols":20
+        }))
+        .unwrap()
+    };
+    let renders = |cx: &mut TestAppContext| {
+        cx.run_until_parked();
+        let count = cx.update(|cx| render_count::count("terminal", cx));
+        cx.update(render_count::reset);
+        count
+    };
+    renders(cx);
+
+    terminal.update(cx, |view, cx| view.scroll_lines(-1, cx));
+    assert_eq!(renders(cx), 1, "a line scroll redraws");
+    terminal.update(cx, |view, cx| view.scroll_pixels(20., 20., cx));
+    assert_eq!(renders(cx), 1, "a wheel scroll redraws");
+    terminal.update(cx, |view, cx| {
+        let (_, applied) = view.apply([history(44)], cx);
+        applied.unwrap();
+    });
+    assert_eq!(
+        renders(cx),
+        1,
+        "history arriving while scrolled back redraws"
+    );
+    terminal.update(cx, |view, cx| view.follow(cx));
+    assert_eq!(renders(cx), 1, "following again redraws");
+    terminal.update(cx, |view, cx| {
+        let (_, applied) = view.apply([history(45)], cx);
+        applied.unwrap();
+    });
+    assert_eq!(
+        renders(cx),
+        0,
+        "history the following view does not show redraws nothing"
     );
 }
 

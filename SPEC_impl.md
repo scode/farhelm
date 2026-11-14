@@ -769,6 +769,10 @@ Traps that an earlier rule already prevents get one line pointing at it.
   when a refresh is ignored, so the drawn frame keeps showing nothing focused until something else redraws; found when
   dismissing this app's own banner left an idle window that way. Rule: the focus coordinator's listener asks for one
   more frame (`window.defer`).
+- **GPUI keeps a frame's input handler past that frame,** and with it a strong handle to whatever implements it. A view
+  that was its own `ElementInputHandler` outlived its retirement, focus handle included, so focus stayed on an element
+  nobody drew and the coordinator's recovery never ran (found when the terminal got its input handler). Rule: the
+  handler is a small entity of its own holding a weak reference to the view.
 - **A focus handle is a Tab stop only when built with `.tab_stop(true)`.** The default blocks Tab.
 - **A virtualized row keeps focus only if registered with `ListState::splice_focusable`.** Otherwise a focused row that
   scrolls out, or is re-spliced, fires focus-lost.

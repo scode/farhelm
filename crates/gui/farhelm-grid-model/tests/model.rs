@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use farhelm_grid_model::{
     ClipboardTarget, Color, GridModel, GridOutput, Link, Position, Selection, SelectionMode,
-    Viewport, display_text,
+    ViewRow, Viewport, display_text, position_of,
 };
 use farhelm_proto::grid::{
     Cursor, CursorShape, GRID_MAX_LINE_NUMBER, MouseMode, Row, Run, ScreenRow, Style, TerminalState,
@@ -46,6 +46,14 @@ fn send(model: &mut GridModel, message: GridOutput) {
 fn sync_view(view: &mut Viewport, model: &mut GridModel) -> bool {
     let damage = model.take_damage();
     view.synchronize(model, &damage)
+}
+
+/// The number of the line at a scrolled view's top; a test that expects the notice line there asserts it directly.
+fn top_line(view: &Viewport, model: &GridModel) -> u64 {
+    match view.row_at(model, view.top(model)) {
+        ViewRow::Line(number) => number,
+        ViewRow::Notice => panic!("the view's top is the notice line"),
+    }
 }
 
 /// Establish the mandatory hello/state prefix without completing replay.
@@ -96,14 +104,17 @@ fn viewport_anchors_survive_output_and_clamp_after_eviction() {
     sync_view(&mut view, &mut model);
     assert!(view.is_following());
     assert!(view.scroll_lines(&model, -2));
-    assert_eq!(view.top(&model), 101);
+    assert_eq!(view.top(&model), position_of(101));
     send(
         &mut model,
         history(103, 8, vec![row(false, &[(0, 1, "D")])]),
     );
     sync_view(&mut view, &mut model);
-    assert_eq!(view.top(&model), 101);
-    assert_eq!(model.line(view.top(&model)).unwrap().1.text(0, 1), "B");
+    assert_eq!(view.top(&model), position_of(101));
+    assert_eq!(
+        model.line(top_line(&view, &model)).unwrap().1.text(0, 1),
+        "B"
+    );
     send(
         &mut model,
         history(
@@ -113,15 +124,18 @@ fn viewport_anchors_survive_output_and_clamp_after_eviction() {
         ),
     );
     sync_view(&mut view, &mut model);
-    assert_eq!(view.top(&model), 102);
+    assert_eq!(view.top(&model), position_of(102));
     assert!(!view.is_following());
     assert!(!view.scroll_lines(&model, 0));
-    assert_eq!(model.line(view.top(&model)).unwrap().1.text(0, 1), "C");
+    assert_eq!(
+        model.line(top_line(&view, &model)).unwrap().1.text(0, 1),
+        "C"
+    );
     assert!(view.scroll_lines(&model, i64::MAX));
     assert!(view.is_following());
-    assert_eq!(view.top(&model), model.screen_base());
+    assert_eq!(view.top(&model), position_of(model.screen_base()));
     assert!(view.scroll_lines(&model, i64::MIN));
-    assert_eq!(view.top(&model), view.first_line(&model));
+    assert_eq!(view.top(&model), view.first(&model));
     assert!(view.follow());
     assert!(!view.follow());
 }
@@ -163,13 +177,13 @@ fn viewport_resets_on_relayout_and_hides_primary_history_on_alt_screen() {
         ),
     );
     sync_view(&mut view, &mut model);
-    view.scroll_to(&model, 901);
+    view.scroll_to(&model, position_of(901));
     let mut state = model.state().unwrap();
     state.alt_screen = true;
     send(&mut model, GridOutput::State(state));
     assert!(sync_view(&mut view, &mut model));
     assert!(view.is_following());
-    assert_eq!(view.first_line(&model), model.screen_base());
+    assert_eq!(view.first(&model), view.bottom(&model));
     assert!(!view.scroll_lines(&model, -1));
     state.alt_screen = false;
     send(&mut model, GridOutput::State(state));
@@ -178,6 +192,61 @@ fn viewport_resets_on_relayout_and_hides_primary_history_on_alt_screen() {
     send(&mut model, frame(2, 9, 4, 0));
     assert!(sync_view(&mut view, &mut model));
     assert!(view.is_following());
+}
+
+/// After a recovery the supervisor numbers the rebuilt history from line 0 and marks it trimmed. The notice line
+/// saying earlier output was lost must sit above line 0 rather than on it: numbered as a line, it once took line 0's
+/// place and hid the oldest recovered line for good. SPEC.md asks for the notice above the scrollback.
+#[test]
+fn the_notice_line_sits_above_history_that_starts_at_line_zero() {
+    let mut model = opened(8, 3, 4);
+    send(&mut model, frame(1, 8, 3, 0));
+    let mut state = model.state().unwrap();
+    state.history_trimmed = true;
+    send(&mut model, GridOutput::State(state));
+    send(
+        &mut model,
+        history(
+            0,
+            8,
+            vec![row(false, &[(0, 1, "A")]), row(false, &[(0, 1, "B")])],
+        ),
+    );
+    let mut view = Viewport::default();
+    sync_view(&mut view, &mut model);
+    assert_eq!(view.notice(&model), Some(view.first(&model)));
+    assert!(view.scroll_lines(&model, i64::MIN));
+    assert_eq!(view.row_at(&model, view.top(&model)), ViewRow::Notice);
+    assert_eq!(view.row_at(&model, view.top(&model) + 1), ViewRow::Line(0));
+    assert_eq!(view.row_at(&model, view.top(&model) + 2), ViewRow::Line(1));
+    assert_eq!(view.top(&model) + 3, view.bottom(&model));
+    assert!(view.scroll_lines(&model, 1));
+    assert_eq!(top_line(&view, &model), 0);
+    assert_eq!(model.line(0).unwrap().1.text(0, 1), "A");
+    // The alternate screen offers no history, and so no notice.
+    state.alt_screen = true;
+    send(&mut model, GridOutput::State(state));
+    sync_view(&mut view, &mut model);
+    assert_eq!(view.notice(&model), None);
+    assert_eq!(view.first(&model), view.bottom(&model));
+}
+
+/// A recovery that kept no history at all still has its notice, one row above the screen's first line (numbered 0),
+/// which a notice numbered as a line would have landed on, losing the notice behind the screen row.
+#[test]
+fn the_notice_line_sits_above_a_screen_with_no_history() {
+    let mut model = opened(8, 3, 4);
+    send(&mut model, frame(1, 8, 3, 0));
+    let mut state = model.state().unwrap();
+    state.history_trimmed = true;
+    send(&mut model, GridOutput::State(state));
+    let mut view = Viewport::default();
+    sync_view(&mut view, &mut model);
+    assert_eq!(model.screen_base(), 0);
+    assert!(view.scroll_lines(&model, -1));
+    assert_eq!(view.row_at(&model, view.top(&model)), ViewRow::Notice);
+    assert_eq!(view.top(&model) + 1, view.bottom(&model));
+    assert!(!view.scroll_lines(&model, -1));
 }
 
 /// Wire history uses safe-integer line numbers. Navigation must saturate rather than wrap to
@@ -197,10 +266,10 @@ fn viewport_navigation_saturates_at_large_absolute_line_numbers() {
     let mut view = Viewport::default();
     sync_view(&mut view, &mut model);
     view.scroll_lines(&model, i64::MIN);
-    assert_eq!(view.top(&model), GRID_MAX_LINE_NUMBER - 2);
+    assert_eq!(view.top(&model), position_of(GRID_MAX_LINE_NUMBER - 2));
     view.scroll_lines(&model, i64::MAX);
     assert!(view.is_following());
-    assert_eq!(view.top(&model), GRID_MAX_LINE_NUMBER);
+    assert_eq!(view.top(&model), position_of(GRID_MAX_LINE_NUMBER));
 }
 
 /// Commit a frame with a visible cursor safely inside every test's size.

@@ -30,7 +30,7 @@ use farhelm_proto::grid::{GridStreamCheck, Row};
 pub use link_disclosure::LinkDisclosure;
 pub use links::{LinkKind, TerminalLink, web_target};
 pub use selection::{Position, Selection, SelectionMode};
-pub use viewport::Viewport;
+pub use viewport::{ViewRow, Viewport, position_of};
 
 /// Compile one of this crate's constant patterns.
 ///
