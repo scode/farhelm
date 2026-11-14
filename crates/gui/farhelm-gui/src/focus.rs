@@ -661,6 +661,22 @@ fn pressed(handle: &FocusHandle, window: &mut Window, cx: &mut App) {
     }
 }
 
+/// The pointer moved onto `item`, a control in a menu: it takes the menu's highlight, which is keyboard focus, so Up,
+/// Down and Enter go on from where the pointer is. SPEC.md: "A menu has one highlight. Whichever moved last, the
+/// pointer or the keys, sets it". A menu item calls this when the pointer enters it, on every platform (the click rule
+/// in [`track`] is about presses, not this).
+///
+/// Only inside the topmost layer: a pointer crossing a menu that is covered, or the page behind an open menu, never
+/// takes focus out of the layer on top. Pointer movement is not a press, so it does not count as the user moving on.
+pub fn highlight(item: &FocusHandle, window: &mut Window, cx: &mut App) {
+    let Some(top) = layers::top_container(window, cx) else {
+        return;
+    };
+    if top.contains(item, window) && !item.is_focused(window) {
+        apply(Move::To(item), window, cx);
+    }
+}
+
 /// Focus `handle` because a layer just opened and it is where that layer starts (the layer manager calls this).
 pub(crate) fn enter_layer(handle: &FocusHandle, window: &mut Window, cx: &mut App) {
     apply(Move::To(handle), window, cx);

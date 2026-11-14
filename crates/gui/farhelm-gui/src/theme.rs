@@ -101,6 +101,8 @@ pub struct Palette {
     pub ok: Token,
     /// `--warn`: the amber label tone.
     pub warn: Token,
+    /// `--warn-bright`: amber prose, which needs more lift than a label does; a question's consequence lines.
+    pub warn_bright: Token,
     /// `--danger`: the red text tone of destructive actions and waiting.
     pub danger: Token,
     /// `--danger-strong`: failure prose on ordinary surfaces.
@@ -149,6 +151,7 @@ pub const DARK: Palette = Palette {
     border_dialog: rgb_token(0x59667c),
     ok: rgb_token(0x7fcf9a),
     warn: rgb_token(0xe5bb6e),
+    warn_bright: rgb_token(0xead09b),
     danger: rgb_token(0xee8a8a),
     danger_strong: rgb_token(0xf09595),
     danger_soft: rgb_token(0xf2c0c4),
@@ -197,6 +200,7 @@ pub const LIGHT: Palette = Palette {
     border_dialog: rgb_token(0xb8c2d3),
     ok: rgb_token(0x276a43),
     warn: rgb_token(0x79531b),
+    warn_bright: rgb_token(0x694719),
     danger: rgb_token(0xa63e4d),
     danger_strong: rgb_token(0xa13443),
     danger_soft: rgb_token(0xf2c0c4),

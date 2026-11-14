@@ -24,7 +24,7 @@ pub use banner::Banner;
 pub use button::{Button, IconButton, Tier};
 pub use dialog::DialogFrame;
 pub use gpui::Role;
-pub use text_input::{TextInput, TextInputState};
+pub use text_input::{TextInput, TextInputEvent, TextInputState};
 
 use gpui::{App, ElementId, SharedString, StatefulInteractiveElement, Window};
 

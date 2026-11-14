@@ -5,14 +5,24 @@
 //! stylesheet). That guarantee is what kept answers reachable at small window sizes, a bug class the old app fixed one
 //! dialog at a time; here every dialog gets it from the frame. The frame only lays out: the layer manager places it,
 //! draws the veil behind it and keeps focus inside it.
+//!
+//! A dialog may also have the shared header Close control SPEC.md gives editors such as Rename ("a shared title and
+//! Close header"): the old `.dialog-close` "×" at the header's top right. Drawn in the header, it comes first in Tab
+//! order, before the body's fields and the answers (SPEC.md for Rename: "Tab follows Close, the title field, Cancel,
+//! Save"). Its label and help are each dialog's own, as they were in the old app ("Close rename", "Close rename; keep
+//! the current title"), and so is what it does.
+//!
+//! NOTE: The old Close changed only its color on hover; here it is a ghost icon button, which gets the ghost tier's
+//! hover fill. The old one was a 20-pixel "×" character; here it is the close icon at the icon buttons' size.
 
 use gpui::{
-    AnyElement, App, BoxShadow, ElementId, FontWeight, InteractiveElement, IntoElement,
+    AnyElement, App, BoxShadow, ClickEvent, ElementId, FontWeight, InteractiveElement, IntoElement,
     ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Window, div,
     point, px,
 };
 
-use super::Button;
+use super::{Button, HoverHelp, IconButton};
+use crate::assets::Icon;
 use crate::host_text::Line;
 use crate::theme::{self, metrics};
 
@@ -29,6 +39,7 @@ pub struct DialogFrame {
     summary: Option<Line>,
     body: AnyElement,
     answers: Vec<Button>,
+    close: Option<IconButton>,
 }
 
 impl DialogFrame {
@@ -45,7 +56,32 @@ impl DialogFrame {
             summary: None,
             body: body.into_any_element(),
             answers,
+            close: None,
         }
+    }
+
+    /// Give the frame the header Close control: `label` is its accessible name ("Close rename"), `help` its hover help,
+    /// and `on_close` what it does, which is the dialog's own business (closing its layer, usually, with whatever its
+    /// Cancel does to a draft). It is an ordinary button: a click or Enter or Space while it has focus runs `on_close`.
+    ///
+    /// `disabled` draws it unavailable, ignoring activation and out of Tab's reach, as a disabled button is. A dialog
+    /// passes the same value it gives its Cancel: SPEC.md has Rename's "Close uses the same cancellation and busy-state
+    /// rules as Cancel", and the old app disabled both while a rename was saving (`rename.rs` at reference commit
+    /// `24bc0580`).
+    pub fn close(
+        mut self,
+        label: impl Into<SharedString>,
+        help: HoverHelp,
+        disabled: bool,
+        on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        let id = format!("{}-close", self.id);
+        self.close = Some(
+            IconButton::new(id, Icon::Close, label, help, Role::Button)
+                .disabled(disabled)
+                .on_click(on_close),
+        );
+        self
     }
 
     /// A one-line summary under the title (the old `.dialog-summary`): app wording as a string, or a
@@ -89,7 +125,12 @@ impl RenderOnce for DialogFrame {
             .bg(theme::color(palette.control_hover))
             .border_b_1()
             .border_color(theme::color(palette.border_dim))
-            .child(heading);
+            .child(heading)
+            // `align-self: flex-start`: the Close sits level with the title, not centered on a two-line heading.
+            .children(
+                self.close
+                    .map(|close| div().flex_shrink_0().self_start().child(close)),
+            );
         let body = div()
             .id(ElementId::Name(format!("{}-body", self.id).into()))
             .debug_selector(|| format!("{}-body", self.id))

@@ -34,11 +34,16 @@
     {
       "golden": "prompt",
       "title": "A confirmation from the prompt foundation",
-      "reference": "row-delete-confirmation"
+      "reference": "host-remove-confirmation"
     },
     {
       "golden": "prompt-host-text",
       "title": "A confirmation whose summary names a host-supplied title, escaped",
+      "reference": "host-remove-confirmation"
+    },
+    {
+      "golden": "anchored-prompt",
+      "title": "A confirmation from the prompt foundation, anchored to a row's menu button",
       "reference": "row-delete-confirmation"
     },
     {

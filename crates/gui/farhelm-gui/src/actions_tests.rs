@@ -24,9 +24,9 @@ use gpui_component::Root;
 
 use crate::actions::{
     CONTEXT, DeleteSession, KeyOwner, RenameSession, TERMINAL_CONTEXT, TERMINAL_KEYS,
-    THIS_PLATFORM, owner_on, terminal_key_owner,
+    TEXT_INPUT_CONTEXT, THIS_PLATFORM, owner_on, terminal_key_owner,
 };
-use crate::components::{Button, HoverHelp, Role};
+use crate::components::{Button, HoverHelp, Role, TextInput, TextInputState};
 use crate::focus::{self, OnPress};
 use crate::{layers, test_support};
 use farhelm_input_mapping::Platform;
@@ -672,4 +672,81 @@ fn a_listed_chord_that_a_deeper_binding_takes_keeps_its_repeats(cx: &mut TestApp
         "the deeper binding ran for the press and each repeat"
     );
     assert_eq!(opened.runs_of(name), 0, "{name} never ran");
+}
+
+/// Why this matters: SPEC.md, "Desktop window chrome": "The Linux chord leaves text editors other than the terminal
+/// alone." Ctrl+Shift+Backspace deletes the open session, and Farhelm's binding of it sits above every text field, so
+/// without the text field's own `NoAction` row a user deleting words in the Rename field or a filter would be asked to
+/// delete their session instead. The row names GPUI Kit's input context, which Kit keeps private, so this also catches
+/// a Kit upgrade renaming it.
+///
+/// Specification: a focused Kit text field has [`TEXT_INPUT_CONTEXT`] in its context stack; with the Delete shortcut
+/// bound on the Linux chord in Farhelm's context, the chord pressed in the field runs nothing and leaves its text as it
+/// was; pressed on a button, it runs Delete.
+#[gpui::test]
+fn the_linux_delete_chord_leaves_a_text_field_alone(cx: &mut TestAppContext) {
+    let chord = "ctrl-shift-backspace";
+    let ran = Rc::new(Cell::new(0));
+    let field: Rc<RefCell<Option<TextInputState>>> = Rc::new(RefCell::new(None));
+    let button_focus = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let (counted, kept, focus) = (ran.clone(), field.clone(), button_focus.clone());
+    let cx = test_support::open(cx, move |window, cx| {
+        let state = kept
+            .borrow_mut()
+            .get_or_insert_with(|| TextInputState::new(window, cx))
+            .clone();
+        let counted = counted.clone();
+        div()
+            .flex()
+            .gap(px(8.))
+            .on_action(move |_: &DeleteSession, _, _| counted.set(counted.get() + 1))
+            .child(
+                div()
+                    .debug_selector(|| "field-box".into())
+                    .w(px(120.))
+                    .child(TextInput::new(
+                        "field",
+                        &state,
+                        "Filter",
+                        HoverHelp::tooltip("A test field"),
+                    )),
+            )
+            .child(
+                Button::new(
+                    "control",
+                    "control",
+                    HoverHelp::tooltip("A test control"),
+                    Role::Button,
+                )
+                .focus(&focus),
+            )
+            .into_any_element()
+    });
+    cx.update(|_, cx| cx.bind_keys([KeyBinding::new(chord, DeleteSession, Some(CONTEXT))]));
+    let state = field.borrow().clone().expect("the field was drawn");
+
+    test_support::click(cx, "field-box");
+    test_support::keys(cx, "a b");
+    let stack = cx.update(|window, _| window.context_stack());
+    assert!(
+        stack
+            .iter()
+            .any(|context| context.contains(TEXT_INPUT_CONTEXT)),
+        "the premise: the focused field is in Kit's input context: {stack:?}"
+    );
+    test_support::keys(cx, chord);
+    assert_eq!(ran.get(), 0, "the chord in the field ran nothing");
+    assert_eq!(
+        cx.update(|_, cx| state.text(cx)).as_ref(),
+        "ab",
+        "and left the field's text alone"
+    );
+
+    test_support::keys(cx, "tab");
+    assert!(
+        cx.update(|window, _| button_focus.is_focused(window)),
+        "the premise: the button has focus"
+    );
+    test_support::keys(cx, chord);
+    assert_eq!(ran.get(), 1, "outside a text field the chord runs Delete");
 }
