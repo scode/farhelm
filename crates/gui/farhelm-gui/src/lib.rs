@@ -30,6 +30,7 @@
 //! - [`assets`]: the bundled fonts and icons.
 //! - [`terminal`]: a session terminal's renderer, an uncached view that owns its grid model.
 //! - [`marks`]: the agent harnesses' marks as plain geometry, kept from the old Dioxus UI.
+//! - [`launcher`]: the session launcher (New, Clone, Replace with, Restart with).
 //!
 //! Still to come, each under its own module: the rest of actions and keys.
 //!
@@ -51,6 +52,7 @@ pub mod components;
 pub mod drafts;
 pub mod focus;
 pub mod host_text;
+pub mod launcher;
 pub mod layers;
 pub mod local_state;
 pub mod main_view;
