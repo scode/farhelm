@@ -746,14 +746,16 @@ systemd or SSH substrate ran.
   header's Restart relaunches it: its terminal shows the resumed launch's marker and the helm lists it live again; and
   at the host rail's foot, a click on Hosts shows host management and a second hides it, with focus on Hosts throughout,
   and a click on the gear opens Settings with focus on its first switch, and Escape closes it with focus back on the
-  gear. A failed run keeps its run directory under `/tmp` for its logs. An interrupted one (Ctrl-C, or SIGTERM from the
+  gear; and a click on the rail's Add host opens the Add host dialog, and Escape closes it with focus back on Add host.
+  A failed run keeps its run directory under `/tmp` for its logs. An interrupted one (Ctrl-C, or SIGTERM from the
   recorder) still stops its app run, for which the recorder's `--termination-grace` leaves it time. Under 30 seconds on
   a build worker with the app already built (4 and 18 s measured, 23 s once the seen toggle's step was added); it builds
   the app first unless given `--no-build`. Needs what `gui-agent.py start` needs (`mutter`, `dbus-run-session` and
   lavapipe on Linux, or a logged-in GUI session of the same user on a Mac). CI does not run it. Run it when the app's
   session list, row menu, session header, Delete, Rename, Stop, Restart, Replace, Mark read and Mark unread, quick
-  switcher, host rail and its foot (Hosts and the Settings gear), sidebar width or divider, terminal attach, paste, text
-  input or scrollback, the bridge's wiring, the app's startup or `scripts/gui-agent.py` change.
+  switcher, host rail (Add host among its entries) and its foot (Hosts and the Settings gear), sidebar width or divider,
+  terminal attach, paste, text input or scrollback, the bridge's wiring, the app's startup or `scripts/gui-agent.py`
+  change.
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh` — the curl-installer is POSIX
   `sh` run unread on a fresh machine (`curl | sh`), so a syntax slip or a shellcheck-catchable bug in it gets caught
   before the slower Rust-side asset-table parity test in `assets.rs` would notice. `test-install-sh.sh` is bash, not

@@ -1,7 +1,7 @@
 //! Tests of the host rail: its entries and their names, the session query a choice sends and how the helm's answer
 //! settles it, the chip, the empty state of a host with no sessions, the placeholder of a removed host, the status of a
-//! host list never read, a reset, the keyboard, the foot's Hosts control and Settings gear, and the rail's width in
-//! the sidebar.
+//! host list never read, a reset, the keyboard, Add host and the keyboard's reach below the rail's fold, the foot's
+//! Hosts control and Settings gear, and the rail's width in the sidebar.
 //!
 //! Like the list's other tests, these run the real main view over the helm client's fake, which hands the test every
 //! command the window sent, and read controls from GPUI's driver record of the frame by their ids (`host-rail-all`,
@@ -28,6 +28,7 @@ use serde_json::{Value, json};
 use super::{Choice, empty_host, identity, refusal_words};
 use crate::host_text::HostText;
 use crate::host_text::tests::SPOOFING_CORPUS;
+use crate::hosts::add::tests::Opened;
 use crate::hosts::identity::LOCAL_NAME;
 use crate::main_view::MainView;
 use crate::session_list::tests::{change, listing, open_main, painted, preferences, session};
@@ -287,10 +288,10 @@ fn hover_help(cx: &mut VisualTestContext, selector: &'static str) -> Option<Stri
 /// stays out of it, its sessions under All. An avatar's name and tooltip are its identity (the old `rail_identity`),
 /// which a screen reader user hears in place of the mark and the caption. Specified: over the local host, an aliased
 /// remote, an unaliased one and a session-owned container, the rail draws All, then the three registered hosts in
-/// registry order and nothing for the container; All is named "All hosts" and pressed, the avatars are not pressed and
-/// are named "Local (this machine)", the alias with its destination in parentheses, and the bare destination (which
-/// is also its name, so no suffix); each avatar's caption is a node with no role (hidden from assistive technology),
-/// and the local caption paints "Local".
+/// registry order and nothing for the container, then Add host; All is named "All hosts" and pressed, the avatars are
+/// not pressed and are named "Local (this machine)", the alias with its destination in parentheses, and the bare
+/// destination (which is also its name, so no suffix); each avatar's caption is a node with no role (hidden from
+/// assistive technology), and the local caption paints "Local".
 #[gpui::test]
 fn the_rail_lists_all_then_registered_hosts_in_order_with_their_names(cx: &mut TestAppContext) {
     let (_fake, cx) = open_main(cx, snapshot());
@@ -301,7 +302,8 @@ fn the_rail_lists_all_then_registered_hosts_in_order_with_their_names(cx: &mut T
             "host-rail-all",
             "host-rail-host-1",
             "host-rail-host-3",
-            "host-rail-host-2"
+            "host-rail-host-2",
+            "host-rail-add"
         ]
     );
     assert_eq!(label(&nodes, "host-rail-all"), "All hosts");
@@ -380,7 +382,8 @@ fn a_hosts_names_are_shown_and_named_escaped(cx: &mut TestAppContext) {
 /// SPEC.md: "a failed first read invents no hosts". The rail then says the host list could not be loaded, and still
 /// offers All, which needs no registry. Specified: a hosts collection whose first read failed (unavailable, no hosts)
 /// and a snapshot with no hosts collection at all each draw All pressed and, after it, the "?" status named "The host
-/// list could not be loaded" with the status role, and no avatar.
+/// list could not be loaded" with the status role, and no avatar; Add host still follows, since adding a host needs no
+/// host list.
 #[gpui::test]
 fn a_host_list_never_read_shows_the_unavailable_status(cx: &mut TestAppContext) {
     let mut failed = hosts(&[]);
@@ -392,7 +395,7 @@ fn a_host_list_never_read_shows_the_unavailable_status(cx: &mut TestAppContext) 
         let nodes = frame(cx);
         assert_eq!(
             rail_entries(&nodes),
-            ["host-rail-all", "host-rail-unavailable"]
+            ["host-rail-all", "host-rail-unavailable", "host-rail-add"]
         );
         assert!(pressed(&nodes, "host-rail-all"));
         let status = node(&nodes, "host-rail-unavailable").unwrap();
@@ -571,10 +574,10 @@ fn the_chip_names_the_chosen_host_and_removes_the_choice(cx: &mut TestAppContext
 
 /// Removing the filter takes away the control the user just used (the chip goes with the filter), and SPEC.md sends
 /// focus to the rail's All then ("After a clear button or the chip removes its focused control, focus returns to the
-/// rail's All button"), where the coordinator's ordinary rule would send it home to the terminal. Specified: a click
-/// on the chip leaves focus on All, whatever a click focuses on this platform; and by keyboard alone, from All, Tab
-/// twice and Space choose host 3, Tab twice more reaches the chip, and Enter on it removes the filter and leaves focus
-/// on All. Each removal sends `{}`.
+/// rail's All button"), where the coordinator's ordinary rule would send it home to the terminal. Specified: a click on
+/// the chip leaves focus on All, whatever a click focuses on this platform; and by keyboard alone, from All, Tab twice
+/// and Space choose host 3, Tab three times more (host 2, Add host) reaches the chip, and Enter on it removes the
+/// filter and leaves focus on All. Each removal sends `{}`.
 #[gpui::test]
 fn clearing_the_filter_by_keyboard_or_click_focuses_all(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot());
@@ -603,7 +606,7 @@ fn clearing_the_filter_by_keyboard_or_click_focuses_all(cx: &mut TestAppContext)
     );
     fake.reply(query.id, 204, None);
     cx.run_until_parked();
-    test_support::keys(cx, "tab tab");
+    test_support::keys(cx, "tab tab tab");
     assert_eq!(
         focused_id(cx).as_deref(),
         Some("host-filter-chip"),
@@ -1022,8 +1025,8 @@ fn choosing_all_or_a_host_returns_from_the_panel_to_sessions(cx: &mut TestAppCon
 /// between them, before the foot; in GPUI, Tab follows the order controls are drawn in, which is why the list draws the
 /// foot after its own column. A foot drawn inside the rail would put Hosts and the gear between the last avatar and the
 /// list. Specified (Linux's rule, where Tab reaches every control): over an empty fleet with host 3 chosen by a click,
-/// which leaves focus on its avatar and draws the chip as the list's one control, Tab goes to host 2's avatar, the
-/// chip, Hosts, then the gear; Shift+Tab from the gear goes back to Hosts.
+/// which leaves focus on its avatar and draws the chip as the list's one control, Tab goes to host 2's avatar, Add
+/// host, the chip, Hosts, then the gear; Shift+Tab from the gear goes back to Hosts.
 #[gpui::test]
 fn tab_reaches_the_foot_after_the_rail_and_the_lists_controls(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, vec![listing(&[], &[]), hosts(&fleet_hosts())]);
@@ -1038,7 +1041,13 @@ fn tab_reaches_the_foot_after_the_rail_and_the_lists_controls(cx: &mut TestAppCo
         node(&frame(cx), "host-filter-chip").is_some(),
         "the premise: the chip is drawn"
     );
-    for expected in ["host-rail-host-2", "host-filter-chip", HOSTS, GEAR] {
+    for expected in [
+        "host-rail-host-2",
+        ADD_HOST,
+        "host-filter-chip",
+        HOSTS,
+        GEAR,
+    ] {
         test_support::keys(cx, "tab");
         assert_eq!(focused_id(cx).as_deref(), Some(expected));
     }
@@ -1096,6 +1105,158 @@ fn a_long_host_list_scrolls_above_the_foot_which_stays_put(cx: &mut TestAppConte
         "the foot did not move"
     );
     assert_eq!(foot.1.bottom(), px(500. - 8.));
+}
+
+// ---- Add host, and the keyboard below the rail's fold ---------------------------------------------------------------
+
+/// Add host's element id (the old `.host-rail-add`), one of the `host-rail-` ids, so [`rail_entries`] counts it among
+/// the rail's entries.
+const ADD_HOST: &str = "host-rail-add";
+
+/// Whether the Add host dialog is open: the dialog its own tests reach through [`Opened`] is alive, and its frame
+/// (drawn under the dialog's id, `add-host`) is in a fresh frame.
+fn add_host_dialog_shown(cx: &mut VisualTestContext) -> bool {
+    let alive = cx.update(|_, cx| {
+        cx.try_global::<Opened>()
+            .is_some_and(|opened| opened.0.upgrade().is_some())
+    });
+    alive && node(&frame(cx), "add-host").is_some()
+}
+
+/// SPEC.md's rail ends with **Add host**, after every registered host, and the button is the one way the app offers to
+/// add a host from the sidebar, so a screen reader user needs its name and a sighted one its help, both the old app's
+/// words. Specified: over the usual fleet, Add host is the rail's last entry, drawn below the last avatar; it is an
+/// enabled, focusable button named "Add host" that reports no pressed state (it is not a choice), a 40-pixel rail
+/// square in the rail's column; and its hover help is "Add host: connect a machine or create a Tensorlake sandbox".
+#[gpui::test]
+fn add_host_is_the_rails_last_entry_with_its_name_help_and_role(cx: &mut TestAppContext) {
+    let (_fake, cx) = open_main(cx, snapshot());
+    let nodes = frame(cx);
+    assert_eq!(
+        rail_entries(&nodes).last().map(String::as_str),
+        Some(ADD_HOST)
+    );
+    let add = node(&nodes, ADD_HOST).expect("Add host is drawn");
+    assert_eq!(add.role, Some(Role::Button));
+    assert_eq!(add.label.as_deref(), Some("Add host"));
+    assert_eq!(add.toggled, None, "not a choice");
+    assert!(add.flags.focusable && add.flags.click, "enabled");
+    assert_eq!(
+        (add.bounds.size.width, add.bounds.size.height),
+        (px(40.), px(40.))
+    );
+    assert_eq!(add.bounds.left(), px(7.), "in the rail's column");
+    let last_avatar = node(&nodes, "host-rail-host-2").unwrap().bounds;
+    assert!(
+        add.bounds.top() > last_avatar.bottom(),
+        "below the last avatar: {:?} after {last_avatar:?}",
+        add.bounds
+    );
+    assert_eq!(
+        hover_help(cx, ADD_HOST).as_deref(),
+        Some("Add host: connect a machine or create a Tensorlake sandbox")
+    );
+}
+
+/// The Add host dialog's own tests open it from a stand-in button; this pins the real rail button's wiring: its kept
+/// focus handle passed as the opener and its mark taken in the handler. SPEC.md: "Closing something the user opened
+/// returns focus to where it was before it opened, on every platform", which under macOS's click rule (a click focuses
+/// no button) only the explicit hand-over to the opener achieves, so the test runs under that rule. Specified: with
+/// focus away from Add host, a click on it opens the Add host dialog and sends nothing (no probe before Add), and
+/// Escape closes it with focus on Add host; Enter on the focused Add host opens it again, and Escape again leaves focus
+/// on Add host.
+#[gpui::test]
+fn add_host_opens_the_dialog_and_escape_returns_focus_to_it(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot());
+    answer_everything(&mut fake);
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(false, cx));
+    test_support::check(cx);
+    assert_ne!(
+        focused_id(cx).as_deref(),
+        Some(ADD_HOST),
+        "the premise: focus is away from Add host"
+    );
+
+    test_support::click(cx, ADD_HOST);
+    assert!(
+        add_host_dialog_shown(cx),
+        "the click opened the Add host dialog"
+    );
+    assert_eq!(fake.commands(), [], "opening it sent nothing");
+    test_support::keys(cx, "escape");
+    assert!(!any_layer_open(cx), "Escape closed the dialog");
+    assert_eq!(focused_id(cx).as_deref(), Some(ADD_HOST), "after the click");
+
+    test_support::keys(cx, "enter");
+    assert!(
+        add_host_dialog_shown(cx),
+        "Enter on Add host opened the dialog"
+    );
+    test_support::keys(cx, "escape");
+    assert!(!any_layer_open(cx));
+    assert_eq!(focused_id(cx).as_deref(), Some(ADD_HOST), "after Enter");
+}
+
+/// SPEC.md, "Reaching everything by keyboard", means little if Tab reaches a rail entry the user cannot see, and a long
+/// registry pushes the last hosts and Add host below the rail's fold (the rail holds about seven hosts at the minimum
+/// window height). The old page scrolled a focused entry into view; here the rail is a focus coordinator scroll region.
+/// Specified (Linux's rule, where Tab reaches every control): in a 1200 by 500 window over an empty fleet and 30 hosts,
+/// where the last avatar and Add host start below the rail's visible part, Tab focuses All, 30 more Tabs focus the
+/// last avatar, which then lies wholly inside the rail's visible part, and one more focuses Add host, which then does
+/// too; the rail's visible box itself stays where it was.
+#[gpui::test]
+fn tab_scrolls_the_last_avatar_and_add_host_into_view_below_the_fold(cx: &mut TestAppContext) {
+    let many: Vec<Host> = (10..40)
+        .map(|id| remote(id, &format!("ops@host-{id}.example.invalid")))
+        .collect();
+    let (mut fake, cx) = open_main(cx, vec![listing(&[], &[]), hosts(&many)]);
+    answer_everything(&mut fake);
+    cx.simulate_resize(size(px(1200.), px(500.)));
+    test_support::settle(cx);
+    let rail = test_support::bounds(cx, "host-rail");
+    for below in ["host-rail-host-39", ADD_HOST] {
+        assert!(
+            test_support::bounds(cx, below).top() >= rail.bottom(),
+            "the premise: {below} starts below the rail's fold"
+        );
+    }
+    // Inside the rail's visible part, whole.
+    let shown = |cx: &mut VisualTestContext, id: &'static str| {
+        let at = test_support::bounds(cx, id);
+        at.top() >= rail.top() && at.bottom() <= rail.bottom()
+    };
+
+    test_support::keys(cx, "tab");
+    assert_eq!(focused_id(cx).as_deref(), Some("host-rail-all"));
+    // One press at a time, each followed by its frame, as a user tabs.
+    for _ in 10..40 {
+        test_support::keys(cx, "tab");
+        test_support::settle(cx);
+    }
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("host-rail-host-39"),
+        "the premise: Tab reached the last avatar"
+    );
+    assert!(
+        shown(cx, "host-rail-host-39"),
+        "the last avatar {:?} shows inside the rail {rail:?}",
+        test_support::bounds(cx, "host-rail-host-39")
+    );
+
+    test_support::keys(cx, "tab");
+    test_support::settle(cx);
+    assert_eq!(focused_id(cx).as_deref(), Some(ADD_HOST));
+    assert!(
+        shown(cx, ADD_HOST),
+        "Add host {:?} shows inside the rail {rail:?}",
+        test_support::bounds(cx, ADD_HOST)
+    );
+    assert_eq!(
+        test_support::bounds(cx, "host-rail"),
+        rail,
+        "the rail itself did not move"
+    );
 }
 
 // ---- Names as pure functions ---------------------------------------------------------------------------------------

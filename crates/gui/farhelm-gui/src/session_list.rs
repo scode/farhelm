@@ -207,6 +207,9 @@ pub struct SessionList {
     /// The Hosts control's focus handle, on the rail's foot, a tab stop: kept here so that Hosts keeps focus when it
     /// toggles the panel ([`host_rail`]).
     hosts_focus: FocusHandle,
+    /// What the host rail keeps across frames (Add host's focus handle, its scroll position): kept here, since the rail
+    /// is rebuilt on every draw ([`host_rail::Kept`]).
+    rail: host_rail::Kept,
     /// The Hosts panel, drawn in place of the list's column while Hosts is pressed. One for the window's life, so the
     /// panel's Details choice survives closing and reopening it (SPEC.md: opening or closing Hosts keeps "the current
     /// ... details choice").
@@ -259,6 +262,7 @@ impl SessionList {
             all_focus: cx.focus_handle().tab_stop(true),
             settings_focus: cx.focus_handle().tab_stop(true),
             hosts_focus: cx.focus_handle().tab_stop(true),
+            rail: host_rail::Kept::new(cx),
             hosts_panel: cx.new(HostsPanel::new),
         };
         list.settle(cx);
@@ -551,6 +555,7 @@ impl Render for SessionList {
             choice.chosen(),
             &weak,
             &self.all_focus,
+            &self.rail,
             hosts_shown,
             palette,
         ));
