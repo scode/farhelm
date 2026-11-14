@@ -1251,7 +1251,7 @@ test-automation bridge that lets an agent drive the running app.
 
 These trees came from a private GPUI prototype of Farhelm, which built and measured them; the changes were ported, not
 re-derived. They are the prototype's trees minus its two measurement-only layers (per-draw CPU attribution and a
-frame-wake counter for one test), plus the change notices below.
+frame-wake counter for one test), plus the change notices below and one layer of Farhelm's own, `frame-source`.
 
 ### What is here
 
@@ -1313,9 +1313,10 @@ Here's what each layer changes and why, in application order. Sizes are `git app
 | `native-key`           | gpui-pre 354 / 11, gpui-pre-linux 89 / 4, gpui-pre-macos 27 / 17               | Physical key identity and the original Shift on key events |
 | `attachment-clipboard` | gpui-pre-linux 159 / 1, gpui-pre-macos 92 / 0                                  | Image-before-text async clipboard reads for paste          |
 | `activation-token`     | gpui-pre 13 / 0, gpui-pre-linux 9 / 0                                          | Activate a window with another client's Wayland token      |
+| `frame-source`         | gpui-pre-macos 10 / 1                                                          | Keep the lower-latency frame source on macOS 14 and later  |
 | `modified-notices`     | gpui-pre 11, gpui-pre-linux 8, gpui-pre-wgpu 1, gpui-pre-macos 4, gpui-agent 5 | The license's change notices (above)                       |
 
-Without the bridge's own two patches and the notices, the GPUI changes come to 1,337 added and 140 removed lines, tests
+Without the bridge's own two patches and the notices, the GPUI changes come to 1,347 added and 141 removed lines, tests
 included.
 
 - **bridge.** The bridge records what each frame drew (elements, text, accessibility roles and names, focus and input
@@ -1348,6 +1349,21 @@ included.
 - **activation-token.** `Window::activate_window_with_token` activates a window with an xdg-activation token another
   client obtained, which a second launch needs to bring the running app's window forward on Wayland. Upstream can only
   request its own token, which compositors usually refuse. Other platforms fall back to plain activation.
+- **frame-source.** On macOS 14 and later GPUI paces a window with `CAMetalDisplayLink`, whose default
+  `preferredFrameLatency` of 2 presents each frame about three refreshes after the update that drew it. On the test Mac
+  that made typing in the prototype's terminal about 20 ms slower than the old app (55-58 ms median against 35-37 ms);
+  GPUI's other frame source, `CVDisplayLink` with `nextDrawable`, which it already uses before macOS 14, measured 29-36
+  ms with the same flood frame rate (the flood ended about 0.1 s later). Setting `preferredFrameLatency` to 1 had no
+  effect there. The cost: `CVDisplayLink` gives GPUI no frame waker and does not pause between needed frames, so an idle
+  window used 0.4% CPU instead of 0.1%, and frame rates no longer follow the display's power policy (ProMotion, not
+  testable on the test Mac). The layer keeps the `CVDisplayLink` source on every macOS version (a constant in
+  `src/window.rs`). The numbers are from the test Mac VM (60 Hz virtual display) on 2026-11-13, three runs per setting
+  (two for idle CPU). The runs used a scratch tree that forced `MetalFrameSource::is_available()` to false; this layer
+  instead skips the Metal source where the window chooses it, which takes the same path, because `gpui-pre-apple` checks
+  availability only inside `MetalFrameSource::new` and this crate constructs that source only for a window that chose
+  it. Drop the layer when an upstream GPUI presents `CAMetalDisplayLink` frames within one refresh, measured the same
+  way. The maintainer chose to keep it with those costs (2026-11-13); a TODO.md entry revisits it, in particular whether
+  Apple or GPUI may drop the older path.
 
 Two Linux hunks are carried but not compiled: the bridge's capture hook in `src/linux/x11/window.rs` and native-key's
 event conversion in `src/linux/x11/client.rs`. The workspace builds `gpui-pre-platform` without its `x11` feature, so
@@ -1385,6 +1401,7 @@ git apply --directory=vendor/gpui-pre-linux patches/gpui/attachment-clipboard/gp
 git apply --directory=vendor/gpui-pre-macos patches/gpui/attachment-clipboard/gpui-pre-macos-0.3.12.patch
 git apply --directory=vendor/gpui-pre patches/gpui/activation-token/gpui-pre-0.3.12.patch
 git apply --directory=vendor/gpui-pre-linux patches/gpui/activation-token/gpui-pre-linux-0.3.12.patch
+git apply --directory=vendor/gpui-pre-macos patches/gpui/frame-source/gpui-pre-macos-0.3.12.patch
 git apply --directory=vendor/gpui-agent patches/gpui/gpui-agent/gpui-agent-lockfile.patch
 git apply --directory=vendor/gpui-pre patches/gpui/modified-notices/gpui-pre-0.3.12.patch
 git apply --directory=vendor/gpui-pre-linux patches/gpui/modified-notices/gpui-pre-linux-0.3.12.patch
@@ -1399,7 +1416,7 @@ git apply --directory=vendor/gpui-agent patches/gpui/modified-notices/gpui-agent
   from a `target/` left by building its CLI in the checkout).
 
 Every layer applies without offsets. The sequence was checked end to end on 2026-11-13, and against the prototype: its
-trees equal these minus the notices, with its two measurement layers added back for `gpui-pre`.
+trees equal these minus the notices and `frame-source`, with its two measurement layers added back for `gpui-pre`.
 
 Layers touch overlapping files, so to check one layer by itself with `git apply --reverse --check`, first reverse every
 later layer in a disposable copy.

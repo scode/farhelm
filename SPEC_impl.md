@@ -574,7 +574,10 @@ Enforced by denying clippy's `unwrap_used` and `expect_used` crate-wide in the G
 
 GPUI is pinned to gpui-pre 0.3.12 and GPUI Kit to 0.9.1 exactly, with the lockfile committed, unless the early macOS
 checks force a change. Upgrades happen only at milestones, as a dedicated change. Patched GPUI crates are vendored under
-`vendor/` with their patch files, per `vendor/README.md`.
+`vendor/` with their patch files, per `vendor/README.md`. Besides the layers ported from the GPUI prototype, Farhelm
+carries one layer written for the shipping app, `frame-source`, which keeps GPUI's older `CVDisplayLink` frame source on
+macOS 14 and later for typing latency at or below the old app's; the maintainer accepted its costs (slightly higher idle
+CPU, no power-policy frame rates), and a TODO.md entry revisits it.
 
 No GPL-family code (GPL, AGPL, LGPL) enters the tree, as a dependency or as copied or closely paraphrased source.
 MPL-2.0 is allowed only as an unmodified dependency. Agents read GPL or other copyleft source only in an isolated
