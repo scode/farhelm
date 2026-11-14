@@ -21,8 +21,7 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, ClickEvent, ElementId, InteractiveElement, IntoElement, ParentElement,
-    RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Window, div,
-    prelude::FluentBuilder as _, px,
+    RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Window, div, px,
 };
 
 use super::{Handler, HoverHelp};
@@ -133,12 +132,12 @@ impl RenderOnce for ListRow {
             );
         }
         let row = super::with_hover_help(row, &self.id, &self.help, true, window, cx);
-        super::activate_on_enter_or_space(
-            focus::track(row, &focus, focus::OnPress::Control),
-            key_handler,
+        super::activate_on_click(
+            super::activate_on_enter_or_space(
+                focus::track(row, &focus, focus::OnPress::Control),
+                key_handler,
+            ),
+            handler,
         )
-        .when_some(handler, |row, handler| {
-            row.on_click(move |event, window, cx| handler(event, window, cx))
-        })
     }
 }
