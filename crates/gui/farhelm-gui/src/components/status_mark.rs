@@ -6,10 +6,15 @@
 //! every control takes, so a status the user can only see a symbol of still has its words for hover and for a screen
 //! reader; the shown text is usually a symbol and is no substitute for the label. Its ink is a theme token, the quiet
 //! foreground unless the caller names another ([`StatusMark::ink`]).
+//!
+//! A status that is more than a word (the Hosts panel's phase dot with its words, a host's identity mark) draws what
+//! the caller built in place of the text ([`StatusMark::content`]), the way [`super::Button::content`] does, and keeps
+//! the label, help and role. The help is also the mark's accessible description unless the caller says it only
+//! repeats the name ([`StatusMark::described`]).
 
 use gpui::{
-    App, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce, Role, SharedString,
-    StatefulInteractiveElement, Styled, Window, div,
+    AnyElement, App, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce, Role,
+    SharedString, StatefulInteractiveElement, Styled, Window, div,
 };
 
 use super::HoverHelp;
@@ -24,6 +29,8 @@ pub struct StatusMark {
     role: Role,
     text: SharedString,
     ink: Option<Token>,
+    content: Option<AnyElement>,
+    described: bool,
 }
 
 impl StatusMark {
@@ -44,12 +51,28 @@ impl StatusMark {
             role,
             text: text.into(),
             ink: None,
+            content: None,
+            described: true,
         }
     }
 
     /// Draw the text in `ink` instead of the quiet foreground (`--fg-1`), as a warning's amber.
     pub fn ink(mut self, ink: Token) -> Self {
         self.ink = Some(ink);
+        self
+    }
+
+    /// Draw `content` in place of the text: a mark, or a dot beside words. It inherits the mark's text size and ink;
+    /// the label stays the mark's accessible name, since what it shows may say nothing to a screen reader.
+    pub fn content(mut self, content: impl IntoElement) -> Self {
+        self.content = Some(content.into_any_element());
+        self
+    }
+
+    /// Whether the hover help is also the mark's accessible description (it is unless told otherwise). Off for a status
+    /// whose help is its name again, which a screen reader would otherwise read twice; the help still shows on hover.
+    pub fn described(mut self, described: bool) -> Self {
+        self.described = described;
         self
     }
 }
@@ -64,8 +87,11 @@ impl RenderOnce for StatusMark {
             .role(self.role)
             .aria_label(self.label.clone())
             .text_size(metrics::TEXT_SM)
-            .text_color(theme::color(ink))
-            .child(self.text);
-        super::with_hover_help(mark, &self.id, &self.help, true, window, cx)
+            .text_color(theme::color(ink));
+        let mark = match self.content {
+            Some(content) => mark.child(content),
+            None => mark.child(self.text),
+        };
+        super::with_hover_help(mark, &self.id, &self.help, self.described, window, cx)
     }
 }

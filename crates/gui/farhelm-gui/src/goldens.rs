@@ -4,8 +4,9 @@
 //! cursor shapes, an attached terminal's exit line and status line, the scrim a pending Delete puts over the open
 //! session's terminal, the session list (a fleet of every status a row draws, an empty fleet, a row's open menu, a
 //! row's Delete question, and a pending and a refused Delete), the Rename editor, the select closed and open, the
-//! YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer, and the Settings dialog at
-//! Sessions and at Hosts, in both appearances, compared pixel for pixel.
+//! YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer, the Settings dialog at
+//! Sessions and at Hosts, and the Hosts panel (closed, with Details, and with a host failing to connect), in both
+//! appearances, compared pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
@@ -40,6 +41,7 @@ use std::rc::Rc;
 
 use crate::focus::Mark;
 use crate::host_text::{self, HostSentence, HostText};
+use crate::hosts::HostsPanel;
 use crate::layers::{self, Anchor, Popover, TooltipOwner};
 use crate::notices::Notice;
 use crate::operations::OpKey;
@@ -61,8 +63,8 @@ use farhelm_helm_client::fake::terminal::FakeTerminal;
 use farhelm_helm_client::terminal::AttachmentLease;
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
 use farhelm_proto::ui_channel::{
-    Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, KeyedEntry,
-    ListCounts, PREFERENCES_KEY,
+    Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, HostView,
+    KeyedEntry, ListCounts, PREFERENCES_KEY,
 };
 
 /// How many frames a scene may take to settle before the test gives up: icons decode on the background executor, so
@@ -1549,6 +1551,74 @@ fn settings_hosts_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene(state, crate::settings::Section::Hosts, window, cx);
 }
 
+/// Make the Hosts panel over a fake helm holding `listed` hosts, with Details on when `details` is; the scene draws it
+/// through [`hosts_panels`]. The fake, the connection and the panel are kept for the scene's life.
+fn hosts_panel_scene(state: &SceneState, listed: &[HostView], details: bool, cx: &mut App) {
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    helm.connect(vec![crate::hosts::tests::hosts(listed)]);
+    let panel = cx.new(HostsPanel::new);
+    if details {
+        panel.update(cx, |panel, cx| panel.show_details(true, cx));
+    }
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    keep.push(Box::new(panel));
+}
+
+/// The reference screens' three connected hosts, Details off (reference `hosts-panel`): the heading with its count and
+/// switch, and each row's mark, name and phase.
+fn hosts_panel_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    hosts_panel_scene(state, &crate::hosts::tests::reference_hosts(), false, cx);
+}
+
+/// The same hosts with Details on (reference `hosts-panel-details`): each row's destination behind its alias and its
+/// version, identity and session count.
+fn hosts_panel_details_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    hosts_panel_scene(state, &crate::hosts::tests::reference_hosts(), true, cx);
+}
+
+/// Details on with `build-box` failing to connect (reference `hosts-panel-host-unreachable`): its grey
+/// "Connecting", and its attempt and the long SSH error wrapping under it.
+fn hosts_panel_host_unreachable_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    use crate::hosts::tests::{aliased, connecting, host, reference_hosts};
+    let mut listed = reference_hosts();
+    listed[1] = aliased(
+        host(
+            2,
+            "ssh",
+            connecting(
+                2,
+                Some(
+                    "SSH could not connect or log in to the host; SSH stderr: \"ssh: Could not resolve hostname \
+                     reference-capture.invalid: Name or service not known\"; cause: connection closed before hello",
+                ),
+            ),
+        ),
+        "build-box",
+        "reference-capture.invalid",
+    );
+    hosts_panel_scene(state, &listed, true, cx);
+}
+
+/// The Hosts panel a scene's setup made, in the sidebar's column beside the rail (the sidebar's width less the rail's
+/// 56 pixels) on the sidebar's surface.
+fn hosts_panels(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    let palette = theme::palette(cx);
+    let panel = state
+        .keep
+        .borrow()
+        .iter()
+        .find_map(|kept| kept.downcast_ref::<Entity<HostsPanel>>().cloned());
+    div()
+        .w(theme::metrics::SIDEBAR_WIDTH - px(56.))
+        .h(px(394.))
+        .bg(theme::color(palette.bg_1))
+        .children(panel)
+        .into_any_element()
+}
+
 /// The session list a scene's setup made, in a column of the sidebar's width and surface.
 fn session_lists(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
     let palette = theme::palette(cx);
@@ -1769,6 +1839,24 @@ static SCENES: &[Scene] = &[
         size: (800., 830.),
         draw: empty,
         setup: settings_hosts_setup,
+    },
+    Scene {
+        name: "hosts-panel",
+        size: (364., 418.),
+        draw: hosts_panels,
+        setup: hosts_panel_setup,
+    },
+    Scene {
+        name: "hosts-panel-details",
+        size: (364., 418.),
+        draw: hosts_panels,
+        setup: hosts_panel_details_setup,
+    },
+    Scene {
+        name: "hosts-panel-host-unreachable",
+        size: (364., 418.),
+        draw: hosts_panels,
+        setup: hosts_panel_host_unreachable_setup,
     },
 ];
 

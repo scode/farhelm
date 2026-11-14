@@ -525,6 +525,21 @@
       "golden": "settings-hosts",
       "title": "Settings at Hosts, automatic remote-host updates on",
       "reference": "settings-hosts"
+    },
+    {
+      "golden": "hosts-panel",
+      "title": "The Hosts panel over three connected hosts: the heading with its count and Details switch, each row's mark, name and phase",
+      "reference": "hosts-panel"
+    },
+    {
+      "golden": "hosts-panel-details",
+      "title": "The Hosts panel with Details on: each row's destination behind its alias, its version, identity and session count",
+      "reference": "hosts-panel-details"
+    },
+    {
+      "golden": "hosts-panel-host-unreachable",
+      "title": "The Hosts panel with Details on and one host failing to connect: its phase, attempt and SSH error",
+      "reference": "hosts-panel-host-unreachable"
     }
   ],
   "reference_scenes": [
