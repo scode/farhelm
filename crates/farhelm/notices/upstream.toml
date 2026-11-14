@@ -1,0 +1,114 @@
+# License texts for dependencies whose notice cargo-about cannot print as the crate publishes it: the package carries no
+# usable notice for a license (cargo-about would print the SPDX template, with `<year> <copyright holders>` in place of
+# a copyright line), or the notice spans several files cargo-about prints only one of. Each entry names the crates and
+# versions it covers, the license, and a file under `upstream/` whose "Upstream text:" lines cite where the text comes
+# from: the crate's own repository, or the crate's own package where the package holds the files. A few files add one
+# hand-written, cited sentence saying that upstream publishes no copyright line, before the license terms.
+# `scripts/dependency-notices.py` puts that text in place of cargo-about's for exactly those crates.
+#
+# A crate whose one license file cargo-about merely failed to pick up belongs in `about.toml` as a `clarify` entry
+# instead.
+#
+# Every entry must still match the dependency graph: a version bump fails generation until the new version's text is
+# checked and the entry updated. Texts come from the crate's own repository at the commit its package was published from
+# (`.cargo_vcs_info.json`) or from its package, apart from the cited sentence above. `no-copyright-line = true`
+# acknowledges that upstream publishes no copyright line at all for that version; the text then states that and gives
+# the license terms, and `reason` says what was checked. Generation fails for any MIT, BSD, ISC, Zlib or NCSA text
+# without a copyright line that is not acknowledged here.
+
+[[text]]
+license = "MIT"
+crates = ["objc-sys 0.3.5", "objc2 0.5.3", "objc2-app-kit 0.2.2", "objc2-foundation 0.2.2"]
+file = "upstream/objc2-0.5-line-MIT.txt"
+
+[[text]]
+license = "MIT"
+crates = ["block2 0.6.2", "objc2 0.6.5", "objc2-encode 4.1.0", "objc2-foundation 0.3.2"]
+file = "upstream/objc2-0.6-line-MIT.txt"
+no-copyright-line = true
+reason = "At each crate's published commit the objc2 repository holds only LICENSE.md, which names MIT without a copyright line; the crate directories hold no license file."
+
+[[text]]
+license = "MIT"
+crates = ["harfrust 0.5.2"]
+file = "upstream/harfrust-0.5.2-MIT.txt"
+
+[[text]]
+license = "MIT"
+crates = ["pulp-wasm-simd-flag 0.1.1"]
+file = "upstream/pulp-wasm-simd-flag-0.1.1-MIT.txt"
+
+[[text]]
+license = "MIT"
+crates = ["rust-i18n-macro 4.2.4", "rust-i18n-support 4.2.4"]
+file = "upstream/rust-i18n-4.2.4-MIT.txt"
+
+[[text]]
+license = "MIT"
+crates = ["seahash 4.1.0"]
+file = "upstream/seahash-4.1.0-MIT.txt"
+no-copyright-line = true
+reason = "The seahash repository at the published commit has no license file, and neither its README nor its source names a copyright holder."
+
+[[text]]
+license = "MIT"
+crates = ["taffy 0.15.1"]
+file = "upstream/taffy-0.15.1-MIT.txt"
+
+[[text]]
+license = "BSD-3-Clause"
+crates = ["sha1_smol 1.0.1"]
+file = "upstream/sha1_smol-1.0.1-BSD-3-Clause.txt"
+
+[[text]]
+license = "MIT"
+crates = ["winnow 0.5.40", "winnow 0.7.15", "winnow 1.0.4"]
+file = "upstream/winnow-MIT.txt"
+no-copyright-line = true
+reason = "winnow's COPYRIGHT file states that copyrights are retained by the contributors (and nom's contributors) without naming a holder, and its LICENSE-MIT has no copyright line; the text gives both files."
+
+[[text]]
+license = "MIT"
+crates = ["gio 0.18.4", "gio-sys 0.18.1", "glib 0.18.5", "glib-macros 0.18.5", "glib-sys 0.18.1", "gobject-sys 0.18.0"]
+file = "upstream/gtk-rs-core-MIT.txt"
+no-copyright-line = true
+reason = "gtk-rs-core's COPYRIGHT file states that copyrights are retained by the contributors without naming a holder, and its LICENSE has no copyright line; the text gives both files."
+
+[[text]]
+license = "MIT"
+crates = ["zvariant_utils 4.2.0"]
+file = "upstream/zvariant_utils-4.2.0-MIT.txt"
+
+# These crates' published MIT text has no copyright line, and neither does their upstream repository's at the
+# published commit (checked file by file); cargo-about's text is theirs unchanged, so no file replaces it.
+[[text]]
+license = "MIT"
+crates = ["endi 1.1.1"]
+no-copyright-line = true
+reason = "github.com/zeenix/endi at 226224559725a9ef0e0687b3a54eca9ad6a5a6c7: LICENSE-MIT has no copyright line."
+
+[[text]]
+license = "MIT"
+crates = ["zbus-lockstep 0.5.2", "zbus-lockstep-macros 0.5.2"]
+no-copyright-line = true
+reason = "github.com/luukvanderduim/zbus-lockstep at 9bda5264dfe1dc7eaa7738f839ff977315c31b84: each crate's LICENSE-MIT has no copyright line, and the repository root has no license file."
+
+[[text]]
+license = "MIT"
+crates = ["zmij 1.0.23"]
+no-copyright-line = true
+reason = "github.com/dtolnay/zmij at 7b7cc48b58028e8af7be87e94c0c1c8936f1a57c: LICENSE-MIT has no copyright line."
+
+[[text]]
+license = "MIT"
+crates = ["cfg_aliases 0.2.2"]
+file = "upstream/cfg_aliases-0.2.2-MIT.txt"
+
+# Code a crate compiles into the binary under a license the crate does not declare, so cargo-about never reports it.
+# Each `[[extra]]` entry adds its own section for the crates named; it fails generation as stale once the graph no
+# longer has every one of them.
+[[extra]]
+license = "FTL"
+name = "Freetype Project License"
+crates = ["freetype-sys 0.20.1"]
+file = "upstream/freetype-2.13.2-FTL.txt"

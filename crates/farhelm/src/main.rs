@@ -143,7 +143,7 @@ enum Cmd {
         #[command(subcommand)]
         command: SupervisorCmd,
     },
-    /// Print the license notices for code Farhelm ported or derived from other projects.
+    /// Print the license notices for third-party code and dependencies in farhelm.
     // Ported and derived code carries its upstream notice with every copy, and this is how the binary carries it: the
     // texts are embedded at build time and printed verbatim; nothing is read from disk. A plain comment, not a doc
     // comment, so it stays out of `farhelm licenses --help`.
@@ -1660,18 +1660,24 @@ fn hold_own_version(command: &Cmd) -> anyhow::Result<()> {
 /// rather than beside the tables.
 const UNICODE_NOTICE: &str = include_str!("../../../vendor/UNICODE-LICENSE.txt");
 
-/// What `farhelm licenses` prints: every notice that must travel with this binary, because the binary contains code
-/// ported or derived from another project.
+/// The license notices of every third-party crate compiled into Farhelm's shipped binaries (`farhelm` and
+/// `farhelm-desktop`), generated from `Cargo.lock` by `scripts/dependency-notices.py` and kept current by its `--check`
+/// in the ordinary checks. One file covers both binaries, so this binary also carries notices for crates only the
+/// desktop app links; that over-covers, it never under-covers.
+const DEPENDENCY_NOTICES: &str = include_str!("../notices/dependencies.txt");
+
+/// What `farhelm licenses` prints: every notice that must travel with this binary.
 ///
-/// Today that is the supervisor's xterm.js port and the vendored terminal emulator's Unicode-derived tables (checked
-/// against the linked binary when this was written). Code ported or derived later and linked into `farhelm` adds its
-/// notice here, so the command keeps covering everything the binary contains (SPEC_impl.md, "Dependencies and
-/// licenses").
+/// First the notices for code Farhelm ported or derived from other projects (the supervisor's xterm.js port and the
+/// vendored terminal emulator's Unicode-derived tables, checked against the linked binary when this was written), then
+/// the dependencies' notices. Code ported or derived later and linked into `farhelm` adds its notice here, so the
+/// command keeps covering everything the binary contains (SPEC_impl.md, "Dependencies and licenses").
 fn licenses_text() -> String {
     format!(
-        "{}\n{}",
+        "{}\n{}\n{}",
         farhelm_supervisor::grid_input::PORTED_CODE_NOTICES,
-        UNICODE_NOTICE
+        UNICODE_NOTICE,
+        DEPENDENCY_NOTICES
     )
 }
 
@@ -2926,6 +2932,30 @@ mod tests {
             text.contains("UNICODE LICENSE V3")
                 && text.contains("Copyright © 1991-2026 Unicode, Inc."),
             "the Unicode notice for the terminal emulator's derived tables is missing"
+        );
+        // The generated dependency notices follow, with a crate every farhelm binary links named under its license.
+        assert!(
+            text.contains(
+                "Third-party license notices for Farhelm's farhelm and farhelm-desktop binaries"
+            ),
+            "the dependency notices are missing"
+        );
+        // Anywhere in a wrapped "Used by:" list, not only first on its line.
+        assert!(
+            text.contains(" tokio 1."),
+            "a linked dependency (tokio) is not named in the dependency notices"
+        );
+        // A crate whose own notice cargo-about could not match on its own (a `clarify` entry fixes it) carries its real
+        // copyright line, and no SPDX template placeholder reached the output.
+        assert!(
+            text.contains("Copyright (c) 2019-2025 Frank Denis"),
+            "minisign-verify's own copyright line is missing"
+        );
+        // The holder half of the template is the tell: a bare `<year>` is legitimate, because FreeType's license
+        // (shipped as its own notice) quotes the credit line it asks users to fill in.
+        assert!(
+            !text.contains("<copyright holders>") && !text.contains("<owner>"),
+            "an SPDX template placeholder reached the notices"
         );
     }
 
