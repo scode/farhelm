@@ -15,7 +15,7 @@
 //!   to open a layer for a mark the user has moved on from, which is how "things the user did not start never open over
 //!   what they are doing" is kept. The two public moves a feature makes after the user acted, [`choose_terminal`] and
 //!   [`focus_control`], take the mark of that action for the same reason.
-//! - **Home.** When nothing holds focus and no layer is open, focus goes home, which SPEC.md's "Where focus rests"
+//! - **Home.** When nothing holds focus and no layer that holds focus is open, focus goes home, which SPEC.md's "Where focus rests"
 //!   defines: the selected session's terminal, New when there are no sessions, a stopped session's card when the
 //!   selected session has stopped. The views that own those set it: [`set_home`] in general, and [`choose_terminal`]
 //!   when the user chooses a session (its terminal becomes home and takes focus). Only when none of them is on screen
@@ -27,7 +27,9 @@
 //!   where it was before it opened, or home when its opener asked for that ([`ReturnTo`]); when the focused control
 //!   disappears inside a dialog or menu, focus moves to the closest remaining control there (by the controls' last
 //!   drawn positions), and to the layer itself only when no control is left. A menu traps Tab like a dialog (SPEC.md:
-//!   "Inside a dialog or menu, focus stays inside").
+//!   "Inside a dialog or menu, focus stays inside"). A popover that never takes focus (a list floating under the field
+//!   the user types in) is not a layer for any of this: it traps nothing and gives nothing back, and while only such a
+//!   popover is open, focus moves on the page as if nothing were open ([`layers::focus_layer_open`]).
 //! - **Which press focuses an element.** Every focusable element is tracked through [`track`], which suppresses GPUI's
 //!   own focus-on-press (GPUI focuses any tracked element on mouse-down, a move no lint could see) and applies the
 //!   coordinator's rule instead: on Linux a click focuses the control it lands on; on macOS it does not, as in WebKit
@@ -309,7 +311,7 @@ fn state(window: &Window, cx: &App) -> Option<Entity<WindowFocus>> {
     installed::<Windows>(cx)?.0.get(&id)?.upgrade()
 }
 
-/// Set the window's home: where focus goes whenever nothing holds it and no layer is open. The selected session's
+/// Set the window's home: where focus goes whenever nothing holds it and no layer that holds focus is open. The selected session's
 /// terminal is home (SPEC.md, "Where focus rests"); `None` leaves the window without one. If nothing holds focus now, it
 /// goes home at once, but home never takes focus from a control that holds it.
 pub fn set_home(home: Option<&FocusHandle>, window: &mut Window, cx: &mut App) {
@@ -317,7 +319,7 @@ pub fn set_home(home: Option<&FocusHandle>, window: &mut Window, cx: &mut App) {
         return;
     };
     state.update(cx, |state, _| state.home = home.map(FocusHandle::downgrade));
-    if holds_nothing(window, cx) && !layers::any_open(window, cx) {
+    if holds_nothing(window, cx) && !layers::focus_layer_open(window, cx) {
         recover(window, cx);
     }
 }
@@ -329,14 +331,14 @@ pub fn set_home(home: Option<&FocusHandle>, window: &mut Window, cx: &mut App) {
 /// `chosen` is the mark taken when the user chose. A choice that completes later (the terminal finishing loading, an
 /// open the helm accepts after a reply) passes the mark from the moment of choosing; once the user has moved on since,
 /// the terminal only becomes home, and takes focus only if nothing holds it (SPEC.md: the session filter typed into
-/// meanwhile keeps focus when the terminal arrives). With a layer open the same holds, since focus never leaves the
+/// meanwhile keeps focus when the terminal arrives). With a layer that holds focus open the same holds, since focus never leaves the
 /// topmost dialog or menu for the page behind it: a dialog that chose a session (the quick switcher) closes itself
 /// first, or closing it returns focus to its opener rather than to the terminal.
 pub fn choose_terminal(terminal: &FocusHandle, chosen: &Mark, window: &mut Window, cx: &mut App) {
     let Some(state) = state(window, cx) else {
         return;
     };
-    if has_moved_on(chosen, cx) || layers::any_open(window, cx) {
+    if has_moved_on(chosen, cx) || layers::focus_layer_open(window, cx) {
         set_home(Some(terminal), window, cx);
         return;
     }
@@ -347,9 +349,13 @@ pub fn choose_terminal(terminal: &FocusHandle, chosen: &Mark, window: &mut Windo
 /// Move focus to the control `target` as the result of something the user did: the host rail's All taking focus after a
 /// filter clears, the session header returning focus on Escape, a moved row's menu button. It is [`choose_terminal`]'s
 /// rule without the home change: `chosen` is the mark taken when the user acted, and once they have moved on since, or
-/// while a layer is open (focus never leaves the topmost dialog or menu for the page behind it), it does nothing.
+/// while a layer that holds focus is open (focus never leaves the topmost dialog or menu for the page behind it; a
+/// popover that never takes focus does not count), it does nothing.
 pub fn focus_control(target: &FocusHandle, chosen: &Mark, window: &mut Window, cx: &mut App) {
-    if state(window, cx).is_none() || has_moved_on(chosen, cx) || layers::any_open(window, cx) {
+    if state(window, cx).is_none()
+        || has_moved_on(chosen, cx)
+        || layers::focus_layer_open(window, cx)
+    {
         return;
     }
     apply(Move::To(target), window, cx);
@@ -370,7 +376,7 @@ fn home(window: &Window, cx: &App) -> Option<FocusHandle> {
     state(window, cx)?.read(cx).home.as_ref()?.upgrade()
 }
 
-/// Where focus rests when nothing else holds it and no layer is open: home if the window has one, its root otherwise.
+/// Where focus rests when nothing else holds it and no layer that holds focus is open: home if the window has one, its root otherwise.
 fn resting_place(window: &Window, cx: &App) -> Option<FocusHandle> {
     home(window, cx).or_else(|| state(window, cx)?.read(cx).root.upgrade())
 }
@@ -760,8 +766,8 @@ pub enum ReturnTo {
     /// a dialog SPEC.md sends back to the terminal however it closes: the Rename editor opened with its shortcut, which
     /// may have been pressed while a row reached with Tab held focus ("Desktop window chrome").
     ///
-    /// Home only once no other layer is left open, since focus never leaves a dialog for the page behind it; with a
-    /// layer still open, or with no home, it falls back to [`ReturnTo::Opener`].
+    /// Home only once no other layer that holds focus is left open, since focus never leaves a dialog for the page
+    /// behind it; with such a layer still open, or with no home, it falls back to [`ReturnTo::Opener`].
     Home,
     /// [`ReturnTo::Home`] when the user dismisses the layer (Escape, through the layer manager's dismissal), and
     /// [`ReturnTo::Opener`] when it closes any other way (an answer, a press outside a question, its subject going).
@@ -780,7 +786,7 @@ pub(crate) fn return_to(
     cx: &mut App,
 ) {
     let home = match target {
-        ReturnTo::Home if !layers::any_open(window, cx) => home(window, cx),
+        ReturnTo::Home if !layers::focus_layer_open(window, cx) => home(window, cx),
         // The layer manager turns `HomeOnEscape` into one of the other two before it gets here; reaching here
         // unturned, it was not a dismissal.
         ReturnTo::Home | ReturnTo::Opener | ReturnTo::HomeOnEscape => None,

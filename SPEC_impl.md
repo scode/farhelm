@@ -476,20 +476,28 @@ through the same hook; a close its opener makes, a subject going and a reset do 
 quick switcher, as in the old app) also closes on a press on its veil outside it, through Escape's path, so the same
 hook decides; any other dialog's veil only takes the press. Dialogs are centered, or near the window's top for an opener
 that asks (the quick switcher again, so it does not move as its results grow). An overlay closes when its subject is
-gone, not when it moves; anchoring to the element makes a moved row's menu follow the row. Whether a click on a dialog's
-empty space (label text included) keeps focus on the control in use is a property of each dialog, set as SPEC.md's list
-says; a dialog without it takes focus itself, so Enter then presses its main action. Whether a terminal link's
-destination disclosure is covered is a hit test, never a hand-kept list of covering surfaces. Things the user did not
-start never open a layer over what they are doing (SPEC.md, "Keyboard focus").
+gone, not when it moves; anchoring to the element makes a moved row's menu follow the row. A popover is as wide as its
+content, or exactly as wide as its anchor when its opener asks (a select's list, a list floating under its field, as the
+old launcher's were `left: 0; right: 0` under theirs), taken from the frame being drawn so a resize never leaves it at
+the old width. A popover may also never take focus: opening it moves none, it traps no Tab, closing it returns none, and
+a press on it leaves focus where it was, so the field the user types in keeps the keys, as with the old launcher's
+floating lists, whose options were never focusable. Escape, an outside press and its anchor going close it as any
+popover. The launcher's floating lists and the terminal's overlays on a zero-size anchor element use it, and wherever
+the focus rules say "the topmost layer" (Tab's trap, where focus recovers) they mean the topmost layer that holds focus,
+which such a popover never is. Whether a click on a dialog's empty space (label text included) keeps focus on the
+control in use is a property of each dialog, set as SPEC.md's list says; a dialog without it takes focus itself, so
+Enter then presses its main action. Whether a terminal link's destination disclosure is covered is a hit test, never a
+hand-kept list of covering surfaces. Things the user did not start never open a layer over what they are doing (SPEC.md,
+"Keyboard focus").
 
 Enforced by clippy bans on GPUI's `deferred` and `anchored` outside the layer manager; by `disallowed-types` on GPUI
 Kit's Dialog, Sheet, Popover, HoverCard, PopupMenu, ContextMenu, DropdownMenu, Notification and Tooltip, and its Select,
 Combobox and DatePicker, which draw their dropdowns through `deferred` and `anchored` (dropdowns go through the layer
 manager instead); by `disallowed-methods` on Kit's `open_dialog`, `open_sheet` and `push_notification`, the
 `.tooltip(..)` methods on Kit controls, and the `context_menu` and `dropdown_menu` extension methods; and by the overlay
-invariant checked after every test step. The Kit bans apply inside the component layer too: only the layer manager draws
-overlays. Kit Input's built-in right-click menu is disabled, matching today's app, whose release builds have no context
-menu.
+invariant checked after every test step (every open popover's anchor was drawn, and a popover that never takes focus
+does not hold it). The Kit bans apply inside the component layer too: only the layer manager draws overlays. Kit Input's
+built-in right-click menu is disabled, matching today's app, whose release builds have no context menu.
 
 ### Questions: the prompt
 

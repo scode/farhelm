@@ -9,8 +9,8 @@
 //!
 //! [`check_invariants`] is the hook every test step calls: the focus coordinator's rules (with a dialog open, focus is
 //! inside the topmost one; with a home set, something holds focus) and the layer manager's (every open popover's anchor
-//! was drawn). GPUI cannot hold two focused elements in one window, so "exactly one" needs only the "at least one" half,
-//! which the rules give wherever SPEC.md requires it.
+//! was drawn, and a popover that never takes focus does not hold it). GPUI cannot hold two focused elements in one
+//! window, so "exactly one" needs only the "at least one" half, which the rules give wherever SPEC.md requires it.
 //!
 //! For behavior tests, [`open`] is the harness: a window built the way the app builds its own, and step helpers
 //! ([`keys`], [`click`], [`redraw`], [`advance`], [`settle`]) that each end with [`check`], so a test written with them
@@ -407,7 +407,7 @@ pub(crate) fn open_menu(
             Popover {
                 view: view.into(),
                 container: cx.focus_handle(),
-                start,
+                start: Some(start),
                 anchor,
             },
             &mark,
@@ -667,7 +667,7 @@ mod self_tests {
         let popover = Popover {
             view: view.into(),
             container: cx.focus_handle(),
-            start: cx.focus_handle(),
+            start: Some(cx.focus_handle()),
             anchor,
         };
         if layers::open_popover(popover, &mark, window, cx).is_none() {

@@ -18,7 +18,7 @@ use gpui::{
 };
 
 use crate::cache::{self, Cached};
-use crate::components::{Button, HoverHelp, Role, Tier};
+use crate::components::{Button, HoverHelp, Role, TextInput, TextInputState, Tier};
 use crate::focus::{self, Mark};
 use crate::layers::{self, Anchor, Dialog, DialogPlacement, Dismissal, LayerId, Popover, Subject};
 use crate::prompt;
@@ -1083,6 +1083,222 @@ fn a_popover_beside_an_anchor_near_the_edges_is_kept_inside_and_never_flips(
     );
 }
 
+// ---- Layers: a popover as wide as its anchor, and one that never takes focus -----------------------------------------
+
+/// A floating list's content: a surface with a height but no width of its own, so it is as wide as its layer makes it,
+/// and with nothing in it that takes focus, as a list that leaves focus in its field must be.
+struct FloatingList;
+
+impl Render for FloatingList {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        layers::surface(cx)
+            .debug_selector(|| "list".into())
+            .h(px(40.))
+    }
+}
+
+/// Open a [`FloatingList`] on `anchor` as a popover that never takes focus, for a mark taken now, and check.
+fn open_floating_list(cx: &mut VisualTestContext, anchor: Anchor) -> LayerId {
+    let id = cx.update(move |window, cx| {
+        let view = cx.new(|_| FloatingList);
+        let mark = Mark::take(cx);
+        let list = Popover {
+            view: view.into(),
+            container: cx.focus_handle(),
+            start: None,
+            anchor,
+        };
+        layers::open_popover(list, &mark, window, cx)
+    });
+    cx.run_until_parked();
+    check(cx);
+    match id {
+        Some(id) => id,
+        None => panic!("the premise: the list opened"),
+    }
+}
+
+/// Why this matters: a select's list lines up with its control, and the old launcher's folder picker and composer
+/// search floated at exactly their field's width (`left: 0; right: 0` under the field at the reference commit), however
+/// long their entries. The width has to be the anchor's in this frame: the window's layout runs before the anchor
+/// records where it is drawn, so a width taken then lags a resize, and stays wrong if no other frame follows.
+///
+/// Specified: a popover opened on [`Anchor::matching_width`] is exactly as wide as its anchor element, left edges
+/// aligned, just below it; after the anchor's width changes, the frame that draws the new width draws the popover at
+/// it.
+#[gpui::test]
+fn a_popover_matching_its_anchor_is_as_wide_as_it_in_the_same_frame(cx: &mut TestAppContext) {
+    let width = Rc::new(Cell::new(px(200.)));
+    let anchor_out: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));
+    let (drawn_width, out) = (width.clone(), anchor_out.clone());
+    let cx = open(cx, move |window, cx| {
+        let anchor = Anchor::for_element("field-anchor", window, cx);
+        out.replace(Some(anchor.clone()));
+        div()
+            .relative()
+            .debug_selector(|| "field".into())
+            .w(drawn_width.get())
+            .h(px(24.))
+            .child(anchor.track())
+            .into_any_element()
+    });
+    let anchor = anchor_out.borrow().clone().unwrap();
+    open_floating_list(cx, anchor.matching_width());
+    for expected in [px(200.), px(260.)] {
+        width.set(expected);
+        redraw(cx);
+        let (list, field) = (bounds(cx, "list"), bounds(cx, "field"));
+        assert_eq!(
+            field.size.width, expected,
+            "the premise: the field is drawn at its width"
+        );
+        assert_eq!(
+            (list.left(), list.top(), list.size.width),
+            (field.left(), field.bottom() + px(4.), expected),
+            "the list sits under the field at exactly its width: {list:?} under {field:?}"
+        );
+    }
+}
+
+/// Why this matters: the old launcher's floating lists kept focus in the field the user was typing in (their options at
+/// `tabindex: -1`, a press on the list prevented), and the terminal's overlays on a zero-size anchor must not take the
+/// keys from the terminal. A popover that took focus on opening, trapped Tab or took focus from a press on it would
+/// leave the user typing into nothing.
+///
+/// Specified: a popover opened without a start while a text field holds focus leaves focus in the field; a press on
+/// the popover leaves focus in the field and the popover open; Escape in the field closes it, as the topmost layer,
+/// with focus still in the field; reopened, Tab goes on from the field to the next control on the page, as with nothing
+/// open, and the popover stays open. The harness's invariants, including that such a popover never holds focus, are
+/// checked after every step.
+#[gpui::test]
+fn a_popover_that_never_takes_focus_leaves_focus_and_tab_with_the_field(cx: &mut TestAppContext) {
+    let field: Rc<RefCell<Option<TextInputState>>> = Rc::new(RefCell::new(None));
+    let anchor_out: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));
+    let next = Rc::new(RefCell::new(None::<FocusHandle>));
+    let (kept, out, drawn_next) = (field.clone(), anchor_out.clone(), next.clone());
+    let cx = open(cx, move |window, cx| {
+        let state = kept
+            .borrow_mut()
+            .get_or_insert_with(|| TextInputState::new(window, cx))
+            .clone();
+        let anchor = Anchor::for_element("field-anchor", window, cx);
+        out.replace(Some(anchor.clone()));
+        let help = HoverHelp::tooltip("A test field");
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(80.))
+            .child(
+                div()
+                    .relative()
+                    .debug_selector(|| "field-box".into())
+                    .w(px(160.))
+                    .child(TextInput::new("field", &state, "Folder", help))
+                    .child(anchor.track()),
+            )
+            .children(
+                drawn_next
+                    .borrow()
+                    .clone()
+                    .map(|focus| button("next", &focus)),
+            )
+            .into_any_element()
+    });
+    let after = handle(cx);
+    next.replace(Some(after.clone()));
+    redraw(cx);
+    let state = field.borrow().clone().unwrap();
+    let in_field = |cx: &mut VisualTestContext| {
+        cx.update(|window, cx| state.focus_handle(cx).is_focused(window))
+    };
+    let anchor = || anchor_out.borrow().clone().unwrap().matching_width();
+    click(cx, "field-box");
+    assert!(in_field(cx), "the premise: the field holds focus");
+
+    let list = open_floating_list(cx, anchor());
+    assert!(in_field(cx), "opening the list left focus in the field");
+    click(cx, "list");
+    assert!(is_open(cx, list), "a press on the list is not outside it");
+    assert!(in_field(cx), "a press on the list left focus in the field");
+    keys(cx, "escape");
+    assert!(!is_open(cx, list), "Escape closed the list");
+    assert!(in_field(cx), "and focus stayed in the field");
+
+    let list = open_floating_list(cx, anchor());
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &after),
+        "Tab went on from the field to the next control, not into the list"
+    );
+    assert!(is_open(cx, list), "Tab does not close the list");
+}
+
+/// Why this matters: the focus coordinator's moves made on the user's behalf (`focus::focus_control`) hold back while
+/// a dialog or menu is open, because focus never leaves the topmost layer for the page behind it. A popover that never
+/// takes focus is not such a layer: focus is on the page already, so holding back under it would freeze those moves for
+/// as long as a floating list shows.
+///
+/// Specified: with only a popover that never takes focus open, a move to another page control, for a mark taken now,
+/// takes focus there and leaves the popover open; with a menu open (a popover that holds focus), the same move does
+/// nothing and focus stays in the menu.
+#[gpui::test]
+fn focus_moves_go_on_under_a_popover_that_never_takes_focus(cx: &mut TestAppContext) {
+    let anchor_out: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));
+    let controls = Rc::new(RefCell::new(None::<(FocusHandle, FocusHandle)>));
+    let (out, drawn) = (anchor_out.clone(), controls.clone());
+    let cx = open(cx, move |window, cx| {
+        let anchor = Anchor::for_element("first-anchor", window, cx);
+        out.replace(Some(anchor.clone()));
+        let page = div().flex().flex_col().gap(px(80.));
+        match drawn.borrow().clone() {
+            Some((first, second)) => page
+                .child(
+                    div()
+                        .relative()
+                        .w(px(160.))
+                        .child(button("first", &first))
+                        .child(anchor.track()),
+                )
+                .child(button("second", &second)),
+            None => page,
+        }
+        .into_any_element()
+    });
+    let (first, second) = (handle(cx), handle(cx));
+    controls.replace(Some((first.clone(), second.clone())));
+    redraw(cx);
+    let anchor = anchor_out.borrow().clone().unwrap();
+    let move_to = |target: &FocusHandle, cx: &mut VisualTestContext| {
+        let target = target.clone();
+        cx.update(move |window, cx| {
+            let mark = Mark::take(cx);
+            focus::focus_control(&target, &mark, window, cx)
+        });
+        cx.run_until_parked();
+        check(cx);
+    };
+    click(cx, "first");
+    assert!(
+        focused(cx, &first),
+        "the premise: the first control holds focus"
+    );
+
+    let list = open_floating_list(cx, anchor.clone());
+    move_to(&second, cx);
+    assert!(
+        focused(cx, &second),
+        "under the floating list, the move took focus"
+    );
+    assert!(is_open(cx, list), "and the list stayed open");
+
+    let item = handle(cx);
+    let menu = open_menu(cx, anchor, vec![("item", item.clone())]);
+    assert!(focused(cx, &item), "the premise: the menu took focus");
+    move_to(&first, cx);
+    assert!(focused(cx, &item), "under a menu, the move did nothing");
+    assert!(is_open(cx, menu), "and the menu stayed open");
+}
+
 // ---- Layers: a session as a subject ----------------------------------------------------------------------------------
 
 /// Why this matters: a Delete question about a session must close when that session is deleted from another window or
@@ -1273,7 +1489,7 @@ fn arrows_walk_every_menu_item_and_wrap_and_the_pointer_moves_the_same_highlight
             Popover {
                 view: view.into(),
                 container: cx.focus_handle(),
-                start,
+                start: Some(start),
                 anchor,
             },
             &mark,

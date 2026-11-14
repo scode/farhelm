@@ -25,7 +25,8 @@
 //!   sidebar). An anchored dialog ([`open_anchored`]) is drawn like a popover but answers like a dialog: it has a
 //!   subject, a main action for Enter and its own empty-space rule. It is how the prompt asks a question beside the
 //!   control it is about (a row's Delete question, opened from the row's menu, as the old app turned the menu into the
-//!   question).
+//!   question). An anchored layer is as wide as its content, or exactly as wide as its anchor when the anchor asks for
+//!   that ([`Anchor::matching_width`]): a select's list under its control, a floating list under its field.
 //! - **A dialog is modal.** It draws a veil over the window that takes every click. A click on its empty space (label
 //!   text included: labels are no longer selectable, so the GPUI migration settled on 2026-11-13 that a click on one
 //!   counts as empty space) keeps focus on the control in use in the dialogs SPEC.md lists, and moves focus to the
@@ -38,6 +39,13 @@
 //! - **A popover's card takes the pointer from what it covers.** It has no veil, so the page around it stays live, but
 //!   a press, click, wheel, hover or move on the card itself never reaches the element under it: a click on a
 //!   question's answer over a terminal must not also focus the terminal or click a control there.
+//! - **A popover may leave focus alone.** One opened without a start ([`Popover::start`]) never takes focus: opening
+//!   it moves none, Tab is not trapped in it, closing it returns none, and a press on it leaves focus where it was. It
+//!   is for a list that floats beside the control the user keeps typing in or pointing at, as the old launcher's
+//!   folder picker and composer search kept focus in their field (options at `tabindex: -1`, the list's mousedown
+//!   prevented). Escape, a press outside it and its anchor going still close it, as any popover. Every rule above that
+//!   names "the topmost layer" for focus (Tab's trap, where focus recovers, the menu highlight) means the topmost layer
+//!   that holds focus, which such a popover never is.
 //! - **One tooltip at a time**, owned by the control that showed it (see [`TooltipOwner`]).
 //!
 //! State is kept per window: multi-window support is a watch-list item, and the one thing it asks of the foundations
@@ -62,11 +70,11 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, AnyView, AnyWindowHandle, App, AppContext as _, Bounds, BoxShadow, Context,
-    Element, ElementId, Entity, EntityId, FocusHandle, Global, GlobalElementId, InspectorElementId,
-    InteractiveElement, IntoElement, LayoutId, ParentElement, Pixels, Point, SharedString, Style,
-    Styled, Subscription, WeakEntity, WeakFocusHandle, Window, WindowId, canvas, div, point,
-    prelude::FluentBuilder as _, px,
+    AnyElement, AnyView, AnyWindowHandle, App, AppContext as _, AvailableSpace, Bounds, BoxShadow,
+    Context, Element, ElementId, Entity, EntityId, FocusHandle, Global, GlobalElementId,
+    InspectorElementId, InteractiveElement, IntoElement, LayoutId, ParentElement, Pixels, Point,
+    SharedString, Style, Styled, Subscription, WeakEntity, WeakFocusHandle, Window, WindowId,
+    canvas, div, point, prelude::FluentBuilder as _, px,
 };
 
 use crate::actions;
@@ -109,6 +117,9 @@ struct Layer {
     container: FocusHandle,
     /// What held focus when the layer opened, so closing it can return focus there.
     opener: Option<WeakFocusHandle>,
+    /// Whether the layer took focus when it opened and holds it while open: every layer but a popover opened without
+    /// a start ([`Popover::start`]), which Tab's trap, focus recovery and the focus return on close all pass over.
+    takes_focus: bool,
     /// Where closing it returns focus: `opener`, unless its opener named home ([`Dialog::returns_to`]).
     returns_to: focus::ReturnTo,
     /// What a dismissal of it does ([`Dialog::on_dismiss`]); `None` always closes.
@@ -141,9 +152,14 @@ pub enum Dismissal {
 enum Kind {
     /// A dialog over its veil, sitting and answering an outside press as its opener asked.
     Dialog(DialogOptions),
-    /// A popover, placed against its anchor element as its [`Placement`] says and following it as it moves; the bounds
-    /// are where the anchor was last drawn.
-    Popover(AnchorBounds, Placement),
+    /// A popover, placed against its anchor element as its [`Placement`] says and following it as it moves.
+    Popover {
+        /// Where the anchor was last drawn.
+        anchor: AnchorBounds,
+        placement: Placement,
+        /// Whether it is exactly as wide as its anchor ([`Anchor::matching_width`]).
+        matches_width: bool,
+    },
 }
 
 /// Where a popover sits against its anchor. Each is the old app's placement for the overlays that used it, and each is
@@ -273,6 +289,8 @@ pub struct Anchor {
     bounds: AnchorBounds,
     /// Where a layer opened on this anchor sits against it: [`Placement::Below`] unless the feature asked otherwise.
     placement: Placement,
+    /// Whether a layer opened on this anchor is exactly as wide as it ([`Anchor::matching_width`]).
+    matches_width: bool,
 }
 
 /// An anchor element's state between frames, kept in its keyed element state: GPUI releases it when the element is not
@@ -293,6 +311,7 @@ impl Anchor {
             bounds: state.read(cx).bounds.clone(),
             state: state.downgrade(),
             placement: Placement::Below,
+            matches_width: false,
         }
     }
 
@@ -302,6 +321,27 @@ impl Anchor {
     pub fn beside(self) -> Anchor {
         Anchor {
             placement: Placement::Beside,
+            ..self
+        }
+    }
+
+    /// This anchor, with the layer opened on it exactly as wide as the anchor element, whatever its content would take:
+    /// a select's list matching its control, a floating list matching its field. Like the placement, the width follows
+    /// the anchor in the very frame the anchor changes size. The content fills that width and must fit it (clip or
+    /// wrap): it is never widened past the anchor.
+    ///
+    /// Exactly, not at least, because that is what the old app's floating lists did (decided by the GPUI migration's
+    /// foundations owner when this was ported, on 2026-11-14): the launcher's folder picker and composer search were
+    /// `position: absolute; left: 0; right: 0` under their field, with `min-width: 0` and a path that clips its leading
+    /// edge, so a long entry never widened the list (`.launch-composer-folder-options` and
+    /// `.launch-composer-search-results` in `app.css` at reference commit `24bc0580`). The old selects differ: a native
+    /// `<select>`'s pop-up is at least its control's width on macOS, and the launcher's host list was `min-width: 100%`
+    /// up to `min(30em, 80vw)`. A select on this anchor therefore keeps its options inside its control's width, a
+    /// deviation from those for the select to record. "At least" would size the list by its content's widest line, so
+    /// a list that clips or wraps would grow to that line's length instead of staying under its field.
+    pub fn matching_width(self) -> Anchor {
+        Anchor {
+            matches_width: true,
             ..self
         }
     }
@@ -376,8 +416,17 @@ pub struct Popover {
     pub view: AnyView,
     /// The popover's own focus handle, tracked on the element around `view`.
     pub container: FocusHandle,
-    /// Where focus starts (a menu's first item, usually).
-    pub start: FocusHandle,
+    /// Where focus starts (a menu's first item, usually), or `None` for a popover that never takes focus (the module
+    /// docs, "A popover may leave focus alone"): opening it moves no focus, Tab is not trapped in it, closing it
+    /// returns none, and a press on it leaves focus where it was. Its content must then hold nothing that takes focus,
+    /// neither a tab stop nor a focus-tracked control, as the old floating lists' options were `tabindex: -1`: its rows
+    /// are plain elements whose owner acts on a press, and the keys stay with the control that holds focus. Its uses
+    /// are the launcher's floating lists, and the terminal's overlays on a zero-size anchor element at the pointer or
+    /// at a link's cells (the GPUI migration's orchestrator decided on 2026-11-13 that those get no layer kind of their
+    /// own, only this popover). Escape closes it from a control that lets Escape go on (a text field), not from a
+    /// focused terminal, whose program gets Escape. Nothing here closes it when focus leaves the control it floats
+    /// beside (the old launcher closed its lists on Tab and on blur): that is its owner's to do.
+    pub start: Option<FocusHandle>,
     /// The element it is drawn below (or beside, [`Anchor::beside`]), following it as it moves; it closes when the
     /// element is no longer drawn.
     pub anchor: Anchor,
@@ -458,7 +507,7 @@ pub fn open_dialog(
         }),
         view,
         container,
-        start,
+        Some(start),
         subject.into_iter().collect(),
         main_action,
         empty_press(keeps_focus_on_empty_click),
@@ -488,6 +537,17 @@ fn drawn(anchor: &Anchor) -> Option<Subject> {
     })))
 }
 
+impl Anchor {
+    /// The kind of an anchored layer opened on this anchor: placed and sized as the anchor asks.
+    fn kind(&self) -> Kind {
+        Kind::Popover {
+            anchor: self.bounds.clone(),
+            placement: self.placement,
+            matches_width: self.matches_width,
+        }
+    }
+}
+
 /// Open `dialog` beside its anchor, on top of everything else, unless the user has moved on since `mark` or the anchor
 /// is no longer drawn.
 pub fn open_anchored(
@@ -508,10 +568,10 @@ pub fn open_anchored(
     } = dialog;
     let drawn = drawn(&anchor)?;
     open(
-        Kind::Popover(anchor.bounds, anchor.placement),
+        anchor.kind(),
         view,
         container,
-        start,
+        Some(start),
         std::iter::once(drawn).chain(subject).collect(),
         main_action,
         empty_press(keeps_focus_on_empty_click),
@@ -538,7 +598,7 @@ pub fn open_popover(
     } = popover;
     let drawn = drawn(&anchor)?;
     open(
-        Kind::Popover(anchor.bounds, anchor.placement),
+        anchor.kind(),
         view,
         container,
         start,
@@ -562,7 +622,7 @@ fn open(
     kind: Kind,
     view: AnyView,
     container: FocusHandle,
-    start: FocusHandle,
+    start: Option<FocusHandle>,
     subjects: Vec<Subject>,
     main_action: Option<MainAction>,
     empty_press: focus::OnPress,
@@ -596,6 +656,7 @@ fn open(
             view,
             container,
             opener,
+            takes_focus: start.is_some(),
             returns_to,
             on_dismiss,
             main_action,
@@ -607,7 +668,10 @@ fn open(
         cx.notify();
         id
     });
-    focus::enter_layer(&start, window, cx);
+    // A popover that never takes focus leaves it with the control the user is in.
+    if let Some(start) = &start {
+        focus::enter_layer(start, window, cx);
+    }
     Some(id)
 }
 
@@ -621,7 +685,8 @@ fn close_later(window: AnyWindowHandle, id: LayerId, cx: &mut App) {
 }
 
 /// Close the layer `id`, if it is still open, and anything opened on top of it. If focus was inside what closed, it
-/// returns to what held it when `id` opened, or where `id`'s opener said instead ([`Dialog::returns_to`]).
+/// returns to what held it when `id` opened, or where `id`'s opener said instead ([`Dialog::returns_to`]). A popover
+/// that never took focus is passed over: closing one with no layer above it moves no focus.
 pub fn close(id: LayerId, window: &mut Window, cx: &mut App) {
     close_as(id, false, window, cx);
 }
@@ -644,8 +709,10 @@ fn close_as(id: LayerId, dismissed: bool, window: &mut Window, cx: &mut App) {
     let focus_was_inside = closed
         .iter()
         .any(|layer| layer.container.contains_focused(window, cx));
+    // Focus goes back as the lowest closed layer that took it says: a popover that never took focus has none to give
+    // back, and the control the user stayed in keeps it.
     if (focus_was_inside || window.focused(cx).is_none())
-        && let Some(bottom) = closed.first()
+        && let Some(bottom) = closed.iter().find(|layer| layer.takes_focus)
     {
         let returns_to = match bottom.returns_to {
             focus::ReturnTo::HomeOnEscape if dismissed => focus::ReturnTo::Home,
@@ -750,12 +817,25 @@ pub fn any_open(window: &Window, cx: &App) -> bool {
     stack(window, cx).is_some_and(|stack| !stack.read(cx).layers.is_empty())
 }
 
+/// Whether a layer that holds focus is open in `window`: any but a popover that never takes focus. Where the focus
+/// coordinator keeps focus from leaving the topmost layer for the page behind it, this is the test, since with only
+/// such a popover open focus is on the page already.
+///
+/// NOTE: The app's shortcuts that refuse while anything is open (Rename, Delete, the quick switcher) still ask
+/// [`any_open`], which counts a popover that never takes focus. Nothing opens one yet; when the terminal's overlays do
+/// (a link disclosure beside the pointer), those shortcuts should ask this instead, or they stop working while a
+/// disclosure shows although nothing modal is open.
+pub fn focus_layer_open(window: &Window, cx: &App) -> bool {
+    top_container(window, cx).is_some()
+}
+
 /// The container Tab must stay inside: the topmost layer's, dialog or menu alike (SPEC.md: "Inside a dialog or menu,
 /// focus stays inside"). A menu opened over a dialog holds Tab until it closes.
 ///
-/// NOTE: Every popover traps Tab, which suits a menu. A pop-up suggestion list keeps focus in its field, outside the
-/// popover (SPEC.md, the repository suggestions), so Tab must not be trapped in it: whoever builds one gives it its own
-/// layer kind, or a no-trap flag, rather than relying on this.
+/// NOTE: A popover that never takes focus ([`Popover::start`] `None`) traps nothing: Tab goes on from the control that
+/// holds focus as if the popover were not open, inside whatever layer below it holds focus (the launcher dialog around
+/// a floating list), or across the page. A list that keeps focus in its field (the launcher's folder picker, a
+/// suggestion list) is that popover, not a menu with a flag.
 pub fn trap(window: &Window, cx: &App) -> Option<FocusHandle> {
     top_container(window, cx)
 }
@@ -779,18 +859,22 @@ pub fn focus_is_where_dialogs_allow(window: &Window, cx: &App) -> bool {
         .any(|layer| layer.container.contains_focused(window, cx))
 }
 
-/// The topmost layer's container, where focus recovers to when its holder disappears inside an open layer.
+/// The container of the topmost layer that holds focus, where focus recovers to when its holder disappears inside an
+/// open layer. A popover that never takes focus is passed over, so focus never recovers into one.
 pub(crate) fn top_container(window: &Window, cx: &App) -> Option<FocusHandle> {
     let stack = stack(window, cx)?;
     stack
         .read(cx)
         .layers
-        .last()
+        .iter()
+        .rev()
+        .find(|layer| layer.takes_focus)
         .map(|layer| layer.container.clone())
 }
 
 /// What breaks the overlay rules in `window` right now, if anything: a popover anchored to an element that was never
-/// drawn has nowhere to be. The test harness runs this after every step.
+/// drawn has nowhere to be, and a popover that never takes focus must not hold it. The test harness runs this after
+/// every step.
 pub fn invariant_violation(window: &Window, cx: &App) -> Option<String> {
     let stack = stack(window, cx)?;
     stack
@@ -798,10 +882,13 @@ pub fn invariant_violation(window: &Window, cx: &App) -> Option<String> {
         .layers
         .iter()
         .find_map(|layer| match &layer.kind {
-            Kind::Popover(bounds, _) if bounds.get().is_none() => Some(format!(
+            Kind::Popover { anchor, .. } if anchor.get().is_none() => Some(format!(
                 "popover {:?} is open but its anchor was never drawn",
                 layer.id
             )),
+            _ if !layer.takes_focus && layer.container.contains_focused(window, cx) => Some(
+                format!("popover {:?} never takes focus but holds it", layer.id),
+            ),
             _ => None,
         })
 }
@@ -1052,7 +1139,11 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
                 }
                 .into_any_element()
             }
-            Kind::Popover(anchor, placement) => {
+            Kind::Popover {
+                anchor,
+                placement,
+                matches_width,
+            } => {
                 let pressed = anchor.clone();
                 // The card takes the pointer from whatever it covers, as the old app's cards did (a web page hands a press
                 // to the topmost element only). A popover has no veil, and GPUI hands a press, a click and a wheel to
@@ -1074,6 +1165,7 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
                 PlacedPopover {
                     anchor: anchor.clone(),
                     placement: *placement,
+                    matches_width: *matches_width,
                     child: content.into_any_element(),
                 }
                 .into_any_element()
@@ -1133,9 +1225,15 @@ pub(crate) fn menu_shadow(palette: &theme::Palette) -> Vec<BoxShadow> {
 /// built. An anchor element records its bounds as the frame is prepared, and overlays are prepared after the rest of
 /// the window, so a popover lands under its anchor in the very frame the anchor moved: no frame shows it at the old
 /// place, and nothing has to ask for a second frame.
+///
+/// A popover as wide as its anchor ([`Anchor::matching_width`]) is laid out at that point too, not with the rest of the
+/// window: the window's layout is computed before any element records where it is drawn, so the anchor's width known
+/// then is the previous frame's, and a popover sized from it would lag a resize by a frame (and stay wrong if no
+/// other frame followed).
 struct PlacedPopover {
     anchor: AnchorBounds,
     placement: Placement,
+    matches_width: bool,
     child: AnyElement,
 }
 
@@ -1159,7 +1257,8 @@ impl IntoElement for PlacedPopover {
 }
 
 impl Element for PlacedPopover {
-    type RequestLayoutState = LayoutId;
+    /// The child's layout when it is laid out with the window; `None` when it waits for prepaint (anchor width).
+    type RequestLayoutState = Option<LayoutId>;
     type PrepaintState = ();
 
     fn id(&self) -> Option<ElementId> {
@@ -1176,13 +1275,16 @@ impl Element for PlacedPopover {
         _: Option<&InspectorElementId>,
         window: &mut Window,
         cx: &mut App,
-    ) -> (LayoutId, LayoutId) {
-        let child = self.child.request_layout(window, cx);
+    ) -> (LayoutId, Option<LayoutId>) {
         let style = Style {
             position: gpui::Position::Absolute,
             ..Style::default()
         };
-        (window.request_layout(style, [child], cx), child)
+        if self.matches_width {
+            return (window.request_layout(style, [], cx), None);
+        }
+        let child = self.child.request_layout(window, cx);
+        (window.request_layout(style, [child], cx), Some(child))
     }
 
     fn prepaint(
@@ -1190,11 +1292,22 @@ impl Element for PlacedPopover {
         _: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
-        child: &mut LayoutId,
+        child: &mut Option<LayoutId>,
         window: &mut Window,
         cx: &mut App,
     ) {
-        let size = window.layout_bounds(*child).size;
+        let size = match *child {
+            Some(child) => window.layout_bounds(child).size,
+            None => {
+                // The anchor's tracker has recorded this frame's bounds by now. The content goes in a wrapper of
+                // exactly that width, which it fills as any block does; its height is its own.
+                let width = self.anchor.get().map_or(px(0.), |anchor| anchor.size.width);
+                let content = std::mem::replace(&mut self.child, gpui::Empty.into_any_element());
+                self.child = div().w(width).child(content).into_any_element();
+                let space = gpui::size(AvailableSpace::Definite(width), AvailableSpace::MinContent);
+                self.child.layout_as_root(space, window, cx)
+            }
+        };
         let viewport = window.viewport_size();
         let mut origin = match (self.anchor.get(), self.placement) {
             (Some(anchor), Placement::Beside) => {
@@ -1216,10 +1329,17 @@ impl Element for PlacedPopover {
         // Keep it inside the window: shift left when it overflows the right edge, down from the top as a last resort.
         origin.x = origin.x.min(viewport.width - size.width).max(px(0.));
         origin.y = origin.y.min(viewport.height - size.height).max(px(0.));
-        let offset = origin - bounds.origin;
-        window.with_element_offset(point(offset.x.round(), offset.y.round()), |window| {
-            self.child.prepaint(window, cx)
-        });
+        if child.is_some() {
+            // Laid out at this element's own place: move it by the difference.
+            let offset = origin - bounds.origin;
+            window.with_element_offset(point(offset.x.round(), offset.y.round()), |window| {
+                self.child.prepaint(window, cx)
+            });
+        } else {
+            // Laid out as a root of its own, at no place: put it at its window position.
+            self.child
+                .prepaint_at(point(origin.x.round(), origin.y.round()), window, cx);
+        }
     }
 
     fn paint(
@@ -1227,7 +1347,7 @@ impl Element for PlacedPopover {
         _: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
         _: Bounds<Pixels>,
-        _: &mut LayoutId,
+        _: &mut Option<LayoutId>,
         _: &mut (),
         window: &mut Window,
         cx: &mut App,
