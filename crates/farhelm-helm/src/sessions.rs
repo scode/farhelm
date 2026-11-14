@@ -3941,37 +3941,6 @@ async fn forget_deleted_session(state: &AppState, claim: &manager::SessionClaim,
     forget_session(state, claim, id).await;
 }
 
-/// The body of `PUT /api/sessions/{id}/seen`: `Some(stamp)` marks the
-/// session seen as of that activity stamp (a manual "mark read", or the
-/// automatic mark the session view issues on open and on every activity
-/// advance), `None` clears it (a manual "mark unread" — SPEC.md, Status).
-/// One field rather than two verbs
-/// because the two directions share every other part of the handler:
-/// existence check, the changed-or-not bump decision, and the reply shape.
-#[derive(Deserialize)]
-pub(crate) struct MarkSeenReq {
-    #[serde(deserialize_with = "require_present_seen_activity_at")]
-    seen_activity_at: Option<i64>,
-}
-
-/// Delegates to `Option<i64>`'s ordinary `Deserialize` impl — an explicit
-/// JSON `null` still decodes to `None`, an integer to `Some` — but merely
-/// attaching a `deserialize_with` is what disables serde derive's syntactic
-/// special case that would otherwise default an ABSENT `seen_activity_at`
-/// key to `None` too (the same trick `Session::seen_activity_at`'s
-/// `double_option` uses the other way, to tell absent apart from an
-/// explicit null). Without this, a malformed or truncated PUT body (`{}`)
-/// would silently be interpreted as a "mark unread" instead of being
-/// rejected — axum 0.8's `JsonRejection::JsonDataError`, a 422, the same
-/// status `RenameReq`'s own missing-field doc explains — see the
-/// seen-route tests' `{}`-body coverage.
-fn require_present_seen_activity_at<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Option::<i64>::deserialize(deserializer)
-}
-
 /// `PUT /api/sessions/{id}/seen` — record or clear this session's "last
 /// seen" activity stamp (SPEC.md, Status), the state behind the idle dot's
 /// grey/blue split and the row's read/unread toggle.
@@ -4004,10 +3973,14 @@ where
 /// issues on a real change is what brings every client's next list read
 /// (including the caller's own) up to date — no optimistic client-side
 /// state is needed here.
+///
+/// The body is [`farhelm_proto::SessionSeenRequest`], the type the GUI sends
+/// too; its key is required, so `{}` is refused (a 422) rather than read as a
+/// "mark unread".
 pub(crate) async fn mark_seen(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
-    axum::Json(req): axum::Json<MarkSeenReq>,
+    axum::Json(req): axum::Json<farhelm_proto::SessionSeenRequest>,
 ) -> impl IntoResponse {
     // Router ownership keeps the store write and its event together, so a
     // cancelled caller cannot hide the change from other open clients.

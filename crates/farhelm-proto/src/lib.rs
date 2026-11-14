@@ -2832,6 +2832,33 @@ impl Default for SessionStopRequest {
     }
 }
 
+/// The body of `PUT /api/sessions/{id}/seen`, shared by the helm that decodes it and the GUI that sends it (SPEC.md,
+/// "Status"). `Some(stamp)` records the session as seen at that activity stamp: a manual Mark read, or the automatic
+/// mark a client sends when a session is opened and whenever its activity advances while it stays open. `None` clears
+/// the stamp, which is a manual Mark unread. One field rather than two verbs, because both directions share everything
+/// else on the helm's side: the existence check, the changed-or-not decision about bumping the fleet feed, and the
+/// reply.
+///
+/// The key is required, `null` included: a body without it (`{}`) does not decode, so a malformed or truncated request
+/// can never be read as a Mark unread that wipes the session's seen state (`require_present_seen_activity_at`).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionSeenRequest {
+    /// The activity stamp to record as seen, or `None` to clear it. Always serialized, as `null` when `None`.
+    #[serde(deserialize_with = "require_present_seen_activity_at")]
+    pub seen_activity_at: Option<i64>,
+}
+
+/// Decodes [`SessionSeenRequest::seen_activity_at`] through `Option<i64>`'s ordinary implementation, so an explicit JSON
+/// `null` is `None` and an integer is `Some`. What matters is that it is a `deserialize_with` at all: serde's derive
+/// treats a missing `Option` field as `None` only when the field has no `deserialize_with`, so attaching one is what
+/// turns an absent key into a decode error (axum's 422 on the helm's route) instead of a silent "mark unread".
+fn require_present_seen_activity_at<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<i64>::deserialize(deserializer)
+}
+
 /// The success body of `POST /api/sessions/{id}/replace`: the replacement's own session, plus the notice the source's
 /// Delete carried, only when it carried one, so a reader of the body as a bare session still works.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -9914,6 +9941,26 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// The GUI and the helm share the seen route's request type, and a body that leaves its key out must never decode as
+    /// a Mark unread, which would wipe the session's seen state on a malformed request. Specified: `{}` does not decode;
+    /// `null` decodes as `None` and an integer as `Some`; both encode back to the same JSON, `None` as an explicit
+    /// `null` rather than an absent key (which the helm would refuse).
+    #[farhelm_testtrace::test]
+    fn session_seen_request_requires_its_key_and_round_trips_null_and_a_stamp() {
+        assert!(serde_json::from_value::<SessionSeenRequest>(serde_json::json!({})).is_err());
+        for (wire, stamp) in [
+            (serde_json::json!({"seen_activity_at": null}), None),
+            (
+                serde_json::json!({"seen_activity_at": 1_700_000_000}),
+                Some(1_700_000_000),
+            ),
+        ] {
+            let request: SessionSeenRequest = serde_json::from_value(wire.clone()).unwrap();
+            assert_eq!(request.seen_activity_at, stamp);
+            assert_eq!(serde_json::to_value(request).unwrap(), wire);
+        }
     }
 
     /// The GUI and the helm share the Stop request's type, and an omitted field must keep refusing open tabs: older

@@ -87,6 +87,11 @@ pub enum Work {
     /// was asked from (`session_list::replace`). Not supersedable, and not a Delete for the selection rules: only an
     /// admitted Delete holds the automatic choice back.
     Replace,
+    /// The session's manual Mark read or Mark unread, from its row's menu or its status dot (`session_list::seen`).
+    /// Not supersedable. It takes the session's key like any request, so while it is in flight the session's other
+    /// actions are unavailable, as SPEC.md has every pending request refuse the session's competing ones. The
+    /// automatic seen mark is not work here: it is a best-effort write nobody waits for.
+    Seen,
 }
 
 /// What a piece of work acts on: the key the store files it under, one request at a time per key. Opaque, and built

@@ -13,8 +13,9 @@
 //!   that could not close a tab, a Replace whose source's Delete reported something), which the operation's completion
 //!   records there with [`crate::operations::Operations::note`]. The store keeps either until the key's next start or
 //!   a reset, whoever starts that work, so an editor or a later header needs no call here. Both are drawn alike, in the
-//!   refusal style, as the old app's one error slot drew them. A Stop or Replace line carries its operation's name in
-//!   front of the words, as that slot did, and a Rename or Delete refusal shows the words alone, as before.
+//!   refusal style, as the old app's one error slot drew them. A Stop, Replace or seen-toggle line carries its
+//!   operation's name in front of the words, as that slot did, and a Rename or Delete refusal shows the words alone, as
+//!   before.
 //! - **The Replace clock is deadlines, never a timer of its own.** Nothing shows for the first two seconds; then the
 //!   line shows the whole seconds since the request started, moved on once a second by a chain of
 //!   [`ticker::after`] deadlines, which fire whether or not the window is active (a wait is about the user's time,
@@ -52,13 +53,15 @@ const PROGRESS_STEP: Duration = Duration::from_secs(1);
 // ---- The words -------------------------------------------------------------------------------------------------------
 
 /// The name a line about `work` carries in front of the host's words on the row, as the old app's error slot did:
-/// "Stop: " and "Replace: ", for a refusal and a notice alike. A Rename or a Delete refusal shows the words alone, as it
-/// did before Stop and Replace came, and a save belongs to an editor, which shows its own refusal. Exhaustive, so a new
-/// kind of work decides.
+/// "Stop: " and "Replace: ", for a refusal and a notice alike, and "Seen: " for a refused Mark read or Mark unread (the
+/// old app's `seen_toggle_report`). A Rename or a Delete refusal shows the words alone, as it did before Stop and
+/// Replace came, and a save belongs to an editor, which shows its own refusal. Exhaustive, so a new kind of work
+/// decides.
 fn prefix(work: Work) -> Option<&'static str> {
     match work {
         Work::Stop => Some("Stop: "),
         Work::Replace => Some("Replace: "),
+        Work::Seen => Some("Seen: "),
         Work::Rename | Work::Delete(_) | Work::Save => None,
     }
 }
@@ -245,13 +248,14 @@ mod tests {
         }
     }
 
-    /// The old app's error slot named the operation for Stop and Replace ("Stop: …", "Replace: …"), and the ported
-    /// Delete and Rename refusals have always shown the helm's words alone. Specified: Stop and Replace carry their name
-    /// and a colon, the others nothing.
+    /// The old app's error slot named the operation for Stop, Replace and a manual seen toggle ("Stop: …", "Replace: …",
+    /// "Seen: …"), and the ported Delete and Rename refusals have always shown the helm's words alone. Specified: Stop,
+    /// Replace and Seen carry their name and a colon, the others nothing.
     #[test]
-    fn only_stop_and_replace_lines_carry_their_name() {
+    fn only_stop_replace_and_seen_lines_carry_their_name() {
         assert_eq!(prefix(Work::Stop), Some("Stop: "));
         assert_eq!(prefix(Work::Replace), Some("Replace: "));
+        assert_eq!(prefix(Work::Seen), Some("Seen: "));
         for work in [
             Work::Rename,
             Work::Save,

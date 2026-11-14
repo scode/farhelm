@@ -19,7 +19,7 @@ use gpui::{AppContext as _, DriverNode, Role, TestAppContext, VisualTestContext}
 use serde_json::{Value, json};
 
 use super::row::{ITEM_ID_PREFIX, ROW_ID_PREFIX, abbreviate_home, host_label};
-use super::selection::{self, Change, Listed, Stamped};
+use super::selection::{self, Change, Listed, Open, Stamped};
 use super::status::{Live, pulse_opacity};
 use super::{CountLine, SessionList, count_line, empty_fleet};
 use crate::host_text::tests::SPOOFING_CORPUS;
@@ -840,13 +840,17 @@ fn a_selection_settles_only_on_evidence() {
 
 /// The seen mark's memory (the old `mark_key`): due when the open session, its activity or its eligibility changes,
 /// and then sent only for an eligible session with unseen output. Ended and stale sessions are never marked, and the
-/// memory still moves for them, so their recovery is a change of its own.
+/// memory still moves for them, so their recovery is a change of its own. A hidden open session keeps the memory only
+/// when it is its own, so a manual Mark unread survives a cut or filtered listing, and leaving for another hidden session
+/// and coming back is still noticed. Specified: the cases below, each named by its assertion; a hidden open session is
+/// due nothing; with the memory its own it stays, and its return with the same activity is due nothing; another hidden
+/// session forgets the memory and sends nothing, and forgetting a forgotten memory is no change.
 #[test]
 fn the_seen_mark_is_due_on_a_new_session_or_activity_and_sent_only_when_eligible_and_unseen() {
     let due = |fixture: Fixture, stamped: &Stamped| {
         let row = fixture.row();
         selection::seen_due(
-            Some(Listed {
+            Open::Shown(Listed {
                 key: fixture.key,
                 row: &row,
             }),
@@ -878,7 +882,21 @@ fn the_seen_mark_is_due_on_a_new_session_or_activity_and_sent_only_when_eligible
         Some(None),
         "nothing new"
     );
-    assert!(selection::seen_due(None, &Stamped::default()).is_none());
+    assert!(selection::seen_due(Open::Nothing, &Stamped::default()).is_none());
+    assert!(
+        selection::seen_due(Open::Hidden("a"), &memory).is_none(),
+        "hidden, its own memory: nothing due, the memory stays"
+    );
+    assert_eq!(
+        selection::seen_due(Open::Hidden("b"), &memory),
+        Some((Stamped::default(), None)),
+        "hidden, another session's memory: forgotten, nothing sent"
+    );
+    assert!(selection::seen_due(Open::Hidden("b"), &Stamped::default()).is_none());
+    assert!(
+        due(session("a").activity(150).seen(None), &memory).is_none(),
+        "shown again with the same activity: still nothing due"
+    );
 }
 
 /// The old app's `abbreviate_home` cases: a personal home folds to `~`; dot segments, `/Users/Shared`, a bare account

@@ -10,11 +10,12 @@
 //! each value its own text element, so a direction override in one cannot reorder anything around it.
 //!
 //! The row's actions menu button sits at its end, outside the open control, so opening the menu never opens the
-//! session ([`super::menu`]). A pending Delete shows its spinner and words in place of the title, which stays the row's
-//! accessible name ([`super::delete`]); a pending Stop shows its spinner and "Stopping…" before the title, which stays
-//! on screen, since the session stays too ([`super::stop`]); a Replace that has waited two seconds says so on a line
-//! under the row ([`super::replace`]). The refusal of the row's last request, or the notice its last success left,
-//! shows under the row for as long as [`super::outcome`] says.
+//! session ([`super::menu`]). A live row's status dot sits inside the open control but is a control of its own: a click
+//! on it marks the session read or unread without opening it ([`super::seen`]). A pending Delete shows its spinner and
+//! words in place of the title, which stays the row's accessible name ([`super::delete`]); a pending Stop shows its
+//! spinner and "Stopping…" before the title, which stays on screen, since the session stays too ([`super::stop`]); a
+//! Replace that has waited two seconds says so on a line under the row ([`super::replace`]). The refusal of the row's
+//! last request, or the notice its last success left, shows under the row for as long as [`super::outcome`] says.
 //!
 //! NOTE: The locality column is kept empty, at its width, so titles start where they did in the old app; the locality,
 //! agent and permission marks, the activity age, the stale cause, the pin and the notification bell are not ported yet.
@@ -113,7 +114,10 @@ pub(crate) fn row(
                 .flex()
                 .items_center()
                 .justify_center()
-                .children(live.map(|live| live.mark(palette, selected, row.stale, steps.pulse))),
+                // The live dot is also the seen toggle ([`super::seen`]).
+                .children(
+                    live.map(|live| super::seen::dot(session, live, selected, steps.pulse, cx)),
+                ),
         )
         .child(div().w(metrics::ROW_SLOT).flex_none())
         // A pending Stop goes before the title, as the old `.stop-progress` did.

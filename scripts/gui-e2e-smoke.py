@@ -6,10 +6,10 @@ NOTE: This is a smoke test, not the end-to-end suite. It covers the first slice'
 (the session list, a row's menu, Delete, Rename, and typing into the open session's terminal), so a break in the wiring
 between the app, the helm and the supervisor shows up somewhere, plus the area steps added since (30, 31 and 33, the
 terminal's: a large paste, on a Mac only, text an input method commits, and scrollback; 32, the sidebar's quick
-switcher; 34, the session list's Stop and Replace from a row's menu; 35, the sidebar's host rail; 40, the
-settings-and-hosts area's scripted host setup). The behavior itself is specified and tested in process
-(`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `terminal/attached/tests.rs`); nothing here checks
-layout or wording beyond the names it clicks.
+switcher; 34, the session list's Stop and Replace from a row's menu; 35, the sidebar's host rail; 36, the row menu's
+Mark read and Mark unread; 40, the settings-and-hosts area's scripted host setup). The behavior itself is specified and
+tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `terminal/attached/tests.rs`); nothing
+here checks layout or wording beyond the names it clicks.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -441,6 +441,47 @@ class Smoke(unittest.TestCase):
         eventually(lambda: LOCAL_CHIP not in self.ok("snapshot"), "the chip going once All is chosen")
         self.ok("wait", "--gone", f"{total} of {total}")
         self.assertRegex(self.ok("snapshot", "-i"), r'button "All hosts" \[focused\]', "focus is on All")
+
+    # ---- The session list's seen toggle (36), on a session of its own ------------------------------------------------
+
+    def test_36_mark_read_and_unread_from_the_row_menu(self) -> None:
+        """Mark read and Mark unread set or clear the session's seen stamp, which the helm keeps and shares with every
+        client (SPEC.md, "Status"), through a request of the operation store to the helm's seen route. Specified, on a
+        basic fake-agent session this step creates under a title of its own and leaves unopened, once the supervisor
+        reads it idle (so its activity stamp no longer moves): the helm lists it with no seen stamp, so its menu offers
+        Mark read ("Treat the latest output as seen"), which makes the helm list a stamp; the menu then offers Mark
+        unread ("Show new output again"), which makes the helm list none again, and Mark read once more brings the
+        stamp back. The helm's listing is the oracle. The item is clicked by its label, which no row's status dot shares
+        (a dot's name carries its session's title)."""
+        fixtures = json.loads((RUN / "run.json").read_text())["binaries"]["fixtures"]
+        title = f"Seen toggle {uuid.uuid4().hex[:8]}"
+        body = gui_agent.seed_body(0, gui_agent.SESSION_CWD, fixtures)
+        body["title"] = title
+        session = gui_agent.helm_request(RUN, "POST", "/api/sessions", body)["id"]
+        self.ok("wait", "--text", title)
+        eventually(lambda: gui_agent.listed_states(RUN).get(session) == "idle", f"{title} listed as idle")
+
+        def stamp() -> int | None:
+            rows = gui_agent.helm_request(RUN, "GET", "/api/sessions")["sessions"]
+            [row] = [row for row in rows if row["id"] == session]
+            return row["seen_activity_at"]
+
+        self.assertIsNone(stamp(), "premise: no client has opened the session, so it has no seen stamp")
+        # Each choice: the item's label, its description (which only the open menu draws), and whether the helm then
+        # lists a seen stamp.
+        for label, description, stamped in (
+            ("Mark read", "Treat the latest output as seen", True),
+            ("Mark unread", "Show new output again", False),
+            ("Mark read", "Treat the latest output as seen", True),
+        ):
+            self.ok("click", f"text:Session actions for {title}")
+            self.ok("wait", "--text", description)
+            self.ok("click", f"text:{label}")
+            self.ok("wait", "--gone", description)
+            eventually(
+                lambda stamped=stamped: (stamp() is not None) == stamped,
+                f"the helm listing {title} {'with' if stamped else 'without'} a seen stamp",
+            )
 
     # ---- The settings-and-hosts area's scripted host setup (40), on a host of its own --------------------------------
 

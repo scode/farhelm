@@ -2448,7 +2448,7 @@ async fn mark_seen_route_bumps_on_change_and_not_on_a_repeat() {
 
 /// An OMITTED `seen_activity_at` key must be rejected outright, not
 /// silently treated as `null` (a clear/"mark unread") — see
-/// `require_present_seen_activity_at`'s doc for why a plain `Option<i64>`
+/// `farhelm_proto::SessionSeenRequest`'s doc for why a plain `Option<i64>`
 /// field would otherwise swallow a missing key into `None`. A malformed or
 /// truncated client request must not be able to clear a session's seen
 /// state by accident, and must leave the store and the fleet-events
