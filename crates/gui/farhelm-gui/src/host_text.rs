@@ -411,9 +411,7 @@ pub(crate) mod tests {
     fn a_drawn_sentence_is_one_labelled_node_with_its_escaped_name(cx: &mut gpui::TestAppContext) {
         crate::test_support::install(cx);
         let (_, cx) = cx.add_window_view(|_, _| SentenceView);
-        cx.update(|window, _| window.set_driver_enabled(true));
-        cx.run_until_parked();
-        let nodes = cx.update(|window, _| window.driver_nodes().to_vec());
+        let nodes = crate::test_support::frame(cx);
         let Some(sentence) = nodes
             .iter()
             .position(|node| node.element_id.as_deref() == Some("delete-question"))
@@ -524,9 +522,7 @@ pub(crate) mod tests {
         assert_eq!(mark_ranges(&shown, vec![1, 2]), vec![2..6]);
         crate::test_support::install(cx);
         let (_, cx) = cx.add_window_view(|_, _| MarkedView);
-        cx.update(|window, _| window.set_driver_enabled(true));
-        cx.run_until_parked();
-        let nodes = cx.update(|window, _| window.driver_nodes().to_vec());
+        let nodes = crate::test_support::frame(cx);
         let row = nodes
             .iter()
             .position(|node| node.element_id.as_deref() == Some("row"))

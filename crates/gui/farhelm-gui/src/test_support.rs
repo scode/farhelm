@@ -26,6 +26,8 @@
 //! buttons, dialogs, menus and questions that the focus, layer and prompt tests open, and the fake helm with the app
 //! serving it, which the UI-session, store and layer tests use and the operation store's and the areas' tests build on
 //! (`started`, `sessions`, `meta`, `session_entry`). A fixture that only one test module uses stays in that module.
+//! After them, a section that areas may append to holds the helpers several tests share (`frame`, `focused_id`), with
+//! the rule for adding one; the helpers above it change only by request.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -512,6 +514,74 @@ pub(crate) fn check_store(
         Vec::<String>::new(),
         "the store matches a fresh snapshot"
     );
+}
+
+// ---- Shared helpers, appended on request ------------------------------------------------------------------------------
+//
+// The extension point for a helper several tests share (docs/gpui/foundation-ownership.md, Test harness row): an area
+// appends it here, with a docstring, and its test in `shared_helper_tests` below, adding lines only. A `use` the helper
+// needs goes in a `use` line of its own (or the type is named by path), because extending a grouped `use` rewraps it,
+// which the ownership check refuses. The helpers above this section and the per-step checks change only by request.
+
+/// One fresh frame's driver record: every element drawn, with its role, accessible name, state, flags and the lines of
+/// text it painted, as assistive technology and the agent bridge see it. Turns the window's driver record on (it stays
+/// on for the window and changes nothing it draws), redraws, and reads the nodes. Turning the record on and the redraw
+/// each render the window, which a test that counts renders must allow for.
+pub(crate) fn frame(cx: &mut VisualTestContext) -> Vec<gpui::DriverNode> {
+    cx.update(|window, _| window.set_driver_enabled(true));
+    redraw(cx);
+    cx.update(|window, _| window.driver_nodes().to_vec())
+}
+
+/// The id of the first element holding focus, among those with an id, in a fresh [`frame`]. Unlike [`focused`], which
+/// asks whether a handle the test holds has focus, this names whatever has it, for a test that holds no handle (a GPUI
+/// Kit field's, a row's own).
+pub(crate) fn focused_id(cx: &mut VisualTestContext) -> Option<String> {
+    frame(cx)
+        .into_iter()
+        .find(|node| node.flags.focused && node.element_id.is_some())
+        .and_then(|node| node.element_id.map(|id| id.to_string()))
+}
+
+/// Tests of the shared helpers above, one per helper, appended with it.
+mod shared_helper_tests {
+    use gpui::{IntoElement as _, ParentElement as _, TestAppContext, div};
+
+    use super::{button, focused, focused_id, keys, open};
+
+    /// Why this matters: tests that hold no focus handle (a GPUI Kit field's, a list row's own) name the focused
+    /// element by its id, and a helper that named nothing, or an element other than the focused one, would let a focus
+    /// bug pass. Specified: with nothing focused there is no id; when Tab has put focus on the first of two buttons
+    /// (checked through its handle) its id is named, and after one more Tab the second's.
+    #[gpui::test]
+    fn focused_id_names_the_element_holding_focus(cx: &mut TestAppContext) {
+        let first = cx.update(|cx| cx.focus_handle().tab_stop(true));
+        let second = cx.update(|cx| cx.focus_handle().tab_stop(true));
+        let (drawn_first, drawn_second) = (first.clone(), second.clone());
+        let cx = open(cx, move |_, _| {
+            div()
+                .child(button("first", &drawn_first))
+                .child(button("second", &drawn_second))
+                .into_any_element()
+        });
+        assert!(
+            !focused(cx, &first) && !focused(cx, &second),
+            "the premise: neither button has focus yet"
+        );
+        assert_eq!(focused_id(cx), None, "nothing is named");
+        keys(cx, "tab");
+        assert!(
+            focused(cx, &first),
+            "the premise: Tab reached the first button"
+        );
+        assert_eq!(focused_id(cx).as_deref(), Some("first"));
+        keys(cx, "tab");
+        assert!(
+            focused(cx, &second),
+            "the premise: Tab reached the second button"
+        );
+        assert_eq!(focused_id(cx).as_deref(), Some("second"));
+    }
 }
 
 // ---- Self-tests: every step helper checks ----------------------------------------------------------------------------

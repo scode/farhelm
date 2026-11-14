@@ -21,8 +21,8 @@ use crate::host_text::{HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId, Subject};
 use crate::prompt::{self, Answer, Presentation, Question};
 use crate::test_support::{
-    Thing, advance, bounds, button, center, check, click, focused, handle, is_open, keys, open,
-    question, redraw,
+    Thing, advance, bounds, button, center, check, click, focused, frame, handle, is_open, keys,
+    open, question, redraw,
 };
 
 // ---- The prompt ------------------------------------------------------------------------------------------------------
@@ -491,7 +491,6 @@ fn ask_and_record(
     cx: &mut VisualTestContext,
     question: Question<String>,
 ) -> (prompt::Asked<String>, Vec<gpui::DriverNode>) {
-    cx.update(|window, _| window.set_driver_enabled(true));
     let asked = cx.update(|window, cx| {
         let mark = Mark::take(cx);
         prompt::ask_for_test(
@@ -507,9 +506,7 @@ fn ask_and_record(
     let Some(asked) = asked else {
         panic!("the question did not open")
     };
-    redraw(cx);
-    let nodes = cx.update(|window, _| window.driver_nodes().to_vec());
-    (asked, nodes)
+    (asked, frame(cx))
 }
 
 /// Why this matters: a prompt's summary is where a confirmation names its target, and the first real one (a session's
