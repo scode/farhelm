@@ -4289,31 +4289,33 @@ inside the environment the first attempt created, where a retry could not find i
 
 - Every failed operation surfaces a concrete, actionable error in the client. A dialog must never close as though an
   operation succeeded when it failed. Best-effort exceptions log a failure but stay silent rather than surfacing it: the
-  helm-side preference (list order, last selection, compact layout, and the host setup and removal confirmation choices,
-  turning the session-confirmation opt-out on, and the feedback contact), because losing next-launch convenience must
-  not turn a choice that already took effect into a failed current operation, and a helm that lost the preference falls
-  back to the defaults (when its save fails, the choice stays in effect only until the next read from the helm and is
-  never resent, an exception to the 2026-10-22 rule under One GUI at a time that a failed GUI save is reported and
-  discarded); and the automatic "mark seen" a session's own opening or activity advance triggers (see Status), because a
-  lost automatic mark costs nothing worse than a dot that is one open-and-close cycle behind, corrected by the next
-  successful write; and marking a session's notifications read when their list closes (see Status), for the same reason:
-  a lost mark costs a bell that stays loud until the list is next closed; marking the welcome card seen, because a
-  failed save only lets it appear at a later window start or reset; the automatic announcement check and recording a
-  dismissed batch, because a failed read or save only postpones those announcements to a later window start or reset;
-  and a trust hint's Don't show again save after its session has left the screen, because that session's adjacent error
-  no longer has a place to appear. The manual "Mark unread"/"Mark read" toggle and the notification list's clear button
-  are not covered — a failed toggle or clear surfaces like any other operation. Turning the session-confirmation opt-out
-  off restores confirmations immediately in the current client; if that save fails while Settings is still open,
-  Settings shows an adjacent error saying confirmations may still be off for this helm and to try again. Closing
-  Settings before the save settles drops that error, so the failure is then only logged. A newer switch choice clears
-  the error and supersedes older save results. Quick-launch naming, terminal-frame colors, terminal link-click behavior
-  and trust-hint visibility instead put back the saved choice and show an adjacent error when their newest save fails.
-  For naming, frame colors and link clicks, closing Settings drops only the alert: the shared choice still reverts, so
-  mounted terminals and later actions cannot keep using a failed save. Superseded results neither report nor revert a
-  newer choice. A trust-hint choice copied by a reopened Settings dialog or another mounted hint also stops being
-  current when its save fails; reopening while that save is pending does not keep the failed choice alive or inherit the
-  closed dialog's alert. A failed corrective read leaves trust settings unavailable rather than treating unknown trust
-  as off.
+  helm-side preference (list order, last selection, compact layout, and the feedback contact), because losing
+  next-launch convenience must not turn a choice that already took effect into a failed current operation, and a helm
+  that lost the preference falls back to the defaults (when its save fails, the choice stays in effect only until the
+  next read from the helm and is never resent, an exception to the 2026-10-22 rule under One GUI at a time that a failed
+  GUI save is reported and discarded); and the automatic "mark seen" a session's own opening or activity advance
+  triggers (see Status), because a lost automatic mark costs nothing worse than a dot that is one open-and-close cycle
+  behind, corrected by the next successful write; and marking a session's notifications read when their list closes (see
+  Status), for the same reason: a lost mark costs a bell that stays loud until the list is next closed; marking the
+  welcome card seen, because a failed save only lets it appear at a later window start or reset; the automatic
+  announcement check and recording a dismissed batch, because a failed read or save only postpones those announcements
+  to a later window start or reset; and a trust hint's Don't show again save after its session has left the screen,
+  because that session's adjacent error no longer has a place to appear. The manual "Mark unread"/"Mark read" toggle and
+  the notification list's clear button are not covered — a failed toggle or clear surfaces like any other operation.
+  Turning the session-confirmation opt-out off restores confirmations as soon as the helm saves it; a refused save
+  leaves them skipped and says so beside the switch, which goes back to the stored choice (the maintainer decided on
+  2026-11-14 that the desktop app follows the helm here rather than restoring confirmations before the helm has saved
+  the choice). Closing Settings before the save settles drops that error. The error stays until that switch's next save
+  starts. Quick-launch naming, terminal-frame colors, terminal link-click behavior and trust-hint visibility instead put
+  back the saved choice and show an adjacent error when their newest save fails. So do the host setup and removal
+  confirmation choices and turning the session-confirmation opt-out on, which were silent before (the migration's
+  orchestrator decided this on 2026-11-14): with no optimistic copy a failed save never took effect, and silence would
+  hide why the switch snapped back. For naming, frame colors and link clicks, closing Settings drops only the alert: the
+  shared choice still reverts, so mounted terminals and later actions cannot keep using a failed save. Superseded
+  results neither report nor revert a newer choice. A trust-hint choice copied by a reopened Settings dialog or another
+  mounted hint also stops being current when its save fails; reopening while that save is pending does not keep the
+  failed choice alive or inherit the closed dialog's alert. A failed corrective read leaves trust settings unavailable
+  rather than treating unknown trust as off.
 - Connection state per host is always visible on its rail avatar, with name and phase on hover and to screen readers;
   reconnection uses bounded retries followed by periodic low-frequency re-probing, so a host that comes back overnight
   resurfaces by itself. Hosts swaps session content for the complete management surface. Each row and its rail avatar

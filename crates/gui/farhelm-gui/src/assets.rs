@@ -28,6 +28,10 @@
 //! app's `HostMark` drawings, copied from its icon module at the reference commit into one file each: Farhelm's own
 //! set, in a 16-unit box with a 1.3 stroke and round caps and joins, unfilled, in the current color, so the view tints
 //! each one with the host's chosen color.
+//!
+//! The Settings gear and the Sessions and Hosts section glyphs are the old app's own (`SettingsIcon`, and
+//! `ActionGlyph::Sessions` and `ActionGlyph::Hosts` in its icon module at the reference commit): the gear in its 16-unit
+//! box, the two section glyphs in the 14-unit action box, all with the 1.2 stroke and round caps and joins.
 
 use std::borrow::Cow;
 
@@ -126,6 +130,12 @@ pub enum Icon {
     /// An eye: mark a session's latest output as seen, or as unseen again (the old app's mark-seen glyph, on its Mark
     /// read and Mark unread command).
     MarkSeen,
+    /// A gear: Settings (the old app's Settings glyph, on its rail button and in the Settings dialog's header tile).
+    Settings,
+    /// Two stacked windows: the Settings dialog's Sessions section (the old app's Sessions glyph).
+    Sessions,
+    /// Three boxes joined as a tree: the Settings dialog's Hosts section (the old app's Hosts glyph).
+    Hosts,
 }
 
 impl Icon {
@@ -164,6 +174,9 @@ impl Icon {
         Icon::HostLaptop,
         Icon::ChevronDown,
         Icon::MarkSeen,
+        Icon::Settings,
+        Icon::Sessions,
+        Icon::Hosts,
     ];
 }
 
@@ -201,6 +214,9 @@ impl Icon {
             Icon::HostLaptop => "icons/host-laptop.svg",
             Icon::ChevronDown => "icons/chevron-down.svg",
             Icon::MarkSeen => "icons/mark-seen.svg",
+            Icon::Settings => "icons/settings.svg",
+            Icon::Sessions => "icons/sessions.svg",
+            Icon::Hosts => "icons/hosts.svg",
         }
     }
 }
@@ -246,6 +262,9 @@ impl Assets {
             "icons/host-laptop.svg" => Some(include_bytes!("../assets/icons/host-laptop.svg")),
             "icons/chevron-down.svg" => Some(include_bytes!("../assets/icons/chevron-down.svg")),
             "icons/mark-seen.svg" => Some(include_bytes!("../assets/icons/mark-seen.svg")),
+            "icons/settings.svg" => Some(include_bytes!("../assets/icons/settings.svg")),
+            "icons/sessions.svg" => Some(include_bytes!("../assets/icons/sessions.svg")),
+            "icons/hosts.svg" => Some(include_bytes!("../assets/icons/hosts.svg")),
             _ => None,
         }
     }

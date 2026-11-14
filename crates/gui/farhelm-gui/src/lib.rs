@@ -19,6 +19,7 @@
 //!   the reset"); [`store`]: the one copy of what the helm pushed, which views read when they draw;
 //!   [`local_state`]: the selected session's id, the one piece of window state that survives a reset.
 //! - [`session_list`]: the sidebar's session list and the selection rules; [`session_pane`]: the pane beside it.
+//! - [`settings`]: the Settings dialog the host rail's gear opens, with its sections.
 //! - [`operations`]: the operation store, which holds work that finishes later (on a session, a host, a template, the
 //!   preferences, a launch), above the views that start it; [`drafts`]: editor fields that follow pushed changes
 //!   until the user touches them, and their saves.
@@ -65,6 +66,7 @@ pub mod root;
 pub mod session;
 pub mod session_list;
 pub mod session_pane;
+pub mod settings;
 pub mod store;
 pub mod terminal;
 pub mod theme;

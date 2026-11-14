@@ -14,13 +14,18 @@
 //! Save"). Its label and help are each dialog's own, as they were in the old app ("Close rename", "Close rename; keep
 //! the current title"), and so is what it does.
 //!
+//! The old host dialogs and Settings framed their header further (`.host-dialog-framed` and `.host-settings-header` in
+//! the old stylesheet): an icon tile left of the title ([`DialogFrame::tile`]), a note at the footer's left beside the
+//! answers ([`DialogFrame::note`]), and Settings alone a size of its own that does not follow its content
+//! ([`DialogFrame::width`], [`DialogFrame::fixed_height`]), so switching sections never moves the frame or its Close.
+//!
 //! NOTE: The old Close changed only its color on hover; here it is a ghost icon button, which gets the ghost tier's
 //! hover fill. The old one was a 20-pixel "×" character; here it is the close icon at the icon buttons' size.
 
 use gpui::{
     AnyElement, App, BoxShadow, ClickEvent, ElementId, FontWeight, InteractiveElement, IntoElement,
-    ParentElement, RenderOnce, Role, ScrollHandle, SharedString, StatefulInteractiveElement,
-    Styled, Window, div, point, px,
+    ParentElement, Pixels, RenderOnce, Role, ScrollHandle, SharedString,
+    StatefulInteractiveElement, Styled, Window, div, point, prelude::FluentBuilder as _, px,
 };
 
 use super::{Button, HoverHelp, IconButton};
@@ -31,6 +36,12 @@ use crate::theme::{self, metrics};
 
 /// The body's floor before the whole frame starts scrolling instead: about three lines, as the old `min-height: 3em`.
 const BODY_MIN_HEIGHT: f32 = 36.;
+
+/// `.host-settings-mark`: the header tile's square side.
+const TILE: f32 = 44.;
+
+/// `.host-settings-footer > span`: the footer note's text size.
+const NOTE_TEXT: f32 = 11.;
 
 /// A dialog's frame. The title is the accessible name, and is always the app's own words; the summary may name a host
 /// value through a [`Line`], which then is a labelled node of its own inside the dialog. The answers are drawn
@@ -43,6 +54,10 @@ pub struct DialogFrame {
     body: AnyElement,
     answers: Vec<Button>,
     close: Option<IconButton>,
+    tile: Option<AnyElement>,
+    note: Option<SharedString>,
+    width: Option<Pixels>,
+    fixed_height: Option<Pixels>,
 }
 
 impl DialogFrame {
@@ -60,6 +75,10 @@ impl DialogFrame {
             body: body.into_any_element(),
             answers,
             close: None,
+            tile: None,
+            note: None,
+            width: None,
+            fixed_height: None,
         }
     }
 
@@ -93,6 +112,35 @@ impl DialogFrame {
         self.summary = Some(summary.into());
         self
     }
+
+    /// An icon tile left of the title (the old host dialogs' `.host-settings-mark`): `tile` drawn centered in a
+    /// 44-pixel square of the raised fill with the medium radius, in the primary text color, so an SVG icon that takes
+    /// the text color draws in it. The tile is decoration: the title stays the dialog's accessible name.
+    pub fn tile(mut self, tile: impl IntoElement) -> Self {
+        self.tile = Some(tile.into_any_element());
+        self
+    }
+
+    /// A note at the footer's left, the answers staying at its right (the old `.host-settings-footer`'s leading span,
+    /// such as Settings' "Most choices save immediately"). Without one the answers sit right-aligned alone.
+    pub fn note(mut self, note: impl Into<SharedString>) -> Self {
+        self.note = Some(note.into());
+        self
+    }
+
+    /// The frame's width in place of the ordinary dialog width, still never wider than the window.
+    pub fn width(mut self, width: Pixels) -> Self {
+        self.width = Some(width);
+        self
+    }
+
+    /// A height the frame keeps whatever its body holds, capped by the window as every frame's height is: the body
+    /// takes the room the header and footer leave, leaving space below short content and scrolling long content. For a
+    /// dialog whose body changes under the user, as Settings' sections do, so the frame and its controls stay put.
+    pub fn fixed_height(mut self, height: Pixels) -> Self {
+        self.fixed_height = Some(height);
+        self
+    }
 }
 
 impl RenderOnce for DialogFrame {
@@ -118,6 +166,18 @@ impl RenderOnce for DialogFrame {
                     .child(summary),
             );
         }
+        let tile = self.tile.map(|tile| {
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .size(px(TILE))
+                .rounded(metrics::RADIUS_MD)
+                .bg(theme::color(palette.bg_1))
+                .text_color(theme::color(palette.fg_0))
+                .child(tile)
+        });
         let header = div()
             .flex()
             .flex_shrink_0()
@@ -128,6 +188,7 @@ impl RenderOnce for DialogFrame {
             .bg(theme::color(palette.control_hover))
             .border_b_1()
             .border_color(theme::color(palette.border_dim))
+            .children(tile)
             .child(heading)
             // `align-self: flex-start`: the Close sits level with the title, not centered on a two-line heading.
             .children(
@@ -143,6 +204,8 @@ impl RenderOnce for DialogFrame {
             .id(ElementId::Name(format!("{}-body", self.id).into()))
             .debug_selector(|| format!("{}-body", self.id))
             .flex_shrink_1()
+            // A fixed-height frame's body takes whatever the header and footer leave.
+            .when(self.fixed_height.is_some(), |body| body.flex_grow(1.))
             .min_h(px(BODY_MIN_HEIGHT))
             .overflow_y_scroll()
             .py(pad_y)
@@ -155,16 +218,36 @@ impl RenderOnce for DialogFrame {
             .debug_selector(|| format!("{}-answers", self.id))
             .flex()
             .flex_shrink_0()
-            .justify_end()
             .items_center()
             .flex_wrap()
-            .gap(px(8.))
             .py(foot_y)
             .px(foot_x)
             .bg(theme::color(palette.bg_1))
             .border_t_1()
-            .border_color(theme::color(palette.border_dim))
-            .children(self.answers);
+            .border_color(theme::color(palette.border_dim));
+        let footer = match self.note {
+            // `.host-settings-footer`: the note and the answers at either end, 12 pixels apart at least, the answers
+            // wrapping below the note when the row is too narrow for both.
+            Some(note) => footer
+                .justify_between()
+                .gap(px(12.))
+                .child(
+                    div()
+                        .min_w_0()
+                        .text_size(px(NOTE_TEXT))
+                        .text_color(theme::color(palette.fg_1))
+                        .child(note),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .justify_end()
+                        .gap(px(8.))
+                        .children(self.answers),
+                ),
+            None => footer.justify_end().gap(px(8.)).children(self.answers),
+        };
 
         let card = div()
             .id(ElementId::Name(self.id.clone()))
@@ -173,8 +256,9 @@ impl RenderOnce for DialogFrame {
             .aria_label(self.title)
             .flex()
             .flex_col()
-            .w(metrics::DIALOG_WIDTH)
+            .w(self.width.unwrap_or(metrics::DIALOG_WIDTH))
             .max_w_full()
+            .when_some(self.fixed_height, |frame, height| frame.h(height))
             .max_h(max_height)
             .overflow_y_scroll()
             .bg(theme::color(palette.bg_2))
