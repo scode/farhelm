@@ -851,11 +851,58 @@ pub(crate) async fn add_host(
 /// Refuses the reserved local row (409 — it has no destination to change),
 /// an unknown id (404), an unusable destination (400), and a destination
 /// another host holds (409).
+///
+/// ## Answering while a setup or Update runs
+///
+/// Waiting for the provisioning lock means waiting for a whole install or
+/// update on this host, which SPEC.md's "Waiting between operations on one
+/// host" accepts but the GUI's channel cannot: it admits one command at a
+/// time and resets the window when one stays unanswered. So the reply comes
+/// within the host reply bound (`crate::sessions::HOST_REPLY_BOUND`), saying
+/// the change waits for the host's setup or update, while the change itself
+/// carries on its own task and lands when the run releases the lock; the
+/// pushed hosts list then shows it. Agents' approved edits do not come through
+/// here and keep waiting.
+///
+/// The change is checked first, with the write's own checks run as a dry run
+/// (`crate::store::HelmStore::check_ssh_destination`), so a change the registry refuses
+/// (an unusable destination, the local row, another host's destination or
+/// name) is refused at once rather than promised. Only a change the registry
+/// starts to refuse while it waits (another host takes that destination in
+/// the meantime) is refused with nobody waiting for the reply; the log records
+/// that refusal, and the hosts list shows the destination the host really has.
 pub(crate) async fn set_destination(
     State(state): State<Arc<AppState>>,
     AxPath(host): AxPath<HostId>,
     axum::Json(spec): axum::Json<HostSpec>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
+    // What the write would refuse now is refused at once, so the reply that
+    // says the change is waiting is never given for a change that cannot land.
+    if let Err(error) = state.store.check_ssh_destination(host, &spec.ssh).await {
+        return http_error(error);
+    }
+    crate::sessions::within_host_reply_bound_saying(
+        retarget(state, host, spec),
+        waiting_for_run_message("destination"),
+    )
+    .await
+}
+
+/// The reply a destination or alias change gives when it is still waiting
+/// for a setup or Update on its host after the host reply bound; see
+/// [`set_destination`], "Answering while a setup or Update runs".
+fn waiting_for_run_message(what: &str) -> String {
+    format!(
+        "the host did not take the new {what} within {} seconds, most likely because a setup or \
+         update is running on it; the change is still waiting and applies when that finishes, \
+         unless the hosts list has changed in a way that refuses it by then, and the hosts list \
+         will show the result",
+        crate::sessions::HOST_REPLY_BOUND.as_secs()
+    )
+}
+
+/// The body of [`set_destination`]: the retarget itself, unbounded.
+async fn retarget(state: Arc<AppState>, host: HostId, spec: HostSpec) -> axum::response::Response {
     // The HTTP router owns the commit through reconciliation, so a client
     // leaving cannot cancel the live connection's convergence on its new address.
     //
@@ -915,18 +962,33 @@ pub(crate) async fn set_destination(
 /// first. It also covers a retry whose store write reports no change because
 /// an earlier attempt wrote the same value but failed to sync: this sync is
 /// still the first to change the actor's row, so it still announces.
+///
+/// Like a destination change, it waits for the provisioning lock and so for
+/// any setup or Update running on the host, and answers within the host reply
+/// bound while the change carries on (see [`set_destination`], "Answering while
+/// a setup or Update runs").
 pub(crate) async fn set_alias(
     State(state): State<Arc<AppState>>,
     AxPath(host): AxPath<HostId>,
     axum::Json(spec): axum::Json<AliasSpec>,
-) -> impl IntoResponse {
-    if let Err(error) = set_alias_for(&state, host, spec.alias.as_deref()).await {
+) -> axum::response::Response {
+    // Refused at once when the write would refuse it now; see `set_destination`.
+    if let Err(error) = state.store.check_alias(host, spec.alias.as_deref()).await {
         return http_error(error);
     }
-    match host_view(&state, host).await {
-        Ok(view) => axum::Json(view).into_response(),
-        Err(error) => http_error(error),
-    }
+    crate::sessions::within_host_reply_bound_saying(
+        async move {
+            if let Err(error) = set_alias_for(&state, host, spec.alias.as_deref()).await {
+                return http_error(error);
+            }
+            match host_view(&state, host).await {
+                Ok(view) => axum::Json(view).into_response(),
+                Err(error) => http_error(error),
+            }
+        },
+        waiting_for_run_message("name"),
+    )
+    .await
 }
 
 /// Store a host's alias under the host's provisioning and write locks: the
@@ -2099,6 +2161,111 @@ mod tests {
         let (status, _, text) =
             call(&harness, "POST", &format!("/api/hosts/{taken}/retry"), None).await;
         assert_eq!(status, StatusCode::OK, "{text}");
+    }
+
+    /// Spec: while a setup or Update holds a host's provisioning lock, a
+    /// destination change and an alias change each answer within the host
+    /// reply bound (504, saying the change waits for the setup or update), and
+    /// both still land once the lock is released. A change the registry would
+    /// refuse anyway (another host's destination) is refused at once instead,
+    /// never answered as waiting.
+    ///
+    /// Why: SPEC.md lets registry edits wait for an install or update, which
+    /// runs for minutes, but the GUI's channel admits one command at a time
+    /// and resets the window when one stays unanswered for 30 seconds. And a
+    /// refusal that came only after the run would reach nobody, since the 504
+    /// went out long before. The held lock stands in for the run, which holds
+    /// it from start to finish; the paused clock makes the bound exact, and the
+    /// outer timeouts turn a missing bound into a failure rather than a hang.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn registry_edits_behind_a_running_setup_answer_within_the_bound_and_land_after() {
+        let harness = lone_local_helm().await;
+        let mut hosts = Vec::new();
+        for destination in ["user@busy", "user@other"] {
+            let (_, added, _) = call(
+                &harness,
+                "POST",
+                "/api/hosts",
+                Some(serde_json::json!({ "ssh": destination })),
+            )
+            .await;
+            let host = added["id"].as_i64().unwrap();
+            harness.await_refreshed(host).await;
+            hosts.push(host);
+        }
+        let host = hosts[0];
+        let run = harness.manager.host_provision_lock(host).await;
+        let bounded = |method, uri: String, body| {
+            let harness = &harness;
+            async move {
+                tokio::time::timeout(
+                    crate::sessions::HOST_REPLY_BOUND + std::time::Duration::from_secs(5),
+                    call(harness, method, &uri, Some(body)),
+                )
+                .await
+                .expect("the route answered within the host reply bound")
+            }
+        };
+
+        let (status, _, text) = bounded(
+            "POST",
+            format!("/api/hosts/{host}/destination"),
+            serde_json::json!({ "ssh": "user@other" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{text}");
+        assert!(
+            text.contains("user@other"),
+            "the duplicate-destination refusal: {text}"
+        );
+        let (status, _, text) = bounded(
+            "POST",
+            format!("/api/hosts/{host}/destination"),
+            serde_json::json!({ "ssh": "user@moved" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{text}");
+        assert!(
+            text.contains("new destination") && text.contains("setup or update"),
+            "{text}"
+        );
+        let (status, _, text) = bounded(
+            "POST",
+            format!("/api/hosts/{host}/alias"),
+            serde_json::json!({ "alias": "Busy box" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{text}");
+        assert!(
+            text.contains("new name") && text.contains("setup or update"),
+            "{text}"
+        );
+        let row = |rows: Vec<crate::store::HostRow>| {
+            rows.into_iter()
+                .find(|row| row.id == host)
+                .expect("the host stays registered")
+        };
+        let before = row(harness.store.list_hosts().await.unwrap());
+        assert_eq!(
+            (before.destination.as_deref(), before.alias.as_deref()),
+            (Some("user@busy"), None),
+            "premise: neither change landed while the run held the lock"
+        );
+
+        drop(run);
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let now = row(harness.store.list_hosts().await.unwrap());
+                if now.destination.as_deref() == Some("user@moved")
+                    && now.alias.as_deref() == Some("Busy box")
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("both changes carried on after their replies and landed once the run ended");
     }
 
     /// Retargeting a host must take effect on the CONNECTION, not just in
