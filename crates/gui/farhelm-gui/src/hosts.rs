@@ -15,6 +15,8 @@
 //! read from the store when it draws. It fills the box it is given and scrolls its rows inside it, so the box needs a
 //! definite height.
 //!
+//! The Add host dialog is [`add::open`], which the host rail's Add host and the heading's add button call.
+//!
 //! ## What it shows
 //!
 //! A heading band with the host count ("Hosts 3", read out as "3 hosts") and the Details switch, then one row per host
@@ -47,6 +49,7 @@
 //! row's end is kept empty, at its width, so the phase words sit where they will sit beside it, and the heading keeps
 //! its old height. [`offers::offers`] already says what the menu will offer.
 
+pub mod add;
 pub(crate) mod offers;
 mod phase;
 

@@ -1,5 +1,7 @@
-//! Host provisioning progress, as `GET /api/hosts/{id}/provisioning` and `GET /api/provisioning` serve it and the UI
-//! channel pushes it. The list route's wrapper object stays in the helm: the GUI decodes the entries, never the wrapper.
+//! Host provisioning as the helm reports it: progress, as `GET /api/hosts/{id}/provisioning` and `GET
+//! /api/provisioning` serve it and the UI channel pushes it, and what a probe (`POST /api/hosts/probe`) found, with the
+//! plan's steps it offers for confirmation. The list route's wrapper object stays in the helm: the GUI decodes the
+//! entries, never the wrapper.
 //!
 //! The helm owns provisioning (planning, runs, retained progress); this module only holds the shape of what it reports,
 //! so the helm's serializer and the GUI's decoder are one type.
@@ -71,4 +73,119 @@ pub struct ProvisioningView {
     pub status: RunStatus,
     pub steps: Vec<StepView>,
     pub message: Option<String>,
+}
+
+/// One frozen action of a plan as the user sees it before and during a run. The id remains the executor's stable label;
+/// the name is the helm's public wording.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanStep {
+    pub id: String,
+    pub name: String,
+    pub paths: Vec<PlanStepPath>,
+    pub explanation: Option<String>,
+}
+
+/// The single ordered description of a plan used for confirmation and progress: a lead line, the steps, and for an
+/// uninstall the data it keeps, a separate note because no action touches that directory.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanSteps {
+    pub lead: String,
+    pub steps: Vec<PlanStep>,
+    pub kept: Option<String>,
+}
+
+/// What `POST /api/hosts/probe` found: an answering supervisor, now registered as it is; a concrete plan to set one up,
+/// which a later confirmation consumes by its `probe_id`; or why this host stays a manual install.
+///
+/// `Plan` is the helm's frozen plan, which it sends beside the steps. Only the helm reads it: a client shows the steps
+/// and confirms by `probe_id`, and the helm acts only on the plan it kept under that id. So the helm fills in its own
+/// plan type, and a client decodes the field as [`serde::de::IgnoredAny`], which keeps the helm's planning types (its
+/// actions, targets and paths) out of this crate without a second, hand-kept copy of the reply's shape.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "result", rename_all = "kebab-case")]
+pub enum ProbeReply<Plan> {
+    TensorlakeProvisionable {
+        probe_id: String,
+        sandbox: String,
+        destination: String,
+        recipe: String,
+        resources: crate::tensorlake::recipes::RecipeSize,
+        confirmation: String,
+        steps: Box<PlanSteps>,
+    },
+    Discovered {
+        /// The registry id the helm filed the host under.
+        host_id: i64,
+        build_version: String,
+        host_identity: Option<String>,
+    },
+    Provisionable {
+        probe_id: String,
+        plan: Plan,
+        confirmation: String,
+        /// Boxed so that the small outcomes stay small in memory; the JSON is the same.
+        steps: Box<PlanSteps>,
+    },
+    Manual {
+        reason: String,
+    },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The GUI decodes the probe's reply through [`ProbeReply`] with the plan ignored, while the helm sends its own
+    /// plan in that field; a reply the helm writes that the GUI cannot read would leave Add host stuck on an unreadable
+    /// answer. Specified: a provisionable reply carrying an arbitrary plan object decodes with its probe id and steps
+    /// intact, and a discovered and a manual reply decode by their `result` tags.
+    #[test]
+    fn a_client_reads_the_probe_reply_without_the_helms_plan() {
+        let steps = PlanSteps {
+            lead: "Farhelm will set up dev@box (ubuntu, x86_64):".into(),
+            steps: vec![PlanStep {
+                id: "install-farhelm".into(),
+                name: "Install Farhelm".into(),
+                paths: vec![PlanStepPath {
+                    full: "/home/dev/.local/lib/farhelm".into(),
+                    short: "~/.local/lib/farhelm".into(),
+                }],
+                explanation: None,
+            }],
+            kept: None,
+        };
+        let sent = ProbeReply::Provisionable {
+            probe_id: "p-1".into(),
+            plan: serde_json::json!({ "actions": [{ "kind": "anything the helm keeps" }] }),
+            confirmation: "the plan as text".into(),
+            steps: Box::new(steps.clone()),
+        };
+        let wire = serde_json::to_value(&sent).unwrap();
+        assert_eq!(wire["result"], "provisionable");
+        let read: ProbeReply<serde::de::IgnoredAny> = serde_json::from_value(wire).unwrap();
+        let ProbeReply::Provisionable {
+            probe_id,
+            steps: read_steps,
+            ..
+        } = read
+        else {
+            panic!("the reply did not decode as provisionable");
+        };
+        assert_eq!((probe_id.as_str(), *read_steps), ("p-1", steps));
+
+        let discovered = serde_json::json!({
+            "result": "discovered", "host_id": 7, "build_version": "0.16.0", "host_identity": "id-1"
+        });
+        let read: ProbeReply<serde::de::IgnoredAny> = serde_json::from_value(discovered).unwrap();
+        assert!(
+            matches!(read, ProbeReply::Discovered { host_id: 7, .. }),
+            "{read:?}"
+        );
+        let manual = serde_json::json!({ "result": "manual", "reason": "no systemd user manager" });
+        let read: ProbeReply<serde::de::IgnoredAny> = serde_json::from_value(manual).unwrap();
+        assert!(
+            matches!(&read, ProbeReply::Manual { reason } if reason == "no systemd user manager"),
+            "{read:?}"
+        );
+    }
 }

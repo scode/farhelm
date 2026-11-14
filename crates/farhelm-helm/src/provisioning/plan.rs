@@ -9,9 +9,11 @@ use crate::units::{SupervisorUnitInputs, render_supervisor_unit};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
-// The operation and the plan-path shape live in `farhelm-proto`, because provisioning progress carries them to the
-// GUI; the helm-only behavior on them is in the two traits below.
-pub(crate) use farhelm_proto::provisioning::{PlanStepPath, ProvisioningOperation};
+// The operation and the plan's steps live in `farhelm-proto`, because provisioning progress and the probe's reply carry
+// them to the GUI; the helm-only behavior on them is in the two traits below.
+pub(crate) use farhelm_proto::provisioning::{
+    PlanStep, PlanStepPath, PlanSteps, ProvisioningOperation,
+};
 
 /// The helm's own wording for an operation, kept out of the shared type because only the helm phrases refusals.
 pub(super) trait OperationRefusal {
@@ -483,25 +485,6 @@ impl StepPathFromHome for PlanStepPath {
         );
         Self { full, short }
     }
-}
-
-/// One frozen action as the user sees it before and during a run. The id
-/// remains the executor's stable label; the name is the helm's public wording.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub(super) struct PlanStep {
-    pub(super) id: String,
-    pub(super) name: String,
-    pub(super) paths: Vec<PlanStepPath>,
-    pub(super) explanation: Option<String>,
-}
-
-/// The single ordered description used for confirmation and progress. Kept
-/// data is a separate note because uninstall never acts on that directory.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub(super) struct PlanSteps {
-    pub(super) lead: String,
-    pub(super) steps: Vec<PlanStep>,
-    pub(super) kept: Option<String>,
 }
 
 #[cfg(test)]

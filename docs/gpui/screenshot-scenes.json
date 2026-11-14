@@ -665,6 +665,11 @@
       "golden": "hosts-panel-host-unreachable",
       "title": "The Hosts panel with Details on and one host failing to connect: its phase, attempt and SSH error",
       "reference": "hosts-panel-host-unreachable"
+    },
+    {
+      "golden": "host-add-dialog",
+      "title": "The Add host dialog as it opens, a destination typed: the SSH destination and alias fields with their help, Cancel and Add",
+      "reference": "host-add-dialog"
     }
   ],
   "reference_scenes": [
