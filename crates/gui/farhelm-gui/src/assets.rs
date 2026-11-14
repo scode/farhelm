@@ -39,6 +39,8 @@
 //! `website/scripts/render-svgs.mjs`, never edited by hand), and a copy here would be one more to forget when the mark
 //! is regenerated. Unlike the icons, each carries its own two colors (the letters and the green block cursor), so it is
 //! drawn as an image, which keeps them, not through `svg()`, which tints a drawing with one color.
+//!
+//! The Terminal section glyph is the old app's too (`ActionGlyph::Terminal`), in the same 14-unit action box and stroke.
 
 use std::borrow::Cow;
 
@@ -145,6 +147,8 @@ pub enum Icon {
     Sessions,
     /// Three boxes joined as a tree: the Settings dialog's Hosts section (the old app's Hosts glyph).
     Hosts,
+    /// A prompt in a window: the Settings dialog's Terminal section (the old app's Terminal glyph).
+    Terminal,
 }
 
 impl Icon {
@@ -187,6 +191,7 @@ impl Icon {
         Icon::Settings,
         Icon::Sessions,
         Icon::Hosts,
+        Icon::Terminal,
     ];
 }
 
@@ -228,6 +233,7 @@ impl Icon {
             Icon::Settings => "icons/settings.svg",
             Icon::Sessions => "icons/sessions.svg",
             Icon::Hosts => "icons/hosts.svg",
+            Icon::Terminal => "icons/terminal.svg",
         }
     }
 }
@@ -284,6 +290,7 @@ impl Assets {
             "icons/settings.svg" => Some(include_bytes!("../assets/icons/settings.svg")),
             "icons/sessions.svg" => Some(include_bytes!("../assets/icons/sessions.svg")),
             "icons/hosts.svg" => Some(include_bytes!("../assets/icons/hosts.svg")),
+            "icons/terminal.svg" => Some(include_bytes!("../assets/icons/terminal.svg")),
             WORDMARK_DARK => Some(include_bytes!(
                 "../../../../packaging/farhelm-desktop/wordmark-dark.svg"
             )),

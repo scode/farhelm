@@ -20,11 +20,11 @@
 //!   the footer's Close all close it, and focus goes back to the gear. Closing discards what the dialog holds; a save
 //!   already sent goes on, since it is the operation store's work, not the dialog's (the helm's reply then settles
 //!   nothing on screen, and the store already shows the result).
-//! - **Saving a switch.** Every switch here saves one field of the helm's preference row at once, with
-//!   [`crate::drafts::save`] under [`OpKey::preferences`]. While the save is in flight the switch shows the value being
-//!   saved (its draft); otherwise it shows what the helm stores, so a refused save shows the stored value again, with
-//!   the failure line under the switch until that switch's next save starts (SPEC.md: "A failed save restores the last
-//!   known value and shows an adjacent error"). Nothing is optimistic, queued, retried or read back.
+//! - **Saving a choice.** Every switch here, and Terminal's link choice, saves one field of the helm's preference row at
+//!   once, with [`crate::drafts::save`] under [`OpKey::preferences`]. While the save is in flight the control shows the
+//!   value being saved (its draft); otherwise it shows what the helm stores, so a refused save shows the stored value
+//!   again, with the failure line under the control until its next save starts (SPEC.md: "A failed save restores the
+//!   last known value and shows an adjacent error"). Nothing is optimistic, queued, retried or read back.
 //!
 //! NOTE: Quick flips do not follow the old app's "newest-choice" rule. Its preference queue coalesced a field's clicks,
 //! sent only the newest, and reported a failure only for the newest click. Here the operation store admits one request
@@ -42,6 +42,7 @@
 //! is long enough to scroll at the minimum window size.
 
 mod choices;
+mod terminal;
 #[cfg(test)]
 mod tests;
 
@@ -62,6 +63,7 @@ use crate::session;
 use crate::theme;
 
 use choices::{Choice, Switch};
+use terminal::LinkClick;
 
 /// `.app-settings-dialog[aria-label="Settings"]`'s width.
 const WIDTH: f32 = 760.;
@@ -113,9 +115,9 @@ pub fn open(
     open_at(Section::Sessions, opener, mark, window, cx)
 }
 
-/// [`open`], at `section` with focus on its first control. The entry points that open elsewhere (Agent trust at an
-/// agent's switch, for a trust hint) call this, or a form of it that takes the control to focus; the screenshot goldens
-/// call it for each section they picture.
+/// [`open`], at `section` with focus on its first control (on the dialog itself at Terminal, [`Section::first`]).
+/// The entry points that open elsewhere (Agent trust at an agent's switch, for a trust hint) call this, or a form of it
+/// that takes the control to focus; the screenshot goldens call it for each section they picture.
 pub(crate) fn open_at(
     section: Section,
     opener: &FocusHandle,
@@ -130,11 +132,15 @@ pub(crate) fn open_at(
     }
     focus::focus_control(opener, mark, window, cx);
     let dialog = cx.new(|cx| SettingsDialog::new(section, cx));
-    let start = dialog.read(cx).start(section);
+    let container = cx.focus_handle();
+    let start = dialog
+        .read(cx)
+        .start(section)
+        .unwrap_or_else(|| container.clone());
     let layer = layers::open_dialog(
         Dialog {
             view: dialog.clone().into(),
-            container: cx.focus_handle(),
+            container,
             start,
             subject: None,
             // None on purpose: Enter on the dialog itself does nothing, as in the old app, where container Enter never
@@ -171,19 +177,21 @@ fn preferences(collections: &farhelm_helm_client::Collections) -> Option<&Prefer
 pub(crate) enum Section {
     Sessions,
     Hosts,
+    Terminal,
 }
 
 impl Section {
     /// The sections this build has, in SPEC.md's order ("Sessions, Appearance, Hosts, Recipes, Tensorlake,
     /// Containers, Credentials, Terminal, Checkouts, Agent trust and Notifications, followed by App"). The others join
     /// with their own changes.
-    const ALL: &[Section] = &[Section::Sessions, Section::Hosts];
+    const ALL: &[Section] = &[Section::Sessions, Section::Hosts, Section::Terminal];
 
     /// The section's stable key, which its button's element id is built from.
     fn key(self) -> &'static str {
         match self {
             Section::Sessions => "sessions",
             Section::Hosts => "hosts",
+            Section::Terminal => "terminal",
         }
     }
 
@@ -192,6 +200,7 @@ impl Section {
         match self {
             Section::Sessions => "Sessions",
             Section::Hosts => "Hosts",
+            Section::Terminal => "Terminal",
         }
     }
 
@@ -200,14 +209,19 @@ impl Section {
         match self {
             Section::Sessions => Icon::Sessions,
             Section::Hosts => Icon::Hosts,
+            Section::Terminal => Icon::Terminal,
         }
     }
 
-    /// The control focus starts on when Settings opens at this section: its first switch.
-    fn first(self) -> Choice {
+    /// The control focus starts on when Settings opens at this section: its first switch. `None` for Terminal, whose
+    /// first control is the link choice's radio group: its options' focus handles live in the component's own element
+    /// state, out of the dialog's reach, so opening there focuses the dialog itself (see [`open_at`]). Nothing in the
+    /// app opens Settings at Terminal; only its golden does.
+    fn first(self) -> Option<Choice> {
         match self {
-            Section::Sessions => Choice::SkipSessionConfirmations,
-            Section::Hosts => Choice::AutoUpdateRemoteHosts,
+            Section::Sessions => Some(Choice::SkipSessionConfirmations),
+            Section::Hosts => Some(Choice::AutoUpdateRemoteHosts),
+            Section::Terminal => None,
         }
     }
 }
@@ -218,6 +232,9 @@ pub(crate) struct SettingsDialog {
     shown: Section,
     /// One per [`Choice`], in [`Choice::ALL`]'s order, whichever section draws it.
     switches: Vec<Switch>,
+    /// Terminal's link choice: like a switch's draft, it holds the value being saved and the last refusal, and its
+    /// loaded value never reaches the screen ([`terminal::links`]).
+    link_click: Draft<LinkClick>,
     /// Set right after the layer opens; what the close controls dismiss.
     layer: Option<LayerId>,
 }
@@ -238,6 +255,7 @@ impl SettingsDialog {
         SettingsDialog {
             shown,
             switches,
+            link_click: Draft::load(LinkClick::Intercept),
             layer: None,
         }
     }
@@ -250,9 +268,11 @@ impl SettingsDialog {
             .unwrap_or_default()
     }
 
-    /// Where focus starts when the dialog opens at `section`.
-    fn start(&self, section: Section) -> FocusHandle {
-        self.switches[Self::index(section.first())].focus.clone()
+    /// Where focus starts when the dialog opens at `section`, or `None` to start on the dialog itself
+    /// ([`Section::first`]).
+    fn start(&self, section: Section) -> Option<FocusHandle> {
+        let first = section.first()?;
+        Some(self.switches[Self::index(first)].focus.clone())
     }
 
     /// Show `section`. Every section's state stays as it is: only which one is drawn changes.
@@ -279,6 +299,25 @@ impl SettingsDialog {
         );
         if let Err(not_started) = started {
             tracing::debug!(?choice, ?not_started, "preference switch not saved");
+        }
+    }
+
+    /// The user chose `choice` for terminal web links: save it as the preference row's `terminal_link_click` field, as
+    /// [`SettingsDialog::toggle`] saves a switch, with the same refusal while any preference save is in flight.
+    fn choose_link_click(&mut self, choice: LinkClick, cx: &mut Context<Self>) {
+        if !self.link_click.edit(choice) {
+            return;
+        }
+        let started = drafts::save(
+            self,
+            |dialog: &mut SettingsDialog| &mut dialog.link_click,
+            &OpKey::preferences(),
+            |choice| terminal::command(*choice),
+            cx,
+            |_, _, _| {},
+        );
+        if let Err(not_started) = started {
+            tracing::debug!(?choice, ?not_started, "terminal link choice not saved");
         }
     }
 
@@ -324,6 +363,20 @@ impl SettingsDialog {
                 self.switch(Choice::SkipHostSetupConfirmation, preferences, cx),
                 self.switch(Choice::SkipHostRemoveConfirmation, preferences, cx),
             ],
+            Section::Terminal => {
+                let weak = cx.weak_entity();
+                terminal::links(
+                    &self.link_click,
+                    preferences,
+                    move |&choice, _, cx| {
+                        let _ = weak.update(cx, |dialog, cx| dialog.choose_link_click(choice, cx));
+                    },
+                    cx,
+                )
+                .into_iter()
+                .map(IntoElement::into_any_element)
+                .collect()
+            }
         }
     }
 }
