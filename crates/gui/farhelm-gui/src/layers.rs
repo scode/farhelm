@@ -48,6 +48,14 @@
 //!   that holds focus, which such a popover never is.
 //! - **One tooltip at a time**, owned by the control that showed it (see [`TooltipOwner`]). It says the app's own
 //!   words, or a host sentence when the help names a host value, drawn through host text's element ([`ShownTooltip`]).
+//! - **One pill, drawn above every layer and under the tooltip, that is not a layer** ([`show_pill`]). It is the one
+//!   thing a feature draws over the dialogs without opening one: SPEC.md's quick-launch sequence pill, which stays in
+//!   view above the launcher's veil, as the old one sat at z-index 50 over the launcher's backdrop at 40. It is display
+//!   only, like the tooltip: it asks for no pointer input and holds no focus, so a press on it is a press on whatever it
+//!   covers, and nothing that asks about layers ([`any_open`], Tab's trap, where focus recovers, Escape's
+//!   [`dismiss_top`]) sees it. It sits centered over an [`Anchor`] element or at its bottom edge ([`PillPlacement`]) and
+//!   goes when that element is no longer drawn, when its feature hides it ([`hide_pill`]), or on a reset
+//!   ([`close_all`]).
 //!
 //! State is kept per window: multi-window support is a watch-list item, and the one thing it asks of the foundations
 //! now is that overlays are not shared between windows. Each window's [`LayerStack`] is an entity that notifies, and
@@ -91,11 +99,16 @@ use crate::ticker;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LayerId(u64);
 
-/// One window's overlays: its open layers, bottom to top, and its tooltip.
+/// One window's overlays: its open layers, bottom to top, its pill and its tooltip.
 pub struct LayerStack {
     window: AnyWindowHandle,
     layers: Vec<Layer>,
     next_id: u64,
+    /// The pill showing in this window, if any ([`show_pill`]). Kept apart from `layers` so that nothing that walks the
+    /// layers for focus, Escape or "is anything open" can count it.
+    pill: Option<ShownPill>,
+    /// The id the next shown pill gets.
+    next_pill_id: u64,
     tooltip: Option<ShownTooltip>,
     /// Takes the tooltip down when its owner is released; replaced with each new tooltip.
     tooltip_release: Option<Subscription>,
@@ -214,6 +227,8 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
         window: handle,
         layers: Vec::new(),
         next_id: 0,
+        pill: None,
+        next_pill_id: 0,
         tooltip: None,
         tooltip_release: None,
         pending_tooltip: None,
@@ -280,8 +295,8 @@ impl Subject {
     }
 }
 
-/// An element a popover can be anchored to. Built while the element renders ([`Anchor::for_element`]); the element
-/// draws [`Anchor::track`] as a child so the popover knows where it is.
+/// An element a popover can be anchored to, or the pill placed over ([`Pill::anchor`]). Built while the element renders
+/// ([`Anchor::for_element`]); the element draws [`Anchor::track`] as a child so the overlay knows where it is.
 ///
 /// It refers to the element's state weakly: keeping an `Anchor` around (in a view, a test) does not keep the element
 /// "drawn", so a popover anchored to it still closes when the element goes.
@@ -732,7 +747,9 @@ fn close_as(id: LayerId, dismissed: bool, window: &mut Window, cx: &mut App) {
 /// This is the one close that does not need the layer's id: a reset is not any opener's decision, and a dialog that
 /// survived it would keep its veil over the inert window, where it takes the clicks meant for Take back or Retry and
 /// traps Tab away from them. Focus follows the ordinary close rule, returning to what held it when the bottom layer
-/// opened (and going home once that is no longer drawn). The tooltip is left alone: it goes with its control.
+/// opened (and going home once that is no longer drawn). The pill goes too ([`show_pill`]): what it showed belonged to
+/// the UI session the reset retired, and its feature, which lives in that session, is no longer there to hide it. The
+/// tooltip is left alone: it goes with its control.
 pub fn close_all(cx: &mut App) {
     let Some(windows) = installed::<Windows>(cx) else {
         return;
@@ -740,6 +757,11 @@ pub fn close_all(cx: &mut App) {
     let stacks: Vec<Entity<LayerStack>> =
         windows.0.values().filter_map(WeakEntity::upgrade).collect();
     for stack in stacks {
+        stack.update(cx, |stack, cx| {
+            if stack.pill.take().is_some() {
+                cx.notify();
+            }
+        });
         let (window, bottom) = {
             let stack = stack.read(cx);
             (stack.window, stack.layers.first().map(|layer| layer.id))
@@ -814,7 +836,7 @@ pub fn is_open(id: LayerId, window: &Window, cx: &App) -> bool {
     stack(window, cx).is_some_and(|stack| stack.read(cx).layers.iter().any(|layer| layer.id == id))
 }
 
-/// Whether any dialog or popover is open in `window`.
+/// Whether any dialog or popover is open in `window`. The pill ([`show_pill`]) is not a layer and never counts.
 pub fn any_open(window: &Window, cx: &App) -> bool {
     stack(window, cx).is_some_and(|stack| !stack.read(cx).layers.is_empty())
 }
@@ -1072,10 +1094,140 @@ pub fn shown_tooltip(window: &Window, cx: &App) -> Option<ShownTooltip> {
     stack(window, cx)?.read(cx).tooltip.clone()
 }
 
+// ---- The pill --------------------------------------------------------------------------------------------------------
+
+/// A display-only element to draw above every layer ([`show_pill`]): SPEC.md's quick-launch sequence pill, with its
+/// candidate list, which must stay in view over the launcher's veil yet take neither focus nor pointer input.
+///
+/// NOTE: The view must ask for no pointer input. GPUI hands a press, a click and a wheel to every element under the
+/// pointer up to the first that blocks them, so a press on a view that asks for nothing passes through to whatever it
+/// covers, as the old pill's `pointer-events: none` did. Anything in the view that does ask breaks that: `occlude` (or
+/// `block_mouse_except_scroll`) blocks the press from what is below; a listener of any kind, a hover or group-hover
+/// style, `.group(..)`, hover help or a tooltip makes the pill react to the pointer as well; a cursor style replaces
+/// the cursor of what is below, since the topmost one wins; a scrolling container (`overflow_*_scroll`,
+/// `track_scroll`) takes the wheel; `list` and `uniform_list` always ask, and so does interactive text; and a drop
+/// target or drag-over style reacts to a drag passing over it. The layer manager cannot see inside the view to check
+/// any of this. Nothing in it can hold focus either: it opens no layer, and no control in it may be focus-tracked, so
+/// its keys come from the feature's own capture, not from the view.
+pub struct Pill {
+    /// What the pill draws. The feature updates it in place (a notify on its view redraws it, as any view) rather than
+    /// showing a new pill for every change.
+    pub view: AnyView,
+    /// The element it is placed over, which must stay drawn for as long as the pill should show (see [`show_pill`]).
+    /// The anchor's own placement and width options are for layers and do not apply here.
+    pub anchor: Anchor,
+    /// Where over the anchor it sits.
+    pub placement: PillPlacement,
+}
+
+/// Identifies one shown pill. Returned by [`show_pill`]; the only way to hide that pill, as a [`LayerId`] is the only
+/// way to close its layer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PillId(u64);
+
+/// Where a pill sits over its anchor element. The view is laid out in a box the anchor's size, so it is as wide as its
+/// content up to the anchor's width, and a view that must stay clear of the anchor's edges pads itself (padding asks
+/// for no pointer input); one larger than the anchor overflows it evenly on both sides.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PillPlacement {
+    /// Centered over the anchor, both ways: the sequence pill outside the launcher (the old
+    /// `.launch-sequence-indicator`, `left: 50%; top: 50%; transform: translate(-50%, -50%)`).
+    Centered,
+    /// Centered across the anchor, its bottom edge on the anchor's: the sequence pill while the launcher is open, at
+    /// the bottom of the main area so it does not cover the launcher. The old one sat 14 pixels above that edge (44
+    /// with the details bar's reservation); the view keeps such a gap as its own bottom padding.
+    Bottom,
+}
+
+/// The pill a window shows: what [`show_pill`] was given, with the anchor reduced to where it was last drawn.
+struct ShownPill {
+    id: PillId,
+    view: AnyView,
+    anchor: AnchorBounds,
+    placement: PillPlacement,
+    /// Takes the pill down when its anchor element is no longer drawn. Dropped with the pill, so a pill shown on a new
+    /// anchor is not taken down by the old one going.
+    _drawn: Subscription,
+}
+
+/// Show `pill` in `window`, above every layer and under the tooltip, replacing any pill showing there. Returns the id
+/// that hides it, or `None` when its anchor element is already gone (there is nowhere to place it) or the window has
+/// no layer stack.
+///
+/// One slot per window: showing replaces whatever shows, and [`hide_pill`] hides only the pill its id names, so a
+/// feature that hides a pill another show has replaced does nothing. SPEC.md has one such pill and arms one sequence at
+/// a time, so one slot is all it needs. A second display-only pill that can show at the same time (the launch progress
+/// pill, say) needs a slot of its own here, or each show would replace the other's pill.
+///
+/// It is not a layer and changes nothing that layers decide: showing it moves no focus, takes no tooltip down, and is
+/// not counted by [`any_open`], [`focus_layer_open`], [`trap`] or Escape's [`dismiss_top`]. A layer opening over it
+/// does not hide it either; the sequence's own rules say when a dialog opening cancels it. It takes no [`Mark`]: it is
+/// not a layer and takes nothing from the user, and its feature shows it from the keystroke that arms the sequence.
+///
+/// It goes when its feature hides it, on a reset ([`close_all`]), and when its anchor element is no longer drawn, with
+/// no word to the feature. So the feature anchors it to the element SPEC.md names for the current state: centered over
+/// the terminal area, or the main area with no session open. Best is one element drawn under the same key in both
+/// states (the terminal area's box while a session is open, the main area's otherwise), whose anchor then survives a
+/// session opening or closing and re-centers the pill in that frame. If they are different elements, the feature shows
+/// the pill again on the new anchor when a session opens or closes (from an observer of the selected session, which
+/// [`crate::local_state`] notifies), or the pill is gone until then. [`pill_shown`] is there for a feature that must
+/// check.
+pub fn show_pill(pill: Pill, window: &mut Window, cx: &mut App) -> Option<PillId> {
+    let Pill {
+        view,
+        anchor,
+        placement,
+    } = pill;
+    let state = anchor.state.upgrade()?;
+    let stack = stack(window, cx)?;
+    let id = stack.update(cx, |stack, cx| {
+        let id = PillId(stack.next_pill_id);
+        stack.next_pill_id += 1;
+        let drawn = cx.observe_release(&state, |stack, _, cx| {
+            stack.pill = None;
+            cx.notify();
+        });
+        stack.pill = Some(ShownPill {
+            id,
+            view,
+            anchor: anchor.bounds,
+            placement,
+            _drawn: drawn,
+        });
+        cx.notify();
+        id
+    });
+    Some(id)
+}
+
+/// Take down the pill `id` in `window`, if it still shows. Nothing happens once another show has replaced it.
+pub fn hide_pill(id: PillId, window: &mut Window, cx: &mut App) {
+    let Some(stack) = stack(window, cx) else {
+        return;
+    };
+    stack.update(cx, |stack, cx| {
+        if stack.pill.as_ref().is_some_and(|pill| pill.id == id) {
+            stack.pill = None;
+            cx.notify();
+        }
+    });
+}
+
+/// Whether the pill `id` still shows in `window`: not hidden, replaced, taken down by a reset, or gone with its anchor.
+pub fn pill_shown(id: PillId, window: &Window, cx: &App) -> bool {
+    stack(window, cx).is_some_and(|stack| {
+        stack
+            .read(cx)
+            .pill
+            .as_ref()
+            .is_some_and(|pill| pill.id == id)
+    })
+}
+
 // ---- Drawing ---------------------------------------------------------------------------------------------------------
 
 /// Everything above the window's content, which the root view draws as its last child: each open layer, bottom to top,
-/// then the tooltip.
+/// then the pill, then the tooltip.
 #[allow(
     clippy::disallowed_methods,
     reason = "the layer manager is the one owner of deferred and anchored"
@@ -1083,7 +1235,7 @@ pub fn shown_tooltip(window: &Window, cx: &App) -> Option<ShownTooltip> {
 pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
     let stack = stack(window, cx)?;
     let stack = stack.read(cx);
-    if stack.layers.is_empty() && stack.tooltip.is_none() {
+    if stack.layers.is_empty() && stack.pill.is_none() && stack.tooltip.is_none() {
         return None;
     }
     let palette = theme::palette(cx);
@@ -1181,6 +1333,17 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
         };
         overlay = overlay.child(gpui::deferred(element).with_priority(depth + 1));
     }
+    if let Some(pill) = &stack.pill {
+        // Above every layer, as the old pill sat above the launcher's backdrop, and under the tooltip, which the old
+        // z-index ladder put above every panel. Nothing here asks for the pointer (no listener, no `occlude`), so GPUI
+        // registers no hit area for the placing wrapper and a press on the pill reaches what it covers.
+        let placed = PlacedPill {
+            anchor: pill.anchor.clone(),
+            placement: pill.placement,
+            child: pill.view.clone().into_any_element(),
+        };
+        overlay = overlay.child(gpui::deferred(placed).with_priority(stack.layers.len() + 1));
+    }
     if let Some(shown) = &stack.tooltip {
         // Offset like a native tooltip so the pointer never covers the text.
         let at = point(shown.at.x + px(8.), shown.at.y + px(16.));
@@ -1188,7 +1351,7 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
             .position(at)
             .snap_to_window()
             .child(tooltip_card(shown, window, cx));
-        overlay = overlay.child(gpui::deferred(placed).with_priority(stack.layers.len() + 1));
+        overlay = overlay.child(gpui::deferred(placed).with_priority(stack.layers.len() + 2));
     }
     Some(overlay.into_any_element())
 }
@@ -1362,6 +1525,107 @@ impl Element for PlacedPopover {
         cx: &mut App,
     ) {
         self.child.paint(window, cx);
+    }
+}
+
+/// Draws the pill over its anchor as its [`PillPlacement`] says, deciding the place while the frame is laid out, for
+/// the reason [`PlacedPopover`] does: the anchor records this frame's bounds before overlays are prepared, so the pill
+/// follows a moved or resized anchor in the same frame. Nothing is drawn while the anchor has never been drawn. In the
+/// one frame that no longer draws the anchor, the pill is drawn once more at the anchor's last place, as a popover is,
+/// before the anchor's release takes it down.
+struct PlacedPill {
+    anchor: AnchorBounds,
+    placement: PillPlacement,
+    child: AnyElement,
+}
+
+impl IntoElement for PlacedPill {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl Element for PlacedPill {
+    type RequestLayoutState = ();
+    /// Whether the child was laid out and prepared, and so may be painted.
+    type PrepaintState = bool;
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        let style = Style {
+            position: gpui::Position::Absolute,
+            ..Style::default()
+        };
+        (window.request_layout(style, [], cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) -> bool {
+        let Some(anchor) = self.anchor.get() else {
+            return false;
+        };
+        // A box exactly over the anchor, which centers the view across and centers it or sets it on the bottom edge
+        // down. Flex centering lets a view wider or taller than the anchor overflow it evenly, as the old pill's
+        // `translate(-50%, …)` did. The box takes no pointer input, like the view.
+        let content = std::mem::replace(&mut self.child, gpui::Empty.into_any_element());
+        let frame = div()
+            .w(anchor.size.width)
+            .h(anchor.size.height)
+            .flex()
+            .justify_center();
+        let frame = match self.placement {
+            PillPlacement::Centered => frame.items_center(),
+            PillPlacement::Bottom => frame.items_end(),
+        };
+        self.child = frame.child(content).into_any_element();
+        let space = gpui::size(
+            AvailableSpace::Definite(anchor.size.width),
+            AvailableSpace::Definite(anchor.size.height),
+        );
+        self.child.layout_as_root(space, window, cx);
+        self.child.prepaint_at(
+            point(anchor.origin.x.round(), anchor.origin.y.round()),
+            window,
+            cx,
+        );
+        true
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        placed: &mut bool,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        if *placed {
+            self.child.paint(window, cx);
+        }
     }
 }
 
