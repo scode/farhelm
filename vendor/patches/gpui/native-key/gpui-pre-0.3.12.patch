@@ -1,5 +1,5 @@
 diff --git a/Cargo.toml b/Cargo.toml
-index d0a404d..b150d29 100644
+index 0eef28a..5673673 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
 @@ -95,6 +95,11 @@ x11 = ["scap?/x11"]
@@ -154,7 +154,7 @@ index e4bce61..d514bc3 100644
                          key_char: Some("ą".into()),
                          ..Keystroke::parse("ctrl-alt-a").expect("valid keystroke")
 diff --git a/src/window.rs b/src/window.rs
-index 295e912..add4a22 100644
+index c795300..e9a7d5c 100644
 --- a/src/window.rs
 +++ b/src/window.rs
 @@ -2790,9 +2790,12 @@ impl Window {
@@ -201,7 +201,7 @@ index 295e912..add4a22 100644
                      keystroke: keystroke.clone(),
                      input_preference,
                      action: None,
-@@ -6002,6 +6012,7 @@ impl Window {
+@@ -6003,6 +6013,7 @@ impl Window {
          let keystroke = keystroke.with_simulated_ime();
          let result = self.dispatch_event(
              PlatformInput::KeyDown(KeyDownEvent {
@@ -209,7 +209,7 @@ index 295e912..add4a22 100644
                  keystroke: keystroke.clone(),
                  is_held: false,
                  prefer_character_input: false,
-@@ -6537,6 +6548,7 @@ impl Window {
+@@ -6538,6 +6549,7 @@ impl Window {
          cx.propagate_event = true;
          self.dispatch_keystroke_interceptors(
              &keystroke,
@@ -217,7 +217,7 @@ index 295e912..add4a22 100644
              input_preference,
              self.context_stack(),
              cx,
-@@ -6617,6 +6629,7 @@ impl Window {
+@@ -6618,6 +6630,7 @@ impl Window {
                  if !cx.propagate_event {
                      self.dispatch_keystroke_observers(
                          &keystroke,
@@ -225,7 +225,7 @@ index 295e912..add4a22 100644
                          input_preference,
                          Some(binding.action.as_ref()),
                          match_result.context_stack,
-@@ -6703,7 +6716,14 @@ impl Window {
+@@ -6704,7 +6717,14 @@ impl Window {
          }
  
          if let Some(keystroke) = recognized_keystroke {
@@ -241,7 +241,7 @@ index 295e912..add4a22 100644
          }
      }
  
-@@ -6896,6 +6916,7 @@ impl Window {
+@@ -6897,6 +6917,7 @@ impl Window {
  
          'replay: for replay in replays {
              let event = KeyDownEvent {
@@ -249,7 +249,7 @@ index 295e912..add4a22 100644
                  keystroke: replay.keystroke.clone(),
                  is_held: false,
                  prefer_character_input: true,
-@@ -6907,6 +6928,7 @@ impl Window {
+@@ -6908,6 +6929,7 @@ impl Window {
                  if !cx.propagate_event {
                      self.dispatch_keystroke_observers(
                          &replay.keystroke,
@@ -257,7 +257,7 @@ index 295e912..add4a22 100644
                          InputPreference::KeyBindings,
                          Some(binding.action.as_ref()),
                          Vec::default(),
-@@ -9554,6 +9576,7 @@ mod tests {
+@@ -9555,6 +9577,7 @@ mod tests {
              window.draw(cx).clear(cx);
              window.dispatch_event(
                  PlatformInput::KeyDown(KeyDownEvent {

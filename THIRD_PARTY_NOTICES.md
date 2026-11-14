@@ -201,10 +201,11 @@ The crates are licensed under the Apache License, Version 2.0 (each tree's `LICE
 
 `vendor/gpui-agent/` is [`wsp-labs/gpui-agent`](https://github.com/wsp-labs/gpui-agent) at commit
 `c9b8b6328877755685e1233b3770f78a68f2a5d1`, the test-automation bridge for GPUI apps, with Farhelm's changes to its
-manifests, compile guards and lockfile (`vendor/patches/gpui/gpui-agent/`) and without its `docs/`, `scripts/` and
-`patches/` directories; each changed file says so in a `Modified for Farhelm` comment at its top. It is licensed under
-the Apache License, Version 2.0 (`vendor/gpui-agent/LICENSE`). Only builds with the GUI's automation feature (still to
-come) will contain it; the GPUI patch layers that it needs are compiled into every build (`vendor/README.md`, "GPUI").
+manifests, compile guards and lockfile (`vendor/patches/gpui/gpui-agent/`) and to the element states it reports
+(`vendor/patches/gpui/bridge/gpui-agent.patch`), and without its `docs/`, `scripts/` and `patches/` directories; each
+changed file says so in a `Modified for Farhelm` comment at its top. It is licensed under the Apache License, Version
+2.0 (`vendor/gpui-agent/LICENSE`). Only builds with the GUI's automation feature (still to come) will contain it; the
+GPUI patch layers that it needs are compiled into every build (`vendor/README.md`, "GPUI").
 
 ## GPUI Kit icons
 

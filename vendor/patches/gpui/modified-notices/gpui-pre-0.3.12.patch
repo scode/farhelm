@@ -1,5 +1,5 @@
 diff --git a/Cargo.toml b/Cargo.toml
-index b150d29..0af89db 100644
+index 5673673..445c1a5 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
 @@ -1,3 +1,4 @@
@@ -71,7 +71,7 @@ index de563bf..48d918d 100644
      App, Bounds, DevicePixels, Half, Hsla, LineLayout, Pixels, Point, RenderGlyphParams, Result,
      SharedString, StrikethroughStyle, TextAlign, UnderlineStyle, Window, WrapBoundary,
 diff --git a/src/window/driver.rs b/src/window/driver.rs
-index 5d738d5..14e1b19 100644
+index 1198197..8a675dc 100644
 --- a/src/window/driver.rs
 +++ b/src/window/driver.rs
 @@ -1,3 +1,4 @@
@@ -80,7 +80,7 @@ index 5d738d5..14e1b19 100644
  //!
  //! Recording is off until [`Window::set_driver_enabled`](crate::Window::set_driver_enabled) turns it on.
 diff --git a/src/window.rs b/src/window.rs
-index 46ebc81..e00c225 100644
+index bb03f03..55a3822 100644
 --- a/src/window.rs
 +++ b/src/window.rs
 @@ -1,3 +1,4 @@
@@ -88,6 +88,15 @@ index 46ebc81..e00c225 100644
  #[cfg(feature = "profiler")]
  use crate::DebugFrameOverlayMode;
  #[cfg(any(feature = "inspector", debug_assertions))]
+diff --git a/tests/driver_record.rs b/tests/driver_record.rs
+index 4a02176..ea83de2 100644
+--- a/tests/driver_record.rs
++++ b/tests/driver_record.rs
+@@ -1,3 +1,4 @@
++// Modified for Farhelm: changed or added by the patch layers in vendor/patches/gpui/ (vendor/README.md, "GPUI").
+ //! The bridge layer's driver record (`src/window/driver.rs`), read the way the automation bridge reads it: enable
+ //! recording, let a frame draw, and look at the nodes it recorded.
+ 
 diff --git a/tests/native_key_metadata.rs b/tests/native_key_metadata.rs
 index 557ca69..540e75d 100644
 --- a/tests/native_key_metadata.rs

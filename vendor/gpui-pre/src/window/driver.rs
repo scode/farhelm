@@ -58,6 +58,9 @@ pub struct DriverNode {
     pub disabled: bool,
     /// The element's checked state, when it has one.
     pub toggled: Option<accesskit::Toggled>,
+    /// The element's selected state, such as a list's selected item: `Some(false)` only when the element says it is
+    /// not selected, `None` when selection does not apply to it.
+    pub selected: Option<bool>,
     /// What the element responds to.
     pub flags: DriverFlags,
     /// The primary entry of the key context the element sets, such as `Editor`.

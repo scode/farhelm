@@ -14,7 +14,8 @@ end-to-end GUI tests are built on.
   launches the app on it and seeds two fake-agent sessions. The run directory must be absolute and must not exist yet;
   put it under your scratch directory (AGENTS.md, "Agent scratch space").
 - `scripts/gui-agent.py /tmp/farhelm-tmp/<id>/run1 snapshot -i`: the controls on screen, each with a ref (`@e3`), its
-  role, its label and the source line that built it.
+  role, its label, its states in brackets (`[disabled]`, `[checked]`, `[selected]` on a list's selected item) and the
+  source line that built it.
 - `scripts/gui-agent.py /tmp/farhelm-tmp/<id>/run1 click @e3`, `... type @e6 "text"`, `... press enter`,
   `... wait --text "Saved"`, `... screenshot /abs/shot.png`.
 - `scripts/gui-agent.py /tmp/farhelm-tmp/<id>/run1 stop`: quits the app and stops its supervisor, its terminal hosts and

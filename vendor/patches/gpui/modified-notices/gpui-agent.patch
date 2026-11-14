@@ -1,3 +1,21 @@
+diff --git a/crates/cli/src/snapshot.rs b/crates/cli/src/snapshot.rs
+index a2dda0f..68ec52d 100644
+--- a/crates/cli/src/snapshot.rs
++++ b/crates/cli/src/snapshot.rs
+@@ -1,3 +1,4 @@
++// Modified for Farhelm: changed or added by the patch layers in vendor/patches/gpui/ (vendor/README.md, "GPUI").
+ //! Turns a frame record into the outline an agent reads, with a ref for each line.
+ 
+ use gpui_agent_protocol::{RawNode, RawTree, Rect};
+diff --git a/crates/protocol/src/lib.rs b/crates/protocol/src/lib.rs
+index 116e03d..77d580d 100644
+--- a/crates/protocol/src/lib.rs
++++ b/crates/protocol/src/lib.rs
+@@ -1,3 +1,4 @@
++// Modified for Farhelm: changed or added by the patch layers in vendor/patches/gpui/ (vendor/README.md, "GPUI").
+ //! The messages between the `gpui-agent` command line and the crate inside a GPUI app.
+ //!
+ //! One JSON object per line over a Unix socket. Coordinates are logical pixels in window space.
 diff --git a/gpui/Cargo.toml b/gpui/Cargo.toml
 index 1878a22..a86fd6b 100644
 --- a/gpui/Cargo.toml
@@ -26,7 +44,7 @@ index 60889e1..8fb16ff 100644
  //! gpui-kit 0.8 pins. The `gpui-pre-0-3-9` feature picks the older shape; `zed` and
  //! `gpui-pre-0-3-12` share the newer one.
 diff --git a/gpui/gpui-agent/src/lib.rs b/gpui/gpui-agent/src/lib.rs
-index 5c29248..f85b68e 100644
+index 7401040..cc7fa18 100644
 --- a/gpui/gpui-agent/src/lib.rs
 +++ b/gpui/gpui-agent/src/lib.rs
 @@ -1,3 +1,4 @@
