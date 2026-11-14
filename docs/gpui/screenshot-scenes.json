@@ -597,6 +597,11 @@
       "reference": "main-running-session"
     },
     {
+      "golden": "session-list-selected-stale",
+      "title": "The session list with the open session on a host the helm cannot reach: its dimmed title and cause in the selected row's inks",
+      "reference": "session-unavailable"
+    },
+    {
       "golden": "session-list-empty",
       "title": "The session list over an empty fleet",
       "reference": "empty-fleet"

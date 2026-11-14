@@ -306,7 +306,9 @@ class Smoke(unittest.TestCase):
         body = gui_agent.seed_body(0, gui_agent.SESSION_CWD, record["binaries"]["fixtures"])
         body["title"] = title
         gui_agent.helm_request(RUN, "POST", "/api/sessions", body)
-        self.ok("wait", "--text", title)
+        # Waited for by the row's name, not its painted line: this title is long enough that the row cuts it short
+        # beside its age, so the whole title is never a painted line.
+        self.ok("wait", f"text:{title}")
         self.ok("click", f"text:{title}")
         self.ok("terminal-text", "--wait", "FAKE-AGENT READY")
         # The premise: the focused terminal is a text input the bridge can commit to. Without an input handler the

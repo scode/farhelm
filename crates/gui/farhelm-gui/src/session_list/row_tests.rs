@@ -1,0 +1,640 @@
+//! Tests of what a session row says beyond its title and status mark: its age and timestamp, its last line (host and
+//! directory), its ended wording, the cause a stale row's status is only last-known, the inks of the selected and stale
+//! rows, and that all of it stays inside the row at the narrowest sidebar.
+//!
+//! Like the list's other tests, these run the real main view over the helm client's fake and read the frame from GPUI's
+//! driver record, finding a row's parts by their ids (`session-item-<key>` for the row, `session-row-<key>-age` and
+//! `session-row-<key>-cause` for its marks). Ages are counted from GPUI's test clock, which starts at [`TEST_NOW`] and
+//! moves only when a test advances it, so every age a test reads is exact. Rules that are pure functions (the causes,
+//! the inks) are tested as such, and the one test whose outcome is layout uses the real text system.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use farhelm_helm_client::fake::FakeHelm;
+use farhelm_proto::ui_channel::{
+    Availability, Collection, CollectionState, HostView, KeyedEntry, PREFERENCES_KEY, Preferences,
+    SIDEBAR_WIDTH_RANGE,
+};
+use gpui::{
+    AppContext as _, DriverNode, DriverText, HeadlessAppContext, Modifiers, Pixels, Role,
+    TestAppContext, VisualTestContext, point, px, size,
+};
+use gpui_component::Root;
+use serde_json::{Value, json};
+
+use super::host_rail::tests::{hosts, local, remote};
+use super::row::{
+    AGE_ID_SUFFIX, AGE_TRACK_ID_SUFFIX, CAUSE_ID_SUFFIX, ITEM_ID_PREFIX, Inks, ROW_ID_PREFIX,
+    meta_parts,
+};
+use super::status::{self, HostLookup};
+use super::tests::{TEST_NOW, collections, listing, open_main, painted, session};
+use crate::main_view::MainView;
+use crate::test_support::{self, frame, meta};
+use crate::{assets, bootstrap, layers, render_count, theme, ticker};
+
+// ---- Helpers --------------------------------------------------------------------------------------------------------
+
+/// The node drawn under `id`, if any.
+fn node<'a>(nodes: &'a [DriverNode], id: &str) -> Option<&'a DriverNode> {
+    nodes
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some(id))
+}
+
+/// The lines of text painted under `id`, at any depth, in paint order: where a node's text is, since text is painted
+/// by the text elements inside it.
+fn texts_within(nodes: &[DriverNode], id: &str) -> Vec<DriverText> {
+    let Some(top) = nodes
+        .iter()
+        .position(|node| node.element_id.as_deref() == Some(id))
+    else {
+        panic!("{id} was not drawn");
+    };
+    let inside = |mut index: usize| loop {
+        if index == top {
+            return true;
+        }
+        match nodes[index].parent {
+            Some(parent) => index = parent,
+            None => return false,
+        }
+    };
+    (0..nodes.len())
+        .filter(|&index| inside(index))
+        .flat_map(|index| nodes[index].texts.iter().cloned())
+        .collect()
+}
+
+/// The strings painted under `key`'s row, top to bottom and left to right within a line.
+fn row_texts(nodes: &[DriverNode], key: &str) -> Vec<String> {
+    texts_within(nodes, &format!("{ITEM_ID_PREFIX}{key}"))
+        .into_iter()
+        .map(|text| text.text.to_string())
+        .collect()
+}
+
+/// `key`'s age mark's id.
+fn age_id(key: &str) -> String {
+    format!("{ROW_ID_PREFIX}{key}{AGE_ID_SUFFIX}")
+}
+
+/// `key`'s stale cause mark's id.
+fn cause_id(key: &str) -> String {
+    format!("{ROW_ID_PREFIX}{key}{CAUSE_ID_SUFFIX}")
+}
+
+/// What `key`'s age mark painted, or `None` when the row drew no age.
+fn age_text(nodes: &[DriverNode], key: &str) -> Option<String> {
+    node(nodes, &age_id(key))?;
+    let texts = texts_within(nodes, &age_id(key));
+    Some(texts.iter().map(|text| text.text.to_string()).collect())
+}
+
+/// The hover help showing once the pointer has moved from a corner of `row` (inside its padding, clear of every mark)
+/// onto the middle of the mark drawn under `selector` and rested for the hover delay: the way a pointer reaches a mark
+/// inside a row, so the mark's own hover is the latest.
+fn help_after_crossing(cx: &mut VisualTestContext, row: &str, selector: &str) -> Option<String> {
+    let nodes = frame(cx);
+    let bounds = |id: &str| match node(&nodes, id) {
+        Some(node) => node.bounds,
+        None => panic!("{id} was not drawn"),
+    };
+    let corner = bounds(row).origin + point(px(2.), px(2.));
+    for at in [corner, bounds(selector).center()] {
+        cx.simulate_mouse_move(at, None, Modifiers::none());
+        test_support::settle(cx);
+    }
+    test_support::advance(cx, layers::HOVER_DELAY);
+    cx.update(|window, cx| layers::shown_tooltip(window, cx))
+        .map(|shown| shown.text.to_string())
+}
+
+/// The hosts collection over the local host and remotes with these registry ids, each remote's connection state
+/// replaced by `state` (the helm's wire form of `HostStateView`).
+fn hosts_in(states: &[(i64, Value)]) -> CollectionState {
+    let mut fleet = vec![local()];
+    fleet.extend(
+        states
+            .iter()
+            .map(|(id, _)| remote(*id, &format!("ops@host{id}.example.invalid"))),
+    );
+    let mut collection = hosts(&fleet);
+    for (entry, (_, state)) in collection.entries.iter_mut().skip(1).zip(states) {
+        entry.value["state"] = state.clone();
+    }
+    collection
+}
+
+/// A host's connection state as the helm's pinned host list spells it: the state of its `index`th host.
+fn pinned_state(index: usize) -> Value {
+    let list: Value = serde_json::from_str(include_str!(
+        "../../../../farhelm-helm/http-contract/host-list.json"
+    ))
+    .unwrap();
+    list["hosts"][index]["state"].clone()
+}
+
+/// A registered host in `state`, decoded as the GUI holds it.
+fn host_in(state: Value) -> HostView {
+    let collection = hosts_in(&[(2, state)]);
+    serde_json::from_value(collection.entries[1].value.clone()).unwrap()
+}
+
+// ---- Ages ------------------------------------------------------------------------------------------------------------
+
+/// Every age a test or golden shows is stamped relative to [`TEST_NOW`], so it holds only while GPUI's test clock starts
+/// there; a GPUI upgrade that moved the start would otherwise turn every age assertion into a confusing mismatch.
+/// Specified: in a fresh test app, the wall clock the ticker reads is `TEST_NOW` in whole seconds.
+#[gpui::test]
+fn the_test_clock_starts_where_the_fixtures_expect(cx: &mut TestAppContext) {
+    test_support::install(cx);
+    let now = cx.update(|cx| super::age::seconds(ticker::wall_now(cx)));
+    assert_eq!(now, Some(TEST_NOW));
+}
+
+/// SPEC.md, "Status": a row shows how long ago the session was last active as a short age "with the full timestamp
+/// available on the row", falls back to the creation time when the helm sends no activity stamp, and shows "no age at
+/// all" when neither exists. Specified: a session last active two minutes ago paints `2m`, is named and helped by
+/// `Last activity 2025-07-01 23:57:58 UTC`; one with no activity stamp created three hours ago paints `3h`; one with
+/// neither stamp draws no age mark.
+#[gpui::test]
+fn a_rows_age_shows_its_bucket_and_its_timestamp_as_hover_help(cx: &mut TestAppContext) {
+    let rows = [
+        session("a").activity(TEST_NOW - 120),
+        session("b").activity(0).created(TEST_NOW - 3 * 3_600),
+        session("c").activity(0).created(0).seen(None),
+    ];
+    let (_fake, cx) = open_main(cx, vec![listing(&["a", "b", "c"], &rows)]);
+    let nodes = frame(cx);
+    assert_eq!(age_text(&nodes, "a").as_deref(), Some("2m"));
+    let stamp = "Last activity 2025-07-01 23:57:58 UTC";
+    let mark = node(&nodes, &age_id("a")).unwrap();
+    assert_eq!(mark.label.as_deref(), Some(stamp));
+    assert_eq!(mark.role, Some(Role::Label));
+    assert_eq!(age_text(&nodes, "b").as_deref(), Some("3h"));
+    assert_eq!(age_text(&nodes, "c"), None, "no stamp, no age");
+    assert_eq!(
+        help_after_crossing(cx, "session-row-a", &age_id("a")).as_deref(),
+        Some(stamp)
+    );
+}
+
+/// An age is only right if it moves on by itself, and SPEC_impl.md, "Animation time: the ticker", gives that job to the
+/// ticker's one 30-second clock, in an inactive window too, since a window behind others is still on screen. Without
+/// it the list would show a stale age until something else redrew it. Specified: in an inactive window, with an idle
+/// row (no pulse) 59 minutes 40 seconds old, 29 seconds redraw the list not once; the 30th second redraws it, and it
+/// then paints `1h`.
+#[gpui::test]
+fn an_age_moves_on_when_the_clock_ticks_even_in_an_inactive_window(cx: &mut TestAppContext) {
+    let row = session("a")
+        .status(json!({"state": "idle"}))
+        .activity(TEST_NOW - (59 * 60 + 40))
+        .seen(Some(TEST_NOW - (59 * 60 + 40)));
+    let (_fake, cx) = open_main(cx, vec![listing(&["a"], &[row])]);
+    assert_eq!(age_text(&frame(cx), "a").as_deref(), Some("59m"), "premise");
+    cx.deactivate_window();
+    test_support::settle(cx);
+    assert!(
+        !cx.update(|window, _| window.is_window_active()),
+        "premise: the window is inactive"
+    );
+
+    cx.update(|_, cx| render_count::reset(cx));
+    test_support::advance(cx, Duration::from_secs(29));
+    assert_eq!(
+        cx.update(|_, cx| render_count::count("session-list", cx)),
+        0,
+        "premise: nothing else redraws the list"
+    );
+    test_support::advance(cx, Duration::from_secs(1));
+    assert!(
+        cx.update(|_, cx| render_count::count("session-list", cx)) > 0,
+        "the clock redrew the list"
+    );
+    assert_eq!(age_text(&frame(cx), "a").as_deref(), Some("1h"));
+}
+
+// ---- The last line -----------------------------------------------------------------------------------------------
+
+/// SPEC.md, "Session list": the last line is the host's name, `:`, then the working directory, and "without either a
+/// registry match or a supplied host name it shows only the directory, rather than inventing a local identity or a
+/// dangling separator". A row with no directory is the mirror case, and one with neither has nothing to say. With no
+/// host list read, the host's name is the one the helm sent. Specified: a row with both paints `buildbox`, `:` and its
+/// directory with the home folded (`~/src/a`); a row with no directory paints `buildbox` and no `:`; a row whose helm
+/// sent no host name paints its directory (`/srv/ci`) and no `:`; a row with neither paints only its title and age.
+#[gpui::test]
+fn the_last_line_names_the_host_and_directory_without_a_dangling_separator(
+    cx: &mut TestAppContext,
+) {
+    let stamped = |key| session(key).activity(TEST_NOW - 60);
+    let rows = [
+        stamped("both"),
+        stamped("host").cwd(""),
+        stamped("dir").host_name("").cwd("/srv/ci"),
+        stamped("none").host_name("").cwd(""),
+    ];
+    let order = ["both", "host", "dir", "none"];
+    let (_fake, cx) = open_main(cx, vec![listing(&order, &rows)]);
+    let nodes = frame(cx);
+    assert_eq!(
+        row_texts(&nodes, "both"),
+        ["both", "1m", "buildbox", ":", "~/src/both"]
+    );
+    assert_eq!(row_texts(&nodes, "host"), ["host", "1m", "buildbox"]);
+    assert_eq!(row_texts(&nodes, "dir"), ["dir", "1m", "/srv/ci"]);
+    assert_eq!(row_texts(&nodes, "none"), ["none", "1m"]);
+}
+
+/// The last line's parts are the one place a row's host name and directory are chosen, so they are pinned apart from
+/// the drawing too. Specified: with no registry row, the helm's name and the folded home; an empty directory and an
+/// empty name are each `None`, never an empty part.
+#[test]
+fn the_last_lines_parts_are_none_when_empty() {
+    let row = session("a").row();
+    assert_eq!(
+        meta_parts(&row, None),
+        (Some("buildbox".to_owned()), Some("~/src/a".to_owned()))
+    );
+    let bare = session("a").host_name("").cwd("").row();
+    assert_eq!(meta_parts(&bare, None), (None, None));
+}
+
+// ---- Ended rows ------------------------------------------------------------------------------------------------------
+
+/// SPEC.md, "Status": an exit the supervisor did not witness shows its code only when the terminal kept it, "and an
+/// explicit unknown otherwise — never a guess", and the noncompact row keeps the complete ended wording visible. The old
+/// app said so on the sidebar alone, keeping plain `Exited` elsewhere. Specified: an exit with no code paints
+/// `Exited (code unknown)`; with a stop annotation its sentence is named `Exited (code unknown) — stopped by user`; an
+/// exit with code 17 paints `Exited (code 17)`; and `status::badge`, which the quick switcher and the menu header draw
+/// from, still says plain `Exited` for the exit with no code (which surfaces call it is not checked here).
+#[gpui::test]
+fn an_exit_without_a_code_says_the_code_is_unknown_on_the_row(cx: &mut TestAppContext) {
+    let exited = |code: Value| json!({"state": "exited", "exit_code": code});
+    let rows = [
+        session("a").status(exited(Value::Null)),
+        session("b")
+            .status(exited(Value::Null))
+            .annotation("stopped by user"),
+        session("c").status(exited(json!(17))),
+    ];
+    let (_fake, cx) = open_main(cx, vec![listing(&["a", "b", "c"], &rows)]);
+    let nodes = frame(cx);
+    assert!(row_texts(&nodes, "a").contains(&"Exited (code unknown)".to_owned()));
+    assert_eq!(
+        node(&nodes, "session-row-b-status").and_then(|node| node.label.as_deref()),
+        Some("Exited (code unknown) — stopped by user")
+    );
+    assert!(row_texts(&nodes, "c").contains(&"Exited (code 17)".to_owned()));
+
+    let elsewhere = status::badge(&rows[0].row(), "elsewhere".into());
+    match elsewhere {
+        Some(status::Badge::Ended { line, .. }) => assert_eq!(line.accessible_text(), "Exited"),
+        _ => panic!("an exit is an ended badge"),
+    }
+}
+
+// ---- Stale rows -------------------------------------------------------------------------------------------------------
+
+/// The cause is the one thing a stale row says about why its status is only last-known, and the old table worded each
+/// host state so the user knows whether to wait, update, or fix the host. Retry counts and error text must not reach
+/// it, or the headline would flicker with every attempt. Specified, for each host state (the helm's pinned host list
+/// where it has one): connecting and unreachable read `Waiting for supervisor`; connected `Refreshing session`; an older
+/// host refused at the handshake `Host needs update` and a newer one `Host is too new`; identity mismatch and unverified,
+/// duplicate, retired, suspended, stopped, suspending, resuming and deleting each their own words; no host list yet
+/// `Checking host`; a failed host list `Host state unavailable`; a host the list lacks `Host removed`. The hover help
+/// adds that this is the session's last-known state.
+#[test]
+fn each_host_state_names_its_cause() {
+    let known = |state: Value| status::cause(HostLookup::Known(&host_in(state)));
+    assert_eq!(known(pinned_state(1)), "Waiting for supervisor");
+    assert_eq!(known(pinned_state(2)), "Waiting for supervisor");
+    assert_eq!(known(pinned_state(0)), "Refreshing session");
+    assert_eq!(known(pinned_state(3)), "Host needs update");
+    let mut newer = pinned_state(3);
+    newer["peer_protocol"] = json!(30);
+    assert_eq!(known(newer), "Host is too new");
+    assert_eq!(known(pinned_state(4)), "Host identity mismatch");
+    assert_eq!(known(pinned_state(5)), "Host identity unverified");
+    assert_eq!(known(pinned_state(6)), "Duplicate host");
+    assert_eq!(known(pinned_state(7)), "Host connection stopped");
+    assert_eq!(known(pinned_state(11)), "Host suspended");
+    assert_eq!(
+        known(json!({"phase": "stopped", "start_failed": null, "waiting_for_place": false})),
+        "Environment stopped"
+    );
+    for (direction, words) in [
+        ("suspending", "Host suspending"),
+        ("resuming", "Host resuming"),
+    ] {
+        assert_eq!(
+            known(json!({
+                "phase": "tensorlake-changing",
+                "starting": false,
+                "direction": direction,
+                "requested_at": 1_700_000_000_000_i64,
+            })),
+            words
+        );
+    }
+    assert_eq!(
+        known(json!({"phase": "deleting", "failure": null})),
+        "Host being deleted"
+    );
+
+    let none = collections(vec![listing(&[], &[])]);
+    assert_eq!(status::cause(HostLookup::of(&none, 2)), "Checking host");
+    let mut failed = hosts_in(&[(2, pinned_state(1))]);
+    failed.meta.availability = Availability::Unavailable {
+        error: "down".into(),
+    };
+    let failed = collections(vec![failed]);
+    assert_eq!(
+        status::cause(HostLookup::of(&failed, 2)),
+        "Host state unavailable"
+    );
+    let read = collections(vec![hosts_in(&[(2, pinned_state(1))])]);
+    assert_eq!(
+        status::cause(HostLookup::of(&read, 2)),
+        "Waiting for supervisor"
+    );
+    assert_eq!(status::cause(HostLookup::of(&read, 9)), "Host removed");
+    assert_eq!(
+        status::cause_help("Host removed"),
+        "Host removed: this is the session's last-known state"
+    );
+}
+
+/// SPEC.md, "Session list": sessions on an unreachable host stay in the list "with a neutral cause mark such as
+/// `Waiting for supervisor` or `Host needs update`, rather than vanishing". The cause belongs to the stale row alone: a
+/// row on the same host that the helm does not mark stale names none. Specified: a stale running row on an unreachable
+/// host draws a status mark `Waiting for supervisor` on its line under the title, with hover help `Waiting for
+/// supervisor: this is the session's last-known state`; a stale exited row on a host the registry lacks paints its ended
+/// words and `Host removed` on that same line; a row on the unreachable host that is not stale draws no cause and
+/// no line between its title and its last line.
+#[gpui::test]
+fn a_stale_row_names_its_cause_with_hover_help(cx: &mut TestAppContext) {
+    let rows = [
+        session("a").host(3).stale().activity(TEST_NOW - 60),
+        session("b")
+            .host(9)
+            .stale()
+            .status(json!({"state": "exited", "exit_code": 0}))
+            .activity(TEST_NOW - 60),
+        session("c").host(3).activity(TEST_NOW - 60),
+    ];
+    let (_fake, cx) = open_main(
+        cx,
+        vec![
+            listing(&["a", "b", "c"], &rows),
+            hosts_in(&[(3, pinned_state(2))]),
+        ],
+    );
+    let nodes = frame(cx);
+    let cause = node(&nodes, &cause_id("a")).expect("the stale row draws its cause");
+    assert_eq!(cause.role, Some(Role::Status));
+    assert_eq!(cause.label.as_deref(), Some("Waiting for supervisor"));
+    assert_eq!(
+        row_texts(&nodes, "a"),
+        ["a", "1m", "Waiting for supervisor", "host3", ":", "~/src/a"]
+    );
+    assert_eq!(
+        row_texts(&nodes, "b"),
+        [
+            "b",
+            "1m",
+            "Exited (code 0)",
+            "Host removed",
+            "buildbox",
+            ":",
+            "~/src/b"
+        ]
+    );
+    assert!(
+        node(&nodes, &cause_id("c")).is_none(),
+        "a live row names no cause"
+    );
+    assert_eq!(row_texts(&nodes, "c"), ["c", "1m", "host3", ":", "~/src/c"]);
+    assert_eq!(
+        help_after_crossing(cx, "session-row-a", &cause_id("a")).as_deref(),
+        Some("Waiting for supervisor: this is the session's last-known state")
+    );
+}
+
+/// The selected row is a solid accent fill, on which the ordinary foregrounds lose their contrast, and a stale row's
+/// title is quieter because its facts are last-known (the old `.session-row.stale` and `.session-row.selected`
+/// rules). Every part this piece adds (the age, the cause) takes the row's secondary ink. Specified, in both palettes: an
+/// ordinary row's title is `--fg-0` and its secondary text `--fg-1`; a stale row's title is `--fg-1`; the selected row's
+/// title is `--on-fill` and its secondary text `--on-accent-dim`; the selected stale row's title is `--on-accent-dim`.
+/// This pins the ink table only: GPUI's driver record carries no colors, so that the row draws with these inks is
+/// pinned by the `session-list` goldens (a stale row) and the `session-list-selected-stale` goldens (a selected one).
+#[test]
+fn the_selected_and_stale_rows_use_their_own_inks() {
+    for palette in [&theme::DARK, &theme::LIGHT] {
+        let inks = |selected, stale| Inks::of(palette, selected, stale);
+        assert_eq!(inks(false, false).title, palette.fg_0);
+        assert_eq!(inks(false, false).secondary, palette.fg_1);
+        assert_eq!(inks(false, true).title, palette.fg_1);
+        assert_eq!(inks(false, true).secondary, palette.fg_1);
+        assert_eq!(inks(true, false).title, palette.on_fill);
+        assert_eq!(inks(true, false).secondary, palette.on_accent_dim);
+        assert_eq!(inks(true, true).title, palette.on_accent_dim);
+        assert_eq!(inks(true, true).secondary, palette.on_accent_dim);
+    }
+}
+
+// ---- Layout, with the real text system -------------------------------------------------------------------------------
+
+/// The main view laid out with the real text system and the bundled fonts in a headless app (no renderer, which layout
+/// does not need), over a helm holding `rows` in that order and the sidebar at its narrowest width: the driver record
+/// of its second frame (the list asks for one to give its rows their height estimates).
+fn narrowest_layout(rows: &[super::tests::Fixture]) -> Vec<DriverNode> {
+    let text_system = Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(
+        assets::UI_FONT,
+    ));
+    let mut cx = HeadlessAppContext::with_asset_source(text_system, Arc::new(assets::Assets));
+    cx.update(bootstrap::install).unwrap();
+    let (mut fake, handle, events) = FakeHelm::new();
+    let _connection = cx.update(|cx| crate::session::start(handle, events, None, cx));
+    let preferences = Preferences {
+        sidebar_width: Some(*SIDEBAR_WIDTH_RANGE.start()),
+        ..Preferences::default()
+    };
+    let order: Vec<&str> = rows.iter().map(|row| row.key).collect();
+    fake.connect(vec![
+        listing(&order, rows),
+        CollectionState {
+            collection: Collection::Preferences,
+            meta: meta(&[PREFERENCES_KEY]),
+            entries: vec![KeyedEntry {
+                key: PREFERENCES_KEY.into(),
+                value: serde_json::to_value(preferences).unwrap(),
+            }],
+        },
+    ]);
+    cx.run_until_parked();
+    let window = cx
+        .open_window(size(px(1000.), px(600.)), |window, cx| {
+            let main = cx.new(|cx| MainView::new(window, cx));
+            cx.new(|cx| Root::new(main, window, cx))
+        })
+        .unwrap();
+    cx.update_window(window.into(), |_, window, cx| {
+        window.set_driver_enabled(true);
+        window.draw(cx).clear(cx);
+        window.draw(cx).clear(cx);
+        window.driver_nodes().to_vec()
+    })
+    .unwrap()
+}
+
+/// The bounds of the node drawn under `id`; fails if nothing was.
+fn bounds_of(nodes: &[DriverNode], id: &str) -> gpui::Bounds<Pixels> {
+    match node(nodes, id) {
+        Some(node) => node.bounds,
+        None => panic!("{id} was not drawn"),
+    }
+}
+
+/// The sidebar's narrowest width leaves the list 239 pixels (240 less the sidebar's edge), and a row's parts must
+/// still fit inside it: a long title cut short rather than pushing the age out, a long directory cut from the left,
+/// and an ended message that wraps rather than running past the edge (the old `narrow rows align fixed facts` and `a
+/// row with unbroken oversized fields stays contained` cases). The age column keeps a floor of four characters (the
+/// old `minmax(4ch, max-content)`), so a short age (`2m`) and a long one (`400d`) leave their titles the same room:
+/// without the floor, titles beside short ages would run further right than titles beside long ones. Only the real
+/// text system measures text. Specified, at the sidebar's narrowest width, over two rows with long titles aged `400d`
+/// and `2m`: every line painted in either row lies inside its row's item, horizontally; each title ends before its age
+/// track begins; the two age tracks start at the same x and end at the same x, as do the two ages; the long error's
+/// wording paints more than one line; and the long directory's line ends with the directory's last segment.
+#[test]
+fn a_long_title_directory_and_error_stay_inside_the_row_at_the_narrowest_sidebar() {
+    let long_title =
+        "A session title long enough to run well past the edge of the narrowest sidebar";
+    let long = session("long")
+        .title(long_title)
+        .cwd("/srv/builds/a/very/deep/tree/of/folders/that/keeps/going/to/the/last-segment")
+        .status(json!({
+            "state": "error",
+            "detail": "the agent could not be started because the command named in its launch was not found on the host",
+        }))
+        .stale()
+        .activity(TEST_NOW - 400 * 86_400);
+    let short = session("short").title(long_title).activity(TEST_NOW - 120);
+    let nodes = narrowest_layout(&[long, short]);
+    let list = bounds_of(&nodes, "session-list");
+    // The narrowest sidebar less its 56-pixel rail and its 1-pixel edge.
+    assert_eq!(list.size.width, px(239.), "premise: the narrowest list");
+    let edge = |x: Pixels| f32::from(x);
+    let near = |a: Pixels, b: Pixels| (edge(a) - edge(b)).abs() < 0.5;
+
+    for key in ["long", "short"] {
+        let item = bounds_of(&nodes, &format!("{ITEM_ID_PREFIX}{key}"));
+        for text in texts_within(&nodes, &format!("{ITEM_ID_PREFIX}{key}")) {
+            assert!(
+                edge(text.visible_bounds.left()) >= edge(item.left()) - 0.5
+                    && edge(text.visible_bounds.right()) <= edge(item.right()) + 0.5,
+                "{key}: {:?} at {:?} lies inside the row {item:?}",
+                text.text,
+                text.visible_bounds
+            );
+        }
+        let track = bounds_of(
+            &nodes,
+            &format!("{ROW_ID_PREFIX}{key}{AGE_TRACK_ID_SUFFIX}"),
+        );
+        let title = texts_within(&nodes, &format!("{ROW_ID_PREFIX}{key}"))
+            .into_iter()
+            .find(|text| text.text.starts_with("A session"))
+            .expect("the long title painted");
+        assert!(
+            title.visible_bounds.right() <= track.left(),
+            "{key}: the title {:?} ends before the age track {track:?}",
+            title.visible_bounds
+        );
+    }
+    let track = |key: &str| {
+        bounds_of(
+            &nodes,
+            &format!("{ROW_ID_PREFIX}{key}{AGE_TRACK_ID_SUFFIX}"),
+        )
+    };
+    assert!(
+        near(track("long").left(), track("short").left())
+            && near(track("long").right(), track("short").right()),
+        "the age tracks share one column whatever the age: {:?} and {:?}",
+        track("long"),
+        track("short")
+    );
+    let age = |key: &str| bounds_of(&nodes, &age_id(key));
+    assert!(
+        near(age("long").right(), age("short").right()),
+        "the ages share one right edge: {:?} and {:?}",
+        age("long"),
+        age("short")
+    );
+    let error_lines = texts_within(&nodes, "session-row-long-status");
+    assert!(
+        error_lines.len() > 1,
+        "the error wraps: {:?}",
+        error_lines
+            .iter()
+            .map(|text| &text.text)
+            .collect::<Vec<_>>()
+    );
+    let texts = painted(&nodes);
+    assert!(
+        texts.iter().any(|text| text.ends_with("last-segment")),
+        "the directory keeps its end: {texts:?}"
+    );
+}
+
+/// The old stylesheet drew a row's working directory in the monospace face (`.session-cwd` in its technical-value
+/// typography), so paths read as technical values and their characters line up; the host's name kept the interface
+/// face. The test text system gives every face the same widths, so only the real one can tell the faces apart.
+/// Specified, with the real text system: a directory of nine narrow characters (`/iiiiiiii`) and one of nine wide ones
+/// (`/MMMMMMMM`), on rows with no host name, each paint nine advances of the monospace face at 12 pixels; and the rows'
+/// titles, six `i`s and six `M`s in the interface face (short enough to stay whole at this width), differ in width
+/// (the premise: that face is proportional, so the comparison can tell the faces apart).
+#[test]
+fn the_directory_is_drawn_in_the_monospace_face() {
+    let rows = [
+        session("narrow")
+            .title("iiiiii")
+            .activity(TEST_NOW - 60)
+            .host_name("")
+            .cwd("/iiiiiiii"),
+        session("wide")
+            .title("MMMMMM")
+            .activity(TEST_NOW - 60)
+            .host_name("")
+            .cwd("/MMMMMMMM"),
+    ];
+    let nodes = narrowest_layout(&rows);
+    let width = |key: &str, text: &str| -> f32 {
+        let line = texts_within(&nodes, &format!("{ITEM_ID_PREFIX}{key}"))
+            .into_iter()
+            .find(|line| line.text.as_ref() == text)
+            .unwrap_or_else(|| {
+                let painted: Vec<_> = texts_within(&nodes, &format!("{ITEM_ID_PREFIX}{key}"))
+                    .into_iter()
+                    .map(|line| line.text)
+                    .collect();
+                panic!("{key} paints {text}; it painted {painted:?}")
+            });
+        f32::from(line.bounds.size.width)
+    };
+    assert!(
+        width("wide", "MMMMMM") - width("narrow", "iiiiii") > 10.,
+        "premise: the title, in the interface face, is proportional"
+    );
+    // JetBrains Mono advances every character 0.6 em.
+    let nine = 9. * 0.6 * 12.;
+    for (key, text) in [("narrow", "/iiiiiiii"), ("wide", "/MMMMMMMM")] {
+        let drawn = width(key, text);
+        assert!(
+            (drawn - nine).abs() < 0.5,
+            "{key}'s directory is {drawn} wide, not nine monospace advances ({nine})"
+        );
+    }
+}
