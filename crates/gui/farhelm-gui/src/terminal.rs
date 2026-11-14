@@ -24,12 +24,13 @@ mod style;
 mod tests;
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use farhelm_grid_model::{
     ApplyEffects, Cursor, CursorShape, Damage, GridError, GridModel, GridOutput, GridRow,
-    TerminalState, display_text,
+    TerminalState, ViewRow, Viewport, display_text,
 };
 use farhelm_input_mapping::pointer::Geometry;
 use gpui::{
@@ -233,10 +234,46 @@ struct PaintPiece {
     line: ShapedLine,
 }
 
-/// One terminal's committed screen, and the view that paints it.
+/// What one row of the view shows: a line of the program's (on the screen or in history), the notice that some
+/// earlier output could not be recovered, or nothing (a line the view reaches that is not there yet).
+#[derive(Clone)]
+enum ShownRow {
+    Line(Rc<CachedRow>),
+    Notice,
+    Blank,
+}
+
+/// The notice line's words above history that recovery lost part of (`TRIMMED_TEXT` in grid-terminal.js at the
+/// reference commit; SPEC.md, "Terminal experience").
+pub(crate) const TRIMMED_TEXT: &str = "Some earlier output could not be recovered";
+
+/// One terminal's committed screen and its scrollback, and the view that paints them.
+///
+/// ## Scrollback
+///
+/// The view is a window of the screen's height onto one list of lines: the history the model holds, then the screen,
+/// with the notice line on top when recovery lost some history, as in the old app (grid-terminal.js's "Scrollback"
+/// at the reference commit). Following the bottom, the rows are the screen; scrolled back, the window is anchored to
+/// the number of its top line ([`Viewport`]), so it stays on the same text while output continues and while the
+/// oldest history is dropped. A resize, a history reset or the alternate screen let go of the anchor. On the
+/// alternate screen there is no history to scroll. The owner moves the view ([`TerminalView::scroll_pixels`],
+/// [`TerminalView::scroll_lines`]) and brings it back to the bottom when the user sends the program input
+/// ([`TerminalView::follow`]).
 pub struct TerminalView {
     model: GridModel,
+    /// The screen's rows, cached with their shaped glyphs.
     rows: Vec<Rc<CachedRow>>,
+    /// Where the view is: following the bottom, or anchored to a line.
+    viewport: Viewport,
+    /// What the element draws, row by row: the screen while following, otherwise the lines from the view's top.
+    shown: Vec<ShownRow>,
+    /// The history lines shown now, cached with their shaped glyphs by line number, so scrolling a line at a time
+    /// shapes one new line. Holds only what is shown; cleared when line numbers stop meaning the same lines.
+    history_rows: HashMap<u64, Rc<CachedRow>>,
+    /// The part of a line the wheel has moved past the view's top line, in pixels at `wheel_cell`, so a trackpad's
+    /// small steps add up; a remainder gathered at another cell height (a text-size change) does not carry over.
+    wheel_remainder: f32,
+    wheel_cell: f32,
     cols: u16,
     cursor: Option<Cursor>,
     visible: bool,
@@ -252,6 +289,11 @@ impl TerminalView {
         Self {
             model: GridModel::new(),
             rows: Vec::new(),
+            viewport: Viewport::default(),
+            shown: Vec::new(),
+            history_rows: HashMap::new(),
+            wheel_remainder: 0.,
+            wheel_cell: 0.,
             cols: 0,
             cursor: None,
             visible: false,
@@ -313,25 +355,151 @@ impl TerminalView {
         }
     }
 
-    /// The visible screen's text, one line per row with trailing blanks trimmed, for the test bridge's `terminal_text`
-    /// probe; `None` behind the catch-up placeholder. Read from the paint cache, not the model, on purpose: a damage
-    /// delivery the view missed must stay visible to automation instead of being hidden by the newer model.
+    /// The text the view shows, one line per row with trailing blanks trimmed, for the test bridge's `terminal_text`
+    /// probe: the screen while following, the lines scrolled to otherwise (the notice line as its words). `None`
+    /// behind the catch-up placeholder. Read from the paint cache, not the model, on purpose: a damage delivery the
+    /// view missed must stay visible to automation instead of being hidden by the newer model.
     pub fn terminal_text(&self) -> Option<String> {
         self.visible.then(|| {
-            self.rows
+            self.shown
                 .iter()
-                .map(|r| r.row.text(0, self.cols).trim_end_matches(' ').to_owned())
+                .map(|row| match row {
+                    ShownRow::Line(r) => r.row.text(0, self.cols).trim_end_matches(' ').to_owned(),
+                    ShownRow::Notice => TRIMMED_TEXT.to_owned(),
+                    ShownRow::Blank => String::new(),
+                })
                 .collect::<Vec<_>>()
                 .join("\n")
         })
     }
 
-    /// Drain the model's damage into the row cache and notify when anything shown changed.
-    fn sync(&mut self, cx: &mut Context<Self>) {
-        let damage = self.model.take_damage();
-        if self.update_grid(damage) {
+    /// Whether the view follows the bottom (the program's live screen) rather than showing history.
+    pub fn is_following(&self) -> bool {
+        self.viewport.is_following()
+    }
+
+    /// Bring the view back to the bottom: the user sent the program input, which the old app answered by showing
+    /// where it lands.
+    pub fn follow(&mut self, cx: &mut Context<Self>) {
+        self.wheel_remainder = 0.;
+        if self.viewport.follow() {
+            self.update_shown();
             cx.notify();
         }
+    }
+
+    /// Scroll by whole lines, positive toward the live screen and negative into history: the page keys' step
+    /// (Shift+PageUp and Shift+PageDown, a page less a line, once they are bound). Reaching the screen follows the
+    /// bottom again.
+    pub fn scroll_lines(&mut self, lines: i64, cx: &mut Context<Self>) {
+        self.wheel_remainder = 0.;
+        if self.viewport.scroll_lines(&self.model, lines) {
+            self.update_shown();
+            cx.notify();
+        }
+    }
+
+    /// Scroll by `pixels` toward older lines (negative toward the screen), at rows `cell_height` pixels tall, keeping
+    /// the part of a line left over for the next step: the old app's wheel scrolling (grid-terminal.js's wheel
+    /// listener at the reference commit), which moved the view's top by whole lines and remembered the rest.
+    pub fn scroll_pixels(&mut self, pixels: f32, cell_height: f32, cx: &mut Context<Self>) {
+        if cell_height.partial_cmp(&0.) != Some(std::cmp::Ordering::Greater) || pixels == 0. {
+            return;
+        }
+        let first = self.viewport.first(&self.model);
+        let bottom = self.viewport.bottom(&self.model).saturating_sub(first) as f64;
+        let top = self.viewport.top(&self.model).saturating_sub(first) as f64;
+        let cell = f64::from(cell_height);
+        let remainder = if self.wheel_cell == cell_height {
+            f64::from(self.wheel_remainder)
+        } else {
+            0.
+        };
+        let next = (top * cell + remainder - f64::from(pixels)).clamp(0., bottom * cell);
+        let index = (next / cell).round();
+        self.wheel_remainder = (next - index * cell) as f32;
+        self.wheel_cell = cell_height;
+        if self.viewport.scroll_to(&self.model, first + index as u64) {
+            self.update_shown();
+            cx.notify();
+        }
+    }
+
+    /// Drain the model's damage into the row cache and the view, and notify when anything shown changed. While the view
+    /// is scrolled back any change can move what it shows (new history, dropped history, a changed screen line in
+    /// view), so any damage redraws it then.
+    fn sync(&mut self, cx: &mut Context<Self>) {
+        let damage = self.model.take_damage();
+        // A reset (a resize or history reset, after which line numbers no longer name the lines they named) lets go
+        // of the anchor, so `update_shown` below follows the screen and drops the history cache.
+        let reset = self.viewport.synchronize(&self.model, &damage);
+        let scrolled_change = !self.viewport.is_following() && damage != Damage::default();
+        let changed = self.update_grid(damage);
+        self.update_shown();
+        if changed || reset || scrolled_change {
+            cx.notify();
+        }
+    }
+
+    /// Rebuild what the element draws from the screen cache, the model's history and the viewport. A history line
+    /// keeps its shaped glyphs while it stays shown and unchanged.
+    fn update_shown(&mut self) {
+        if self.viewport.is_following() {
+            self.shown = self.rows.iter().cloned().map(ShownRow::Line).collect();
+            self.history_rows.clear();
+            return;
+        }
+        // Positions, not line numbers: see `Viewport` on why the notice line needs a place of its own.
+        let top = self.viewport.top(&self.model);
+        let bottom = self.viewport.bottom(&self.model);
+        let mut kept = HashMap::new();
+        let mut shown = Vec::with_capacity(self.rows.len());
+        for position in (0..self.rows.len() as u64).map(|i| top + i) {
+            if position >= bottom {
+                let row = usize::try_from(position - bottom)
+                    .ok()
+                    .and_then(|i| self.rows.get(i))
+                    .map_or(ShownRow::Blank, |row| ShownRow::Line(row.clone()));
+                shown.push(row);
+                continue;
+            }
+            let number = match self.viewport.row_at(&self.model, position) {
+                ViewRow::Notice => {
+                    shown.push(ShownRow::Notice);
+                    continue;
+                }
+                ViewRow::Line(number) => number,
+            };
+            let row = if let Some((_, line)) = self.model.line(number) {
+                let cached = self
+                    .history_rows
+                    .get(&number)
+                    .filter(|cached| cached.row == *line)
+                    .cloned()
+                    .unwrap_or_else(|| cache_row(line.clone()));
+                kept.insert(number, cached.clone());
+                ShownRow::Line(cached)
+            } else {
+                ShownRow::Blank
+            };
+            shown.push(row);
+        }
+        self.shown = shown;
+        self.history_rows = kept;
+    }
+
+    /// The view row the cursor's screen row is drawn in, if it is in view.
+    fn cursor_row(&self) -> Option<usize> {
+        let cursor = self.cursor?;
+        let offset = if self.viewport.is_following() {
+            0
+        } else {
+            self.viewport
+                .bottom(&self.model)
+                .checked_sub(self.viewport.top(&self.model))?
+        };
+        let row = usize::try_from(offset + u64::from(cursor.y)).ok()?;
+        (row < self.shown.len()).then_some(row)
     }
 
     /// Bring the row cache up to the model. Returns whether a redraw is needed; a row rewritten with equal contents
@@ -379,7 +547,7 @@ impl TerminalView {
 
     /// Drop every row's shaped glyphs: the default colors changed, and glyph colors are part of the shape.
     fn invalidate_shapes(&self) {
-        for row in &self.rows {
+        for row in self.rows.iter().chain(self.history_rows.values()) {
             row.shaped.replace(None);
         }
     }
@@ -397,7 +565,8 @@ impl Render for TerminalView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         render_count::record("terminal", cx);
         TerminalElement {
-            rows: self.rows.clone(),
+            rows: self.shown.clone(),
+            cursor_row: self.cursor_row(),
             cols: self.cols,
             cursor: self.cursor,
             visible: self.visible,
@@ -405,13 +574,16 @@ impl Render for TerminalView {
             metrics: self.metrics,
             phase: self.phase,
             cell: Size::default(),
+            notice: None,
         }
     }
 }
 
 /// The single element a terminal draws as: no per-cell layout nodes and no event handlers.
 struct TerminalElement {
-    rows: Vec<Rc<CachedRow>>,
+    rows: Vec<ShownRow>,
+    /// The row the cursor is drawn in, `None` when the view is scrolled away from it.
+    cursor_row: Option<usize>,
     cols: u16,
     cursor: Option<Cursor>,
     visible: bool,
@@ -421,6 +593,8 @@ struct TerminalElement {
     /// The cell in logical pixels, worked out from `metrics` when the element lays out, where the window's scale
     /// factor is known; paint reads it from here.
     cell: Size<f32>,
+    /// The notice line's words, shaped in prepaint when a notice row is shown.
+    notice: Option<ShapedLine>,
 }
 
 impl TerminalElement {
@@ -490,9 +664,8 @@ impl TerminalElement {
     }
 
     /// The cells the cursor covers: a wide character's whole box, otherwise one cell.
-    fn cursor_cell(&self, cursor: Cursor) -> (u16, u16) {
-        self.rows
-            .get(usize::from(cursor.y))
+    fn cursor_cell(&self, cursor: Cursor, row: usize) -> (u16, u16) {
+        self.line(row)
             .and_then(|row| {
                 row.row
                     .runs
@@ -501,6 +674,16 @@ impl TerminalElement {
             })
             .filter(|run| !run.is_plain_flow())
             .map_or((cursor.x, 1), |run| (run.col, run.width))
+    }
+}
+
+impl TerminalElement {
+    /// The program's line in view row `y`, if that row shows one.
+    fn line(&self, y: usize) -> Option<&Rc<CachedRow>> {
+        match self.rows.get(y) {
+            Some(ShownRow::Line(row)) => Some(row),
+            _ => None,
+        }
     }
 }
 
@@ -558,9 +741,27 @@ impl Element for TerminalElement {
     ) {
         if self.visible {
             for row in &self.rows {
-                if row.shaped.borrow().is_none() {
+                if let ShownRow::Line(row) = row
+                    && row.shaped.borrow().is_none()
+                {
                     row.shaped.replace(Some(self.shape(row, window)));
                 }
+            }
+            if self.rows.iter().any(|row| matches!(row, ShownRow::Notice)) {
+                // The terminal's background color: the notice is drawn reversed (`paint_notice`).
+                let (_, bg) = style::defaults(self.state);
+                let runs = [TextRun {
+                    len: TRIMMED_TEXT.len(),
+                    font: font(TERMINAL_FONT),
+                    color: bg.hsla(1.),
+                    ..Default::default()
+                }];
+                self.notice = Some(window.text_system().shape_line(
+                    TRIMMED_TEXT.into(),
+                    self.metrics.font_size(),
+                    &runs,
+                    None,
+                ));
             }
         }
     }
@@ -592,7 +793,15 @@ impl TerminalElement {
     fn paint_rows(&self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
         let m = self.cell;
         let baselines = self.baselines(bounds.origin.y, window);
-        for (y, row) in self.rows.iter().enumerate() {
+        for (y, shown) in self.rows.iter().enumerate() {
+            let row = match shown {
+                ShownRow::Line(row) => row,
+                ShownRow::Notice => {
+                    self.paint_notice(y, bounds, baselines, window, cx);
+                    continue;
+                }
+                ShownRow::Blank => continue,
+            };
             let shaped = row.shaped.borrow();
             for run in shaped.as_ref().into_iter().flatten() {
                 let origin = bounds.origin
@@ -642,6 +851,39 @@ impl TerminalElement {
         }
     }
 
+    /// Paint the notice line in view row `y`: the terminal's default colors reversed across the row, like the exit
+    /// line, so it reads as the app's own line rather than the program's output (the old app's
+    /// `.grid-terminal-notice`, with its 4-pixel inset).
+    fn paint_notice(
+        &self,
+        y: usize,
+        bounds: Bounds<Pixels>,
+        baselines: Baselines,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let m = self.cell;
+        let (fg, _) = style::defaults(self.state);
+        let area = Bounds::new(
+            bounds.origin + point(px(0.), px(y as f32 * m.height)),
+            size(bounds.size.width, px(m.height)),
+        );
+        window.paint_quad(fill(area, fg.hsla(1.)));
+        let Some(line) = &self.notice else {
+            return;
+        };
+        let origin = point(
+            area.left() + px(4.),
+            px(baselines.origin_y(y, f32::from(line.ascent), f32::from(line.descent))),
+        );
+        window.with_content_mask(Some(ContentMask { bounds: area }), |window| {
+            if let Err(error) = line.paint(origin, px(m.height), TextAlign::Left, None, window, cx)
+            {
+                tracing::warn!("terminal notice paint failed: {error}");
+            }
+        });
+    }
+
     /// Paint the cursor: outlined while unfocused, otherwise in its shape, with a block re-painting its glyph in the
     /// accent color. A blinking cursor is skipped during the blink's off phase; an unfocused one never blinks.
     fn paint_cursor(&self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
@@ -651,22 +893,21 @@ impl TerminalElement {
         else {
             return;
         };
+        let Some(row) = self.cursor_row else {
+            return;
+        };
         let m = self.cell;
         let cursor_color = TerminalColor::of(TERMINAL.cursor).hsla(1.);
-        let (start, cells) = self.cursor_cell(cursor);
+        let (start, cells) = self.cursor_cell(cursor, row);
         let area = Bounds::new(
-            bounds.origin
-                + point(
-                    px(f32::from(start) * m.width),
-                    px(f32::from(cursor.y) * m.height),
-                ),
+            bounds.origin + point(px(f32::from(start) * m.width), px(row as f32 * m.height)),
             size(px(f32::from(cells) * m.width), px(m.height)),
         );
         if !self.phase.focused {
             outline(area, cursor_color, window);
         } else if cursor.shape == CursorShape::Block {
             window.paint_quad(fill(area, cursor_color));
-            self.paint_cursor_glyph(cursor, area, bounds, window, cx);
+            self.paint_cursor_glyph(cursor, row, area, bounds, window, cx);
         } else {
             let shape = if cursor.shape == CursorShape::Bar {
                 Bounds::new(area.origin, size(px(1.), area.size.height))
@@ -685,13 +926,14 @@ impl TerminalElement {
     fn paint_cursor_glyph(
         &self,
         cursor: Cursor,
+        y: usize,
         area: Bounds<Pixels>,
         bounds: Bounds<Pixels>,
         window: &mut Window,
         cx: &mut App,
     ) {
         let m = self.cell;
-        let Some(row) = self.rows.get(usize::from(cursor.y)) else {
+        let Some(row) = self.line(y) else {
             return;
         };
         let shaped = row.shaped.borrow();
@@ -709,7 +951,7 @@ impl TerminalElement {
                     let origin = point(
                         bounds.origin.x + px(f32::from(col) * m.width),
                         px(self.baselines(bounds.origin.y, window).origin_y(
-                            usize::from(cursor.y),
+                            y,
                             f32::from(piece.line.ascent),
                             f32::from(piece.line.descent),
                         )),

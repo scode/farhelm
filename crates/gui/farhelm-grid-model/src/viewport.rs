@@ -3,13 +3,37 @@
 //! Output and cap eviction change the buffer's first index. Holding an absolute
 //! anchor keeps the same text visible until it is evicted; following the tail
 //! instead tracks the current screen. Relayout and resets invalidate old numbers.
+//!
+//! Navigation counts in positions, not line numbers: position `n + 1` is line
+//! `n`, so the row above the oldest retained line has a position of its own even
+//! when that line is numbered 0. That row is the notice line, shown when recovery
+//! lost some history (`history_trimmed`), as the old app's view put it. The
+//! supervisor numbers a rebuilt emulator's history from 0, so a recovered
+//! terminal's oldest line is usually line 0, and a notice numbered one line
+//! before it would land on that line and hide it.
 
 use crate::{Damage, GridModel};
 
-/// One viewport anchor; `None` follows live output at the screen's top line.
-/// Eviction past the anchor clamps the view to the oldest retained line without
-/// resuming following. Navigation changes that anchor; reset/resize/alt transitions
-/// clear it in `synchronize` because those transitions invalidate its line numbers.
+/// What sits at a navigation position: a retained line by its number, or the
+/// notice line above the oldest one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewRow {
+    Notice,
+    Line(u64),
+}
+
+/// The navigation position of line `number`.
+pub fn position_of(number: u64) -> u64 {
+    // Line numbers are bounded by the wire format's safe integers, far below
+    // `u64::MAX`; saturating keeps the function total anyway.
+    number.saturating_add(1)
+}
+
+/// One viewport anchor, a navigation position; `None` follows live output at
+/// the screen's top line. Eviction past the anchor clamps the view to the oldest
+/// row navigation can show without resuming following. Navigation changes that
+/// anchor; reset/resize/alt transitions clear it in `synchronize` because those
+/// transitions invalidate its line numbers.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Viewport {
     anchor: Option<u64>,
@@ -30,15 +54,47 @@ impl Viewport {
         reset
     }
 
-    /// The oldest line navigation can show; primary history is hidden on alt-screen.
-    pub fn first_line(&self, model: &GridModel) -> u64 {
+    /// The oldest position navigation can show; primary history is hidden on
+    /// alt-screen. When recovery lost some history, that is the notice line's
+    /// ([`Viewport::notice`]), one before the oldest retained line.
+    pub fn first(&self, model: &GridModel) -> u64 {
         if model.state().is_some_and(|state| state.alt_screen) {
-            model.screen_base()
+            return self.bottom(model);
+        }
+        let oldest = model
+            .history()
+            .front()
+            .map_or(model.screen_base(), |line| line.number);
+        let oldest = position_of(oldest);
+        if model.state().is_some_and(|state| state.history_trimmed) {
+            oldest - 1
         } else {
-            model
-                .history()
-                .front()
-                .map_or(model.screen_base(), |line| line.number)
+            oldest
+        }
+    }
+
+    /// The position of the screen's top line: the view's top while it follows,
+    /// and the bound a scrolled view's top stays below (reaching it follows).
+    pub fn bottom(&self, model: &GridModel) -> u64 {
+        position_of(model.screen_base())
+    }
+
+    /// The notice line's position, when recovery lost some history and the
+    /// primary screen is shown.
+    pub fn notice(&self, model: &GridModel) -> Option<u64> {
+        let trimmed = model
+            .state()
+            .is_some_and(|state| state.history_trimmed && !state.alt_screen);
+        trimmed.then(|| self.first(model))
+    }
+
+    /// What position `position` shows above the screen: the notice line, or a
+    /// line by its number (which the model may no longer hold).
+    pub fn row_at(&self, model: &GridModel, position: u64) -> ViewRow {
+        if Some(position) == self.notice(model) {
+            ViewRow::Notice
+        } else {
+            ViewRow::Line(position.saturating_sub(1))
         }
     }
 
@@ -46,8 +102,8 @@ impl Viewport {
     /// rewriting the anchor when eviction moves the oldest retained line past it.
     pub fn top(&self, model: &GridModel) -> u64 {
         self.anchor
-            .unwrap_or(model.screen_base())
-            .clamp(self.first_line(model), model.screen_base())
+            .unwrap_or(self.bottom(model))
+            .clamp(self.first(model), self.bottom(model))
     }
 
     /// Following is an explicit mode, not an equality test against today's bottom.
@@ -55,10 +111,10 @@ impl Viewport {
         self.anchor.is_none()
     }
 
-    /// Move to a visible line; reaching the current screen resumes following.
+    /// Move the top to a position; reaching the current screen resumes following.
     pub fn scroll_to(&mut self, model: &GridModel, top: u64) -> bool {
-        let top = top.clamp(self.first_line(model), model.screen_base());
-        let next = (top < model.screen_base()).then_some(top);
+        let top = top.clamp(self.first(model), self.bottom(model));
+        let next = (top < self.bottom(model)).then_some(top);
         let changed = self.anchor != next;
         self.anchor = next;
         changed

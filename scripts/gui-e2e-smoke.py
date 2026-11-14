@@ -4,10 +4,10 @@ driven through the test-automation bridge (`scripts/gui-agent.py`, `docs/gui-age
 
 NOTE: This is a smoke test, not the end-to-end suite. It covers the first slice's path through the app once each
 (the session list, a row's menu, Delete, Rename, and typing into the open session's terminal), so a break in the wiring
-between the app, the helm and the supervisor shows up somewhere, plus the area steps added since (30 and 31, the
-terminal's: a large paste, on a Mac only, and text an input method commits; 32, the sidebar's quick switcher). The
-behavior itself is specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`,
-`terminal/attached/tests.rs`); nothing here checks layout or wording beyond the names it clicks.
+between the app, the helm and the supervisor shows up somewhere, plus the area steps added since (30, 31 and 33, the
+terminal's: a large paste, on a Mac only, text an input method commits, and scrollback; 32, the sidebar's quick
+switcher). The behavior itself is specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`,
+`session_pane.rs`, `terminal/attached/tests.rs`); nothing here checks layout or wording beyond the names it clicks.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -329,6 +329,34 @@ class Smoke(unittest.TestCase):
         eventually(lambda: last_selected() == ids["target"], "the helm remembering the picked target as selected")
         screen = self.ok("terminal-text", "--wait", "FAKE-AGENT READY")
         self.assertNotIn(f"echo:{line}", screen, "the focused terminal is the target's, not the origin's")
+
+    # ---- The terminal area's scrollback (33), on a session of its own ------------------------------------------------
+
+    def test_33_the_wheel_scrolls_history_and_typing_returns(self) -> None:
+        """Scrollback is how the user reads what scrolled off (SPEC.md, "Terminal experience": scrollback stays
+        viewable), and it is the terminal's own: on the ordinary screen the wheel moves the view into history and the
+        program hears nothing, and the next key the user types brings the view back to the live screen. Specified: in
+        a session of this step's own that printed 120 numbered lines and waits, the oldest line is off screen at
+        first, the wheel over the terminal brings it into view, and a typed key shows the newest line again with the
+        oldest gone."""
+        record = json.loads((RUN / "run.json").read_text())
+        work = RUN.parent / "scroll"
+        work.mkdir()
+        transcript = work / "transcript.txt"
+        transcript.write_text("".join(f"line-{i:03}\n" for i in range(120)))
+        title = f"Scrollback {uuid.uuid4().hex[:8]}"
+        body = gui_agent.seed_body(0, gui_agent.SESSION_CWD, record["binaries"]["fixtures"], "idle", transcript)
+        body["title"] = title
+        gui_agent.helm_request(RUN, "POST", "/api/sessions", body)
+        self.ok("wait", "--text", title)
+        self.ok("click", f"text:{title}")
+        screen = self.ok("terminal-text", "--wait", "line-119")
+        self.assertNotIn("line-000", screen, "premise: the oldest line has scrolled off")
+        self.ok("scroll", "up", "5000", "--on", "id:terminal-grid")
+        self.assertIn("line-000", self.ok("terminal-text"), "the wheel scrolled back to the oldest line")
+        self.ok("type", "--keys", "x")
+        screen = self.ok("terminal-text", "--wait", "line-119")
+        self.assertNotIn("line-000", screen, "typing returned to the live screen")
 
 
 # The receiver for the large-paste step: once the step types `copy`, it writes its payload file to the clipboard with

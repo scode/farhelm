@@ -192,6 +192,39 @@ impl WheelAccumulator {
     }
 }
 
+/// How many pixels one wheel event scrolls the terminal's own scrollback, positive toward older lines: 50 pixels a
+/// notch, five times that with Alt (Option), and nothing for a Shift wheel off a Mac, which the platform turns
+/// horizontal. `delta` is GPUI's vertical delta, positive when the content moves down (toward older lines) on every
+/// platform, in `unit`: a wheel's whole lines are notches, and a trackpad's pixels count 1.25 each.
+///
+/// The old app read the browser's wheel event (`wheelPixels` in grid-terminal.js at the reference commit): notches
+/// were `wheelDeltaY / 120` where the engine had it, else `-deltaY / 40` in pixels or `-deltaY` in lines. A
+/// trackpad's pixel deltas come out at 50 / 40 = 1.25 of a pixel each on the second rule, and on WebKit's
+/// `wheelDeltaY`, three times the platform's delta, also at 1.25; a wheel notch is one line. The browser ceiled the
+/// magnitude to a whole pixel, which this keeps.
+///
+/// Ported from Visual Studio Code's `StandardWheelEvent` and `ScrollableElement._onMouseWheel` as compiled into
+/// xterm.js 6.0.0 (MIT; notices in this crate's LICENSE-PORTED), through the old app.
+pub fn wheel_pixels(delta: f64, unit: WheelUnit, alt: bool, shift: bool, mac: bool) -> f64 {
+    if (shift && !mac) || !delta.is_finite() {
+        return 0.0;
+    }
+    let notches = match unit {
+        WheelUnit::Pixels => delta / 40.0,
+        WheelUnit::Lines => delta,
+        WheelUnit::Pages => delta * 3.0,
+    };
+    let mut pixels = 50.0 * notches;
+    if alt {
+        pixels *= 5.0;
+    }
+    if pixels < 0.0 {
+        pixels.floor()
+    } else {
+        pixels.ceil()
+    }
+}
+
 /// Normal-screen wheel without reporting scrolls local history; alternate-screen
 /// wheel goes as `Mouse::Wheel` and the supervisor emits cursor keys for it.
 pub fn wheel_goes_to_program(mode: MouseMode, alternate_screen: bool) -> bool {
@@ -201,6 +234,27 @@ pub fn wheel_goes_to_program(mode: MouseMode, alternate_screen: bool) -> bool {
 /// Report terminal focus transitions only while mode 1004 is enabled.
 pub fn focus_report(focused: bool, reporting: bool) -> Option<GridInput> {
     reporting.then_some(GridInput::Focus { focused })
+}
+
+#[cfg(test)]
+mod wheel_tests {
+    use super::*;
+
+    /// The old app's scroll distances, which users' hands are tuned to: a wheel notch is 50 pixels, Alt makes it five
+    /// times that, a trackpad pixel counts 1.25 and a part pixel rounds away from zero, and off a Mac a Shift wheel
+    /// scrolls nothing (the platform turned it horizontal). The sign follows GPUI's: positive is toward older lines.
+    #[test]
+    fn wheel_pixels_keeps_the_old_distances() {
+        assert_eq!(wheel_pixels(1.0, WheelUnit::Lines, false, false, false), 50.0);
+        assert_eq!(wheel_pixels(-1.0, WheelUnit::Lines, false, false, false), -50.0);
+        assert_eq!(wheel_pixels(1.0, WheelUnit::Lines, true, false, false), 250.0);
+        assert_eq!(wheel_pixels(8.0, WheelUnit::Pixels, false, false, false), 10.0);
+        assert_eq!(wheel_pixels(1.0, WheelUnit::Pixels, false, false, false), 2.0);
+        assert_eq!(wheel_pixels(-1.0, WheelUnit::Pixels, false, false, false), -2.0);
+        assert_eq!(wheel_pixels(1.0, WheelUnit::Lines, false, true, false), 0.0);
+        assert_eq!(wheel_pixels(1.0, WheelUnit::Lines, false, true, true), 50.0);
+        assert_eq!(wheel_pixels(f64::NAN, WheelUnit::Lines, false, false, false), 0.0);
+    }
 }
 
 #[cfg(test)]

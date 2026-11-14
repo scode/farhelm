@@ -19,7 +19,8 @@ use farhelm_input_mapping::Modifiers as KeyModifiers;
 use farhelm_proto::DetachCode;
 use gpui::{
     AppContext as _, Context, Entity, KeyBinding, KeyUpEvent, Keystroke, Modifiers, ParentElement,
-    Render, Styled, TestAppContext, VisualTestContext, Window, div, point, px,
+    Render, ScrollDelta, ScrollEvent, Styled, TestAppContext, VisualTestContext, Window, div,
+    point, px,
 };
 
 use super::*;
@@ -1083,16 +1084,174 @@ fn a_held_app_shortcut_never_reaches_the_program(cx: &mut TestAppContext) {
     assert!(h.focused(&owner), "the premise: the terminal kept focus");
 }
 
+// ---- Scrollback ----------------------------------------------------------------------------------------------------
+
+impl Harness<'_> {
+    /// The fake's attach opens and replays a complete screen ("screen" on its first row) with `lines` history lines
+    /// above it ("h0" oldest), then goes live.
+    fn attach_with_history(&mut self, lines: usize) {
+        let asked = self.fake().attach();
+        let mut replay = screen(asked.cols, asked.rows, "screen", serde_json::Value::Null);
+        replay[0] = serde_json::from_value(
+            serde_json::json!({"t":"hello","cols":asked.cols,"rows":asked.rows,"history_cap":1000}),
+        )
+        .unwrap();
+        let rows: Vec<_> = (0..lines)
+            .map(|i| {
+                let text = format!("h{i}");
+                serde_json::json!({"w":false,"r":[[0,text.len(),text,[0,-1,-1]]]})
+            })
+            .collect();
+        replay.push(
+            serde_json::from_value(
+                serde_json::json!({"t":"history","first":0,"rows":rows,"cols":asked.cols}),
+            )
+            .unwrap(),
+        );
+        for message in replay {
+            self.fake().output(message);
+        }
+        self.fake().replay_complete();
+        settle(self.cx);
+    }
+
+    /// Whether the shown screen follows the bottom.
+    fn following(&mut self) -> bool {
+        self.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).is_following())
+    }
+
+    /// One wheel event over the middle of the grid: `lines` notches, positive toward older lines.
+    fn wheel(&mut self, lines: f32) {
+        self.cx.simulate_event(ScrollEvent {
+            position: point(px(200.), px(200.)),
+            delta: ScrollDelta::Lines(point(0., lines)),
+            ..Default::default()
+        });
+        settle(self.cx);
+    }
+}
+
+/// On the ordinary screen with no mouse reporting the wheel scrolls the terminal's own history and sends the program
+/// nothing; the next input the user sends (a key, committed text or a paste) brings the view back to the bottom, where
+/// it lands (the old app's wheel policy and `sendUserInput`).
+#[gpui::test]
+fn the_wheel_scrolls_history_and_input_returns_to_the_bottom(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_with_history(40);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    assert!(h.following(), "the premise: following");
+    h.wheel(1.);
+    assert!(!h.following(), "a notch up scrolls back");
+    assert_eq!(h.sent(), [], "the program hears nothing of it");
+    assert!(
+        h.text().unwrap().lines().any(|line| line.starts_with('h')),
+        "history shows"
+    );
+    keys(h.cx, "a");
+    assert!(h.following(), "typing returns to the bottom");
+    assert_eq!(h.sent(), [(key("a", 65), true)]);
+
+    // Text the platform commits and a paste are input the user sends too.
+    h.wheel(1.);
+    assert!(!h.following(), "the premise: scrolled back");
+    keys(h.cx, "shift-a");
+    assert!(h.following(), "committed text returns to the bottom");
+    assert_eq!(h.sent(), [(text("A"), true)]);
+    h.wheel(1.);
+    assert!(!h.following(), "the premise: scrolled back");
+    h.cx.write_to_clipboard(ClipboardItem::new_string("pasted".into()));
+    h.cx.dispatch_action(actions::Paste);
+    settle(h.cx);
+    assert!(h.following(), "a paste returns to the bottom");
+    assert_eq!(h.sent(), [(paste("pasted", true), true)]);
+}
+
+/// On the alternate screen the wheel is the program's (the supervisor turns it into arrow keys when the program has
+/// not asked for mouse reports): one wheel message per event, up for a notch toward older lines, at the cell under the
+/// pointer, and the view does not scroll (the alternate screen has no history).
+#[gpui::test]
+fn the_wheel_goes_to_the_program_on_the_alternate_screen(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_with_history(40);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let alternate: GridOutput =
+        serde_json::from_value(serde_json::json!({"t":"state","mouse":"off","focus":false,
+        "alt_screen":true,"default_fg":null,"default_bg":null,"history_trimmed":false,"exit":null}))
+        .unwrap();
+    h.fake().output(alternate);
+    settle(h.cx);
+    h.wheel(1.);
+    h.wheel(-1.);
+    let sent = h.sent();
+    assert_eq!(sent.len(), 2, "one message per event: {sent:?}");
+    let under = h
+        .read(|owner, cx| owner.cell_at(point(px(200.), px(200.)), cx))
+        .unwrap();
+    for ((input, delivered), button) in sent.iter().zip([0, 1]) {
+        assert!(delivered);
+        assert!(
+            matches!(input, GridInput::Mouse { kind: MouseEventKind::Wheel, button: b, x, y, .. }
+                if *b == button && (*x, *y) == under),
+            "{input:?}, pointer over {under:?}"
+        );
+    }
+    assert!(h.following());
+}
+
+/// The cell a pointer report names is the one drawn under the pointer, also when the screen is lifted to make room
+/// for its exit line: the lift moves every row up, so the top of the grid's area shows a lower row than row 0. A
+/// report that ignored the lift would name a row the user did not point at. A point exactly on a boundary belongs to
+/// the cell before it, as in the old app.
+#[gpui::test]
+fn the_pointer_names_the_cell_drawn_under_it_on_a_lifted_screen(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("running");
+    let exited: GridOutput = serde_json::from_value(serde_json::json!({"t":"state","mouse":"off","focus":false,
+        "alt_screen":false,"default_fg":null,"default_bg":null,"history_trimmed":false,"exit":{"signal":15}}))
+    .unwrap();
+    h.fake().output(exited);
+    settle(h.cx);
+    let (origin, width, placement) = h.read(|owner, cx| {
+        let view = owner.committed.as_ref().unwrap().read(cx);
+        (
+            owner.grid_origin.unwrap(),
+            owner.cell(cx).unwrap().width,
+            owner.placement(view, cx).unwrap(),
+        )
+    });
+    let lifted = (placement.lift / placement.cell_height).round() as u16;
+    assert!(lifted > 0, "the premise: the exit line lifts the screen");
+    let at = |h: &mut Harness, x: f32, y: f32| {
+        h.read(|owner, cx| owner.cell_at(origin + point(px(x), px(y)), cx))
+    };
+    assert_eq!(
+        at(&mut h, width * 2.5, placement.cell_height * 0.5),
+        Some((2, lifted))
+    );
+    assert_eq!(
+        at(&mut h, width * 3., placement.cell_height),
+        Some((2, lifted)),
+        "a boundary belongs to the cell before it"
+    );
+}
+
 // ---- Paste ---------------------------------------------------------------------------------------------------------
 
-/// This platform's paste chords, as the keymap binds them.
-fn paste_chords() -> Vec<&'static str> {
+/// This platform's chords for the terminal action `action`, as the keymap binds them.
+fn chords_of(action: &dyn gpui::Action) -> Vec<&'static str> {
     crate::actions::TERMINAL_KEYS
         .iter()
         .filter_map(|key| Some((key.chord(THIS_PLATFORM)?, key.bind?)))
-        .filter(|(chord, bind)| bind(chord).action().partial_eq(&crate::actions::Paste))
+        .filter(|(chord, bind)| bind(chord).action().partial_eq(action))
         .map(|(chord, _)| chord)
         .collect()
+}
+
+/// This platform's paste chords, as the keymap binds them.
+fn paste_chords() -> Vec<&'static str> {
+    chords_of(&actions::Paste)
 }
 
 fn paste(data: &str, last: bool) -> GridInput {

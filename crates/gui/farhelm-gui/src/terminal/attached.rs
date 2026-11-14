@@ -94,19 +94,21 @@ use farhelm_helm_client::terminal::{
     Attachment, AttachmentLease, StreamState, TerminalAttach, TerminalEvent, TerminalEvents,
     TerminalHandle,
 };
-use farhelm_input_mapping::pointer::Geometry;
+use farhelm_input_mapping::pointer::{
+    Geometry, WheelAccumulator, WheelUnit, wheel_goes_to_program, wheel_pixels,
+};
 use farhelm_input_mapping::{
     Composition, Decision, KeyDown, NativeIdentity, NativeKey, Platform, Route, committed_text,
     map_key, pasted_text,
 };
 use farhelm_proto::DetachCode;
-use farhelm_proto::grid::GridInput;
+use farhelm_proto::grid::{GridInput, MouseEventKind};
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, ClipboardEntry, ClipboardItem, Context,
     ElementInputHandler, Entity, EntityInputHandler, FocusHandle, InteractiveElement, IntoElement,
-    KeyDownEvent, NativeKeyIdentity, ParentElement, Pixels, Render, SharedString, Styled,
-    Subscription, Task, UTF16Selection, WeakEntity, Window, canvas, div,
-    prelude::FluentBuilder as _, px,
+    KeyDownEvent, NativeKeyIdentity, ParentElement, Pixels, Point, Render, ScrollDelta,
+    ScrollEvent, SharedString, Styled, Subscription, Task, UTF16Selection, WeakEntity, Window,
+    canvas, div, prelude::FluentBuilder as _, px,
 };
 
 use super::{CellMetrics, CursorPhase, TerminalView, style};
@@ -206,6 +208,11 @@ pub struct AttachedTerminal {
     /// The height the grid actually has, the pane less the status line and padding, which is where the exit line must
     /// fit. Measured apart from the fit because the fit deliberately ignores the status line.
     room: Option<f32>,
+    /// Where the grid's area (inside the padding, below the status line) sits in the window, measured with `room`:
+    /// where a wheel event's position is turned into a cell.
+    grid_origin: Option<Point<Pixels>>,
+    /// The part of a line the wheel has gathered toward the program's next wheel report, per terminal.
+    program_wheel: WheelAccumulator,
     retired: bool,
     /// The pane's focus: a tab stop, which a press on the pane focuses. Lives as long as the owner, so the session
     /// view can name it as home across redraws.
@@ -286,6 +293,8 @@ impl AttachedTerminal {
             fit: None,
             scale: None,
             room: None,
+            grid_origin: None,
+            program_wheel: WheelAccumulator::default(),
             retired,
             focus: cx.focus_handle().tab_stop(true),
             text_input: {
@@ -443,7 +452,8 @@ impl AttachedTerminal {
     }
 
     /// The grid's area was drawn `height` pixels tall (inside its padding, below the status line).
-    fn grid_measured(&mut self, height: f32, cx: &mut Context<Self>) {
+    fn grid_measured(&mut self, origin: Point<Pixels>, height: f32, cx: &mut Context<Self>) {
+        self.grid_origin = Some(origin);
         if self.room != Some(height) {
             self.room = Some(height);
             if self.committed.is_some() {
@@ -616,7 +626,7 @@ impl AttachedTerminal {
             KeyRoute::Send(input) => {
                 cx.stop_propagation();
                 if let Some(attachment) = self.attachment {
-                    self.send(attachment, vec![input]);
+                    self.send_user(attachment, vec![input], cx);
                 }
             }
             KeyRoute::TextInput => {}
@@ -635,6 +645,113 @@ impl AttachedTerminal {
         if let Some(handle) = &self.handle {
             handle.input(attachment, group);
         }
+    }
+
+    /// Send input the user made (a key, typed or committed text, a paste, a wheel report) and bring the view back to
+    /// the bottom, where it lands, as the old app did (grid-terminal.js's `sendUserInput` at the reference commit).
+    /// Focus reports are the terminal's own and go through [`AttachedTerminal::send`], leaving the view where it is.
+    fn send_user(&mut self, attachment: Attachment, group: Vec<GridInput>, cx: &mut Context<Self>) {
+        if !self.is_live() || group.is_empty() {
+            return;
+        }
+        if let Some(view) = &self.committed {
+            view.update(cx, |view, cx| view.follow(cx));
+        }
+        self.send(attachment, group);
+    }
+
+    /// The shown screen's cell size on this display, `None` before it is measured.
+    fn cell(&self, cx: &App) -> Option<gpui::Size<f32>> {
+        let view = self.committed.as_ref()?.read(cx);
+        let rows = u16::try_from(view.rows.len()).unwrap_or(u16::MAX);
+        Some(view.metrics.cell_size(view.cols, rows, self.scale?))
+    }
+
+    /// The screen cell under `position` (window coordinates), clamped into the screen, or `None` before the grid is
+    /// measured. The screen may be lifted for the exit or status line ([`lift`]), which moves its cells up with it.
+    /// The lookup is the old app's mouse cell (`Geometry::cell`), where a point exactly on a boundary belongs to the
+    /// cell before it.
+    fn cell_at(&self, position: Point<Pixels>, cx: &App) -> Option<(u16, u16)> {
+        let origin = self.grid_origin?;
+        let view = self.committed.as_ref()?.read(cx);
+        let placement = self.placement(view, cx)?;
+        let cell = self.cell(cx)?;
+        let geometry = Geometry {
+            cell_width: f64::from(cell.width),
+            cell_height: f64::from(placement.cell_height),
+            columns: view.cols,
+            rows: placement.rows,
+        };
+        geometry.cell(
+            f64::from(f32::from(position.x - origin.x)),
+            f64::from(f32::from(position.y - origin.y) + placement.lift),
+        )
+    }
+
+    /// The wheel over the terminal, by the old app's policy (grid-terminal.js's wheel listener at the reference
+    /// commit; `wheel_goes_to_program`): with mouse reporting on, or on the alternate screen, it is the program's, as
+    /// one wheel message per event that moves at least a line (a mouse report, or arrow keys the supervisor makes on
+    /// the alternate screen without reporting); otherwise it scrolls the terminal's own history. A wheel the program
+    /// owns goes out only while the terminal is live; scrolling history works on any shown screen.
+    fn wheel(&mut self, event: &ScrollEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(view) = self.committed.clone() else {
+            return;
+        };
+        let Some(cell) = self.cell(cx) else {
+            return;
+        };
+        cx.stop_propagation();
+        let (unit, delta) = match event.delta {
+            ScrollDelta::Pixels(delta) => (WheelUnit::Pixels, f64::from(f32::from(delta.y))),
+            ScrollDelta::Lines(delta) => (WheelUnit::Lines, f64::from(delta.y)),
+        };
+        let modifiers = event.modifiers;
+        let state = view.read(cx).state;
+        let mouse = state.map_or(farhelm_proto::grid::MouseMode::Off, |state| state.mouse);
+        let alternate = state.is_some_and(|state| state.alt_screen);
+        if wheel_goes_to_program(mouse, alternate) {
+            let (true, Some(attachment)) = (self.is_live(), self.attachment) else {
+                return;
+            };
+            let mods = farhelm_input_mapping::Modifiers {
+                control: modifiers.control,
+                alt: modifiers.alt,
+                shift: modifiers.shift,
+                platform: modifiers.platform,
+                function: modifiers.function,
+            }
+            .bits();
+            let rows = u16::try_from(view.read(cx).rows.len()).unwrap_or(u16::MAX);
+            // The accumulator takes the browser's sign (positive toward newer lines), the opposite of GPUI's.
+            let lines =
+                self.program_wheel
+                    .consume(-delta, unit, f64::from(cell.height), rows, mods);
+            let Some((x, y)) = self.cell_at(event.position, cx) else {
+                return;
+            };
+            if lines == 0.0 {
+                return;
+            }
+            let wheel = GridInput::Mouse {
+                kind: MouseEventKind::Wheel,
+                button: if delta > 0.0 { 0 } else { 1 },
+                x,
+                y,
+                mods,
+            };
+            self.send_user(attachment, vec![wheel], cx);
+            return;
+        }
+        let pixels = wheel_pixels(
+            delta,
+            unit,
+            modifiers.alt,
+            modifiers.shift,
+            actions::THIS_PLATFORM == Platform::Mac,
+        );
+        view.update(cx, |view, cx| {
+            view.scroll_pixels(pixels as f32, cell.height, cx)
+        });
     }
 
     /// The user's Paste ([`actions::Paste`], from a key or a menu): send the clipboard's text to the program as one
@@ -673,7 +790,9 @@ impl AttachedTerminal {
             let Some(text) = clipboard_text(&item).filter(|text| !text.is_empty()) else {
                 return;
             };
-            let _ = owner.update(cx, |owner, _| owner.send(attachment, pasted_text(&text)));
+            let _ = owner.update(cx, |owner, cx| {
+                owner.send_user(attachment, pasted_text(&text), cx)
+            });
         }));
     }
 
@@ -1067,8 +1186,10 @@ impl Render for AttachedTerminal {
                 move |bounds, (), window, cx| {
                     window.handle_input(&focus, ElementInputHandler::new(bounds, text_input), cx);
                     let height = f32::from(bounds.size.height);
+                    let origin = bounds.origin;
                     window.defer(cx, move |_, cx| {
-                        let _ = owner.update(cx, |owner, cx| owner.grid_measured(height, cx));
+                        let _ =
+                            owner.update(cx, |owner, cx| owner.grid_measured(origin, height, cx));
                     });
                 },
             )
@@ -1090,6 +1211,7 @@ impl Render for AttachedTerminal {
             .key_context(actions::TERMINAL_CONTEXT)
             .on_key_down(cx.listener(Self::key))
             .on_action(cx.listener(Self::paste))
+            .on_scroll(cx.listener(Self::wheel))
             .relative()
             .flex_1()
             .min_h_0()
@@ -1141,11 +1263,11 @@ impl AttachedTerminal {
     /// It ends any composition and dead-key sequence (left pending, the input mapping would hold back the next key
     /// that sends a sequence, so Enter after a composed `é` would send nothing), and goes to the program as typed text
     /// while the terminal is live.
-    fn commit_text(&mut self, text: &str) {
+    fn commit_text(&mut self, text: &str, cx: &mut Context<Self>) {
         self.set_marked(None);
         self.composition.dead_pending = false;
         if let Some(attachment) = self.attachment {
-            self.send(attachment, committed_text(text));
+            self.send_user(attachment, committed_text(text), cx);
         }
     }
 
@@ -1160,12 +1282,12 @@ impl AttachedTerminal {
     /// NOTE: No platform GPUI ships for Farhelm calls this today (GPUI names only the web's DOM paste as a caller); it
     /// is here so that the input handler's default, which would type a paste as text, can never apply to a terminal.
     /// It does not wait behind the app's own pastes still reading the clipboard.
-    fn paste_item(&mut self, item: &ClipboardItem) {
+    fn paste_item(&mut self, item: &ClipboardItem, cx: &mut Context<Self>) {
         let Some(text) = clipboard_text(item).filter(|text| !text.is_empty()) else {
             return;
         };
         if let Some(attachment) = self.attachment {
-            self.send(attachment, pasted_text(&text));
+            self.send_user(attachment, pasted_text(&text), cx);
         }
     }
 }
@@ -1193,9 +1315,9 @@ impl TerminalInputHandler {
     fn on_owner<R>(
         &self,
         cx: &mut Context<Self>,
-        f: impl FnOnce(&mut AttachedTerminal) -> R,
+        f: impl FnOnce(&mut AttachedTerminal, &mut Context<AttachedTerminal>) -> R,
     ) -> Option<R> {
-        self.owner.update(cx, |owner, _| f(owner)).ok()
+        self.owner.update(cx, f).ok()
     }
 }
 
@@ -1229,7 +1351,7 @@ impl EntityInputHandler for TerminalInputHandler {
     }
 
     fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        self.on_owner(cx, |owner| owner.set_marked(None));
+        self.on_owner(cx, |owner, _| owner.set_marked(None));
     }
 
     fn replace_text_in_range(
@@ -1239,7 +1361,7 @@ impl EntityInputHandler for TerminalInputHandler {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.on_owner(cx, |owner| owner.commit_text(text));
+        self.on_owner(cx, |owner, cx| owner.commit_text(text, cx));
     }
 
     fn replace_and_mark_text_in_range(
@@ -1250,11 +1372,11 @@ impl EntityInputHandler for TerminalInputHandler {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.on_owner(cx, |owner| owner.mark_text(new_text));
+        self.on_owner(cx, |owner, _| owner.mark_text(new_text));
     }
 
     fn paste(&mut self, item: ClipboardItem, _: &mut Window, cx: &mut Context<Self>) {
-        self.on_owner(cx, |owner| owner.paste_item(&item));
+        self.on_owner(cx, |owner, cx| owner.paste_item(&item, cx));
     }
 
     fn bounds_for_range(
