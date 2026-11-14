@@ -3032,21 +3032,28 @@ pub(crate) async fn stop_session(
             }
         }
     };
-    let key = match resolve_session_ref(&state, &id).await {
-        Ok(key) => key,
-        Err(error) => return http_error(error),
-    };
-    match do_stop_session(
-        &state,
-        &key,
-        request.refuse_if_tabs_open,
-        request.refuse_if_agent_running,
-    )
+    // Bounded like rename and Delete: the GUI admits one command at a
+    // time, so a Stop waiting on a slow host would hold every later click
+    // (see `HOST_REPLY_BOUND`). The bound runs the Stop on its own task, so
+    // it finishes even when its caller goes away.
+    within_host_reply_bound(async move {
+        let key = match resolve_session_ref(&state, &id).await {
+            Ok(key) => key,
+            Err(error) => return http_error(error),
+        };
+        match do_stop_session(
+            &state,
+            &key,
+            request.refuse_if_tabs_open,
+            request.refuse_if_agent_running,
+        )
+        .await
+        {
+            Ok(outcome) => axum::Json(outcome).into_response(),
+            Err(e) => http_error(e),
+        }
+    })
     .await
-    {
-        Ok(outcome) => axum::Json(outcome).into_response(),
-        Err(e) => http_error(e),
-    }
 }
 
 /// `GET /api/sessions/{id}` — one session's current state, as a merged-list
@@ -3280,35 +3287,39 @@ pub(crate) async fn restart_session(
     axum::Json(req): axum::Json<RestartReq>,
 ) -> impl IntoResponse {
     // Router ownership keeps the relaunch and its new cached state together
-    // even when the caller stops waiting for the reply.
-    let key = match resolve_session_ref(&state, &id).await {
-        Ok(key) => key,
-        Err(error) => return http_error(error),
-    };
-    let with = match (req.with, req.with_command) {
-        (None, None) => None,
-        (Some(selection), None) => Some(LaunchRequest::Agent { selection }),
-        (None, Some(command)) => Some(LaunchRequest::Command(command)),
-        (Some(_), Some(_)) => {
-            return http_error(invalid_request(
-                "a restart names at most one of with or with_command".to_string(),
-            ));
+    // even when the caller stops waiting for the reply, and the wait is
+    // bounded like rename's and Delete's (see `HOST_REPLY_BOUND`).
+    within_host_reply_bound(async move {
+        let key = match resolve_session_ref(&state, &id).await {
+            Ok(key) => key,
+            Err(error) => return http_error(error),
+        };
+        let with = match (req.with, req.with_command) {
+            (None, None) => None,
+            (Some(selection), None) => Some(LaunchRequest::Agent { selection }),
+            (None, Some(command)) => Some(LaunchRequest::Command(command)),
+            (Some(_), Some(_)) => {
+                return http_error(invalid_request(
+                    "a restart names at most one of with or with_command".to_string(),
+                ));
+            }
+        };
+        match resolve_and_restart_session(
+            &state,
+            &key,
+            req.stop_if_running,
+            with,
+            req.confirm_yolo,
+            None,
+            req.conversation,
+        )
+        .await
+        {
+            Ok((claim, session)) => session_reply(&claim.entry_uuid, session),
+            Err(e) => http_error(e),
         }
-    };
-    match resolve_and_restart_session(
-        &state,
-        &key,
-        req.stop_if_running,
-        with,
-        req.confirm_yolo,
-        None,
-        req.conversation,
-    )
+    })
     .await
-    {
-        Ok((claim, session)) => session_reply(&claim.entry_uuid, session),
-        Err(e) => http_error(e),
-    }
 }
 
 /// Route, relaunch, enrich, and publish one session restart.
@@ -3560,20 +3571,32 @@ pub(crate) async fn rename_session(
     .await
 }
 
-/// How long the GUI's ordinary DELETE and its rename of a session wait for
-/// the host before answering that it did not answer in time.
+/// How long the GUI's ordinary DELETE, rename, Stop, Restart and Replace of a
+/// session wait for the host before answering that it did not answer in time.
 ///
 /// The UI channel admits one command at a time, so this is also the longest
 /// any later click can wait behind a slow host; it has to stay short. Twenty
-/// seconds is several times what a responsive host takes for either action,
-/// even over SSH, and still well under the GUI's own watchdog, which treats
-/// a command left unanswered for longer as a broken channel and resets the
-/// window. The host request itself is not cancelled: it carries on, and the
-/// pushed session list shows its outcome when it lands.
+/// seconds is several times what a responsive host takes for each of these,
+/// even over SSH (a Restart or Replace launches an agent and a Replace then
+/// deletes the source, which normally ends well inside it), and still well
+/// under the GUI's own watchdog, which treats a command left unanswered for
+/// longer as a broken channel and resets the window. The host request itself
+/// is not cancelled: it carries on, and the pushed session list shows its
+/// outcome when it lands.
 ///
-/// Only the HTTP routes are bounded. Agents reach the same work through the
-/// supervisor relay (`do_delete_session`, `do_rename_session`), which keeps
-/// its own waiting behavior unchanged.
+/// What a caller must not assume from the timeout reply: that the work
+/// finished, failed, or did not start. The next command the channel admits
+/// can therefore run while the timed-out one is still going, so a client that
+/// sends the same Replace again after a timeout reuses its intent key, which
+/// is what keeps a second attempt from creating a second replacement. A reply
+/// the work produces after the bound (a Replace's partial-failure words, a
+/// Stop's notice about tabs it could not close) reaches only the log; the
+/// pushed session list still shows what happened to the sessions.
+///
+/// Only the HTTP routes are bounded. Every other caller of the shared work
+/// (`do_delete_session`, `do_rename_session`, `do_stop_session`,
+/// `do_replace_session` and the restart's), such as the supervisor relay
+/// agents use, keeps its own waiting behavior unchanged.
 pub(crate) const HOST_REPLY_BOUND: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// Run `work` to completion, but answer once [`HOST_REPLY_BOUND`] passes.
@@ -4721,31 +4744,39 @@ pub(crate) async fn replace_session(
     axum::Json(req): axum::Json<ReplaceReq>,
 ) -> impl IntoResponse {
     // The router owns both halves: creating the replacement and deleting the
-    // source. A disconnect between them must not leave the old session behind.
-    let key = match resolve_session_ref(&state, &id).await {
-        Ok(key) => key,
-        Err(error) => return http_error(error),
-    };
-    match do_replace_session(
-        &state,
-        &key,
-        req.intent_key,
-        req.with,
-        farhelm_proto::DeleteGuard::from_flags(req.only_if_nothing_alive, req.only_if_agent_ended),
-        req.confirm_yolo,
-    )
+    // source. A disconnect between them must not leave the old session behind,
+    // and neither may the reply bound (see `HOST_REPLY_BOUND`), which ends
+    // only the wait: both halves still run, and the pushed list shows them.
+    within_host_reply_bound(async move {
+        let key = match resolve_session_ref(&state, &id).await {
+            Ok(key) => key,
+            Err(error) => return http_error(error),
+        };
+        match do_replace_session(
+            &state,
+            &key,
+            req.intent_key,
+            req.with,
+            farhelm_proto::DeleteGuard::from_flags(
+                req.only_if_nothing_alive,
+                req.only_if_agent_ended,
+            ),
+            req.confirm_yolo,
+        )
+        .await
+        {
+            Ok(Replaced {
+                entry_uuid,
+                session,
+                delete_notice,
+            }) => match qualify_session_info(&entry_uuid, session) {
+                Ok(session) => replace_reply(&session, delete_notice),
+                Err(error) => http_error(error),
+            },
+            Err(e) => http_error(e),
+        }
+    })
     .await
-    {
-        Ok(Replaced {
-            entry_uuid,
-            session,
-            delete_notice,
-        }) => match qualify_session_info(&entry_uuid, session) {
-            Ok(session) => replace_reply(&session, delete_notice),
-            Err(error) => http_error(error),
-        },
-        Err(e) => http_error(e),
-    }
 }
 
 /// The replace endpoint's success body: the new session's own JSON, plus a
