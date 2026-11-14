@@ -275,10 +275,14 @@ the result, so the GUI needs no optimistic updates.
 Owner: the UI channel.
 
 Pushed collections are the helm-local data the fleet feed already invalidates: sessions, hosts, templates, preferences,
-notices, approvals, announcements and host progress. The PR that adds a collection lists it. The snapshot sent when a
-channel opens never waits on a remote host. Every other read (directory browse, repository lists, the trash list, launch
-history, file stat) is an ordinary GET command whose reply body is the result. Data the old GUI polled stays a query
-that the GUI issues again; it does not become a replicated collection.
+notices, approvals, announcements and host progress. The PR that adds a collection lists it. Each is read through its
+GET route: sessions keyed by their served id, templates by name, notices by id, approvals by id, hosts by registry id;
+preferences and the announcement queue travel as one entry each; host progress is `GET /api/provisioning`, every run
+this helm process retains, keyed by host id (a host with no run is absent, not idle). Their entry types live in
+`farhelm-proto` beside the channel's. The snapshot sent when a channel opens never waits on a remote host. Every other
+read (directory browse, repository lists, the trash list, launch history, file stat) is an ordinary GET command whose
+reply body is the result. Data the old GUI polled stays a query that the GUI issues again; it does not become a
+replicated collection.
 
 The session list is a query. Its filter, sort and cap are this channel's state, set by a command, and the helm keeps
 serving the filtered, capped view with its `total`, `matching` and `truncated` counts. Collections carry their metadata:

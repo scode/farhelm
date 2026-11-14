@@ -1,7 +1,7 @@
 //! Discovery-first supervisor provisioning and its host-scoped REST state.
 
 use super::backend::BackendFailure;
-use super::plan::{PlanStepPath, PlanSteps, ProvisioningOperation, ProvisioningPlan};
+use super::plan::{PlanSteps, ProvisioningPlan};
 use crate::store::HostId;
 use crate::{AppState, http_error};
 use axum::extract::{Path as AxPath, State};
@@ -127,52 +127,31 @@ pub(crate) struct HostPlanResponse {
     pub(super) steps: PlanSteps,
 }
 
-/// One action's observable progress. Completed runs remain readable through
-/// the host-scoped GET until a later run replaces them.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub(super) enum StepStatus {
-    Pending,
-    Running,
-    Completed,
-    Skipped,
-    Degraded,
-    Failed,
+// The progress shapes live in `farhelm-proto`, because the UI channel pushes them to the GUI; the helm builds them
+// through [`ProgressViews`].
+pub(crate) use farhelm_proto::provisioning::{ProvisioningView, RunStatus, StepStatus, StepView};
+
+/// `GET /api/provisioning`: every run this helm process retains, one per host. A host with no retained run is absent
+/// rather than listed as idle, so the list is exactly the progress there is to show.
+///
+/// Unlike the entries, this wrapper is not in `farhelm-proto`: the GUI decodes the [`ProvisioningView`] entries the UI
+/// channel splits out of it, never the wrapper.
+#[derive(Debug, Serialize)]
+pub(crate) struct ProvisioningRuns {
+    pub(super) runs: Vec<ProvisioningView>,
 }
 
-/// One action's retained status and bounded explanatory message. The helm
-/// carries its plan wording into progress; clients never name steps from ids.
-#[derive(Debug, Clone, Serialize)]
-pub(super) struct StepView {
-    pub(super) step: String,
-    pub(super) name: String,
-    pub(super) paths: Vec<PlanStepPath>,
-    pub(super) explanation: Option<String>,
-    pub(super) status: StepStatus,
-    pub(super) message: Option<String>,
+/// The helm's constructors for a host's progress view.
+pub(super) trait ProgressViews: Sized {
+    /// An explicit idle view for a valid host that has never been provisioned by this helm process.
+    fn idle(host_id: HostId) -> Self;
+    /// Start progress from the plan's own descriptions so status updates keep
+    /// the names and paths the user saw before authorizing the run.
+    fn for_plan(host_id: HostId, run_id: String, plan: &ProvisioningPlan) -> Self;
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "kebab-case")]
-pub(super) enum RunStatus {
-    Running,
-    Completed,
-    Failed,
-}
-
-/// What `GET /api/hosts/{id}/provisioning` returns.
-#[derive(Debug, Clone, Serialize)]
-pub(crate) struct ProvisioningView {
-    pub(super) host_id: HostId,
-    pub(super) run_id: Option<String>,
-    pub(super) operation: Option<ProvisioningOperation>,
-    pub(super) status: RunStatus,
-    pub(super) steps: Vec<StepView>,
-    pub(super) message: Option<String>,
-}
-
-impl ProvisioningView {
-    pub(super) fn idle(host_id: HostId) -> Self {
+impl ProgressViews for ProvisioningView {
+    fn idle(host_id: HostId) -> Self {
         Self {
             host_id,
             run_id: None,
@@ -183,9 +162,7 @@ impl ProvisioningView {
         }
     }
 
-    /// Start progress from the plan's own descriptions so status updates keep
-    /// the names and paths the user saw before authorizing the run.
-    pub(super) fn for_plan(host_id: HostId, run_id: String, plan: &ProvisioningPlan) -> Self {
+    fn for_plan(host_id: HostId, run_id: String, plan: &ProvisioningPlan) -> Self {
         let steps = plan.steps();
         Self {
             host_id,
@@ -295,6 +272,12 @@ pub(crate) async fn provisioning_state(
         Ok(view) => axum::Json(view).into_response(),
         Err(error) => http_error(error),
     }
+}
+
+/// `GET /api/provisioning` — every host's retained run in one read, which the UI channel pushes as its
+/// host-progress collection (the per-host route stays for callers that want one host).
+pub(crate) async fn provisioning_runs(State(state): State<Arc<AppState>>) -> Response {
+    axum::Json(state.provisioning.runs().await).into_response()
 }
 
 /// Map provisioning's own typed refusals without parsing their diagnostics.
