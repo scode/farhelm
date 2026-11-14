@@ -79,9 +79,14 @@
 //!   (checked against `LaunchHarness::ALL`), its permission help and the
 //!   Cursor support notice are in `crates/gui/farhelm-gui/src/launcher/words.rs`,
 //!   and its conversation selector's label is `conversation_label` in
-//!   `launcher/view.rs`. The rest of the GUI's per-harness vocabulary is not
-//!   ported yet: the harness-to-mark mapping and the marks' identity colors,
-//!   and the per-agent-KIND facts that also cover command and legacy launches
+//!   `launcher/view.rs`. Settings' Agent trust section names its agents with
+//!   `TrustAgent` in `crates/gui/farhelm-gui/src/settings/agent_trust.rs`,
+//!   whose exhaustive methods hold each trust agent's route, wording, caution
+//!   and hint switch (a harness with no managed-checkout trust setting has no
+//!   variant there, as the helm's `trust_column` refuses it). The rest of the
+//!   GUI's per-harness vocabulary is not ported yet: the harness-to-mark
+//!   mapping and the marks' identity colors, and the per-agent-KIND facts that
+//!   also cover command and legacy launches
 //!   (today the copy instruction the terminal's "this drag did not copy"
 //!   notice offers). Each comes back as an exhaustive per-harness or per-kind
 //!   function in the GUI crates. The Dioxus versions are readable at the GPUI

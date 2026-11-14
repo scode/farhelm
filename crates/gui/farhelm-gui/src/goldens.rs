@@ -7,8 +7,8 @@
 //! reach, an empty fleet, a row's open menu, a row's Delete question, and a pending and a refused Delete), the Rename
 //! editor, the select closed and open, the
 //! YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer, the Settings dialog at
-//! Sessions, at Appearance, at Hosts and at Terminal, the Hosts panel (closed, with Details, and with a host failing to
-//! connect), and the Add host dialog, in both appearances, compared pixel for pixel.
+//! Sessions, at Appearance, at Hosts, at Terminal and at Agent trust, the Hosts panel (closed, with Details, and with a
+//! host failing to connect), and the Add host dialog, in both appearances, compared pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
@@ -1788,11 +1788,12 @@ fn rename_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
 }
 
 /// The Settings dialog over the fake helm's preference row, opened at `section` as the gear opens it (references
-/// `settings-sessions`, `settings-appearance`, `settings-hosts` and `settings-terminal`): focus on the section's first
-/// switch (on the dialog itself at Appearance and Terminal), naming on because the row stores no choice for it, and
-/// automatic remote-host updates turned on so the Hosts picture shows a switch in each state. The opener is the scene's
-/// ring handle, which stands in for the gear. The fake and the connection are kept for the scene's life, like the
-/// Rename editor's.
+/// `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-terminal` and `settings-agent-trust`): focus
+/// on the section's first switch (on the dialog itself at Appearance, Terminal and Agent trust), naming on because the
+/// row stores no choice for it, and automatic remote-host updates turned on so the Hosts picture shows a switch in each
+/// state. Agent trust's reads of each agent's trust, sent as it opens, are answered at once with the trust off and the
+/// hint not dismissed; nothing else is answered. The opener is the scene's ring handle, which stands in for the gear.
+/// The fake and the connection are kept for the scene's life, like the Rename editor's.
 fn settings_scene(
     state: &SceneState,
     section: crate::settings::Section,
@@ -1814,6 +1815,8 @@ fn settings_scene(
     let handle = window.window_handle();
     let opener = state.ring.clone();
     let opened = std::cell::Cell::new(false);
+    let helm = Rc::new(RefCell::new(helm));
+    let answering = helm.clone();
     let watch = cx.observe(&connection, move |connection, cx| {
         if opened.get() || connection.read(cx).session().is_none() {
             return;
@@ -1823,6 +1826,15 @@ fn settings_scene(
             let mark = Mark::take(cx);
             crate::settings::open_at(section, &opener, &mark, window, cx);
         });
+        let mut helm = answering.borrow_mut();
+        for read in helm.commands() {
+            let trust = read.path.starts_with("/api/checkout-claude-trust")
+                || read.path.starts_with("/api/checkout-agent-trust/");
+            if trust {
+                let answer = serde_json::json!({ "enabled": false, "hint_dismissed": false });
+                helm.reply(read.id, 200, Some(answer));
+            }
+        }
     });
     let mut keep = state.keep.borrow_mut();
     keep.push(Box::new(helm));
@@ -1887,6 +1899,12 @@ fn host_add_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) 
     keep.push(Box::new(helm));
     keep.push(Box::new(connection));
     keep.push(Box::new(watch));
+}
+
+/// Settings at Agent trust, every agent's trust off and every hint shown, as in the reference. Focus starts on the
+/// dialog itself (`Section::first`), so no ring shows.
+fn settings_agent_trust_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    settings_scene(state, crate::settings::Section::AgentTrust, window, cx);
 }
 
 /// Make the Hosts panel over a fake helm holding `listed` hosts, with Details on when `details` is; the scene draws it
@@ -2201,6 +2219,12 @@ static SCENES: &[Scene] = &[
         size: (800., 830.),
         draw: empty,
         setup: settings_terminal_setup,
+    },
+    Scene {
+        name: "settings-agent-trust",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_agent_trust_setup,
     },
     Scene {
         name: "hosts-panel",

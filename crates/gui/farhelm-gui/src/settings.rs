@@ -16,26 +16,27 @@
 //!   as it is open, so a hidden section keeps its pending saves and failure lines (and, once sections with text fields
 //!   exist, their unsaved text); only the shown one is drawn, so Tab never reaches a hidden control.
 //! - **Opening and closing.** [`open`] is the gear's entry point. It opens at Sessions with focus on its first switch
-//!   (SPEC.md: "The gear always opens sessions and focuses its first switch"). Escape, the header's close control and
-//!   the footer's Close all close it, and focus goes back to the gear. Closing discards what the dialog holds; a save
-//!   already sent goes on, since it is the operation store's work, not the dialog's (the helm's reply then settles
-//!   nothing on screen, and the store already shows the result).
+//!   (SPEC.md: "The gear always opens sessions and focuses its first switch"). [`open_at_agent_trust`] is a trust
+//!   hint's: it opens at Agent trust and puts focus on that agent's switch once the switch can take it. Escape, the
+//!   header's close control and the footer's Close all close it, and focus goes back to the gear. Closing discards what
+//!   the dialog holds; a save already sent goes on, since it is the operation store's work, not the dialog's (the
+//!   helm's reply then settles nothing on screen, and the store already shows the result).
 //! - **Saving a choice.** Every switch here, Appearance's choice and Terminal's link choice save one field of the
-//!   helm's preference row at once, with [`crate::drafts::save`] under [`OpKey::preferences`]. While the save is in
-//!   flight the control shows the value being saved (its draft); otherwise it shows what the helm stores, so a refused
-//!   save shows the stored value again, with the failure line under the control until its next save starts (SPEC.md:
-//!   "A failed save restores the last known value and shows an adjacent error"). Nothing is optimistic, queued,
-//!   retried or read back.
+//!   helm's preference row at once, with [`crate::drafts::save`] under [`OpKey::preferences`]; Agent trust's trust
+//!   switches save the same way through their own routes ([`agent_trust`]). While the save is in flight the control
+//!   shows the value being saved (its draft); otherwise it shows what the helm stores, so a refused save shows the
+//!   stored value again, with the failure line under the control until its next save starts (SPEC.md: "A failed save
+//!   restores the last known value and shows an adjacent error"). Nothing is optimistic, queued, retried or read back.
 //!
 //! NOTE: Quick flips do not follow the old app's "newest-choice" rule. Its preference queue coalesced a field's clicks,
 //! sent only the newest, and reported a failure only for the newest click. Here the operation store admits one request
-//! on the preference row's key at a time, so a click on any switch or radio option while a preference save is in flight
-//! is refused and changes nothing: the control goes on showing the value in flight, and the next click after the reply
-//! acts. On the radios (Appearance, Terminal's link choice) an arrow press moves focus before it reports the choice, so
-//! a dropped arrow press still moves focus while the choice stays where it was. The helm is embedded and answers a
-//! preference write in milliseconds, so the window in which a click is dropped this way is that short. The migration's
-//! orchestrator accepted this on 2026-11-14, to be revisited only if a user meets it; closing it would take a key per
-//! field or a queue, both changes to the operation store, not here.
+//! on the preference row's key at a time, and every Settings save holds that key, so a click on any switch or radio
+//! option while any Settings save is in flight is refused and changes nothing: the control goes on showing the value in
+//! flight, and the next click after the reply acts. On the radios (Appearance, Terminal's link choice) an arrow press
+//! moves focus before it reports the choice, so a dropped arrow press still moves focus while the choice stays where it
+//! was. The helm is embedded and answers a preference write in milliseconds, so the window in which a click is dropped
+//! this way is that short. The migration's orchestrator accepted this on 2026-11-14, to be revisited only if a user
+//! meets it; closing it would take a key per field or a queue, both changes to the operation store, not here.
 //!
 //! NOTE: Not ported yet, each recorded in `docs/gpui/parity/settings-and-hosts.md`. The one-pane layout at 620 pixels
 //! wide and below ("‹ Settings" back to the list) is not built, since the window's minimum width is above it. A
@@ -44,6 +45,7 @@
 //! control. The section list is not pinned while a long section scrolls (the old `position: sticky`); no section here
 //! is long enough to scroll at the minimum window size.
 
+mod agent_trust;
 mod appearance;
 mod choices;
 mod terminal;
@@ -52,9 +54,9 @@ mod tests;
 
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
 use gpui::{
-    AnyElement, App, AppContext as _, Context, FocusHandle, FontWeight, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, Role, StatefulInteractiveElement as _, Styled as _,
-    WeakEntity, Window, div, px, svg,
+    AnyElement, AnyWindowHandle, App, AppContext as _, Context, Entity, FocusHandle, FontWeight,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, Role,
+    StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div, px, svg,
 };
 
 use crate::assets::Icon;
@@ -62,11 +64,14 @@ use crate::components::{Button, DialogFrame, HoverHelp, Tier};
 use crate::drafts::{self, Draft};
 use crate::focus::{self, Mark, ReturnTo};
 use crate::layers::{self, Dialog, LayerId};
-use crate::operations::OpKey;
+use crate::operations::{OpKey, Outcome};
 use crate::session;
 use crate::theme::{self, Preference};
 
+use agent_trust::{Known, Trust};
 use choices::{Choice, Switch};
+
+pub use agent_trust::TrustAgent;
 use terminal::LinkClick;
 
 /// Hands the helm's stored appearance to the theme, for the main view's subscription to the current UI session. It
@@ -124,9 +129,9 @@ pub fn open(
     open_at(Section::Sessions, opener, mark, window, cx)
 }
 
-/// [`open`], at `section` with focus on its first control (on the dialog itself at Appearance and Terminal,
-/// [`Section::first`]). The entry points that open elsewhere (Agent trust at an agent's switch, for a trust hint) call
-/// this, or a form of it that takes the control to focus; the screenshot goldens call it for each section they picture.
+/// [`open`], at `section` with focus on its first control (on the dialog itself at Appearance, Terminal and Agent
+/// trust, [`Section::first`]). The screenshot goldens call it for each section they picture; [`open_at_agent_trust`]
+/// opens through [`open_dialog`], the form that also hands back the dialog.
 pub(crate) fn open_at(
     section: Section,
     opener: &FocusHandle,
@@ -134,6 +139,17 @@ pub(crate) fn open_at(
     window: &mut Window,
     cx: &mut App,
 ) -> Option<LayerId> {
+    open_dialog(section, opener, mark, window, cx).map(|(layer, _, _)| layer)
+}
+
+/// [`open_at`], handing back the dialog and its own focus handle too, for an entry point that tells it more.
+fn open_dialog(
+    section: Section,
+    opener: &FocusHandle,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<(LayerId, Entity<SettingsDialog>, FocusHandle)> {
     // An inert window has no store to draw the switches from, and nothing to save through.
     session::current_store(cx)?;
     if focus::has_moved_on(mark, cx) {
@@ -149,7 +165,7 @@ pub(crate) fn open_at(
     let layer = layers::open_dialog(
         Dialog {
             view: dialog.clone().into(),
-            container,
+            container: container.clone(),
             start,
             subject: None,
             // None on purpose: Enter on the dialog itself does nothing, as in the old app, where container Enter never
@@ -169,7 +185,56 @@ pub(crate) fn open_at(
         window,
         cx,
     )?;
-    dialog.update(cx, |dialog, _| dialog.layer = Some(layer));
+    dialog.update(cx, |dialog, cx| {
+        dialog.layer = Some(layer);
+        dialog.show(section, cx);
+    });
+    Some((layer, dialog, container))
+}
+
+/// Open Settings at Agent trust with focus on `agent`'s switch: a trust hint's "Settings and caveats" (SPEC.md: "Trust
+/// hints instead open agent trust at the relevant switch and scroll its block into view"). `opener` and `mark` are as
+/// [`open`]'s: the hint's button and the mark taken in its click handler.
+///
+/// The switch is unavailable until the section's read of the agent's trust answers ([`agent_trust`]), and an
+/// unavailable control cannot hold focus, so the dialog opens with focus on itself and hands focus to the switch once
+/// the read has answered. The handover is skipped when the user has moved on since `mark` (any key press or click, a
+/// click that leaves focus on the dialog included), or moved focus off the dialog in the meantime. If the read fails,
+/// focus stays on the dialog, beside the failure line.
+///
+/// NOTE: The switch is not scrolled into view, so Muse's and Pi's lie below the fold at the dialog's full height, and
+/// Codex's too when the window caps the dialog's height (in a window shorter than about 730 pixels; the window's
+/// minimum height is 560). Only Claude's switch is always visible. The handover borrows [`focus::move_within_control`],
+/// which moves without revealing its target and whose documented callers are a radio group and an inline question; see
+/// [`SettingsDialog::trust_known`] for why that borrowed use is safe here. It waits for `focus::focus_in_layer` to
+/// accept a target that is not drawn yet, which reveals the switch (not the agent's whole block, which SPEC.md's
+/// "scroll its block into view" asks for).
+///
+/// NOTE: Until then, opening this for any agent but Claude can focus a trust switch the user cannot see (Muse's and
+/// Pi's always, Codex's in a short window), and Space toggles it: a user who presses Space to scroll to the switch
+/// turns that agent's trust on unseen. A hint band that calls this before the reveal lands should either not call it
+/// for an agent whose switch lies below the fold, or accept that risk knowingly.
+///
+/// NOTE: Trust is not pushed. A hint band that shows only while its agent's trust is off (SPEC.md) does not learn from
+/// this function that the user turned trust on in Settings: it returns only the layer, and the dialog has no dismissal
+/// hook. The old band read trust again when Settings closed; the session view's band needs its own re-read when the
+/// dialog it opened closes (for example, a dismissal hook offered here when the band is built).
+pub fn open_at_agent_trust(
+    agent: TrustAgent,
+    opener: &FocusHandle,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
+    let (layer, dialog, container) = open_dialog(Section::AgentTrust, opener, mark, window, cx)?;
+    // A fresh dialog has just sent its reads, so the switch is not available yet: focus waits for the answer.
+    let handover = Handover {
+        agent,
+        mark: *mark,
+        from: container,
+        window: window.window_handle(),
+    };
+    dialog.update(cx, |dialog, _| dialog.focus_on = Some(handover));
     Some(layer)
 }
 
@@ -188,6 +253,7 @@ pub(crate) enum Section {
     Appearance,
     Hosts,
     Terminal,
+    AgentTrust,
 }
 
 impl Section {
@@ -199,6 +265,7 @@ impl Section {
         Section::Appearance,
         Section::Hosts,
         Section::Terminal,
+        Section::AgentTrust,
     ];
 
     /// The section's stable key, which its button's element id is built from.
@@ -208,6 +275,7 @@ impl Section {
             Section::Appearance => "appearance",
             Section::Hosts => "hosts",
             Section::Terminal => "terminal",
+            Section::AgentTrust => "agent-trust",
         }
     }
 
@@ -218,6 +286,7 @@ impl Section {
             Section::Appearance => "Appearance",
             Section::Hosts => "Hosts",
             Section::Terminal => "Terminal",
+            Section::AgentTrust => "Agent trust",
         }
     }
 
@@ -228,19 +297,22 @@ impl Section {
             Section::Appearance => Icon::Appearance,
             Section::Hosts => Icon::Hosts,
             Section::Terminal => Icon::Terminal,
+            Section::AgentTrust => Icon::AgentTrust,
         }
     }
 
     /// The control focus starts on when Settings opens at this section: its first switch. `None` for Appearance and
     /// Terminal, whose first control is a radio group: its options' focus handles live in the component's own element
     /// state, out of the dialog's reach, so opening there focuses the dialog itself (see [`open_at`]). Nothing in the
-    /// app opens Settings at either; only their goldens do.
+    /// app opens Settings at either; only their goldens do. `None` for Agent trust too, whose first switch is
+    /// unavailable until the section's read answers ([`open_at_agent_trust`]).
     fn first(self) -> Option<Choice> {
         match self {
             Section::Sessions => Some(Choice::SkipSessionConfirmations),
             Section::Appearance => None,
             Section::Hosts => Some(Choice::AutoUpdateRemoteHosts),
             Section::Terminal => None,
+            Section::AgentTrust => None,
         }
     }
 }
@@ -257,8 +329,25 @@ pub(crate) struct SettingsDialog {
     /// Terminal's link choice: like a switch's draft, it holds the value being saved and the last refusal, and its
     /// loaded value never reaches the screen ([`terminal::links`]).
     link_click: Draft<LinkClick>,
+    /// Agent trust's switches, in [`TrustAgent::ALL`]'s order. What they know comes from the read the section sends
+    /// the first time it is shown in this opening; `trust_read` says whether it was sent.
+    trust: Vec<Trust>,
+    trust_read: bool,
+    /// The handover a trust hint asked for ([`open_at_agent_trust`]), until its agent's read answers. Left set if that
+    /// read fails, which is harmless: the read is sent once per opening, so nothing can match it again in this opening.
+    focus_on: Option<Handover>,
     /// Set right after the layer opens; what the close controls dismiss.
     layer: Option<LayerId>,
+}
+
+/// What a trust hint's entry point asks of the dialog ([`open_at_agent_trust`]): once `agent`'s read answers, focus
+/// moves from the dialog itself (`from`, in `window`) to that agent's switch, unless the user has moved on since
+/// `mark`.
+struct Handover {
+    agent: TrustAgent,
+    mark: Mark,
+    from: FocusHandle,
+    window: AnyWindowHandle,
 }
 
 impl SettingsDialog {
@@ -279,6 +368,17 @@ impl SettingsDialog {
             switches,
             appearance: Draft::load(Preference::System),
             link_click: Draft::load(LinkClick::Intercept),
+            trust: TrustAgent::ALL
+                .iter()
+                .map(|&agent| Trust {
+                    agent,
+                    known: Known::Reading,
+                    draft: Draft::load(false),
+                    focus: cx.focus_handle().tab_stop(true),
+                })
+                .collect(),
+            trust_read: false,
+            focus_on: None,
             layer: None,
         }
     }
@@ -298,10 +398,80 @@ impl SettingsDialog {
         Some(self.switches[Self::index(first)].focus.clone())
     }
 
-    /// Show `section`. Every section's state stays as it is: only which one is drawn changes.
+    /// Show `section`. Every section's state stays as it is: only which one is drawn changes. Showing Agent trust for
+    /// the first time in this opening reads the agents' trust choices.
     fn show(&mut self, section: Section, cx: &mut Context<Self>) {
         self.shown = section;
+        if section == Section::AgentTrust && !self.trust_read {
+            self.trust_read = true;
+            for agent in TrustAgent::ALL {
+                let dialog = cx.weak_entity();
+                agent.read(cx, move |answer, cx| {
+                    let _ = dialog.update(cx, |dialog, cx| dialog.trust_known(agent, answer, cx));
+                });
+            }
+        }
         cx.notify();
+    }
+
+    /// The read of `agent`'s trust answered: the switch shows it, and takes focus if [`open_at_agent_trust`] asked for
+    /// it and the user has not moved on since.
+    fn trust_known(
+        &mut self,
+        agent: TrustAgent,
+        answer: Result<bool, crate::host_text::HostText>,
+        cx: &mut Context<Self>,
+    ) {
+        let trust = &mut self.trust[agent.index()];
+        trust.known = match answer {
+            Ok(enabled) => Known::Read(enabled),
+            Err(reason) => Known::Unreadable(reason),
+        };
+        // The switch takes focus from the dialog itself ([`open_at_agent_trust`]). This borrows
+        // `focus::move_within_control` outside its documented callers (a radio group's arrows and an inline question).
+        // It is safe here for the same two reasons those are: it moves focus only from the dialog itself, which still
+        // holds it only if the user has not moved focus anywhere since the dialog opened, and the target is drawn in
+        // the same layer by the next frame, which this update's notify asks for (the function's contract). The mark
+        // check covers what focus alone cannot: a click that leaves focus on the dialog still counts as moving on.
+        //
+        // TODO: switch to `focus::focus_in_layer`, under the same mark, once it accepts a target that is not drawn yet;
+        // it also scrolls the switch into view.
+        if trust.available()
+            && let Some(handover) = self.focus_on.take_if(|handover| handover.agent == agent)
+            && !focus::has_moved_on(&handover.mark, cx)
+        {
+            let to = trust.focus.clone();
+            // A window that has closed meanwhile has nothing to focus, so its error is ignored.
+            let _ = handover.window.update(cx, |_, window, cx| {
+                focus::move_within_control(&handover.from, &to, window, cx)
+            });
+        }
+        cx.notify();
+    }
+
+    /// The user turned `agent`'s trust switch to `on`: save it through the agent's trust route, under the preference
+    /// row's key like every Settings choice ([`agent_trust`]). Once the helm has done it, that is the choice the
+    /// section holds; a refusal leaves the choice read before.
+    fn toggle_trust(&mut self, agent: TrustAgent, on: bool, cx: &mut Context<Self>) {
+        let index = agent.index();
+        if !self.trust[index].available() || !self.trust[index].draft.edit(on) {
+            return;
+        }
+        let started = drafts::save(
+            self,
+            move |dialog: &mut SettingsDialog| &mut dialog.trust[index].draft,
+            &OpKey::preferences(),
+            |on| agent.command(*on),
+            cx,
+            move |dialog, settled, _| {
+                if matches!(settled.outcome, Outcome::Done(_)) {
+                    dialog.trust[index].known = Known::Read(on);
+                }
+            },
+        );
+        if let Err(not_started) = started {
+            tracing::debug!(?agent, ?not_started, "agent trust not saved");
+        }
     }
 
     /// The user turned `choice`'s switch to `on`: save it as the preference row's field. Does nothing while that
@@ -436,6 +606,25 @@ impl SettingsDialog {
                 .map(IntoElement::into_any_element)
                 .collect()
             }
+            Section::AgentTrust => self
+                .trust
+                .iter()
+                .enumerate()
+                .map(|(index, trust)| {
+                    let agent = trust.agent;
+                    let weak = cx.weak_entity();
+                    agent_trust::block(
+                        trust,
+                        index == 0,
+                        move |on, _, cx| {
+                            let _ = weak.update(cx, |dialog, cx| dialog.toggle_trust(agent, on, cx));
+                        },
+                        |choice| self.switch(choice, preferences, cx),
+                        cx,
+                    )
+                    .into_any_element()
+                })
+                .collect(),
         }
     }
 }
