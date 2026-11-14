@@ -67,8 +67,8 @@ use std::rc::Rc;
 
 use gpui::{
     App, AppContext as _, Context, ElementId, Entity, FocusHandle, Focusable as _,
-    InteractiveElement, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Subscription,
-    Window, div, prelude::FluentBuilder as _,
+    InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, SharedString, Styled,
+    Subscription, Window, div, prelude::FluentBuilder as _,
 };
 use gpui_component::input::{
     Enter, Input, InputEvent, InputState, MoveDown, MoveUp, Textarea, TextareaState,
@@ -319,6 +319,8 @@ pub struct TextInput {
     on_vertical: Option<VerticalHandler>,
     /// Drawn in the monospace face ([`TextInput::monospace`]).
     monospace: bool,
+    /// The field's height in place of Kit's ([`TextInput::height`]).
+    height: Option<Pixels>,
 }
 
 /// What a field hands Up and Down to ([`TextInput::on_vertical`]).
@@ -346,6 +348,7 @@ impl TextInput {
             help,
             on_vertical: None,
             monospace: false,
+            height: None,
         }
     }
 
@@ -354,6 +357,14 @@ impl TextInput {
     /// multi-line field has needed it, so the other kinds ignore it.
     pub fn monospace(mut self) -> Self {
         self.monospace = true;
+        self
+    }
+
+    /// Make the field `height` tall in place of Kit's 32 pixels, its text centered in it, for a form whose old fields
+    /// had a height of their own (the old Add host form's `min-height: 36px`). Only the single-line field takes it, as
+    /// with [`TextInput::monospace`].
+    pub fn height(mut self, height: Pixels) -> Self {
+        self.height = Some(height);
         self
     }
 
@@ -414,7 +425,11 @@ impl RenderOnce for TextInput {
                     .text_size(metrics::TEXT_MD)
                     .when(self.monospace, |input| {
                         input.font_family(crate::assets::TERMINAL_FONT)
-                    }),
+                    })
+                    // Kit centers its text in whatever height the field gets, and a refinement replaces Kit's own
+                    // height. Called through `Styled` on purpose: Kit's `Input` has an inherent `h` of its own, for
+                    // multi-line fields only, which a single-line field ignores.
+                    .when_some(self.height, Styled::h),
             ),
             Field::Row(area) => wrapper
                 // Kit's text area breaks the line on Shift+Enter even when Enter submits. Caught on the way down,

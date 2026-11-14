@@ -96,6 +96,10 @@ pub enum Work {
     /// to stop a working agent that its question (or a skipped one) gave (`session_list::restart`). Not supersedable:
     /// Restart makes no promise that a second press is harmless (SPEC.md, "Lifecycle operations").
     Restart,
+    /// A host probe (`POST /api/hosts/probe`): Add host's check of a new destination, which registers a supervisor that
+    /// answers and otherwise returns the helm's setup plan or why setup is manual. Not supersedable: a second Add while
+    /// one probe is out waits for it, so the helm never holds two competing one-use plans for one dialog.
+    Probe,
 }
 
 /// What a piece of work acts on: the key the store files it under, one request at a time per key. Opaque, and built

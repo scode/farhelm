@@ -6,8 +6,8 @@
 //! session's terminal, the session list (a fleet of every status a row draws, an empty fleet, a row's open menu, a
 //! row's Delete question, and a pending and a refused Delete), the Rename editor, the select closed and open, the
 //! YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer, the Settings dialog at
-//! Sessions, at Hosts and at Terminal, and the Hosts panel (closed, with Details, and with a host failing to connect),
-//! in both appearances, compared pixel for pixel.
+//! Sessions, at Hosts and at Terminal, the Hosts panel (closed, with Details, and with a host failing to
+//! connect), and the Add host dialog, in both appearances, compared pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
@@ -1751,6 +1751,43 @@ fn settings_terminal_setup(state: &SceneState, window: &mut Window, cx: &mut App
     settings_scene(state, crate::settings::Section::Terminal, window, cx);
 }
 
+/// The Add host dialog over the fake helm's reference hosts, as the host rail's Add host opens it (reference
+/// `host-add-dialog`), with `dev@new-box` in the destination field, which holds focus. The opener is the scene's ring
+/// handle. The fake and the connection are kept for the scene's life, like Settings'.
+fn host_add_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    helm.connect(vec![crate::hosts::tests::hosts(
+        &crate::hosts::tests::reference_hosts(),
+    )]);
+    // The dialog opens only over a live UI session, which the snapshot's connection makes after this setup returns:
+    // open once the connection has one, and only once.
+    let handle = window.window_handle();
+    let opener = state.ring.clone();
+    let opened = std::cell::Cell::new(false);
+    let watch = cx.observe(&connection, move |connection, cx| {
+        if opened.get() || connection.read(cx).session().is_none() {
+            return;
+        }
+        opened.set(true);
+        let _ = handle.update(cx, |_, window, cx| {
+            let mark = Mark::take(cx);
+            crate::hosts::add::open(&opener, &mark, window, cx);
+            let dialog = cx
+                .try_global::<crate::hosts::add::tests::Opened>()
+                .and_then(|opened| opened.0.upgrade());
+            if let Some(dialog) = dialog {
+                let input = dialog.read(cx).destination_input();
+                input.set_text("dev@new-box", window, cx);
+            }
+        });
+    });
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    keep.push(Box::new(watch));
+}
+
 /// Make the Hosts panel over a fake helm holding `listed` hosts, with Details on when `details` is; the scene draws it
 /// through [`hosts_panels`]. The fake, the connection and the panel are kept for the scene's life.
 fn hosts_panel_scene(state: &SceneState, listed: &[HostView], details: bool, cx: &mut App) {
@@ -2081,6 +2118,12 @@ static SCENES: &[Scene] = &[
         size: (640., 340.),
         draw: dialog_launcher_frame,
         setup: no_setup,
+    },
+    Scene {
+        name: "host-add-dialog",
+        size: (600., 600.),
+        draw: empty,
+        setup: host_add_dialog_setup,
     },
 ];
 

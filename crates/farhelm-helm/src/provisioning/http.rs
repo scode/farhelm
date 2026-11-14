@@ -77,36 +77,9 @@ pub(crate) struct ProvisionRequest {
 }
 
 /// Discovery either registers an answering supervisor, offers one concrete
-/// plan, or explains why this host remains a manual install.
-#[derive(Debug, Serialize)]
-#[serde(tag = "result", rename_all = "kebab-case")]
-pub(super) enum ProbeResponse {
-    TensorlakeProvisionable {
-        probe_id: String,
-        sandbox: String,
-        destination: String,
-        recipe: String,
-        resources: farhelm_proto::tensorlake::recipes::RecipeSize,
-        confirmation: String,
-        steps: Box<PlanSteps>,
-    },
-    Discovered {
-        host_id: HostId,
-        build_version: String,
-        host_identity: Option<String>,
-    },
-    Provisionable {
-        probe_id: String,
-        plan: ProvisioningPlan,
-        confirmation: String,
-        /// Indirection keeps discovery's small outcomes small in memory;
-        /// JSON still contains the same additive step list beside the plan.
-        steps: Box<PlanSteps>,
-    },
-    Manual {
-        reason: String,
-    },
-}
+/// plan, or explains why this host remains a manual install. The shape is
+/// `farhelm-proto`'s, which the GUI decodes; the plan in it is the helm's own.
+pub(super) type ProbeResponse = farhelm_proto::provisioning::ProbeReply<ProvisioningPlan>;
 
 /// Identity returned before a long provision or update continues in the
 /// background.
