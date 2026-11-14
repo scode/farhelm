@@ -19,10 +19,13 @@
 //!   control closes without choosing. Closing returns focus to the closed control. GPUI Kit's `Select` is banned (it
 //!   draws its own overlay), so this is the component layer's own.
 //! - **Keys on the closed control** are WebKit's on macOS, where the old app shipped: Space, Up and Down open the list
-//!   rather than stepping the value, and Alt+Down or Alt+Up (the convention of the other desktops) open it too. Enter
-//!   does not open it: in WebKit a Return on a closed select submitted its form, and the old launcher turned that into
-//!   "apply the choice, then Launch". Here Enter goes on to whatever holds the control, decided in one place
-//!   ([`closed_key`]) for the shared Enter rule that is still to come.
+//!   rather than stepping the value, and Alt+Down or Alt+Up (the convention of the other desktops) open it too
+//!   ([`closed_key`]). Enter does not open it: in WebKit a Return on a closed select submitted its form. So Enter goes
+//!   on to whatever holds the control, unless the owner gave the dialog's main action ([`Select::on_enter`]), which
+//!   Enter then runs with the value shown, under the choice controls' shared Enter rule ([`super::enter_choice`]). A
+//!   closed select has no focused choice to apply first, and the old launcher applied none: its selects' Enter called
+//!   `enter_choice` with nothing to apply, since each pick had already reached the owner on its own, and SPEC.md's
+//!   launcher has Enter on "the closed host picker, agent-type or effort dropdown" launch "with the values shown".
 //! - **Focus** follows the pop-up rule ([`focus::OnPress::Focus`]): a press on it focuses it on every platform, and Tab
 //!   reaches it even on macOS with Keyboard navigation off, where Tab reaches text fields and pop-ups only and skips
 //!   buttons. With the button rule it would drop out of Tab's order there.
@@ -58,7 +61,7 @@ use gpui::{
     prelude::FluentBuilder as _, px, svg,
 };
 
-use super::{Handler, HoverHelp, MenuItem};
+use super::{Handler, HoverHelp, MainAction, MenuItem};
 use crate::assets::Icon;
 use crate::focus::{self, Mark};
 use crate::layers::{self, Anchor, LayerId, Popover};
@@ -128,6 +131,7 @@ pub struct Select {
     placeholder: Option<SharedString>,
     disabled: bool,
     on_choose: Option<OnChoose>,
+    on_enter: Option<MainAction>,
     focus: Option<FocusHandle>,
 }
 
@@ -153,6 +157,7 @@ impl Select {
             placeholder: None,
             disabled: false,
             on_choose: None,
+            on_enter: None,
             focus: None,
         }
     }
@@ -200,6 +205,15 @@ impl Select {
         self
     }
 
+    /// The owner's main action (the launcher's Launch), which Enter on the closed control runs with the value shown,
+    /// under the choice controls' shared Enter rule (`components::enter_choice`, which says what the action must
+    /// guard itself); see the module docs. Without it, Enter goes on to whatever holds the control. The open list
+    /// keeps its own Enter, which chooses and closes.
+    pub fn on_enter(mut self, handler: impl Fn(&mut Window, &mut App) + 'static) -> Self {
+        self.on_enter = Some(Rc::new(handler));
+        self
+    }
+
     /// Use `handle` as the closed control's focus handle, so its owner can make it where focus starts. Without it the
     /// control keeps its own handle in its element state.
     pub fn focus(mut self, handle: &FocusHandle) -> Self {
@@ -238,13 +252,13 @@ enum ClosedKey {
     PassOn,
 }
 
-/// The closed control's keys, in one place (see the module docs): Space, Up and Down open the list, as WebKit's select
-/// did on macOS, and so do Alt+Down and Alt+Up. Everything else goes on, Enter included: WebKit submitted the form on a
-/// closed select's Return, and the rule that will apply the focused choice and then run the dialog's main action
-/// across segments, radios, checkboxes and this control changes this function when it comes. A held key opens
-/// nothing, so a repeat that arrives after the list closed does not reopen it. These are key listeners, and GPUI
-/// dispatches key bindings first: a binding for `up` or `down` in a context around the select (only the menu context
-/// binds them today) would take the arrows before they reach it.
+/// The closed control's own keys, in one place (see the module docs): Space, Up and Down open the list, as WebKit's
+/// select did on macOS, and so do Alt+Down and Alt+Up. Everything else goes on, Enter included: WebKit submitted the
+/// form on a closed select's Return. When the owner gave its main action, the choice controls' shared Enter rule
+/// ([`super::enter_choice`]) takes Enter before these keys are asked. A held key opens nothing, so a repeat that
+/// arrives after the list closed does not reopen it. These are key listeners, and GPUI dispatches key bindings first: a
+/// binding for `up` or `down` in a context around the select (only the menu context binds them today) would take the
+/// arrows before they reach it.
 fn closed_key(keystroke: &Keystroke, held: bool) -> ClosedKey {
     if held {
         return ClosedKey::PassOn;
@@ -413,11 +427,16 @@ impl RenderOnce for Select {
             choices,
         });
         let (on_key, on_press) = (opening.clone(), opening.clone());
+        let on_enter = self.on_enter.clone();
         let clicked: Handler = Rc::new(move |_: &ClickEvent, window: &mut Window, cx: &mut App| {
             opening.click(window, cx)
         });
         let control = focus::track(control, &focus, focus::OnPress::Focus)
             .on_key_down(move |event, window, cx| {
+                // Nothing to apply: a closed select has no focused choice, and its value is the one shown.
+                if super::enter_choice(event, on_enter.as_ref(), |_, _| {}, window, cx) {
+                    return;
+                }
                 if closed_key(&event.keystroke, event.is_held) == ClosedKey::Open {
                     cx.stop_propagation();
                     on_key.open(window, cx);

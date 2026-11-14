@@ -9,7 +9,11 @@
 //! What it keeps from the native input:
 //!
 //! - **Space toggles; Enter does not.** Enter on a checkbox in a form submits the form rather than toggling, so here it
-//!   goes on to whatever holds the control (a dialog's Enter). A held Space does not toggle again.
+//!   goes on to whatever holds the control (a dialog's Enter). A held Space does not toggle again. An owner can give
+//!   it the dialog's main action instead ([`Checkbox::on_enter`]): Enter then runs that action with the box as shown,
+//!   unchanged, under the choice controls' shared Enter rule ([`super::enter_choice`]). That is what the old
+//!   launcher's Resume checkbox did (its `enter_choice` applied nothing, then launched), and SPEC.md's launcher says
+//!   so: "Enter on the ... Resume checkbox launches with the values shown, without changing them".
 //! - **The label is part of the control.** The old markup wrapped the input in its `<label>`, so a click on the words
 //!   toggles too, and the words are drawn beside the box (after the box for a checkbox, before the switch for a
 //!   switch, as the old Settings rows put them, and after a [`Checkbox::inline`] switch, as the old Hosts heading
@@ -30,7 +34,7 @@ use gpui::{
     prelude::FluentBuilder as _, px, svg,
 };
 
-use super::HoverHelp;
+use super::{HoverHelp, MainAction};
 use crate::assets::Icon;
 use crate::focus;
 use crate::theme::{self, Palette, metrics};
@@ -59,6 +63,7 @@ pub struct Checkbox {
     switch: bool,
     inline: bool,
     on_toggle: Option<OnToggle>,
+    on_enter: Option<MainAction>,
     focus: Option<FocusHandle>,
 }
 
@@ -81,6 +86,7 @@ impl Checkbox {
             switch: false,
             inline: false,
             on_toggle: None,
+            on_enter: None,
             focus: None,
         }
     }
@@ -115,6 +121,14 @@ impl Checkbox {
     /// What a toggle does: called with the new value (the opposite of [`Checkbox::checked`]).
     pub fn on_toggle(mut self, handler: impl Fn(bool, &mut Window, &mut App) + 'static) -> Self {
         self.on_toggle = Some(Rc::new(handler));
+        self
+    }
+
+    /// The owner's main action (the launcher's Launch), which Enter on the focused control runs without toggling it,
+    /// under the choice controls' shared Enter rule (`components::enter_choice`, which says what the action must
+    /// guard itself); see the module docs. Without it, Enter goes on to whatever holds the control.
+    pub fn on_enter(mut self, handler: impl Fn(&mut Window, &mut App) + 'static) -> Self {
+        self.on_enter = Some(Rc::new(handler));
         self
     }
 
@@ -283,6 +297,8 @@ impl RenderOnce for Checkbox {
             control.on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
         };
         let on_space = toggle.clone();
+        // A disabled control is not focus-tracked, so its keys never arrive and the action needs no filter.
+        let on_enter = self.on_enter.clone();
         // A click toggles; GPUI's keyboard "click" (the release of an Enter or Space pressed on the focused element) does
         // not, through the shared click rule: it would toggle a second time after Space, whose key handler below already
         // ran on the press, and toggle on Enter, which a checkbox must leave to the form around it.
@@ -290,9 +306,13 @@ impl RenderOnce for Checkbox {
             Rc::new(move |_, window, cx| handler(next, window, cx))
         });
         super::activate_on_click(control, on_click)
-            // Space only, as the native checkbox: Enter goes on to the form (here, whatever holds the control). A held
-            // or modified Space does nothing, as with every control's keys.
+            // Space only, as the native checkbox: Enter goes on to the form (here, whatever holds the control), unless
+            // the owner gave its main action, which Enter then runs with the value shown. A held or modified Space does
+            // nothing, as with every control's keys.
             .on_key_down(move |event, window, cx| {
+                if super::enter_choice(event, on_enter.as_ref(), |_, _| {}, window, cx) {
+                    return;
+                }
                 if event.is_held
                     || event.keystroke.modifiers.modified()
                     || event.keystroke.key != "space"
