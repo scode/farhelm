@@ -120,11 +120,15 @@ impl<T: Clone + PartialEq> Draft<T> {
     }
 
     /// Record how the save ended. A done save counts as saved and clears the touched mark, so later pushes are
-    /// followed again; a refused one keeps the text and the mark and records the helm's words.
+    /// followed again: the store already holds the saved value. A refused one keeps the text and the mark and records
+    /// the helm's words. An accepted one (202, work the helm carries on with) keeps the text and the mark too: the
+    /// store does not hold the new value yet, so a push in the meantime would put the old one back, and the work may
+    /// still fail. No draft-backed save goes to such a route today.
     fn settle(&mut self, outcome: &Outcome) {
         self.saving = false;
         match outcome {
             Outcome::Done(_) => self.touched = false,
+            Outcome::Accepted(_) => {}
             Outcome::Refused(message) => self.refusal = Some(message.clone()),
         }
     }
@@ -339,8 +343,9 @@ mod tests {
     }
 
     /// A failed save must not be treated as saved: SPEC.md's Rename rule keeps the draft and its error visible for
-    /// correction. Specified: a refusal keeps the value and the touched mark and records the helm's words; a done save
-    /// clears the mark.
+    /// correction, and an accepted save (202) has not taken effect yet. Specified: a refusal keeps the value and the
+    /// touched mark and records the helm's words; an accepted save keeps the value and the mark; a done save clears the
+    /// mark.
     #[test]
     fn only_a_done_save_counts_as_saved() {
         let mut draft = Draft::load("old".to_owned());
@@ -355,6 +360,11 @@ mod tests {
             draft.refusal(),
             Some(&HostText::from_host("titles are one line"))
         );
+
+        draft.saving = true;
+        draft.settle(&Outcome::Accepted(None));
+        assert_eq!(draft.value(), "bad\ntitle");
+        assert!(draft.is_touched(), "accepted is not saved yet");
 
         draft.settle(&Outcome::Done(None));
         assert!(!draft.is_touched(), "done is saved");
