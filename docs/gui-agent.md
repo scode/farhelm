@@ -38,9 +38,10 @@ it must fit Mutter's monitor, and it includes the frame GPUI Kit draws inside th
 margin and a 1-pixel border on every side, which `screenshot` captures too) and `--appearance light|dark` (start in that
 palette whatever the system's appearance). The last two are test hooks of agent builds, passed to the app as environment
 variables that `crates/gui/farhelm-gui/src/agent_startup.rs` reads, so a screenshot batch can capture each theme and
-size; they are not the app's appearance setting, and a value the app cannot parse makes it refuse to start. It builds
-with whatever `CARGO_TARGET_DIR` you set. If `start` fails or is interrupted, run `stop` anyway: it releases whatever
-`start` had already taken, the lock included.
+size; they are not the app's appearance setting, and a value the app cannot parse makes it refuse to start.
+`--scripted-hosts` gives the app fake SSH hosts (see "Scripted hosts"). It builds with whatever `CARGO_TARGET_DIR` you
+set. If `start` fails or is interrupted, run `stop` anyway: it releases whatever `start` had already taken, the lock
+included.
 
 To compare the app with the old app's reference pictures, `scripts/gui-screenshot-batch.py` drives these same commands
 over a fixed scene list and writes one browsable page (`docs/gpui/screenshot-batch.md`). `scripts/gui-e2e-smoke.py` is a
@@ -61,6 +62,47 @@ nothing more (`idle`), or an exit (`exited`). The waiting one is declared a Clau
 own reading recognizes a question; the rest are undeclared commands. `start` then waits (up to two minutes) until the
 helm lists every one of them in its status, so a scene that follows can rely on it. The statuses are the supervisor's
 own reading of each live screen, never written in by the harness.
+
+## Scripted hosts
+
+`start --scripted-hosts` gives the app fake SSH hosts: its helm runs every command it would run on a host through a
+scripted provisioning backend instead of real ssh (`crates/farhelm-helm/src/provisioning/e2e.rs`). That covers setup,
+Update and uninstall on SSH hosts, and credential delivery and preparation on environment hosts. Everything else is the
+helm's own code (the routes, the one-use plans, registration, progress and the pushed collections), so Add host, setup,
+its failures and Update can be driven end to end, including failures at a chosen step and races, which a real host
+cannot stage on cue. Only debug builds of the helm read the switch, the same condition that keeps the bridge out of
+releases and devbuilds.
+
+What it does not fake is the connection to a host's supervisor: once a fake host is added, the helm dials it over real
+ssh like any host, so it shows as unreachable. That is also why a run must use made-up destinations only (the `.example`
+domain, say), never a real hostname.
+
+The backend's directory is `<run>/state/scripted-hosts/`, inside the app's state directory because the helm refuses a
+backend directory anywhere else. `start` writes its marker (`ENABLED`) and an empty `config.json`, under which every
+destination has no supervisor (a probe offers a setup plan) and every setup step succeeds. A step changes what the fake
+hosts do with `gui_agent.script_hosts(run, config)`, which replaces `config.json` whole: the backend rereads the file at
+every probe and step, so one rewritten in place could be read half-written and fail a step by accident. For example:
+
+```json
+{
+  "default": { "probe": "absent" },
+  "targets": {
+    "ssh:failing.example": { "fail_action": "install-farhelm", "message": "disk full" },
+    "ssh:running.example": { "probe": "supervisor" },
+    "ssh:slow.example": { "action_delay_ms": 1000 }
+  }
+}
+```
+
+`targets` keys are `ssh:<destination>`, `podman:<container>` or `local`, and `default` applies to every other target.
+Each entry may set `probe` (`absent`, `supervisor` or `error`), `inspect` (`supported`, `manual` or `error`), `message`
+(the text of an injected failure or manual refusal), `build_version`, `identity`, `dial_farhelm` and `dial_state_dir`
+(what an answering supervisor reports), `home` and `user_unit_dir`, `github_cli` (whether the host has GitHub's command
+line, true by default), `hold_actions` (true holds every step until it is set back to false, for at most 30 seconds),
+`fail_action` (the step to fail, by the name the backend records for it in `events.jsonl`, such as `install-farhelm`;
+the names are the labels in `e2e.rs`) and `action_delay_ms` (a pause before each step, at most 30 seconds). The backend
+appends one line per probe and step to `events.jsonl` beside it (`{"event": ..., "target": ...}`), which tells a step
+what the helm actually did.
 
 ## What a run is made of
 
