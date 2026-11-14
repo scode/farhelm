@@ -54,6 +54,7 @@ use gpui::{
     Window,
 };
 
+use crate::host_text::{HostSentence, Line};
 use crate::layers::{self, TooltipOwner};
 
 /// What a control says when the user hovers it or asks assistive technology about it.
@@ -62,19 +63,41 @@ use crate::layers::{self, TooltipOwner};
 /// description. SPEC_impl.md lets a control that already shows its explanation beside itself (a menu item with a
 /// description line) count that text as its hover help instead. That form is not built: [`MenuItem`], the first control
 /// to draw such a description, takes a tooltip as well and makes its description line its accessible description.
+///
+/// Help is the app's own wording ([`HoverHelp::tooltip`]) or a sentence that names host values beside it
+/// ([`HoverHelp::sentence`], for help such as the agent mark's and the permission shield's). A host value goes in only
+/// the second way. Help formatted from [`HostText::raw`](crate::host_text::HostText::raw) would reach the screen
+/// unescaped and with its direction unisolated, which SPEC_impl.md, "Host-supplied text", rules out; `tooltip` takes
+/// any string, so that is held by review rather than by the type, as for a dialog's title.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HoverHelp(SharedString);
+pub struct HoverHelp(Line);
 
 impl HoverHelp {
-    /// Help shown as a tooltip.
+    /// Help shown as a tooltip, in the app's own words.
     pub fn tooltip(text: impl Into<SharedString>) -> Self {
-        HoverHelp(text.into())
+        HoverHelp(Line::App(text.into()))
+    }
+
+    /// Help that names host values: `sentence` mixes the app's words with them, and the tooltip draws it as a
+    /// [`HostSentence`] (each host value escaped, in a text element of its own). The control's accessible description
+    /// is the sentence's [`HostSentence::accessible_name`]: the same words with each host value escaped, which is what
+    /// assistive technology reads for host text everywhere else. Inside the tooltip the sentence is one labelled node
+    /// under the id it was made with, as a [`HostSentence`] is wherever it is drawn.
+    pub fn sentence(sentence: HostSentence) -> Self {
+        HoverHelp(Line::Sentence(sentence))
+    }
+
+    /// The control's accessible description: the help as one string, with every host value escaped
+    /// ([`Line::accessible_text`]). Private to the component layer, like the help itself.
+    fn description(&self) -> SharedString {
+        self.0.accessible_text()
     }
 }
 
 /// Give `element`, the control drawn under `id`, its hover help: the tooltip the layer manager shows while the pointer
 /// is over it, owned by this control so it closes when the control is gone, and the help as the control's accessible
-/// description where the element can carry one.
+/// description where the element can carry one ([`HoverHelp::description`]: for help naming a host value, the
+/// sentence's text with each host value escaped).
 ///
 /// Every control wires its help through here, and nothing else can: the help's text is private to this module, so a
 /// control that skipped this would never read its own help, and the unused field fails the build (`-D warnings`). That
@@ -92,15 +115,15 @@ pub(crate) fn with_hover_help<E: StatefulInteractiveElement>(
         window,
         cx,
     );
-    let text = help.0.clone();
     let element = if describe {
-        element.aria_description(text.clone())
+        element.aria_description(help.description())
     } else {
         element
     };
+    let help = help.0.clone();
     element.on_hover(move |hovered, window, cx| {
         if *hovered {
-            layers::show_tooltip(&owner, text.clone(), window, cx);
+            layers::show_tooltip(&owner, help.clone(), window, cx);
         } else {
             layers::hide_tooltip(&owner, window, cx);
         }

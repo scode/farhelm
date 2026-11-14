@@ -23,7 +23,8 @@
 //! - [`operations`]: the operation store, which holds work that finishes later (on a session, a host, a template, the
 //!   preferences, a launch), above the views that start it; [`drafts`]: editor fields that follow pushed changes
 //!   until the user touches them, and their saves.
-//! - [`ticker`]: the one source of time, for animation (at most 10 ticks a second) and for one-shot deadlines.
+//! - [`ticker`]: the one source of time, for animation (at most 10 ticks a second), for one-shot deadlines, and for
+//!   the wall clock that ages are drawn from.
 //! - [`notices`]: the notice center, the one place that decides what notice shows.
 //! - [`cache`]: the one way to cache a view.
 //! - [`render_count`]: per-view render counts in test builds.

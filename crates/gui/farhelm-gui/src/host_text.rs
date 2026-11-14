@@ -26,8 +26,11 @@
 //! [`HostText::from_host`] where it reads the field and draws it with [`element`] (or [`marked`], for a value with some
 //! characters marked) or a [`HostSentence`]; a component that takes host text takes `&HostText` and draws it the same
 //! way, or, for wording that is usually the app's own but may name a host value (a dialog's summary, a prompt's lines),
-//! takes a [`Line`]. Identity labels the user compares (installation ids, which SPEC.md also wants with their spaces
-//! visible) are not built yet; they arrive with the first view that shows one, as a second presentation here.
+//! takes a [`Line`]. A control's hover help that names a host value is a [`HostSentence`] handed to
+//! `HoverHelp::sentence`: the tooltip draws it through this module's element, and the control's accessible description
+//! is the sentence's [`HostSentence::accessible_name`]. Identity labels the user compares (installation ids, which
+//! SPEC.md also wants with their spaces visible) are not built yet; they arrive with the first view that shows one, as
+//! a second presentation here.
 
 use std::fmt;
 use std::ops::Range;
@@ -160,8 +163,8 @@ fn mark_ranges(presentation: &str, mut chosen: Vec<usize>) -> Vec<Range<usize>> 
     ranges
 }
 
-/// One part of a [`HostSentence`].
-#[derive(Clone)]
+/// One part of a [`HostSentence`]. `Debug` prints a host part through [`HostText`]'s own `Debug`, escaped.
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Part {
     /// The app's own words.
     App(SharedString),
@@ -179,7 +182,10 @@ enum Part {
 ///
 /// A clone draws the same parts under the same id, so two clones drawn in one frame are two nodes with one id; a
 /// sentence is cloned to be kept (inside a frozen [`Question`](crate::prompt::Question), say), not to be drawn twice.
-#[derive(Clone, IntoElement)]
+///
+/// Equality compares the id and every part, host parts by their raw value (as [`HostText`]'s does), so two sentences
+/// that differ only by a hidden character in a host value are different; `Debug` prints host parts escaped.
+#[derive(Clone, Debug, PartialEq, Eq, IntoElement)]
 pub struct HostSentence {
     id: ElementId,
     parts: Vec<Part>,
@@ -257,12 +263,29 @@ impl RenderOnce for HostSentence {
 /// labelled node, under the id the caller gave it, named with its host parts escaped. Titles and button labels stay
 /// plain strings, for the app's own words only: a host value goes in the summary or a line, never in a dialog's
 /// accessible name. That is a convention, not something the type enforces, since a title still takes any string.
-#[derive(Clone, IntoElement)]
+///
+/// Hover help is a `Line` too: a control's help that names a host value ("Claude Code on «build-box»") is built with
+/// [`HoverHelp::sentence`](crate::components::HoverHelp::sentence), and the layer manager draws the tooltip from the
+/// `Line` itself, so the host value is laid out by this module's element there as anywhere else.
+#[derive(Clone, Debug, PartialEq, Eq, IntoElement)]
 pub enum Line {
     /// The app's own words.
     App(SharedString),
     /// A sentence mixing the app's words with host values.
     Sentence(HostSentence),
+}
+
+impl Line {
+    /// The line as one string, as assistive technology reads it: the app's words as they are, or a sentence's
+    /// [`HostSentence::accessible_name`], with every host value escaped. For accessible names and descriptions (a
+    /// control's description is its hover help's text) and for tests; never for display, where a sentence must be drawn
+    /// as its own element so each host value keeps its direction to itself.
+    pub fn accessible_text(&self) -> SharedString {
+        match self {
+            Line::App(words) => words.clone(),
+            Line::Sentence(sentence) => sentence.accessible_name(),
+        }
+    }
 }
 
 impl From<&'static str> for Line {

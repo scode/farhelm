@@ -46,7 +46,8 @@
 //!   prevented). Escape, a press outside it and its anchor going still close it, as any popover. Every rule above that
 //!   names "the topmost layer" for focus (Tab's trap, where focus recovers, the menu highlight) means the topmost layer
 //!   that holds focus, which such a popover never is.
-//! - **One tooltip at a time**, owned by the control that showed it (see [`TooltipOwner`]).
+//! - **One tooltip at a time**, owned by the control that showed it (see [`TooltipOwner`]). It says the app's own
+//!   words, or a host sentence when the help names a host value, drawn through host text's element ([`ShownTooltip`]).
 //!
 //! State is kept per window: multi-window support is a watch-list item, and the one thing it asks of the foundations
 //! now is that overlays are not shared between windows. Each window's [`LayerStack`] is an entity that notifies, and
@@ -80,6 +81,7 @@ use gpui::{
 use crate::actions;
 use crate::bootstrap::{installed, installed_mut};
 use crate::focus::{self, Mark};
+use crate::host_text::Line;
 use crate::theme::{self, metrics};
 use crate::ticker;
 
@@ -918,20 +920,24 @@ impl TooltipOwner {
 pub struct ShownTooltip {
     /// Which control asked for it, so only that control can take it down again.
     pub owner: EntityId,
-    /// The help text, already final (hover help is Farhelm's own wording, never host-supplied text).
+    /// What the tooltip says, as one string, for tests and the bridge's snapshot: the app's wording, or for help that
+    /// names a host value the sentence's accessible text, each host value escaped ([`Line::accessible_text`]). The
+    /// card never draws it; it draws `help`.
     pub text: SharedString,
     /// Where the pointer was when the hover began, in window coordinates.
     pub at: Point<Pixels>,
+    /// The help the card draws. Host values reach a tooltip only through this form, a [`Line::Sentence`], whose host
+    /// parts are drawn by host text's own element, escaped and each in a text element of its own (SPEC_impl.md,
+    /// "Host-supplied text"); a [`Line::App`] is Farhelm's own wording.
+    help: Line,
 }
 
-/// The hover on the control `owner` began: show `text` as its hover help after [`HOVER_DELAY`], at the pointer's
+/// The hover on the control `owner` began: show `help` as its hover help after [`HOVER_DELAY`], at the pointer's
 /// position, replacing any other tooltip. Shows at once while another tooltip is showing or has only just gone.
-pub fn show_tooltip(
-    owner: &Entity<TooltipOwner>,
-    text: SharedString,
-    window: &mut Window,
-    cx: &mut App,
-) {
+///
+/// A host value reaches a tooltip only as part of a [`Line::Sentence`]. The app's own wording is a [`Line::App`], which
+/// a caller makes from a plain string with `.into()`.
+pub fn show_tooltip(owner: &Entity<TooltipOwner>, help: Line, window: &mut Window, cx: &mut App) {
     let at = window.mouse_position();
     let Some(stack) = stack(window, cx) else {
         return;
@@ -941,7 +947,7 @@ pub fn show_tooltip(
         stack.tooltip.is_some() || stack.warm
     };
     if at_once {
-        show_tooltip_from(owner, text, at, window, cx);
+        show_tooltip_from(owner, help, at, window, cx);
         return;
     }
     let owner_id = owner.entity_id();
@@ -952,7 +958,7 @@ pub fn show_tooltip(
             return;
         };
         let _ = handle.update(cx, |_, window, cx| {
-            show_tooltip_from(&owner, text, at, window, cx)
+            show_tooltip_from(&owner, help, at, window, cx)
         });
     });
     stack.update(cx, |stack, _| {
@@ -964,18 +970,19 @@ pub fn show_tooltip(
 #[cfg(test)]
 pub(crate) fn show_tooltip_at(
     owner: &Entity<TooltipOwner>,
-    text: SharedString,
+    help: Line,
     at: Point<Pixels>,
     window: &mut Window,
     cx: &mut App,
 ) {
-    show_tooltip_from(owner, text, at, window, cx);
+    show_tooltip_from(owner, help, at, window, cx);
 }
 
-/// Show `text` for `owner` with the hover beginning at `at`.
+/// Show `help` for `owner` with the hover beginning at `at`. The one place a [`ShownTooltip`] is made, so its `text`
+/// is always its `help`'s accessible text.
 fn show_tooltip_from(
     owner: &Entity<TooltipOwner>,
-    text: SharedString,
+    help: Line,
     at: Point<Pixels>,
     window: &mut Window,
     cx: &mut App,
@@ -988,8 +995,9 @@ fn show_tooltip_from(
         stack.pending_tooltip = None;
         stack.tooltip = Some(ShownTooltip {
             owner: owner_id,
-            text,
+            text: help.accessible_text(),
             at,
+            help,
         });
         // The tooltip closes when its control is gone, though no hover-leave ever fires for a control that simply
         // stops being drawn (a dialog closing on Enter, a deleted row).
@@ -1207,7 +1215,8 @@ fn tooltip_card(shown: &ShownTooltip, window: &Window, cx: &App) -> gpui::Div {
         .text_size(metrics::TEXT_SM)
         .line_height(metrics::TOOLTIP_LINE_HEIGHT)
         .line_clamp(metrics::TOOLTIP_MAX_LINES)
-        .child(shown.text.clone())
+        // The help itself, not its accessible text: a sentence draws each host value through host text's element.
+        .child(shown.help.clone())
 }
 
 /// `--shadow-menu`: `0 6px 18px` in the token's color, shared by menus, popovers and tooltips.

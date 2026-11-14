@@ -24,6 +24,11 @@
 //! NOTE: One source entity per cached view. A view that draws from two sources (a session row that also shows its
 //! host's name, say) is settled when the store lands: either the store offers one entity that joins them, or the
 //! wrapper observes each source explicitly. It must never become a second, unobserved read inside `compute`.
+//!
+//! NOTE: A view that draws an age (anything read from `ticker::wall_now`) is drawn uncached. The time is not part of
+//! the source, so `compute` cannot see it change, and a cached row would replay its old age for as long as nothing else
+//! about it changed, however often its list's `ticker::Clock` fires. Caching such a view needs the time (rounded to
+//! what the age shows) as one of its inputs, which is a change to this wrapper, not a workaround in the view.
 
 use gpui::{
     AnyElement, App, Context, Entity, IntoElement, Render, StyleRefinement, Subscription, Window,
