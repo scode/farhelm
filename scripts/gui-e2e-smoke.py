@@ -18,6 +18,20 @@ terminal's text. The run directory is made under /tmp (the same place `scripts/g
 deleted when every step passed and the run stopped cleanly, and kept for its logs otherwise; `--keep` keeps it either
 way. `--no-build` reuses the binaries already built. Ctrl-C or SIGTERM ends the steps and still stops the app run.
 
+An area adds the steps for its own feature at the end of `Smoke` (the Test-automation bridge row of
+`docs/gpui/foundation-ownership.md`). Two rules keep the steps of several areas from depending on each other, because
+they all share the one app run:
+
+- Steps run in name order, and unittest sorts names as strings, so a step is `test_<nn>_...` with a two-digit number
+  after the last one taken (`test_10_` would sort before `test_1_`, since `0` sorts before `_`). `main` refuses to run
+  a step named otherwise. Two areas taking the same number is harmless, since their steps share nothing.
+- Each area's steps seed and use sessions of their own (created through the helm's API with `gui_agent.helm_request`,
+  under titles no other step uses; `gui_agent.seed_body` always titles its session `Fixture <n>`, so a body built with
+  it gets its title overridden), set up the open session and focus their steps depend on rather than assume what an
+  earlier step left, and never touch a session another area's steps seed or use. The three `Fixture` sessions `start`
+  seeds belong to steps 01 to 05, the first slice's, which leave Fixture 3 deleted, Fixture 1 renamed, and Fixture 2
+  open with focus in its terminal (each step's `setUp` presses Escape, which reaches that terminal).
+
 Needs what `gui-agent.py start` needs: on Linux `mutter`, `dbus-run-session` and lavapipe; on a Mac, a logged-in GUI
 session of the same user. Run it through `scripts/record-test-run.py` (`.agents/validation.md` has the command).
 """
@@ -26,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import re
 import shutil
 import signal
 import subprocess
@@ -61,6 +76,9 @@ EFFECT_TIMEOUT_SECONDS = 60
 # tells the menu's state apart from the list's.
 MENU_DESCRIPTION = "Removes the session and its state"
 
+# What every step's name must look like (the module docs say why); `main` checks it before starting the app.
+STEP_NAME = re.compile(r"test_\d\d_")
+
 # Set by `main` once the app is up; the test case reads it.
 RUN: Path | None = None
 
@@ -92,7 +110,8 @@ def eventually(check, what: str, timeout: float = EFFECT_TIMEOUT_SECONDS):
 
 
 class Smoke(unittest.TestCase):
-    """The first slice's path through the real app, one step per test, in name order against one app run.
+    """The first slice's path through the real app, one step per test, in name order against one app run (the module
+    docs have the rules for adding a step).
 
     Each test starts by pressing Escape, so a step that failed with a menu or dialog open does not also fail the steps
     after it for that reason alone. Escape reaches the open terminal when nothing else is open; the basic fake agent
@@ -108,7 +127,7 @@ class Smoke(unittest.TestCase):
         self.assertEqual(result.returncode, 0, f"`{' '.join(args)}` failed:\n{result.stdout}{result.stderr}")
         return result.stdout
 
-    def test_1_the_list_shows_every_seeded_session(self) -> None:
+    def test_01_the_list_shows_every_seeded_session(self) -> None:
         """The list is where every other step starts, and it is fed by the helm's push over the UI channel, not by
         anything this test seeds into the app. Specified: the helm lists the three seeded sessions, and the window
         shows a row for each by title."""
@@ -117,7 +136,7 @@ class Smoke(unittest.TestCase):
         for title in titles:
             self.ok("wait", "--text", title)
 
-    def test_2_the_open_sessions_terminal_takes_typing(self) -> None:
+    def test_02_the_open_sessions_terminal_takes_typing(self) -> None:
         """Typing into the open session's terminal crosses every layer this slice joined: the click opens the session
         and hands its terminal focus, the terminal attaches through the helm to the supervisor's terminal host, and
         keys travel back to the program. Specified: after a click on a row, the focused terminal shows the fake agent's
@@ -131,7 +150,7 @@ class Smoke(unittest.TestCase):
         self.ok("press", "enter")
         self.ok("terminal-text", "--wait", f"echo:{line}")
 
-    def test_3_a_rows_menu_opens_from_its_button_and_escape_closes_it(self) -> None:
+    def test_03_a_rows_menu_opens_from_its_button_and_escape_closes_it(self) -> None:
         """The row menu is how a session's commands are reached, and a menu left open would keep the keyboard from the
         terminal. Specified: a click on a row's actions button, found by its accessible name, opens that row's menu;
         Escape closes it again."""
@@ -140,7 +159,7 @@ class Smoke(unittest.TestCase):
         self.ok("press", "escape")
         self.ok("wait", "--gone", MENU_DESCRIPTION)
 
-    def test_4_delete_from_the_row_menu_deletes_the_session(self) -> None:
+    def test_04_delete_from_the_row_menu_deletes_the_session(self) -> None:
         """Delete is the slice's one command that changes the fleet, through the operation store and the helm's API.
         Specified: the menu's Delete asks first (the fake agent is still running), the answer Confirm delete removes
         the session from the helm's listing, and the window then draws no row for it. The listing is the oracle: the
@@ -156,7 +175,7 @@ class Smoke(unittest.TestCase):
         eventually(lambda: ids[0] not in listed_titles(), "Fixture 3 leaving the helm's listing")
         eventually(lambda: '"Fixture 3"' not in self.ok("snapshot"), "Fixture 3's row leaving the window")
 
-    def test_5_rename_from_the_row_menu_retitles_the_session(self) -> None:
+    def test_05_rename_from_the_row_menu_retitles_the_session(self) -> None:
         """Rename is the slice's other command, and the one that goes through a dialog with a text field. Specified:
         the menu's Rename opens the "Rename session" dialog; a new title filled in and saved closes it, the helm lists
         the session under the new title, and the window's row shows it."""
@@ -188,6 +207,12 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--no-build", action="store_true", help="reuse the binaries already in the target directory")
     parser.add_argument("--keep", action="store_true", help="keep the run directory even when everything passed")
     options = parser.parse_args(argv)
+    # A step named outside the two-digit pattern would sort out of place and run against state its neighbours did not
+    # leave, so the run stops here, before anything starts.
+    misnamed = [name for name in unittest.defaultTestLoader.getTestCaseNames(Smoke) if not STEP_NAME.match(name)]
+    if misnamed:
+        print(f"gui-e2e-smoke: steps must be named test_<nn>_...: {', '.join(misnamed)}", file=sys.stderr)
+        return 1
     parent = Path(tempfile.mkdtemp(prefix="gui-smoke-", dir=RUNS_PARENT))
     RUN = parent / "run"
     passed = False
