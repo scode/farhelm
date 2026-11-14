@@ -25,8 +25,8 @@ use gpui::{
 use crate::actions::{
     CONTEXT, DecreaseTerminalTextSize, DeleteSession, IncreaseTerminalTextSize, KeyOwner,
     PHYSICAL_KEYS, PhysicalKey, QuickSwitcher, RenameSession, ShowKeyboardShortcuts,
-    TERMINAL_BINDINGS, TERMINAL_CONTEXT, TERMINAL_KEYS, TEXT_INPUT_CONTEXT, THIS_PLATFORM,
-    TemplateNumberKey, owner_on, physical_key_at, physical_on, terminal_key_owner,
+    TERMINAL_CONTEXT, TERMINAL_KEYS, TEXT_INPUT_CONTEXT, THIS_PLATFORM, TemplateNumberKey,
+    owner_on, physical_key_at, physical_on, terminal_key_owner,
 };
 use crate::components::{Button, HoverHelp, Role, TextInput, TextInputState};
 use crate::focus::{self, OnPress};
@@ -390,20 +390,13 @@ fn every_key_the_terminal_or_its_program_owns_reaches_the_terminal(cx: &mut Test
     let mut opened = open(cx);
     opened.focus_terminal();
     let stack = opened.stack();
-    let with_action: Vec<&str> = TERMINAL_BINDINGS
-        .iter()
-        .flat_map(|binding| binding.chords(THIS_PLATFORM).iter().copied())
-        .collect();
     for key in TERMINAL_KEYS
         .iter()
-        .filter(|key| key.owner != KeyOwner::App)
+        .filter(|key| key.owner != KeyOwner::App && key.bind.is_none())
     {
         let Some(chord) = key.chord(THIS_PLATFORM) else {
             continue;
         };
-        if with_action.contains(&chord) {
-            continue;
-        }
         let resolved = opened.cx.update(|_, cx| {
             cx.key_bindings()
                 .borrow()
@@ -433,41 +426,39 @@ fn every_key_the_terminal_or_its_program_owns_reaches_the_terminal(cx: &mut Test
 }
 
 /// The terminal's own commands with an action (paste) are bound where a terminal has focus, and only there. A binding
-/// placed before the table's `NoAction` rows would be hidden by them, and a chord left out of the table would make the
-/// keymap walk report it as taken from the program, so this pins both halves on both platforms: every chord of
-/// [`TERMINAL_BINDINGS`] is a [`KeyOwner::Terminal`] row, and on this platform the first binding GPUI tries for it in
-/// a focused terminal is its own action.
+/// placed before the table's `NoAction` rows would be hidden by them, and an action on a row the terminal does not own
+/// would bind a key the table gives to the app or the program, so this pins both on both platforms: every row with an
+/// action ([`TerminalKey::bind`]) is a [`KeyOwner::Terminal`] row, and on this platform the first binding GPUI tries
+/// for its chord in a focused terminal is its own action.
 #[gpui::test]
 fn the_terminals_own_actions_take_their_keys_in_a_focused_terminal(cx: &mut TestAppContext) {
-    for platform in [Platform::Mac, Platform::Linux] {
-        for binding in TERMINAL_BINDINGS {
-            for chord in binding.chords(platform) {
-                assert_eq!(
-                    owner_on(platform, &down(parse(chord))),
-                    KeyOwner::Terminal,
-                    "{chord} on {platform:?} is bound to a terminal action, so it must be a Terminal row"
-                );
-            }
-        }
+    for key in TERMINAL_KEYS.iter().filter(|key| key.bind.is_some()) {
+        assert_eq!(
+            key.owner,
+            KeyOwner::Terminal,
+            "{} has an action, so it must be the terminal's own",
+            key.what
+        );
     }
     let mut opened = open(cx);
     opened.focus_terminal();
     let stack = opened.stack();
     let mut checked = 0;
-    for binding in TERMINAL_BINDINGS {
-        let action = (binding.bind)("a").action().name();
-        for chord in binding.chords(THIS_PLATFORM) {
-            let resolved = opened.cx.update(|_, cx| {
-                cx.key_bindings()
-                    .borrow()
-                    .bindings_for_input(&[parse(chord)], &stack)
-                    .0
-                    .first()
-                    .map(|binding| binding.action().name())
-            });
-            assert_eq!(resolved, Some(action), "{chord} in a focused terminal");
-            checked += 1;
-        }
+    for key in TERMINAL_KEYS {
+        let (Some(bind), Some(chord)) = (key.bind, key.chord(THIS_PLATFORM)) else {
+            continue;
+        };
+        let action = bind(chord).action().name();
+        let resolved = opened.cx.update(|_, cx| {
+            cx.key_bindings()
+                .borrow()
+                .bindings_for_input(&[parse(chord)], &stack)
+                .0
+                .first()
+                .map(|binding| binding.action().name())
+        });
+        assert_eq!(resolved, Some(action), "{chord} in a focused terminal");
+        checked += 1;
     }
     assert!(
         checked > 0,
