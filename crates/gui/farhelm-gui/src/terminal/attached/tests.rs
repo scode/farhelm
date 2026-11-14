@@ -1940,6 +1940,154 @@ fn select_all_and_copy_copy_the_whole_terminal(cx: &mut TestAppContext) {
     );
 }
 
+// ---- Mouse reporting -----------------------------------------------------------------------------------------------
+
+/// A mouse report as the terminal sends it, with no modifier held.
+fn report(kind: MouseEventKind, button: i8, (x, y): (u16, u16)) -> (GridInput, bool) {
+    (
+        GridInput::Mouse {
+            kind,
+            button,
+            x,
+            y,
+            mods: 0,
+        },
+        true,
+    )
+}
+
+/// A program that turned mouse reporting on gets the presses and releases of every button at the cell under the
+/// pointer, in each mode; drag mode adds moves while a button is held and motion mode moves with none, each only
+/// when it reaches a new cell (the format leaves de-duplication to the client). Nothing the program did not ask for
+/// is sent: click mode gets no moves. These are what full-screen programs (editors, agents) build their mouse
+/// support on.
+#[gpui::test]
+fn the_program_gets_the_mouse_reports_its_mode_asks_for(cx: &mut TestAppContext) {
+    use MouseEventKind::{Down, Move, Up};
+    let mut h = harness(cx);
+    h.attach_showing("hello world");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let (a, b) = (h.at_cell(2, 1), h.at_cell(6, 1));
+    let none = Modifiers::none();
+
+    h.fake().output(mouse_mode("click"));
+    settle(h.cx);
+    h.cx.simulate_mouse_down(a, MouseButton::Left, none);
+    h.cx.simulate_mouse_move(b, MouseButton::Left, none);
+    h.cx.simulate_mouse_up(b, MouseButton::Left, none);
+    settle(h.cx);
+    assert_eq!(
+        h.sent(),
+        [report(Down, 0, (2, 1)), report(Up, 0, (6, 1))],
+        "click mode: no moves"
+    );
+    h.cx.simulate_mouse_down(a, MouseButton::Right, none);
+    h.cx.simulate_mouse_up(a, MouseButton::Right, none);
+    h.cx.simulate_mouse_down(a, MouseButton::Middle, none);
+    h.cx.simulate_mouse_up(a, MouseButton::Middle, none);
+    settle(h.cx);
+    assert_eq!(
+        h.sent(),
+        [
+            report(Down, 2, (2, 1)),
+            report(Up, 2, (2, 1)),
+            report(Down, 1, (2, 1)),
+            report(Up, 1, (2, 1))
+        ],
+        "the right and middle buttons too"
+    );
+
+    h.fake().output(mouse_mode("drag"));
+    settle(h.cx);
+    let b_again = b + point(px(1.), px(0.));
+    h.cx.simulate_mouse_down(a, MouseButton::Left, none);
+    h.cx.simulate_mouse_move(b, MouseButton::Left, none);
+    h.cx.simulate_mouse_move(b_again, MouseButton::Left, none);
+    h.cx.simulate_mouse_up(b, MouseButton::Left, none);
+    h.cx.simulate_mouse_move(a, None, none);
+    settle(h.cx);
+    assert_eq!(
+        h.sent(),
+        [
+            report(Down, 0, (2, 1)),
+            report(Move, 0, (6, 1)),
+            report(Up, 0, (6, 1))
+        ],
+        "drag mode: one move per new cell while held, none without a button"
+    );
+
+    h.fake().output(mouse_mode("motion"));
+    settle(h.cx);
+    h.cx.simulate_mouse_move(b, None, none);
+    h.cx.simulate_mouse_move(b_again, None, none);
+    settle(h.cx);
+    assert_eq!(
+        h.sent(),
+        [report(Move, -1, (6, 1))],
+        "motion mode: moves with no button"
+    );
+}
+
+/// A press that goes to the program is input like a key: it clears the local selection and brings a scrolled view
+/// back to the live screen. A release the window never saw (the button let go outside it) is still reported, at the
+/// next move, so the program is not left thinking a button is held.
+#[gpui::test]
+fn a_reported_press_clears_the_selection_and_a_lost_release_is_reported(cx: &mut TestAppContext) {
+    use MouseEventKind::{Down, Up};
+    let mut h = harness(cx);
+    h.attach_showing("hello world");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let (from, to) = (h.at_cell(0, 0), h.at_cell(5, 0));
+    h.drag(from, to, Modifiers::none());
+    let selection = |h: &mut Harness| {
+        h.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).selection())
+    };
+    assert!(
+        selection(&mut h).is_some(),
+        "the premise: something is selected"
+    );
+    h.fake().output(mouse_mode("drag"));
+    settle(h.cx);
+    let at = h.at_cell(3, 0);
+    h.cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(selection(&mut h), None, "the report cleared the selection");
+    h.cx.simulate_mouse_move(at, None, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(h.sent(), [report(Down, 0, (3, 0)), report(Up, 0, (3, 0))]);
+}
+
+/// A program's mouse reporting is part of its terminal state, so a reattach that replays a screen with reporting on
+/// brings the reports back at once, without the program having to ask again (the old app's
+/// `mouse-modes-restored-on-reattach`).
+#[gpui::test]
+fn mouse_reporting_survives_a_reattach(cx: &mut TestAppContext) {
+    use MouseEventKind::{Down, Up};
+    let mut h = harness(cx);
+    h.attach_showing("hello world");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    h.fake().drop_link();
+    let asked = h.fake().attach();
+    for message in screen(asked.cols, asked.rows, "again", serde_json::Value::Null) {
+        h.fake().output(message);
+    }
+    h.fake().output(mouse_mode("click"));
+    h.fake().replay_complete();
+    settle(h.cx);
+    assert!(
+        h.read(|owner, _| owner.is_live()),
+        "the premise: live again"
+    );
+    let at = h.at_cell(1, 0);
+    h.cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(h.sent(), [report(Down, 0, (1, 0)), report(Up, 0, (1, 0))]);
+}
+
 // ---- Paste ---------------------------------------------------------------------------------------------------------
 
 /// This platform's chords for the terminal action `action`, as the keymap binds them.
