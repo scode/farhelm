@@ -799,6 +799,261 @@ fn a_dialog_without_the_rule_takes_focus_on_an_empty_space_click(cx: &mut TestAp
     );
 }
 
+// ---- Focus: choosing a terminal, and a tab's exit --------------------------------------------------------------------
+
+/// One thing a terminal test draws: a terminal stand-in (tracked as a terminal is, so a press focuses it) or a button,
+/// drawn while `shown` is set.
+struct Drawn {
+    id: &'static str,
+    focus: FocusHandle,
+    terminal: bool,
+    shown: Rc<Cell<bool>>,
+}
+
+/// Open a window drawing `controls` (buttons) and then `terminals` (terminal stand-ins), in that order, which is also
+/// their tab order. Nothing holds focus but the root, and no home is set.
+fn open_terminals<'a>(
+    cx: &'a mut TestAppContext,
+    controls: &[&'static str],
+    terminals: &[&'static str],
+) -> (&'a mut VisualTestContext, Rc<RefCell<Vec<Drawn>>>) {
+    let drawn = Rc::new(RefCell::new(Vec::<Drawn>::new()));
+    let reading = drawn.clone();
+    let cx = open(cx, move |_, _| {
+        div()
+            .flex()
+            .gap(px(8.))
+            .children(
+                reading
+                    .borrow()
+                    .iter()
+                    .filter(|item| item.shown.get())
+                    .map(|item| {
+                        let id = item.id;
+                        if item.terminal {
+                            focus::track(
+                                div()
+                                    .relative()
+                                    .debug_selector(move || id.into())
+                                    .size(px(40.)),
+                                &item.focus,
+                                OnPress::Focus,
+                            )
+                            .into_any_element()
+                        } else {
+                            button(id, &item.focus).into_any_element()
+                        }
+                    }),
+            )
+            .into_any_element()
+    });
+    let kinds = controls
+        .iter()
+        .map(|id| (*id, false))
+        .chain(terminals.iter().map(|id| (*id, true)));
+    let mut made = Vec::new();
+    for (id, terminal) in kinds {
+        made.push(Drawn {
+            id,
+            focus: handle(cx),
+            terminal,
+            shown: Rc::new(Cell::new(true)),
+        });
+    }
+    drawn.replace(made);
+    redraw(cx);
+    (cx, drawn)
+}
+
+/// The focus handle and the shown flag of what [`open_terminals`] drew under `id`.
+fn drawn(items: &RefCell<Vec<Drawn>>, id: &str) -> (FocusHandle, Rc<Cell<bool>>) {
+    match items.borrow().iter().find(|item| item.id == id) {
+        Some(item) => (item.focus.clone(), item.shown.clone()),
+        None => panic!("nothing was drawn under {id}"),
+    }
+}
+
+/// The user chooses the session whose terminal is `terminal`, now: the mark is taken in the same step, as a click or
+/// key handler that chooses takes it.
+fn choose_now(cx: &mut VisualTestContext, terminal: &FocusHandle) {
+    let terminal = terminal.clone();
+    cx.update(move |window, cx| {
+        let mark = Mark::take(cx);
+        focus::choose_terminal(&terminal, &mark, window, cx);
+    });
+    cx.run_until_parked();
+    check(cx);
+}
+
+/// SPEC.md, "Where focus rests": "Choosing a session, including the one already selected, focuses its terminal." The
+/// choice takes focus from whatever control held it (here the session's row), and the terminal is home from then on,
+/// so a click on the page's empty space sends focus back to it. Without the public move, a view could only set home,
+/// which never takes focus from a control.
+#[gpui::test]
+fn choosing_a_session_focuses_its_terminal_and_makes_it_home(cx: &mut TestAppContext) {
+    let (cx, items) = open_terminals(cx, &["row"], &["terminal"]);
+    let ((row, _), (terminal, _)) = (drawn(&items, "row"), drawn(&items, "terminal"));
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &row),
+        "the premise: the session's row holds focus"
+    );
+
+    choose_now(cx, &terminal);
+    assert!(
+        focused(cx, &terminal),
+        "choosing the session focused its terminal"
+    );
+    choose_now(cx, &terminal);
+    assert!(
+        focused(cx, &terminal),
+        "choosing the session already selected keeps its terminal focused"
+    );
+
+    keys(cx, "shift-tab");
+    assert!(
+        focused(cx, &row),
+        "the premise: Shift+Tab went back to the row"
+    );
+    cx.simulate_click(point(px(600.), px(500.)), Modifiers::none());
+    check(cx);
+    assert!(
+        focused(cx, &terminal),
+        "the terminal is home: a click on empty space sent focus there"
+    );
+}
+
+/// SPEC.md's settled case: "The user selects a session and, before its terminal finishes loading, types in the session
+/// filter. The filter keeps focus when the terminal arrives." A choice that completes later carries the mark from when
+/// the user chose; once they moved on, the terminal only becomes home, and takes focus when nothing else holds it.
+#[gpui::test]
+fn a_chosen_terminal_that_arrives_after_the_user_moved_on_only_becomes_home(
+    cx: &mut TestAppContext,
+) {
+    let (cx, items) = open_terminals(cx, &["filter"], &["terminal"]);
+    let ((filter, filter_shown), (terminal, _)) =
+        (drawn(&items, "filter"), drawn(&items, "terminal"));
+    let chosen = cx.update(|_, cx| Mark::take(cx));
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &filter),
+        "the premise: the user went on into the filter"
+    );
+    assert!(
+        cx.update(|_, cx| focus::has_moved_on(&chosen, cx)),
+        "the premise: that counts as moving on"
+    );
+
+    let arrived = terminal.clone();
+    cx.update(move |window, cx| focus::choose_terminal(&arrived, &chosen, window, cx));
+    cx.run_until_parked();
+    check(cx);
+    assert!(
+        focused(cx, &filter),
+        "the filter kept focus when the terminal arrived"
+    );
+
+    filter_shown.set(false);
+    redraw(cx);
+    assert!(
+        focused(cx, &terminal),
+        "the terminal is home: once the filter went away, focus went there"
+    );
+}
+
+/// Focus never leaves an open dialog for the page behind it (SPEC.md, "Opening and closing"), not even for a session
+/// the user just chose. The terminal becomes home; closing the dialog returns focus to where it was before it opened,
+/// which is why a dialog that chooses a session closes itself before choosing.
+#[gpui::test]
+fn choosing_a_terminal_while_a_dialog_is_open_leaves_focus_in_the_dialog(cx: &mut TestAppContext) {
+    let (cx, items) = open_terminals(cx, &["opener"], &["terminal"]);
+    let ((opener, opener_shown), (terminal, _)) =
+        (drawn(&items, "opener"), drawn(&items, "terminal"));
+    keys(cx, "tab");
+    assert!(focused(cx, &opener), "the premise: the opener holds focus");
+    let inside = handle(cx);
+    let (dialog, _, _) = open_dialog(cx, vec![("inside", inside.clone())], &inside);
+    assert!(focused(cx, &inside), "the premise: the dialog holds focus");
+
+    choose_now(cx, &terminal);
+    assert!(focused(cx, &inside), "focus stayed inside the dialog");
+
+    keys(cx, "escape");
+    assert!(
+        !is_open(cx, dialog),
+        "the premise: Escape closed the dialog"
+    );
+    assert!(
+        focused(cx, &opener),
+        "closing the dialog returned focus to its opener, not to the terminal"
+    );
+    opener_shown.set(false);
+    redraw(cx);
+    assert!(focused(cx, &terminal), "the chosen terminal became home");
+}
+
+/// SPEC.md's settled case: "A shell tab exits on its own while the user types in it. The session's agent tab takes
+/// focus." The agent tab takes it at once, while the exited tab is still drawn, so typing does not go to a dead tab
+/// until the next frame; plain `set_home` would leave it there, since home never takes focus from what holds it.
+#[gpui::test]
+fn a_shell_tab_that_exits_hands_focus_to_the_agent_tab(cx: &mut TestAppContext) {
+    let (cx, items) = open_terminals(cx, &[], &["agent", "shell"]);
+    let ((agent, _), (shell, shell_shown)) = (drawn(&items, "agent"), drawn(&items, "shell"));
+    choose_now(cx, &shell);
+    assert!(
+        focused(cx, &shell),
+        "the premise: the user types in the shell tab"
+    );
+
+    let next = agent.clone();
+    cx.update(move |window, cx| focus::replace_home(Some(&next), window, cx));
+    cx.run_until_parked();
+    check(cx);
+    assert!(
+        cx.debug_bounds("shell").is_some(),
+        "the premise: the exited tab is still drawn"
+    );
+    assert!(focused(cx, &agent), "the agent tab took focus at once");
+
+    shell_shown.set(false);
+    redraw(cx);
+    assert!(
+        focused(cx, &agent),
+        "and kept it once the shell tab was gone"
+    );
+}
+
+/// The other half of a tab's exit: home moves to the agent tab, but a control that holds focus keeps it (SPEC.md: the
+/// terminal never takes focus from a control that holds it, such as the session filter). The agent tab takes focus
+/// only once the control goes away.
+#[gpui::test]
+fn a_tab_exit_leaves_a_control_that_holds_focus_alone(cx: &mut TestAppContext) {
+    let (cx, items) = open_terminals(cx, &["filter"], &["agent", "shell"]);
+    let (filter, filter_shown) = drawn(&items, "filter");
+    let ((agent, _), (shell, shell_shown)) = (drawn(&items, "agent"), drawn(&items, "shell"));
+    choose_now(cx, &shell);
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &filter),
+        "the premise: Tab from the shell tab wrapped to the filter"
+    );
+
+    let next = agent.clone();
+    cx.update(move |window, cx| focus::replace_home(Some(&next), window, cx));
+    cx.run_until_parked();
+    check(cx);
+    shell_shown.set(false);
+    redraw(cx);
+    assert!(
+        focused(cx, &filter),
+        "the filter kept focus through the tab's exit"
+    );
+
+    filter_shown.set(false);
+    redraw(cx);
+    assert!(focused(cx, &agent), "the agent tab is home now");
+}
+
 // ---- Which controls Tab reaches -------------------------------------------------------------------------------------
 
 /// Make the coordinator follow `reach` for which controls Tab reaches, as the bootstrap does with the host's answer.
