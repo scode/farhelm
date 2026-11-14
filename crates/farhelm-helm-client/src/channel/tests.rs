@@ -315,6 +315,42 @@ async fn a_displaced_channel_reconnects_only_on_take_back() {
     assert_eq!(harness.script.attempts(), 2);
 }
 
+/// The permission to reconnect at once belongs to the connection that earned it by answering a heartbeat, not to the
+/// channel. Before the shared reconnect policy, a channel-wide flag set by an earlier healthy connection survived a
+/// displacement and take-back, so a later connection that dropped before ever answering a heartbeat reconnected at
+/// once on stale evidence: the hot loop the policy exists to prevent. This pins that such a drop waits the initial
+/// backoff.
+#[tokio::test(start_paused = true)]
+async fn a_take_back_connection_that_drops_unproven_waits_the_initial_backoff() {
+    let mut harness = start();
+    let first = harness.connect(true).await;
+    // sleep-ok: paused clock: one ping interval, so the first connection answers a heartbeat (proves itself)
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    first.send(ServerMessage::Displaced);
+    harness.until_state(ChannelState::Displaced).await;
+    drop(first);
+
+    harness.handle.take_back();
+    harness.until_state(ChannelState::Reconnecting).await;
+    // The take-back connection delivers its snapshot and drops before its first heartbeat.
+    let second = harness.connect(true).await;
+    assert_eq!(
+        harness.script.attempts(),
+        2,
+        "premise: the take-back made exactly one attempt"
+    );
+    let dropped_at = Instant::now();
+    drop(second);
+    harness.until_state(ChannelState::Reconnecting).await;
+    let _third = harness.connect(true).await;
+    let third_at = harness.script.attempts.lock().unwrap()[2];
+    assert_eq!(
+        third_at - dropped_at,
+        ChannelConfig::default().reconnect_initial,
+        "an unproven connection's drop waits the initial backoff, whatever an earlier connection proved"
+    );
+}
+
 /// A refused credential cannot fix itself, so retrying on a timer would only hammer the helm; the channel waits for
 /// the user's retry.
 #[tokio::test(start_paused = true)]

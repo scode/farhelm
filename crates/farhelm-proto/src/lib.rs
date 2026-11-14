@@ -130,6 +130,8 @@ pub mod open_extensions;
 // The GUI's one ordered channel to the helm. Its docs are its own, for the
 // same rustdoc-link reason as `grid`.
 pub mod ui_channel;
+// The control messages beside a terminal socket's grid stream, typed once for both ends (see the module's own docs).
+pub mod terminal_socket;
 
 /// What counts as a YOLO launch (see the module's own docs).
 pub mod yolo;

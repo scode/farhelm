@@ -1,0 +1,4 @@
+# Clippy reads the nearest clippy.toml above the crate being linted. This crate denies unwrap and expect outside
+# tests in its Cargo.toml `[lints]`; tests may: a panic there is a test failure, not an abort inside a platform callback.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

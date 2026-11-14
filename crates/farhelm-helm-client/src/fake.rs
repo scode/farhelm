@@ -79,6 +79,10 @@ impl FakeHelm {
     /// entry does not decode, which is a broken test, not a GUI behavior to test.
     pub fn connect(&mut self, snapshot: Vec<CollectionState>) {
         self.drain();
+        #[expect(
+            clippy::expect_used,
+            reason = "the fake is a test double: a panic here is how it reports a broken test, never a GUI behavior"
+        )]
         let decoded = snapshot
             .into_iter()
             .map(decode_state)
@@ -96,6 +100,10 @@ impl FakeHelm {
             self.connected,
             "the fake helm pushes changes only while connected"
         );
+        #[expect(
+            clippy::expect_used,
+            reason = "the fake is a test double: a panic here is how it reports a broken test, never a GUI behavior"
+        )]
         let decoded = decode_changes(changes).expect("the fake helm's changes decode");
         self.event(ChannelEvent::Changes(decoded));
     }
@@ -119,6 +127,10 @@ impl FakeHelm {
             Some(id),
             "the fake helm answers commands in order"
         );
+        #[expect(
+            clippy::unwrap_used,
+            reason = "the fake is a test double: a panic here is how it reports a broken test, never a GUI behavior"
+        )]
         let (_, done) = self.unanswered.pop_front().unwrap();
         let _ = self
             .items

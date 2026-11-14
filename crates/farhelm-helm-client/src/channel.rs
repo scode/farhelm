@@ -45,6 +45,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, sleep_until};
 
 use crate::collections::{PushedChanges, PushedState, decode_changes, decode_state};
+use crate::reconnect::Backoff;
 use crate::ws::ConnectError;
 use farhelm_proto::ui_channel::ApiPath;
 
@@ -280,14 +281,13 @@ pub fn spawn_channel(
     let (requests_tx, requests) = mpsc::unbounded_channel();
     let (items, items_rx) = mpsc::unbounded_channel();
     let task = Task {
-        backoff: config.reconnect_initial,
+        backoff: Backoff::new(&config),
         connector,
         config,
         requests,
         items,
         next_id: 1,
         state: None,
-        immediate_reconnect: false,
     };
     tokio::spawn(task.run());
     (
@@ -302,9 +302,10 @@ pub fn spawn_channel(
 
 /// How one connection ended.
 enum Ended {
-    /// Dropped, watchdog, or a protocol violation. `was_up` says whether the snapshot had arrived.
+    /// Dropped, watchdog, or a protocol violation. `proven` says whether this connection answered a heartbeat, the
+    /// evidence that earns an immediate reconnect ([`Backoff::after_break`]).
     Broken {
-        was_up: bool,
+        proven: bool,
     },
     Displaced,
     Refused {
@@ -329,12 +330,9 @@ struct Task {
     items: mpsc::UnboundedSender<Item>,
     next_id: u64,
     state: Option<ChannelState>,
-    /// The wait before the next attempt after a failure; doubles per failure up to `reconnect_max`.
-    backoff: Duration,
-    /// Whether the next break after being up may reconnect without waiting. Earned by a connection answering a
-    /// heartbeat and spent by the first immediate reconnect, so a helm that keeps dropping connections right after
-    /// their snapshot falls back to the backoff instead of a loop of snapshots and resets.
-    immediate_reconnect: bool,
+    /// The wait before the next attempt after a break, shared policy with the terminal streams: a helm that keeps
+    /// dropping connections right after their snapshot gets a growing wait instead of a loop of snapshots and resets.
+    backoff: Backoff,
 }
 
 /// A command sent on the current link and not yet answered.
@@ -355,12 +353,11 @@ impl Task {
             let ended = self.connect_and_serve().await;
             reconnecting = true;
             match ended {
-                Ended::Broken { was_up } => {
-                    if was_up && std::mem::take(&mut self.immediate_reconnect) {
+                Ended::Broken { proven } => {
+                    let Some(wait) = self.backoff.after_break(proven) else {
                         continue;
-                    }
-                    let until = Instant::now() + self.backoff;
-                    self.backoff = (self.backoff * 2).min(self.config.reconnect_max);
+                    };
+                    let until = Instant::now() + wait;
                     // Nothing ends the wait early: the user has no way to hurry an automatic reconnect, and a
                     // take-back or retry means nothing while the channel is getting back by itself.
                     loop {
@@ -375,14 +372,14 @@ impl Task {
                     if !self.wait_for(Wake::TakeBack).await {
                         return;
                     }
-                    self.backoff = self.config.reconnect_initial;
+                    self.backoff.reset();
                 }
                 Ended::Refused { status } => {
                     self.set_state(ChannelState::CannotConnect { status });
                     if !self.wait_for(Wake::Retry).await {
                         return;
                     }
-                    self.backoff = self.config.reconnect_initial;
+                    self.backoff.reset();
                 }
                 Ended::HelmExited => {
                     self.set_state(ChannelState::HelmEnded);
@@ -414,7 +411,7 @@ impl Task {
             Err(ConnectError::Refused { status: 401 }) => Ended::Refused { status: 401 },
             Err(error) => {
                 tracing::debug!(%error, "UI channel connection attempt failed");
-                Ended::Broken { was_up: false }
+                Ended::Broken { proven: false }
             }
         }
     }
@@ -423,6 +420,8 @@ impl Task {
     async fn serve(&mut self, mut link: Link) -> Ended {
         let opened = Instant::now();
         let mut up = false;
+        // Whether this connection answered a heartbeat, which proves the link worked end to end.
+        let mut proven = false;
         // The collections the current snapshot installed. Changes to any other collection are a protocol violation.
         let mut installed: Vec<Collection> = Vec::new();
         let mut in_flight: VecDeque<InFlight> = VecDeque::new();
@@ -455,13 +454,13 @@ impl Task {
             tokio::select! {
                 biased;
                 message = link.rx.recv() => match message {
-                    None => break Ended::Broken { was_up: up },
+                    None => break Ended::Broken { proven },
                     Some(ServerMessage::Snapshot { collections }) => {
                         let decoded = match collections.into_iter().map(decode_state).collect::<Result<Vec<_>, _>>() {
                             Ok(decoded) => decoded,
                             Err(error) => {
                                 tracing::warn!(%error, "the helm's snapshot does not decode");
-                                break Ended::Broken { was_up: up };
+                                break Ended::Broken { proven };
                             }
                         };
                         installed = decoded.iter().map(|state| state.collection).collect();
@@ -474,20 +473,20 @@ impl Task {
                     Some(ServerMessage::Changes(changes)) => {
                         if !installed.contains(&changes.collection) {
                             tracing::warn!(collection = ?changes.collection, "the helm pushed changes before their snapshot");
-                            break Ended::Broken { was_up: up };
+                            break Ended::Broken { proven };
                         }
                         match decode_changes(changes) {
                             Ok(decoded) => self.emit(ChannelEvent::Changes(decoded)),
                             Err(error) => {
                                 tracing::warn!(%error, "the helm's changes do not decode");
-                                break Ended::Broken { was_up: up };
+                                break Ended::Broken { proven };
                             }
                         }
                     }
                     Some(ServerMessage::Reply(reply)) => {
                         let Some(front) = in_flight.pop_front().filter(|front| front.id == reply.id) else {
                             tracing::warn!(id = reply.id, "the helm answered a command out of order");
-                            break Ended::Broken { was_up: up };
+                            break Ended::Broken { proven };
                         };
                         self.complete(front.done, Ok(reply));
                         admitted = Instant::now();
@@ -495,9 +494,8 @@ impl Task {
                     Some(ServerMessage::Pong { n }) => {
                         if ping.is_some_and(|(sent, _)| sent == n) {
                             ping = None;
-                            // This connection works end to end, so its next break may reconnect at once.
-                            self.immediate_reconnect = true;
-                            self.backoff = self.config.reconnect_initial;
+                            // This connection works end to end, so its break may reconnect at once.
+                            proven = true;
                         }
                     }
                     Some(ServerMessage::Displaced) => break Ended::Displaced,
@@ -519,7 +517,7 @@ impl Task {
                         // same break as any other.
                         let command = Command { id, method: method.as_str().into(), path, body };
                         if link.tx.send(ClientMessage::Command(command)).is_err() {
-                            break Ended::Broken { was_up: up };
+                            break Ended::Broken { proven };
                         }
                     }
                     Some(Request::HelmEnded) => break Ended::HelmExited,
@@ -527,14 +525,14 @@ impl Task {
                 },
                 _ = watchdog => {
                     tracing::info!("the UI channel's watchdog fired");
-                    break Ended::Broken { was_up: up };
+                    break Ended::Broken { proven };
                 }
                 _ = sleep_until(next_ping_at) => {
                     next_ping_at += self.config.ping_interval;
                     if ping.is_none() && up {
                         ping = Some((next_ping_n, Instant::now()));
                         if link.tx.send(ClientMessage::Ping { n: next_ping_n }).is_err() {
-                            break Ended::Broken { was_up: up };
+                            break Ended::Broken { proven };
                         }
                         next_ping_n += 1;
                     }

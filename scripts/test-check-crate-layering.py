@@ -97,7 +97,7 @@ class GuiLintTableTest(unittest.TestCase):
                 crate.mkdir(parents=True)
                 (crate / "Cargo.toml").write_text(text)
                 members[name] = crate
-            return checker.lint_violations(metadata(members, {}, root), root / "crates/gui", workspace or {})
+            return checker.lint_violations(metadata(members, {}, root), root / "crates/gui", workspace or {}, ())
 
     def test_a_crate_without_the_table_fails(self):
         """A GUI crate with no [lints.clippy] is reported, naming both lints."""
@@ -115,6 +115,40 @@ class GuiLintTableTest(unittest.TestCase):
         """A crate's own deny table passes, and so does `[lints] workspace = true` over a workspace table that denies."""
         workspace = {"workspace": {"lints": {"clippy": {"unwrap_used": "deny", "expect_used": {"level": "deny"}}}}}
         self.assertEqual(self.check({"a": DENY, "b": "[lints]\nworkspace = true\n"}, workspace), [])
+
+
+class OutsideGuiLintTableTest(unittest.TestCase):
+    """The crates outside crates/gui/ that GUI code runs through are held to the same rule, by name."""
+
+    def check(self, manifests, also):
+        """Write each manifest under a temporary crates/<name>/ and return the lint check's problems for `also`."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            members = {}
+            for name, text in manifests.items():
+                crate = root / "crates" / name
+                crate.mkdir(parents=True)
+                (crate / "Cargo.toml").write_text(text)
+                members[name] = crate
+            return checker.lint_violations(metadata(members, {}, root), root / "crates/gui", {}, also)
+
+    def test_a_named_crate_outside_gui_without_the_table_fails(self):
+        """The desktop app's crate is checked although it is not under crates/gui/, and an unnamed neighbor is not."""
+        problems = self.check(
+            {"farhelm-desktop": '[package]\nname = "farhelm-desktop"\n', "farhelm-helm": "[package]\n"},
+            ("farhelm-desktop",),
+        )
+        self.assertEqual(len(problems), 1)
+        self.assertIn("farhelm-desktop does not deny unwrap_used, expect_used", problems[0])
+
+    def test_a_named_crate_that_left_the_workspace_fails(self):
+        """Renaming or removing a named crate must not drop it from the rule silently."""
+        problems = self.check({"farhelm-desktop": DENY}, ("farhelm-desktop", "farhelm-helm-client"))
+        self.assertEqual(problems, ["farhelm-helm-client is not a workspace member; update ALSO_DENY_UNWRAP"])
+
+    def test_named_crates_with_the_table_pass(self):
+        """The real shape passes: both named crates deny in their own table."""
+        self.assertEqual(self.check({"farhelm-desktop": DENY, "farhelm-helm-client": DENY}, checker.ALSO_DENY_UNWRAP), [])
 
 
 class CargoFailureTest(unittest.TestCase):

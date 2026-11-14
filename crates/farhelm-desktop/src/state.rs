@@ -90,9 +90,10 @@ pub(super) fn update_state(
     path: &Path,
     mutate: impl FnOnce(&mut PersistedState),
 ) -> anyhow::Result<PersistedState> {
+    // The lock guards nothing but the order of writes, so a panic in another writer leaves nothing to distrust.
     let _guard = STATE_FILE_WRITE
         .lock()
-        .expect("desktop state-file lock poisoned");
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut state = read_state(path)?;
     mutate(&mut state);
     atomic_write_json(path, &state)?;

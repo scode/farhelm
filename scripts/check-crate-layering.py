@@ -14,9 +14,11 @@ following normal and build dependencies transitively (dev-dependencies do not co
 - No crate under `crates/gui/` other than the GPUI app crates in `GPUI_CRATES` may reach GPUI (`gpui-pre`) or GPUI Kit
   (`gpui-component`, `gpui-base`). The framework-free crates (grid model, input mapping, escape table, store and draft
   logic) stay testable without a window, and Kit stays behind the app crate's component layer.
-- Every crate under `crates/gui/` denies clippy's `unwrap_used` and `expect_used` in its own `[lints.clippy]`, or
-  inherits a `[workspace.lints.clippy]` table that does. Nearly all GUI code runs inside platform callbacks, where a
-  panic aborts the app on macOS, so a GUI crate that forgets the table is a crate where the rule silently stops.
+- Every crate under `crates/gui/`, and the crates outside it that GUI code runs through (`ALSO_DENY_UNWRAP`: the
+  desktop app's process and the helm client), denies clippy's `unwrap_used` and `expect_used` in its own
+  `[lints.clippy]`, or inherits a `[workspace.lints.clippy]` table that does. Nearly all GUI code runs inside platform
+  callbacks, where a panic aborts the app on macOS, so a crate that forgets the table is a crate where the rule
+  silently stops.
   Only manifests are read: a crate-level `#![allow(clippy::unwrap_used)]` in source would still switch the rule off,
   and the review gate covers that.
 
@@ -38,6 +40,9 @@ GPUI_CRATES = {
     # One deliberate violation of each GUI lint ban (scripts/check-gui-lints.py), so it needs the GPUI and Kit types.
     "farhelm-gui-lint-demo",
 }
+# Crates outside crates/gui/ that SPEC_impl.md ("Where the GUI meets the helm") holds to the same no-unwrap rule: the
+# desktop binary, whose process runs the GPUI app, and the helm client, which GUI code calls from platform callbacks.
+ALSO_DENY_UNWRAP = ("farhelm-desktop", "farhelm-helm-client")
 HELM_CRATES = {"farhelm-helm", "farhelm-supervisor"}
 FRAMEWORK_CRATES = {"gpui-pre", "gpui-component", "gpui-base"}
 DENIED_LINTS = ("unwrap_used", "expect_used")
@@ -68,20 +73,35 @@ def violations(metadata: dict, gui_dir: pathlib.Path) -> list[str]:
     return problems
 
 
-def lint_violations(metadata: dict, gui_dir: pathlib.Path, workspace_manifest: dict) -> list[str]:
-    """GUI crates whose manifest does not deny `unwrap_used` and `expect_used`, directly or through the workspace."""
+def lint_violations(
+    metadata: dict, gui_dir: pathlib.Path, workspace_manifest: dict, also: tuple[str, ...] = ALSO_DENY_UNWRAP
+) -> list[str]:
+    """Checked crates whose manifest does not deny `unwrap_used` and `expect_used`, directly or through the workspace.
+
+    Checked means every crate under `gui_dir` plus the workspace members named in `also`. A name in `also` that is no
+    longer a workspace member is a problem too, so renaming or removing one of those crates cannot drop it from the
+    rule unnoticed.
+    """
     packages = {p["id"]: p for p in metadata["packages"]}
     workspace_clippy = workspace_manifest.get("workspace", {}).get("lints", {}).get("clippy", {})
     problems = []
-    for member in gui_members(metadata, packages, gui_dir):
+    by_name = {packages[m]["name"]: m for m in metadata["workspace_members"]}
+    checked = gui_members(metadata, packages, gui_dir)
+    for name in also:
+        if name not in by_name:
+            problems.append(f"{name} is not a workspace member; update ALSO_DENY_UNWRAP")
+        elif by_name[name] not in checked:
+            checked.append(by_name[name])
+    for member in checked:
         manifest = tomllib.loads(pathlib.Path(packages[member]["manifest_path"]).read_text())
         lints = manifest.get("lints", {})
         clippy = workspace_clippy if lints.get("workspace") is True else lints.get("clippy", {})
         missing = [lint for lint in DENIED_LINTS if level(clippy.get(lint)) not in ("deny", "forbid")]
         if missing:
             problems.append(
-                f"{packages[member]['name']} does not deny {', '.join(missing)} in [lints.clippy]; GUI crates never "
-                "unwrap or expect outside tests"
+                f"{packages[member]['name']} does not deny {', '.join(missing)} in [lints.clippy]; code that platform "
+                "callbacks can reach (the GUI crates, the desktop app, the helm client) never unwraps or expects "
+                "outside tests"
             )
     return problems
 

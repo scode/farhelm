@@ -24,6 +24,7 @@
 pub mod channel;
 pub mod collections;
 pub mod fake;
+mod reconnect;
 pub mod terminal;
 mod ws;
 
@@ -43,7 +44,11 @@ use std::sync::Arc;
 /// runtime-agnostic: the GUI polls it on its own executor and never enters this runtime. Dropping the connection
 /// stops the runtime without waiting for its tasks, so a window closing never blocks on a socket.
 pub struct HelmConnection {
+    /// `Some` for the connection's whole life; `Drop` takes it to shut it down without waiting.
     runtime: Option<tokio::runtime::Runtime>,
+    /// The runtime's handle, for starting work on it. Kept beside the runtime so starting work never has to unwrap the
+    /// `Option` above, which is empty only inside `Drop`.
+    handle: tokio::runtime::Handle,
     endpoint: HelmEndpoint,
     channel: ChannelHandle,
 }
@@ -70,6 +75,7 @@ impl HelmConnection {
         };
         Ok((
             HelmConnection {
+                handle: runtime.handle().clone(),
                 runtime: Some(runtime),
                 endpoint,
                 channel,
@@ -89,8 +95,7 @@ impl HelmConnection {
         attach: terminal::TerminalAttach,
         config: ChannelConfig,
     ) -> (terminal::TerminalHandle, terminal::TerminalEvents) {
-        let runtime = self.runtime.as_ref().expect("the runtime lives until drop");
-        let _guard = runtime.enter();
+        let _guard = self.handle.enter();
         terminal::open_terminal(self.endpoint.clone(), attach, config)
     }
 }

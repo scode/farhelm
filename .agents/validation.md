@@ -665,8 +665,9 @@ systemd or SSH substrate ran.
 - `python3 -B scripts/check-crate-layering.py` and `python3 -B scripts/test-check-crate-layering.py` — from
   `cargo metadata --all-features`, fails when a crate under `crates/gui/` reaches `farhelm-helm` or `farhelm-supervisor`
   through normal or build dependencies, when one other than the GPUI app crates the script names reaches GPUI or GPUI
-  Kit, or when a GUI crate's manifest does not deny clippy's `unwrap_used` and `expect_used`. Seconds, nothing compiled.
-  Run it when a manifest under `crates/gui/` or `Cargo.lock` changes. CI's `deny` job runs both.
+  Kit, or when the manifest of a GUI crate, `farhelm-desktop` or `farhelm-helm-client` does not deny clippy's
+  `unwrap_used` and `expect_used`. Seconds, nothing compiled. Run it when a manifest under `crates/gui/`, either of
+  those two crates' manifests, or `Cargo.lock` changes. CI's `deny` job runs both.
 - `python3 scripts/record-test-run.py --kind development --selection 'GPUI app goldens' --concurrency 'libtest default threads' -- python3 scripts/check-gui-goldens.py`
   — the GPUI app's screenshot goldens (`crates/gui/farhelm-gui/src/goldens.rs`): every component, the dialog frame and
   the layer manager's overlays (a tooltip, a popover, the prompt over its veil) and the keyboard focus ring, light and
