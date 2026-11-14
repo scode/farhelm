@@ -25,7 +25,7 @@
 //!   "Status", as the old app did). The memory of what was stamped is keyed on the session, its activity and its
 //!   eligibility, never on the stamp itself:
 //!   that is what makes a manual mark-unread of the open session stick until new output arrives or the user opens
-//!   another session. A failed mark is silent (SPEC.md, "Errors and diagnostics"): it costs a dot that is one visit
+//!   another session. A listing that hides the open session leaves the memory alone ([`Open::Hidden`]). A failed mark is silent (SPEC.md, "Errors and diagnostics"): it costs a dot that is one visit
 //!   behind, and the next mark corrects it.
 //! - **A Delete holds the automatic choice back.** While any Delete the list sent is in flight, no session is opened
 //!   automatically, and a selection proven gone is cleared rather than replaced ([`hold_for_deletes`]); the choice is
@@ -41,6 +41,7 @@
 //! environment's session, which arrives with environment sessions.
 
 use farhelm_helm_client::{ApiPath, Collections, Method};
+use farhelm_proto::SessionSeenRequest;
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences, SessionRow};
 use gpui::App;
 
@@ -162,12 +163,42 @@ pub(crate) fn newest_created<'a>(listed: &[Listed<'a>], excluded: Option<&str>) 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Stamped(Option<(String, i64, bool)>);
 
+/// The open session as the automatic seen mark sees it.
+#[derive(Clone, Copy)]
+pub(crate) enum Open<'a> {
+    /// No session is open.
+    Nothing,
+    /// The session filed under this key is open but the listing does not show it: the helm's cap cut it, or a filter
+    /// (a chosen host, say) leaves it out, and the store then holds no row for it. Its activity is unknown, not gone.
+    Hidden(&'a str),
+    /// The open session, listed.
+    Shown(Listed<'a>),
+}
+
 /// The seen mark the open session `open` is due, if any: its new memory, and the session and activity stamp to send
 /// when one is due (`None` when the memory changed but nothing needs marking, which still has to be remembered).
-pub(crate) fn seen_due(
-    open: Option<Listed>,
-    stamped: &Stamped,
-) -> Option<(Stamped, Option<(String, i64)>)> {
+/// Nothing is ever due for an [`Open::Hidden`] session, since its row is unknown. The memory is kept when it is that
+/// session's own, so its reappearance with the same activity marks nothing; any other memory is forgotten, so a session
+/// the user opened while it was hidden is marked once it shows.
+///
+/// NOTE: Treating every hidden session as nothing open, or every one as no change, would be wrong though either looks
+/// simpler. Forgetting the open session's own memory makes its reappearance (the filter cleared, the cap no longer
+/// cutting it) mark it seen again, undoing a manual Mark unread of a session the user never left. Keeping a memory of
+/// another session means that leaving for a session the listing also hides (the quick switcher reaches any session)
+/// and coming back is never noticed, so the return does not mark the session seen, as SPEC.md, "Status", asks.
+pub(crate) fn seen_due(open: Open, stamped: &Stamped) -> Option<(Stamped, Option<(String, i64)>)> {
+    let open = match open {
+        Open::Hidden(key) => {
+            let own = stamped
+                .0
+                .as_ref()
+                .is_some_and(|(stamped, _, _)| stamped == key);
+            let forgotten = Stamped::default();
+            return (!own && *stamped != forgotten).then_some((forgotten, None));
+        }
+        Open::Nothing => None,
+        Open::Shown(open) => Some(open),
+    };
     let next = Stamped(open.map(|open| {
         let row = open.row;
         let eligible = !row.stale && !row.info.status.has_ended();
@@ -222,11 +253,16 @@ pub(crate) fn remember(key: &str, cx: &mut App) {
     );
 }
 
-/// Record `activity` as the activity the open session `key` was seen at.
+/// Record `activity` as the activity the open session `key` was seen at, with the route's own request type, which the
+/// manual toggle sends too ([`super::seen`]).
 pub(crate) fn mark_seen(key: &str, activity: i64, cx: &mut App) {
+    let request = SessionSeenRequest {
+        seen_activity_at: Some(activity),
+    };
     send(
         ApiPath::api(&["sessions", key, "seen"]),
-        serde_json::json!({ "seen_activity_at": activity }),
+        // An optional integer always encodes, so `json!` (which panics on a failed encode) cannot fail here.
+        serde_json::json!(request),
         "mark the open session seen",
         cx,
     );

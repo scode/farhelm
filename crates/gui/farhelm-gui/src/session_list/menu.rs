@@ -15,6 +15,10 @@
 //! Rename shortcut on the open session's row only, the one row the shortcut acts on (SPEC.md, "Desktop window
 //! chrome"). Like Delete, it is unavailable while the session has a request in flight.
 //!
+//! Right after Rename, in the same group with no separator between them, a live row offers Mark read or Mark unread,
+//! whichever its seen state calls for ([`super::seen`]); a row that offers neither omits the item, so the commands
+//! after it move up. Choosing it closes the menu, which leaves focus on the menu's button, and then sends the request.
+//!
 //! Then come the lifecycle commands in the old menu's groups, each after a separator: Replace ([`super::replace`]), Stop
 //! ([`super::stop`]) and Delete ([`super::delete`]), all three in the danger red. Choosing one closes the menu before
 //! its question opens beside the same button (the old app turned the menu into the question; here the two are separate
@@ -25,7 +29,7 @@
 //! other sessions' menus are untouched. A refusal or a notice from the helm shows inside the menu as well as on the
 //! row, since the open menu covers the row's own copy ([`super::outcome`]).
 //!
-//! NOTE: Clone and Replace with (the launcher's), Mark read, Pin and the environment commands come with their areas,
+//! NOTE: Clone and Replace with (the launcher's), Pin and the environment commands come with their areas,
 //! in the old order around these, with no placeholder meanwhile; the old row menu had no Restart, which comes with the
 //! session header. Also not ported: the button staying visible while the row's open control has keyboard focus (the
 //! old `:focus-within`; here only the button's own focus shows it), opening the menu with the arrow keys from the
@@ -43,7 +47,7 @@ use gpui::{
     Window, div, px,
 };
 
-use super::{SessionList, delete, outcome, replace, selection, status, stop};
+use super::{SessionList, delete, outcome, replace, seen, selection, status, stop};
 use crate::actions::RENAME_SESSION_SHORTCUT_NAME;
 use crate::assets::Icon;
 use crate::components::{HoverHelp, IconButton, MenuItem, Role, Tier};
@@ -228,15 +232,9 @@ impl SessionList {
         }
     }
 
-    /// The menu's Rename was chosen at `mark`: close the menu, which returns focus to its button, then open the Rename
-    /// editor, which returns focus there when it closes.
-    fn rename_from_menu(
-        &mut self,
-        key: &str,
-        mark: &Mark,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    /// Close `key`'s menu if it is still open, which returns focus to where it was when the menu opened (its button):
+    /// what every command chosen from the menu does first, at acceptance rather than at a reply.
+    fn close_menu(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
         let open = self
             .current
             .current(cx)
@@ -246,7 +244,32 @@ impl SessionList {
         if let Some((menu, Opened::Menu)) = open {
             layers::close(menu, window, cx);
         }
+    }
+
+    /// The menu's Rename was chosen at `mark`: close the menu, which returns focus to its button, then open the Rename
+    /// editor, which returns focus there when it closes.
+    fn rename_from_menu(
+        &mut self,
+        key: &str,
+        mark: &Mark,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_menu(key, window, cx);
         let _ = super::rename::open(key, mark, window, cx);
+    }
+
+    /// The menu's Mark read or Mark unread was chosen: close the menu, then send `toggle`, the action the item was drawn
+    /// with. A refusal shows on the row, so nothing waits with the menu open.
+    fn seen_from_menu(
+        &mut self,
+        key: &str,
+        toggle: seen::Toggle,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.close_menu(key, window, cx);
+        seen::send(key, toggle, cx);
     }
 
     /// One of the menu's lifecycle commands was chosen at `mark`: close the menu, which returns focus to where it was
@@ -260,15 +283,7 @@ impl SessionList {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let open = self
-            .current
-            .current(cx)
-            .rows
-            .borrow_mut()
-            .still_open(key, window, cx);
-        if let Some((menu, Opened::Menu)) = open {
-            layers::close(menu, window, cx);
-        }
+        self.close_menu(key, window, cx);
         match command {
             LifecycleCommand::Replace => self.replace(key, mark, window, cx),
             LifecycleCommand::Stop => self.stop(key, mark, window, cx),
@@ -434,6 +449,22 @@ impl Render for RowMenu {
                 list.rename_from_menu(&key, &mark, window, cx)
             });
         });
+        // Mark read or Mark unread, as the row's seen state reads now, for a live row only.
+        let seen_item = seen::offered(row).map(|toggle| {
+            let (list, key) = (self.list.clone(), self.key.clone());
+            MenuItem::new(
+                "session-menu-seen",
+                Icon::MarkSeen,
+                toggle.label(),
+                HoverHelp::tooltip(toggle.help()),
+                Role::MenuItem,
+            )
+            .description(toggle.description())
+            .disabled(busy)
+            .on_click(move |_, window, cx| {
+                let _ = list.update(cx, |list, cx| list.seen_from_menu(&key, toggle, window, cx));
+            })
+        });
         // The lifecycle commands: in the old menu's danger red, each in a group of its own, and unavailable while
         // the session has a request in flight, as Rename is.
         let lifecycle = |id: &'static str,
@@ -488,6 +519,7 @@ impl Render for RowMenu {
                     .flex()
                     .flex_col()
                     .child(rename)
+                    .children(seen_item)
                     .child(separator(cx))
                     .child(replace)
                     .child(separator(cx))
