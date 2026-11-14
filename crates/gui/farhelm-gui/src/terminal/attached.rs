@@ -2,9 +2,10 @@
 //!
 //! NOTE: This is cut to what the first milestone's slice needs (the migration's orchestrator trimmed it on 2026-11-13):
 //! attach a terminal, show its output, say when it is not live, take focus and send the program its keys. The terminal
-//! area added paste, committed text from the platform's text input, focus reports, scrollback, the local selection and
-//! mouse reporting since. Links and the reconnect display with its phase and Retry come later in that work. The
-//! session pane ([`crate::session_pane`]) mounts one for the selected session.
+//! area added paste, committed text from the platform's text input, focus reports, scrollback, the local selection,
+//! mouse reporting and printed web links since. The disclosure of a program's hyperlink's target, file links and the
+//! reconnect display with its phase and Retry come later in that work. The session pane ([`crate::session_pane`])
+//! mounts one for the selected session.
 //!
 //! [`AttachedTerminal`] owns one stream ([`TerminalHandle`] and [`TerminalEvents`]) and the [`TerminalView`]s that show
 //! it. Here's the TLDR of what it adds on top of the stream and the renderer, each a rule the old app or the GPUI
@@ -95,7 +96,10 @@ use std::rc::Rc;
 use std::task::Poll;
 use std::time::Duration;
 
-use farhelm_grid_model::{ExitState, GridError, GridOutput, Position, Selection, SelectionMode};
+use farhelm_grid_model::{
+    ExitState, GridError, GridOutput, LinkKind, Position, Selection, SelectionMode, TerminalLink,
+    web_target,
+};
 use farhelm_helm_client::terminal::{
     Attachment, AttachmentLease, StreamState, TerminalAttach, TerminalEvent, TerminalEvents,
     TerminalHandle,
@@ -110,6 +114,7 @@ use farhelm_input_mapping::{
 };
 use farhelm_proto::DetachCode;
 use farhelm_proto::grid::{GridInput, MouseEventKind};
+use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, ClipboardEntry, ClipboardItem, Context,
     DispatchPhase, ElementInputHandler, Entity, EntityInputHandler, FocusHandle, HoverListenerMode,
@@ -128,7 +133,7 @@ use crate::components::{
 use crate::focus::{self, OnPress};
 use crate::host_text::{HostSentence, HostText};
 use crate::render_count;
-use crate::session::UiSession;
+use crate::session::{self, UiSession};
 use crate::{theme, ticker};
 
 /// The most stream events one GUI turn takes before it yields. The prototype's bound (eight messages, at most 2 MiB);
@@ -232,6 +237,8 @@ pub struct AttachedTerminal {
     scrollbar_hold: Option<ticker::Deadline>,
     /// The local selection being dragged, from its press to its release.
     select: Option<SelectGesture>,
+    /// A primary press on a link, until its release decides whether it was a click.
+    link_press: Option<LinkPress>,
     /// The buttons held in a press the program's mouse reporting took, as a bit per button (1 left, 2 middle, 4
     /// right); 0 while none is. Moves and releases go to the program until the last of them comes up.
     reporting: u8,
@@ -323,6 +330,7 @@ impl AttachedTerminal {
             pointer_over: false,
             scrollbar_hold: None,
             select: None,
+            link_press: None,
             reporting: 0,
             mouse_dedupe: MouseDeduper::default(),
             retired,
@@ -482,13 +490,29 @@ impl AttachedTerminal {
     }
 
     /// The grid's area was drawn `height` pixels tall (inside its padding, below the status line).
-    fn grid_measured(&mut self, origin: Point<Pixels>, height: f32, cx: &mut Context<Self>) {
+    fn grid_measured(
+        &mut self,
+        origin: Point<Pixels>,
+        height: f32,
+        pointer: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
         self.grid_origin = Some(origin);
         if self.room != Some(height) {
             self.room = Some(height);
             if self.committed.is_some() {
                 cx.notify();
             }
+        }
+        // The screen can move under a still pointer without scrolling (lifted for the exit line or the status band, or
+        // the pane moved), which leaves the hovered cell naming another row: look again where the pointer is. The view
+        // skips the lookup when the cell is unchanged, so this costs nothing frame to frame.
+        if self.pointer_over
+            && self.select.is_none()
+            && self.reporting == 0
+            && self.link_press.is_none()
+        {
+            self.hover_link_at(Some(pointer), cx);
         }
     }
 
@@ -1311,6 +1335,7 @@ impl Render for AttachedTerminal {
                     window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
                         if phase == DispatchPhase::Bubble {
                             let _ = moved.update(cx, |owner, cx| {
+                                owner.link_press_moved(event.position);
                                 owner.report_moved(event, cx);
                                 owner.drag_moved(event, cx);
                             });
@@ -1325,14 +1350,23 @@ impl Render for AttachedTerminal {
                             owner.report_released(event, cx);
                             if event.button == MouseButton::Left {
                                 owner.end_selection(Some(event), cx);
+                                owner.link_released(event, cx);
+                                // Hover lookups pause during a press; the pointer may rest on other text now. Only
+                                // while it is over the grid: a release over a dialog covering the terminal must not
+                                // underline a link through its scrim.
+                                if owner.pointer_over {
+                                    owner.hover_link_at(Some(event.position), cx);
+                                }
                             }
                         });
                     });
                     let height = f32::from(bounds.size.height);
                     let origin = bounds.origin;
+                    let pointer = window.mouse_position();
                     window.defer(cx, move |_, cx| {
-                        let _ =
-                            owner.update(cx, |owner, cx| owner.grid_measured(origin, height, cx));
+                        let _ = owner.update(cx, |owner, cx| {
+                            owner.grid_measured(origin, height, pointer, cx)
+                        });
                     });
                 },
             )
@@ -1357,6 +1391,10 @@ impl Render for AttachedTerminal {
                 .w(px(SCROLLBAR_WIDTH))
                 .child(self.scrollbar_element(view, cx))
         });
+        let hovering_link = self
+            .committed
+            .as_ref()
+            .is_some_and(|view| view.read(cx).hovered_link().is_some());
         // The grid's area is what takes focus and keys, not the whole pane: the status line above it holds a Take
         // control button, whose own Tab and Escape the terminal's key context would otherwise give to the program
         // (`actions::TERMINAL_KEYS` binds them to nothing there), leaving a focused button with no way off it.
@@ -1368,6 +1406,8 @@ impl Render for AttachedTerminal {
             .on_action(cx.listener(Self::select_all))
             .on_action(cx.listener(Self::copy_selection))
             .on_any_mouse_down(cx.listener(Self::press))
+            // A link under the pointer shows the pointing hand, as the old app's hovered links did.
+            .when(hovering_link, |body| body.cursor_pointer())
             .on_mouse_move(
                 cx.listener(|owner, event: &MouseMoveEvent, _, cx| owner.hover_moved(event, cx)),
             )
@@ -1386,6 +1426,9 @@ impl Render for AttachedTerminal {
             // over the terminal, keys or not.
             .hover_listener_mode(HoverListenerMode::InputModalityIndependent)
             .on_hover(cx.listener(|owner, hovered: &bool, _, cx| {
+                if !*hovered {
+                    owner.hover_link_at(None, cx);
+                }
                 if owner.pointer_over != *hovered {
                     owner.pointer_over = *hovered;
                     // Leaving shows the bar for the hold, as the old app's `mouseleave` did.
@@ -1438,6 +1481,169 @@ impl Render for AttachedTerminal {
             .child(body)
             .children(placeholder)
             .child(measure)
+    }
+}
+
+// ---- Links -----------------------------------------------------------------------------------------------------------
+
+/// How far, in pixels, a press on a link may wander before its release and still count as a click (the old app's
+/// `CLICK_JITTER_PX`); SPEC.md: small pointer jitter still counts as a click, a drag never opens.
+const CLICK_JITTER: f32 = 4.;
+
+/// Who a click on a web link belongs to, from the Terminal settings' link choice (the shared preference
+/// `terminal_link_click`; unset means intercept).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LinkClick {
+    /// Farhelm opens the link; under mouse reporting the press is withheld from the program, with its drag and
+    /// release, so a program that opens links itself cannot open a second tab from the same click.
+    Intercept,
+    /// Farhelm opens the link and the program gets the click too.
+    Both,
+    /// The program alone gets the click; Farhelm opens nothing.
+    Program,
+}
+
+impl LinkClick {
+    /// The current choice, from the helm's preferences; intercept when they have not arrived or say nothing else.
+    fn current(cx: &App) -> Self {
+        let preferences = session::current_store(cx).and_then(|store| {
+            store
+                .read(cx)
+                .collections()
+                .get::<Preferences>(PREFERENCES_KEY)
+                .and_then(|preferences| preferences.terminal_link_click.clone())
+        });
+        match preferences.as_deref() {
+            Some("both") => LinkClick::Both,
+            Some("program") => LinkClick::Program,
+            _ => LinkClick::Intercept,
+        }
+    }
+}
+
+/// A primary press that landed on a link, followed to its release: the link it was on, and where it was pressed, so a
+/// release on the same link within [`CLICK_JITTER`] of the press is a click.
+struct LinkPress {
+    link: TerminalLink,
+    at: Point<Pixels>,
+}
+
+/// The web address a click on `link` opens: a printed address by the strict rule for text, a program's hyperlink by
+/// its parsed scheme (the grid model's `web_target`; no caller opens a program's hyperlink until its disclosure is
+/// built). `None` for anything else, which a click never opens.
+fn link_web_target(link: &TerminalLink) -> Option<String> {
+    let plain = link.kind == LinkKind::Text;
+    web_target(&link.uri, plain).map(|url| url.to_string())
+}
+
+impl AttachedTerminal {
+    /// The view cell under `position` (window coordinates) for links, as (column, row) of what is shown: `None` off
+    /// the shown screen (the old app's `linkCell`). Unlike a selection's position, nothing clamps to the edge.
+    fn link_cell(&self, position: Point<Pixels>, cx: &App) -> Option<(u16, u16)> {
+        let origin = self.grid_origin?;
+        let view = self.committed.as_ref()?.read(cx);
+        let placement = self.placement(view, cx)?;
+        let cell = self.cell(cx)?;
+        let x = f32::from(position.x - origin.x);
+        let y = f32::from(position.y - origin.y) + placement.lift;
+        let width = f32::from(view.cols) * cell.width;
+        let height = f32::from(placement.rows) * placement.cell_height;
+        if !(x >= 0. && x < width && y >= placement.lift && y < height) {
+            return None;
+        }
+        Some((
+            (x / cell.width).floor() as u16,
+            (y / placement.cell_height).floor() as u16,
+        ))
+    }
+
+    /// The line position under `position` for links: [`AttachedTerminal::link_cell`]'s cell, by the line its row
+    /// shows; `None` on the notice line, which holds no link.
+    fn link_position(&self, position: Point<Pixels>, cx: &App) -> Option<Position> {
+        let (col, row) = self.link_cell(position, cx)?;
+        let view = self.committed.as_ref()?.read(cx);
+        if view.row_is_notice(row) {
+            return None;
+        }
+        Some(Position {
+            line: view.line_at_row(row)?,
+            col,
+        })
+    }
+
+    /// The pointer rests on `position` with no press under way: tell the view, which finds the link there.
+    fn hover_link_at(&mut self, position: Option<Point<Pixels>>, cx: &mut Context<Self>) {
+        let cell = position.and_then(|position| self.link_cell(position, cx));
+        if let Some(view) = self.committed.clone() {
+            let before = view.read(cx).hovered_link().is_some();
+            view.update(cx, |view, cx| view.set_hover(cell, cx));
+            // The pointing hand is drawn by this owner, over the grid.
+            if view.read(cx).hovered_link().is_some() != before {
+                cx.notify();
+            }
+        }
+    }
+
+    /// The hovered link a primary press at `position` landed on: the link the pointer is over, not one found anew at
+    /// the press (the old app's rule).
+    fn pressed_link(&self, position: Point<Pixels>, cx: &App) -> Option<TerminalLink> {
+        let cell = self.link_position(position, cx)?;
+        let view = self.committed.as_ref()?.read(cx);
+        view.hovered_link()
+            .filter(|link| link.covers(cell))
+            .cloned()
+    }
+
+    /// Whether a primary press on `link` under mouse reporting is withheld from the program: in intercept mode, for a
+    /// link Farhelm would open, the press and its drag and release are Farhelm's alone (the old app's
+    /// `interceptLinkPress`). Only a printed web address counts until a program's hyperlink can open (with its
+    /// disclosure); withholding a press Farhelm then did nothing with would swallow the click.
+    fn withholds_press(link: &TerminalLink, cx: &App) -> bool {
+        LinkClick::current(cx) == LinkClick::Intercept
+            && link.kind == LinkKind::Text
+            && link_web_target(link).is_some()
+    }
+
+    /// The pointer moved during a press on a link: once it is farther than [`CLICK_JITTER`] from the press, the press
+    /// is a drag and opens nothing at its release.
+    fn link_press_moved(&mut self, position: Point<Pixels>) {
+        let Some(press) = &self.link_press else {
+            return;
+        };
+        let moved = position - press.at;
+        if f32::from(moved.x).hypot(f32::from(moved.y)) > CLICK_JITTER {
+            self.link_press = None;
+        }
+    }
+
+    /// The primary button came up: a press on a link that is released on the same link, still in the text, within
+    /// the jitter, with nothing selected, is a click, and opens the link's web address in the browser with no prompt
+    /// (SPEC.md) unless the link choice leaves clicks to the program. A program's hyperlink (OSC 8) does not open yet:
+    /// it opens only while the disclosure of its real target is shown, which comes with the disclosure work.
+    fn link_released(&mut self, event: &MouseUpEvent, cx: &mut Context<Self>) {
+        let Some(press) = self.link_press.take() else {
+            return;
+        };
+        let moved = event.position - press.at;
+        if f32::from(moved.x).hypot(f32::from(moved.y)) > CLICK_JITTER {
+            return;
+        }
+        let Some(view) = self.committed.clone() else {
+            return;
+        };
+        let still = self
+            .link_position(event.position, cx)
+            .and_then(|cell| view.read(cx).link_at(cell));
+        if still.as_ref() != Some(&press.link)
+            || view.read(cx).selected_text().is_some()
+            || LinkClick::current(cx) == LinkClick::Program
+            || press.link.kind != LinkKind::Text
+        {
+            return;
+        }
+        if let Some(target) = link_web_target(&press.link) {
+            cx.open_url(&target);
+        }
     }
 }
 
@@ -1583,12 +1789,13 @@ impl AttachedTerminal {
         );
     }
 
-    /// The pointer moved over the grid with no press under way: in motion mode the program hears it, as a move with no
-    /// button (`-1`; the old app's `mousemove` without buttons).
+    /// The pointer moved over the grid with no press under way: the view learns which link it rests on, and in motion
+    /// mode the program hears the move, with no button (`-1`; the old app's `mousemove` without buttons).
     fn hover_moved(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
         if event.pressed_button.is_some() || self.reporting != 0 || self.select.is_some() {
             return;
         }
+        self.hover_link_at(Some(event.position), cx);
         self.mouse_report(
             MouseEventKind::Move,
             -1,
@@ -1713,7 +1920,23 @@ impl AttachedTerminal {
             .state
             .is_some_and(|state| state.mouse != farhelm_proto::grid::MouseMode::Off);
         let forced = forces_selection(event.modifiers);
+        let link = if event.button == MouseButton::Left {
+            self.pressed_link(event.position, cx)
+        } else {
+            None
+        };
+        self.link_press = link.clone().map(|link| LinkPress {
+            link,
+            at: event.position,
+        });
         if tracking && !forced {
+            // A press on a web link Farhelm opens is withheld from the program, in intercept mode, with its drag and
+            // release: it is never reported, so its release is not either. It clears the selection, as the old app's
+            // did.
+            if link.is_some_and(|link| Self::withholds_press(&link, cx)) {
+                view.update(cx, |view, cx| view.set_selection(None, cx));
+                return;
+            }
             self.report_press(event, cx);
             return;
         }
@@ -1881,8 +2104,13 @@ impl AttachedTerminal {
                 if lines == 0 {
                     return;
                 }
+                // No link is hovered while a drag scrolls: the frozen press cell would otherwise underline each
+                // link passing under it. The release looks again.
                 if let Some(view) = &owner.committed {
-                    view.update(cx, |view, cx| view.scroll_lines(lines, cx));
+                    view.update(cx, |view, cx| {
+                        view.set_hover(None, cx);
+                        view.scroll_lines(lines, cx);
+                    });
                 }
                 owner.hold_scrollbar(cx);
                 owner.extend_selection(pointer, cx);

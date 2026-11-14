@@ -131,7 +131,16 @@ fn harness_with(cx: &mut TestAppContext, two: bool) -> Harness<'_> {
     test_support::install(cx);
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = cx.update(|cx| session::start(handle, events, None, cx));
-    helm.connect(Vec::new());
+    // An empty preferences row, as a fresh helm pushes it: a test changes a preference by pushing to it (the client
+    // ignores changes to a collection it has no snapshot of).
+    helm.connect(vec![farhelm_proto::ui_channel::CollectionState {
+        collection: farhelm_proto::ui_channel::Collection::Preferences,
+        meta: test_support::meta(&[farhelm_proto::ui_channel::PREFERENCES_KEY]),
+        entries: vec![farhelm_proto::ui_channel::KeyedEntry {
+            key: farhelm_proto::ui_channel::PREFERENCES_KEY.into(),
+            value: serde_json::json!({}),
+        }],
+    }]);
     cx.run_until_parked();
     let session = cx.update(|cx| connection.read(cx).session().cloned().unwrap());
     let opened: Opened = Rc::new(RefCell::new(None));
@@ -1937,6 +1946,188 @@ fn select_all_and_copy_copy_the_whole_terminal(cx: &mut TestAppContext) {
     assert!(
         copied.starts_with("h0\nh1\nh2\nh3\nh4\nscreen"),
         "{copied:?}"
+    );
+}
+
+// ---- Links ---------------------------------------------------------------------------------------------------------
+
+/// A screen whose first row prints a web address at columns 3 to 23 and another from column 29.
+const LINKED: &str = "go https://example.com/x and https://example.com/y";
+const LINKED_URL: &str = "https://example.com/x";
+const OTHER_URL: &str = "https://example.com/y";
+
+impl Harness<'_> {
+    /// Set the Terminal settings' link choice (`intercept`, `both` or `program`) as the helm pushes it.
+    fn link_click(&mut self, mode: &str) {
+        self.helm
+            .push(farhelm_proto::ui_channel::CollectionChanges {
+                collection: farhelm_proto::ui_channel::Collection::Preferences,
+                meta: test_support::meta(&[farhelm_proto::ui_channel::PREFERENCES_KEY]),
+                upsert: vec![farhelm_proto::ui_channel::KeyedEntry {
+                    key: farhelm_proto::ui_channel::PREFERENCES_KEY.into(),
+                    value: serde_json::json!({ "terminal_link_click": mode }),
+                }],
+                remove: Vec::new(),
+            });
+        settle(self.cx);
+    }
+
+    /// The link the view says the pointer rests on, by its address.
+    fn hovered(&mut self) -> Option<String> {
+        self.read(|owner, cx| {
+            owner
+                .committed
+                .as_ref()
+                .unwrap()
+                .read(cx)
+                .hovered_link()
+                .map(|link| link.uri.clone())
+        })
+    }
+
+    /// A click at `at`, the pointer having come to rest there first, as a real pointer does.
+    fn click_at(&mut self, at: Point<Pixels>) {
+        self.cx.simulate_mouse_move(at, None, Modifiers::none());
+        settle(self.cx);
+        self.cx
+            .simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+        self.cx
+            .simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+        settle(self.cx);
+    }
+}
+
+/// A web address printed in the terminal is a link: resting the pointer on it hovers it (the view underlines it and
+/// the pointing hand shows) and moving off leaves it; a click opens it in the browser with no prompt (SPEC.md's links
+/// paragraph). Small jitter between press and release still counts as a click; a drag never opens anything.
+#[gpui::test]
+fn a_printed_web_address_hovers_and_opens_on_a_click(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing(LINKED);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let (on, off) = (h.at_cell(5, 0), h.at_cell(0, 0));
+    h.cx.simulate_mouse_move(on, None, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(h.hovered().as_deref(), Some(LINKED_URL));
+    h.cx.simulate_mouse_move(off, None, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(h.hovered(), None, "moving off leaves it");
+
+    h.cx.simulate_mouse_move(on, None, Modifiers::none());
+    settle(h.cx);
+    let far = on + point(px(30.), px(0.));
+    h.drag(on, far, Modifiers::none());
+    assert_eq!(h.cx.opened_url(), None, "a drag opens nothing");
+    // A drag that wanders off and comes back is still a drag, not a click (the old app dropped the click candidate
+    // once the pointer left the jitter).
+    h.cx.simulate_mouse_move(on, None, Modifiers::none());
+    settle(h.cx);
+    h.cx.simulate_mouse_down(on, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_move(far, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_move(on, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_up(on, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(
+        h.cx.opened_url(),
+        None,
+        "a drag back to the press opens nothing"
+    );
+
+    let nudged = on + point(px(3.), px(0.));
+    h.cx.simulate_mouse_move(on, None, Modifiers::none());
+    settle(h.cx);
+    h.cx.simulate_mouse_down(on, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_move(nudged, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_up(nudged, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(
+        h.cx.opened_url().as_deref(),
+        Some(LINKED_URL),
+        "jitter is still a click"
+    );
+    assert_eq!(h.sent(), [], "the program hears nothing of it");
+}
+
+/// Hover lookups pause while a button is held, so the release looks again: a drag from a link onto plain text, let go
+/// there with no further move, leaves no link underlined, and a press on plain text released over a link hovers it.
+#[gpui::test]
+fn the_release_looks_up_the_hover_again(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing(LINKED);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let (on, plain) = (h.at_cell(5, 0), h.at_cell(1, 0));
+    h.cx.simulate_mouse_move(on, None, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(
+        h.hovered().as_deref(),
+        Some(LINKED_URL),
+        "the premise: the link is hovered"
+    );
+    h.drag(on, plain, Modifiers::none());
+    assert_eq!(h.hovered(), None, "released on plain text");
+    h.drag(plain, on, Modifiers::none());
+    assert_eq!(
+        h.hovered().as_deref(),
+        Some(LINKED_URL),
+        "released on the link"
+    );
+}
+
+/// The Terminal settings' link choice decides who a click on a web link belongs to under mouse reporting. Intercept
+/// (the default) withholds the press from the program, with its release, and Farhelm opens the link, so a program
+/// that opens links itself cannot open a second tab; both sends the click on and opens it too; program leaves it to
+/// the program alone, and Farhelm opens nothing, with or without mouse reporting.
+#[gpui::test]
+fn the_link_choice_decides_who_gets_a_click_on_a_link(cx: &mut TestAppContext) {
+    use MouseEventKind::{Down, Up};
+    let mut h = harness(cx);
+    h.attach_showing(LINKED);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let on = h.at_cell(5, 0);
+
+    // Program first, while nothing has been opened (the test platform remembers only the last address opened).
+    h.link_click("program");
+    h.click_at(on);
+    assert_eq!(
+        h.cx.opened_url(),
+        None,
+        "program, no reporting: nothing opens"
+    );
+    h.fake().output(mouse_mode("click"));
+    settle(h.cx);
+    h.click_at(on);
+    assert_eq!(
+        h.sent(),
+        [report(Down, 0, (5, 0)), report(Up, 0, (5, 0))],
+        "program: the click is the program's"
+    );
+    assert_eq!(h.cx.opened_url(), None, "and Farhelm opens nothing");
+
+    h.link_click("intercept");
+    h.click_at(on);
+    assert_eq!(
+        h.sent(),
+        [],
+        "intercept: the program hears nothing of the press"
+    );
+    assert_eq!(h.cx.opened_url().as_deref(), Some(LINKED_URL));
+
+    // The other address, so its opening shows (the test platform keeps the last address opened).
+    h.link_click("both");
+    let other = h.at_cell(31, 0);
+    h.click_at(other);
+    assert_eq!(
+        h.sent(),
+        [report(Down, 0, (31, 0)), report(Up, 0, (31, 0))],
+        "both: the program gets it"
+    );
+    assert_eq!(
+        h.cx.opened_url().as_deref(),
+        Some(OTHER_URL),
+        "and Farhelm opens it"
     );
 }
 
