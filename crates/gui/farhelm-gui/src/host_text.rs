@@ -24,9 +24,10 @@
 //!
 //! Extension points (docs/gpui/foundation-ownership.md): a view that shows a new host-supplied field wraps it with
 //! [`HostText::from_host`] where it reads the field and draws it with [`element`] or a [`HostSentence`]; a component
-//! that takes host text takes `&HostText` and draws it the same way. Identity labels the user compares (installation
-//! ids, which SPEC.md also wants with their spaces visible) are not built yet; they arrive with the first view that
-//! shows one, as a second presentation here.
+//! that takes host text takes `&HostText` and draws it the same way, or, for wording that is usually the app's own but
+//! may name a host value (a dialog's summary, a prompt's lines), takes a [`Line`]. Identity labels the user compares
+//! (installation ids, which SPEC.md also wants with their spaces visible) are not built yet; they arrive with the first
+//! view that shows one, as a second presentation here.
 
 use std::fmt;
 use std::sync::Arc;
@@ -99,6 +100,7 @@ pub fn element(text: &HostText) -> Div {
 }
 
 /// One part of a [`HostSentence`].
+#[derive(Clone)]
 enum Part {
     /// The app's own words.
     App(SharedString),
@@ -113,7 +115,10 @@ enum Part {
 /// The parts are never concatenated for display, which is what keeps a right-to-left host value from reordering the
 /// app's words around it. The parts themselves carry no id, so they are not nodes of their own: a screen reader reads
 /// the sentence once, by its name, rather than as a run of fragments.
-#[derive(IntoElement)]
+///
+/// A clone draws the same parts under the same id, so two clones drawn in one frame are two nodes with one id; a
+/// sentence is cloned to be kept (inside a frozen [`Question`](crate::prompt::Question), say), not to be drawn twice.
+#[derive(Clone, IntoElement)]
 pub struct HostSentence {
     id: ElementId,
     parts: Vec<Part>,
@@ -166,12 +171,69 @@ impl RenderOnce for HostSentence {
             .flex()
             .flex_row()
             .flex_wrap()
+            // `min_w_0` lets a part shrink to the row and wrap. Without it a flex item's minimum width is its whole
+            // unwrapped line (GPUI measures text with no wrap width for that query), so a long session title in a
+            // dialog summary ran past the dialog's edge and was cut off there, hiding the part that tells two
+            // look-alike titles apart. Parts still wrap as whole blocks, since each is its own element.
             .children(self.parts.into_iter().map(|part| -> AnyElement {
                 match part {
-                    Part::App(words) => div().child(words).into_any_element(),
-                    Part::Host(text) => element(&text).into_any_element(),
+                    Part::App(words) => div().min_w_0().child(words).into_any_element(),
+                    Part::Host(text) => element(&text).min_w_0().into_any_element(),
                 }
             }))
+    }
+}
+
+/// One line of wording a component shows: the app's own words, or a [`HostSentence`] that names a host value.
+///
+/// Components whose text is usually the app's own but sometimes names something a host wrote (a dialog's summary, a
+/// prompt's lines: "Delete «api-refactor» on «build-box»?") take a `Line`, so a caller never has to turn a host value
+/// into a string to fit a string parameter. Without it, the only way in would be formatting [`HostText::raw`] into a
+/// label, which is exactly the unescaped, unisolated path SPEC_impl.md, "Host-supplied text", rules out. Plain strings
+/// convert through `From`, so app wording reads as it always did (`.summary("On this machine")`).
+///
+/// An app line draws exactly as a string child would. A sentence draws through [`HostSentence`]'s own element: one
+/// labelled node, under the id the caller gave it, named with its host parts escaped. Titles and button labels stay
+/// plain strings, for the app's own words only: a host value goes in the summary or a line, never in a dialog's
+/// accessible name. That is a convention, not something the type enforces, since a title still takes any string.
+#[derive(Clone, IntoElement)]
+pub enum Line {
+    /// The app's own words.
+    App(SharedString),
+    /// A sentence mixing the app's words with host values.
+    Sentence(HostSentence),
+}
+
+impl From<&'static str> for Line {
+    fn from(words: &'static str) -> Self {
+        Line::App(words.into())
+    }
+}
+
+impl From<String> for Line {
+    fn from(words: String) -> Self {
+        Line::App(words.into())
+    }
+}
+
+impl From<SharedString> for Line {
+    fn from(words: SharedString) -> Self {
+        Line::App(words)
+    }
+}
+
+impl From<HostSentence> for Line {
+    fn from(sentence: HostSentence) -> Self {
+        Line::Sentence(sentence)
+    }
+}
+
+impl RenderOnce for Line {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        match self {
+            Line::App(words) => words.into_any_element(),
+            Line::Sentence(sentence) => sentence.into_any_element(),
+        }
     }
 }
 

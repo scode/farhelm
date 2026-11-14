@@ -13,18 +13,20 @@ use gpui::{
 };
 
 use super::Button;
+use crate::host_text::Line;
 use crate::theme::{self, metrics};
 
 /// The body's floor before the whole frame starts scrolling instead: about three lines, as the old `min-height: 3em`.
 const BODY_MIN_HEIGHT: f32 = 36.;
 
-/// A dialog's frame. The title is the accessible name; the answers are drawn right-aligned in the order given, the old
-/// footer's order (Cancel first, the main action last).
+/// A dialog's frame. The title is the accessible name, and is always the app's own words; the summary may name a host
+/// value through a [`Line`], which then is a labelled node of its own inside the dialog. The answers are drawn
+/// right-aligned in the order given, the old footer's order (Cancel first, the main action last).
 #[derive(IntoElement)]
 pub struct DialogFrame {
     id: SharedString,
     title: SharedString,
-    summary: Option<SharedString>,
+    summary: Option<Line>,
     body: AnyElement,
     answers: Vec<Button>,
 }
@@ -46,8 +48,9 @@ impl DialogFrame {
         }
     }
 
-    /// A one-line summary under the title (the old `.dialog-summary`).
-    pub fn summary(mut self, summary: impl Into<SharedString>) -> Self {
+    /// A one-line summary under the title (the old `.dialog-summary`): app wording as a string, or a
+    /// [`HostSentence`](crate::host_text::HostSentence) when it names a host value (the session a delete removes).
+    pub fn summary(mut self, summary: impl Into<Line>) -> Self {
         self.summary = Some(summary.into());
         self
     }
