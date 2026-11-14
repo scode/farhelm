@@ -13,16 +13,17 @@
 //!   every key press. Work that finishes later takes a [`Mark`]
 //!   when the user starts it and asks [`has_moved_on`] before it moves focus or opens anything. The layer manager refuses
 //!   to open a layer for a mark the user has moved on from, which is how "things the user did not start never open over
-//!   what they are doing" is kept. The two public moves a feature makes after the user acted, [`choose_terminal`] and
-//!   [`focus_control`], take the mark of that action for the same reason. A third, [`move_within_control`], needs none:
-//!   it carries focus inside the control whose key is being handled (a radio group's arrows).
-//! - **Home.** When nothing holds focus and no layer that holds focus is open, focus goes home, which SPEC.md's "Where focus rests"
-//!   defines: the selected session's terminal, New when there are no sessions, a stopped session's card when the
-//!   selected session has stopped. The views that own those set it: [`set_home`] in general, and [`choose_terminal`]
-//!   when the user chooses a session (its terminal becomes home and takes focus). Only when none of them is on screen
-//!   does focus rest on the window's root view, which is not a tab stop, so a key press still starts inside Farhelm's
-//!   key context. SPEC.md's rule for a shell tab that exits (the agent tab takes focus at once) needs a move of its own,
-//!   which the terminal tabs add here when they arrive.
+//!   what they are doing" is kept. The three public moves a feature makes after the user acted, [`choose_terminal`],
+//!   [`focus_control`] and [`focus_in_layer`], take the mark of that action for the same reason. A fourth,
+//!   [`move_within_control`], needs none: it carries focus inside the control whose key is being handled (a radio
+//!   group's arrows).
+//! - **Home.** When nothing holds focus and no layer that holds focus is open, focus goes home, which SPEC.md's "Where
+//!   focus rests" defines: the selected session's terminal, New when there are no sessions, a stopped session's card
+//!   when the selected session has stopped. The views that own those set it: [`set_home`] in general, and
+//!   [`choose_terminal`] when the user chooses a session (its terminal becomes home and takes focus). Only when none of
+//!   them is on screen does focus rest on the window's root view, which is not a tab stop, so a key press still starts
+//!   inside Farhelm's key context. SPEC.md's rule for a shell tab that exits (the agent tab takes focus at once) needs
+//!   a move of its own, which the terminal tabs add here when they arrive.
 //! - **The dialog stack's trap and restore**, together with the layer manager, which records who opened each layer and
 //!   what was focused at the time. Tab and Shift+Tab stay inside the topmost layer; closing a layer returns focus to
 //!   where it was before it opened, or home when its opener asked for that ([`ReturnTo`]); when the focused control
@@ -31,8 +32,9 @@
 //!   "Inside a dialog or menu, focus stays inside"). A popover that never takes focus (a list floating under the field
 //!   the user types in) is not a layer for any of this: it traps nothing and gives nothing back, and while only such a
 //!   popover is open, focus moves on the page as if nothing were open ([`layers::focus_layer_open`]). Inside the
-//!   topmost layer, focus moves between parts of it only through [`move_within_control`]: within a radio group, and
-//!   into and out of a question the prompt draws inline in a dialog.
+//!   topmost layer, focus moves between parts of it only through [`move_within_control`] (within a radio group, and
+//!   into and out of a question the prompt draws inline in a dialog) or, to another control of the layer (because of
+//!   the user's action there, or a result that arrived later), through [`focus_in_layer`].
 //! - **Which press focuses an element.** Every focusable element is tracked through [`track`], which suppresses GPUI's
 //!   own focus-on-press (GPUI focuses any tracked element on mouse-down, a move no lint could see) and applies the
 //!   coordinator's rule instead: on Linux a click focuses the control it lands on; on macOS it does not, as in WebKit
@@ -50,20 +52,23 @@
 //!   decided this on 2026-11-13, under the rule that the GPUI app ports the old one rather than redesigning it: the Mac
 //!   keeps the old app's behavior, and Linux follows the GTK and Qt convention.
 //! - **Scrolling the focused control into view.** When the keyboard (Tab, Shift+Tab, a menu's arrows) or the app (a
-//!   layer returning focus, [`focus_control`], the recovery when a focused control vanishes) moves focus onto a control
-//!   inside a scrolling container, the container scrolls the least distance that shows the whole control, as a
-//!   browser's scroll-into-view does: SPEC.md's "Reaching everything by keyboard" means little if Tab reaches a control
-//!   the user cannot see. A container opts in by drawing through [`scroll_region`]; every one around the control
-//!   scrolls as far as needed, innermost first, and only vertically. A pointer press that focuses a control does not
-//!   scroll (browsers do not either, and it would move what the user is clicking), and neither does pointer hover in a
-//!   menu; but when the pressed control then goes away, the recovery that moves focus to the closest remaining one
-//!   scrolls that one into view, as any recovery does. Virtualized lists keep their own reveal: their rows are not all
-//!   drawn, so a row Tab has not reached may have no position to scroll to.
+//!   layer returning focus, [`focus_control`], [`focus_in_layer`], the recovery when a focused control vanishes) moves
+//!   focus onto a control inside a scrolling container, the container scrolls the least distance that shows the whole
+//!   control, as a browser's scroll-into-view does: SPEC.md's "Reaching everything by keyboard" means little if Tab
+//!   reaches a control the user cannot see. A container opts in by drawing through [`scroll_region`]; every one around
+//!   the control scrolls as far as needed, innermost first, and only vertically. A pointer press that focuses a control
+//!   does not scroll (browsers do not either, and it would move what the user is clicking), and neither does pointer
+//!   hover in a menu; but when the pressed control then goes away, the recovery that moves focus to the closest
+//!   remaining one scrolls that one into view, as any recovery does. Virtualized lists keep their own reveal: their
+//!   rows are not all drawn, so a row Tab has not reached may have no position to scroll to.
 //!
-//!   A control focused before it is first drawn is not scrolled to: a layer's start, or a control shown in the same
-//!   update that focuses it, has no position yet. Its owner scrolls it. SPEC.md has two such cases to come: Settings'
-//!   trust hints, which open agent trust and scroll its block into view, and the archive's global confirmation, whose
-//!   actions are brought into view when it opens.
+//!   A control focused before it is first drawn (a layer's start, or a control shown in the same update that focuses
+//!   it) has no position yet and is not scrolled to, and [`move_within_control`] scrolls nothing. A move to another
+//!   control of the open dialog goes through [`focus_in_layer`], which scrolls it into view once a frame has drawn it:
+//!   Settings' trust hints, which open agent trust and, once the agent's read answers, move focus to its switch and
+//!   scroll its block into view, and the launcher's Custom choice, which moves focus into the flags field it shows
+//!   (SPEC.md). Nothing yet scrolls to a layer's start below the fold; SPEC.md's archive global confirmation, whose
+//!   actions are brought into view when it opens, will need it.
 //!
 //! NOTE: Agent approval cards, which keep focus while a dialog is open, do not exist yet, so [`invariant_violation`]
 //! knows only the topmost dialog.
@@ -394,7 +399,8 @@ pub fn choose_terminal(terminal: &FocusHandle, chosen: &Mark, window: &mut Windo
 /// filter clears, the session header returning focus on Escape, a moved row's menu button. It is [`choose_terminal`]'s
 /// rule without the home change: `chosen` is the mark taken when the user acted, and once they have moved on since, or
 /// while a layer that holds focus is open (focus never leaves the topmost dialog or menu for the page behind it; a
-/// popover that never takes focus does not count), it does nothing.
+/// popover that never takes focus does not count), it does nothing. Inside the open dialog, [`focus_in_layer`] is the
+/// move.
 pub fn focus_control(target: &FocusHandle, chosen: &Mark, window: &mut Window, cx: &mut App) {
     if state(window, cx).is_none()
         || has_moved_on(chosen, cx)
@@ -403,6 +409,38 @@ pub fn focus_control(target: &FocusHandle, chosen: &Mark, window: &mut Window, c
         return;
     }
     apply_and_reveal(Move::To(target), window, cx);
+}
+
+/// Move focus to `target`, a control drawn inside the topmost layer that holds focus (a dialog, or a menu above it),
+/// because of something the user did there, and scroll it into view as after Tab. Two kinds of caller:
+///
+/// - A result that arrives later than the user's action: Settings opened at agent trust from a trust hint, with focus
+///   on the dialog, moving focus to the agent's switch once that agent's read answers.
+/// - The user's own action moving focus to another control of the same layer: choosing Custom in the launcher (a click
+///   or Enter) moving focus into its permission flags field.
+///
+/// [`focus_control`]'s rule for the topmost layer instead of the page: `chosen` is the mark taken when the user acted,
+/// and it does nothing once they have moved on since (a key press or a click), with no layer that holds focus open (the
+/// user's dialog closed), or when `target` was not drawn inside the topmost such layer in the frame on screen (another
+/// layer opened above the dialog). It also checks that focus is inside that layer, which the focus invariant already
+/// guarantees: a defensive check, so a broken state never lets the move pull focus.
+///
+/// Call it once a frame has drawn `target`, or it refuses quietly: a control not yet drawn has no position to scroll
+/// to and is not known to be inside the layer. A target that the action itself makes appear (the flags field, drawn
+/// only once Custom is chosen) is not drawn while the action is handled, nor in a `window.defer` queued there, which
+/// runs before the next frame. Its owner calls this from the next frame instead: a `window.defer` queued from the
+/// render that first draws the target runs once that frame is drawn. (`window.on_next_frame` is the ticker's alone,
+/// by the GUI lints.)
+pub fn focus_in_layer(target: &FocusHandle, chosen: &Mark, window: &mut Window, cx: &mut App) {
+    if state(window, cx).is_none() || has_moved_on(chosen, cx) {
+        return;
+    }
+    // `contains` reads the frame on screen, so a target not drawn there, or drawn outside the layer, is refused.
+    let inside_topmost = layers::top_container(window, cx)
+        .is_some_and(|top| top.contains_focused(window, cx) && top.contains(target, window));
+    if inside_topmost {
+        apply_and_reveal(Move::To(target), window, cx);
+    }
 }
 
 /// Carry focus from `from` to `to`, two parts of one place inside the topmost layer (or the page), because what the
@@ -421,6 +459,12 @@ pub fn focus_control(target: &FocusHandle, chosen: &Mark, window: &mut Window, c
 /// must draw `to` beside `from` in the same layer: the coordinator cannot check a target that is not drawn yet, the
 /// per-step focus invariant catches a caller that breaks this, and a target not drawn in the next frame loses focus to
 /// the closest control left in the layer.
+///
+/// Both kinds carry focus along inside one place as part of the key the user just pressed there, so this scrolls
+/// nothing into view and checks no mark. A move to another control of the layer, because of the user's action or a
+/// result that arrived later, uses [`focus_in_layer`] instead, which checks that the user has not moved on (`from`
+/// still holding focus does not show that, and on macOS a clicked button never held focus) and scrolls the control
+/// into view.
 pub fn move_within_control(
     from: &FocusHandle,
     to: &FocusHandle,
@@ -695,9 +739,9 @@ fn distance_squared(a: gpui::Point<Pixels>, b: gpui::Point<Pixels>) -> f32 {
 ///
 /// For a container that scrolls vertically and draws all its content, such as a dialog's body, or the sidebar's host
 /// list once the sidebar draws it through this. Not for a virtualized list: it draws only the rows in view, so the row
-/// focus lands on next may have no position yet, and it keeps its own reveal. Regions may nest (a dialog's body inside its card):
-/// each one around the control scrolls as needed, innermost first. Style the container before wrapping it; the region
-/// adds no box of its own.
+/// focus lands on next may have no position yet, and it keeps its own reveal. Regions may nest (a dialog's body inside
+/// its card): each one around the control scrolls as needed, innermost first. Style the container before wrapping it;
+/// the region adds no box of its own.
 pub fn scroll_region<E>(container: E, handle: &ScrollHandle) -> ScrollRegion
 where
     E: StatefulInteractiveElement + IntoElement,
