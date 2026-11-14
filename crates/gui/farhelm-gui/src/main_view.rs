@@ -25,6 +25,10 @@
 //! ([`settings::follow_stored_appearance`]). Together they give SPEC.md's rule ("System follows each device's current
 //! appearance ... an explicit choice overrides it"); the theme module decides how a choice and the system resolve to
 //! a palette.
+//!
+//! In the macOS window the sidebar's app bar and the session pane's top row are the window's title band
+//! (`desktop::title_band`); this view draws the band's one window-wide press watcher, gives the connection screens a
+//! band strip of their own above their content, and puts a strip of the band above any notice banner.
 
 use farhelm_helm_client::ChannelState;
 use gpui::{
@@ -35,6 +39,7 @@ use gpui::{
 
 use crate::actions::{DeleteSession, QuickSwitcher, RenameSession};
 use crate::components::{Banner, Button, HoverHelp, Role, Tier};
+use crate::desktop::title_band::{self, Row};
 use crate::focus::Mark;
 use crate::notices::{self, Notice};
 use crate::session_list::{self, SessionList};
@@ -117,11 +122,24 @@ impl Render for MainView {
             .map(|connection| connection.read(cx).state().clone())
             .unwrap_or(ChannelState::Connecting);
         let body = if state == ChannelState::Connected {
+            let posted = notices::posted(cx);
+            // In the macOS window a posted notice's banner would sit under the traffic lights, so a strip of the title
+            // band goes above the banners while any is shown.
+            let above_banners = (!posted.is_empty())
+                .then(|| title_band::strip("above-banners", Row::AboveBanners))
+                .flatten();
             div()
                 .flex()
                 .flex_col()
                 .size_full()
-                .children(notices::posted(cx).into_iter().map(banner))
+                .children(above_banners)
+                .children(posted.into_iter().map(banner))
+                // In a narrow macOS window the app header leaves the sidebar's column and runs across the window's top
+                // here, above the row that scrolls sideways (`Sidebar::floating_header`).
+                .children(
+                    self.sidebar
+                        .update(cx, |sidebar, cx| sidebar.floating_header(window, cx)),
+                )
                 .child(
                     div()
                         .id("main-shell")
@@ -175,7 +193,10 @@ impl Render for MainView {
             .bg(theme::color(palette.bg_0))
             .text_color(theme::color(palette.fg_0))
             .font_family(crate::assets::UI_FONT)
-            .child(body);
+            .child(body)
+            // Once for the whole window: it lets the title band pair a double-click with the press before it, wherever
+            // that press was (`desktop::title_band`).
+            .child(title_band::watch_presses());
         root::wrap(ground, &self.root, window, cx)
     }
 }
@@ -226,8 +247,14 @@ fn inert(state: &ChannelState, cx: &App) -> AnyElement {
         ),
         ChannelState::HelmEnded => ("The helm stopped.".into(), None),
     };
-    div()
-        .size_full()
+    // SPEC.md, "Desktop window chrome": startup screens keep their content clear of the native controls. In the macOS
+    // window a strip of the title band runs across the screen's top, as tall as the band, as the old window's startup
+    // pages kept 48 pixels there (`padding-top: 48px`); unlike the old padding the strip also moves the window, which
+    // with the app owning the title bar's drag would otherwise have no place to be grabbed until the helm connects.
+    let content = div()
+        .flex_1()
+        .min_h_0()
+        .w_full()
         .flex()
         .flex_col()
         .items_center()
@@ -239,7 +266,13 @@ fn inert(state: &ChannelState, cx: &App) -> AnyElement {
                 .text_color(theme::color(palette.fg_1))
                 .child(message),
         )
-        .children(action)
+        .children(action);
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .children(title_band::strip("connection-titlebar", Row::EmptyPane))
+        .child(content)
         .into_any_element()
 }
 

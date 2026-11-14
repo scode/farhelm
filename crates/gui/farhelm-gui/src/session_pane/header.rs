@@ -50,6 +50,7 @@ use super::SessionPane;
 use crate::actions::DELETE_SESSION_SHORTCUT_NAME;
 use crate::assets::Icon;
 use crate::components::{Button, HoverHelp, Tier};
+use crate::desktop::title_band::{self, Row};
 use crate::focus::Mark;
 use crate::layers::{self, Anchor, LayerId, Subject};
 use crate::operations::Work;
@@ -202,6 +203,13 @@ impl SessionPane {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let palette = theme::palette(cx);
+        // In the macOS window the row is the session's half of the window's title band: as tall as the sidebar's app
+        // bar, and a press on its empty background drags the window (`desktop::title_band`).
+        let min_height = if title_band::ON {
+            title_band::HEIGHT
+        } else {
+            px(ROW_MIN_HEIGHT)
+        };
         let row = div()
             .id("session-header")
             .debug_selector(|| "session-header".into())
@@ -210,7 +218,7 @@ impl SessionPane {
             .flex_none()
             .items_center()
             .gap(px(ROW_GAP))
-            .min_h(px(ROW_MIN_HEIGHT))
+            .min_h(min_height)
             .px(px(ROW_PAD_X))
             .overflow_hidden()
             .bg(theme::color(palette.bg_1))
@@ -224,6 +232,7 @@ impl SessionPane {
                     .flex_1()
                     .min_w_0(),
             );
+        let row = title_band::row(row, Row::SessionTop);
         let Some(store) = session::current_store(cx) else {
             return row.into_any_element();
         };
@@ -233,7 +242,10 @@ impl SessionPane {
         if let Some(guard) = delete::in_flight(key, cx) {
             self.header.anchors.clear();
             return row
-                .child(delete_progress(key, guard, step, cx))
+                // Text in the title band keeps its presses: it must not move the window (`desktop::title_band`).
+                .child(title_band::claims_presses(
+                    div().child(delete_progress(key, guard, step, cx)),
+                ))
                 .into_any_element();
         }
         let shown = Shown {
