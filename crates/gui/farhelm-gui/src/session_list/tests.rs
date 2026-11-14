@@ -16,17 +16,16 @@ use farhelm_proto::ui_channel::{
     KeyedEntry, ListCounts, PREFERENCES_KEY, Preferences, SessionRow,
 };
 use gpui::{AppContext as _, DriverNode, Role, TestAppContext, VisualTestContext};
-use gpui_component::Root;
 use serde_json::{Value, json};
 
-use super::row::{ROW_ID_PREFIX, abbreviate_home, host_label};
+use super::row::{ITEM_ID_PREFIX, ROW_ID_PREFIX, abbreviate_home, host_label};
 use super::selection::{self, Change, Listed, Stamped};
 use super::status::{Live, pulse_opacity};
 use super::{CountLine, SessionList, count_line, empty_fleet};
 use crate::host_text::tests::SPOOFING_CORPUS;
 use crate::main_view::MainView;
 use crate::notices::{self, Notice};
-use crate::test_support::{meta, session_entry, started};
+use crate::test_support::{frame, meta, session_entry, started};
 use crate::{local_state, render_count, session_pane, test_support, theme, ticker};
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
@@ -182,13 +181,7 @@ pub(super) fn open_main(
     let (mut fake, _connection) = started(cx);
     fake.connect(snapshot);
     cx.run_until_parked();
-    let (_, window) = cx.add_window_view(|window, cx| {
-        let main = cx.new(|cx| MainView::new(window, cx));
-        Root::new(main, window, cx)
-    });
-    window.update(|window, _| window.activate_window());
-    window.run_until_parked();
-    test_support::check(window);
+    let (_, window) = test_support::open_view(cx, MainView::new);
     (fake, window)
 }
 
@@ -213,13 +206,6 @@ fn seen(key: &str, activity: i64) -> (String, Value) {
 
 pub(super) fn selected(cx: &mut VisualTestContext) -> Option<String> {
     cx.update(|_, cx| local_state::selected(cx))
-}
-
-/// One frame's driver record: every element drawn, with its accessible name and the text it painted.
-pub(crate) fn frame(cx: &mut VisualTestContext) -> Vec<DriverNode> {
-    cx.update(|window, _| window.set_driver_enabled(true));
-    test_support::redraw(cx);
-    cx.update(|window, _| window.driver_nodes().to_vec())
 }
 
 /// The keys of the rows drawn, top to bottom.
@@ -295,6 +281,49 @@ fn a_click_opens_a_session_remembers_it_and_marks_it_seen_once(cx: &mut TestAppC
         [],
         "choosing the open session again sends nothing"
     );
+}
+
+/// The open session's row is how assistive technology tells which session the pane shows. The old app marked the open
+/// row's button `aria-current`, which GPUI cannot express, so the port marks the row's list item selected instead (a
+/// recorded deviation in the parity file), and nothing checked that mark until the frame record carried selection.
+/// Specified: with session a open, a's list item says it is selected and b's says it is not; after a click opens b,
+/// the two swap.
+#[gpui::test]
+fn the_open_sessions_list_item_says_it_is_selected(cx: &mut TestAppContext) {
+    let rows = [session("a"), session("b")];
+    let (_fake, cx) = open_main(
+        cx,
+        vec![listing(&["a", "b"], &rows), preferences(&["a"], None)],
+    );
+    assert_eq!(selected(cx).as_deref(), Some("a"), "the premise: a is open");
+    assert_eq!(
+        item_selection(&frame(cx)),
+        [("a".to_owned(), Some(true)), ("b".to_owned(), Some(false))]
+    );
+
+    test_support::click(cx, "session-row-b");
+    cx.run_until_parked();
+    assert_eq!(selected(cx).as_deref(), Some("b"), "the premise: b is open");
+    assert_eq!(
+        item_selection(&frame(cx)),
+        [("a".to_owned(), Some(false)), ("b".to_owned(), Some(true))]
+    );
+}
+
+/// What each drawn row's list item says about selection, by session key in key order: the frame record's `selected`,
+/// which is `None` only for an element that says nothing about it. Only elements with the list item role count, since
+/// assistive technology reports selection on item-like roles alone, which is why the mark is on the item at all.
+fn item_selection(nodes: &[DriverNode]) -> Vec<(String, Option<bool>)> {
+    let mut items: Vec<_> = nodes
+        .iter()
+        .filter(|node| node.role == Some(Role::ListItem))
+        .filter_map(|node| {
+            let key = node.element_id.as_deref()?.strip_prefix(ITEM_ID_PREFIX)?;
+            Some((key.to_owned(), node.selected))
+        })
+        .collect();
+    items.sort();
+    items
 }
 
 /// GPUI draws nothing for a window that is hidden, minimized or behind other windows, yet SPEC.md, "Status", records

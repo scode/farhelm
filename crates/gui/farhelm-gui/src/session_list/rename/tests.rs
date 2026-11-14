@@ -23,7 +23,7 @@ use crate::operations::OpKey;
 use crate::session;
 use crate::session_list::tests::{Fixture, listing, preferences, session};
 use crate::test_support::started;
-use crate::test_support::{self, keys, settle};
+use crate::test_support::{self, frame, keys, settle};
 
 /// The editor [`super::open`] opened last, recorded in test builds only, so a test can read its draft and field.
 pub(super) struct Opened(pub(super) WeakEntity<RenameEditor>);
@@ -153,13 +153,6 @@ fn terminal_focused(cx: &mut VisualTestContext) -> bool {
             .iter()
             .any(|context| context.contains(TERMINAL_CONTEXT))
     })
-}
-
-/// One frame's driver record: every element drawn, with its accessible name and state.
-fn frame(cx: &mut VisualTestContext) -> Vec<DriverNode> {
-    cx.update(|window, _| window.set_driver_enabled(true));
-    test_support::redraw(cx);
-    cx.update(|window, _| window.driver_nodes().to_vec())
 }
 
 /// The drawn element under `id`, from `nodes`.

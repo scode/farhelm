@@ -17,10 +17,10 @@ use serde_json::json;
 use super::row::ROW_ID_PREFIX;
 use super::selection;
 use super::tests::{
-    Fixture, change, frame, listing, listing_meta, open_main, preferences, selected, session,
+    Fixture, change, listing, listing_meta, open_main, preferences, selected, session,
 };
 use crate::actions::DELETE_SESSION_CHORD;
-use crate::test_support;
+use crate::test_support::{self, focused_id, frame};
 
 /// `n` idle sessions keyed `s000`, `s001`, ... (the listing's order), so the keys sort as the order does and no row
 /// pulses.
@@ -52,14 +52,6 @@ fn drawn_rows(cx: &mut VisualTestContext) -> Vec<String> {
         .collect();
     rows.sort_by(|a, b| a.0.total_cmp(&b.0));
     rows.into_iter().map(|(_, key)| key).collect()
-}
-
-/// The id of the element that holds focus, from a fresh frame's driver record.
-fn focused(cx: &mut VisualTestContext) -> Option<String> {
-    frame(cx)
-        .into_iter()
-        .find(|node| node.flags.focused && node.element_id.is_some())
-        .and_then(|node| node.element_id.map(|id| id.to_string()))
 }
 
 /// Scroll the list down by `by` with the pointer over it, as a wheel or trackpad would.
@@ -163,7 +155,7 @@ fn a_rows_menu_button_keeps_focus_when_its_row_scrolls_out_of_view(cx: &mut Test
     test_support::click(cx, "session-menu-s000");
     test_support::keys(cx, "escape");
     assert_eq!(
-        focused(cx).as_deref(),
+        focused_id(cx).as_deref(),
         Some("session-menu-s000"),
         "the premise: focus is on s000's menu button"
     );
@@ -173,7 +165,7 @@ fn a_rows_menu_button_keeps_focus_when_its_row_scrolls_out_of_view(cx: &mut Test
         drawn_rows(cx).iter().any(|key| key == "s100"),
         "the premise: the list scrolled far down"
     );
-    assert_eq!(focused(cx).as_deref(), Some("session-menu-s000"));
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-s000"));
 }
 
 /// SPEC.md asks the Delete shortcut's question beside the open session's row, and a question beside a row nobody can
@@ -234,7 +226,7 @@ fn tab_walks_past_the_painted_rows(cx: &mut TestAppContext) {
     test_support::click(cx, "session-menu-s000");
     test_support::keys(cx, "escape");
     assert_eq!(
-        focused(cx).as_deref(),
+        focused_id(cx).as_deref(),
         Some("session-menu-s000"),
         "the premise: focus is on s000's menu button"
     );
@@ -242,7 +234,7 @@ fn tab_walks_past_the_painted_rows(cx: &mut TestAppContext) {
     for _ in 0..60 {
         test_support::keys(cx, "tab");
     }
-    let focused = focused(cx).unwrap_or_default();
+    let focused = focused_id(cx).unwrap_or_default();
     let key = focused
         .strip_prefix(ROW_ID_PREFIX)
         .or_else(|| focused.strip_prefix("session-menu-"))
@@ -278,7 +270,7 @@ fn a_press_on_a_scrolled_away_menu_button_brings_its_row_back_and_opens_the_menu
         !drawn_rows(cx).iter().any(|key| key == "s001"),
         "the premise: the rows around s000 are scrolled away"
     );
-    assert_eq!(focused(cx).as_deref(), Some("session-menu-s000"));
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-s000"));
 
     let view = cx.update(|window, _| window.viewport_size().height);
     assert!(
@@ -326,7 +318,7 @@ fn a_click_on_an_edge_row_opens_it_without_scrolling(cx: &mut TestAppContext) {
     // so the row stays put with or without the keyboard-only rule and the test checks only that the click opens it.
     if crate::focus::CLICK_FOCUSES_CONTROLS {
         assert_eq!(
-            focused(cx).as_deref(),
+            focused_id(cx).as_deref(),
             Some(selector),
             "the premise: the press focused the row's control"
         );
@@ -364,7 +356,7 @@ fn a_tab_within_the_view_does_not_scroll(cx: &mut TestAppContext) {
     test_support::click(cx, "session-menu-s002");
     test_support::keys(cx, "escape");
     assert_eq!(
-        focused(cx).as_deref(),
+        focused_id(cx).as_deref(),
         Some("session-menu-s002"),
         "the premise: focus is on s002's menu button"
     );
