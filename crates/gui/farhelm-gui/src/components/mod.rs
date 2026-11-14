@@ -108,6 +108,20 @@ impl HoverHelp {
 /// Every control wires its help through here, and nothing else can: the help's text is private to this module, so a
 /// control that skipped this would never read its own help, and the unused field fails the build (`-D warnings`). That
 /// is what keeps a future control from silently dropping its tooltip.
+///
+/// A control may sit inside another that has help of its own (a mark inside a row), and the innermost one's help wins
+/// ([`layers::hover_began`], "Nested hover help"). The move listener wired here exists for that rule: it tells the
+/// layer manager the order GPUI drew the hovered controls in. So a container does not need its help moved onto a
+/// separate surface to keep it from covering its children's.
+///
+/// Every render hands the layer manager the help as drawn ([`layers::help_drawn`]), so an outer control's help that
+/// shows later is what it says then, not what it said when the pointer arrived. A press of any mouse button on the
+/// control puts its help away while the pointer rests there ([`layers::pointer_pressed`]), in the capture phase so a
+/// child that stops the press (a text field's input) cannot hide it.
+///
+/// The move listener makes every control with help a mouse listener in GPUI's driver record, which the test bridge
+/// reads: in its snapshots a status mark is an interactive entry, and a row button holding marks lists them under it
+/// rather than being a leaf.
 pub(crate) fn with_hover_help<E: StatefulInteractiveElement>(
     element: E,
     id: &SharedString,
@@ -126,14 +140,19 @@ pub(crate) fn with_hover_help<E: StatefulInteractiveElement>(
     } else {
         element
     };
+    layers::help_drawn(&owner, &help.0, window, cx);
     let help = help.0.clone();
-    element.on_hover(move |hovered, window, cx| {
-        if *hovered {
-            layers::show_tooltip(&owner, help.clone(), window, cx);
-        } else {
-            layers::hide_tooltip(&owner, window, cx);
-        }
-    })
+    let moved = owner.clone();
+    element
+        .on_hover(move |hovered, window, cx| {
+            if *hovered {
+                layers::hover_began(&owner, help.clone(), window, cx);
+            } else {
+                layers::hover_ended(&owner, window, cx);
+            }
+        })
+        .capture_any_mouse_down(|_, window, cx| layers::pointer_pressed(window, cx))
+        .on_mouse_move(move |_, window, cx| layers::hover_moved(&moved, window, cx))
 }
 
 /// A control's activation handler: what a click, or Enter or Space while the control has focus, does.
