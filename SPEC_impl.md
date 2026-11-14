@@ -537,13 +537,19 @@ as done, refused, or accepted (202: long work the helm carries on with; the stor
 setup, Update and Uninstall the result arrives in the hosts' pushed progress). An accepted save leaves its draft
 touched, since the stored value has not changed yet.
 
+A read (a GET for something the helm does not push) is not work on a key: it changes nothing, so it has no busy state
+and leaves no refusal on a key. A feature's read goes through the store's one read helper (the quick switcher's, written
+before the helper, is the one still to move onto it), which words a refusal exactly as an operation's is worded, so a
+failed read and a failed save say the helm's reason the same way; the feature shows the result itself. A reset drops a
+read's wait like any other.
+
 Feature code does not detach tasks. GUI crates do not spawn threads or other runtimes' tasks, sleep, or read the system
 clock; time comes from the ticker and async work from GPUI's executor, which keeps tests deterministic. The runtime that
 network I/O needs lives in the helm client, outside `crates/gui/` (see "Where the GUI meets the helm").
 
 Enforced by clippy `disallowed-methods` for detaching, thread and runtime spawns, sleeps and clock reads in the GUI
 crates, by a test of overlapping actions on two sessions, and by a test of work on a host and a template beside a
-session's, each with its own busy state and refusal.
+session's, each with its own busy state and refusal, and by tests of a read's wording and of its send and reset.
 
 ### Drafts
 
