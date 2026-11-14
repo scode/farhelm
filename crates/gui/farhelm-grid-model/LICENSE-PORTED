@@ -7,6 +7,12 @@ and bounded neighboring-row search are in src/links.rs; the disclosure policy
 in src/link_disclosure.rs follows the same old client. The upstream notices
 and MIT license texts below are unchanged.
 
+The "ships inside the distributed bundles" paragraph below describes the
+old web client: that asset and bundle are gone. No shipped binary links
+this crate yet; the change that first links it into the desktop app
+embeds this notice and shows it to the user (SPEC_impl.md, "Dependencies
+and licenses").
+
 --------------------------------------------------------------------------------
 
 This file carries the license notices for code that Farhelm ported from

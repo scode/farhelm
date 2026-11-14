@@ -70,6 +70,14 @@ use farhelm_proto::grid::{GridInput, MouseEventKind, modifiers};
 use farhelm_terminal_emulator::{Modes, MouseEncoding, MouseReporting, Size};
 use terminal_host::protocol::MAX_INPUT;
 
+/// The license notices for the xterm.js code this module ports, verbatim, as they must travel with every binary that
+/// compiles it.
+///
+/// MIT requires the copyright and permission notice to be included with copies of the code, and this module is
+/// compiled into every `farhelm` binary. The notice used to ship inside the web bundle that binary embedded; with that
+/// bundle gone, embedding the file here is what keeps it in the binary, and `farhelm licenses` prints it.
+pub const PORTED_CODE_NOTICES: &str = include_str!("../grid-ported-code-LICENSES.txt");
+
 /// Opens a bracketed paste (mode 2004).
 pub const PASTE_START: &[u8] = b"\x1b[200~";
 /// Closes a bracketed paste.
