@@ -1,6 +1,7 @@
 //! Buttons, drawn as the old stylesheet's `.btn` tiers: ghost (the default), neutral, primary and danger, the outlined
 //! danger of a permanent answer, plus the compact control that sits on the red banner, the ⋯ that opens a list row's
-//! menu, the host rail's square entries, the removable filter chip, and the button that reads as a link.
+//! menu, the host rail's square entries, the removable filter chip, the button that reads as a link, and an entry of a
+//! navigation list such as Settings' sections.
 //!
 //! A button shows its label's text, or other content in its place ([`Button::content`]: a host's mark, a mark beside a
 //! host's name); the label is its accessible name either way. A button that is one of a set of choices says whether
@@ -21,7 +22,8 @@
 //! chose stays focused while its work runs (disabling it would drop focus out of the dialog's controls). The
 //! focus ring is the old `:focus-visible` ring (a 2-pixel accent outline one pixel outside the button, shown only after
 //! keyboard input) together with the hover fill, which the old sheet also gave a focused button so a ghost button's box
-//! is visible to a keyboard user.
+//! is visible to a keyboard user. The Settings section list's entries (`Tier::Nav`) are the exception: their old rules
+//! drew the ring alone, one pixel inside the edge, with no focus fill.
 
 use std::rc::Rc;
 
@@ -75,6 +77,13 @@ pub enum Tier {
     /// `.inline-link`: a button that reads as a link in running text: the link color, underlined, with no fill, edge
     /// or padding. The focus ring is every control's.
     Link,
+    /// `.app-settings-navigation button`: an entry of a navigation list (Settings' sections), as wide as its list, its
+    /// icon and label at the left 8 pixels apart, 13-pixel text on a 16-pixel line (the old `line-height: normal`, which
+    /// made it 34 pixels high), the primary ink at rest, and the label cut short with an ellipsis rather than wrapped.
+    /// The entry whose pane is shown is drawn through [`Button::pressed`], in this tier as the old sheet drew it: the
+    /// accent fill with the accent edge, which the pointer does not change, and the inverse ring one pixel inside the
+    /// edge (`outline-offset: -3px`).
+    Nav,
 }
 
 /// The [`Tier::RowMenu`] box's height: 14-pixel text at `line-height: 1.4`.
@@ -85,6 +94,10 @@ const ROW_MENU_PAD_X: f32 = 5.;
 const RAIL_SIZE: f32 = 40.;
 /// The [`Tier::Chip`] box's padding, vertical then horizontal.
 const CHIP_PAD: (f32, f32) = (4., 6.);
+/// The [`Tier::Nav`] box's padding, vertical then horizontal.
+const NAV_PAD: (f32, f32) = (8., 10.);
+/// The [`Tier::Nav`] label's line height.
+const NAV_LINE_HEIGHT: f32 = 16.;
 
 /// A button with a visible text label (and optionally a leading icon).
 #[derive(IntoElement)]
@@ -179,7 +192,8 @@ impl Button {
     /// force now: `aria-pressed`, which assistive technology hears as a toggle's state, and while pressed the old
     /// `[aria-pressed="true"]` look, the accent fill with the inverse ink and an inverse focus ring drawn inside the
     /// edge. A pressed button keeps that fill under the pointer and the keyboard ring (one step up the accent family),
-    /// where the old sheet's later `.btn` hover and focus fills replaced it and left white ink on a light fill.
+    /// where the old sheet's later `.btn` hover and focus fills replaced it and left white ink on a light fill; a
+    /// pressed `Tier::Nav` entry keeps its fill unchanged under the pointer, as the old section list did.
     pub fn pressed(mut self, pressed: bool) -> Self {
         self.pressed = Some(pressed);
         self
@@ -219,6 +233,14 @@ impl Button {
                 palette.on_fill,
             );
         }
+        if self.pressed == Some(true) && self.tier == Tier::Nav {
+            return (
+                Some(palette.accent_fill),
+                palette.accent_fill,
+                Some(palette.accent_edge),
+                palette.on_fill,
+            );
+        }
         if self.pressed == Some(true) {
             return (
                 Some(palette.accent_fill),
@@ -253,6 +275,7 @@ impl Button {
                 palette.fg_0,
             ),
             Tier::Rail => (None, palette.bg_2, None, palette.fg_1),
+            Tier::Nav => (None, palette.control_hover, None, palette.fg_0),
             Tier::Link => (None, theme::TRANSPARENT, None, palette.link),
             Tier::Primary if self.disabled || self.busy => retired,
             Tier::Danger if self.disabled || self.busy => retired,
@@ -297,6 +320,7 @@ impl RenderOnce for Button {
             Tier::RowMenu { .. } => (px(0.), px(ROW_MENU_PAD_X)),
             Tier::Rail | Tier::Link => (px(0.), px(0.)),
             Tier::Chip => (px(CHIP_PAD.0), px(CHIP_PAD.1)),
+            Tier::Nav => (px(NAV_PAD.0), px(NAV_PAD.1)),
             Tier::Ghost | Tier::Neutral | Tier::Primary | Tier::Danger | Tier::DangerOutline => {
                 metrics::BUTTON_PAD
             }
@@ -313,6 +337,7 @@ impl RenderOnce for Button {
             | Tier::Rail
             | Tier::Chip
             | Tier::Link
+            | Tier::Nav
             | Tier::RowMenu { on_fill: false } => palette.accent,
         };
         // An icon-only button is otherwise as high as its icon plus its padding and square; the row menu's box is the
@@ -377,24 +402,39 @@ impl RenderOnce for Button {
             .line_height(px(17.))
             .text_color(theme::color(text))
             // A transparent edge where a tier has none keeps every tier the same size.
-            .border_color(theme::color(edge.unwrap_or(theme::TRANSPARENT)));
+            .border_color(theme::color(edge.unwrap_or(theme::TRANSPARENT)))
+            .when(self.tier == Tier::Nav, |button| {
+                button
+                    .justify_start()
+                    .gap(px(8.))
+                    .min_w_0()
+                    .text_size(metrics::TEXT_MD)
+                    .line_height(px(NAV_LINE_HEIGHT))
+            });
         button = button.when_some(fill, |button, fill| button.bg(theme::color(fill)));
-        if ring && enabled {
+        // The old navigation entries showed keyboard focus by their ring alone, without `.btn`'s focus fill.
+        if ring && enabled && self.tier != Tier::Nav {
             button = button.bg(theme::color(hover_fill));
         }
         if ring && pressed {
             // A pressed button's ring is the inverse ink inside its edge (`outline-color: var(--on-fill);
             // outline-offset: -4px`), as the old rail drew it: the accent ring would not read against the accent fill.
+            // The old navigation entries drew it a pixel further out (`outline-offset: -3px`).
+            let (inset, radius) = if self.tier == Tier::Nav {
+                (px(1.), metrics::RADIUS_SM - px(1.))
+            } else {
+                (px(2.), px(1.))
+            };
             button = button.child(
                 div()
                     .absolute()
-                    .top(px(2.))
-                    .left(px(2.))
-                    .right(px(2.))
-                    .bottom(px(2.))
+                    .top(inset)
+                    .left(inset)
+                    .right(inset)
+                    .bottom(inset)
                     .border_2()
                     .border_color(theme::color(ring_color))
-                    .rounded(px(1.)),
+                    .rounded(radius),
             );
         } else if ring {
             // The old `outline: 2px solid var(--accent); outline-offset: 1px`, drawn as a ring element because GPUI has
@@ -425,6 +465,7 @@ impl RenderOnce for Button {
                     | Tier::Rail
                     | Tier::Chip
                     | Tier::Link
+                    | Tier::Nav
             )
         {
             button = button.opacity(0.5);
@@ -439,6 +480,8 @@ impl RenderOnce for Button {
         }
         if let Some(content) = self.content {
             button = button.child(content);
+        } else if self.show_label && self.tier == Tier::Nav {
+            button = button.child(div().min_w_0().truncate().child(self.label));
         } else if self.show_label {
             button = button.child(self.label);
         }

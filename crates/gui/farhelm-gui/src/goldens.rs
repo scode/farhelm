@@ -3,9 +3,9 @@
 //! the keyboard focus ring, host-supplied text over its spoofing corpus, the notice banner, the terminal's styles and
 //! cursor shapes, an attached terminal's exit line and status line, the scrim a pending Delete puts over the open
 //! session's terminal, the session list (a fleet of every status a row draws, an empty fleet, a row's open menu, a
-//! row's Delete question, and a pending and a refused Delete), the Rename editor, the select closed and open, and the
-//! YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer, in both appearances, compared
-//! pixel for pixel.
+//! row's Delete question, and a pending and a refused Delete), the Rename editor, the select closed and open, the
+//! YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer, and the Settings dialog at
+//! Sessions and at Hosts, in both appearances, compared pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
@@ -61,7 +61,8 @@ use farhelm_helm_client::fake::terminal::FakeTerminal;
 use farhelm_helm_client::terminal::AttachmentLease;
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
 use farhelm_proto::ui_channel::{
-    Availability, Collection, CollectionChanges, CollectionMeta, ListCounts,
+    Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, KeyedEntry,
+    ListCounts, PREFERENCES_KEY,
 };
 
 /// How many frames a scene may take to settle before the test gives up: icons decode on the background executor, so
@@ -1496,6 +1497,58 @@ fn rename_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     keep.push(Box::new(watch));
 }
 
+/// The Settings dialog over the fake helm's preference row, opened at `section` as the gear opens it (references
+/// `settings-sessions` and `settings-hosts`): focus on the section's first switch, naming on because the row stores no
+/// choice for it, and automatic remote-host updates turned on so the Hosts picture shows a switch in each state. The
+/// opener is the scene's ring handle, which stands in for the gear. The fake and the connection are kept for the
+/// scene's life, like the Rename editor's.
+fn settings_scene(
+    state: &SceneState,
+    section: crate::settings::Section,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    helm.connect(vec![CollectionState {
+        collection: Collection::Preferences,
+        meta: test_support::meta(&[PREFERENCES_KEY]),
+        entries: vec![KeyedEntry {
+            key: PREFERENCES_KEY.into(),
+            value: serde_json::json!({ "auto_update_remote_hosts": true }),
+        }],
+    }]);
+    // The dialog reads the row from the store, which the snapshot reaches after this setup returns: open once the
+    // connection has a UI session, and only once.
+    let handle = window.window_handle();
+    let opener = state.ring.clone();
+    let opened = std::cell::Cell::new(false);
+    let watch = cx.observe(&connection, move |connection, cx| {
+        if opened.get() || connection.read(cx).session().is_none() {
+            return;
+        }
+        opened.set(true);
+        let _ = handle.update(cx, |_, window, cx| {
+            let mark = Mark::take(cx);
+            crate::settings::open_at(section, &opener, &mark, window, cx);
+        });
+    });
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    keep.push(Box::new(watch));
+}
+
+/// Settings as the gear opens it, at Sessions.
+fn settings_sessions_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    settings_scene(state, crate::settings::Section::Sessions, window, cx);
+}
+
+/// Settings at Hosts.
+fn settings_hosts_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    settings_scene(state, crate::settings::Section::Hosts, window, cx);
+}
+
 /// The session list a scene's setup made, in a column of the sidebar's width and surface.
 fn session_lists(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
     let palette = theme::palette(cx);
@@ -1704,6 +1757,18 @@ static SCENES: &[Scene] = &[
         size: (260., 240.),
         draw: select_open,
         setup: select_open_setup,
+    },
+    Scene {
+        name: "settings-sessions",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_sessions_setup,
+    },
+    Scene {
+        name: "settings-hosts",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_hosts_setup,
     },
 ];
 
