@@ -17,15 +17,17 @@
 //!
 //! The Add host dialog is [`add::open`], which the host rail's Add host and the heading's add button call.
 //!
+//! How a host is named and marked, here and in every other area that shows a host, is [`identity`].
+//!
 //! ## What it shows
 //!
 //! A heading band with the host count ("Hosts 3", read out as "3 hosts") and the Details switch, then one row per host
 //! in the registry's order, session-owned hosts included (SPEC.md: they "participate in ordinary host management"). A
 //! row is the host's identity mark, its name (the alias, else the helm's display name, "Local (this machine)" for the
 //! local host under the registry's own name; the destination behind an alias shows in the details), and its phase dot
-//! and words ([`phase`]). Under it, while the row is open, the details: the destination behind an alias, what the helm
-//! knows about the phase (for a connected host its version, identity and session count) and the remedy where waiting
-//! will not help. The last refusal of work on the host shows under the row whether it is open or not.
+//! and words ([`identity::phase`]). Under it, while the row is open, the details: the destination behind an alias,
+//! what the helm knows about the phase (for a connected host its version, identity and session count) and the remedy
+//! where waiting will not help. The last refusal of work on the host shows under the row whether it is open or not.
 //!
 //! A row is open while the Details switch is on, or while the row opens itself ([`disclosed`]): its last provisioning
 //! run failed, the last work on it was refused, or it is the helm's own machine with no supervisor running. The switch
@@ -50,11 +52,8 @@
 //! its old height. [`offers::offers`] already says what the menu will offer.
 
 pub mod add;
+pub(crate) mod identity;
 pub(crate) mod offers;
-mod phase;
-
-/// The app's one timestamp format, shared with the session row's age ([`crate::session_list`]).
-pub(crate) use phase::utc_stamp;
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -71,10 +70,10 @@ use crate::host_text::{self, HostSentence, HostText};
 use crate::operations::{Failure, OpKey};
 use crate::render_count;
 use crate::session;
-use crate::session_list::host_rail::{display_name, host_mark};
 use crate::theme::{self, Palette, Token, metrics};
+use identity::phase::{self, Kind, Tone};
+use identity::{display_name, host_mark};
 use offers::{HostKind, Locality};
-use phase::{Kind, Tone};
 
 /// `.hosts-heading`'s padding (vertical then horizontal) and the gap between its parts.
 const HEADING_PAD: (f32, f32) = (4., 10.);

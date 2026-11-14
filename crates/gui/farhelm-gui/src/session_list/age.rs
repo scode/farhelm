@@ -44,7 +44,7 @@ pub(crate) fn of(stamp: i64, now: Option<i64>) -> Option<Age> {
     }
     Some(Age {
         short: relative(now.saturating_sub(stamp)),
-        full: format!("Last activity {}", crate::hosts::utc_stamp(stamp)),
+        full: format!("Last activity {}", crate::hosts::identity::utc_stamp(stamp)),
     })
 }
 
