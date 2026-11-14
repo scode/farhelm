@@ -1,3 +1,11 @@
 [
- {"id":"g026","turn":6,"offset":27,"state":"complete","verdict":"final-discovery-empty","discovery":{"new_verified":[],"new_unverified":[],"empty":true},"reason":"Parentreadfullreply andcomplete1234lineaudit zero gaps/rejected/unfinished/unrecognized, actualzeroevents. Refreshedneighbours/ownhistoryandall12assignedpatches/contracts/callers/testassertionsrecheckedbeyondknownissues, explicitnonewverified/UAI/openlead. Latestmanagerinputalreadyfullysynthesizedlastturn; no relevantpendingquestion. Validfinalemptycondition, sourceonly/no runtime."}
+  {
+    "id": "g026",
+    "turn": 6,
+    "offset": 27,
+    "state": "complete",
+    "verdict": "final-discovery-empty",
+    "discovery": { "new_verified": [], "new_unverified": [], "empty": true },
+    "reason": "Parentreadfullreply andcomplete1234lineaudit zero gaps/rejected/unfinished/unrecognized, actualzeroevents. Refreshedneighbours/ownhistoryandall12assignedpatches/contracts/callers/testassertionsrecheckedbeyondknownissues, explicitnonewverified/UAI/openlead. Latestmanagerinputalreadyfullysynthesizedlastturn; no relevantpendingquestion. Validfinalemptycondition, sourceonly/no runtime."
+  }
 ]

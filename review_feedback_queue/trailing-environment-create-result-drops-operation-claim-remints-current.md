@@ -4,13 +4,30 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Unverified collection: investigate whether a successful environment create can present an old session result as current after its owning connection changes before reply projection. Actual source checked: launch_environment_for_agent awaits the result at 4555-4558, then calls host_client(accepted.host_id) at 4582 to obtain the current SessionClaim. agent_row_of_mutation at 4691-4708 compares that claim incarnation with the current snapshot and can mark the row nonstale. Unlike ordinary mutation paths, the claim did not accompany the source operation. The nearby new comment says a lost connection should mark this reply stale; a replacement connection may instead be accepted. Missing premises to check: the provisioning result ownership and publication lifetime, whether any replacement connection can publish before result projection, and the governing stale/current contract for new environments as distinct from ordinary mutations. No conclusion yet that a host name or routing authority is wrong; environment entry identity may stay fixed and historical mutation success may legitimately remain current. Suggested bucket if verified: other for reply freshness/contract accuracy; could-be-highest:false on this checked route (no different physical destination or work-loss route established). Confidence: concrete source lead requiring these checks. proposed_drop:false. possible_cover:none in the supplied latest interface records. No runtime tests, builds, reproductions or observations. # Environment create replies can mark an earlier connection result current Reviewed commit: 190d844e58c96cf197aa838d0b0eea80
+Unverified collection: investigate whether a successful environment create can present an old session result as current
+after its owning connection changes before reply projection. Actual source checked: launch_environment_for_agent awaits
+the result at 4555-4558, then calls host_client(accepted.host_id) at 4582 to obtain the current SessionClaim.
+agent_row_of_mutation at 4691-4708 compares that claim incarnation with the current snapshot and can mark the row
+nonstale. Unlike ordinary mutation paths, the claim did not accompany the source operation. The nearby new comment says
+a lost connection should mark this reply stale; a replacement connection may instead be accepted. Missing premises to
+check: the provisioning result ownership and publication lifetime, whether any replacement connection can publish before
+result projection, and the governing stale/current contract for new environments as distinct from ordinary mutations. No
+conclusion yet that a host name or routing authority is wrong; environment entry identity may stay fixed and historical
+mutation success may legitimately remain current. Suggested bucket if verified: other for reply freshness/contract
+accuracy; could-be-highest:false on this checked route (no different physical destination or work-loss route
+established). Confidence: concrete source lead requiring these checks. proposed_drop:false. possible_cover:none in the
+supplied latest interface records. No runtime tests, builds, reproductions or observations. # Environment create replies
+can mark an earlier connection result current Reviewed commit: 190d844e58c96cf197aa838d0b0eea80
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g020/l8`, `g024/c3`, `g027/l6`, `g045/l4`, `g052/l9`.
 
@@ -20,39 +37,131 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 30 (finding, open):
 
-Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: investigate whether a successful environment create can present an old session result as current after its owning connection changes before reply projection. Actual source checked: launch_environment_for_agent awaits the result at 4555-4558, then calls host_client(accepted.host_id) at 4582 to obtain the current SessionClaim. agent_row_of_mutation at 4691-4708 compares that claim incarnation with the current snapshot and can mark the row nonstale. Unlike ordinary mutation paths, the claim did not accompany the source operation. The nearby new comment says a lost connection should mark this reply stale; a replacement connection may instead be accepted. Missing premises to check: the provisioning result ownership and publication lifetime, whether any replacement connection can publish before result projection, and the governing stale/current contract for new environments as distinct from ordinary mutations. No conclusion yet that a host name or routing authority is wrong; environment entry identity may stay fixed and historical mutation success may legitimately remain current. Suggested bucket if verified: other for reply freshness/contract accuracy; could-be-highest:false on this checked route (no different physical destination or work-loss route established). Confidence: concrete source lead requiring these checks. proposed_drop:false. possible_cover:none in the supplied latest interface records. No runtime tests, builds, reproductions or observations.
+Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: investigate whether a successful environment create can
+present an old session result as current after its owning connection changes before reply projection. Actual source
+checked: launch_environment_for_agent awaits the result at 4555-4558, then calls host_client(accepted.host_id) at 4582
+to obtain the current SessionClaim. agent_row_of_mutation at 4691-4708 compares that claim incarnation with the current
+snapshot and can mark the row nonstale. Unlike ordinary mutation paths, the claim did not accompany the source
+operation. The nearby new comment says a lost connection should mark this reply stale; a replacement connection may
+instead be accepted. Missing premises to check: the provisioning result ownership and publication lifetime, whether any
+replacement connection can publish before result projection, and the governing stale/current contract for new
+environments as distinct from ordinary mutations. No conclusion yet that a host name or routing authority is wrong;
+environment entry identity may stay fixed and historical mutation success may legitimately remain current. Suggested
+bucket if verified: other for reply freshness/contract accuracy; could-be-highest:false on this checked route (no
+different physical destination or work-loss route established). Confidence: concrete source lead requiring these checks.
+proposed_drop:false. possible_cover:none in the supplied latest interface records. No runtime tests, builds,
+reproductions or observations.
 
 # Environment create replies can mark an earlier connection result current
 
-Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: after a new sandbox or container successfully creates its first session, a disconnect and reconnect before its reply is projected can make the agent receive the earlier connection’s session state marked fresh under the replacement connection. The successful creation and stable session reference remain valid; the defect is false connection freshness, not a new launch on another machine.
+Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435. TLDR: after a new sandbox or container successfully creates
+its first session, a disconnect and reconnect before its reply is projected can make the agent receive the earlier
+connection’s session state marked fresh under the replacement connection. The successful creation and stable session
+reference remain valid; the defect is false connection freshness, not a new launch on another machine.
 
-Details: create_in_session_sandbox obtains the operation’s real (claim, session) from create_session_request, but discards the claim and returns only entry-qualified SessionInfo (sessions.rs:1756-1802). create_session_request captures claim/client together before dispatch (:1844-1868) and returns that original claim after create/bookkeeping (:1923-1925). finish_session_launch then awaits set_step and memory.lock before sending only the session through its result channel (provisioning/tensorlake_add.rs:1018-1057). The agent caller receives that earlier result and obtains a NEW current claim via host_client at agent_requests.rs:4578-4588. agent_row_of_mutation :4690-4710 compares this new claim with current snapshots, so a replacement connection yields host:Some/current name and stale:false for the earlier result. The comparison cannot detect the replacement because the original incarnation was discarded.
+Details: create_in_session_sandbox obtains the operation’s real (claim, session) from create_session_request, but
+discards the claim and returns only entry-qualified SessionInfo (sessions.rs:1756-1802). create_session_request captures
+claim/client together before dispatch (:1844-1868) and returns that original claim after create/bookkeeping
+(:1923-1925). finish_session_launch then awaits set_step and memory.lock before sending only the session through its
+result channel (provisioning/tensorlake_add.rs:1018-1057). The agent caller receives that earlier result and obtains a
+NEW current claim via host_client at agent_requests.rs:4578-4588. agent_row_of_mutation :4690-4710 compares this new
+claim with current snapshots, so a replacement connection yields host:Some/current name and stale:false for the earlier
+result. The comparison cannot detect the replacement because the original incarnation was discarded.
 
-The replacement premise is source-supported independently of operator retarget: setup releases its connection hold before attach_supervisor (tensorlake_add.rs:615-622). The resource provisioning guard excludes coordinated resource operations, not actor transport reconnection. The actor’s run/refresh loop independently exits on client.closed and redials (manager.rs:3588-3668,4720); publish mints a new incarnation whenever the client changes, including going away (:5190-5208). The result sender and agent receiver are separate tasks, with awaited bookkeeping before sending, and neither carries a connection lease through projection. Thus the earlier operation may already have completed successfully while the actor reconnects before the receiving task samples its claim. No timing frequency or runtime occurrence was measured.
+The replacement premise is source-supported independently of operator retarget: setup releases its connection hold
+before attach_supervisor (tensorlake_add.rs:615-622). The resource provisioning guard excludes coordinated resource
+operations, not actor transport reconnection. The actor’s run/refresh loop independently exits on client.closed and
+redials (manager.rs:3588-3668,4720); publish mints a new incarnation whenever the client changes, including going away
+(:5190-5208). The result sender and agent receiver are separate tasks, with awaited bookkeeping before sending, and
+neither carries a connection lease through projection. Thus the earlier operation may already have completed
+successfully while the actor reconnects before the receiving task samples its claim. No timing frequency or runtime
+occurrence was measured.
 
-Contract: AgentSession.host at proto/lib.rs:2656-2668 explicitly says every mutating reply, including the two creating verbs, pins the row to the connection the mutation actually routed through and marks lost ownership as stale with host:None. Its host_id contract :2640-2644 preserves the original claim without asserting current incarnation. The ordinary agent mutation projection’s own complete contract (agent_requests.rs:4599-4635) states the same same-connection requirement; the new environment caller bypasses it by re-minting the input claim. The new local comment :4575-4577 promises the stale fallback after loss but only handles a host still disconnected at the sampling moment. Preserve the original SessionClaim through the owned provisioning result and project against it, or explicitly emit a stale result when that claim cannot be retained; do not substitute a later connection claim for the operation’s.
+Contract: AgentSession.host at proto/lib.rs:2656-2668 explicitly says every mutating reply, including the two creating
+verbs, pins the row to the connection the mutation actually routed through and marks lost ownership as stale with
+host:None. Its host_id contract :2640-2644 preserves the original claim without asserting current incarnation. The
+ordinary agent mutation projection’s own complete contract (agent_requests.rs:4599-4635) states the same same-connection
+requirement; the new environment caller bypasses it by re-minting the input claim. The new local comment :4575-4577
+promises the stale fallback after loss but only handles a host still disconnected at the sampling moment. Preserve the
+original SessionClaim through the owned provisioning result and project against it, or explicitly emit a stale result
+when that claim cannot be retained; do not substitute a later connection claim for the operation’s.
 
-Attribution: this assigned 190d844e patch adds the entire new environment agent result path and post-result claim lookup; the parent has no such caller. Complete later agent_requests path diff to inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db leaves these lines unchanged, and exact endpoint :4576-4597 retains the lookup. This is an introduced caller regression even though the shared projection and provisioning API exist separately. Suggested bucket: other (agent reply accuracy). Confidence: confirmed conditional source/data-flow defect; no execution, tests, builds or reproductions. Could-be-highest:false; no changed physical destination, reference misrouting, duplicate launch or loss-of-work route established. proposed_drop:false. possible_cover:none among the complete refreshed supplied interface findings; this differs from l1’s pending-card place authority, l5’s GUI-choice provenance and l7’s deadline explanation. All readily checkable lead premises are resolved; l8 closes to a verified finding. Original narrower lead and caveats above remain preserved.
+Attribution: this assigned 190d844e patch adds the entire new environment agent result path and post-result claim
+lookup; the parent has no such caller. Complete later agent_requests path diff to inclusive
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db leaves these lines unchanged, and exact endpoint :4576-4597 retains the lookup.
+This is an introduced caller regression even though the shared projection and provisioning API exist separately.
+Suggested bucket: other (agent reply accuracy). Confidence: confirmed conditional source/data-flow defect; no execution,
+tests, builds or reproductions. Could-be-highest:false; no changed physical destination, reference misrouting, duplicate
+launch or loss-of-work route established. proposed_drop:false. possible_cover:none among the complete refreshed supplied
+interface findings; this differs from l1’s pending-card place authority, l5’s GUI-choice provenance and l7’s deadline
+explanation. All readily checkable lead premises are resolved; l8 closes to a verified finding. Original narrower lead
+and caveats above remain preserved.
 
-Exact numbered-source validation: claim discard is sessions.rs:1793-1794; ordinary create returns its captured pair at :1923 (correcting the broader :1923-1925 citation). The precise AgentSession.host connection-pinning contract is proto/lib.rs:2648-2658 (the earlier :2656-2668 anchor overlaps only its tail); projection matches incarnation at agent_requests.rs:4694-4707. Publication invalidates the old claim at manager.rs:5190-5207, with independent client.closed observation at :4720. These citation refinements change no conclusion. Full pinned range path log and explicit base/parent grep show launch_environment_for_agent absent at the exclusive base and immediate parent, then added by the assigned190d844e patch. The replaced-current-claim defect is therefore introduced in the range, not inferred merely from unchanged old projection code. No distinct documentation finding is split from the same result-claim loss; preserving and projecting the original claim repairs the new caller’s promise as well. No parent drop/lowering proposed or assumed.
+Exact numbered-source validation: claim discard is sessions.rs:1793-1794; ordinary create returns its captured pair at
+:1923 (correcting the broader :1923-1925 citation). The precise AgentSession.host connection-pinning contract is
+proto/lib.rs:2648-2658 (the earlier :2656-2668 anchor overlaps only its tail); projection matches incarnation at
+agent_requests.rs:4694-4707. Publication invalidates the old claim at manager.rs:5190-5207, with independent
+client.closed observation at :4720. These citation refinements change no conclusion. Full pinned range path log and
+explicit base/parent grep show launch_environment_for_agent absent at the exclusive base and immediate parent, then
+added by the assigned190d844e patch. The replaced-current-claim defect is therefore introduced in the range, not
+inferred merely from unchanged old projection code. No distinct documentation finding is split from the same
+result-claim loss; preserving and projecting the original claim repairs the new caller’s promise as well. No parent
+drop/lowering proposed or assumed.
 
-Pass completion check: read the complete zero-context later diffs for sessions.rs and provisioning/tensorlake_add.rs from190d844e through inclusive00de0b6c. Only unrelated environment-delete/seal changes occur; neither the original claim-discarding API nor finish_session_launch result payload changes. Together with exact endpoint caller lookup and full agent_requests hunk inspection, this confirms no later in-range repair of l8. Continued the assigned pass after recording the finding: rechecked explicit CreateEnvironment parse/dispatch, hostless recipe-template diversion and keyed ordinary fallback, optional Clone host/source validation and whitespace preservation, and the small CLI/delete/terminal fixture and browser-comment edits at their recorded commits. No additional independent defect or unsettled premise arose. No new IDs beyond l8, and no open lead remains for this result-claim analysis. All conclusions remain source-only.
+Pass completion check: read the complete zero-context later diffs for sessions.rs and provisioning/tensorlake_add.rs
+from190d844e through inclusive00de0b6c. Only unrelated environment-delete/seal changes occur; neither the original
+claim-discarding API nor finish_session_launch result payload changes. Together with exact endpoint caller lookup and
+full agent_requests hunk inspection, this confirms no later in-range repair of l8. Continued the assigned pass after
+recording the finding: rechecked explicit CreateEnvironment parse/dispatch, hostless recipe-template diversion and keyed
+ordinary fallback, optional Clone host/source validation and whitespace preservation, and the small CLI/delete/terminal
+fixture and browser-comment edits at their recorded commits. No additional independent defect or unsettled premise
+arose. No new IDs beyond l8, and no open lead remains for this result-claim analysis. All conclusions remain
+source-only.
 
-Discovery4 interface refresh: read supplied g052/l9 in full. Its independent protocol-scope analysis corroborates this exact l8 claim-loss/result-projection route, including absence of an environment freshness exception and separation from pending logical-host approval authority. possible_cover now includes exact g052/l9, which explicitly attributes the caller defect to g020/l8 event29 and recommends consolidation; it is not an independent new finding or parent disposition. No consequence, bucket, confidence, proposed_drop or source premise changes. Existing l1 authority uncertainty stays separate. All named input premises are already source-checked; this revision records new provenance only, before continuing the refreshed interface reads. No runtime observation.
+Discovery4 interface refresh: read supplied g052/l9 in full. Its independent protocol-scope analysis corroborates this
+exact l8 claim-loss/result-projection route, including absence of an environment freshness exception and separation from
+pending logical-host approval authority. possible_cover now includes exact g052/l9, which explicitly attributes the
+caller defect to g020/l8 event29 and recommends consolidation; it is not an independent new finding or parent
+disposition. No consequence, bucket, confidence, proposed_drop or source premise changes. Existing l1 authority
+uncertainty stays separate. All named input premises are already source-checked; this revision records new provenance
+only, before continuing the refreshed interface reads. No runtime observation.
 
 Returned proposal (claims-128, event 30): **retain-verified**, suggested bucket **other**.
 
-The conditional source defect is established: a successful environment create loses its actual creating connection claim, then the new agent caller samples a replacement connection and can report the earlier session result with host present and stale:false. Keep one canonical finding under g020/l8. Same-entry identity and successful creation remain valid. No wrong-machine operation, duplicate create, reference misrouting, security harm or user-work loss is established.
+The conditional source defect is established: a successful environment create loses its actual creating connection
+claim, then the new agent caller samples a replacement connection and can report the earlier session result with host
+present and stale:false. Keep one canonical finding under g020/l8. Same-entry identity and successful creation remain
+valid. No wrong-machine operation, duplicate create, reference misrouting, security harm or user-work loss is
+established.
 
-Original stronger consequence: None in this record: the original lead was other-priority reply accuracy and expressly excluded a different physical destination or work-loss route. Preserve that limit. Success of creation is not success of a failed operation.
+Original stronger consequence: None in this record: the original lead was other-priority reply accuracy and expressly
+excluded a different physical destination or work-loss route. Preserve that limit. Success of creation is not success of
+a failed operation.
 
-Unresolved premise or limitation: No missing source premise for the conditional data-flow defect. Runtime incidence is unmeasured. Parent should explicitly settle whether structured success-reply freshness counts as the rare-diagnostic filter's 'other diagnostic'; this consultation recommends retention while that boundary is unclear.
+Unresolved premise or limitation: No missing source premise for the conditional data-flow defect. Runtime incidence is
+unmeasured. Parent should explicitly settle whether structured success-reply freshness counts as the rare-diagnostic
+filter's 'other diagnostic'; this consultation recommends retention while that boundary is unclear.
 
-Proposed basis: Proposal only: retain one other-priority canonical conditional source finding and attach the named corroboration. Candidate filter text: 'a narrow timing window' plus 'an error message, log line or other diagnostic that is imprecise, misleading, missing detail, or lost'. Whether structured mutation freshness falls wholly within the latter phrase remains unclear; rarity alone does not justify omission. No final drop gate performed.
+Proposed basis: Proposal only: retain one other-priority canonical conditional source finding and attach the named
+corroboration. Candidate filter text: 'a narrow timing window' plus 'an error message, log line or other diagnostic that
+is imprecise, misleading, missing detail, or lost'. Whether structured mutation freshness falls wholly within the latter
+phrase remains unclear; rarity alone does not justify omission. No final drop gate performed.
 
-Existing parent disposition (event 30): verified. Parentreadallprimarylatehistory/actualcaller/discard/protocontract, thenfullfreshfocused128result.190dnewagentcallerreceivesSessionInfoonly aftercreateactualclaimdiscarded, samplescurrenthost_clientandusesitforstaleprojection; separatelyscheduledsame-entryreconnectcanremintcurrentclaimsooldoperationreplyhostSome/stalefalse. Actualmutationconnectionfreshnesscontractincludescreate; stableUUID/reference andsuccessfulcreatevalidbutnotfreshnessproof. Introduced190d/persists00de/currentmain; bothSPECs/Planned/plans/BUGS/INDEX/matchingqueue/activeledgernoexactacceptance/repair. FILTERrare-diagnosticplausiblebutnotfullclearboundary: structuredsuccessfreshnessismorethanerror/logandnotautomaticallyrefresheddisplay; unclear-matchruleretains. No strongerwrongmachine/reference/duplicate/security/worklossinvented. Retainverifiedotherconditionalmetadataonly. PreserveGUIqualifiedJSONandrealcreatesuccess; laterstalenessmustnottriggerfailedcreate/rollback. 024c3GUIhistoryandoriginalauthoritycomponentseparate, notmergedhere. Fullchecks/caveatsclaims128.
+Existing parent disposition (event 30): verified. Parentreadallprimarylatehistory/actualcaller/discard/protocontract,
+thenfullfreshfocused128result.190dnewagentcallerreceivesSessionInfoonly aftercreateactualclaimdiscarded,
+samplescurrenthost_clientandusesitforstaleprojection;
+separatelyscheduledsame-entryreconnectcanremintcurrentclaimsooldoperationreplyhostSome/stalefalse.
+Actualmutationconnectionfreshnesscontractincludescreate; stableUUID/reference
+andsuccessfulcreatevalidbutnotfreshnessproof. Introduced190d/persists00de/currentmain;
+bothSPECs/Planned/plans/BUGS/INDEX/matchingqueue/activeledgernoexactacceptance/repair.
+FILTERrare-diagnosticplausiblebutnotfullclearboundary:
+structuredsuccessfreshnessismorethanerror/logandnotautomaticallyrefresheddisplay; unclear-matchruleretains. No
+strongerwrongmachine/reference/duplicate/security/worklossinvented. Retainverifiedotherconditionalmetadataonly.
+PreserveGUIqualifiedJSONandrealcreatesuccess; laterstalenessmustnottriggerfailedcreate/rollback.
+024c3GUIhistoryandoriginalauthoritycomponentseparate, notmergedhere. Fullchecks/caveatsclaims128.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g020 record](records/review-through-00de0b6c/groups/g020.json). Record ID: `l8`.
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g020 record](records/review-through-00de0b6c/groups/g020.json). Record ID: `l8`.
 
 ### g024/c3
 
@@ -60,33 +169,144 @@ Confidence: Unverified collection; recording proposals and any disagreement rema
 
 Latest reviewer record, event 26 (candidate, open):
 
-Reviewed commits: initial 56659839785691f76da3af5d8f51b511cff4ba8b; integration 190d844e58c96cf197aa838d0b0eea8062f48435. Revision closes the temporary c3 cross-check lead. The supplied defect remains owned by g050/l1:8, with this record providing corroboration rather than claiming a new discovery. Original c3 consequence was incorrect reusable suggestions/defaults due to forged or obsolete replies. Original authority-only proposed drop is retained only for those exact routes: serde-skipped target and live entry/incarnation/identity plus transactional identity checks refute arbitrary reply authority and obsolete-connection history writes. It does NOT establish GUI-choice provenance and does not refute g050/l1:8. Cross-group TLDR: an agent's approved new container can change the GUI's future container-host default, and successful agent environment launches age/evict the user's environment recent setups. Source route at integration: agent_requests.rs:4477-4484 constructs for_agent_environment, :4493-4515 gets an Allow card, :4541-4548 calls the shared owned provisioning task. provisioning/tensorlake_add.rs:357-361 always attaches target, :1007-1013 calls create_in_session_sandbox. sessions.rs:1243-1252 retains CreateOrigin::Agent, :1848-1863 propagates it for fresh checkouts, :1893-1907 forwards target independently on ordinary home launches, :2055-2060 omits explicit_selection for Agent, and :2099-2109 carries both into acceptance. :2174-2235 passes None selection and Some target through a valid claim guard into storage; no origin bit reaches this phase. store.rs:9015-9017 calls environment_history::record with those values. store/environment_history.rs:49-75 admits the target despite NULL selection; :82-88 writes last_container_host; :93-99 bounds the same window, so agent launches can evict GUI rows; :113 filters NULL selection only on listing, after their eviction effect. GUI consumption is established at environment_ui.rs:491-507: last_container_host selects the default container place when applicable; create_form.rs:7441 supplies the preference. Contract SPEC.md:5158-5163: 'Only what the user explicitly selects in the GUI may affect the GUI's future defaults and suggestions' and 'anything an agent creates do not qualify, because none of them is a choice the user made in the GUI.' An approval card's Allow authorizes this agent operation; it does not convert its request origin to User (source explicitly retains Agent). Suggested bucket for g050/l1:8: other. Confidence: confirmed by source/caller/storage/consumer analysis, no execution. proposed_drop: the original forged/obsolete-authority suspicion remains source-refuted; false for the supplied agent-provenance defect, which must stay recorded under g050/l1:8. possible_cover: none. Could-be-highest: false for both the originally considered and supplied convenience-data consequences; no security, process loss or user-work loss is claimed. Material caveat: agent rows do not themselves appear as reusable structured setups because selection is NULL; the established effects are default-place mutation and aging/eviction, not injection of agent launch selections. No unresolved premise remains in this check. Cancellation follow-up: initial HelmStore uses farhelm_supervisor::db::Db (store.rs:2406); its db.rs:230-244 moves the closure into spawn_blocking and obtains the connection mutex before invoking work. The history callback owns the registry guard as a moved value, and store.rs:8863-8867 binds its returned guard for the complete transaction. Cancelling the async waiter after spawn therefore cannot release that guard before queued/started blocking work finishes; cancellation before spawn performs no history transaction. This supports the narrow stale/adoption authority refutation, while leaving g050/l1:8 provenance defect intact. GUI trigger follow-up at integration: environment_ui.rs:550-570 consumes default_container when the user enters New container mode, emitting a target with that place at :560-567. Thus the changed preference affects an ordinary future GUI choice, rather than being unused storage. This corroborates g050/l1:8 without changing its owner or claiming another discovery. Reopened synthesis input: exact named g020/l8 event29 was read after complete own history. Its distinct consequence is an older successful environment-create result marked fresh after actor reconnect, because the agent caller remints host_client after receiving a session-only result. This is not the original c3 stale-history write or the previously corroborated g050 GUI-choice provenance defect. Pending readily checkable premises here: original claim discard in sessions; independent actor disconnect/reconnect/publication while provisioning owns resource lock; exact AgentSession.host contract. Preserve g020/l8 owner/ID, same entry and valid created reference; no wrong-machine/action or work-loss claim. Source/caller verification pending, no reproduction or unrelated discovery. Synthesis turn 6 source result at 190d844e58c96cf197aa838d0b0eea8062f48435: corroborated the named g020/l8 event29 defect, retaining that owner and ID. sessions.rs:1793-1794 obtains the original (claim, session) pair then returns only qualified SessionInfo; create_session_request captures claim and client together at :1844-1846 and returns that original pair at :1923. provisioning/tensorlake_add.rs:1007-1026 carries only session through success; :1019-1021 awaits job step and memory lock before delivery at :1057. The held provisioning lock at :452 is a resource-operation exclusion, not an actor-incarnation freeze; the explicit actor hold is released at :613 before session attach. Actor run in manager.rs:3588-3682 and :3736-3745 resumes its outer loop after serve; serve observes client.closed at :4720. Outer loop reads current registry and respects environment hold, not provisioning lock. Publishing a changed client increments incarnation at :5199-5202 and withdrawing it clears incarnation at :5207. Therefore an ordinary connection dropout and same-entry reconnection can replace the incarnation before the result is projected. agent_requests.rs:4578-4588 performs a NEW host_client lookup after receiving the session-only result, and :4694-4707 compares that new claim to the current snapshot, allowing fresh metadata for the older result. host_client itself derives claim and client from the same CURRENT status read (sessions.rs:1534-1562), which is correct locally but cannot recover the discarded original connection. Exact contract farhelm-proto/src/lib.rs:2648-2658 explicitly includes both creating verbs among mutating replies that must describe the connection actually used; a later healthy connection is insufficient. Current-disconnected fallback with sentinel incarnation remains correct for that separate moment and does not prevent later-reconnection case. Narrow consequence: reply can report host Some(name), stale=false for a result whose actual connection is gone. Same entry, created session and reference may remain valid; no wrong-machine mutation, misrouted action, security harm or work loss is established. Suggested bucket other; confirmed by source, no execution; could-be-highest false; proposed_drop false for g020/l8. The original c3 stale-history authority proposal remains limited to its original route; this independent reply-contract defect is not refuted by it. Named actor/discard/contract premises now checked; no unresolved premise in that concrete route. Further bounded caller/contract attribution checks continue before finishing this synthesis pass. Final bounded checks: unqualified_launch_session at agent_requests.rs:4270-4291 checks only the stable entry UUID prefix and strips qualification; there is no incarnation in SessionRef, so the same-entry reconnect is correctly admitted while freshness remains independently wrong. Full AgentSession.host declaration at farhelm-proto/src/lib.rs:2636-2674 confirms the actual-mutation-connection contract. SPEC_impl.md:22-59 permits accepted work to finish independently of caller disconnection and does not make a newly sampled connection equivalent to the mutation connection. Compared the range-base-to-190d844e source diff and exact 190d844e parent diff: the post-result host_client lookup is added by 190d844e58c96cf197aa838d0b0eea8062f48435, not merely inherited from an earlier assigned commit. Actor run/serve/publish rechecked in bounded ranges; no provisioning lock is taken in that reconnect boundary. Correction to the immediately prior prose: manager.rs:5207 takes/withdraws the old client, not clears the incarnation; the changed-client branch at :5199-5202 assigns a fresh incarnation, including disconnect, as its own preceding comment explicitly says. This precision does not change the confirmed route. Synthesis complete: c3 is candidate only for its original authority concern, with exact historical proposed bases preserved; g020/l8 remains the confirmed upstream finding, proposed_drop false. No duplicate ID, no broadened consequence, no new discovery, and no open lead from this named interface input. All source-supported; no execution observation.
+Reviewed commits: initial 56659839785691f76da3af5d8f51b511cff4ba8b; integration
+190d844e58c96cf197aa838d0b0eea8062f48435. Revision closes the temporary c3 cross-check lead. The supplied defect remains
+owned by g050/l1:8, with this record providing corroboration rather than claiming a new discovery. Original c3
+consequence was incorrect reusable suggestions/defaults due to forged or obsolete replies. Original authority-only
+proposed drop is retained only for those exact routes: serde-skipped target and live entry/incarnation/identity plus
+transactional identity checks refute arbitrary reply authority and obsolete-connection history writes. It does NOT
+establish GUI-choice provenance and does not refute g050/l1:8. Cross-group TLDR: an agent's approved new container can
+change the GUI's future container-host default, and successful agent environment launches age/evict the user's
+environment recent setups. Source route at integration: agent_requests.rs:4477-4484 constructs for_agent_environment,
+:4493-4515 gets an Allow card, :4541-4548 calls the shared owned provisioning task.
+provisioning/tensorlake_add.rs:357-361 always attaches target, :1007-1013 calls create_in_session_sandbox.
+sessions.rs:1243-1252 retains CreateOrigin::Agent, :1848-1863 propagates it for fresh checkouts, :1893-1907 forwards
+target independently on ordinary home launches, :2055-2060 omits explicit_selection for Agent, and :2099-2109 carries
+both into acceptance. :2174-2235 passes None selection and Some target through a valid claim guard into storage; no
+origin bit reaches this phase. store.rs:9015-9017 calls environment_history::record with those values.
+store/environment_history.rs:49-75 admits the target despite NULL selection; :82-88 writes last_container_host; :93-99
+bounds the same window, so agent launches can evict GUI rows; :113 filters NULL selection only on listing, after their
+eviction effect. GUI consumption is established at environment_ui.rs:491-507: last_container_host selects the default
+container place when applicable; create_form.rs:7441 supplies the preference. Contract SPEC.md:5158-5163: 'Only what the
+user explicitly selects in the GUI may affect the GUI's future defaults and suggestions' and 'anything an agent creates
+do not qualify, because none of them is a choice the user made in the GUI.' An approval card's Allow authorizes this
+agent operation; it does not convert its request origin to User (source explicitly retains Agent). Suggested bucket for
+g050/l1:8: other. Confidence: confirmed by source/caller/storage/consumer analysis, no execution. proposed_drop: the
+original forged/obsolete-authority suspicion remains source-refuted; false for the supplied agent-provenance defect,
+which must stay recorded under g050/l1:8. possible_cover: none. Could-be-highest: false for both the originally
+considered and supplied convenience-data consequences; no security, process loss or user-work loss is claimed. Material
+caveat: agent rows do not themselves appear as reusable structured setups because selection is NULL; the established
+effects are default-place mutation and aging/eviction, not injection of agent launch selections. No unresolved premise
+remains in this check. Cancellation follow-up: initial HelmStore uses farhelm_supervisor::db::Db (store.rs:2406); its
+db.rs:230-244 moves the closure into spawn_blocking and obtains the connection mutex before invoking work. The history
+callback owns the registry guard as a moved value, and store.rs:8863-8867 binds its returned guard for the complete
+transaction. Cancelling the async waiter after spawn therefore cannot release that guard before queued/started blocking
+work finishes; cancellation before spawn performs no history transaction. This supports the narrow stale/adoption
+authority refutation, while leaving g050/l1:8 provenance defect intact. GUI trigger follow-up at integration:
+environment_ui.rs:550-570 consumes default_container when the user enters New container mode, emitting a target with
+that place at :560-567. Thus the changed preference affects an ordinary future GUI choice, rather than being unused
+storage. This corroborates g050/l1:8 without changing its owner or claiming another discovery. Reopened synthesis input:
+exact named g020/l8 event29 was read after complete own history. Its distinct consequence is an older successful
+environment-create result marked fresh after actor reconnect, because the agent caller remints host_client after
+receiving a session-only result. This is not the original c3 stale-history write or the previously corroborated g050
+GUI-choice provenance defect. Pending readily checkable premises here: original claim discard in sessions; independent
+actor disconnect/reconnect/publication while provisioning owns resource lock; exact AgentSession.host contract. Preserve
+g020/l8 owner/ID, same entry and valid created reference; no wrong-machine/action or work-loss claim. Source/caller
+verification pending, no reproduction or unrelated discovery. Synthesis turn 6 source result at
+190d844e58c96cf197aa838d0b0eea8062f48435: corroborated the named g020/l8 event29 defect, retaining that owner and ID.
+sessions.rs:1793-1794 obtains the original (claim, session) pair then returns only qualified SessionInfo;
+create_session_request captures claim and client together at :1844-1846 and returns that original pair at :1923.
+provisioning/tensorlake_add.rs:1007-1026 carries only session through success; :1019-1021 awaits job step and memory
+lock before delivery at :1057. The held provisioning lock at :452 is a resource-operation exclusion, not an
+actor-incarnation freeze; the explicit actor hold is released at :613 before session attach. Actor run in
+manager.rs:3588-3682 and :3736-3745 resumes its outer loop after serve; serve observes client.closed at :4720. Outer
+loop reads current registry and respects environment hold, not provisioning lock. Publishing a changed client increments
+incarnation at :5199-5202 and withdrawing it clears incarnation at :5207. Therefore an ordinary connection dropout and
+same-entry reconnection can replace the incarnation before the result is projected. agent_requests.rs:4578-4588 performs
+a NEW host_client lookup after receiving the session-only result, and :4694-4707 compares that new claim to the current
+snapshot, allowing fresh metadata for the older result. host_client itself derives claim and client from the same
+CURRENT status read (sessions.rs:1534-1562), which is correct locally but cannot recover the discarded original
+connection. Exact contract farhelm-proto/src/lib.rs:2648-2658 explicitly includes both creating verbs among mutating
+replies that must describe the connection actually used; a later healthy connection is insufficient.
+Current-disconnected fallback with sentinel incarnation remains correct for that separate moment and does not prevent
+later-reconnection case. Narrow consequence: reply can report host Some(name), stale=false for a result whose actual
+connection is gone. Same entry, created session and reference may remain valid; no wrong-machine mutation, misrouted
+action, security harm or work loss is established. Suggested bucket other; confirmed by source, no execution;
+could-be-highest false; proposed_drop false for g020/l8. The original c3 stale-history authority proposal remains
+limited to its original route; this independent reply-contract defect is not refuted by it. Named actor/discard/contract
+premises now checked; no unresolved premise in that concrete route. Further bounded caller/contract attribution checks
+continue before finishing this synthesis pass. Final bounded checks: unqualified_launch_session at
+agent_requests.rs:4270-4291 checks only the stable entry UUID prefix and strips qualification; there is no incarnation
+in SessionRef, so the same-entry reconnect is correctly admitted while freshness remains independently wrong. Full
+AgentSession.host declaration at farhelm-proto/src/lib.rs:2636-2674 confirms the actual-mutation-connection contract.
+SPEC_impl.md:22-59 permits accepted work to finish independently of caller disconnection and does not make a newly
+sampled connection equivalent to the mutation connection. Compared the range-base-to-190d844e source diff and exact
+190d844e parent diff: the post-result host_client lookup is added by 190d844e58c96cf197aa838d0b0eea8062f48435, not
+merely inherited from an earlier assigned commit. Actor run/serve/publish rechecked in bounded ranges; no provisioning
+lock is taken in that reconnect boundary. Correction to the immediately prior prose: manager.rs:5207 takes/withdraws the
+old client, not clears the incarnation; the changed-client branch at :5199-5202 assigns a fresh incarnation, including
+disconnect, as its own preceding comment explicitly says. This precision does not change the confirmed route. Synthesis
+complete: c3 is candidate only for its original authority concern, with exact historical proposed bases preserved;
+g020/l8 remains the confirmed upstream finding, proposed_drop false. No duplicate ID, no broadened consequence, no new
+discovery, and no open lead from this named interface input. All source-supported; no execution observation.
 
 Returned proposal (claims-012, event 13): **needs-parent**, suggested bucket **other**.
 
-The original forged/obsolete-reply routes are narrowly source-refuted, but that does not refute the later supplied agent-provenance defect. The latest record corroborates g050/l1:8 rather than owning a separate discovery. Parent should attach the corroboration to that canonical finding while preserving the original authority-only proposed drop.
+The original forged/obsolete-reply routes are narrowly source-refuted, but that does not refute the later supplied
+agent-provenance defect. The latest record corroborates g050/l1:8 rather than owning a separate discovery. Parent should
+attach the corroboration to that canonical finding while preserving the original authority-only proposed drop.
 
-Original stronger consequence: Original c3 suspected arbitrary ordinary requests, descriptive supervisor replies or delayed replies could manufacture reusable placement or restore obsolete suggestions. Later history narrows that refutation to authority/connection freshness and separately confirms agent-created environment launches changing GUI container-host defaults and aging/evicting GUI recents. Neither route establishes security disclosure, automatic destructive execution or user-work loss.
+Original stronger consequence: Original c3 suspected arbitrary ordinary requests, descriptive supervisor replies or
+delayed replies could manufacture reusable placement or restore obsolete suggestions. Later history narrows that
+refutation to authority/connection freshness and separately confirms agent-created environment launches changing GUI
+container-host defaults and aging/evicting GUI recents. Neither route establishes security disclosure, automatic
+destructive execution or user-work loss.
 
-Unresolved premise or limitation: No remaining source premise for the supplied convenience-data consequence. Parent must reconcile ownership with g050/l1:8; its full named record was not assigned to this batch and was not searched independently.
+Unresolved premise or limitation: No remaining source premise for the supplied convenience-data consequence. Parent must
+reconcile ownership with g050/l1:8; its full named record was not assigned to this batch and was not searched
+independently.
 
-Proposed basis: Refute only forged-placement/obsolete-connection authority routes, with their original wording retained for the parent register because they concern an authority boundary. Retain the distinct GUI-provenance finding under g050/l1:8; this batch is corroboration, not authorization to drop or silently deduplicate it.
+Proposed basis: Refute only forged-placement/obsolete-connection authority routes, with their original wording retained
+for the parent register because they concern an authority boundary. Retain the distinct GUI-provenance finding under
+g050/l1:8; this batch is corroboration, not authorization to drop or silently deduplicate it.
 
 Returned proposal (claims-128, event 26): **needs-parent**, suggested bucket **other**.
 
-This ID carries three distinct historical components. Consolidate only its latest reply-freshness corroboration with g020/l8. Preserve its original forged/obsolete-history authority source refutation separately, and preserve its agent-origin GUI-history corroboration under the separately named g050/l1 owner. A whole-record duplicate/drop would erase those distinctions. Approval authorizes an operation; it does not make an Agent-origin request a GUI selection.
+This ID carries three distinct historical components. Consolidate only its latest reply-freshness corroboration with
+g020/l8. Preserve its original forged/obsolete-history authority source refutation separately, and preserve its
+agent-origin GUI-history corroboration under the separately named g050/l1 owner. A whole-record duplicate/drop would
+erase those distinctions. Approval authorizes an operation; it does not make an Agent-origin request a GUI selection.
 
-Original stronger consequence: Original c3 considered forged or obsolete replies manufacturing reusable placement/defaults; it explicitly stayed other and alleged no automatic execution, credential exposure or user-work loss. Later approved-agent history effects are default-place changes and aging/eviction, not agent selections appearing as reusable setups. The later reply concern also explicitly excludes wrong-machine action and work loss.
+Original stronger consequence: Original c3 considered forged or obsolete replies manufacturing reusable
+placement/defaults; it explicitly stayed other and alleged no automatic execution, credential exposure or user-work
+loss. Later approved-agent history effects are default-place changes and aging/eviction, not agent selections appearing
+as reusable setups. The later reply concern also explicitly excludes wrong-machine action and work loss.
 
-Unresolved premise or limitation: No unresolved premise for the latest same-entry reply-freshness component. Parent must split this composite record's dispositions when reconciling its original authority refutation, g050/l1 history corroboration and g020/l8 reply corroboration; do not interpret one component as a drop of another.
+Unresolved premise or limitation: No unresolved premise for the latest same-entry reply-freshness component. Parent must
+split this composite record's dispositions when reconciling its original authority refutation, g050/l1 history
+corroboration and g020/l8 reply corroboration; do not interpret one component as a drop of another.
 
-Proposed basis: Proposal only: attach reply evidence to g020/l8, preserve the narrow source-refuted original authority route in the disposition register, and hand historical GUI-origin corroboration to the existing g050/l1 recording owner. This is not a new discovery, a whole-record duplicate judgment, or an independent drop decision.
+Proposed basis: Proposal only: attach reply evidence to g020/l8, preserve the narrow source-refuted original authority
+route in the disposition register, and hand historical GUI-origin corroboration to the existing g050/l1 recording owner.
+This is not a new discovery, a whole-record duplicate judgment, or an independent drop decision.
 
-Existing parent disposition (event 13): under-investigation. Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it.
+Existing parent disposition (event 13): under-investigation. Record durably acknowledged; parent source/contract
+validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This
+preserves the claim and uncertainty without accepting, dropping or lowering it.
 
-Unapplied parent proposal: partial-refutation-original-authority-plus-retain-history-provenance. Full012historicalevent13: arbitraryordinaryrequest/supervisordescriptor/obsoleteconnectionmanufacturingplacementrefutedbyserde-skippedtarget,capturedclaim/client/entry/identityandblockingclosureownedtransactionguard. Preserveoriginalauthoritydropproposalforfreshgate. Lateragent-origin targetwithNULLGUIselectionstillwriteslastplace/agesboundedrecents, explicitlySPECexcludesagentcreatesfromGUIdefaults; retainunder050l1 canonical, notsource-refutedbyforgeryguards. CURRENTc3later26also corroborates020l8remintedclaimfreshness; separatecause/recordingcoveredbyfocused128, don'tapplystaleproposalorcombineGUIhistorywithconnectionfreshnessroot. Candidatecanbeonecanonicaldispositionbutotherrootssupportingprovenancemustremaininqueue/evidence. No currentdrop/dedupaccepted.
+Unapplied parent proposal: partial-refutation-original-authority-plus-retain-history-provenance.
+Full012historicalevent13:
+arbitraryordinaryrequest/supervisordescriptor/obsoleteconnectionmanufacturingplacementrefutedbyserde-skippedtarget,capturedclaim/client/entry/identityandblockingclosureownedtransactionguard.
+Preserveoriginalauthoritydropproposalforfreshgate. Lateragent-origin
+targetwithNULLGUIselectionstillwriteslastplace/agesboundedrecents, explicitlySPECexcludesagentcreatesfromGUIdefaults;
+retainunder050l1 canonical, notsource-refutedbyforgeryguards. CURRENTc3later26also
+corroborates020l8remintedclaimfreshness; separatecause/recordingcoveredbyfocused128,
+don'tapplystaleproposalorcombineGUIhistorywithconnectionfreshnessroot.
+Candidatecanbeonecanonicaldispositionbutotherrootssupportingprovenancemustremaininqueue/evidence. No
+currentdrop/dedupaccepted.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g024 record](records/review-through-00de0b6c/groups/g024.json). Record ID: `c3`.
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g024 record](records/review-through-00de0b6c/groups/g024.json). Record ID: `c3`.
 
 ### g027/l6
 
@@ -96,31 +316,81 @@ Latest reviewer record, event 17 (candidate, open):
 
 Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435
 
-TLDR: A successful environment create can report its earlier session state as fresh after the environment disconnects and reconnects before the agent reply is projected. Creation and the stable session reference remain valid. This is canonical parent-supplied g020/l8 event29, locally checked at the API/manager boundary rather than a new independent finding.
+TLDR: A successful environment create can report its earlier session state as fresh after the environment disconnects
+and reconnects before the agent reply is projected. Creation and the stable session reference remain valid. This is
+canonical parent-supplied g020/l8 event29, locally checked at the API/manager boundary rather than a new independent
+finding.
 
-Details: create_session_request captures SessionClaim and client in one host_client read at sessions.rs:1844-1846, uses that claim through either fresh-checkout creation (1852-1866) or ordinary creation (1894-1923), and returns the original pair. create_in_session_sandbox:1793-1794 then qualifies the SessionInfo ID with claim.entry_uuid and drops the rest of the claim. qualify_session_info:874-886 retains entry/session identity only; it carries no connection incarnation. Provisioning SessionLaunch.result at tensorlake_add.rs:101 and start_session_environment:353-355 transports only Result<SessionInfo>. finish_session_launch awaits completed-step publication and memory.lock at 1018-1026, then sends that session at 1057. No creating-connection claim survives to the receiver.
+Details: create_session_request captures SessionClaim and client in one host_client read at sessions.rs:1844-1846, uses
+that claim through either fresh-checkout creation (1852-1866) or ordinary creation (1894-1923), and returns the original
+pair. create_in_session_sandbox:1793-1794 then qualifies the SessionInfo ID with claim.entry_uuid and drops the rest of
+the claim. qualify_session_info:874-886 retains entry/session identity only; it carries no connection incarnation.
+Provisioning SessionLaunch.result at tensorlake_add.rs:101 and start_session_environment:353-355 transports only
+Result<SessionInfo>. finish_session_launch awaits completed-step publication and memory.lock at 1018-1026, then sends
+that session at 1057. No creating-connection claim survives to the receiver.
 
-The provisioning guard is not a connection lease: setup explicitly release_hold at tensorlake_add.rs:613 before attach_supervisor; its remaining host_provision_lock excludes resource operations, not actor transport reconnection. manager run:3691-3745 executes connect_phase/serve and re-enters an active connection window after serve returns; serve independently notices client.closed at 4720. publish_refresh:5190-5207 assigns a new incarnation whenever the client changes, including withdrawal. Ordinary post-create acceptance at sessions.rs:2152-2163 returns the already successful session even when cache/history cannot retain a now-old claim. Those paths therefore allow successful completion on connection A, then connection B before the separately scheduled receiver projects it, without retargeting the physical environment.
+The provisioning guard is not a connection lease: setup explicitly release_hold at tensorlake_add.rs:613 before
+attach_supervisor; its remaining host_provision_lock excludes resource operations, not actor transport reconnection.
+manager run:3691-3745 executes connect_phase/serve and re-enters an active connection window after serve returns; serve
+independently notices client.closed at 4720. publish_refresh:5190-5207 assigns a new incarnation whenever the client
+changes, including withdrawal. Ordinary post-create acceptance at sessions.rs:2152-2163 returns the already successful
+session even when cache/history cannot retain a now-old claim. Those paths therefore allow successful completion on
+connection A, then connection B before the separately scheduled receiver projects it, without retargeting the physical
+environment.
 
-The new caller agent_requests.rs:4578-4588 obtains a fresh host_client claim after receiving the owned result. unqualified_launch_session:4278-4291 checks only entry UUID; a normal reconnect keeps that UUID, so it cannot catch the lost mutation incarnation. agent_row_of_mutation:4694-4707 compares the newly obtained claim to current snapshots and yields host Some/stale false for B while using A's SessionInfo. Contract: AgentSession.host (proto/lib.rs:2648-2658) pins every mutation reply, including creating replies, to the connection the mutation actually routed through. The ordinary projection contract at agent_requests.rs:4599-4631 requires the original routed claim for precisely this reason. Preserve that claim in a typed owned-launch result; qualify only at the outward REST boundary or explicitly project stale when the original claim is unavailable.
+The new caller agent_requests.rs:4578-4588 obtains a fresh host_client claim after receiving the owned result.
+unqualified_launch_session:4278-4291 checks only entry UUID; a normal reconnect keeps that UUID, so it cannot catch the
+lost mutation incarnation. agent_row_of_mutation:4694-4707 compares the newly obtained claim to current snapshots and
+yields host Some/stale false for B while using A's SessionInfo. Contract: AgentSession.host (proto/lib.rs:2648-2658)
+pins every mutation reply, including creating replies, to the connection the mutation actually routed through. The
+ordinary projection contract at agent_requests.rs:4599-4631 requires the original routed claim for precisely this
+reason. Preserve that claim in a typed owned-launch result; qualify only at the outward REST boundary or explicitly
+project stale when the original claim is unavailable.
 
-Attribution/status: the API's SessionInfo-only result alone did not force this new caller to assert freshness; 190d844e adds the environment agent caller that reacquires a current claim and requires an operation-claim-aware result. The complete later sessions.rs/provisioning tensorlake_add.rs diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db only adds unrelated environment-seal/Delete behavior. The agent_requests production diff changes an unrelated delete comment; later additions are tests. No result payload, claim-discarding helper, or projection lookup repair is present. A larger combined diff output clipped test additions; relevant production hunks were reread separately in bounded outputs, and no coverage claim is made for unrelated test additions.
+Attribution/status: the API's SessionInfo-only result alone did not force this new caller to assert freshness; 190d844e
+adds the environment agent caller that reacquires a current claim and requires an operation-claim-aware result. The
+complete later sessions.rs/provisioning tensorlake_add.rs diff through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db only
+adds unrelated environment-seal/Delete behavior. The agent_requests production diff changes an unrelated delete comment;
+later additions are tests. No result payload, claim-discarding helper, or projection lookup repair is present. A larger
+combined diff output clipped test additions; relevant production hunks were reread separately in bounded outputs, and no
+coverage claim is made for unrelated test additions.
 
-Suggested bucket: other (agent reply freshness/contract accuracy). Could-be-highest: no; no changed physical destination, credential exposure, duplicate launch or work-loss route is established. Confidence: confirmed conditional source/data-flow defect; no execution or timing incidence measured. proposed_drop: duplicate-only consolidation with canonical g020/l8 event29, not a correctness rejection or specification acceptance. possible_cover: exact parent-supplied g020/l8; preserve its owner, ID and consequence. No alias to c1, l3, l4 or l5 is assumed: c1 command/trust remains a separate source refutation with history effects linked to g050/l1, and l3 resource continuity cannot establish connection freshness. Material caveat: a host still disconnected at the late sample uses the existing stale fallback correctly; the defect requires an intervening replacement connection before that sample. Revision: local lead closed to source-confirmed duplicate candidate after all readily checkable API, channel, actor, lease and protocol premises were resolved.
+Suggested bucket: other (agent reply freshness/contract accuracy). Could-be-highest: no; no changed physical
+destination, credential exposure, duplicate launch or work-loss route is established. Confidence: confirmed conditional
+source/data-flow defect; no execution or timing incidence measured. proposed_drop: duplicate-only consolidation with
+canonical g020/l8 event29, not a correctness rejection or specification acceptance. possible_cover: exact
+parent-supplied g020/l8; preserve its owner, ID and consequence. No alias to c1, l3, l4 or l5 is assumed: c1
+command/trust remains a separate source refutation with history effects linked to g050/l1, and l3 resource continuity
+cannot establish connection freshness. Material caveat: a host still disconnected at the late sample uses the existing
+stale fallback correctly; the defect requires an intervening replacement connection before that sample. Revision: local
+lead closed to source-confirmed duplicate candidate after all readily checkable API, channel, actor, lease and protocol
+premises were resolved.
 
 Returned proposal (claims-128, event 17): **duplicate**, suggested bucket **other**.
 
-Exact corroboration of the canonical claim-loss/reminted-connection route, not an additional defect. Stable resource/reference identity cannot prove connection freshness. Preserve this API/manager-boundary evidence with g020/l8.
+Exact corroboration of the canonical claim-loss/reminted-connection route, not an additional defect. Stable
+resource/reference identity cannot prove connection freshness. Preserve this API/manager-boundary evidence with g020/l8.
 
-Original stronger consequence: None: both lead and final candidate explicitly exclude physical retarget, credential exposure, duplicate creation and work loss. The duplicate-only proposal was never correctness rejection or specification acceptance.
+Original stronger consequence: None: both lead and final candidate explicitly exclude physical retarget, credential
+exposure, duplicate creation and work loss. The duplicate-only proposal was never correctness rejection or specification
+acceptance.
 
-Unresolved premise or limitation: No missing source premise. Runtime occurrence/frequency unmeasured; possible rare-diagnostic classification remains for parent.
+Unresolved premise or limitation: No missing source premise. Runtime occurrence/frequency unmeasured; possible
+rare-diagnostic classification remains for parent.
 
-Proposed basis: Proposal only: consolidate source-confirmed other-priority evidence with g020/l8, retaining the canonical issue and all caveats. A still-disconnected host uses the correct stale fallback; the defect needs intervening reconnection.
+Proposed basis: Proposal only: consolidate source-confirmed other-priority evidence with g020/l8, retaining the
+canonical issue and all caveats. A still-disconnected host uses the correct stale fallback; the defect needs intervening
+reconnection.
 
-Existing parent disposition (event 17): duplicate. Full128exactnamedAPI/managercorroborationofthe020l8claimloss/remintroot. Preserveactualoriginalclaimreturn/session-onlyownedcompletion/reconnectpublication boundaries,disconnectedfallbackalreadycorrect,onlyreplacementbeforelatersamplesuffices. Otherconditionalreplyaccuracy/noharmruntimeclaim. Retaincanonicalratherthanfilterviaalias; no independentdefect, noGUIhistorymerge.
+Existing parent disposition (event 17): duplicate.
+Full128exactnamedAPI/managercorroborationofthe020l8claimloss/remintroot.
+Preserveactualoriginalclaimreturn/session-onlyownedcompletion/reconnectpublication
+boundaries,disconnectedfallbackalreadycorrect,onlyreplacementbeforelatersamplesuffices.
+Otherconditionalreplyaccuracy/noharmruntimeclaim. Retaincanonicalratherthanfilterviaalias; no independentdefect,
+noGUIhistorymerge.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g027 record](records/review-through-00de0b6c/groups/g027.json). Record ID: `l6`.
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g027 record](records/review-through-00de0b6c/groups/g027.json). Record ID: `l6`.
 
 ### g045/l4
 
@@ -130,39 +400,95 @@ Latest reviewer record, event 25 (finding, open):
 
 # Owned-result payload loses creating-connection provenance
 
-Reviewed caller revision: 190d844e58c96cf197aa838d0b0eea8062f48435. Assigned result composition: 56659839785691f76da3af5d8f51b511cff4ba8b. Supplied interface: g020/l8 event29, independently corroborated; same cause/consequence, not an independent discovery.
+Reviewed caller revision: 190d844e58c96cf197aa838d0b0eea8062f48435. Assigned result composition:
+56659839785691f76da3af5d8f51b511cff4ba8b. Supplied interface: g020/l8 event29, independently corroborated; same
+cause/consequence, not an independent discovery.
 
 ## TLDR
 
-An environment session successfully created over one connection can later be returned to an agent with stale:false using a replacement connection's claim. The created session and entry-prefixed reference remain valid; no creation on another machine, duplicate create, reference misrouting, security harm or lost-work route is established.
+An environment session successfully created over one connection can later be returned to an agent with stale:false using
+a replacement connection's claim. The created session and entry-prefixed reference remain valid; no creation on another
+machine, duplicate create, reference misrouting, security harm or lost-work route is established.
 
 ## Details
 
-At 190d, create_session_request takes the claim/client together (sessions.rs:1844-1847), routes through that client, and returns the original claim for managed-checkout (:1852-1866) and ordinary (:1894-1923) success. create_in_session_sandbox then qualifies SessionInfo with claim.entry_uuid but discards its connection incarnation (:1793-1794). The owned provisioning channel carries only Result<SessionInfo> (tensorlake_add.rs:353-355). finish_session_launch awaits progress/memory bookkeeping (:1018-1026) before sending that narrowed result at :1057. After receiving it, the new agent caller obtains a NEW current claim (agent_requests.rs:4555-4588), unqualifies the session and uses the existing agent-created projection (:4589-4596). agent_row_of_mutation checks only that supplied claim against current snapshots (:4694-4707), so a replacement connection's claim can make an earlier connection's result look current. unqualified_launch_session (:4278-4291) correctly checks the durable entry UUID, but that stable-entry check cannot recover the lost incarnation.
+At 190d, create_session_request takes the claim/client together (sessions.rs:1844-1847), routes through that client, and
+returns the original claim for managed-checkout (:1852-1866) and ordinary (:1894-1923) success.
+create_in_session_sandbox then qualifies SessionInfo with claim.entry_uuid but discards its connection incarnation
+(:1793-1794). The owned provisioning channel carries only Result<SessionInfo> (tensorlake_add.rs:353-355).
+finish_session_launch awaits progress/memory bookkeeping (:1018-1026) before sending that narrowed result at :1057.
+After receiving it, the new agent caller obtains a NEW current claim (agent_requests.rs:4555-4588), unqualifies the
+session and uses the existing agent-created projection (:4589-4596). agent_row_of_mutation checks only that supplied
+claim against current snapshots (:4694-4707), so a replacement connection's claim can make an earlier connection's
+result look current. unqualified_launch_session (:4278-4291) correctly checks the durable entry UUID, but that
+stable-entry check cannot recover the lost incarnation.
 
-The reconnect premise is source-established independently of retarget/adoption. Provisioning releases its connection hold before attach and first create (tensorlake_add.rs:613-614,1007-1013). Its ProvisionLockGuard contains a per-host operation mutex (manager.rs:904-928), not a connection lease; its own docs separate host-plan serialization from refresh/write-back work (:2525-2540). The actor independently serves, observes client.closed (:4720), returns to an active retry window (:3727-3745), and attempts connections through its outer loop (:3637-3693). Publication mints a new incarnation whenever the client changes, including going away (:5190-5207). The awaited success bookkeeping and separate result-receiver task permit reconnect before the lookup; the sender can also finish and release its provisioning guard before the receiver runs. There is no source cycle or lease requiring the first connection to remain current through projection. This is conditional source/control-flow reasoning, not an observed schedule or frequency claim.
+The reconnect premise is source-established independently of retarget/adoption. Provisioning releases its connection
+hold before attach and first create (tensorlake_add.rs:613-614,1007-1013). Its ProvisionLockGuard contains a per-host
+operation mutex (manager.rs:904-928), not a connection lease; its own docs separate host-plan serialization from
+refresh/write-back work (:2525-2540). The actor independently serves, observes client.closed (:4720), returns to an
+active retry window (:3727-3745), and attempts connections through its outer loop (:3637-3693). Publication mints a new
+incarnation whenever the client changes, including going away (:5190-5207). The awaited success bookkeeping and separate
+result-receiver task permit reconnect before the lookup; the sender can also finish and release its provisioning guard
+before the receiver runs. There is no source cycle or lease requiring the first connection to remain current through
+projection. This is conditional source/control-flow reasoning, not an observed schedule or frequency claim.
 
-Exact contract: AgentSession.host, proto/lib.rs:2650-2658, pins every mutating reply including creating verbs to 'the connection the mutation actually routed through', pairs no vouched-for current name with host:None, and sets stale. agent_session_reply's complete contract at agent_requests.rs:4599-4631 explicitly forbids using a fresh unchecked post-mutation claim for that projection. SPEC_impl.md agent transport section (:3820-3945, especially :3871-3875) retains that absent-name encoding and shared-operation create provenance; no environment exception was found. The new caller's :4575-4577 stale promise catches only the case where its post-result lookup remains disconnected, not replacement before that lookup.
+Exact contract: AgentSession.host, proto/lib.rs:2650-2658, pins every mutating reply including creating verbs to 'the
+connection the mutation actually routed through', pairs no vouched-for current name with host:None, and sets stale.
+agent_session_reply's complete contract at agent_requests.rs:4599-4631 explicitly forbids using a fresh unchecked
+post-mutation claim for that projection. SPEC_impl.md agent transport section (:3820-3945, especially :3871-3875)
+retains that absent-name encoding and shared-operation create provenance; no environment exception was found. The new
+caller's :4575-4577 stale promise catches only the case where its post-result lookup remains disconnected, not
+replacement before that lookup.
 
-GUI and result lifetime remain separate obligations: sessions/sandbox.rs:81-105 flushes admitted host/run headers before streaming its ordinary entry-qualified session JSON. Preserve that GUI result and successful-create semantics while retaining the original SessionClaim in the internal owned result for agent projection. Do not turn later connection staleness into a failed create/rollback; project a successful stale result with the original claim. No connection lease through projection is required or currently established. Local f1's accepted destruction after ambiguous initial-create failure is unchanged and does not accept false freshness after confirmed internal success.
+GUI and result lifetime remain separate obligations: sessions/sandbox.rs:81-105 flushes admitted host/run headers before
+streaming its ordinary entry-qualified session JSON. Preserve that GUI result and successful-create semantics while
+retaining the original SessionClaim in the internal owned result for agent projection. Do not turn later connection
+staleness into a failed create/rollback; project a successful stale result with the original claim. No connection lease
+through projection is required or currently established. Local f1's accepted destruction after ambiguous initial-create
+failure is unchanged and does not accept false freshness after confirmed internal success.
 
-Attribution/persistence settled: base 6e423e30068b62c6cfa276c6d720ee35bb70387a and immediate parent 190d^ both have no launch_environment_for_agent symbol (git grep returned 1/no match); the 190d patch adds this caller and current-claim remint. The earlier qualified-only result API served GUI needs; this report attributes the newly exposed agent contract violation to the new caller rather than claiming that the 566 extraction already had this agent behavior. Later path history and zero-context production diffs show only unrelated seal/delete and terminal fixture changes. Inclusive tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains remint/projection (agent_requests.rs:4576-4597), claim discard (sessions.rs:1802-1803), and success bookkeeping/send-only-session (tensorlake_add.rs:1030-1038,1069). No later in-range repair.
+Attribution/persistence settled: base 6e423e30068b62c6cfa276c6d720ee35bb70387a and immediate parent 190d^ both have no
+launch_environment_for_agent symbol (git grep returned 1/no match); the 190d patch adds this caller and current-claim
+remint. The earlier qualified-only result API served GUI needs; this report attributes the newly exposed agent contract
+violation to the new caller rather than claiming that the 566 extraction already had this agent behavior. Later path
+history and zero-context production diffs show only unrelated seal/delete and terminal fixture changes. Inclusive tip
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db retains remint/projection (agent_requests.rs:4576-4597), claim discard
+(sessions.rs:1802-1803), and success bookkeeping/send-only-session (tensorlake_add.rs:1030-1038,1069). No later in-range
+repair.
 
-Suggested bucket: other (agent reply freshness/accuracy). Could-be-highest: no established security or loss-of-work consequence; stable same-entry reconnect alone suffices. Confidence: confirmed conditional source/data-flow/contract defect; no execution or observed deployment. proposed_drop: false. possible_cover: supplied g020/l8 event29, exact duplicate cause for parent consolidation; retain both source ownership/provenance. All readily checkable payload, caller, GUI, independent reconnect and in-range attribution premises are resolved. No open lead remains under l4. No tests, builds, reproductions, live-install actions, checkout edits, nested agents, unrelated discovery or prohibited coverage searches performed.
+Suggested bucket: other (agent reply freshness/accuracy). Could-be-highest: no established security or loss-of-work
+consequence; stable same-entry reconnect alone suffices. Confidence: confirmed conditional source/data-flow/contract
+defect; no execution or observed deployment. proposed_drop: false. possible_cover: supplied g020/l8 event29, exact
+duplicate cause for parent consolidation; retain both source ownership/provenance. All readily checkable payload,
+caller, GUI, independent reconnect and in-range attribution premises are resolved. No open lead remains under l4. No
+tests, builds, reproductions, live-install actions, checkout edits, nested agents, unrelated discovery or prohibited
+coverage searches performed.
 
 Returned proposal (claims-128, event 25): **duplicate**, suggested bucket **other**.
 
-The owned-result payload/lifetime analysis establishes the same original-claim loss as g020/l8. Retain its GUI outward-JSON and successful-create caveats with the canonical record; do not split this into another implementation or documentation finding.
+The owned-result payload/lifetime analysis establishes the same original-claim loss as g020/l8. Retain its GUI
+outward-JSON and successful-create caveats with the canonical record; do not split this into another implementation or
+documentation finding.
 
-Original stronger consequence: None: all l4 events exclude different-machine launch, duplicate create and lost work; final record also explicitly excludes reference misrouting/security. Its separate local f1 ambiguous-create cleanup acceptance does not accept or refute this successful-create freshness route.
+Original stronger consequence: None: all l4 events exclude different-machine launch, duplicate create and lost work;
+final record also explicitly excludes reference misrouting/security. Its separate local f1 ambiguous-create cleanup
+acceptance does not accept or refute this successful-create freshness route.
 
-Unresolved premise or limitation: No missing source premise; actual timing incidence unmeasured. Preserve GUI-qualified success and avoid stale-triggered destructive cleanup in any later fix.
+Unresolved premise or limitation: No missing source premise; actual timing incidence unmeasured. Preserve GUI-qualified
+success and avoid stale-triggered destructive cleanup in any later fix.
 
-Proposed basis: Proposal only: consolidate with caller-owned g020/l8 and retain payload, lifetime and GUI evidence. This proposes no correctness drop or severity lowering.
+Proposed basis: Proposal only: consolidate with caller-owned g020/l8 and retain payload, lifetime and GUI evidence. This
+proposes no correctness drop or severity lowering.
 
-Existing parent disposition (event 25): duplicate. Full128exactownedresultpayload/lifetimecorroborationof020l8, notadditionalroot. Provisioningmutexnotconnectionlease,postbookkeepingoneshotlosesclaim; keepoutwardGUIprogressheaders+qualifiedSessionInfoJSONandsuccessfulcreate. No stale-triggeredrollbackorfailureconversion, no physicalretarget/reference/duplicate/workloss. UnderlyingothercanonicalretainedunderunclearFILTERboundary; originalallownerrecordskept.
+Existing parent disposition (event 25): duplicate. Full128exactownedresultpayload/lifetimecorroborationof020l8,
+notadditionalroot. Provisioningmutexnotconnectionlease,postbookkeepingoneshotlosesclaim;
+keepoutwardGUIprogressheaders+qualifiedSessionInfoJSONandsuccessfulcreate. No
+stale-triggeredrollbackorfailureconversion, no physicalretarget/reference/duplicate/workloss.
+UnderlyingothercanonicalretainedunderunclearFILTERboundary; originalallownerrecordskept.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g045 record](records/review-through-00de0b6c/groups/g045.json). Record ID: `l4`.
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g045 record](records/review-through-00de0b6c/groups/g045.json). Record ID: `l4`.
 
 ### g052/l9
 
@@ -176,31 +502,82 @@ Reviewed commit: 190d844e58c96cf197aa838d0b0eea8062f48435
 
 ## TLDR
 
-After creating a new sandbox or container session, the agent can receive an earlier connection's result marked fresh under a connection that replaced it before reply projection. The create still succeeded and the session reference still names the same entry. The issue is inaccurate freshness metadata, not physical retargeting, execution on another machine or loss of work. This corroborates caller-owned g020/l8 event29, not a newly independent discovery.
+After creating a new sandbox or container session, the agent can receive an earlier connection's result marked fresh
+under a connection that replaced it before reply projection. The create still succeeded and the session reference still
+names the same entry. The issue is inaccurate freshness metadata, not physical retargeting, execution on another machine
+or loss of work. This corroborates caller-owned g020/l8 event29, not a newly independent discovery.
 
 ## Details
 
-Read the complete 19-event local findings history and ONLY the named g020/l8 event29 before synthesis. Independently checked the exact protocol/caller boundary: proto/lib.rs:2640-2644 allows host_id to retain the original entry UUID even for a stale result, while 2648-2658 explicitly includes every mutating reply and the creating verbs in the actual-routed-connection contract. It says the row's host 'is pinned to the connection the mutation actually routed through' and that when that connection is no longer current, host=None accompanies stale. New CreateEnvironment is expressly answered with AgentReply::Created at 2092-2095; the new caller uses agent_created_reply, whose 4662-4680 documentation and implementation share the ordinary mutation projection. No new environment freshness exception is encoded or documented in this representation.
+Read the complete 19-event local findings history and ONLY the named g020/l8 event29 before synthesis. Independently
+checked the exact protocol/caller boundary: proto/lib.rs:2640-2644 allows host_id to retain the original entry UUID even
+for a stale result, while 2648-2658 explicitly includes every mutating reply and the creating verbs in the
+actual-routed-connection contract. It says the row's host 'is pinned to the connection the mutation actually routed
+through' and that when that connection is no longer current, host=None accompanies stale. New CreateEnvironment is
+expressly answered with AgentReply::Created at 2092-2095; the new caller uses agent_created_reply, whose 4662-4680
+documentation and implementation share the ordinary mutation projection. No new environment freshness exception is
+encoded or documented in this representation.
 
-The narrow data-flow checks independently reproduce g020's source conclusion without execution. sessions.rs:1844-1866 captures the real claim/client before a managed-checkout create and returns that same claim, and the ordinary branch returns it at 1923. But create_in_session_sandbox at 1793-1794 keeps only the qualified SessionInfo and discards the claim. The provisioning completion at tensorlake_add.rs:1018-1026 awaits step publication and a memory lock, then sends only this session result at 1057. The new agent caller samples host_client AFTER receiving the result (agent_requests.rs:4578-4588), using either the current claim or an invalid sentinel only if no client exists. Its existing projection at 4694-4707 compares that sampled claim's incarnation with the current snapshot, which can match a replacement connection and report host:Some/current name with stale:false for earlier data.
+The narrow data-flow checks independently reproduce g020's source conclusion without execution. sessions.rs:1844-1866
+captures the real claim/client before a managed-checkout create and returns that same claim, and the ordinary branch
+returns it at 1923. But create_in_session_sandbox at 1793-1794 keeps only the qualified SessionInfo and discards the
+claim. The provisioning completion at tensorlake_add.rs:1018-1026 awaits step publication and a memory lock, then sends
+only this session result at 1057. The new agent caller samples host_client AFTER receiving the result
+(agent_requests.rs:4578-4588), using either the current claim or an invalid sentinel only if no client exists. Its
+existing projection at 4694-4707 compares that sampled claim's incarnation with the current snapshot, which can match a
+replacement connection and report host:Some/current name with stale:false for earlier data.
 
-Connection replacement is distinct from logical entry identity: manager.rs:5190-5207 explicitly mints a fresh incarnation whenever the client changes, including disappearance; refreshes on one client keep their incarnation. Provisioning releases the environment's connection hold before attach_supervisor (tensorlake_add.rs:612-614); the later result boundary retains neither original claim nor connection lease. The separately owned completion and agent-receiver tasks and intervening awaited bookkeeping permit reconnect before the receiver samples its new claim. Source supports this conditional interleaving; no occurrence, timing frequency or destructive consequence was observed. The correct remedy is to retain the actual mutation claim through the owned result and project against it, or conservatively mark the result stale if that evidence is unavailable. Stable reference qualification alone cannot recreate freshness evidence.
+Connection replacement is distinct from logical entry identity: manager.rs:5190-5207 explicitly mints a fresh
+incarnation whenever the client changes, including disappearance; refreshes on one client keep their incarnation.
+Provisioning releases the environment's connection hold before attach_supervisor (tensorlake_add.rs:612-614); the later
+result boundary retains neither original claim nor connection lease. The separately owned completion and agent-receiver
+tasks and intervening awaited bookkeeping permit reconnect before the receiver samples its new claim. Source supports
+this conditional interleaving; no occurrence, timing frequency or destructive consequence was observed. The correct
+remedy is to retain the actual mutation claim through the owned result and project against it, or conservatively mark
+the result stale if that evidence is unavailable. Stable reference qualification alone cannot recreate freshness
+evidence.
 
-Contract reconciliation: SPEC.md logical-host approvals and c3's pending container-place authority uncertainty concern what an approved operation may target. They do not define the incarnation freshness of a completed reply. A permitted stable entry/reference and successful create can coexist with host=None/stale for the old connection. Therefore neither accepting logical-entry targeting nor c3's direct-Allow source refutations settles or drops this separate freshness defect. No new highest consequence is inferred.
+Contract reconciliation: SPEC.md logical-host approvals and c3's pending container-place authority uncertainty concern
+what an approved operation may target. They do not define the incarnation freshness of a completed reply. A permitted
+stable entry/reference and successful create can coexist with host=None/stale for the old connection. Therefore neither
+accepting logical-entry targeting nor c3's direct-Allow source refutations settles or drops this separate freshness
+defect. No new highest consequence is inferred.
 
-Suggested bucket: other (agent reply accuracy). Confidence: confirmed conditional source/data-flow and shared-contract mismatch; no runtime observation. Could-be-highest: false on this record; no physical target change, credential exposure, reference misrouting, security or user-work-loss route alleged. proposed_drop: false. possible_cover: exact g020/l8 event29 owns the complete caller defect and range-attribution/persistence evidence; this is the assigned protocol interface corroboration for consolidation, not a second independent runtime finding or a new false-doc-only report. Caveats: an environment still disconnected at projection uses the stale sentinel as intended; the problem requires a replacement connection current before projection. Ordinary creation remains subject to the same shared freshness contract. Prior c3 highest conditional consequence, both competing authority clauses, its investigated scope uncertainty and all proposals remain unchanged. All readily checkable protocol-scope/result-boundary premises resolved; l9 is closed as this corroborating finding. No tests, builds, reproductions, unrelated search, forbidden coverage reads, checkout edits, nested agents or live actions.
+Suggested bucket: other (agent reply accuracy). Confidence: confirmed conditional source/data-flow and shared-contract
+mismatch; no runtime observation. Could-be-highest: false on this record; no physical target change, credential
+exposure, reference misrouting, security or user-work-loss route alleged. proposed_drop: false. possible_cover: exact
+g020/l8 event29 owns the complete caller defect and range-attribution/persistence evidence; this is the assigned
+protocol interface corroboration for consolidation, not a second independent runtime finding or a new false-doc-only
+report. Caveats: an environment still disconnected at projection uses the stale sentinel as intended; the problem
+requires a replacement connection current before projection. Ordinary creation remains subject to the same shared
+freshness contract. Prior c3 highest conditional consequence, both competing authority clauses, its investigated scope
+uncertainty and all proposals remain unchanged. All readily checkable protocol-scope/result-boundary premises resolved;
+l9 is closed as this corroborating finding. No tests, builds, reproductions, unrelated search, forbidden coverage reads,
+checkout edits, nested agents or live actions.
 
 Returned proposal (claims-128, event 21): **duplicate**, suggested bucket **other**.
 
-Exact protocol-interface corroboration of g020/l8. Stable host entry and a valid created reference coexist with stale connection provenance. The mandatory Allow/logical-host approval question in this reviewer's distinct c3 is not part of l9 and cannot refute it.
+Exact protocol-interface corroboration of g020/l8. Stable host entry and a valid created reference coexist with stale
+connection provenance. The mandatory Allow/logical-host approval question in this reviewer's distinct c3 is not part of
+l9 and cannot refute it.
 
-Original stronger consequence: None in l9: it consistently excludes physical retargeting, reference misrouting, security and user-work loss. References to c3's original highest approval-authority concern explicitly preserve that separate record, not a stronger l9 consequence or lowering.
+Original stronger consequence: None in l9: it consistently excludes physical retargeting, reference misrouting, security
+and user-work loss. References to c3's original highest approval-authority concern explicitly preserve that separate
+record, not a stronger l9 consequence or lowering.
 
-Unresolved premise or limitation: None for l9's conditional source defect; runtime incidence unmeasured. The separate c3 approval-authority uncertainty and any highest consequence there remain untouched and are not independently assessed by this assigned l9 check.
+Unresolved premise or limitation: None for l9's conditional source defect; runtime incidence unmeasured. The separate c3
+approval-authority uncertainty and any highest consequence there remain untouched and are not independently assessed by
+this assigned l9 check.
 
-Proposed basis: Proposal only: consolidate protocol-contract evidence under g020/l8, preserving its other-priority conditional result and all limits. No parent decision or independent drop verdict inferred.
+Proposed basis: Proposal only: consolidate protocol-contract evidence under g020/l8, preserving its other-priority
+conditional result and all limits. No parent decision or independent drop verdict inferred.
 
-Existing parent disposition (event 21): duplicate. Full128exactprotocolcreatingreplyactualoperationconnectioncontractcorroborates020l8. Stablelogicalentryandvalidcreatedreferencearenotfreshness; mandatoryAllow/logicalhostoperationacceptanceofseparatec3approvalauthoritydoesnotwaivereplyprovenance. Retainothercanonicalconditionalmetadatafalsefreshnesswithcurrent-disconnectedfallbackgood,noruntime/security/workloss. Originalhighestc3untouched, nohiddenlowering.
+Existing parent disposition (event 21): duplicate.
+Full128exactprotocolcreatingreplyactualoperationconnectioncontractcorroborates020l8.
+Stablelogicalentryandvalidcreatedreferencearenotfreshness;
+mandatoryAllow/logicalhostoperationacceptanceofseparatec3approvalauthoritydoesnotwaivereplyprovenance.
+Retainothercanonicalconditionalmetadatafalsefreshnesswithcurrent-disconnectedfallbackgood,noruntime/security/workloss.
+Originalhighestc3untouched, nohiddenlowering.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g052 record](records/review-through-00de0b6c/groups/g052.json). Record ID: `l9`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g052 record](records/review-through-00de0b6c/groups/g052.json). Record ID: `l9`.

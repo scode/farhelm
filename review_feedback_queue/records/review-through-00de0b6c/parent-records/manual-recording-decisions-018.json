@@ -1,3 +1,12 @@
 [
-  {"key":"g070/l2","line":9,"disposition":"duplicate","group":"podman-test-payload-producer-consumer-tmux-mismatch","bucket":"other","recording":"repaired-in-range","needs_independent_drop_check":false,"reason":"Parent read complete claims045; this is the same500548b9 intermediate producer/consumer mismatch as g067/l3: script stages no tmux, fresh consumer still requires it before fixture creation. Corrected prereq caller citation1600-1601 is preserved. d751ff16 repairs the consumer and00de retains it. Join canonical historical-repaired group, preserving original defect, stale-output masking and later repair, not claiming it never existed or persists at tip. No highest consequence; g093/f1 remains to reconcile separately."}
+  {
+    "key": "g070/l2",
+    "line": 9,
+    "disposition": "duplicate",
+    "group": "podman-test-payload-producer-consumer-tmux-mismatch",
+    "bucket": "other",
+    "recording": "repaired-in-range",
+    "needs_independent_drop_check": false,
+    "reason": "Parent read complete claims045; this is the same500548b9 intermediate producer/consumer mismatch as g067/l3: script stages no tmux, fresh consumer still requires it before fixture creation. Corrected prereq caller citation1600-1601 is preserved. d751ff16 repairs the consumer and00de retains it. Join canonical historical-repaired group, preserving original defect, stale-output masking and later repair, not claiming it never existed or persists at tip. No highest consequence; g093/f1 remains to reconcile separately."
+  }
 ]

@@ -4,13 +4,30 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Source-confirmed review record: the revised cleanup explanation tells future maintainers that terminal-host processes inherit a parent session's tab marker. They do not: the host's empty environment keeps Stop's marker sweep from killing the terminal process and losing its retained screen. The child receives environment entries in its launch spec instead. This is a documentation defect; no unsafe production signaling is alleged. Source: launch.rs:110-118 now says a nested supervisor inherits the outer FARHELM_TAB_ID and 'its terminal hosts inherit it'. The assigned patch explicitly replaces tmux server with terminal hosts there. hosts/spawn.rs:19-24 says nothing of the supervisor's environment reaches the host process, specifically to keep markers and credentials off it; the start at :350-359 calls env_clear. host_launch.rs:490-495 composes the child's environment from std::env::vars_os(), :496-498 explicitly says the host never receives it in its own environment, and :508-518 places it in ChildSpec. Correct nearby TAB_ID_ENV_VAR docs at launch.rs:85-89 call it the terminal host's child environment, exposing the contradictory inheritance narrative. The inline comment at launch.rs:1227-1232 also describes passage 'through its own terminal hosts'; it can be clarified alongside the unambiguously incorrect host-inheritance sentence, but no separate issue is counted for that broader wording. Fix direction: describe the supervisor composing the child's environment from its base and transporting it in the spec, while keeping the host itself marker-free; retain the actual reason the agent shim scrubs an outer tab
+Source-confirmed review record: the revised cleanup explanation tells future maintainers that terminal-host processes
+inherit a parent session's tab marker. They do not: the host's empty environment keeps Stop's marker sweep from killing
+the terminal process and losing its retained screen. The child receives environment entries in its launch spec instead.
+This is a documentation defect; no unsafe production signaling is alleged. Source: launch.rs:110-118 now says a nested
+supervisor inherits the outer FARHELM_TAB_ID and 'its terminal hosts inherit it'. The assigned patch explicitly replaces
+tmux server with terminal hosts there. hosts/spawn.rs:19-24 says nothing of the supervisor's environment reaches the
+host process, specifically to keep markers and credentials off it; the start at :350-359 calls env_clear.
+host_launch.rs:490-495 composes the child's environment from std::env::vars_os(), :496-498 explicitly says the host
+never receives it in its own environment, and :508-518 places it in ChildSpec. Correct nearby TAB_ID_ENV_VAR docs at
+launch.rs:85-89 call it the terminal host's child environment, exposing the contradictory inheritance narrative. The
+inline comment at launch.rs:1227-1232 also describes passage 'through its own terminal hosts'; it can be clarified
+alongside the unambiguously incorrect host-inheritance sentence, but no separate issue is counted for that broader
+wording. Fix direction: describe the supervisor composing the child's environment from its base and transporting it in
+the spec, while keeping the host itself marker-free; retain the actual reason the agent shim scrubs an outer tab
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g098/l1`.
 
@@ -20,19 +37,69 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 10 (finding, open):
 
-Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; persistence checked through pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the revised cleanup explanation tells future maintainers that terminal-host processes inherit a parent session's tab marker. They do not: the host's empty environment keeps Stop's marker sweep from killing the terminal process and losing its retained screen. The child receives environment entries in its launch spec instead. This is a documentation defect; no unsafe production signaling is alleged. Source: launch.rs:110-118 now says a nested supervisor inherits the outer FARHELM_TAB_ID and 'its terminal hosts inherit it'. The assigned patch explicitly replaces tmux server with terminal hosts there. hosts/spawn.rs:19-24 says nothing of the supervisor's environment reaches the host process, specifically to keep markers and credentials off it; the start at :350-359 calls env_clear. host_launch.rs:490-495 composes the child's environment from std::env::vars_os(), :496-498 explicitly says the host never receives it in its own environment, and :508-518 places it in ChildSpec. Correct nearby TAB_ID_ENV_VAR docs at launch.rs:85-89 call it the terminal host's child environment, exposing the contradictory inheritance narrative. The inline comment at launch.rs:1227-1232 also describes passage 'through its own terminal hosts'; it can be clarified alongside the unambiguously incorrect host-inheritance sentence, but no separate issue is counted for that broader wording. Fix direction: describe the supervisor composing the child's environment from its base and transporting it in the spec, while keeping the host itself marker-free; retain the actual reason the agent shim scrubs an outer tab marker. Contract: SPEC_impl.md Terminal host, Starting a host, states an empty host environment keeps session markers and credentials off the host, and the child's environment travels only in the spec. Attribution over the whole range: base 6e423e30068b62c6cfa276c6d720ee35bb70387a describes tmux-server inheritance, not terminal-host inheritance; this assigned commit makes the incorrect substitution. The complete launch.rs diff from this revision through tip changes other comments/test wording only; the tip still contains the same terminal-host inheritance sentence at :113-114. No later-repair premise remains unresolved. Suggested bucket: other (incorrect developer-facing ownership/cleanup explanation). Could-be-highest: no established security or user-work-loss route from the wording; host termination/lost retained output explains why the real invariant matters, not an alleged runtime defect. Confidence: confirmed by pinned source, parent/base attribution and tip comparison; no execution. proposed_drop: false. possible_cover: none in supplied neighboring findings. Caveats: production marker scrubbing and positive agent selection may be correct and are not the subject of this finding. Their correctness does not refute the false documentation statement. Lead l1 resolved to this finding; no remaining open source premise.
+Reviewed commit: 1ed482dde220452e424973faf38a5e1318986333; persistence checked through pinned tip
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: the revised cleanup explanation tells future maintainers that
+terminal-host processes inherit a parent session's tab marker. They do not: the host's empty environment keeps Stop's
+marker sweep from killing the terminal process and losing its retained screen. The child receives environment entries in
+its launch spec instead. This is a documentation defect; no unsafe production signaling is alleged. Source:
+launch.rs:110-118 now says a nested supervisor inherits the outer FARHELM_TAB_ID and 'its terminal hosts inherit it'.
+The assigned patch explicitly replaces tmux server with terminal hosts there. hosts/spawn.rs:19-24 says nothing of the
+supervisor's environment reaches the host process, specifically to keep markers and credentials off it; the start at
+:350-359 calls env_clear. host_launch.rs:490-495 composes the child's environment from std::env::vars_os(), :496-498
+explicitly says the host never receives it in its own environment, and :508-518 places it in ChildSpec. Correct nearby
+TAB_ID_ENV_VAR docs at launch.rs:85-89 call it the terminal host's child environment, exposing the contradictory
+inheritance narrative. The inline comment at launch.rs:1227-1232 also describes passage 'through its own terminal
+hosts'; it can be clarified alongside the unambiguously incorrect host-inheritance sentence, but no separate issue is
+counted for that broader wording. Fix direction: describe the supervisor composing the child's environment from its base
+and transporting it in the spec, while keeping the host itself marker-free; retain the actual reason the agent shim
+scrubs an outer tab marker. Contract: SPEC_impl.md Terminal host, Starting a host, states an empty host environment
+keeps session markers and credentials off the host, and the child's environment travels only in the spec. Attribution
+over the whole range: base 6e423e30068b62c6cfa276c6d720ee35bb70387a describes tmux-server inheritance, not terminal-host
+inheritance; this assigned commit makes the incorrect substitution. The complete launch.rs diff from this revision
+through tip changes other comments/test wording only; the tip still contains the same terminal-host inheritance sentence
+at :113-114. No later-repair premise remains unresolved. Suggested bucket: other (incorrect developer-facing
+ownership/cleanup explanation). Could-be-highest: no established security or user-work-loss route from the wording; host
+termination/lost retained output explains why the real invariant matters, not an alleged runtime defect. Confidence:
+confirmed by pinned source, parent/base attribution and tip comparison; no execution. proposed_drop: false.
+possible_cover: none in supplied neighboring findings. Caveats: production marker scrubbing and positive agent selection
+may be correct and are not the subject of this finding. Their correctness does not refute the false documentation
+statement. Lead l1 resolved to this finding; no remaining open source premise.
 
 Returned proposal (claims-065, event 10): **retain-verified**, suggested bucket **other**.
 
-The changed comment expressly assigns inherited markers to host processes, contradicting the empty host environment. This is a comment defect, not an unsafe production sweep claim.
+The changed comment expressly assigns inherited markers to host processes, contradicting the empty host environment.
+This is a comment defect, not an unsafe production sweep claim.
 
-Original stronger consequence: Host termination and loss of its retained screen explain why the real marker-free invariant matters. No history event alleges that the comment currently causes unsafe signaling or work loss.
+Original stronger consequence: Host termination and loss of its retained screen explain why the real marker-free
+invariant matters. No history event alleges that the comment currently causes unsafe signaling or work loss.
 
 Unresolved premise or limitation: No missing premise stated in this returned proposal.
 
-Proposed basis: Retain the incorrect process-environment statement, with the broader through-hosts wording as nearby clarification rather than another finding.
+Proposed basis: Retain the incorrect process-environment statement, with the broader through-hosts wording as nearby
+clarification rather than another finding.
 
-Existing parent disposition (event 10): verified. Parent explicitly accepted named retain-verified proposal from claims-065 after inspecting it. The changed comment expressly assigns inherited markers to host processes, contradicting the empty host environment. This is a comment defect, not an unsafe production sweep claim. Retain the incorrect process-environment statement, with the broader through-hosts wording as nearby clarification rather than another finding. Checked source/results: ["1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/launch.rs:110-118 says its terminal hosts inherit FARHELM_TAB_ID; the same sentence survives at 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:113-114.","1ed482d:crates/farhelm-supervisor/src/hosts/spawn.rs:19-24 documents the empty host environment; :350-359 actually calls env_clear. service/core/host_launch.rs:490-518 composes and serializes the child environment separately.","Exclusive base 6e423e3:launch.rs:110-118 describes tmux-server inheritance instead. The terminal-host substitution is in range. Nearby child-environment documentation at launch.rs:85-89 exposes rather than repairs the contradiction. No runtime execution."] Current coverage/results: ["SPEC.md and SPEC_impl.md searched for markers, inheritance, host environment and cleanup. Current SPEC_impl.md:1916-1921 explicitly keeps markers off hosts; Creating agents in hosts at :2178-2200 distinguishes host from child. Neither accepts false documentation.","TODO.md Planned is empty (:25-26). BUGS.md contains only the unrelated SSH output-holder install hang. No matching active TRIAGE_OUTCOMES.md item found.","plans/queue searched for the actual inheritance claim. tmux-drop-from-docs has broad comment cleanup criteria, but plans/REPORTS.md:32 records it landed; it supplies no unlanded coverage. INDEX.md read in bounded chunks and searched; no same-root queue item found.","FILTER.md does not cover persistent developer-facing ownership documentation."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "Host termination and loss of its retained screen explain why the real marker-free invariant matters. No history event alleges that the comment currently causes unsafe signaling or work loss."; null.
+Existing parent disposition (event 10): verified. Parent explicitly accepted named retain-verified proposal from
+claims-065 after inspecting it. The changed comment expressly assigns inherited markers to host processes, contradicting
+the empty host environment. This is a comment defect, not an unsafe production sweep claim. Retain the incorrect
+process-environment statement, with the broader through-hosts wording as nearby clarification rather than another
+finding. Checked source/results:
+["1ed482dde220452e424973faf38a5e1318986333:crates/farhelm-supervisor/src/launch.rs:110-118 says its terminal hosts
+inherit FARHELM_TAB_ID; the same sentence survives at
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:113-114.","1ed482d:crates/farhelm-supervisor/src/hosts/spawn.rs:19-24 documents
+the empty host environment; :350-359 actually calls env_clear. service/core/host_launch.rs:490-518 composes and
+serializes the child environment separately.","Exclusive base 6e423e3:launch.rs:110-118 describes tmux-server
+inheritance instead. The terminal-host substitution is in range. Nearby child-environment documentation at
+launch.rs:85-89 exposes rather than repairs the contradiction. No runtime execution."] Current coverage/results:
+["SPEC.md and SPEC_impl.md searched for markers, inheritance, host environment and cleanup. Current
+SPEC_impl.md:1916-1921 explicitly keeps markers off hosts; Creating agents in hosts at :2178-2200 distinguishes host
+from child. Neither accepts false documentation.","TODO.md Planned is empty (:25-26). BUGS.md contains only the
+unrelated SSH output-holder install hang. No matching active TRIAGE_OUTCOMES.md item found.","plans/queue searched for
+the actual inheritance claim. tmux-drop-from-docs has broad comment cleanup criteria, but plans/REPORTS.md:32 records it
+landed; it supplies no unlanded coverage. INDEX.md read in bounded chunks and searched; no same-root queue item
+found.","FILTER.md does not cover persistent developer-facing ownership documentation."] Exact cited cover: [] Original
+stronger consequence and missing premise remain preserved: "Host termination and loss of its retained screen explain why
+the real marker-free invariant matters. No history event alleges that the comment currently causes unsafe signaling or
+work loss."; null.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g098 record](records/review-through-00de0b6c/groups/g098.json). Record ID: `l1`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g098 record](records/review-through-00de0b6c/groups/g098.json). Record ID: `l1`.

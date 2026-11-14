@@ -1,4 +1,16 @@
 [
- {"key":"g037/f2","proposal":"claim-checks/claims-022/result.json","parent_proposal":"source-refuted-rendered-row-delete-scope-widening","final_independent_gate":"required-before-highest-drop","reason":"Parent read full022. DrawnRowQuestionDelete/DeleteWhole exacttokenconsumed, answeredforcesSession/Wholescopeirrespectiveupdatedconnection; UnaskedopensnewWholequestionnotdispatch. Sameboundedrouteas028c4butretainindependentrowrefs/history. Original otherprocess/filelossfromunconfirmedwideningkeptforfreshgate, noassertionallDeletepaths safe."},
- {"key":"g037/f5","proposal":"claim-checks/claims-022/result.json","parent_proposal":"source-refuted-old-terminal-bell-comment-accuracy","final_independent_gate":"required-by-conservative-link-trust-flag","reason":"Full022 actual61e632changesonlymodule/testcommentfromoldwarningtostartup-endednotice, matchinghistorical/currentSPEC; executablelinkadmission/assertionsunchanged. Nobugassertedandnoproductharmestablished. Freshgateconservativebecausementionssupervisorlinktrust, boundedcommentaccuracyonlynotseparatelinkvalidationexemption."}
+  {
+    "key": "g037/f2",
+    "proposal": "claim-checks/claims-022/result.json",
+    "parent_proposal": "source-refuted-rendered-row-delete-scope-widening",
+    "final_independent_gate": "required-before-highest-drop",
+    "reason": "Parent read full022. DrawnRowQuestionDelete/DeleteWhole exacttokenconsumed, answeredforcesSession/Wholescopeirrespectiveupdatedconnection; UnaskedopensnewWholequestionnotdispatch. Sameboundedrouteas028c4butretainindependentrowrefs/history. Original otherprocess/filelossfromunconfirmedwideningkeptforfreshgate, noassertionallDeletepaths safe."
+  },
+  {
+    "key": "g037/f5",
+    "proposal": "claim-checks/claims-022/result.json",
+    "parent_proposal": "source-refuted-old-terminal-bell-comment-accuracy",
+    "final_independent_gate": "required-by-conservative-link-trust-flag",
+    "reason": "Full022 actual61e632changesonlymodule/testcommentfromoldwarningtostartup-endednotice, matchinghistorical/currentSPEC; executablelinkadmission/assertionsunchanged. Nobugassertedandnoproductharmestablished. Freshgateconservativebecausementionssupervisorlinktrust, boundedcommentaccuracyonlynotseparatelinkvalidationexemption."
+  }
 ]

@@ -120,9 +120,18 @@
       "TODO.md Planned is empty. Searches of plans/queue, BUGS.md, INDEX and active TRIAGE_OUTCOMES.md found no different exact cover. Automatic-update opt-out durability concerns a trust setting and is not an alias. FILTER.md is not the proposed basis."
     ],
     "exact_cover_quotes": [
-      {"source": "SPEC_impl.md:5188-5189 at recording main 24bc058066fd57848e788b465719b0e6da2f98f7", "quote": "This accepts losing the last commits on an OS crash or power loss without weakening database consistency; process crashes preserve commits."},
-      {"source": "SPEC_impl.md:6304-6305 at recording main", "quote": "A legacy row or a power loss that lost both records cannot recover by name: remove that host entry, then handle the leftover explicitly."},
-      {"source": "SPEC_impl.md:6460-6461 at recording main", "quote": "Ordinary write durability is retained: a legacy row or power loss that loses both the ID and pending marker requires explicit cleanup."}
+      {
+        "source": "SPEC_impl.md:5188-5189 at recording main 24bc058066fd57848e788b465719b0e6da2f98f7",
+        "quote": "This accepts losing the last commits on an OS crash or power loss without weakening database consistency; process crashes preserve commits."
+      },
+      {
+        "source": "SPEC_impl.md:6304-6305 at recording main",
+        "quote": "A legacy row or a power loss that lost both records cannot recover by name: remove that host entry, then handle the leftover explicitly."
+      },
+      {
+        "source": "SPEC_impl.md:6460-6461 at recording main",
+        "quote": "Ordinary write durability is retained: a legacy row or power loss that loses both the ID and pending marker requires explicit cleanup."
+      }
     ],
     "missing_premise": "Irreversible work/process loss or a silent destructive recovery route was not established. The accepted loss of the normal UI/cleanup association is established conditionally on lost WAL tail commits.",
     "original_stronger_consequence": "Power loss could erase ownership facts while remote work/processes survive, potentially leaving user work unaccounted for or inaccessible. Later wording narrows established consequence to lost normal association/manual recovery; it does not erase the original possible work-loss concern.",

@@ -4,13 +4,30 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Unverified collection: a page retained across the grid-only update can paste literal JSON that the updated endpoint treats as a Text instruction; escaped carriage returns become unbracketed terminal input and can submit commands embedded in the document. Original consequence retained: the old page also misdraws grid data, and ordinary malformed input ends only the viewer attachment. That invalid-input teardown does not refute this valid-input route. Source checks: parent UI lib.rs:514-521 defaults a missing agent_terminal to None; session_view.rs:1806-1810 passes agent_kind into the spec and :3839-3852 preserves an unknown kind when not restarting. Parent terminal.js:4651-4666 builds a fresh xterm for that unknown kind. Its :3590-3621 mount gate checks helpers/fonts/element, with no build-match prerequisite. :1550-1579 gates automatic recovery/heartbeat on skew but explicitly allows manual reconnect; :1871-1898 remounts on that manual route. :4158-4160 sends encoded input when the socket is open, with no build guard. Parent xterm.js:1 module 7861 paste function r normalizes actual line endings, brackets only when decPrivateModes.bracketedPasteMode is true and triggers one data event; that mode defaults false. Parent terminal.js:2649-2676 handles text paste, :2232-2235 removes literal ESC only, :4628-4634 invokes term.paste, and :4191-4196 sends onData through the whole-frame sendData. Reviewed grid.rs:1565-1566 tags GridInput by t; :1610-1612 defines Text data; :1650-1655 deserializes JSON; :1686-1693 bounds Text length without excluding decoded controls. grid_input.rs:175 emits Text data bytes d
+Unverified collection: a page retained across the grid-only update can paste literal JSON that the updated endpoint
+treats as a Text instruction; escaped carriage returns become unbracketed terminal input and can submit commands
+embedded in the document. Original consequence retained: the old page also misdraws grid data, and ordinary malformed
+input ends only the viewer attachment. That invalid-input teardown does not refute this valid-input route. Source
+checks: parent UI lib.rs:514-521 defaults a missing agent_terminal to None; session_view.rs:1806-1810 passes agent_kind
+into the spec and :3839-3852 preserves an unknown kind when not restarting. Parent terminal.js:4651-4666 builds a fresh
+xterm for that unknown kind. Its :3590-3621 mount gate checks helpers/fonts/element, with no build-match prerequisite.
+:1550-1579 gates automatic recovery/heartbeat on skew but explicitly allows manual reconnect; :1871-1898 remounts on
+that manual route. :4158-4160 sends encoded input when the socket is open, with no build guard. Parent xterm.js:1 module
+7861 paste function r normalizes actual line endings, brackets only when decPrivateModes.bracketedPasteMode is true and
+triggers one data event; that mode defaults false. Parent terminal.js:2649-2676 handles text paste, :2232-2235 removes
+literal ESC only, :4628-4634 invokes term.paste, and :4191-4196 sends onData through the whole-frame sendData. Reviewed
+grid.rs:1565-1566 tags GridInput by t; :1610-1612 defines Text data; :1650-1655 deserializes JSON; :1686-1693 bounds
+Text length without excluding decoded controls. grid_input.rs:175 emits Text data bytes d
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **highest**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **highest**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g192/c4`.
 
@@ -20,19 +37,60 @@ Confidence: Unverified collection; recording proposals and any disagreement rema
 
 Latest reviewer record, event 11 (finding, open):
 
-Synthesis revision completing the named cross-group input before discovery pass 1. Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: a page retained across the grid-only update can paste literal JSON that the updated endpoint treats as a Text instruction; escaped carriage returns become unbracketed terminal input and can submit commands embedded in the document. Original consequence retained: the old page also misdraws grid data, and ordinary malformed input ends only the viewer attachment. That invalid-input teardown does not refute this valid-input route. Source checks: parent UI lib.rs:514-521 defaults a missing agent_terminal to None; session_view.rs:1806-1810 passes agent_kind into the spec and :3839-3852 preserves an unknown kind when not restarting. Parent terminal.js:4651-4666 builds a fresh xterm for that unknown kind. Its :3590-3621 mount gate checks helpers/fonts/element, with no build-match prerequisite. :1550-1579 gates automatic recovery/heartbeat on skew but explicitly allows manual reconnect; :1871-1898 remounts on that manual route. :4158-4160 sends encoded input when the socket is open, with no build guard. Parent xterm.js:1 module 7861 paste function r normalizes actual line endings, brackets only when decPrivateModes.bracketedPasteMode is true and triggers one data event; that mode defaults false. Parent terminal.js:2649-2676 handles text paste, :2232-2235 removes literal ESC only, :4628-4634 invokes term.paste, and :4191-4196 sends onData through the whole-frame sendData. Reviewed grid.rs:1565-1566 tags GridInput by t; :1610-1612 defines Text data; :1650-1655 deserializes JSON; :1686-1693 bounds Text length without excluding decoded controls. grid_input.rs:175 emits Text data bytes directly without paste wrapping, irrespective of the real program's bracketed-paste mode. The reviewed helm binary relay was checked at terminal.rs:762-773 in the prior turn. Thus a small one-line GridInput-shaped pasted document can cross as raw bytes and be reinterpreted. Suggested bucket: highest/security or loss of work. Could-be-highest: true; unintended unbracketed command submission is an established source route, although no execution or destructive result was observed. Confidence: confirmed source path under the explicit old-page/unknown-kind fresh-mount/valid-small-JSON-paste conditions; no runtime evidence. proposed_drop: potential specification acceptance remains proposed for independent judgment, not accepted. Exact preserved basis: SPEC_impl.md:3021-3027 says, 'A page loaded from the previous helm and left open across the update must be reloaded; nothing keeps it working.' It describes misdrawing and malformed-input detach and says, 'Keeping the stream notice for such pages was considered and not done: a reload is the whole remedy.' It does not expressly name successful JSON reinterpretation as unbracketed program input. possible_cover: supplied g196/l1 is the same route; g082/c2 and g083/c5 also retain it. Parent owns consolidation; no prohibited coverage searches. Caveats: ordinary keystrokes usually detach first; program output that enables the old surface's bracketed-paste mode can prevent this particular raw-frame route. Full arbitrary-byte behavior and actual shell execution were not tested. This resolves the local readily checkable premises and replaces the earlier broad no-highest treatment. It is a revision from supplied interface evidence, not a new independent discovery.
+Synthesis revision completing the named cross-group input before discovery pass 1. Reviewed commit:
+f560058da19e02716e6f943883a9508b447aff4e. TLDR: a page retained across the grid-only update can paste literal JSON that
+the updated endpoint treats as a Text instruction; escaped carriage returns become unbracketed terminal input and can
+submit commands embedded in the document. Original consequence retained: the old page also misdraws grid data, and
+ordinary malformed input ends only the viewer attachment. That invalid-input teardown does not refute this valid-input
+route. Source checks: parent UI lib.rs:514-521 defaults a missing agent_terminal to None; session_view.rs:1806-1810
+passes agent_kind into the spec and :3839-3852 preserves an unknown kind when not restarting. Parent
+terminal.js:4651-4666 builds a fresh xterm for that unknown kind. Its :3590-3621 mount gate checks
+helpers/fonts/element, with no build-match prerequisite. :1550-1579 gates automatic recovery/heartbeat on skew but
+explicitly allows manual reconnect; :1871-1898 remounts on that manual route. :4158-4160 sends encoded input when the
+socket is open, with no build guard. Parent xterm.js:1 module 7861 paste function r normalizes actual line endings,
+brackets only when decPrivateModes.bracketedPasteMode is true and triggers one data event; that mode defaults false.
+Parent terminal.js:2649-2676 handles text paste, :2232-2235 removes literal ESC only, :4628-4634 invokes term.paste, and
+:4191-4196 sends onData through the whole-frame sendData. Reviewed grid.rs:1565-1566 tags GridInput by t; :1610-1612
+defines Text data; :1650-1655 deserializes JSON; :1686-1693 bounds Text length without excluding decoded controls.
+grid_input.rs:175 emits Text data bytes directly without paste wrapping, irrespective of the real program's
+bracketed-paste mode. The reviewed helm binary relay was checked at terminal.rs:762-773 in the prior turn. Thus a small
+one-line GridInput-shaped pasted document can cross as raw bytes and be reinterpreted. Suggested bucket:
+highest/security or loss of work. Could-be-highest: true; unintended unbracketed command submission is an established
+source route, although no execution or destructive result was observed. Confidence: confirmed source path under the
+explicit old-page/unknown-kind fresh-mount/valid-small-JSON-paste conditions; no runtime evidence. proposed_drop:
+potential specification acceptance remains proposed for independent judgment, not accepted. Exact preserved basis:
+SPEC_impl.md:3021-3027 says, 'A page loaded from the previous helm and left open across the update must be reloaded;
+nothing keeps it working.' It describes misdrawing and malformed-input detach and says, 'Keeping the stream notice for
+such pages was considered and not done: a reload is the whole remedy.' It does not expressly name successful JSON
+reinterpretation as unbracketed program input. possible_cover: supplied g196/l1 is the same route; g082/c2 and g083/c5
+also retain it. Parent owns consolidation; no prohibited coverage searches. Caveats: ordinary keystrokes usually detach
+first; program output that enables the old surface's bracketed-paste mode can prevent this particular raw-frame route.
+Full arbitrary-byte behavior and actual shell execution were not tested. This resolves the local readily checkable
+premises and replaces the earlier broad no-highest treatment. It is a revision from supplied interface evidence, not a
+new independent discovery.
 
 Returned proposal (claims-120, event 11): **retain-verified**, suggested bucket **highest**.
 
-Under the stated old-page/fresh unknown-kind attachment conditions, a literal GridInput-shaped JSON paste crosses as one binary frame and is deserialized as Text. Escaped carriage returns become active unbracketed terminal input. The spec's reload requirement describes misdraw and malformed-input detach, not this successful reinterpretation consequence.
+Under the stated old-page/fresh unknown-kind attachment conditions, a literal GridInput-shaped JSON paste crosses as one
+binary frame and is deserialized as Text. Escaped carriage returns become active unbracketed terminal input. The spec's
+reload requirement describes misdraw and malformed-input detach, not this successful reinterpretation consequence.
 
-Original stronger consequence: Initial records proposed spec-covered high for old-page misdraw/malformed-input detach and no host-process loss. Lines 9-11 explicitly withdrew that broad no-highest conclusion for valid JSON, establishing potential unbracketed command submission/security or work loss. The original contained malformed-input consequence remains true but does not refute successful input.
+Original stronger consequence: Initial records proposed spec-covered high for old-page misdraw/malformed-input detach
+and no host-process loss. Lines 9-11 explicitly withdrew that broad no-highest conclusion for valid JSON, establishing
+potential unbracketed command submission/security or work loss. The original contained malformed-input consequence
+remains true but does not refute successful input.
 
-Unresolved premise or limitation: No missing local source premise for the conditional reinterpretation chain. Actual execution/destruction was not reproduced. Parent should consolidate the supplied g196/l1, g082/c2 and g083/c5 records only after comparing their histories; they were not included in this batch and were not independently read here.
+Unresolved premise or limitation: No missing local source premise for the conditional reinterpretation chain. Actual
+execution/destruction was not reproduced. Parent should consolidate the supplied g196/l1, g082/c2 and g083/c5 records
+only after comparing their histories; they were not included in this batch and were not independently read here.
 
-Proposed basis: Retain highest on the established unintended-command source route. Preserve the earlier proposed specification drop as unresolved and send it for an independent fresh-context drop check before any dismissal or consequence lowering. This consultation does not approve that drop.
+Proposed basis: Retain highest on the established unintended-command source route. Preserve the earlier proposed
+specification drop as unresolved and send it for an independent fresh-context drop check before any dismissal or
+consequence lowering. This consultation does not approve that drop.
 
-Existing parent disposition (event 11): under-investigation. Record durably acknowledged; parent source/contract validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This preserves the claim and uncertainty without accepting, dropping or lowering it.
+Existing parent disposition (event 11): under-investigation. Record durably acknowledged; parent source/contract
+validation, cross-group synthesis, coverage/filter matching and any independent drop check remain pending. This
+preserves the claim and uncertainty without accepting, dropping or lowering it.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g192 record](records/review-through-00de0b6c/groups/g192.json). Record ID: `c4`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g192 record](records/review-through-00de0b6c/groups/g192.json). Record ID: `c4`.

@@ -1,6 +1,30 @@
 [
- {"key":"g008/f3","proposal":"claim-checks/claims-004/result.json","parent_proposal":"source-refuted-retired-producer-contract","final_independent_gate":"required-before-drop","reason":"Parentreadfull004. Deletedtmuxbyte-streamflowexplanationexplicitlyassignedtooldersupervisors; currentHost-onlyresolver/refuse-nongridbeforetakeover/GridStreamcaller matches separatelyretainedgridpause/historycontract. Refutesdeletionofcurrentflowinvariant, notallruntimeflowcorrectness orretroactiveauditoldsupervisors. Preserveoriginaloutputretention/cross-terminalstallpossibleworkconsequence forfreshcheck; nofiltertestpremiseconflation."},
- {"key":"g008/f4","proposal":"claim-checks/claims-004/result.json","parent_proposal":"source-refuted-same-root-g006/f3","final_independent_gate":"required-before-drop-and-withdrawal","reason":"Full004samequalifiedrollbackcomparisonas006f3, in-range647authorshipnotprebase. 'Likeaspecneverlanded' referencespolicywith explicitpostallocationretainerrorrow/membership; actualFailedStart::Specandoldretrybothpreserveallocated/unreadableorigins. No overridingunconditionaldeletiontext. Preserveearliercategoricaldocumentationfindingwithdrawal/isolatedreaderclarity/ownershiphandleharmforfreshgate, notrefutedmerelybyproductioncorrectness."},
- {"key":"g009/c2","proposal":"claim-checks/claims-004/result.json","parent_proposal":"source-refuted-caller-supplied-link-tags","final_independent_gate":"required-before-security-drop","reason":"Full004actualgridadapterlinkLinesprovidesperhoverintegeridentityonEVERYcell, positivehyperlink/zeroblank; linkHoverTextgetsviewbuiltfromactualgetGrid. Removedoldtagunavailableexceptiondoesnotremovejoinedcomparisonwhenitsprerequisiteabsent; defensiveundefinedfallbackdoesnotprovemissingtagsproducer. Fulltargetdisclosurestillmandatory, preserveoriginaldeceptivelinksecurityhypothesiswithoutcertifyingalllinkpolicies. Freshcheckprecisecaller/tagroute; unrelatedcursor-tailacceptedexceptionnotcover."},
- {"key":"g010/f1","proposal":"claim-checks/claims-004/result.json","parent_proposal":"retain-verified-other","final_independent_gate":"required-for-original-consequence-narrowing","reason":"Full004newf560SPEC_implunconditionalonePTYwriteexplanationcontradictsactualhostshortwritesuffixloopandterminal-hostSPECinitialwholeoffer/shortwriteallowed/no-read-boundaryguarantee. RootSPECstrongerwordingalreadybase, butnewimplementationclaiminrange. Retainpersistentdocumentationcontractmismatch, ordinaryencoderoneframe/initialofferisnotphysicalwriteatomicity. Proposedotherbecauseactualsupportedlineeditorsequence/split→unintendedsubmit→destructiveworklossnotestablished; originalhypothesishighestremainsinregister forfreshpriorityjudgment, ambiguousloweringkeepshighest. No runtime/falsephysicalreadclaim. SeparateRustblockedreaderandAltGraphrootsnotduplicates."}
+  {
+    "key": "g008/f3",
+    "proposal": "claim-checks/claims-004/result.json",
+    "parent_proposal": "source-refuted-retired-producer-contract",
+    "final_independent_gate": "required-before-drop",
+    "reason": "Parentreadfull004. Deletedtmuxbyte-streamflowexplanationexplicitlyassignedtooldersupervisors; currentHost-onlyresolver/refuse-nongridbeforetakeover/GridStreamcaller matches separatelyretainedgridpause/historycontract. Refutesdeletionofcurrentflowinvariant, notallruntimeflowcorrectness orretroactiveauditoldsupervisors. Preserveoriginaloutputretention/cross-terminalstallpossibleworkconsequence forfreshcheck; nofiltertestpremiseconflation."
+  },
+  {
+    "key": "g008/f4",
+    "proposal": "claim-checks/claims-004/result.json",
+    "parent_proposal": "source-refuted-same-root-g006/f3",
+    "final_independent_gate": "required-before-drop-and-withdrawal",
+    "reason": "Full004samequalifiedrollbackcomparisonas006f3, in-range647authorshipnotprebase. 'Likeaspecneverlanded' referencespolicywith explicitpostallocationretainerrorrow/membership; actualFailedStart::Specandoldretrybothpreserveallocated/unreadableorigins. No overridingunconditionaldeletiontext. Preserveearliercategoricaldocumentationfindingwithdrawal/isolatedreaderclarity/ownershiphandleharmforfreshgate, notrefutedmerelybyproductioncorrectness."
+  },
+  {
+    "key": "g009/c2",
+    "proposal": "claim-checks/claims-004/result.json",
+    "parent_proposal": "source-refuted-caller-supplied-link-tags",
+    "final_independent_gate": "required-before-security-drop",
+    "reason": "Full004actualgridadapterlinkLinesprovidesperhoverintegeridentityonEVERYcell, positivehyperlink/zeroblank; linkHoverTextgetsviewbuiltfromactualgetGrid. Removedoldtagunavailableexceptiondoesnotremovejoinedcomparisonwhenitsprerequisiteabsent; defensiveundefinedfallbackdoesnotprovemissingtagsproducer. Fulltargetdisclosurestillmandatory, preserveoriginaldeceptivelinksecurityhypothesiswithoutcertifyingalllinkpolicies. Freshcheckprecisecaller/tagroute; unrelatedcursor-tailacceptedexceptionnotcover."
+  },
+  {
+    "key": "g010/f1",
+    "proposal": "claim-checks/claims-004/result.json",
+    "parent_proposal": "retain-verified-other",
+    "final_independent_gate": "required-for-original-consequence-narrowing",
+    "reason": "Full004newf560SPEC_implunconditionalonePTYwriteexplanationcontradictsactualhostshortwritesuffixloopandterminal-hostSPECinitialwholeoffer/shortwriteallowed/no-read-boundaryguarantee. RootSPECstrongerwordingalreadybase, butnewimplementationclaiminrange. Retainpersistentdocumentationcontractmismatch, ordinaryencoderoneframe/initialofferisnotphysicalwriteatomicity. Proposedotherbecauseactualsupportedlineeditorsequence/split→unintendedsubmit→destructiveworklossnotestablished; originalhypothesishighestremainsinregister forfreshpriorityjudgment, ambiguousloweringkeepshighest. No runtime/falsephysicalreadclaim. SeparateRustblockedreaderandAltGraphrootsnotduplicates."
+  }
 ]

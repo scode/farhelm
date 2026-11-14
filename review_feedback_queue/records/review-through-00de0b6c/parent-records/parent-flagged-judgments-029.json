@@ -1,6 +1,30 @@
 [
- {"key":"g045/c5","proposal":"claim-checks/claims-029/result.json","parent_proposal":"retired-supervisor-runtime-pin-test-source-refutation","final_independent_gate":"required-before-original-possible-session-loss-drop","reason":"Parent read full029 unitinputs/service noselectedtmux andsupervisorignoresinheritedFARHELM_TMUX; exactspecnoprogramdependency. Deletedtestpinsretiredruntime, notlossstill-supportedsubstrateoracle. Preservehypotheticalunsupported/shadowedsessioncrashworklossforfreshgate; inheritedusercommandselection045l2andoldorphanlifetimesdistinctnotrefuted."},
- {"key":"g046/f1","proposal":"claim-checks/claims-029/result.json","parent_proposal":"exact-spec-accepted-legacy-private-server-survival-after-offline-uninstall","final_independent_gate":"required-before-possible-highest-drop-or-lowering","reason":"Full029 stopinactiveunit/terminalhostcleanupdoesnotreachdetachedoldserver; ordinarystopfailurestillreturnsbeforedelete, onlybundledtmuxremovebest-effort. Sourcelegacyprocessesmayremainafterhost/binaryremoval, exactproduct/implexplicitlyacceptpreviouslystoppedsupervisor/failedstartupendresidual. Highestpossibilitypreserveduntilfreshgate, proposedotheronlyestablishedleftoverimpact. NotordinaryAddoveransweringsupervisoracceptance, no blanketupgradefilter orobservedcgroupclaim."},
- {"key":"g046/c2","proposal":"claim-checks/claims-029/result.json","parent_proposal":"source-refuted-shared-binary-neighbor-tmux-removal-target","final_independent_gate":"required-before-highest-user-executable-drop","reason":"Full029 frozenprivate lib_dir/tmuxseparatefromregisteredbinaryoverride, pre0.18sharedcopypreserved; unlink/rm-fnorecursive/finalsymlinkfollow. Refutesordinaryuseradjacentexecutableremoval, notparentreplacement/maliciousinterference. Falseregressiondocstringseparateretained046l2, notvalidatedbycorrectsource. Preserveoriginaluserbinarylossroutefreshgate."},
- {"key":"g046/c3","proposal":"claim-checks/claims-029/result.json","parent_proposal":"source-refuted-ordinary-Add-over-answering-supervisor","final_independent_gate":"required-before-original-possible-highest-drop-or-lowering","reason":"Full029 discoverycompatible/skewansweradopts, planonlyAbsent; confirmationprobesoriginal/plannedcoordsanswer→UseAsIs, positiveabsenceexit+emptystdout+command-startrequirednotbadhello/stall. RefutesordinaryAddremovetmuxunderansweringoldruntime, notexternalstartafterconfirmunestablishedraceorautomaticUpdateotherroot. Orphanuninstallacceptancenotcover. Originalhighavailability/possibleworksecurityharmpreservedfreshgate."}
+  {
+    "key": "g045/c5",
+    "proposal": "claim-checks/claims-029/result.json",
+    "parent_proposal": "retired-supervisor-runtime-pin-test-source-refutation",
+    "final_independent_gate": "required-before-original-possible-session-loss-drop",
+    "reason": "Parent read full029 unitinputs/service noselectedtmux andsupervisorignoresinheritedFARHELM_TMUX; exactspecnoprogramdependency. Deletedtestpinsretiredruntime, notlossstill-supportedsubstrateoracle. Preservehypotheticalunsupported/shadowedsessioncrashworklossforfreshgate; inheritedusercommandselection045l2andoldorphanlifetimesdistinctnotrefuted."
+  },
+  {
+    "key": "g046/f1",
+    "proposal": "claim-checks/claims-029/result.json",
+    "parent_proposal": "exact-spec-accepted-legacy-private-server-survival-after-offline-uninstall",
+    "final_independent_gate": "required-before-possible-highest-drop-or-lowering",
+    "reason": "Full029 stopinactiveunit/terminalhostcleanupdoesnotreachdetachedoldserver; ordinarystopfailurestillreturnsbeforedelete, onlybundledtmuxremovebest-effort. Sourcelegacyprocessesmayremainafterhost/binaryremoval, exactproduct/implexplicitlyacceptpreviouslystoppedsupervisor/failedstartupendresidual. Highestpossibilitypreserveduntilfreshgate, proposedotheronlyestablishedleftoverimpact. NotordinaryAddoveransweringsupervisoracceptance, no blanketupgradefilter orobservedcgroupclaim."
+  },
+  {
+    "key": "g046/c2",
+    "proposal": "claim-checks/claims-029/result.json",
+    "parent_proposal": "source-refuted-shared-binary-neighbor-tmux-removal-target",
+    "final_independent_gate": "required-before-highest-user-executable-drop",
+    "reason": "Full029 frozenprivate lib_dir/tmuxseparatefromregisteredbinaryoverride, pre0.18sharedcopypreserved; unlink/rm-fnorecursive/finalsymlinkfollow. Refutesordinaryuseradjacentexecutableremoval, notparentreplacement/maliciousinterference. Falseregressiondocstringseparateretained046l2, notvalidatedbycorrectsource. Preserveoriginaluserbinarylossroutefreshgate."
+  },
+  {
+    "key": "g046/c3",
+    "proposal": "claim-checks/claims-029/result.json",
+    "parent_proposal": "source-refuted-ordinary-Add-over-answering-supervisor",
+    "final_independent_gate": "required-before-original-possible-highest-drop-or-lowering",
+    "reason": "Full029 discoverycompatible/skewansweradopts, planonlyAbsent; confirmationprobesoriginal/plannedcoordsanswer→UseAsIs, positiveabsenceexit+emptystdout+command-startrequirednotbadhello/stall. RefutesordinaryAddremovetmuxunderansweringoldruntime, notexternalstartafterconfirmunestablishedraceorautomaticUpdateotherroot. Orphanuninstallacceptancenotcover. Originalhighavailability/possibleworksecurityharmpreservedfreshgate."
+  }
 ]

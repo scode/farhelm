@@ -46,10 +46,19 @@
       "FILTER.md's upgrade-plus-rare-condition filter does not apply to unconditional retirement on upgrade. No filter is used."
     ],
     "exact_cover_quotes": [
-      {"source": "SPEC.md:3000-3005", "quote": "A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program."},
-      {"source": "SPEC.md:3004", "quote": "last screen, which lived in the server, is gone; old tabs are closed."},
-      {"source": "SPEC.md:3008-3010", "quote": "A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running."},
-      {"source": "SPEC_impl.md:2825-2827", "quote": "A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)"}
+      {
+        "source": "SPEC.md:3000-3005",
+        "quote": "A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program."
+      },
+      { "source": "SPEC.md:3004", "quote": "last screen, which lived in the server, is gone; old tabs are closed." },
+      {
+        "source": "SPEC.md:3008-3010",
+        "quote": "A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running."
+      },
+      {
+        "source": "SPEC_impl.md:2825-2827",
+        "quote": "A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)"
+      }
     ],
     "missing_premise": null,
     "original_stronger_consequence": "Starting the release ends agents and tab programs in the old private tmux server, losing running processes and old terminal contents. A failed termination can also leave an old agent running beside one subsequently restarted. Both consequences remain preserved as highest-impact provenance.",

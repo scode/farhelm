@@ -1,3 +1,9 @@
 [
- {"key":"g101/c2","proposal":"claim-checks/claims-066/result.json","parent_proposal":"source-refuted-removed-TerminalProcess-abstraction-does-not-trust-recycled-child","final_independent_gate":"required-before-highest-unrelated-work-loss-drop","reason":"Full flagged066 read. Running-only PID and adoption-pinned start are retained; changed, absent or zombie child is Dead, unreadability errors, requested root must match original PID. Stop/Restart/tab capture that root before async intent/cleanup; guarded Delete refuses Running and propagates uncertainty. Matching implementation contract2047-2053 corroborates the source, not acceptance of wrong-process killing. Refute only alleged omitted identity check caused by abstraction removal; do not infer every later sweep/signal race safe or auto-alias098/100. Original highest unrelated process/work loss remains for gate; handoff filter is expressly narrower."}
+  {
+    "key": "g101/c2",
+    "proposal": "claim-checks/claims-066/result.json",
+    "parent_proposal": "source-refuted-removed-TerminalProcess-abstraction-does-not-trust-recycled-child",
+    "final_independent_gate": "required-before-highest-unrelated-work-loss-drop",
+    "reason": "Full flagged066 read. Running-only PID and adoption-pinned start are retained; changed, absent or zombie child is Dead, unreadability errors, requested root must match original PID. Stop/Restart/tab capture that root before async intent/cleanup; guarded Delete refuses Running and propagates uncertainty. Matching implementation contract2047-2053 corroborates the source, not acceptance of wrong-process killing. Refute only alleged omitted identity check caused by abstraction removal; do not infer every later sweep/signal race safe or auto-alias098/100. Original highest unrelated process/work loss remains for gate; handoff filter is expressly narrower."
+  }
 ]

@@ -1,6 +1,30 @@
 [
- {"key":"g011/c1","proposal":"claim-checks/claims-005/result.json","parent_proposal":"retain-highest-canonical-legacy-json-input","final_independent_gate":"include-prior-broad-reload-drop-and-any-alias","reason":"Parentreadfull005. Sourceestablishesoldloadedpagefreshunknownkindxtermcanmount/attachthroughmanualskewdespitemissingnotice, offbracketedpasteonebinaryevent literalvalidTextJSON acceptednewgriddecoder, decodedCRqueuedasTextoutsiderealpaste. Thisis successfulreinterpretation/controlinput, notacceptedmisdraw/malformedinputdetachorreload-onlydisplaybreakage. Retainhighestconditionalunintendedcommandroute, noexecutedpayload/harm/frequency/allstalesurfacesclaim. Knownkindgridmissnoticefailsseparate. Reconcile017l1/196l1andothersaliases preservingallsource/producerpremises; earlygenericreloadacceptanceonlypartialdisplay/refusalscope. Securityboundaryexcludesupgrade-rare filter. Freshcheckanyproposeddrop/lowering, don'ttreatgeneraloldpageunsupportedasacceptinginputtransform."},
- {"key":"g011/c2","proposal":"claim-checks/claims-005/result.json","parent_proposal":"source-refuted-retained-osc-scheme-gate","final_independent_gate":"required-before-security-drop","reason":"Full005oscTargetclassifiesonlyHTTP/HTTPS/validatedabsolutefile,inertcallbackotherwise;everyOSCresultgoesthroughadapter,andtaggedcellsblockprintedURLfallback. Refutesdeletedxtermgate→arbitrarylocalhandlerexecutionroute, not allparser/linksecurity. No absentcoveragefilter; freshcheckactualactivationhandoffandfallback. Preservepotentialhighestarbitraryschemeharmandnobroadallowlistbypasscertification."},
- {"key":"g012/c1","proposal":"claim-checks/claims-005/result.json","parent_proposal":"covered-same-root-g006/f2","final_independent_gate":"required-before-drop","reason":"Full005exactremoteuninstallstopped-supervisor/outofunitgroupprivatetmuxsurvivoracceptance inSPEC/impl. Terminalhoststopconfirmationremainschecked, noincorrectterminationorunrelatedcleanupaccepted. Same006f2rootneedsbothprovenance/sourcevariants, preserveuserprocessaccess/resourceconsequence, notautomaticallylostwork. Landedplan corroboratingintentnotfuturefix. Freshchecknarrowpriorstopresidualonly."},
- {"key":"g012/c2","proposal":"claim-checks/claims-005/result.json","parent_proposal":"source-refuted-no-executable-dependency","final_independent_gate":"required-before-drop","reason":"Full005Macpreflightremovedwithruntime/provisioneddependency; actualdesktopspawnsFarhelmsupervisorwithnotmuxhandoff andoldstartupcleanupconnectssocket/verifiespeerwithouttmuxprogram. Refutesmissingexecutablebreaksterminalstartup/upgradecleanupprerequisite, notcorrectness/successofeverycleanupoutcome. Preserveuserprocesscleanupcontextforfreshgate, separatemisleadinginstallerassurance/sourcefailuresunaffected."}
+  {
+    "key": "g011/c1",
+    "proposal": "claim-checks/claims-005/result.json",
+    "parent_proposal": "retain-highest-canonical-legacy-json-input",
+    "final_independent_gate": "include-prior-broad-reload-drop-and-any-alias",
+    "reason": "Parentreadfull005. Sourceestablishesoldloadedpagefreshunknownkindxtermcanmount/attachthroughmanualskewdespitemissingnotice, offbracketedpasteonebinaryevent literalvalidTextJSON acceptednewgriddecoder, decodedCRqueuedasTextoutsiderealpaste. Thisis successfulreinterpretation/controlinput, notacceptedmisdraw/malformedinputdetachorreload-onlydisplaybreakage. Retainhighestconditionalunintendedcommandroute, noexecutedpayload/harm/frequency/allstalesurfacesclaim. Knownkindgridmissnoticefailsseparate. Reconcile017l1/196l1andothersaliases preservingallsource/producerpremises; earlygenericreloadacceptanceonlypartialdisplay/refusalscope. Securityboundaryexcludesupgrade-rare filter. Freshcheckanyproposeddrop/lowering, don'ttreatgeneraloldpageunsupportedasacceptinginputtransform."
+  },
+  {
+    "key": "g011/c2",
+    "proposal": "claim-checks/claims-005/result.json",
+    "parent_proposal": "source-refuted-retained-osc-scheme-gate",
+    "final_independent_gate": "required-before-security-drop",
+    "reason": "Full005oscTargetclassifiesonlyHTTP/HTTPS/validatedabsolutefile,inertcallbackotherwise;everyOSCresultgoesthroughadapter,andtaggedcellsblockprintedURLfallback. Refutesdeletedxtermgate→arbitrarylocalhandlerexecutionroute, not allparser/linksecurity. No absentcoveragefilter; freshcheckactualactivationhandoffandfallback. Preservepotentialhighestarbitraryschemeharmandnobroadallowlistbypasscertification."
+  },
+  {
+    "key": "g012/c1",
+    "proposal": "claim-checks/claims-005/result.json",
+    "parent_proposal": "covered-same-root-g006/f2",
+    "final_independent_gate": "required-before-drop",
+    "reason": "Full005exactremoteuninstallstopped-supervisor/outofunitgroupprivatetmuxsurvivoracceptance inSPEC/impl. Terminalhoststopconfirmationremainschecked, noincorrectterminationorunrelatedcleanupaccepted. Same006f2rootneedsbothprovenance/sourcevariants, preserveuserprocessaccess/resourceconsequence, notautomaticallylostwork. Landedplan corroboratingintentnotfuturefix. Freshchecknarrowpriorstopresidualonly."
+  },
+  {
+    "key": "g012/c2",
+    "proposal": "claim-checks/claims-005/result.json",
+    "parent_proposal": "source-refuted-no-executable-dependency",
+    "final_independent_gate": "required-before-drop",
+    "reason": "Full005Macpreflightremovedwithruntime/provisioneddependency; actualdesktopspawnsFarhelmsupervisorwithnotmuxhandoff andoldstartupcleanupconnectssocket/verifiespeerwithouttmuxprogram. Refutesmissingexecutablebreaksterminalstartup/upgradecleanupprerequisite, notcorrectness/successofeverycleanupoutcome. Preserveuserprocesscleanupcontextforfreshgate, separatemisleadinginstallerassurance/sourcefailuresunaffected."
+  }
 ]

@@ -1,4 +1,18 @@
 [
- {"id":"g018","turn":9,"offset":30,"state":"complete","verdict":"final-discovery-empty","discovery":{"new_verified":[],"new_unverified":[],"empty":true},"reason":"Parent read full reply/event30 and complete1497line supported audit, zero gaps/rejected/unfinished/unrecognized. f10 exact shared unknown-outcome remedy says check current state, not unsupported retry key; mutation/reply classifications and no competing timer preserve environment contract. Useful independent search checked CLI correlation/unknown outcome, relay classifications, placement normalization and confinement. Explicit no new finding, no lead, no relevant input pending; actual last search after recipe refusal discovery and prior input. Final empty condition met. Source-only; latest manager retention input does not bear on this CLI/refusal group."},
- {"id":"g023","turn":4,"offset":13,"verdict":"late-interface-synthesis-verified","reason":"Parent read full reply/everyevent12-13 and complete1525line supported audit, zero gaps/rejected/unfinished/unrecognized. Originalf2 lifecycle hold-release refutation remains distinct from024l5 idle upgraded-Arc retention. Independently checked direct-drop fixture, provider direct status route, base/new/tip stopped arm, exact Rust ownership/short-circuit and graceful serving/RESTshutdown. Corroborates024l5 conditional other resource lifetime without new duplicate ID or runtime observation; no open source premise. Wait current manager/probe interfaces' syntheses, then separate discovery beyond known l5."}
+  {
+    "id": "g018",
+    "turn": 9,
+    "offset": 30,
+    "state": "complete",
+    "verdict": "final-discovery-empty",
+    "discovery": { "new_verified": [], "new_unverified": [], "empty": true },
+    "reason": "Parent read full reply/event30 and complete1497line supported audit, zero gaps/rejected/unfinished/unrecognized. f10 exact shared unknown-outcome remedy says check current state, not unsupported retry key; mutation/reply classifications and no competing timer preserve environment contract. Useful independent search checked CLI correlation/unknown outcome, relay classifications, placement normalization and confinement. Explicit no new finding, no lead, no relevant input pending; actual last search after recipe refusal discovery and prior input. Final empty condition met. Source-only; latest manager retention input does not bear on this CLI/refusal group."
+  },
+  {
+    "id": "g023",
+    "turn": 4,
+    "offset": 13,
+    "verdict": "late-interface-synthesis-verified",
+    "reason": "Parent read full reply/everyevent12-13 and complete1525line supported audit, zero gaps/rejected/unfinished/unrecognized. Originalf2 lifecycle hold-release refutation remains distinct from024l5 idle upgraded-Arc retention. Independently checked direct-drop fixture, provider direct status route, base/new/tip stopped arm, exact Rust ownership/short-circuit and graceful serving/RESTshutdown. Corroborates024l5 conditional other resource lifetime without new duplicate ID or runtime observation; no open source premise. Wait current manager/probe interfaces' syntheses, then separate discovery beyond known l5."
+  }
 ]

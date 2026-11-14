@@ -21,7 +21,10 @@
       "FILTER.md has no complete boundary matching this ordinary test-coverage concern; no filter is used."
     ],
     "exact_cover_quotes": [
-      {"source": "SPEC_impl.md:2943-2945 (also f560058d:3015-3017)", "quote": "Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries a grid stream"}
+      {
+        "source": "SPEC_impl.md:2943-2945 (also f560058d:3015-3017)",
+        "quote": "Protocol 77 removed the byte streams with the old terminals and xterm.js: every attachment's data channel carries a grid stream"
+      }
     ],
     "missing_premise": null,
     "original_stronger_consequence": "Deleting kind assertions, stream notices, byte-only refusals and reply-kind checks might remove meaningful terminal-delivery regression coverage. Earlier records correctly left the bare tab attach's payload unproved; the final record supplies a distinct direct tab decoder. No production or highest-priority consequence was claimed.",
@@ -107,8 +110,8 @@
       "FILTER.md is not used; the named concern is source-refuted rather than a rare diagnostic exception."
     ],
     "exact_cover_quotes": [
-      {"source": "SPEC_impl.md:7996", "quote": "The supervisor runs no tmux."},
-      {"source": "SPEC_impl.md:2787-2788", "quote": "works whether or not any tmux program exists"}
+      { "source": "SPEC_impl.md:7996", "quote": "The supervisor runs no tmux." },
+      { "source": "SPEC_impl.md:2787-2788", "quote": "works whether or not any tmux program exists" }
     ],
     "missing_premise": null,
     "original_stronger_consequence": "The broader wording might mislead maintainers by overlooking startup retirement or user-launched tmux. The second history record checks actual startup termination rather than relying on comments. Neither version alleges a runtime regression or security/work-loss route; the fixture does not prove arbitrary user commands avoid tmux.",

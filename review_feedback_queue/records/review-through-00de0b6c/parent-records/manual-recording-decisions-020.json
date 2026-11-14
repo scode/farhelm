@@ -1,3 +1,12 @@
 [
-  {"key":"g085/c4","line":8,"disposition":"excluded","group":"environment-recent-search-omits-placement-label","bucket":"other","recording":"unsupported-defect-premise","needs_independent_drop_check":false,"reason":"Parent read the complete original candidate8 and claims055. Actual search omission is undisputed: Recent haystack contains destination/harness/model and does not include all displayed fields, including effort/permission. The introduced environment entries preserve that policy; the contract promises a Recent search group without defining placement-name matching. Neither a violated contract nor a concrete inability to find/use an offered setup is shown. The proposed expansion remains an enhancement suggestion, not an investigated defect merely because no explicit spec exception forbids it. Reject only the unsupported inference that a newly displayed field must join the established predicate; no proof of every omission's harmlessness is required. No blanket spec-acceptance or filter is asserted, no higher consequence was proposed. The separately established Replace admission failure remains retained under g086/l2."}
+  {
+    "key": "g085/c4",
+    "line": 8,
+    "disposition": "excluded",
+    "group": "environment-recent-search-omits-placement-label",
+    "bucket": "other",
+    "recording": "unsupported-defect-premise",
+    "needs_independent_drop_check": false,
+    "reason": "Parent read the complete original candidate8 and claims055. Actual search omission is undisputed: Recent haystack contains destination/harness/model and does not include all displayed fields, including effort/permission. The introduced environment entries preserve that policy; the contract promises a Recent search group without defining placement-name matching. Neither a violated contract nor a concrete inability to find/use an offered setup is shown. The proposed expansion remains an enhancement suggestion, not an investigated defect merely because no explicit spec exception forbids it. Reject only the unsupported inference that a newly displayed field must join the established predicate; no proof of every omission's harmlessness is required. No blanket spec-acceptance or filter is asserted, no higher consequence was proposed. The separately established Replace admission failure remains retained under g086/l2."
+  }
 ]

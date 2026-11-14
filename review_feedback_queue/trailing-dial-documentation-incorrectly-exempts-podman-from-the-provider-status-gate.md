@@ -4,13 +4,30 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Unverified collection: the dial entry-point explanation may teach maintainers that only Tensorlake waits on a provider status check and every other host dials immediately, while the new Podman route also requires that provider gate. Exact inspected source: manager.rs near :4250 documents Self::attempt as running dial after a Tensorlake status check and at once for every other host. The same file :4183-4227 first derives row.environment_binding and runs the selected provider status for both owned kinds; a stopped Podman returns AttemptOutcome::Stopped and a paused one Suspended instead of dialing. This is a documentation/control-boundary concern only; production status dispatch appears correct. Missing readily checkable premises: exact numbered anchor; base/parent domain to establish whole-range attribution rather than a pre-existing defect; complete governing provider policy paragraph; pinned endpoint persistence. Suggested bucket if confirmed: other (source documentation). Confidence: concrete lead after source checks above, not yet final. Could-be-highest:false, no established security/user-work-loss route from the prose. proposed_drop:false pending checks. possible_cover:none in refreshed interface context; c5 concerned a different Suspended enum projection description and existing f1 concerns history authority, neither this dial-order explanation. No runtime tests, builds, reproduction, live action or checkout changes. This record preserves uncertainty until accessible attribution and contract checks settle it. Source/contract investigation complete. Exact doc at :4247-4249 says attempt runs 
+Unverified collection: the dial entry-point explanation may teach maintainers that only Tensorlake waits on a provider
+status check and every other host dials immediately, while the new Podman route also requires that provider gate. Exact
+inspected source: manager.rs near :4250 documents Self::attempt as running dial after a Tensorlake status check and at
+once for every other host. The same file :4183-4227 first derives row.environment_binding and runs the selected provider
+status for both owned kinds; a stopped Podman returns AttemptOutcome::Stopped and a paused one Suspended instead of
+dialing. This is a documentation/control-boundary concern only; production status dispatch appears correct. Missing
+readily checkable premises: exact numbered anchor; base/parent domain to establish whole-range attribution rather than a
+pre-existing defect; complete governing provider policy paragraph; pinned endpoint persistence. Suggested bucket if
+confirmed: other (source documentation). Confidence: concrete lead after source checks above, not yet final.
+Could-be-highest:false, no established security/user-work-loss route from the prose. proposed_drop:false pending checks.
+possible_cover:none in refreshed interface context; c5 concerned a different Suspended enum projection description and
+existing f1 concerns history authority, neither this dial-order explanation. No runtime tests, builds, reproduction,
+live action or checkout changes. This record preserves uncertainty until accessible attribution and contract checks
+settle it. Source/contract investigation complete. Exact doc at :4247-4249 says attempt runs
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g024/l4`.
 
@@ -20,7 +37,41 @@ Confidence: Unverified collection; recording proposals and any disagreement rema
 
 Latest reviewer record, event 28 (finding, open):
 
-Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: the dial entry-point explanation may teach maintainers that only Tensorlake waits on a provider status check and every other host dials immediately, while the new Podman route also requires that provider gate. Exact inspected source: manager.rs near :4250 documents Self::attempt as running dial after a Tensorlake status check and at once for every other host. The same file :4183-4227 first derives row.environment_binding and runs the selected provider status for both owned kinds; a stopped Podman returns AttemptOutcome::Stopped and a paused one Suspended instead of dialing. This is a documentation/control-boundary concern only; production status dispatch appears correct. Missing readily checkable premises: exact numbered anchor; base/parent domain to establish whole-range attribution rather than a pre-existing defect; complete governing provider policy paragraph; pinned endpoint persistence. Suggested bucket if confirmed: other (source documentation). Confidence: concrete lead after source checks above, not yet final. Could-be-highest:false, no established security/user-work-loss route from the prose. proposed_drop:false pending checks. possible_cover:none in refreshed interface context; c5 concerned a different Suspended enum projection description and existing f1 concerns history authority, neither this dial-order explanation. No runtime tests, builds, reproduction, live action or checkout changes. This record preserves uncertainty until accessible attribution and contract checks settle it. Source/contract investigation complete. Exact doc at :4247-4249 says attempt runs dial after a Tensorlake hosts status check and at once for every other host. Actual :4185-4202 selects environment_binding for both providers and awaits provider.status; :4216-4222 withholds dial for Suspended, Stopped or refused status. ProviderKind::when_status_unanswered at farhelm-proto/src/environment.rs:77-85 explicitly gives Podman RetryLater, so even an unanswered Podman status does not immediately dial. This is a real causal-order contract error in documentation, not a demand to change correct runtime dispatch. Governing complete SPEC_impl.md Disposable environments / Environment rows and provider state at :6408-6460 requires shared status, no dial for unknown states and RetryLater for Podman; root docstring rules require changed lifecycle/provider assumptions to be documented accurately. Fix the dial explanation to distinguish ordinary hosts from every provider-owned environment and point to the exhaustive status policy. Suggested bucket other, confidence confirmed by pinned source and contract, could-be-highest false, proposed_drop false, possible_cover none. No security/user-work-loss or observed runtime regression asserted. Attribution checked across the WHOLE range: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a has identical prose at manager.rs:4205-4207 but attempt only gates row.tensorlake at :4161-4177, and HostKind has no Podman. In-range ee39aeacdaccfeaa0cea25246540b20008c868f0 generalizes that status gate while retaining the words; its actual production registry still has only Tensorlake. Assigned 56659839785691f76da3af5d8f51b511cff4ba8b adds and wires the real Podman provider (lib.rs:2465-2486, versus its parent :2439-2452 Tensorlake-only), adds the real Stopped branch, and gives the false other-host assertion an ordinary production Podman path. Therefore the defect is newly widened documentation under the assigned lifecycle/provider behavior, not merely old words or an independent pre-range flaw. Exact inclusive endpoint retains the sentence at manager.rs:4456-4458. Scope is only this causal gate explanation; existing c5 enum wording, c4 refusal noun and f1 history-comment consequences remain separate and unchanged. All readily checkable numbered-source, base/parent/range attribution and policy premises are settled. No unverified premise remains; no runtime test/build/reproduction performed. The assigned discovery pass continues beyond this finding.
+Reviewed commit: 56659839785691f76da3af5d8f51b511cff4ba8b. TLDR: the dial entry-point explanation may teach maintainers
+that only Tensorlake waits on a provider status check and every other host dials immediately, while the new Podman route
+also requires that provider gate. Exact inspected source: manager.rs near :4250 documents Self::attempt as running dial
+after a Tensorlake status check and at once for every other host. The same file :4183-4227 first derives
+row.environment_binding and runs the selected provider status for both owned kinds; a stopped Podman returns
+AttemptOutcome::Stopped and a paused one Suspended instead of dialing. This is a documentation/control-boundary concern
+only; production status dispatch appears correct. Missing readily checkable premises: exact numbered anchor; base/parent
+domain to establish whole-range attribution rather than a pre-existing defect; complete governing provider policy
+paragraph; pinned endpoint persistence. Suggested bucket if confirmed: other (source documentation). Confidence:
+concrete lead after source checks above, not yet final. Could-be-highest:false, no established security/user-work-loss
+route from the prose. proposed_drop:false pending checks. possible_cover:none in refreshed interface context; c5
+concerned a different Suspended enum projection description and existing f1 concerns history authority, neither this
+dial-order explanation. No runtime tests, builds, reproduction, live action or checkout changes. This record preserves
+uncertainty until accessible attribution and contract checks settle it. Source/contract investigation complete. Exact
+doc at :4247-4249 says attempt runs dial after a Tensorlake hosts status check and at once for every other host. Actual
+:4185-4202 selects environment_binding for both providers and awaits provider.status; :4216-4222 withholds dial for
+Suspended, Stopped or refused status. ProviderKind::when_status_unanswered at farhelm-proto/src/environment.rs:77-85
+explicitly gives Podman RetryLater, so even an unanswered Podman status does not immediately dial. This is a real
+causal-order contract error in documentation, not a demand to change correct runtime dispatch. Governing complete
+SPEC_impl.md Disposable environments / Environment rows and provider state at :6408-6460 requires shared status, no dial
+for unknown states and RetryLater for Podman; root docstring rules require changed lifecycle/provider assumptions to be
+documented accurately. Fix the dial explanation to distinguish ordinary hosts from every provider-owned environment and
+point to the exhaustive status policy. Suggested bucket other, confidence confirmed by pinned source and contract,
+could-be-highest false, proposed_drop false, possible_cover none. No security/user-work-loss or observed runtime
+regression asserted. Attribution checked across the WHOLE range: exclusive base 6e423e30068b62c6cfa276c6d720ee35bb70387a
+has identical prose at manager.rs:4205-4207 but attempt only gates row.tensorlake at :4161-4177, and HostKind has no
+Podman. In-range ee39aeacdaccfeaa0cea25246540b20008c868f0 generalizes that status gate while retaining the words; its
+actual production registry still has only Tensorlake. Assigned 56659839785691f76da3af5d8f51b511cff4ba8b adds and wires
+the real Podman provider (lib.rs:2465-2486, versus its parent :2439-2452 Tensorlake-only), adds the real Stopped branch,
+and gives the false other-host assertion an ordinary production Podman path. Therefore the defect is newly widened
+documentation under the assigned lifecycle/provider behavior, not merely old words or an independent pre-range flaw.
+Exact inclusive endpoint retains the sentence at manager.rs:4456-4458. Scope is only this causal gate explanation;
+existing c5 enum wording, c4 refusal noun and f1 history-comment consequences remain separate and unchanged. All readily
+checkable numbered-source, base/parent/range attribution and policy premises are settled. No unverified premise remains;
+no runtime test/build/reproduction performed. The assigned discovery pass continues beyond this finding.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g024 record](records/review-through-00de0b6c/groups/g024.json). Record ID: `l4`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g024 record](records/review-through-00de0b6c/groups/g024.json). Record ID: `l4`.

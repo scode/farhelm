@@ -4,13 +4,31 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Unverified collection: An offered container/sandbox Recent changes Replace with into fresh-environment placement. Submission refuses it while the placement picker is disabled; Reset choices does not repair it, and the user may have to reopen the form. Original consequence retained; no create or source deletion is sent. Source route: create_form.rs:4347-4356 merges global environment history, :8185 and :8216-8246 offer/accept captured rows, draft.rs:1984-2043 excludes only Restart then applies target, saved launch and destination. Replace holds host (:2256-2259, :3601-3603); submit refuses any target while host_fixed (:5991-5998); PlacementPicker disabled at :7456. Atomicity contrast: templates validate the whole fold before replay (draft.rs:2442-2450); proto launcher.rs:914-947 refuses installed-host or environment-target edits when host_fixed. The recent path has no corresponding held-placement admission and commits target plus other setup edits. Reset choices only changes the agent choice group (draft.rs:1105-1114, :2274-2306), retaining target; source reconciliation resets target only on a new source generation (:2888-2946). Recovery correction from earlier records: a compatible ordinary Recent can clear target (:2017-2021), subject to ordinary installation admission; host search also clears target (:2711-2722) and is offered by create_form.rs:5065-5087, so searching for the original ordinary host can repair placement. This does not help choose a session-owned source host, which is omitted from that search. A template is NOT a generally valid repair: once target is present, launcher_snapshot o
+Unverified collection: An offered container/sandbox Recent changes Replace with into fresh-environment placement.
+Submission refuses it while the placement picker is disabled; Reset choices does not repair it, and the user may have to
+reopen the form. Original consequence retained; no create or source deletion is sent. Source route:
+create_form.rs:4347-4356 merges global environment history, :8185 and :8216-8246 offer/accept captured rows,
+draft.rs:1984-2043 excludes only Restart then applies target, saved launch and destination. Replace holds host
+(:2256-2259, :3601-3603); submit refuses any target while host_fixed (:5991-5998); PlacementPicker disabled at :7456.
+Atomicity contrast: templates validate the whole fold before replay (draft.rs:2442-2450); proto launcher.rs:914-947
+refuses installed-host or environment-target edits when host_fixed. The recent path has no corresponding held-placement
+admission and commits target plus other setup edits. Reset choices only changes the agent choice group
+(draft.rs:1105-1114, :2274-2306), retaining target; source reconciliation resets target only on a new source generation
+(:2888-2946). Recovery correction from earlier records: a compatible ordinary Recent can clear target (:2017-2021),
+subject to ordinary installation admission; host search also clears target (:2711-2722) and is offered by
+create_form.rs:5065-5087, so searching for the original ordinary host can repair placement. This does not help choose a
+session-owned source host, which is omitted from that search. A template is NOT a generally valid repair: once target is
+present, launcher_snapshot o
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **high**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **high**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g086/l2`, `g087/l1`.
 
@@ -20,21 +38,84 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 13 (finding, open):
 
-Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462; later-repair check through 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: An offered container/sandbox Recent changes Replace with into fresh-environment placement. Submission refuses it while the placement picker is disabled; Reset choices does not repair it, and the user may have to reopen the form. Original consequence retained; no create or source deletion is sent. Source route: create_form.rs:4347-4356 merges global environment history, :8185 and :8216-8246 offer/accept captured rows, draft.rs:1984-2043 excludes only Restart then applies target, saved launch and destination. Replace holds host (:2256-2259, :3601-3603); submit refuses any target while host_fixed (:5991-5998); PlacementPicker disabled at :7456. Atomicity contrast: templates validate the whole fold before replay (draft.rs:2442-2450); proto launcher.rs:914-947 refuses installed-host or environment-target edits when host_fixed. The recent path has no corresponding held-placement admission and commits target plus other setup edits. Reset choices only changes the agent choice group (draft.rs:1105-1114, :2274-2306), retaining target; source reconciliation resets target only on a new source generation (:2888-2946). Recovery correction from earlier records: a compatible ordinary Recent can clear target (:2017-2021), subject to ordinary installation admission; host search also clears target (:2711-2722) and is offered by create_form.rs:5065-5087, so searching for the original ordinary host can repair placement. This does not help choose a session-owned source host, which is omitted from that search. A template is NOT a generally valid repair: once target is present, launcher_snapshot omits installed host (:689-699), so a host template cannot have its assignment removed as an equal held value (:743-744) and instead hits the host_fixed refusal. A template omitting placement leaves target unchanged (draft.rs:2561-2580). Close/reopen reliably reseeds the source. Contract: SPEC.md Replace with: ‘Unlike clone, it keeps the source's own host — clone is the way to start a session on a different host.’ Creation: ‘So is a template that changes a field the current launcher mode holds fixed, such as the host in Replace with’ and ‘nothing from it is applied.’ Fix by refusing incompatible environment Recent placement before any setup mutation, or omitting those offers in Replace, while preserving ordinary same-host recents. Later repairs: 04d85f0c98a9b635709d00b056719a0baa7fd3fc adds retired selection.container checks, which do not reject new entry.target. At end revision the direct path still excludes only Restart/legacy container (draft.rs:1958-2005), search still mutates target (:2818 onward), recents still show outside Restart (create_form.rs:8214), and submit/picker still refuse/disable (:5963-5969, :7446). 1d24c6af0b6fdbbec854623ff53f90281b8271ab's per-host guard and db72347066bc4de3fa1a5f05d64bca91e571bc11's progress lifetime change do not repair recent admission. Suggested bucket: high: a normally offered setup action breaks the active Replace workflow and leaves its visible placement controls disabled; recovery requires knowing another route or abandoning/reopening, potentially redoing edits. This is not classified as loss of user-owned work. Confidence: confirmed source/contract analysis, no execution. proposed_drop: false. possible_cover: caller reports independently traced g085/l2 is likely the same bug; retain for consolidation, no parent drop accepted. Could-be-highest: no established route, since submission refuses before create or source deletion. All readily checkable recovery premises settled; no unresolved lead remains.
+Reviewed commit: 350a4b33b6d4476f4a78e43cea124bc2b828f462; later-repair check through
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. TLDR: An offered container/sandbox Recent changes Replace with into
+fresh-environment placement. Submission refuses it while the placement picker is disabled; Reset choices does not repair
+it, and the user may have to reopen the form. Original consequence retained; no create or source deletion is sent.
+Source route: create_form.rs:4347-4356 merges global environment history, :8185 and :8216-8246 offer/accept captured
+rows, draft.rs:1984-2043 excludes only Restart then applies target, saved launch and destination. Replace holds host
+(:2256-2259, :3601-3603); submit refuses any target while host_fixed (:5991-5998); PlacementPicker disabled at :7456.
+Atomicity contrast: templates validate the whole fold before replay (draft.rs:2442-2450); proto launcher.rs:914-947
+refuses installed-host or environment-target edits when host_fixed. The recent path has no corresponding held-placement
+admission and commits target plus other setup edits. Reset choices only changes the agent choice group
+(draft.rs:1105-1114, :2274-2306), retaining target; source reconciliation resets target only on a new source generation
+(:2888-2946). Recovery correction from earlier records: a compatible ordinary Recent can clear target (:2017-2021),
+subject to ordinary installation admission; host search also clears target (:2711-2722) and is offered by
+create_form.rs:5065-5087, so searching for the original ordinary host can repair placement. This does not help choose a
+session-owned source host, which is omitted from that search. A template is NOT a generally valid repair: once target is
+present, launcher_snapshot omits installed host (:689-699), so a host template cannot have its assignment removed as an
+equal held value (:743-744) and instead hits the host_fixed refusal. A template omitting placement leaves target
+unchanged (draft.rs:2561-2580). Close/reopen reliably reseeds the source. Contract: SPEC.md Replace with: ‘Unlike clone,
+it keeps the source's own host — clone is the way to start a session on a different host.’ Creation: ‘So is a template
+that changes a field the current launcher mode holds fixed, such as the host in Replace with’ and ‘nothing from it is
+applied.’ Fix by refusing incompatible environment Recent placement before any setup mutation, or omitting those offers
+in Replace, while preserving ordinary same-host recents. Later repairs: 04d85f0c98a9b635709d00b056719a0baa7fd3fc adds
+retired selection.container checks, which do not reject new entry.target. At end revision the direct path still excludes
+only Restart/legacy container (draft.rs:1958-2005), search still mutates target (:2818 onward), recents still show
+outside Restart (create_form.rs:8214), and submit/picker still refuse/disable (:5963-5969, :7446).
+1d24c6af0b6fdbbec854623ff53f90281b8271ab's per-host guard and db72347066bc4de3fa1a5f05d64bca91e571bc11's progress
+lifetime change do not repair recent admission. Suggested bucket: high: a normally offered setup action breaks the
+active Replace workflow and leaves its visible placement controls disabled; recovery requires knowing another route or
+abandoning/reopening, potentially redoing edits. This is not classified as loss of user-owned work. Confidence:
+confirmed source/contract analysis, no execution. proposed_drop: false. possible_cover: caller reports independently
+traced g085/l2 is likely the same bug; retain for consolidation, no parent drop accepted. Could-be-highest: no
+established route, since submission refuses before create or source deletion. All readily checkable recovery premises
+settled; no unresolved lead remains.
 
 Returned proposal (claims-056, event 13): **retain-verified**, suggested bucket **high**.
 
-An offered environment Recent mutates Replace into a fresh-environment draft that submission refuses while the placement picker is disabled. This breaks the active offered workflow. The refusal precedes create and source deletion, so no wrong-target execution or loss of user work is established.
+An offered environment Recent mutates Replace into a fresh-environment draft that submission refuses while the placement
+picker is disabled. This breaks the active offered workflow. The refusal precedes create and source deletion, so no
+wrong-target execution or loss of user work is established.
 
-Original stronger consequence: The user may have to recover through another compatible ordinary Recent, original ordinary-host search, or closing/reopening and redoing edits. A same-host template is not a reliable repair. No create or source deletion is sent. The parent's reported g085/l2 similarity was not treated as a verified alias because that record is outside this batch.
+Original stronger consequence: The user may have to recover through another compatible ordinary Recent, original
+ordinary-host search, or closing/reopening and redoing edits. A same-host template is not a reliable repair. No create
+or source deletion is sent. The parent's reported g085/l2 similarity was not treated as a verified alias because that
+record is outside this batch.
 
 Unresolved premise or limitation: No missing premise stated in this returned proposal.
 
-Proposed basis: Retain the source-established Replace admission defect; use underlying_key to reconcile the parent's separately supplied counterpart.
+Proposed basis: Retain the source-established Replace admission defect; use underlying_key to reconcile the parent's
+separately supplied counterpart.
 
-Existing parent disposition (event 13): verified. Parent explicitly accepted named retain-verified proposal from claims-056 after inspecting it. An offered environment Recent mutates Replace into a fresh-environment draft that submission refuses while the placement picker is disabled. This breaks the active offered workflow. The refusal precedes create and source deletion, so no wrong-target execution or loss of user work is established. Retain the source-established Replace admission defect; use underlying_key to reconcile the parent's separately supplied counterpart. Checked source/results: ["350a4b33:create_form.rs:4347-4356 merges environment history; :8185-8225 offers Recent outside Restart, explicitly including Replace. draft.rs:1984-2043 excludes only Restart and assigns entry.target before restoring destination.","350a4b33:create_form.rs:5991-5998 refuses target with host_fixed before dispatch; :7450-7457 disables PlacementPicker with busy || host_fixed.","00de0b6c:crates/farhelm-ui/src/list/create_form/draft.rs:1958-2005 still admits modern entry.target; its new legacy-container refusal is a separate field. create_form.rs:5963-5969 still refuses the resulting Replace.","350a4b33:draft.rs:2711-2722 host search clears recipe/target and can repair an ordinary source host. A compatible ordinary Recent can clear target; session-owned source hosts are not ordinary search destinations. Earlier generic template-recovery wording was withdrawn: a host template can itself hit held-placement refusal, while an absent placement leaves target. Reset choices preserves placement; reopening reseeds source. No reproduction."] Current coverage/results: ["SPEC.md:1138-1143 requires all-or-none refusal of held template fields; :2012-2024 says Replace with keeps the source's host. SPEC_impl.md launch-template placement rules and environment ownership provide no exception for Recent mutation.","TODO.md Planned empty; BUGS.md unrelated; searched plans/queue and active TRIAGE_OUTCOMES.md for environment Recent/Replace/held-placement triggers, without exact repair coverage.","INDEX.md contains no exact environment-Recent Replace item. Existing launcher-source, browse fallback and shortcut-batch items describe different owners/triggers. FILTER.md does not cover this ordinarily offered workflow becoming unlaunchable."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "The user may have to recover through another compatible ordinary Recent, original ordinary-host search, or closing/reopening and redoing edits. A same-host template is not a reliable repair. No create or source deletion is sent. The parent's reported g085/l2 similarity was not treated as a verified alias because that record is outside this batch."; null.
+Existing parent disposition (event 13): verified. Parent explicitly accepted named retain-verified proposal from
+claims-056 after inspecting it. An offered environment Recent mutates Replace into a fresh-environment draft that
+submission refuses while the placement picker is disabled. This breaks the active offered workflow. The refusal precedes
+create and source deletion, so no wrong-target execution or loss of user work is established. Retain the
+source-established Replace admission defect; use underlying_key to reconcile the parent's separately supplied
+counterpart. Checked source/results: ["350a4b33:create_form.rs:4347-4356 merges environment history; :8185-8225 offers
+Recent outside Restart, explicitly including Replace. draft.rs:1984-2043 excludes only Restart and assigns entry.target
+before restoring destination.","350a4b33:create_form.rs:5991-5998 refuses target with host_fixed before dispatch;
+:7450-7457 disables PlacementPicker with busy ||
+host_fixed.","00de0b6c:crates/farhelm-ui/src/list/create_form/draft.rs:1958-2005 still admits modern entry.target; its
+new legacy-container refusal is a separate field. create_form.rs:5963-5969 still refuses the resulting
+Replace.","350a4b33:draft.rs:2711-2722 host search clears recipe/target and can repair an ordinary source host. A
+compatible ordinary Recent can clear target; session-owned source hosts are not ordinary search destinations. Earlier
+generic template-recovery wording was withdrawn: a host template can itself hit held-placement refusal, while an absent
+placement leaves target. Reset choices preserves placement; reopening reseeds source. No reproduction."] Current
+coverage/results: ["SPEC.md:1138-1143 requires all-or-none refusal of held template fields; :2012-2024 says Replace with
+keeps the source's host. SPEC_impl.md launch-template placement rules and environment ownership provide no exception for
+Recent mutation.","TODO.md Planned empty; BUGS.md unrelated; searched plans/queue and active TRIAGE_OUTCOMES.md for
+environment Recent/Replace/held-placement triggers, without exact repair coverage.","INDEX.md contains no exact
+environment-Recent Replace item. Existing launcher-source, browse fallback and shortcut-batch items describe different
+owners/triggers. FILTER.md does not cover this ordinarily offered workflow becoming unlaunchable."] Exact cited cover:
+[] Original stronger consequence and missing premise remain preserved: "The user may have to recover through another
+compatible ordinary Recent, original ordinary-host search, or closing/reopening and redoing edits. A same-host template
+is not a reliable repair. No create or source deletion is sent. The parent's reported g085/l2 similarity was not treated
+as a verified alias because that record is outside this batch."; null.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g086 record](records/review-through-00de0b6c/groups/g086.json). Record ID: `l2`.
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g086 record](records/review-through-00de0b6c/groups/g086.json). Record ID: `l2`.
 
 ### g087/l1
 
@@ -42,19 +123,67 @@ Confidence: Unverified collection; recording proposals and any disagreement rema
 
 Latest reviewer record, event 13 (finding, open):
 
-Introducing reviewed revision resolved: 350a4b33b6d4476f4a78e43cea124bc2b828f462, within exclusive 6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Source also checked at assigned revisions 04d85f0c98a9b635709d00b056719a0baa7fd3fc, 428badadfec337d5185af0d9bfeb02aad9a7b812, 533169cf19571d34af3a8497eaceb8d2d7b7c852, 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa and f560058da19e02716e6f943883a9508b447aff4e. TLDR: Replace with offers and accepts a recent setup for a new environment, then cannot submit it because replacement must stay on its source. Placement picker is disabled and Reset choices retains that placement. Attribution checks: full bounded-range -G history for entry.target, environment_history and fixed-environment refusal identifies 350a4b33 as the sole matching pre-retirement change. The exclusive base has recipe-based fixed-host refusal at create_form.rs:5819-5822 but no environment-history feed/merge and no Recent target assignment. At 350a4b33^ draft.rs:1952-2004 both direct and search recents preserve current recipe and do not set entry.target. The 350a4b33 patch newly bypasses ordinary-install Recent admission when entry.target is Some, merges environment history, and calls draft.select_target(entry.target.clone()) in both direct (:2017-2021) and search (:2825-2830) activation without a Replace/host_fixed gate. The same commit retains the fixed-host submit refusal (:5991-5998) and disables the placement picker for host_fixed (:7456). Thus this is an in-range newly reachable interaction, not a pre-range defect, and is not introduced by the unrelated later container-retirement patch. Source route at 04d85f0c: create_form.rs:1478-1489,4296-4304 merges environment history, :4336-4343 ranks it and :8089-8110 offers it outside Restart. draft.rs:1950-1963 rejects Restart only, :1966-1977 rejects retired ContainerConfig only, :2005 and :2818-2823 select modern target. create_form.rs:5912-5919 refuses target Some when host_fixed; :7351-7361 disables the picker. draft reset :2258-2290 and :1090-1100 preserves target; source reconciliation :2880-2954 reseeds it only on a new prefill generation. Identical draft blob 20ee6a92d0f51111336e6457d1fed7cd96229020 at all five assigned revisions and complete later form diff prove persistence across them. Contract: SPEC.md Sandbox sessions at 04d85f0c says exactly 'Restart, Restart with, Replace and Replace with stay in the existing sandbox.' It also says 'Recent setups restore the recipe and place, obtaining a fresh environment.' Creation refuses held-host template changes atomically; the analogous Recent admits incompatible fresh-environment intent before refusing launch. Suggested bucket: high/material UX, unchanged. Could-be-highest: false on the established route; submit protects the source, with no shown wrong-environment replacement, security or loss-of-work consequence. Confidence: confirmed source/contract and range-attribution analysis, no execution. proposed_drop: false; no parent lowering/drop accepted. possible_cover: supplied g085/l2 and g086/l2 describe the same cause and introducing revision; retain for parent consolidation, not new discovery credit. Recovery caveats preserved: an offered ordinary Recent can clear target subject to original-installation admission/effective-host matching; source-host search can clear it where the ordinary source host is offered; session-owned hosts are omitted from that search. Templates are not a generally established repair. Cancel/reopen reliably reseeds. Original consequence remains a workflow stall, not permanent inability to replace or loss of user-owned work. Missing introducing-revision premise is now resolved; no unresolved lead remains. No reproductions or live-install actions.
+Introducing reviewed revision resolved: 350a4b33b6d4476f4a78e43cea124bc2b828f462, within exclusive
+6e423e30068b62c6cfa276c6d720ee35bb70387a through inclusive 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db. Source also checked
+at assigned revisions 04d85f0c98a9b635709d00b056719a0baa7fd3fc, 428badadfec337d5185af0d9bfeb02aad9a7b812,
+533169cf19571d34af3a8497eaceb8d2d7b7c852, 2ef10815f12ed719ab6c51c6e3ac6fcd3f8bc1fa and
+f560058da19e02716e6f943883a9508b447aff4e. TLDR: Replace with offers and accepts a recent setup for a new environment,
+then cannot submit it because replacement must stay on its source. Placement picker is disabled and Reset choices
+retains that placement. Attribution checks: full bounded-range -G history for entry.target, environment_history and
+fixed-environment refusal identifies 350a4b33 as the sole matching pre-retirement change. The exclusive base has
+recipe-based fixed-host refusal at create_form.rs:5819-5822 but no environment-history feed/merge and no Recent target
+assignment. At 350a4b33^ draft.rs:1952-2004 both direct and search recents preserve current recipe and do not set
+entry.target. The 350a4b33 patch newly bypasses ordinary-install Recent admission when entry.target is Some, merges
+environment history, and calls draft.select_target(entry.target.clone()) in both direct (:2017-2021) and search
+(:2825-2830) activation without a Replace/host_fixed gate. The same commit retains the fixed-host submit refusal
+(:5991-5998) and disables the placement picker for host_fixed (:7456). Thus this is an in-range newly reachable
+interaction, not a pre-range defect, and is not introduced by the unrelated later container-retirement patch. Source
+route at 04d85f0c: create_form.rs:1478-1489,4296-4304 merges environment history, :4336-4343 ranks it and :8089-8110
+offers it outside Restart. draft.rs:1950-1963 rejects Restart only, :1966-1977 rejects retired ContainerConfig only,
+:2005 and :2818-2823 select modern target. create_form.rs:5912-5919 refuses target Some when host_fixed; :7351-7361
+disables the picker. draft reset :2258-2290 and :1090-1100 preserves target; source reconciliation :2880-2954 reseeds it
+only on a new prefill generation. Identical draft blob 20ee6a92d0f51111336e6457d1fed7cd96229020 at all five assigned
+revisions and complete later form diff prove persistence across them. Contract: SPEC.md Sandbox sessions at 04d85f0c
+says exactly 'Restart, Restart with, Replace and Replace with stay in the existing sandbox.' It also says 'Recent setups
+restore the recipe and place, obtaining a fresh environment.' Creation refuses held-host template changes atomically;
+the analogous Recent admits incompatible fresh-environment intent before refusing launch. Suggested bucket:
+high/material UX, unchanged. Could-be-highest: false on the established route; submit protects the source, with no shown
+wrong-environment replacement, security or loss-of-work consequence. Confidence: confirmed source/contract and
+range-attribution analysis, no execution. proposed_drop: false; no parent lowering/drop accepted. possible_cover:
+supplied g085/l2 and g086/l2 describe the same cause and introducing revision; retain for parent consolidation, not new
+discovery credit. Recovery caveats preserved: an offered ordinary Recent can clear target subject to
+original-installation admission/effective-host matching; source-host search can clear it where the ordinary source host
+is offered; session-owned hosts are omitted from that search. Templates are not a generally established repair.
+Cancel/reopen reliably reseeds. Original consequence remains a workflow stall, not permanent inability to replace or
+loss of user-owned work. Missing introducing-revision premise is now resolved; no unresolved lead remains. No
+reproductions or live-install actions.
 
 Returned proposal (claims-057, event 13): **retain-verified**, suggested bucket **high**.
 
-An offered environment Recent sets a fresh-environment target in Replace with, whose submission refuses that target and whose placement picker is disabled. Reset choices preserves it. This is an ordinary workflow stall, recoverable by cancel/reopen or an applicable ordinary-host choice, not permanent inability to replace. Confirmed by source; not reproduced.
+An offered environment Recent sets a fresh-environment target in Replace with, whose submission refuses that target and
+whose placement picker is disabled. Reset choices preserves it. This is an ordinary workflow stall, recoverable by
+cancel/reopen or an applicable ordinary-host choice, not permanent inability to replace. Confirmed by source; not
+reproduced.
 
-Original stronger consequence: Initial lead: a new-environment Recent strands Replace with because submission is forbidden and placement changes disabled. Later records preserve accepted mutation, refusal, ineffective picker and Reset, while bounding recovery: another admissible ordinary Recent or offered source-host search can clear it; cancel/reopen reliably repairs it. No established wrong-environment replacement, security effect or loss of user-owned work; the submit guard blocks that route.
+Original stronger consequence: Initial lead: a new-environment Recent strands Replace with because submission is
+forbidden and placement changes disabled. Later records preserve accepted mutation, refusal, ineffective picker and
+Reset, while bounding recovery: another admissible ordinary Recent or offered source-host search can clear it;
+cancel/reopen reliably repairs it. No established wrong-environment replacement, security effect or loss of user-owned
+work; the submit guard blocks that route.
 
-Unresolved premise or limitation: No missing source premise for the bounded stall. Actual frequency and rendered runtime behavior were not measured. Supplied history names g085/l2 and g086/l2 as same-root reports; those records are outside this batch and were not independently checked.
+Unresolved premise or limitation: No missing source premise for the bounded stall. Actual frequency and rendered runtime
+behavior were not measured. Supplied history names g085/l2 and g086/l2 as same-root reports; those records are outside
+this batch and were not independently checked.
 
-Proposed basis: Record the source-confirmed stall at high, attributing introduction to 350a4b33. Parent may consolidate cross-batch reports using the underlying key; do not attribute it to retirement or claim permanent loss.
+Proposed basis: Record the source-confirmed stall at high, attributing introduction to 350a4b33. Parent may consolidate
+cross-batch reports using the underlying key; do not attribute it to retirement or claim permanent loss.
 
-Existing parent disposition (event 13): duplicate. Parent read complete claims057 and compared retained g086/l2. Same newly introduced350a4b33 Recent acceptance mutates fixed-source Replace to fresh entry.target; host_fixed rejects submission and disables picker, Reset preserves placement. Retain all direct/search caller provenance, correction to original introduction attribution and ordinary-host/recent/cancel-reopen recovery limits under one high item. No create, source deletion or work-loss is sent; exact claims057 coverage found no acceptance/pending repair/filter. g085/l2 remains to reconcile separately.
+Existing parent disposition (event 13): duplicate. Parent read complete claims057 and compared retained g086/l2. Same
+newly introduced350a4b33 Recent acceptance mutates fixed-source Replace to fresh entry.target; host_fixed rejects
+submission and disables picker, Reset preserves placement. Retain all direct/search caller provenance, correction to
+original introduction attribution and ordinary-host/recent/cancel-reopen recovery limits under one high item. No create,
+source deletion or work-loss is sent; exact claims057 coverage found no acceptance/pending repair/filter. g085/l2
+remains to reconcile separately.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g087 record](records/review-through-00de0b6c/groups/g087.json). Record ID: `l1`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g087 record](records/review-through-00de0b6c/groups/g087.json). Record ID: `l1`.

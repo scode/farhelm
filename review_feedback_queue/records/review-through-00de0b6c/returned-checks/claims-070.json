@@ -232,8 +232,14 @@
       "FILTER.md reviewed. No filter is needed for the narrow specification-accepted fallback; neither a generic session-status filter nor an upgrade filter is used to erase distinct destructive-consent, security or other-session work-loss routes."
     ],
     "exact_cover_quotes": [
-      {"source": "SPEC.md:3008-3010, Terminal experience / Old terminals", "quote": "A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running."},
-      {"source": "SPEC_impl.md:2819-2821, Ending the old private tmux server", "quote": "A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)"}
+      {
+        "source": "SPEC.md:3008-3010, Terminal experience / Old terminals",
+        "quote": "A failure to end the server or to stop what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the same, accepting that a Restart could then start a second agent beside one still running."
+      },
+      {
+        "source": "SPEC_impl.md:2819-2821, Ending the old private tmux server",
+        "quote": "A failure anywhere is logged and never fatal (the maintainer chose to start anyway and treat old sessions as ended, accepting that a Restart could then start a second agent beside one still running)"
+      }
     ],
     "missing_premise": "The potential highest route still needs a survivor that later AgentOnly/recorded-scope cleanup misses while succeeding, then a second launch and conflicting writes. Ordinary scoped/marker-visible survivors are not automatically ignored. No supported completed work-loss sequence for this ID was reproduced or established here.",
     "original_stronger_consequence": "Old agent remains alive while shown interrupted; Restart may start a second agent in the same working directory, causing conflicting writes and potentially losing user-owned work. The latest high bucket reflects established misleading lifecycle state, not an accepted dismissal of the stronger consequence.",

@@ -1,9 +1,51 @@
 [
- {"key":"g079/c1","proposal":"claim-checks/claims-052/result.json","parent_proposal":"source-refuted-new-bundle-retired-terminal-host-file-disclosure-route","final_independent_gate":"required-before-highest-file-disclosure-drop","reason":"Parent read full052. New view and supervisor agent/tab attachment admission reject stored retired container choice before terminal resolution, through tip; replacement supported environments run ordinary supervisor/file paths inside the container. Refute the changed new-bundle legacy outside-supervisor terminal route, not every independent file API or an already-open old-asset page. Preserve outside-checkout host-file disclosure hypothesis and old-page limitation for a narrow fresh verdict; no runtime/all-file-route certification."},
- {"key":"g079/c2","proposal":"claim-checks/claims-052/result.json","parent_proposal":"source-refuted-kind-gate-removal-breaks-path-generation-or-held-grid-ownership","final_independent_gate":"required-by-conservative-stale-input-work-flag","reason":"Full052 current path/gen changes retire controllers, surviving specs refresh before recovery, Restart revision increments agent generation; held grid captured before unmount then frozen/moved, restored as tombstone or disposed, with local interactions but cleared send/resize. Sanitizer/grid helpers remain mount gates. Numeric generation does NOT establish successful Restart admission (088/089 separate), constructor rollback079l1 remains, old-page196 separate. Refute only removed-kind gate as cause of these identity/held-screen failures; preserve high UX and possible stale-input concerns for gate."},
- {"key":"g081/l1","proposal":"claim-checks/claims-052/result.json","parent_proposal":"source-refuted-deleted-byte-replay-caps-as-grid-dispatch-guard","final_independent_gate":"required-before-original-hostile-peer-security-drop","reason":"Full052 parent grid dispatch returns before byte replay accumulation/cap checks, and existing receiveGrid already applies without them. New grid path retains sliced-history backlog with real-row cap/superseded queue trimming, not zero buffering. Refute the changed causal route only, not maximum legal histories, decoder/resource budgets, WebSocket buffering or existing costs. Preserve hostile-peer page exhaustion/security consequence and limitations for fresh check; no malformed-input acceptance or generalized safety proof."},
- {"key":"g081/c2","proposal":"claim-checks/claims-052/result.json","parent_proposal":"source-refuted-current-page-paste-sanitizer-rename-or-wiring-loss","final_independent_gate":"required-before-highest-command-input-drop","reason":"Full052 rename keeps identical end-marker/ESC filter, remains injected and required before mount, and both current page paste paths use it; supervisor Paste framing separately captures mode/filters across parts. Refute weakened sanitizer/helper wiring only. Old page rawJSON decoded as Text bypasses Paste and remains196 highest, not refuted by this proof. Preserve original embedded terminator→unwanted command/credentials/work consequence for gate; no global paste guarantee."},
- {"key":"g081/c3","proposal":"claim-checks/claims-052/result.json","parent_proposal":"source-refuted-removed-xterm-provider-enables-OSC52-clipboard-load","final_independent_gate":"required-before-highest-private-data-drop","reason":"Full052 grid callbacks only enqueue clipboard writes, emulator configuredOnlyCopy refuses load before emitting ClipboardLoad and effects also discards it. No program query obtains browser/system clipboard through replacement. Refute exact read channel, not intentional paste, clipboard writes or unrelated channels; preserve credential/private-data exfiltration hypothesis for gate. Specification forbids disclosure, not covers it as accepted."},
- {"key":"g081/c4","proposal":"claim-checks/claims-052/result.json","parent_proposal":"source-refuted-removed-xterm-snapshot-listener-needed-by-frozen-grid","final_independent_gate":"required-by-conservative-frozen-input-work-flag","reason":"Full052 old auxiliary listener explicitly not installed for held grids. Grid freeze keeps local copy/link callbacks while clearing program send/resize and gesture, only disposal clears local callbacks. Thus removed xterm listener does not remove grid copy or leak live input to replacement. Preserve program-mouse forcing-modifier condition and no universal mode/history-drain/link-policy proof. Original convenience loss and conservatively considered input-to-new-run premise remain for fresh check."},
- {"key":"g081/c5","proposal":"claim-checks/claims-052/result.json","parent_proposal":"source-refuted-current-grid-kind-refresh-attachment-identity-change","final_independent_gate":"required-by-conservative-wrong-target-input-flag","reason":"Full052 current mount specs have no kind and always construct grid; path/gen retires changed identities across live/pending/reconnect/tombstone, surviving controller spec updates before expedited recovery. Removed same-identity kind refresh therefore does not establish wrong renderer/attachment. Restart completion may retire before admission088/089 and old-bundle196 remain separate, not proved safe by generation. Preserve original possible wrong-target input/security/work premise for gate, no exact whole-record alias with broader079c2."}
+  {
+    "key": "g079/c1",
+    "proposal": "claim-checks/claims-052/result.json",
+    "parent_proposal": "source-refuted-new-bundle-retired-terminal-host-file-disclosure-route",
+    "final_independent_gate": "required-before-highest-file-disclosure-drop",
+    "reason": "Parent read full052. New view and supervisor agent/tab attachment admission reject stored retired container choice before terminal resolution, through tip; replacement supported environments run ordinary supervisor/file paths inside the container. Refute the changed new-bundle legacy outside-supervisor terminal route, not every independent file API or an already-open old-asset page. Preserve outside-checkout host-file disclosure hypothesis and old-page limitation for a narrow fresh verdict; no runtime/all-file-route certification."
+  },
+  {
+    "key": "g079/c2",
+    "proposal": "claim-checks/claims-052/result.json",
+    "parent_proposal": "source-refuted-kind-gate-removal-breaks-path-generation-or-held-grid-ownership",
+    "final_independent_gate": "required-by-conservative-stale-input-work-flag",
+    "reason": "Full052 current path/gen changes retire controllers, surviving specs refresh before recovery, Restart revision increments agent generation; held grid captured before unmount then frozen/moved, restored as tombstone or disposed, with local interactions but cleared send/resize. Sanitizer/grid helpers remain mount gates. Numeric generation does NOT establish successful Restart admission (088/089 separate), constructor rollback079l1 remains, old-page196 separate. Refute only removed-kind gate as cause of these identity/held-screen failures; preserve high UX and possible stale-input concerns for gate."
+  },
+  {
+    "key": "g081/l1",
+    "proposal": "claim-checks/claims-052/result.json",
+    "parent_proposal": "source-refuted-deleted-byte-replay-caps-as-grid-dispatch-guard",
+    "final_independent_gate": "required-before-original-hostile-peer-security-drop",
+    "reason": "Full052 parent grid dispatch returns before byte replay accumulation/cap checks, and existing receiveGrid already applies without them. New grid path retains sliced-history backlog with real-row cap/superseded queue trimming, not zero buffering. Refute the changed causal route only, not maximum legal histories, decoder/resource budgets, WebSocket buffering or existing costs. Preserve hostile-peer page exhaustion/security consequence and limitations for fresh check; no malformed-input acceptance or generalized safety proof."
+  },
+  {
+    "key": "g081/c2",
+    "proposal": "claim-checks/claims-052/result.json",
+    "parent_proposal": "source-refuted-current-page-paste-sanitizer-rename-or-wiring-loss",
+    "final_independent_gate": "required-before-highest-command-input-drop",
+    "reason": "Full052 rename keeps identical end-marker/ESC filter, remains injected and required before mount, and both current page paste paths use it; supervisor Paste framing separately captures mode/filters across parts. Refute weakened sanitizer/helper wiring only. Old page rawJSON decoded as Text bypasses Paste and remains196 highest, not refuted by this proof. Preserve original embedded terminator→unwanted command/credentials/work consequence for gate; no global paste guarantee."
+  },
+  {
+    "key": "g081/c3",
+    "proposal": "claim-checks/claims-052/result.json",
+    "parent_proposal": "source-refuted-removed-xterm-provider-enables-OSC52-clipboard-load",
+    "final_independent_gate": "required-before-highest-private-data-drop",
+    "reason": "Full052 grid callbacks only enqueue clipboard writes, emulator configuredOnlyCopy refuses load before emitting ClipboardLoad and effects also discards it. No program query obtains browser/system clipboard through replacement. Refute exact read channel, not intentional paste, clipboard writes or unrelated channels; preserve credential/private-data exfiltration hypothesis for gate. Specification forbids disclosure, not covers it as accepted."
+  },
+  {
+    "key": "g081/c4",
+    "proposal": "claim-checks/claims-052/result.json",
+    "parent_proposal": "source-refuted-removed-xterm-snapshot-listener-needed-by-frozen-grid",
+    "final_independent_gate": "required-by-conservative-frozen-input-work-flag",
+    "reason": "Full052 old auxiliary listener explicitly not installed for held grids. Grid freeze keeps local copy/link callbacks while clearing program send/resize and gesture, only disposal clears local callbacks. Thus removed xterm listener does not remove grid copy or leak live input to replacement. Preserve program-mouse forcing-modifier condition and no universal mode/history-drain/link-policy proof. Original convenience loss and conservatively considered input-to-new-run premise remain for fresh check."
+  },
+  {
+    "key": "g081/c5",
+    "proposal": "claim-checks/claims-052/result.json",
+    "parent_proposal": "source-refuted-current-grid-kind-refresh-attachment-identity-change",
+    "final_independent_gate": "required-by-conservative-wrong-target-input-flag",
+    "reason": "Full052 current mount specs have no kind and always construct grid; path/gen retires changed identities across live/pending/reconnect/tombstone, surviving controller spec updates before expedited recovery. Removed same-identity kind refresh therefore does not establish wrong renderer/attachment. Restart completion may retire before admission088/089 and old-bundle196 remain separate, not proved safe by generation. Preserve original possible wrong-target input/security/work premise for gate, no exact whole-record alias with broader079c2."
+  }
 ]

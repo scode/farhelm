@@ -4,13 +4,31 @@ Reviewed commit: 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db
 
 ## TLDR
 
-Source-confirmed review record: a new smoke-test explanation says its grid hello proves the stream reached the desktop page, but an independent Python WebSocket client makes that observation. A broken page receive/render path can leave this particular assertion green. This is a documentation/test-oracle overclaim, not a demonstrated product failure or a request that this API-level probe cover the entire desktop. Source: scripts/desktop-smoke.sh:330-333 changes the former statement that a grid proves a terminal host to the page-delivery claim. drive_terminal:334-411 creates its own TCP/WebSocket connection, reads hello/replay and sends input there, then observes a command-written file. Its caller at 1959-1980 proves a kept terminal survives replacement with listing/listening checks and this API round trip; it does not bind the helper's received frame to the actual page's socket or consumption. The script's top-level caveats correctly describe transport/state evidence and optional pixel interaction, but do not turn this helper's independent receive into a page-consumption observable. The base revision 6e423e30068b62c6cfa276c6d720ee35bb70387a:325-330 and the immediate parent both make the narrower host claim, so this assigned comment change introduces the overstatement. Later-source check: the only subsequent desktop-smoke.sh changes are 17a3fe858c5511a24b7403af15dd41c93bf69fd7 and d751ff1633bb479c7bf53920f2e4ea4ba932a1c2; the same sentence persists at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:303-306, with the independent Python helper beginning at 307-310. Suggested bucket: other (misleading assu
+Source-confirmed review record: a new smoke-test explanation says its grid hello proves the stream reached the desktop
+page, but an independent Python WebSocket client makes that observation. A broken page receive/render path can leave
+this particular assertion green. This is a documentation/test-oracle overclaim, not a demonstrated product failure or a
+request that this API-level probe cover the entire desktop. Source: scripts/desktop-smoke.sh:330-333 changes the former
+statement that a grid proves a terminal host to the page-delivery claim. drive_terminal:334-411 creates its own
+TCP/WebSocket connection, reads hello/replay and sends input there, then observes a command-written file. Its caller at
+1959-1980 proves a kept terminal survives replacement with listing/listening checks and this API round trip; it does not
+bind the helper's received frame to the actual page's socket or consumption. The script's top-level caveats correctly
+describe transport/state evidence and optional pixel interaction, but do not turn this helper's independent receive into
+a page-consumption observable. The base revision 6e423e30068b62c6cfa276c6d720ee35bb70387a:325-330 and the immediate
+parent both make the narrower host claim, so this assigned comment change introduces the overstatement. Later-source
+check: the only subsequent desktop-smoke.sh changes are 17a3fe858c5511a24b7403af15dd41c93bf69fd7 and
+d751ff1633bb479c7bf53920f2e4ea4ba932a1c2; the same sentence persists at pinned tip
+00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:303-306, with the independent Python helper beginning at 307-310. Suggested
+bucket: other (misleading assu
 
 ## Details
 
-Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes after the pinned tip.
+Collected immediately at the maintainer's request from the pinned review. No further source investigation, coverage
+search, claim check, independent dismissal check or exhaustive reconciliation was performed. This entry preserves
+proposals rather than approving a dismissal or severity reduction. It has not been reassessed against product changes
+after the pinned tip.
 
-Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket does not approve any proposed lowering.
+Provisional priority: **other**. Original and later consequence statements are preserved separately below; this bucket
+does not approve any proposed lowering.
 
 Contributing records: `g093/l2`.
 
@@ -20,19 +38,73 @@ Confidence: Source-confirmed by an existing parent decision; not runtime reprodu
 
 Latest reviewer record, event 21 (finding, open):
 
-Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: a new smoke-test explanation says its grid hello proves the stream reached the desktop page, but an independent Python WebSocket client makes that observation. A broken page receive/render path can leave this particular assertion green. This is a documentation/test-oracle overclaim, not a demonstrated product failure or a request that this API-level probe cover the entire desktop. Source: scripts/desktop-smoke.sh:330-333 changes the former statement that a grid proves a terminal host to the page-delivery claim. drive_terminal:334-411 creates its own TCP/WebSocket connection, reads hello/replay and sends input there, then observes a command-written file. Its caller at 1959-1980 proves a kept terminal survives replacement with listing/listening checks and this API round trip; it does not bind the helper's received frame to the actual page's socket or consumption. The script's top-level caveats correctly describe transport/state evidence and optional pixel interaction, but do not turn this helper's independent receive into a page-consumption observable. The base revision 6e423e30068b62c6cfa276c6d720ee35bb70387a:325-330 and the immediate parent both make the narrower host claim, so this assigned comment change introduces the overstatement. Later-source check: the only subsequent desktop-smoke.sh changes are 17a3fe858c5511a24b7403af15dd41c93bf69fd7 and d751ff1633bb479c7bf53920f2e4ea4ba932a1c2; the same sentence persists at pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:303-306, with the independent Python helper beginning at 307-310. Suggested bucket: other (misleading assurance about the test boundary). Confidence: confirmed by historical source and observable comparison, not execution. proposed_drop: false. possible_cover: none in supplied neighbor findings; c3 checks protocol compatibility, a distinct claim. Could-be-highest: no security or user-work-loss route established or alleged. Useful correction: say the grid stream reached this probe through the embedded helm, leaving actual page delivery to separately bound page observations. No unresolved premise remains for the narrow overclaim; no runtime test or reproduction performed.
+Reviewed commit: f560058da19e02716e6f943883a9508b447aff4e. TLDR: a new smoke-test explanation says its grid hello proves
+the stream reached the desktop page, but an independent Python WebSocket client makes that observation. A broken page
+receive/render path can leave this particular assertion green. This is a documentation/test-oracle overclaim, not a
+demonstrated product failure or a request that this API-level probe cover the entire desktop. Source:
+scripts/desktop-smoke.sh:330-333 changes the former statement that a grid proves a terminal host to the page-delivery
+claim. drive_terminal:334-411 creates its own TCP/WebSocket connection, reads hello/replay and sends input there, then
+observes a command-written file. Its caller at 1959-1980 proves a kept terminal survives replacement with
+listing/listening checks and this API round trip; it does not bind the helper's received frame to the actual page's
+socket or consumption. The script's top-level caveats correctly describe transport/state evidence and optional pixel
+interaction, but do not turn this helper's independent receive into a page-consumption observable. The base revision
+6e423e30068b62c6cfa276c6d720ee35bb70387a:325-330 and the immediate parent both make the narrower host claim, so this
+assigned comment change introduces the overstatement. Later-source check: the only subsequent desktop-smoke.sh changes
+are 17a3fe858c5511a24b7403af15dd41c93bf69fd7 and d751ff1633bb479c7bf53920f2e4ea4ba932a1c2; the same sentence persists at
+pinned tip 00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:303-306, with the independent Python helper beginning at 307-310.
+Suggested bucket: other (misleading assurance about the test boundary). Confidence: confirmed by historical source and
+observable comparison, not execution. proposed_drop: false. possible_cover: none in supplied neighbor findings; c3
+checks protocol compatibility, a distinct claim. Could-be-highest: no security or user-work-loss route established or
+alleged. Useful correction: say the grid stream reached this probe through the embedded helm, leaving actual page
+delivery to separately bound page observations. No unresolved premise remains for the narrow overclaim; no runtime test
+or reproduction performed.
 
 Returned proposal (claims-061, event 21): **retain-verified**, suggested bucket **other**.
 
-The new local comment attributes an independent Python socket's received hello to the desktop page. Its particular assertion can succeed while the page receive/render path is broken. This establishes a comment/test-evidence overclaim, not a product failure or a requirement to turn this API probe into complete GUI coverage.
+The new local comment attributes an independent Python socket's received hello to the desktop page. Its particular
+assertion can succeed while the page receive/render path is broken. This establishes a comment/test-evidence overclaim,
+not a product failure or a requirement to turn this API probe into complete GUI coverage.
 
-Original stronger consequence: Initial lead asked whether callers independently establish page consumption; later source inspection establishes they do not bind this helper's frame to the page. The final finding expressly alleges no demonstrated product failure, security issue or loss of user work, and asks only to calibrate the comment to the probe's actual boundary.
+Original stronger consequence: Initial lead asked whether callers independently establish page consumption; later source
+inspection establishes they do not bind this helper's frame to the page. The final finding expressly alleges no
+demonstrated product failure, security issue or loss of user work, and asks only to calibrate the comment to the probe's
+actual boundary.
 
 Unresolved premise or limitation: No missing premise stated in this returned proposal.
 
-Proposed basis: Retain at other priority. Correct the comment to describe delivery through the embedded helm to this probe; separate actual page observations remain separate evidence.
+Proposed basis: Retain at other priority. Correct the comment to describe delivery through the embedded helm to this
+probe; separate actual page observations remain separate evidence.
 
-Existing parent disposition (event 21): verified. Parent explicitly accepted named retain-verified proposal from claims-061 after inspecting it. The new local comment attributes an independent Python socket's received hello to the desktop page. Its particular assertion can succeed while the page receive/render path is broken. This establishes a comment/test-evidence overclaim, not a product failure or a requirement to turn this API probe into complete GUI coverage. Retain at other priority. Correct the comment to describe delivery through the embedded helm to this probe; separate actual page observations remain separate evidence. Checked source/results: ["f560058da19e02716e6f943883a9508b447aff4e:scripts/desktop-smoke.sh:330-333 changes the narrower host-kind claim into a statement that the grid stream reached the page. The patch itself shows the old and new wording.","Same hash :334-411 creates an independent Python TCP/WebSocket client, reads hello/replay on it, sends input there and checks a command-written file. No frame is observed on the page's actual socket by this helper.","Same hash :1959-1980 checks survival/listing/listening after supervisor replacement and invokes this API round trip; it does not bind the helper's hello to page consumption. Opening caveats at :1-46 correctly distinguish transport/state and optional pixel interaction, but do not validate the narrower local claim.","00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:scripts/desktop-smoke.sh:303-310 still contains the same page-delivery claim and starts the independent Python client. In-range file history confirms no later repair. Source analysis only."] Current coverage/results: ["SPEC_impl.md Grid streams/Terminal widget/Testing and SPEC.md Acceptance test searched/read for page-delivery and GUI observables. Grid-only protocol correctness does not make receipt by one socket prove receipt by another; no specification accepts this overclaim.","TODO Planned empty. BUGS.md and active TRIAGE_OUTCOMES.md searched for desktop smoke page delivery/oracle/probe claims; no exact cover found.","plans/queue tmux cleanup/audit matches were read through their acceptance criteria; plans/REPORTS.md:29-32 marks them landed. No unlanded plan specifically repairs this evidence wording.","INDEX.md and candidate-specific queue searches found no exact page-delivery overclaim. desktop-smoke-misparses-space-bearing-run-path.md and desktop-smoke-supervisor-precedes-cleanup-record.md were read in full and concern independent path parsing and resource-lifetime defects. c3 in this batch concerns protocol compatibility, not this claim's observation boundary.","FILTER.md: no complete boundary matches. Reading a routine test comment is not a rare timing/crash/input trigger, and a persistent assurance overclaim is not a self-correcting display glitch."] Exact cited cover: [] Original stronger consequence and missing premise remain preserved: "Initial lead asked whether callers independently establish page consumption; later source inspection establishes they do not bind this helper's frame to the page. The final finding expressly alleges no demonstrated product failure, security issue or loss of user work, and asks only to calibrate the comment to the probe's actual boundary."; null.
+Existing parent disposition (event 21): verified. Parent explicitly accepted named retain-verified proposal from
+claims-061 after inspecting it. The new local comment attributes an independent Python socket's received hello to the
+desktop page. Its particular assertion can succeed while the page receive/render path is broken. This establishes a
+comment/test-evidence overclaim, not a product failure or a requirement to turn this API probe into complete GUI
+coverage. Retain at other priority. Correct the comment to describe delivery through the embedded helm to this probe;
+separate actual page observations remain separate evidence. Checked source/results:
+["f560058da19e02716e6f943883a9508b447aff4e:scripts/desktop-smoke.sh:330-333 changes the narrower host-kind claim into a
+statement that the grid stream reached the page. The patch itself shows the old and new wording.","Same hash :334-411
+creates an independent Python TCP/WebSocket client, reads hello/replay on it, sends input there and checks a
+command-written file. No frame is observed on the page's actual socket by this helper.","Same hash :1959-1980 checks
+survival/listing/listening after supervisor replacement and invokes this API round trip; it does not bind the helper's
+hello to page consumption. Opening caveats at :1-46 correctly distinguish transport/state and optional pixel
+interaction, but do not validate the narrower local
+claim.","00de0b6c9cf206f1a7c9c5ad1c76b5b10eaf85db:scripts/desktop-smoke.sh:303-310 still contains the same page-delivery
+claim and starts the independent Python client. In-range file history confirms no later repair. Source analysis only."]
+Current coverage/results: ["SPEC_impl.md Grid streams/Terminal widget/Testing and SPEC.md Acceptance test searched/read
+for page-delivery and GUI observables. Grid-only protocol correctness does not make receipt by one socket prove receipt
+by another; no specification accepts this overclaim.","TODO Planned empty. BUGS.md and active TRIAGE_OUTCOMES.md
+searched for desktop smoke page delivery/oracle/probe claims; no exact cover found.","plans/queue tmux cleanup/audit
+matches were read through their acceptance criteria; plans/REPORTS.md:29-32 marks them landed. No unlanded plan
+specifically repairs this evidence wording.","INDEX.md and candidate-specific queue searches found no exact
+page-delivery overclaim. desktop-smoke-misparses-space-bearing-run-path.md and
+desktop-smoke-supervisor-precedes-cleanup-record.md were read in full and concern independent path parsing and
+resource-lifetime defects. c3 in this batch concerns protocol compatibility, not this claim's observation
+boundary.","FILTER.md: no complete boundary matches. Reading a routine test comment is not a rare timing/crash/input
+trigger, and a persistent assurance overclaim is not a self-correcting display glitch."] Exact cited cover: [] Original
+stronger consequence and missing premise remain preserved: "Initial lead asked whether callers independently establish
+page consumption; later source inspection establishes they do not bind this helper's frame to the page. The final
+finding expressly alleges no demonstrated product failure, security issue or loss of user work, and asks only to
+calibrate the comment to the probe's actual boundary."; null.
 
-Complete original wording, every revision/withdrawal, cited checks and exact cover quotations: [g093 record](records/review-through-00de0b6c/groups/g093.json). Record ID: `l2`.
-
+Complete original wording, every revision/withdrawal, cited checks and exact cover quotations:
+[g093 record](records/review-through-00de0b6c/groups/g093.json). Record ID: `l2`.

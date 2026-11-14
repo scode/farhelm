@@ -139,8 +139,14 @@
       "TODO.md Planned is empty. Searched plans/queue, BUGS.md, INDEX.md and active TRIAGE_OUTCOMES.md for private-tmux retirement, old-terminal startup termination and screen loss. No additional exact open cover; the tmux retirement plan is landed per plans/REPORTS.md:29. FILTER.md is unnecessary and no rare-upgrade inference is used."
     ],
     "exact_cover_quotes": [
-      {"source": "1ed482dde220452e424973faf38a5e1318986333:SPEC.md:3006-3007", "quote": "This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program."},
-      {"source": "current SPEC.md:3000-3004", "quote": "A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program."}
+      {
+        "source": "1ed482dde220452e424973faf38a5e1318986333:SPEC.md:3006-3007",
+        "quote": "This release ends them: the first time a host's supervisor of this release starts, it ends that tmux server, and with it everything that still ran in an old terminal, without needing a tmux program."
+      },
+      {
+        "source": "current SPEC.md:3000-3004",
+        "quote": "A supervisor that finds that tmux server when it starts ends it, and with it everything that still ran in an old terminal, without needing a tmux program."
+      }
     ],
     "missing_premise": "None for this deliberate retirement consequence. Startup retirement's correctness against other processes is a separate question, not reviewed here.",
     "original_stronger_consequence": "Terminates user-owned processes and discards old terminal state. Earlier candidate labels are superseded by a finding explicitly retained as highest for independent specification-acceptance checking. No parent drop was accepted.",
