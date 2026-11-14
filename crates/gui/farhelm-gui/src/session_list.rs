@@ -131,7 +131,7 @@ impl SessionList {
 
         match change {
             Change::Keep => {}
-            Change::Select(key) => selection::choose(&key, cx),
+            Change::Select(key) => selection::open_automatically(&key, cx),
             Change::Clear => {
                 local_state::clear(cx);
             }

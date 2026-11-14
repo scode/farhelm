@@ -20,8 +20,9 @@ use gpui::{
 use crate::components::{Banner, Button, HoverHelp, Role, Tier};
 use crate::notices::{self, Notice};
 use crate::session_list::SessionList;
+use crate::session_pane::SessionPane;
 use crate::theme::metrics;
-use crate::{render_count, root, session, session_pane, theme};
+use crate::{render_count, root, session, theme};
 
 /// The window's root view.
 pub struct MainView {
@@ -35,6 +36,9 @@ pub struct MainView {
     /// The sidebar's session list, kept for the window's life: it holds only per-UI-session state, which it starts
     /// over by itself after a reset.
     session_list: Entity<SessionList>,
+    /// The pane beside the list, kept for the window's life like the list: it remakes the selected session's terminal
+    /// by itself on every change of selection or UI session.
+    session_pane: Entity<SessionPane>,
 }
 
 impl MainView {
@@ -53,7 +57,16 @@ impl MainView {
             root: root::attach(window, cx),
             _observed: observed,
             session_list: cx.new(SessionList::new),
+            session_pane: cx.new(|cx| SessionPane::new(window, cx)),
         }
+    }
+}
+
+#[cfg(test)]
+impl MainView {
+    /// The pane, for tests that reach the terminal it shows.
+    pub(crate) fn session_pane(&self) -> &Entity<SessionPane> {
+        &self.session_pane
     }
 }
 
@@ -86,7 +99,13 @@ impl Render for MainView {
                         .flex_1()
                         .min_h_0()
                         .child(sidebar)
-                        .child(div().flex_1().min_w_0().child(session_pane::element(cx))),
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .h_full()
+                                .child(self.session_pane.clone()),
+                        ),
                 )
                 .into_any_element()
         } else {
