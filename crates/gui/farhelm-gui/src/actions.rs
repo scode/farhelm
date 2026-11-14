@@ -3,8 +3,8 @@
 //! SPEC_impl.md, "Actions and keymap": buttons, menu items and keys dispatch the same action, and every action is
 //! declared here, so a key and the control it stands for can never drift apart. This file holds the actions the focus
 //! coordinator and the layer manager need, the session shortcuts' actions, the terminal's key table
-//! ([`TERMINAL_KEYS`]), and the list of actions a held key runs only once (`ONCE_PER_PRESS`). The features add their
-//! own actions as they are built.
+//! ([`TERMINAL_KEYS`]), the shortcuts matched by the physical key ([`PHYSICAL_KEYS`]), and the list of actions a held
+//! key runs only once (`ONCE_PER_PRESS`). The features add their own actions as they are built.
 //!
 //! Every binding lives in [`CONTEXT`], the key context the root view sets on everything Farhelm draws. GPUI Kit's
 //! `Root` binds Tab and Shift+Tab in its own context, which sits above Farhelm's root, and moves focus itself when it
@@ -16,8 +16,9 @@
 //! context. A menu sets [`MENU_CONTEXT`], where Up and Down walk its items.
 //!
 //! Extension points (`docs/gpui/foundation-ownership.md`), besides an action and its binding in [`CONTEXT`]: a row in
-//! [`TERMINAL_KEYS`], with a row in [`TERMINAL_BINDINGS`] once the terminal command it names has an action, an action
-//! in `ONCE_PER_PRESS`, and a chord in `TEXT_FIELD_KEYS` for an app shortcut SPEC.md says a text field keeps.
+//! [`TERMINAL_KEYS`], with a row in [`TERMINAL_BINDINGS`] once the terminal command it names has an action, a row in
+//! [`PHYSICAL_KEYS`] for a shortcut SPEC.md matches by key position, an action in `ONCE_PER_PRESS`, and a chord in
+//! `TEXT_FIELD_KEYS` for an app shortcut SPEC.md says a text field keeps.
 //!
 //! ## A focused terminal
 //!
@@ -64,12 +65,32 @@
 //! event has no composing flag and an interceptor cannot reach the focused input handler. On macOS GPUI offers a key to
 //! the input method first while it composes, and a key the input method hands back is dispatched like any other, so a
 //! listed shortcut typed mid-composition still runs. The element that owns the input handler knows it is composing and
-//! is the place to refuse it; for a terminal, that comes with the terminal's input method work.
+//! is the place to refuse it; for a terminal, that comes with the terminal's input method work. For the
+//! [`PHYSICAL_KEYS`] rows that place is the action's handler instead: the interceptor stops their keys before the
+//! focused element sees them, so it cannot refuse one itself, and SPEC.md's "composition do not open it" for Keyboard
+//! shortcuts (the old app checked `isComposing`) is the handler's to keep, by asking the focused input whether it is
+//! composing (marked text) before it opens anything. That handler is not built here.
+//!
+//! ## Shortcuts matched by the physical key
+//!
+//! SPEC.md matches some shortcuts by where the key sits rather than what it prints: the template number keys ("the
+//! physical digit key, independent of the printed character; the numeric keypad is excluded"), Keyboard shortcuts ("the
+//! physical Slash key, with no extra modifiers") and terminal text size ("the US-layout positions of = and −"). A key
+//! binding cannot express that, because GPUI matches bindings by the logical key: on Linux it reports Ctrl+Shift+1 as
+//! Ctrl+`!` on a US layout and as something else on others. So [`PHYSICAL_KEYS`] lists them by key, and the same
+//! keystroke interceptor that guards repeats matches them before any binding or listener sees the key: it dispatches
+//! the row's action to the focused element and stops the key, so neither a focused terminal's program nor a text field
+//! receives it, whether or not a feature handles the action yet. A held repeat of a row whose action is in
+//! `ONCE_PER_PRESS` is stopped without dispatching; any other row acts on every repeat.
+//!
+//! A row names its key by the key event's native identity (an XKB position name on Linux, a virtual keycode on macOS),
+//! which the vendored GPUI's native-key layer adds (`vendor/README.md`). [`physical_key_at`] finds a row by key alone,
+//! and is public so the quick-launch sequence can recognize its bare number keys the same way.
 
 use farhelm_input_mapping::Platform;
 use gpui::{
     Action, App, Global, KeyBinding, KeyContext, KeyDownEvent, KeybindingKeystroke, Keystroke,
-    KeystrokeEvent, NoAction, Subscription, Window, actions,
+    KeystrokeEvent, NativeKeyIdentity, NoAction, Subscription, Window, actions,
 };
 
 /// The key context the root view sets, and the one every Farhelm binding is declared in.
@@ -161,6 +182,16 @@ actions!(
         /// terminal handles it; its keys are in [`TERMINAL_BINDINGS`], and a menu item that dispatches it reaches the
         /// focused terminal the same way.
         Paste,
+        /// Open the Keyboard shortcuts dialog (SPEC.md, "Desktop window chrome": Cmd+/ on a Mac, Ctrl+Shift+/ on
+        /// Linux, by the physical Slash key; a row in [`PHYSICAL_KEYS`]). Runs once per press (`ONCE_PER_PRESS`).
+        ShowKeyboardShortcuts,
+        /// Step every open terminal's text size up (SPEC.md, "Terminal experience": Cmd+Shift or Ctrl+Shift with the
+        /// key at the US position of =; a row in [`PHYSICAL_KEYS`]). Acts on every repeat of a held chord, as the old
+        /// app did.
+        IncreaseTerminalTextSize,
+        /// Step every open terminal's text size down (the key at the US position of −; otherwise as
+        /// [`IncreaseTerminalTextSize`]).
+        DecreaseTerminalTextSize,
     ]
 );
 
@@ -203,6 +234,17 @@ impl TerminalBinding {
             Platform::Linux => self.linux,
         }
     }
+}
+
+/// Start the template that holds number key `digit` (SPEC.md, "Template number shortcuts": Cmd+digit on a Mac,
+/// Ctrl+Shift+digit on Linux, by the physical digit key; ten rows in [`PHYSICAL_KEYS`]). One action carries the digit,
+/// rather than one action per key, so a feature handles every number key in one place. Runs once per press
+/// (`ONCE_PER_PRESS`). Never built from JSON: no keymap file names it, and the physical rows are its only source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, gpui::Action)]
+#[action(namespace = farhelm, no_json)]
+pub struct TemplateNumberKey {
+    /// The key's digit, 0 to 9 (SPEC.md lists them 1–9 then 0).
+    pub digit: u8,
 }
 
 /// Bind the keys. The bootstrap calls this after GPUI Kit's own init, so Farhelm's bindings are added after Kit's.
@@ -252,49 +294,66 @@ pub fn install(cx: &mut App) {
             .iter()
             .map(|chord| (binding.bind)(chord))
     }));
-    let interceptor = cx.intercept_keystrokes(hold_back_repeat);
-    cx.set_global(RepeatGuard {
+    let interceptor = cx.intercept_keystrokes(intercept);
+    cx.set_global(KeyInterceptor {
         _interceptor: interceptor,
     });
+}
+
+/// The keystroke interceptor, which sees every key before GPUI matches a binding for it: it runs the shortcuts
+/// [`PHYSICAL_KEYS`] matches by position, and stops a held repeat of a key that would run a `ONCE_PER_PRESS` action.
+///
+/// It does not check GPUI's character-input preference, under which bindings would not run at all: on macOS and
+/// Wayland only GPUI's replay of a held-back chord key asks for it, and a replay never reaches an interceptor. Were a
+/// platform to ask for it, dropping a listed shortcut's repeat would still be what SPEC.md wants.
+fn intercept(event: &KeystrokeEvent, window: &mut Window, cx: &mut App) {
+    let Some(down) = &event.key_down else {
+        return;
+    };
+    if let Some(row) = physical_on(THIS_PLATFORM, down) {
+        if !(down.is_held && once_per_press(row.action)) {
+            window.dispatch_action(row.action.boxed_clone(), cx);
+        }
+        cx.stop_propagation();
+    } else if down.is_held && runs_once_per_press(&down.keystroke, &event.context_stack, cx) {
+        cx.stop_propagation();
+    }
 }
 
 // ---- Shortcuts that act once per press -------------------------------------------------------------------------------
 
 /// The actions a held key runs once, on the press, and not again on each auto-repeat: the ones behind SPEC.md's
 /// shortcuts that "ignore repeat". A shortcut opts in by having its action listed here; its binding stays where every
-/// binding is, in [`install`]. The module docs say what the guard covers and what it cannot.
+/// binding is, in [`install`], or its row in [`PHYSICAL_KEYS`], whose dispatcher drops a held repeat of a listed
+/// action itself. The module docs say what the guard covers and what it cannot.
 ///
 /// A listed action's handler must take every key that reaches it, even when it does nothing (Delete with no session
 /// open). The guard judges a repeat by the first binding GPUI tries for the key; a handler that declined would send
 /// the press on to the next binding or to the key listeners, and its repeats would not follow it there.
+///
+/// Entries are compared by action name, not value, so the one [`TemplateNumberKey`] entry covers every digit.
 const ONCE_PER_PRESS: &[&dyn Action] = &[
     // One entry per line, so that a new shortcut only adds a line (the shape `docs/gpui/foundation-ownership.md` asks
     // of the lists areas append to); this comment is also what keeps rustfmt from joining the entries.
     &DeleteSession,
     &RenameSession,
+    &TemplateNumberKey { digit: 0 },
+    &ShowKeyboardShortcuts,
 ];
 
-/// Keeps the repeat guard's keystroke interceptor subscribed for the app's lifetime.
-struct RepeatGuard {
+/// Whether `action` is one a held key runs only once: its name is listed in [`ONCE_PER_PRESS`].
+fn once_per_press(action: &dyn Action) -> bool {
+    ONCE_PER_PRESS
+        .iter()
+        .any(|listed| listed.name() == action.name())
+}
+
+/// Keeps the keystroke interceptor ([`intercept`]) subscribed for the app's lifetime.
+struct KeyInterceptor {
     _interceptor: Subscription,
 }
 
-impl Global for RepeatGuard {}
-
-/// The repeat guard: stop a held repeat of a key that would run a [`ONCE_PER_PRESS`] action, before GPUI matches any
-/// binding for it.
-///
-/// It does not check GPUI's character-input preference, under which bindings would not run at all: on macOS and
-/// Wayland only GPUI's replay of a held-back chord key asks for it, and a replay never reaches an interceptor. Were a
-/// platform to ask for it, dropping a listed shortcut's repeat would still be what SPEC.md wants.
-fn hold_back_repeat(event: &KeystrokeEvent, _: &mut Window, cx: &mut App) {
-    let Some(down) = &event.key_down else {
-        return;
-    };
-    if down.is_held && runs_once_per_press(&down.keystroke, &event.context_stack, cx) {
-        cx.stop_propagation();
-    }
-}
+impl Global for KeyInterceptor {}
 
 /// Whether `keystroke`, typed where the focused element's context stack is `context_stack`, would run a
 /// [`ONCE_PER_PRESS`] action: whether the binding GPUI tries first for it is bound to one. A deeper context's binding
@@ -308,11 +367,9 @@ fn runs_once_per_press(keystroke: &Keystroke, context_stack: &[KeyContext], cx: 
     let keymap = cx.key_bindings();
     let keymap = keymap.borrow();
     let (bindings, _) = keymap.bindings_for_input(std::slice::from_ref(keystroke), context_stack);
-    bindings.first().is_some_and(|binding| {
-        ONCE_PER_PRESS
-            .iter()
-            .any(|listed| listed.partial_eq(binding.action()))
-    })
+    bindings
+        .first()
+        .is_some_and(|binding| once_per_press(binding.action()))
 }
 
 // ---- The terminal's key table ----------------------------------------------------------------------------------------
@@ -364,10 +421,9 @@ impl TerminalKey {
 /// here yet: neither SPEC.md nor the old app's terminal settles one, so it waits for the copy work.
 ///
 /// NOTE: Not in this table, because a key binding cannot express them: the number keys (Cmd or Ctrl+Shift with 0-9),
-/// the Keyboard shortcuts dialog (with `/`) and terminal text size (with `=` and `-`). SPEC.md and the old app match
-/// those by the physical key, which a binding's logical key does not capture (on Linux, GPUI reports Ctrl+Shift+1 as
-/// Ctrl+`!` on a US layout and as something else on others). They join a physical-key table when their features are
-/// built; until then a focused terminal sends them to its program.
+/// the Keyboard shortcuts dialog (with `/`) and terminal text size (with `=` and `-`), which SPEC.md matches by the
+/// physical key. They are rows of [`PHYSICAL_KEYS`], whose interceptor takes them before any binding or the terminal
+/// sees them, so they never reach the program either.
 pub const TERMINAL_KEYS: &[TerminalKey] = &[
     // Farhelm's shortcuts that work from a focused terminal.
     app("cmd-k", "ctrl-shift-k", "open the quick switcher"),
@@ -499,9 +555,8 @@ const fn mac_only(chord: &'static str, owner: KeyOwner, what: &'static str) -> T
 ///
 /// A key a binding handled never reaches the terminal, so this answers only for the keys that do. It matches the way
 /// GPUI matches a binding ([`Keystroke::should_match`]), so a key counts as a chord here exactly when a binding for
-/// that chord would take it. It takes the whole key-down event, not only its keystroke, because the shortcuts this
-/// table cannot hold yet (the NOTE on [`TERMINAL_KEYS`]) match the physical key, which only the event's `native_key`
-/// carries; today only the keystroke is read.
+/// that chord would take it. The shortcuts matched by the physical key never get here: [`PHYSICAL_KEYS`]' interceptor
+/// stops them first.
 pub fn terminal_key_owner(event: &KeyDownEvent) -> KeyOwner {
     owner_on(THIS_PLATFORM, event)
 }
@@ -520,4 +575,172 @@ pub(crate) fn owner_on(platform: Platform, event: &KeyDownEvent) -> KeyOwner {
                 })
         })
         .map_or(KeyOwner::Program, |key| key.owner)
+}
+
+// ---- Shortcuts matched by the physical key ---------------------------------------------------------------------------
+
+/// A key named by its place on the keyboard rather than by what it prints: its native identity on each platform, and
+/// the character a US layout prints there unshifted, for events that carry no identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PhysicalKeyId {
+    /// The XKB position name, on Linux: `AE01` is the main row's first digit key whatever the layout prints on it, and
+    /// the keypad's keys have names of their own (`KP1`).
+    pub xkb: &'static str,
+    /// The macOS virtual keycode (the `kVK_ANSI_*` codes), which also names a position rather than a character.
+    pub mac: u16,
+    /// What a US layout prints on the key unshifted.
+    pub us: &'static str,
+}
+
+impl PhysicalKeyId {
+    /// Whether `event` was typed at this key: by the event's native identity when it has one, and by its logical key
+    /// as a US layout prints it unshifted when it has none.
+    ///
+    /// The native identity is what SPEC.md asks for ("independent of the printed character"), and it is never
+    /// second-guessed: an identity that names another key is another key, even when the layout printed this one's
+    /// character. The logical fallback applies only to events without any identity, and for the chords in
+    /// [`PHYSICAL_KEYS`] it does not undercut that rule: on real hardware the events without an identity are
+    /// input-method commits of ASCII text and replayed keystrokes (`vendor/README.md`, "native-key"), never a Cmd or
+    /// Ctrl+Shift chord. It exists so the keys the test bridge injects, and simulated test keys, can press these
+    /// shortcuts.
+    ///
+    /// NOTE: For a bare key (the quick-launch sequence's number keys, which take no modifiers) that reasoning does not
+    /// hold: a digit an input method commits, the keypad's included, has no identity and reads as the main row's
+    /// digit here. A caller that matches bare keys decides whether that matters to it.
+    pub fn typed_in(&self, event: &KeyDownEvent) -> bool {
+        match &event.native_key {
+            Some(native) => match &native.identity {
+                NativeKeyIdentity::Xkb(name) => name.as_ref() == self.xkb,
+                NativeKeyIdentity::Mac(code) => *code == self.mac,
+            },
+            None => event.keystroke.key == self.us,
+        }
+    }
+}
+
+/// The key at `xkb` (Linux), `mac` (macOS), printing `us` on a US layout.
+const fn key(xkb: &'static str, mac: u16, us: &'static str) -> PhysicalKeyId {
+    PhysicalKeyId { xkb, mac, us }
+}
+
+/// The modifiers a physical-key shortcut is typed with, exactly: Option (Alt) and Fn are never part of one, and any
+/// modifier beyond these keeps the chord from matching (SPEC.md: "with no extra modifiers").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChordModifiers {
+    /// Command on a Mac (GPUI's `platform` modifier, Super on Linux).
+    pub command: bool,
+    /// Ctrl.
+    pub control: bool,
+    /// Shift, as the key event's original Shift (a symbol's logical keystroke drops it).
+    pub shift: bool,
+}
+
+/// Command alone.
+const COMMAND: ChordModifiers = ChordModifiers {
+    command: true,
+    control: false,
+    shift: false,
+};
+/// Command and Shift.
+const COMMAND_SHIFT: ChordModifiers = ChordModifiers {
+    command: true,
+    control: false,
+    shift: true,
+};
+/// Ctrl and Shift, the Linux app's form of every app shortcut.
+const CONTROL_SHIFT: ChordModifiers = ChordModifiers {
+    command: false,
+    control: true,
+    shift: true,
+};
+
+/// One row of [`PHYSICAL_KEYS`]: the key, its exact modifiers on each platform, and the action it runs.
+#[derive(Clone, Copy)]
+pub struct PhysicalKey {
+    pub key: PhysicalKeyId,
+    pub mac: ChordModifiers,
+    pub linux: ChordModifiers,
+    pub action: &'static dyn Action,
+}
+
+impl PhysicalKey {
+    /// The modifiers this row is typed with on `platform`.
+    pub fn modifiers(&self, platform: Platform) -> ChordModifiers {
+        match platform {
+            Platform::Mac => self.mac,
+            Platform::Linux => self.linux,
+        }
+    }
+}
+
+/// Every shortcut SPEC.md matches by key position rather than by the key's printed character, with the modifiers the
+/// old app used at the reference commit: Command on a Mac and Ctrl+Shift on Linux, and Command+Shift on a Mac for
+/// terminal text size. A row's action runs from anywhere in the window, a focused terminal and a text field included,
+/// and the key goes no further (the module docs' "Shortcuts matched by the physical key"). Its feature adds the
+/// action's handler; until then the key does nothing at all.
+///
+/// A row is the whole of a new shortcut: its key's identities are data in the row. One row per line, so that a new
+/// shortcut only adds a line.
+#[rustfmt::skip]
+pub const PHYSICAL_KEYS: &[PhysicalKey] = &[
+    // SPEC.md, "Template number shortcuts": 1–9 then 0, the main row's digits. The Mac's digit keycodes are not in
+    // numeric order.
+    number_key(key("AE01", 0x12, "1"), &TemplateNumberKey { digit: 1 }),
+    number_key(key("AE02", 0x13, "2"), &TemplateNumberKey { digit: 2 }),
+    number_key(key("AE03", 0x14, "3"), &TemplateNumberKey { digit: 3 }),
+    number_key(key("AE04", 0x15, "4"), &TemplateNumberKey { digit: 4 }),
+    number_key(key("AE05", 0x17, "5"), &TemplateNumberKey { digit: 5 }),
+    number_key(key("AE06", 0x16, "6"), &TemplateNumberKey { digit: 6 }),
+    number_key(key("AE07", 0x1A, "7"), &TemplateNumberKey { digit: 7 }),
+    number_key(key("AE08", 0x1C, "8"), &TemplateNumberKey { digit: 8 }),
+    number_key(key("AE09", 0x19, "9"), &TemplateNumberKey { digit: 9 }),
+    number_key(key("AE10", 0x1D, "0"), &TemplateNumberKey { digit: 0 }),
+    // SPEC.md, "Desktop window chrome": Keyboard shortcuts, at the US slash's key.
+    PhysicalKey { key: key("AB10", 0x2C, "/"), mac: COMMAND, linux: CONTROL_SHIFT, action: &ShowKeyboardShortcuts },
+    // SPEC.md, "Terminal experience": text size, at the US positions of = and −.
+    PhysicalKey { key: key("AE12", 0x18, "="), mac: COMMAND_SHIFT, linux: CONTROL_SHIFT, action: &IncreaseTerminalTextSize },
+    PhysicalKey { key: key("AE11", 0x1B, "-"), mac: COMMAND_SHIFT, linux: CONTROL_SHIFT, action: &DecreaseTerminalTextSize },
+];
+
+/// A template number key's row: Command+digit on a Mac, Ctrl+Shift+digit on Linux.
+const fn number_key(key: PhysicalKeyId, action: &'static dyn Action) -> PhysicalKey {
+    PhysicalKey {
+        key,
+        mac: COMMAND,
+        linux: CONTROL_SHIFT,
+        action,
+    }
+}
+
+/// The first row of [`PHYSICAL_KEYS`] whose key `event` was typed at, whatever modifiers were held: for code that matches
+/// these keys bare, such as the quick-launch sequence's number keys (the row's action says which digit:
+/// `row.action.as_any().downcast_ref::<TemplateNumberKey>()`). [`PhysicalKeyId::typed_in`] says how the key is read,
+/// and its NOTE what a bare match should know.
+pub fn physical_key_at(event: &KeyDownEvent) -> Option<&'static PhysicalKey> {
+    PHYSICAL_KEYS.iter().find(|row| row.key.typed_in(event))
+}
+
+/// The row of [`PHYSICAL_KEYS`] that `event` presses on `platform`, if any: its key and exactly its modifiers. Shift is
+/// read from the native event when it has one, because the logical keystroke drops Shift from a symbol (on Linux,
+/// Ctrl+Shift+1 arrives as Ctrl+`!`). Crate-only, with the platform passed in like [`owner_on`], so the Mac's rows can
+/// be tested on Linux; the app asks about its own platform.
+pub(crate) fn physical_on(
+    platform: Platform,
+    event: &KeyDownEvent,
+) -> Option<&'static PhysicalKey> {
+    let modifiers = &event.keystroke.modifiers;
+    if modifiers.alt || modifiers.function {
+        return None;
+    }
+    let held = ChordModifiers {
+        command: modifiers.platform,
+        control: modifiers.control,
+        shift: event
+            .native_key
+            .as_ref()
+            .map_or(modifiers.shift, |native| native.shift),
+    };
+    PHYSICAL_KEYS
+        .iter()
+        .find(|row| row.key.typed_in(event) && row.modifiers(platform) == held)
 }
