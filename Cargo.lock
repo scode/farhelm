@@ -2023,6 +2023,7 @@ dependencies = [
  "gpui-pre-platform",
  "gpui-pre-wgpu",
  "image",
+ "serde",
  "serde_json",
  "tracing",
 ]

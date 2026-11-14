@@ -42,6 +42,10 @@
 //! themselves are built where their feature lives, with [`Command::new`], keeping today's API semantics for their
 //! route (the session list builds its Rename and Delete): this module holds the store, not a catalog of routes. A
 //! new kind of key ([`OpKey`]) is a change here.
+//!
+//! Reads are not operations: a GET changes nothing on the helm, so it has no key, no busy state and no recorded refusal.
+//! [`read`] sends one through the live UI session and words its refusal exactly as the store words an operation's, so
+//! a read and a save that fail on the same helm say so in the same way; the feature shows the result itself.
 
 use std::collections::HashMap;
 
@@ -49,6 +53,7 @@ use farhelm_helm_client::{ApiPath, ChannelHandle, CommandError, Method, PathErro
 use farhelm_proto::DeleteGuard;
 use farhelm_proto::ui_channel::Reply;
 use gpui::{App, Context, Task};
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::focus::{self, Mark};
@@ -97,7 +102,9 @@ enum Key {
     Host(String),
     Template(String),
     Preferences,
+    /// Numbered by [`next_number`], so no two launches share a key.
     Launch(u64),
+    /// Numbered the same way.
     HostAdd(u64),
 }
 
@@ -122,20 +129,29 @@ impl OpKey {
         OpKey(Key::Preferences)
     }
 
-    /// A launch, sent before any session exists for it. `n` must be unique for the life of the UI session's store
-    /// (across the launcher's openings, and quick launches, which never open it): a number reused while an earlier
-    /// launch with it is in flight would be refused as busy, and SPEC.md lets New and the shortcuts start a fresh
-    /// launch at once. A counter kept beside the store, not in a launcher view, gives that.
-    pub fn launch(n: u64) -> OpKey {
-        OpKey(Key::Launch(n))
+    /// A fresh key for a launch, sent before any session exists for it. Every call gives a key no other call in this
+    /// run of the app gives, so a launch never shares its key with an earlier one still in flight (SPEC.md lets New
+    /// and the shortcuts start a fresh launch at once) or with a stale key a view held across a reset. Keep the key
+    /// for as long as the launch's busy state or refusal is shown.
+    pub fn new_launch() -> OpKey {
+        OpKey(Key::Launch(next_number()))
     }
 
-    /// Adding a host, sent before the host has a registry id: it gets one when the helm registers it, which is when it
-    /// accepts the setup (202), or straight away when the probe finds the host already set up (200). `n` follows
-    /// [`OpKey::launch`]'s rule: unique for the life of the UI session's store, from a counter kept beside it.
-    pub fn host_add(n: u64) -> OpKey {
-        OpKey(Key::HostAdd(n))
+    /// A fresh key for adding a host, sent before the host has a registry id: it gets one when the helm registers it,
+    /// which is when it accepts the setup (202), or straight away when the probe finds the host already set up (200).
+    /// Fresh in the same way as [`OpKey::new_launch`]'s.
+    pub fn new_host_add() -> OpKey {
+        OpKey(Key::HostAdd(next_number()))
     }
+}
+
+/// The next number for a fresh key. One counter for the whole app rather than one per UI session's store: a view can
+/// hold a key across a reset, and a number restarted with the new store would hand that view's key to someone else's
+/// work. Relaxed ordering is enough, since all that matters is that no two calls get the same number.
+fn next_number() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 /// One command to the helm, with the work it does and how a refusal without words names it. Built where its feature
@@ -212,20 +228,86 @@ impl Outcome {
         match reply.status {
             202 => Outcome::Accepted(reply.body),
             200..=299 => Outcome::Done(reply.body),
-            status => {
-                let words = match reply.body {
-                    Some(Value::String(text)) => text.trim().to_owned(),
-                    Some(other) => other.to_string(),
-                    None => String::new(),
-                };
-                let words = if words.is_empty() {
-                    format!("{shown}: {status}")
-                } else {
-                    words
-                };
-                Outcome::Refused(HostText::from_host(words))
-            }
+            status => Outcome::Refused(refusal(reply.body, status, shown)),
         }
+    }
+}
+
+/// The words of a refusal: the helm's own (a plain string, trimmed, or the JSON it sent), or, when it sent none, which
+/// command got which status, as the old app's `api::refusal_text` did. One wording for operations and reads alike.
+fn refusal(body: Option<Value>, status: u16, shown: &str) -> HostText {
+    let words = match body {
+        Some(Value::String(text)) => text.trim().to_owned(),
+        Some(other) => other.to_string(),
+        None => String::new(),
+    };
+    if words.is_empty() {
+        HostText::from_host(format!("{shown}: {status}"))
+    } else {
+        HostText::from_host(words)
+    }
+}
+
+// ---- Reads ----------------------------------------------------------------------------------------------------------
+
+/// Read `path` with a plain GET through the live UI session, and hand `on_read` the reply decoded as `T`, or why there
+/// is none, worded for the user. Returns whether it was sent: `false` while there is no UI session (before the first
+/// connect, or between a reset and the next), and then `on_read` never runs.
+///
+/// Only for what the helm does not push. Pushed state (sessions, hosts, templates, the preferences) is read from the
+/// store while drawing, never fetched: a fetched copy would go stale the moment the next push lands.
+///
+/// `shown` names the read in a refusal without words, as [`Command::new`]'s does (`GET /api/sessions`, with any
+/// internal id hidden). A refusal is worded exactly as an operation's ([`Outcome::Refused`]); a reply that does not
+/// decode as `T`, or has no body, says so, naming `shown`. Every 2xx counts as an answer.
+///
+/// `on_read` runs on its own, after the UI session's update that received the reply has returned, so it may read the
+/// store, start an operation or send another read; called inside that update, any of those would update or read the
+/// UI session again and panic. It is told nothing about whether the user moved on: a reader that may move focus or
+/// open something takes its own [`Mark`] when it sends the read and asks [`focus::has_moved_on`] when the answer
+/// comes.
+///
+/// The wait belongs to the UI session: a reset retires it and drops the wait, so `on_read` never runs for a read sent
+/// before a reset. Nothing holds the reader: `on_read` should hold its view weakly, so that a reply after the view
+/// closed reaches nobody.
+pub fn read<T: DeserializeOwned + 'static>(
+    path: ApiPath,
+    shown: impl Into<String>,
+    cx: &mut App,
+    on_read: impl FnOnce(Result<T, HostText>, &mut App) + 'static,
+) -> bool {
+    let Some(current) = crate::session::connection(cx).and_then(|c| c.read(cx).session().cloned())
+    else {
+        return false;
+    };
+    let shown = shown.into();
+    current.update(cx, |current, cx| {
+        current.command(Method::Get, path, None, cx, move |_, result, cx| {
+            let answer = decode(result, &shown);
+            cx.defer(move |cx| on_read(answer, cx));
+        });
+    });
+    true
+}
+
+/// What the reply to the read shown as `shown` says, decoded as `T`. Split from [`read`] so the wording is tested
+/// without a channel.
+pub(crate) fn decode<T: DeserializeOwned>(
+    result: Result<Reply, CommandError>,
+    shown: &str,
+) -> Result<T, HostText> {
+    let reply = result.map_err(|error| HostText::from_host(error.to_string()))?;
+    if !(200..300).contains(&reply.status) {
+        return Err(refusal(reply.body, reply.status, shown));
+    }
+    match reply.body.map(serde_json::from_value::<T>) {
+        Some(Ok(value)) => Ok(value),
+        Some(Err(error)) => Err(HostText::from_host(format!(
+            "the helm's answer to {shown} could not be read: {error}"
+        ))),
+        None => Err(HostText::from_host(format!(
+            "the helm sent no answer to {shown}"
+        ))),
     }
 }
 

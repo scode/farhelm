@@ -22,7 +22,9 @@ use crate::components::{HoverHelp, TextInput, TextInputState};
 use crate::drafts::{self, Draft, DraftInput};
 use crate::host_text::HostText;
 use crate::main_view::MainView;
-use crate::operations::{Command, Failure, NotStarted, OpKey, Operations, Outcome, Settled, Work};
+use crate::operations::{
+    self, Command, Failure, NotStarted, OpKey, Operations, Outcome, Settled, Work,
+};
 use crate::session::{self, Connection};
 use crate::test_support::{self, keys, meta, session_entry, sessions, started};
 
@@ -521,15 +523,19 @@ fn save_on(path: &[&str], shown: &'static str) -> Command {
 /// Adding a host and a confirmed Update answer 202: the helm accepted long work and carries on with it, reporting its
 /// progress and result in the hosts it pushes. Settling that as done would claim a success nobody has seen yet, and
 /// keeping the key busy would block the next action until the work ends. A new host has no id until the helm accepts
-/// it, so its work goes under a key of its own. Specified: a host addition under `OpKey::host_add` settles on a 202 as
-/// accepted with the reply's body, its key is no longer busy, and nothing is recorded as a failure; a second addition
-/// under another number runs beside the first; and any other 2xx (a 201) still settles as done.
+/// it, so its work goes under a fresh key of its own. Specified: a host addition under `OpKey::new_host_add` settles on
+/// a 202 as accepted with the reply's body, its key is no longer busy, and nothing is recorded as a failure; a second
+/// addition under another fresh key runs beside the first; and any other 2xx (a 201) still settles as done.
 #[gpui::test]
 fn an_accepted_reply_ends_the_work_without_claiming_success_or_failure(cx: &mut TestAppContext) {
     let (mut fake, _connection) = connected(&[], cx);
     let operations = operations(cx);
     let delivered = Delivered::default();
-    let (first, second) = (OpKey::host_add(1), OpKey::host_add(2));
+    let (first, second) = (OpKey::new_host_add(), OpKey::new_host_add());
+    assert_ne!(
+        first, second,
+        "the premise: each addition has a key of its own"
+    );
     let add = || {
         let path = ApiPath::api(&["hosts", "provision"]).unwrap();
         Command::new(
@@ -1222,5 +1228,123 @@ fn a_bound_growing_box_mirrors_line_breaks_and_follows_pushes_until_touched(
         shown(&editor, cx),
         "first line\nx",
         "the push left the typed text alone"
+    );
+}
+
+// ---- Reads ----------------------------------------------------------------------------------------------------------
+
+/// Every read a feature makes (the quick switcher's listing, the launcher's and Settings' lookups) shows a failure in
+/// the same words an operation's refusal uses, so the helm's reason reads the same wherever it surfaces; before this
+/// helper each read copied that wording. Specified: any 2xx body (a 202's included) decodes as the caller's type; a
+/// refusal is the helm's words trimmed, or the JSON it sent, or, with no words, the read as `shown` names it and the
+/// status, exactly as the store words a refusal (`Outcome::Refused`); a body that does not decode, a 2xx with no body,
+/// and a channel error each say so.
+#[test]
+fn a_reads_answer_decodes_and_its_refusal_is_worded_as_an_operations() {
+    use farhelm_helm_client::CommandError;
+    use farhelm_proto::ui_channel::Reply;
+
+    let decoded = |status, body| {
+        let reply = Ok(Reply {
+            id: 0,
+            status,
+            body,
+        });
+        operations::decode::<Vec<String>>(reply, "GET /api/x")
+    };
+    let words = vec!["a".to_owned(), "b".to_owned()];
+    assert_eq!(decoded(200, Some(json!(["a", "b"]))), Ok(words.clone()));
+    assert_eq!(decoded(202, Some(json!(["a", "b"]))), Ok(words));
+    let refused = |words: &str| Err(HostText::from_host(words));
+    assert_eq!(decoded(400, Some(json!(" not here "))), refused("not here"));
+    assert_eq!(
+        decoded(409, Some(json!({ "error": "busy" }))),
+        refused(r#"{"error":"busy"}"#)
+    );
+    assert_eq!(decoded(404, None), refused("GET /api/x: 404"));
+    assert_eq!(decoded(500, Some(json!(""))), refused("GET /api/x: 500"));
+    let wrong_shape = decoded(200, Some(json!({ "x": 1 })));
+    let prefix = "the helm's answer to GET /api/x could not be read: ";
+    assert!(
+        matches!(&wrong_shape, Err(words) if words.raw().starts_with(prefix)),
+        "an answer of the wrong shape says so: {wrong_shape:?}"
+    );
+    assert_eq!(
+        decoded(204, None),
+        refused("the helm sent no answer to GET /api/x")
+    );
+    assert_eq!(
+        operations::decode::<Vec<String>>(Err(CommandError::Reset), "GET /api/x"),
+        refused("the connection to the helm is resetting")
+    );
+}
+
+/// A read is the one way a feature asks the helm for something it does not push, so it must reach the helm as a plain
+/// GET on the caller's route and come back to the caller, free to read the store when it does (a callback run inside
+/// the UI session's update would panic on that), and a read that a reset made pointless must not come back at all (the
+/// reset already reports the lost connection). Specified: with no connection, and with a connection that has no UI
+/// session yet, `operations::read` sends nothing and says so; with one, it sends a GET with no body on its path, and
+/// its callback receives the decoded answer and can read the store; a read sent before the channel breaks never calls
+/// back.
+#[gpui::test]
+fn a_read_sends_a_get_and_hands_back_the_answer_unless_a_reset_drops_it(cx: &mut TestAppContext) {
+    /// Each answer, and whether the store could be read from the callback that received it.
+    type Answers = Rc<RefCell<Vec<(Result<Vec<String>, HostText>, bool)>>>;
+    let send = |answers: &Answers, cx: &mut TestAppContext| {
+        let answers = answers.clone();
+        cx.update(move |cx| {
+            let path = ApiPath::api(&["example"]).unwrap();
+            operations::read(path, "GET /api/example", cx, move |answer, cx| {
+                let store_read = session::current_store(cx).is_some_and(|store| {
+                    let _ = store.read(cx).collections();
+                    true
+                });
+                answers.borrow_mut().push((answer, store_read))
+            })
+        })
+    };
+    let answers = Answers::default();
+    assert!(!send(&answers, cx), "with no connection, nothing is sent");
+    let (mut fake, _connection) = started(cx);
+    assert!(
+        !send(&answers, cx),
+        "with a connection but no UI session yet, nothing is sent"
+    );
+    fake.connect(vec![sessions(&[])]);
+    cx.run_until_parked();
+
+    assert!(
+        send(&answers, cx),
+        "the premise: a live UI session sends it"
+    );
+    cx.run_until_parked();
+    let sent = fake.commands();
+    let shown: Vec<_> = sent
+        .iter()
+        .map(|sent| (sent.method, sent.path.as_str(), sent.body.clone()))
+        .collect();
+    assert_eq!(shown, vec![(Method::Get, "/api/example", None)]);
+    fake.reply(sent[0].id, 200, Some(json!(["h1"])));
+    cx.run_until_parked();
+    assert_eq!(
+        *answers.borrow(),
+        vec![(Ok(vec!["h1".to_owned()]), true)],
+        "the answer arrived, and its callback read the store"
+    );
+
+    assert!(send(&answers, cx), "the premise: the second read is sent");
+    cx.run_until_parked();
+    let second = fake.commands();
+    assert_eq!(
+        second.len(),
+        1,
+        "the premise: the second read reached the helm"
+    );
+    fake.break_channel();
+    cx.run_until_parked();
+    assert_eq!(
+        answers.borrow().len(),
+        1,
+        "the read the reset dropped never called back"
     );
 }

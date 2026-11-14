@@ -42,6 +42,9 @@ gpui-agent = { workspace = true, optional = true }
 gpui-base.workspace = true
 gpui-component.workspace = true
 gpui_platform.workspace = true
+# For `DeserializeOwned` only: the operation store's `read` decodes a helm reply into the type its caller names. Already
+# built for `serde_json`, so naming it adds no crate.
+serde.workspace = true
 # Kit's theme is configured from JSON (`ThemeConfig`); the theme module projects Farhelm's tokens onto it.
 serde_json.workspace = true
 tracing.workspace = true
