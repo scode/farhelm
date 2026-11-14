@@ -4,7 +4,13 @@
 //! permissions choice of successful structured launches, per-agent trust-hint dismissals,
 //! host confirmation choices, terminal web-link ownership, quick-launch template,
 //! number-key bindings, welcome dismissal, tunnel consent, desktop download-opening
-//! types, and contact reused after successful feedback.
+//! types, and contact reused after successful feedback. It also holds the
+//! settings the old app kept per device: appearance, sidebar width, host rail
+//! expansion, the three status-sound switches and terminal text size. The
+//! maintainer decided on 2026-11-13 that these are shared helm preferences in
+//! the new desktop app, starting unset (nothing is carried over from the old
+//! app's per-device storage), so SPEC.md's "remembered per device" wording
+//! changes as each one is wired into the app.
 //! Automatic remote-host updates are a helm-owned authorization too: only an
 //! explicit true enables them, and committing a policy write wakes the listener.
 //!
@@ -42,7 +48,12 @@
 //! `remembered_permissions` gets the identical treatment against its own
 //! smaller vocabulary ([`store::is_known_remembered_permissions_word`]).
 //! Terminal link ownership similarly has three known words; unknown writes
-//! refuse the patch, while null restores default interception.
+//! refuse the patch, while null restores default interception. Appearance
+//! works the same way with its own three words. Sidebar width and terminal
+//! text size are refused outside their ranges
+//! ([`farhelm_proto::ui_channel::SIDEBAR_WIDTH_RANGE`] and
+//! [`farhelm_proto::ui_channel::TERMINAL_TEXT_SIZE_RANGE`]) instead of being
+//! clamped, so a client sending a wrong value sees its save fail.
 //! `last_selected` is NOT checked against the fleet — a session can be
 //! deleted after the write, so the reader has to tolerate a stale id
 //! regardless (the UI skips absent history entries when choosing), and
@@ -63,6 +74,7 @@ use crate::{AppState, SupervisorError, http_error};
 use axum::extract::State;
 use axum::response::IntoResponse;
 use farhelm_proto::feedback::FEEDBACK_CONTACT_MAX_CHARS;
+use farhelm_proto::ui_channel::{SIDEBAR_WIDTH_RANGE, TERMINAL_TEXT_SIZE_RANGE};
 use farhelm_proto::{ErrorKind, SessionRef};
 use std::sync::Arc;
 
@@ -90,7 +102,8 @@ pub(crate) async fn get_preferences(State(state): State<Arc<AppState>>) -> impl 
 /// JSON route here), which is what keeps a typo in a client from being an
 /// accepted no-op; a sort word this helm does not serve, or a
 /// `last_selected` that is not a full session reference, a feedback contact
-/// beyond its code-point cap, or an unmatchable download-opening list is a 400. The list is
+/// beyond its code-point cap, an unknown appearance word, a sidebar width or
+/// terminal text size outside its range, or an unmatchable download-opening list is a 400. The list is
 /// normalized before the sparse write, so the next read names exactly the
 /// types the helm checks. 204 on success; the maintained visit history is
 /// available on the next GET rather than a second client write.
@@ -204,6 +217,40 @@ pub(crate) async fn put_preferences(
         return http_error(anyhow::Error::new(SupervisorError::helm(
             ErrorKind::InvalidRequest,
             "terminal_link_click must be intercept, both, or program".into(),
+        )));
+    }
+    if let Some(Some(word)) = &patch.appearance
+        && !store::is_known_appearance_word(word)
+    {
+        return http_error(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::InvalidRequest,
+            "appearance must be system, dark, or light".into(),
+        )));
+    }
+    // Refuse rather than clamp: a client that sends a width or size outside
+    // the range has a bug, and storing a nearby value would hide it.
+    if let Some(Some(width)) = patch.sidebar_width
+        && !SIDEBAR_WIDTH_RANGE.contains(&width)
+    {
+        return http_error(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::InvalidRequest,
+            format!(
+                "sidebar_width must be between {} and {} logical pixels",
+                SIDEBAR_WIDTH_RANGE.start(),
+                SIDEBAR_WIDTH_RANGE.end()
+            ),
+        )));
+    }
+    if let Some(Some(size)) = patch.terminal_text_size
+        && !TERMINAL_TEXT_SIZE_RANGE.contains(&size)
+    {
+        return http_error(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::InvalidRequest,
+            format!(
+                "terminal_text_size must be between {} and {} points",
+                TERMINAL_TEXT_SIZE_RANGE.start(),
+                TERMINAL_TEXT_SIZE_RANGE.end()
+            ),
         )));
     }
     // SQLite can commit after an HTTP caller disappears. Both consent cleanup
@@ -497,6 +544,12 @@ mod tests {
     async fn read(harness: &rest_harness::Harness) -> Preferences {
         serde_json::from_slice(&read_raw(harness).await)
             .expect("the preference reply decodes as the shared type")
+    }
+
+    /// The reply as untyped JSON, where an unset field is a missing key
+    /// rather than a `None` that a null would also decode to.
+    async fn wire(harness: &rest_harness::Harness) -> serde_json::Value {
+        serde_json::from_slice(&read_raw(harness).await).expect("the preference reply is JSON")
     }
 
     /// Seen is a typed, shared field: omission cannot undo another client's
@@ -913,6 +966,197 @@ mod tests {
         }
     }
 
+    /// The settings the old app kept per device are shared preferences now,
+    /// so every client relies on this route for them: a save must land only
+    /// its own field, a clear must restore the client default, and a value
+    /// the app cannot show must never reach the shared row.
+    ///
+    /// Through the public routes, for each of the seven fields: a value is
+    /// read back as written, a patch of a different field leaves it alone,
+    /// and an explicit null clears it to unset (omitted from the reply). The
+    /// range ends are accepted. An unknown appearance word, a width or a
+    /// size just outside its range (400), and a wrongly typed value (422)
+    /// are refused, and a refusal changes nothing else in its patch.
+    #[farhelm_testtrace::test]
+    async fn former_device_settings_are_sparse_validated_preferences() {
+        let harness = rest_harness::idle_helm().await;
+        assert_eq!(read_raw(&harness).await, b"{}");
+        let fields = [
+            ("appearance", serde_json::json!("dark")),
+            ("sidebar_width", serde_json::json!(480)),
+            ("host_rail_open", serde_json::json!(true)),
+            ("sound_waiting", serde_json::json!(false)),
+            ("sound_approval", serde_json::json!(false)),
+            ("sound_turn_finished", serde_json::json!(true)),
+            ("terminal_text_size", serde_json::json!(18)),
+        ];
+        for (name, value) in &fields {
+            let reply = harness
+                .router()
+                .oneshot(put(serde_json::json!({ *name: value })))
+                .await
+                .unwrap();
+            assert_eq!(reply.status(), StatusCode::NO_CONTENT, "{name}");
+            assert_eq!(&wire(&harness).await[*name], value, "{name}");
+        }
+        // Every field is stored at once, and a patch naming another field
+        // leaves all of them alone.
+        let reply = harness
+            .router()
+            .oneshot(put(serde_json::json!({ "compact": true })))
+            .await
+            .unwrap();
+        assert_eq!(reply.status(), StatusCode::NO_CONTENT);
+        let stored = read(&harness).await;
+        assert_eq!(
+            stored,
+            Preferences {
+                compact: Some(true),
+                appearance: Some("dark".into()),
+                sidebar_width: Some(480),
+                host_rail_open: Some(true),
+                sound_waiting: Some(false),
+                sound_approval: Some(false),
+                sound_turn_finished: Some(true),
+                terminal_text_size: Some(18),
+                ..Preferences::default()
+            }
+        );
+
+        for (name, value) in [
+            ("appearance", serde_json::json!("system")),
+            ("appearance", serde_json::json!("light")),
+            ("sidebar_width", serde_json::json!(296)),
+            ("sidebar_width", serde_json::json!(656)),
+            ("terminal_text_size", serde_json::json!(9)),
+            ("terminal_text_size", serde_json::json!(28)),
+        ] {
+            let reply = harness
+                .router()
+                .oneshot(put(serde_json::json!({ name: value })))
+                .await
+                .unwrap();
+            assert_eq!(reply.status(), StatusCode::NO_CONTENT, "{name} {value}");
+            assert_eq!(wire(&harness).await[name], value, "{name}");
+        }
+        let accepted = read(&harness).await;
+
+        for (name, value, status) in [
+            (
+                "appearance",
+                serde_json::json!("sepia"),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "appearance",
+                serde_json::json!("Dark"),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "sidebar_width",
+                serde_json::json!(295),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "sidebar_width",
+                serde_json::json!(657),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "sidebar_width",
+                serde_json::json!(0),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "terminal_text_size",
+                serde_json::json!(8),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "terminal_text_size",
+                serde_json::json!(29),
+                StatusCode::BAD_REQUEST,
+            ),
+            (
+                "sidebar_width",
+                serde_json::json!(-1),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                "sidebar_width",
+                serde_json::json!(400.5),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                "terminal_text_size",
+                serde_json::json!("14"),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                "appearance",
+                serde_json::json!(1),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                "host_rail_open",
+                serde_json::json!("true"),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                "sound_waiting",
+                serde_json::json!(1),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                "sound_approval",
+                serde_json::json!(0),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            (
+                "sound_turn_finished",
+                serde_json::json!("off"),
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+        ] {
+            let reply = harness
+                .router()
+                .oneshot(put(serde_json::json!({ name: value, "compact": false })))
+                .await
+                .unwrap();
+            assert_eq!(reply.status(), status, "{name} {value}");
+            if status == StatusCode::BAD_REQUEST {
+                let body = axum::body::to_bytes(reply.into_body(), 4096).await.unwrap();
+                assert!(
+                    String::from_utf8_lossy(&body).contains(name),
+                    "the refusal names the field"
+                );
+            }
+            assert_eq!(
+                read(&harness).await,
+                accepted,
+                "refusal is atomic: {name} {value}"
+            );
+        }
+
+        for (name, _) in &fields {
+            let reply = harness
+                .router()
+                .oneshot(put(serde_json::json!({ *name: null })))
+                .await
+                .unwrap();
+            assert_eq!(reply.status(), StatusCode::NO_CONTENT, "{name}");
+            assert!(wire(&harness).await.get(*name).is_none(), "{name} cleared");
+        }
+        assert_eq!(
+            read(&harness).await,
+            Preferences {
+                compact: Some(true),
+                ..Preferences::default()
+            },
+            "clearing the seven fields leaves an unrelated preference alone"
+        );
+    }
+
     /// Compact may be the first preference a fresh client changes. Exercise
     /// insertion into an absent singleton row, not only the update path after
     /// sort or selection created it, and leave those unrelated choices unset.
@@ -1080,6 +1324,13 @@ mod tests {
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
                 last_container_host: None,
+                appearance: None,
+                sidebar_width: None,
+                host_rail_open: None,
+                sound_waiting: None,
+                sound_approval: None,
+                sound_turn_finished: None,
+                terminal_text_size: None,
             },
             "each sparse patch lands its own field and keeps the others"
         );
@@ -1199,6 +1450,13 @@ mod tests {
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
                 last_container_host: None,
+                appearance: None,
+                sidebar_width: None,
+                host_rail_open: None,
+                sound_waiting: None,
+                sound_approval: None,
+                sound_turn_finished: None,
+                terminal_text_size: None,
             },
             "an explicit null clears selection and visits without changing settings"
         );
