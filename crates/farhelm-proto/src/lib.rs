@@ -136,6 +136,9 @@ pub mod provisioning;
 // The GUI's one ordered channel to the helm. Its docs are its own, for the
 // same rustdoc-link reason as `grid`.
 pub mod ui_channel;
+// The GUI's bodies for the helm's create, Restart and Replace routes (see the
+// module's own docs).
+pub mod session_requests;
 // The control messages beside a terminal socket's grid stream, typed once for both ends (see the module's own docs).
 pub mod terminal_socket;
 

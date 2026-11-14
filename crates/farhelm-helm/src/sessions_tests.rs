@@ -12313,3 +12313,200 @@ async fn retired_container_http_mutations_dispatch_nothing() {
         .expect("peer remains alive through the last refusal");
     responder.await.unwrap();
 }
+
+/// The GUI builds its create, Restart and Replace bodies from the shared
+/// client types in `farhelm_proto::session_requests`, while the helm decodes
+/// them into its own request types. These tests are the only thing holding
+/// the two together: a field renamed, retyped or dropped on either side makes
+/// a serialized client body decode differently (or not at all) here, instead
+/// of a launcher silently losing a choice in the running app.
+mod client_bodies {
+    use super::super::{CreateReq, ReplaceReq, RestartReq};
+    use farhelm_proto::session_requests::{
+        CreateSessionBody, ReplaceSessionBody, RestartSessionBody,
+    };
+    use farhelm_proto::{
+        AcceptedGithubPreview, CheckoutPreviewBinding, CommandLaunch, GithubCheckoutRequest,
+        LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection,
+    };
+
+    /// An agent launch with every choice the launcher can set, so a field the
+    /// helm stopped reading shows up as a lost value.
+    fn selection() -> LaunchSelection {
+        LaunchSelection {
+            harness: LaunchHarness::Codex,
+            model: Some("gpt-6-luna".into()),
+            effort: Some(LaunchEffort::High),
+            permissions: Some(LaunchPermission::Custom),
+            permission_flags: Some(vec!["--sandbox".into(), "danger full".into()]),
+            workspace_trust: None,
+            wrapper_prefix: Some(vec!["nice".into(), "-n".into(), "5".into()]),
+            container: None,
+        }
+    }
+
+    fn command() -> CommandLaunch {
+        CommandLaunch {
+            command: "claude {farhelm_args}".into(),
+            yolo: true,
+            agent: Some(LaunchHarness::Claude),
+            resume: Some("claude --resume {conversation} {farhelm_args}".into()),
+        }
+    }
+
+    /// A create with every field set to a value other than its default, so a
+    /// field dropped on either side shows up as a lost value. Not a launch the
+    /// helm would accept as a whole (a command launch refuses a prompt and a
+    /// conversation selector): this checks decoding, not validation.
+    fn create(
+        launch: Option<LaunchSelection>,
+        command: Option<CommandLaunch>,
+    ) -> CreateSessionBody {
+        CreateSessionBody {
+            host: Some(7),
+            expected_incarnation: Some(42),
+            cwd: "/checkouts/repo-2".into(),
+            title: Some("named".into()),
+            launch,
+            command,
+            prompt: Some("first\nmessage".into()),
+            conversation: Some("0123-abcd".into()),
+            confirm_yolo: true,
+            github_checkout: Some(GithubCheckoutRequest {
+                repo: "owner/repo".into(),
+                title: Some("repo-2".into()),
+                preview: Some(AcceptedGithubPreview {
+                    binding: CheckoutPreviewBinding {
+                        canonical_root: "/checkouts".into(),
+                        basename: "repo-2".into(),
+                        cwd: "/checkouts/repo-2".into(),
+                        config_revision: 3,
+                    },
+                    host: "7".into(),
+                    incarnation: 42,
+                    installation_identity: "install-1".into(),
+                }),
+            }),
+        }
+    }
+
+    /// Decode a client body as the helm's route would: through its JSON.
+    fn decode<T: serde::de::DeserializeOwned>(body: &impl serde::Serialize) -> T {
+        serde_json::from_value(serde_json::to_value(body).expect("a client body serializes"))
+            .expect("the helm decodes the client's body")
+    }
+
+    /// Every field of a create body arrives with its value, and nothing the
+    /// GUI never sends (a launch request key, a terminal size) is invented.
+    /// Destructured without `..`, so a field added to the client body does not
+    /// compile until it is checked here.
+    fn assert_create_decodes(body: &CreateSessionBody, req: &CreateReq) {
+        let CreateSessionBody {
+            host,
+            expected_incarnation,
+            cwd,
+            title,
+            launch,
+            command,
+            prompt,
+            conversation,
+            confirm_yolo,
+            github_checkout,
+        } = body;
+        assert_eq!(&req.host, host);
+        assert_eq!(&req.expected_incarnation, expected_incarnation);
+        assert_eq!(&req.cwd, cwd);
+        assert_eq!(&req.title, title);
+        assert_eq!(&req.launch, launch);
+        assert_eq!(&req.command, command);
+        assert_eq!(&req.prompt, prompt);
+        assert_eq!(&req.conversation, conversation);
+        assert_eq!(&req.confirm_yolo, confirm_yolo);
+        assert_eq!(&req.github_checkout, github_checkout);
+        assert_eq!(req.intent_key, None, "the GUI sends no launch request key");
+        assert_eq!(
+            (req.cols, req.rows),
+            (super::super::default_cols(), super::super::default_rows()),
+            "the GUI sends no terminal size"
+        );
+        assert!(req.retired.refusal().is_none());
+    }
+
+    /// `POST /api/sessions`: an agent launch's body and a command launch's
+    /// body each decode into `CreateReq` with every value intact.
+    #[test]
+    fn a_create_body_decodes_into_the_helms_create_request() {
+        for body in [
+            create(Some(selection()), None),
+            create(None, Some(command())),
+        ] {
+            let req: CreateReq = decode(&body);
+            assert_create_decodes(&body, &req);
+        }
+    }
+
+    /// `POST /api/sessions/{id}/restart`: Restart with an agent launch's
+    /// choices, and with a command launch's edits, decode into `RestartReq`.
+    #[test]
+    fn a_restart_body_decodes_into_the_helms_restart_request() {
+        for (with, with_command) in [(Some(selection()), None), (None, Some(command()))] {
+            let body = RestartSessionBody {
+                conversation: Some("0123-abcd".into()),
+                stop_if_running: true,
+                with,
+                with_command,
+                confirm_yolo: true,
+            };
+            let req: RestartReq = decode(&body);
+            // Without `..`, so a new client field must be checked here.
+            let RestartSessionBody {
+                conversation,
+                stop_if_running,
+                with,
+                with_command,
+                confirm_yolo,
+            } = body;
+            assert_eq!(req.conversation, conversation);
+            assert_eq!(req.stop_if_running, stop_if_running);
+            assert_eq!(req.with, with);
+            assert_eq!(req.with_command, with_command);
+            assert_eq!(req.confirm_yolo, confirm_yolo);
+        }
+    }
+
+    /// `POST /api/sessions/{id}/replace`: a plain Replace and a Replace with
+    /// (whose create is an ordinary create body) decode into `ReplaceReq`,
+    /// each delete guard flag landing on its own field.
+    #[test]
+    fn a_replace_body_decodes_into_the_helms_replace_request() {
+        for (with, nothing_alive) in [(None, true), (Some(create(Some(selection()), None)), false)]
+        {
+            let body = ReplaceSessionBody {
+                confirm_yolo: true,
+                with,
+                only_if_nothing_alive: nothing_alive,
+                only_if_agent_ended: !nothing_alive,
+            };
+            let req: ReplaceReq = decode(&body);
+            // Without `..`, so a new client field must be checked here.
+            let ReplaceSessionBody {
+                confirm_yolo,
+                with,
+                only_if_nothing_alive,
+                only_if_agent_ended,
+            } = &body;
+            assert_eq!(&req.confirm_yolo, confirm_yolo);
+            assert_eq!(&req.only_if_nothing_alive, only_if_nothing_alive);
+            assert_eq!(&req.only_if_agent_ended, only_if_agent_ended);
+            assert_eq!(req.intent_key, None, "the GUI sends no launch request key");
+            match (with, &req.with) {
+                (None, None) => {}
+                (Some(body), Some(req)) => assert_create_decodes(body, req),
+                (body, req) => panic!(
+                    "Replace with's create was lost: {body:?} -> {}",
+                    req.is_some()
+                ),
+            }
+        }
+    }
+}
