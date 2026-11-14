@@ -77,8 +77,8 @@ use std::rc::Rc;
 
 use gpui::{
     App, ElementId, FocusHandle, FontWeight, InteractiveElement, IntoElement, KeyDownEvent,
-    MouseButton, ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled,
-    Toggled, Window, div, prelude::FluentBuilder as _, px, svg,
+    ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Toggled,
+    Window, div, prelude::FluentBuilder as _, px, svg,
 };
 
 use super::{HoverHelp, MainAction};
@@ -508,11 +508,11 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
             let element =
                 super::with_hover_help(element, &ids[index], &option.help, describe, window, cx);
             if !state.enabled {
-                // Not tracked, so neither Tab nor a click can focus it; the press is still this control's, so it does
-                // not reach the page's empty-space handler and move focus.
+                // Not tracked, so neither Tab nor a click can focus it; a press of any mouse button is still this
+                // control's, so it does not reach the page's empty-space handler and move focus.
                 options.push(
                     element
-                        .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
+                        .on_any_mouse_down(|_, window, _| window.prevent_default())
                         .into_any_element(),
                 );
                 continue;

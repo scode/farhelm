@@ -52,7 +52,8 @@
 //!   not, as in WebKit there; a right or middle press focuses no button or other [`OnPress::Control`] on either. An
 //!   element that takes focus when pressed (a terminal, a dialog's empty space) takes it from a press of any mouse
 //!   button, as the old terminal did on every mousedown, but only from a press that gave focus to nothing inside it
-//!   ([`OnPress::Focus`]), so a click into a dialog's text field stays in the field. `track_focus` itself is banned
+//!   ([`OnPress::Focus`]), so a click into a dialog's text field stays in the field. A press of any mouse button that
+//!   no element took (the page's empty space) sends focus home ([`root`]). `track_focus` itself is banned
 //!   outside this module. The macOS half is ported from the old app, which ran in WebKit. On Linux the old desktop app
 //!   built against WebKitGTK but was released only for the Mac, so there is no shipped behavior to keep, and a click
 //!   follows the platform.
@@ -612,7 +613,11 @@ pub fn root(element: Div, attachment: &Attachment) -> Div {
         // A press that no control took (the page's empty space) leaves nothing focused, as a click on a web page's
         // background did, and then focus rests where it rests: home if there is one. GPUI would otherwise focus the root
         // itself, and home would never get focus back. A dialog's veil keeps such presses from reaching here.
-        .on_mouse_down(MouseButton::Left, |_, window, cx| {
+        //
+        // Every mouse button, as in `track`: GPUI's focus-on-press takes a press of any of them, and with a listener
+        // for the primary button alone a right or middle press on the page's empty space (the list's title, say) moved
+        // focus off the terminal to the root, where the keys typed next reached nothing.
+        .on_any_mouse_down(|_, window, cx| {
             if !window.default_prevented() {
                 window.prevent_default();
                 recover(window, cx);
