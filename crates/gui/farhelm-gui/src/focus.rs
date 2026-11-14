@@ -27,13 +27,15 @@
 //! - **Which press focuses an element.** Every focusable element is tracked through [`track`], which suppresses GPUI's
 //!   own focus-on-press (GPUI focuses any tracked element on mouse-down, a move no lint could see) and applies the
 //!   coordinator's rule instead: on Linux a click focuses the control it lands on; on macOS it does not, as in WebKit
-//!   there (maintainer decision D-2). `track_focus` itself is banned outside this module.
-//! - **Which controls Tab reaches** ([`TabReach`], decision D-2). On macOS, Tab follows the system's Keyboard navigation
-//!   setting exactly as the old app did: with it off, Tab reaches text fields and pop-ups only and skips buttons, and
-//!   Option-Tab reaches every control; with it on, Tab reaches every control. Linux has no such setting, and Tab reaches
-//!   every control there. The desktop binary supplies how to read the setting ([`follow_tab_reach`]), and the
-//!   coordinator reads it on every Tab and Shift+Tab press, as WebKit follows the setting's change at once: the user can
-//!   flip it from the keyboard (Control-F7 by default) without leaving the app.
+//!   there. `track_focus` itself is banned outside this module. This rule and the next were settled for the GPUI
+//!   migration on 2026-11-13: the Mac keeps the old app's behavior, and Linux, where the app is new, follows its
+//!   platform.
+//! - **Which controls Tab reaches** ([`TabReach`]). On macOS, Tab follows the system's Keyboard navigation setting
+//!   exactly as the old app did: with it off, Tab reaches text fields and pop-ups only and skips buttons, and
+//!   Option-Tab reaches every control; with it on, Tab reaches every control. Linux has no such setting, and Tab
+//!   reaches every control there. The desktop binary supplies how to read the setting ([`follow_tab_reach`]), and the
+//!   coordinator reads it on every Tab and Shift+Tab press, as WebKit follows the setting's change at once: the user
+//!   can flip it from the keyboard (Control-F7 by default) without leaving the app.
 //!
 //! NOTE: Agent approval cards, which keep focus while a dialog is open, do not exist yet, so [`invariant_violation`]
 //! knows only the topmost dialog.
@@ -53,10 +55,10 @@ use crate::actions::{
 use crate::layers;
 
 /// Whether a click focuses the control it lands on, on this platform. WebKit on macOS does not focus a button on click,
-/// and the old app behaved accordingly there; on Linux a click focuses it (maintainer decision D-2).
+/// and the old app behaved accordingly there; on Linux, where the app is new and follows its platform, a click does.
 pub const CLICK_FOCUSES_CONTROLS: bool = !cfg!(target_os = "macos");
 
-/// Which controls a plain Tab reaches (decision D-2). Option-Tab always reaches every control.
+/// Which controls a plain Tab reaches. Option-Tab always reaches every control.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TabReach {
     /// Every focusable control, buttons included: Linux, and macOS with the system's Keyboard navigation setting on.
@@ -273,7 +275,15 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
         windows.0.retain(|_, state| state.upgrade().is_some());
         windows.0.insert(id, state.downgrade());
     }
-    let lost = cx.on_focus_lost(window, |_, window, cx| recover(window, cx));
+    let lost = cx.on_focus_lost(window, |_, window, cx| {
+        recover(window, cx);
+        // GPUI calls this listener while it finishes a frame, when a redraw request is ignored and a focus move made
+        // here schedules no frame of its own. The move takes effect for keys at once, but the drawn frame keeps saying
+        // nothing is focused (no focus events, no ring, the test bridge reporting no focus) until something else
+        // redraws, which in an idle window can be never: dismissing the connection-lost banner left it that way. So
+        // ask for one more frame once this one is done.
+        window.defer(cx, |window, _| window.refresh());
+    });
     // After the window's first frame exists, not inside its construction (a cookbook trap).
     window.defer(cx, recover);
     Attachment {

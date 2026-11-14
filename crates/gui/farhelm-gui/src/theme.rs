@@ -230,6 +230,12 @@ pub mod metrics {
     pub const TEXT_TITLE: Pixels = px(18.);
     /// `.btn` padding, vertical then horizontal.
     pub const BUTTON_PAD: (Pixels, Pixels) = (px(6.), px(10.));
+    /// `.banner` padding, vertical then horizontal: the red band across the top of a surface.
+    pub const BANNER_PAD: (Pixels, Pixels) = (px(4.), px(10.));
+    /// `.banner-reclaim` padding, vertical then horizontal: a button inside that band.
+    pub const BANNER_BUTTON_PAD: (Pixels, Pixels) = (px(1.), px(8.));
+    /// `.banner-reclaim`'s `margin-left`: the gap between the banner's text and its button.
+    pub const BANNER_BUTTON_GAP: Pixels = px(10.);
     /// `.dialog-header`/`.dialog-body` padding, vertical then horizontal.
     pub const DIALOG_PAD: (Pixels, Pixels) = (px(20.), px(24.));
     /// `.dialog-footer` padding, vertical then horizontal.

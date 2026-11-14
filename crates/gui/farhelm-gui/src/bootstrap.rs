@@ -9,8 +9,10 @@
 //! the first window see them; then Kit's own init (it installs its theme and the text input's actions), then the
 //! bundled fonts, then Farhelm's theme, which re-projects Kit's theme from Farhelm's tokens, then Farhelm's key bindings
 //! (after Kit's, so a deeper Farhelm context wins where both bind a key), the focus coordinator's and the layer
-//! manager's registries and, in test builds, the render counter. Then the coordinator starts following the host's
-//! answer for which controls Tab reaches. Only then does a window open.
+//! manager's registries, the ticker, the notice center and the local state that survives resets, and, in test builds,
+//! the render counter. Then the coordinator starts following the host's answer for which controls Tab reaches, and the
+//! UI channel to the helm opens, so the window's first frame already reflects where the connection stands. Only then
+//! does a window open.
 //!
 //! Nothing here may panic: on macOS this runs inside an AppKit callback, where a panic aborts the process. Failures are
 //! returned, and [`run`] hands them to the host's [`Host::on_startup_failure`], which owns how the process reports them.
@@ -28,7 +30,7 @@ use crate::assets::{self, Assets};
 use crate::main_view::MainView;
 use crate::render_count;
 use crate::theme::{self, Preference};
-use crate::{actions, focus, layers};
+use crate::{actions, focus, layers, local_state, notices, session, ticker};
 
 /// The smallest window the app supports, in logical pixels.
 ///
@@ -45,8 +47,11 @@ pub const DEFAULT_WINDOW_SIZE: Size<gpui::Pixels> = size(px(1100.), px(760.));
 /// The window's title as the system shows it (window lists, the dock's window menu).
 pub const WINDOW_TITLE: &str = "Farhelm";
 
-/// The application identity Wayland compositors and the macOS bundle use.
-pub const APP_ID: &str = "io.farhelm.Farhelm";
+/// The app's identity on Linux: the Wayland app id and the X11 window class. It matches the bundle identifier
+/// `scripts/install.sh` writes into the macOS app's Info.plist, so the app has one name everywhere. On macOS GPUI
+/// ignores it (its `set_app_id` does nothing); the app's identity there, and anything keyed by it, comes from that
+/// Info.plist.
+pub const APP_ID: &str = "org.scode.farhelm.desktop";
 
 /// Install all app-wide state. Call once, inside the GPUI app, before opening any window.
 pub fn install(cx: &mut App) -> anyhow::Result<()> {
@@ -60,12 +65,16 @@ pub fn install(cx: &mut App) -> anyhow::Result<()> {
 pub(crate) fn install_app_state(cx: &mut App) -> anyhow::Result<()> {
     gpui_component::init(cx);
     cx.text_system().add_fonts(assets::ui_fonts())?;
-    // The persisted choice comes from the local preference store once it exists; until then every launch starts at
-    // System, the old app's default (an agent run may force light or dark, see `starting_preference`).
+    // The persisted choice will come from the helm's preferences (the maintainer decided on 2026-11-13 that appearance
+    // is a helm preference, not a per-device one); until then every launch starts at System, the old app's default (an
+    // agent run may force light or dark, see `starting_preference`).
     theme::install(starting_preference(cx), cx.window_appearance(), cx);
     actions::install(cx);
     focus::install(cx);
     layers::install(cx);
+    ticker::install(cx);
+    notices::install(cx);
+    local_state::install(cx);
     render_count::install(cx);
     Ok(())
 }
@@ -123,6 +132,10 @@ pub fn window_options(cx: &App) -> WindowOptions {
             title: Some(WINDOW_TITLE.into()),
             ..Default::default()
         }),
+        // Inactive windows draw at full rate, as the old app's did, instead of GPUI's 30 frames a second (the
+        // maintainer decided this on 2026-11-13); TODO.md revisits the cost to battery while a background window shows
+        // long agent output.
+        inactive_frame_interval: None,
         ..Default::default()
     }
 }
@@ -162,9 +175,16 @@ pub struct Host {
     pub on_startup_failure: Box<dyn FnOnce(String)>,
     /// Which controls a plain Tab reaches on this platform: the system's Keyboard navigation setting on macOS, every
     /// control elsewhere (decided on 2026-11-13 for the GPUI migration: the Mac keeps the old app's behavior, and the
-    /// Linux app follows the GTK/Qt convention because Linux has no such setting). Asked on every Tab and Shift+Tab press, on the main thread; it must answer
-    /// quickly and never fail (a setting it cannot read answers the platform's default).
+    /// Linux app follows the GTK/Qt convention because Linux has no such setting). Asked on every Tab and Shift+Tab
+    /// press, on the main thread; it must answer quickly and never fail (a setting it cannot read answers the
+    /// platform's default).
     pub tab_reach: Box<dyn Fn() -> focus::TabReach>,
+    /// The helm this window talks to: the embedded helm's address and the device credential it minted for this
+    /// process. `None` opens no channel, so the window stays at "Connecting to the helm…" (useful only in tests).
+    pub helm: Option<farhelm_helm_client::HelmEndpoint>,
+    /// The operating system's reduced-motion setting, read by the host at startup: the GUI does not query the platform
+    /// itself (see the ticker).
+    pub reduced_motion: bool,
 }
 
 /// What keeps the app's quit wiring alive for the life of the app: the task waiting on [`Host::quit_requested`] and the
@@ -186,6 +206,8 @@ pub fn run(host: Host) {
         on_quit,
         on_startup_failure,
         tab_reach,
+        helm,
+        reduced_motion,
     } = host;
     let tab_reach: focus::TabReachSource = std::rc::Rc::from(tab_reach);
     gpui_platform::application()
@@ -212,6 +234,14 @@ pub fn run(host: Host) {
             });
             let started = install(cx).and_then(|()| {
                 focus::follow_tab_reach(tab_reach, cx);
+                ticker::set_reduced_motion(reduced_motion, cx);
+                // Headless Mutter reports every window inactive forever, and the bridge's runs are where an agent
+                // watches the app animate, so agent builds count windows as active (SPEC_impl.md, "GPUI cookbook").
+                #[cfg(feature = "agent")]
+                ticker::set_active_override(Some(true), cx);
+                if let Some(endpoint) = helm {
+                    session::connect(endpoint, cx)?;
+                }
                 open_main_window(cx).map(|_| ())
             });
             if let Err(error) = started {

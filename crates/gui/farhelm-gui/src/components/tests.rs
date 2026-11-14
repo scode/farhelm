@@ -118,10 +118,20 @@ fn tooltip(cx: &mut VisualTestContext) -> Option<gpui::SharedString> {
         .map(|shown| shown.text)
 }
 
-/// Hovering a control shows its help through the layer manager and leaving it takes the help down. This is the old
-/// app's "every control has hover help" rule, now carried by the constructor instead of a page-walking test.
+/// Wait out the hover delay on the executor's clock, the way a pointer resting on a control does.
+fn wait_hover_delay(cx: &mut VisualTestContext) {
+    cx.executor().advance_clock(layers::HOVER_DELAY);
+    cx.run_until_parked();
+}
+
+/// Hovering a control shows its help through the layer manager once the pointer has rested for the old app's hover
+/// delay, and leaving it takes the help down. This is the old app's "every control has hover help" rule, now carried
+/// by the constructor instead of a page-walking test; the delay is what keeps a pointer crossing the window from
+/// flashing a tooltip on every control it passes.
 #[gpui::test]
-fn hovering_shows_the_controls_help_and_leaving_hides_it(cx: &mut TestAppContext) {
+fn hovering_shows_the_controls_help_after_the_hover_delay_and_leaving_hides_it(
+    cx: &mut TestAppContext,
+) {
     let cx = open(cx, |_, _| {
         Button::new(
             "save",
@@ -135,6 +145,16 @@ fn hovering_shows_the_controls_help_and_leaving_hides_it(cx: &mut TestAppContext
     let save = center(cx, "save");
     cx.simulate_mouse_move(save, None, Modifiers::none());
     check(cx);
+    assert_eq!(tooltip(cx), None, "nothing shows before the hover delay");
+    cx.executor()
+        .advance_clock(layers::HOVER_DELAY - std::time::Duration::from_millis(1));
+    cx.run_until_parked();
+    assert_eq!(
+        tooltip(cx),
+        None,
+        "still nothing just before the delay ends"
+    );
+    wait_hover_delay(cx);
     assert_eq!(tooltip(cx), Some("Save the title".into()));
 
     cx.simulate_mouse_move(point(px(1.), px(1.)), None, Modifiers::none());
@@ -142,9 +162,10 @@ fn hovering_shows_the_controls_help_and_leaving_hides_it(cx: &mut TestAppContext
     assert_eq!(tooltip(cx), None, "leaving to empty space hid it");
 }
 
-/// Moving straight from one control onto its neighbor shows the neighbor's help, whichever hover event GPUI delivers
-/// first. If the first control's leave could take down any tooltip, the neighbor's help would vanish the moment it
-/// appeared, and it would also do so for two controls that merely share an id in different parts of the window.
+/// Moving straight from one control onto its neighbor shows the neighbor's help at once, whichever hover event GPUI
+/// delivers first: a user scanning a row of controls does not wait the hover delay at each (the old app's rule). If the
+/// first control's leave could take down any tooltip, the neighbor's help would vanish the moment it appeared, and it
+/// would also do so for two controls that merely share an id in different parts of the window.
 #[gpui::test]
 fn one_controls_leave_never_hides_anothers_tooltip(cx: &mut TestAppContext) {
     let cx = open(cx, |_, _| {
@@ -177,6 +198,7 @@ fn one_controls_leave_never_hides_anothers_tooltip(cx: &mut TestAppContext) {
     let first = point(panel.left() - px(4.), panel.center().y);
     let second = point(panel.left() + px(4.), panel.center().y);
     cx.simulate_mouse_move(first, None, Modifiers::none());
+    wait_hover_delay(cx);
     check(cx);
     assert_eq!(
         tooltip(cx),
@@ -189,7 +211,7 @@ fn one_controls_leave_never_hides_anothers_tooltip(cx: &mut TestAppContext) {
     assert_eq!(
         tooltip(cx),
         Some("Give it a new title".into()),
-        "the neighbor's help shows, and the first control's leave did not take it down"
+        "the neighbor's help shows at once, and the first control's leave did not take it down"
     );
 }
 
@@ -214,6 +236,7 @@ fn a_tooltip_closes_when_its_control_is_no_longer_drawn(cx: &mut TestAppContext)
     });
     let at = center(cx, "gone");
     cx.simulate_mouse_move(at, None, Modifiers::none());
+    wait_hover_delay(cx);
     check(cx);
     assert_eq!(
         tooltip(cx),

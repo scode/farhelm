@@ -6,7 +6,8 @@
 //!
 //! - **Who opened what.** Opening a layer returns its [`LayerId`], and only that id closes it ([`close`]): nothing
 //!   closes a dialog, menu or confirmation it did not open. The user closes the topmost layer with Escape
-//!   ([`dismiss_top`]) or, for a popover, by clicking outside it.
+//!   ([`dismiss_top`]) or, for a popover, by clicking outside it. The one exception is a reset of the connection to
+//!   the helm, which closes everything ([`close_all`]).
 //! - **Things the user did not start never open a layer.** Every open takes the [`Mark`] the feature took when the user
 //!   acted, and is refused once the user has moved on since (the focus coordinator's counter). Work that finishes later
 //!   shows its result where it belongs instead.
@@ -16,10 +17,11 @@
 //!   entity whose release closes it (a confirmation about a session that was deleted elsewhere). Every overlay is
 //!   anchored to an element: SPEC.md has no menu opened at a pointer position.
 //! - **A dialog is modal.** It draws a veil over the window that takes every click. A click on its empty space (label
-//!   text included, decision D-15) keeps focus on the control in use in the dialogs SPEC.md lists, and moves focus to
-//!   the dialog itself in the others ([`Dialog::keeps_focus_on_empty_click`]); a click on a menu's empty space keeps
-//!   focus on its item. Tab stays inside the topmost layer, dialog or menu alike (the focus coordinator walks GPUI's
-//!   tab order within [`trap`]). Closing any layer returns focus to what held it when the layer opened.
+//!   text included: labels are no longer selectable, so the GPUI migration settled on 2026-11-13 that a click on one
+//!   counts as empty space) keeps focus on the control in use in the dialogs SPEC.md lists, and moves focus to the
+//!   dialog itself in the others ([`Dialog::keeps_focus_on_empty_click`]); a click on a menu's empty space keeps focus
+//!   on its item. Tab stays inside the topmost layer, dialog or menu alike (the focus coordinator walks GPUI's tab
+//!   order within [`trap`]). Closing any layer returns focus to what held it when the layer opened.
 //! - **One tooltip at a time**, owned by the control that showed it (see [`TooltipOwner`]).
 //!
 //! State is kept per window: multi-window support is a watch-list item, and the one thing it asks of the foundations
@@ -28,10 +30,15 @@
 //! which draws the overlay, while cached views below it replay. A whole-window refresh would instead re-render every
 //! cached view, which on a 200-row session list is every row each time the pointer crosses a control.
 //!
-//! NOTE: Still to come here: the covered-terminal-link hit test, which needs the terminal, and the tooltip's hover delay
-//! (a one-shot deadline the ticker serves), its pointer notch and the target ring on its control (both follow element
-//! anchoring for tooltips). Until then a tooltip appears at once, below and right of where the pointer was. Menu items
-//! are plain buttons until the session row's menu brings the menu item component, so the popover golden shows
+//! A tooltip waits [`HOVER_DELAY`] (the old app's 300 ms) before it shows, through a ticker deadline, and shows at once
+//! when another tooltip is showing or one went away less than that long ago, so a user scanning a row of icons does
+//! not wait at each. Escape or a layer opening puts the tooltip away without that grace, as in the old app.
+//!
+//! NOTE: Still to come here: putting the tooltip away on any pointer press, as the old app's `tooltip.js` did (nothing
+//! on a press path does yet); the covered-terminal-link hit test, which needs the terminal; and the tooltip's pointer
+//! notch and the target ring on its control (both follow element anchoring for tooltips). Until then a tooltip sits
+//! below and right of where the pointer was, and a pointer moving inside a control does not restart the wait. Menu
+//! items are plain buttons until the session row's menu brings the menu item component, so the popover golden shows
 //! centered item labels, which the old menus did not have; it is captured again with that component.
 
 use std::cell::Cell;
@@ -47,6 +54,7 @@ use gpui::{
 
 use crate::focus::{self, Mark};
 use crate::theme::{self, metrics};
+use crate::ticker;
 
 // ---- Per-window state ------------------------------------------------------------------------------------------------
 
@@ -62,7 +70,15 @@ pub struct LayerStack {
     tooltip: Option<ShownTooltip>,
     /// Takes the tooltip down when its owner is released; replaced with each new tooltip.
     tooltip_release: Option<Subscription>,
+    /// The tooltip waiting out its hover delay: its owner, and the deadline that shows it. Dropping it cancels.
+    pending_tooltip: Option<(EntityId, ticker::Deadline)>,
+    /// A tooltip showed recently enough that the next one skips the hover delay. Cleared by `cool_down`.
+    warm: bool,
+    cool_down: Option<ticker::Deadline>,
 }
+
+/// How long the pointer must rest on a control before its hover help shows: the old app's tooltip delay.
+pub const HOVER_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
 
 /// An open dialog or popover.
 struct Layer {
@@ -122,6 +138,9 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
         next_id: 0,
         tooltip: None,
         tooltip_release: None,
+        pending_tooltip: None,
+        warm: false,
+        cool_down: None,
     });
     // Checked first: `global_mut` panics on a missing global, and a bare test fixture may not have installed it.
     if cx.has_global::<Windows>() {
@@ -229,12 +248,12 @@ pub struct Dialog {
     /// What Enter does while the dialog itself has focus: its enabled main action, if it has exactly one (SPEC.md:
     /// "If a dialog container itself has focus, Enter presses its enabled main action"). `None` does nothing.
     pub main_action: Option<MainAction>,
-    /// Whether a primary click on the dialog's empty space (or its label text, decision D-15) keeps focus on the control
-    /// in use. SPEC.md, "Opening and closing", lists the dialogs that do: the session launcher, Restart with, the dialogs
-    /// that share the host and Settings installer, and the session row and header Stop, Restart, Replace and Delete
-    /// questions. Every other dialog passes `false`, and such a click focuses the dialog itself, as a click on a web
-    /// dialog's background did; Enter then presses its main action. Per dialog, never a global rule: SPEC.md says
-    /// which dialogs "do not have this rule yet".
+    /// Whether a primary click on the dialog's empty space (or its label text, which counts as empty space now that
+    /// labels are not selectable) keeps focus on the control in use. SPEC.md, "Opening and closing", lists the dialogs
+    /// that do: the session launcher, Restart with, the dialogs that share the host and Settings installer, and the
+    /// session row and header Stop, Restart, Replace and Delete questions. Every other dialog passes `false`, and such
+    /// a click focuses the dialog itself, as a click on a web dialog's background did; Enter then presses its main
+    /// action. Per dialog, never a global rule: SPEC.md says which dialogs "do not have this rule yet".
     pub keeps_focus_on_empty_click: bool,
 }
 
@@ -358,9 +377,8 @@ fn open(
             empty_press,
             _subject: subject,
         });
-        // A layer covers the tooltip of whatever is under it.
-        stack.tooltip = None;
-        stack.tooltip_release = None;
+        // A layer covers the tooltip of whatever is under it, and the next tooltip waits the full delay again.
+        stack.put_tooltip_away();
         cx.notify();
         id
     });
@@ -406,6 +424,32 @@ pub fn close(id: LayerId, window: &mut Window, cx: &mut App) {
     }
 }
 
+/// Close every dialog and popover in every window, as a reset of the connection to the helm requires (SPEC.md,
+/// "Losing the connection to the helm": open dialogs and menus start over). The UI-session owner calls it when the
+/// window goes inert.
+///
+/// This is the one close that does not need the layer's id: a reset is not any opener's decision, and a dialog that
+/// survived it would keep its veil over the inert window, where it takes the clicks meant for Take back or Retry and
+/// traps Tab away from them. Focus follows the ordinary close rule, returning to what held it when the bottom layer
+/// opened (and going home once that is no longer drawn). The tooltip is left alone: it goes with its control.
+pub fn close_all(cx: &mut App) {
+    let Some(windows) = cx.try_global::<Windows>() else {
+        return;
+    };
+    let stacks: Vec<Entity<LayerStack>> =
+        windows.0.values().filter_map(WeakEntity::upgrade).collect();
+    for stack in stacks {
+        let (window, bottom) = {
+            let stack = stack.read(cx);
+            (stack.window, stack.layers.first().map(|layer| layer.id))
+        };
+        if let Some(bottom) = bottom {
+            // A window that closed meanwhile has nothing left to close.
+            let _ = window.update(cx, |_, window, cx| close(bottom, window, cx));
+        }
+    }
+}
+
 /// The user closes the topmost layer (Escape), or the tooltip if no layer is open. Returns whether anything closed, so
 /// the key can go on to whatever else wants it when nothing did.
 pub fn dismiss_top(window: &mut Window, cx: &mut App) -> bool {
@@ -417,8 +461,8 @@ pub fn dismiss_top(window: &mut Window, cx: &mut App) -> bool {
         return true;
     }
     stack.update(cx, |stack, cx| {
-        let shown = stack.tooltip.take().is_some();
-        stack.tooltip_release = None;
+        let shown = stack.tooltip.is_some();
+        stack.put_tooltip_away();
         if shown {
             cx.notify();
         }
@@ -523,7 +567,8 @@ pub struct ShownTooltip {
     pub at: Point<Pixels>,
 }
 
-/// Show `text` as hover help for the control `owner`, replacing any other tooltip, at the pointer's position.
+/// The hover on the control `owner` began: show `text` as its hover help after [`HOVER_DELAY`], at the pointer's
+/// position, replacing any other tooltip. Shows at once while another tooltip is showing or has only just gone.
 pub fn show_tooltip(
     owner: &Entity<TooltipOwner>,
     text: SharedString,
@@ -531,7 +576,31 @@ pub fn show_tooltip(
     cx: &mut App,
 ) {
     let at = window.mouse_position();
-    show_tooltip_from(owner, text, at, window, cx);
+    let Some(stack) = stack(window, cx) else {
+        return;
+    };
+    let at_once = {
+        let stack = stack.read(cx);
+        stack.tooltip.is_some() || stack.warm
+    };
+    if at_once {
+        show_tooltip_from(owner, text, at, window, cx);
+        return;
+    }
+    let owner_id = owner.entity_id();
+    let weak_owner = owner.downgrade();
+    let handle = window.window_handle();
+    let deadline = ticker::after(HOVER_DELAY, cx, move |cx| {
+        let Some(owner) = weak_owner.upgrade() else {
+            return;
+        };
+        let _ = handle.update(cx, |_, window, cx| {
+            show_tooltip_from(&owner, text, at, window, cx)
+        });
+    });
+    stack.update(cx, |stack, _| {
+        stack.pending_tooltip = Some((owner_id, deadline));
+    });
 }
 
 /// [`show_tooltip`] with the hover beginning at a fixed point, for the screenshot goldens.
@@ -559,6 +628,7 @@ fn show_tooltip_from(
     };
     let owner_id = owner.entity_id();
     stack.update(cx, |stack, cx| {
+        stack.pending_tooltip = None;
         stack.tooltip = Some(ShownTooltip {
             owner: owner_id,
             text,
@@ -587,7 +657,14 @@ pub fn hide_tooltip(owner: &Entity<TooltipOwner>, window: &mut Window, cx: &mut 
         return;
     };
     let owner_id = owner.entity_id();
-    stack.update(cx, |stack, cx| {
+    let hidden = stack.update(cx, |stack, cx| {
+        if stack
+            .pending_tooltip
+            .as_ref()
+            .is_some_and(|(pending, _)| *pending == owner_id)
+        {
+            stack.pending_tooltip = None;
+        }
         if stack
             .tooltip
             .as_ref()
@@ -596,8 +673,33 @@ pub fn hide_tooltip(owner: &Entity<TooltipOwner>, window: &mut Window, cx: &mut 
             stack.tooltip = None;
             stack.tooltip_release = None;
             cx.notify();
+            return true;
         }
+        false
     });
+    // The pointer moved off a showing tooltip's control: the next one within the delay shows at once.
+    if hidden {
+        let weak = stack.downgrade();
+        let cool_down = ticker::after(HOVER_DELAY, cx, move |cx| {
+            let _ = weak.update(cx, |stack, _| stack.warm = false);
+        });
+        stack.update(cx, |stack, _| {
+            stack.warm = true;
+            stack.cool_down = Some(cool_down);
+        });
+    }
+}
+
+impl LayerStack {
+    /// Take the tooltip down, and any waiting one, without the grace that lets the next one skip the delay: after
+    /// Escape or a layer opening, the user has just put one away.
+    fn put_tooltip_away(&mut self) {
+        self.tooltip = None;
+        self.tooltip_release = None;
+        self.pending_tooltip = None;
+        self.warm = false;
+        self.cool_down = None;
+    }
 }
 
 /// The tooltip showing now in `window`, for tests and the bridge's snapshot.

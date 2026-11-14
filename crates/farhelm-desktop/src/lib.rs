@@ -39,6 +39,7 @@ use farhelm_supervisor::service::STATE_DIR_CLAIM_WAIT;
 mod agent;
 pub mod bundle;
 mod local_host;
+mod reduced_motion;
 pub mod state;
 mod tab_reach;
 pub mod update_readout;
@@ -89,9 +90,9 @@ fn open_saved_file(path: &Path) -> Result<(), String> {
 }
 
 /// The license notices of every third-party crate compiled into Farhelm's shipped binaries, generated from `Cargo.lock`
-/// by `scripts/dependency-notices.py` and kept current by its `--check` in the ordinary checks (decision D-18: every
-/// shipped binary carries them). `farhelm` embeds the same file; one file covers both binaries, so each over-covers
-/// rather than under-covers.
+/// by `scripts/dependency-notices.py` and kept current by its `--check` in the ordinary checks (the maintainer decided
+/// on 2026-11-13 that every shipped binary carries them). `farhelm` embeds the same file; one file covers both
+/// binaries, so each over-covers rather than under-covers.
 const DEPENDENCY_NOTICES: &str = include_str!("../../farhelm/notices/dependencies.txt");
 
 /// The Unicode License V3 notice for the Unicode-derived property tables in the vendored terminal emulator
@@ -111,8 +112,9 @@ const INTER_FONT_NOTICE: &str = include_str!("../../gui/farhelm-gui/assets/fonts
 /// ports, for instance) adds its notice here in the change that first links it (SPEC_impl.md, "Dependencies and
 /// licenses").
 ///
-/// `--licenses` is the interim surface decision D-22 allowed until the app's "Open-Source Notices" window (D-25)
-/// exists; that window shows the same text and replaces this flag as the user-facing surface.
+/// `--licenses` is the interim surface, allowed on 2026-11-13 until the app's "Open-Source Notices" window exists (an
+/// app-menu item the maintainer chose the same day); that window shows the same text and replaces this flag as the
+/// user-facing surface.
 pub fn licenses_text() -> String {
     format!(
         "{}\n{UNICODE_NOTICE}\n{DEPENDENCY_NOTICES}\n{RULE}\nInter font (SIL Open Font License 1.1)\n\n{INTER_FONT_NOTICE}",
@@ -128,8 +130,8 @@ const RULE: &str =
 /// Run the desktop app until it quits.
 ///
 /// Starts the embedded helm and the local supervisor, then hands the main thread to the GPUI app, which owns it until
-/// the app quits (GPUI's event loop has to run there, on macOS because AppKit requires it). The window is the GPUI
-/// app's empty first screen until the foundations it draws with are built; nothing feeds it data yet.
+/// the app quits (GPUI's event loop has to run there, on macOS because AppKit requires it). The window connects to the
+/// embedded helm over its UI channel and shows the connection's states; it shows no sessions yet.
 ///
 /// A bootstrap failure, and a window that fails to open, go through [`refuse_and_exit`], the pre-window refusal path:
 /// there is no window in which to show an error, and a launcher launch still needs its native surface. SIGTERM and Ctrl+C quit the app the ordinary
@@ -163,6 +165,8 @@ pub fn run() -> anyhow::Result<()> {
             ))
         }),
         tab_reach: Box::new(tab_reach::current),
+        helm: Some(desktop.helm_endpoint()),
+        reduced_motion: reduced_motion::read(),
     });
     // Linux only: GPUI's event loop has returned. Dropping the bootstrap waits for the helm the quit asked to stop.
     tracing::info!("the app quit; waiting for the embedded helm to stop");
@@ -238,6 +242,9 @@ fn init_tracing() {
 pub struct DesktopBootstrap {
     /// Loopback origin of the embedded helm, e.g. `http://127.0.0.1:41233`.
     base: String,
+    /// The address the embedded helm bound, kept as the helm reported it so the GPUI app's endpoint cannot fail to
+    /// form.
+    addr: std::net::SocketAddr,
     /// The GUI's in-memory credential for this launch, minted by the embedded
     /// helm ([`farhelm_helm::EmbeddedReady`]). Never persisted.
     native_device_secret: String,
@@ -466,7 +473,8 @@ impl DesktopBootstrap {
         // the helm can observe the dropped sender.
         let mut startup_failure =
             ExpectHelmShutdownUnlessDisarmed(Some(Arc::clone(&expected_helm_shutdown)));
-        let base = format!("http://{}", ready.addr);
+        let addr = ready.addr;
+        let base = format!("http://{addr}");
         let native_secret = ready.native_device_secret;
         runtime.block_on(await_local_supervisor(
             &base,
@@ -486,6 +494,7 @@ impl DesktopBootstrap {
         startup_failure.disarm();
         Ok(Self {
             base,
+            addr,
             native_device_secret: native_secret,
             state_dir,
             helm_monitor: Some(helm_monitor),
@@ -497,6 +506,11 @@ impl DesktopBootstrap {
     /// Loopback origin of this process's embedded helm.
     pub fn api_base(&self) -> &str {
         &self.base
+    }
+
+    /// Where the GPUI app's UI channel reaches the embedded helm, with this launch's device credential.
+    pub fn helm_endpoint(&self) -> farhelm_helm_client::HelmEndpoint {
+        farhelm_helm_client::HelmEndpoint::new(self.addr, self.native_device_secret.as_str())
     }
 
     /// The GUI's credential for the embedded helm: valid for this process only.
@@ -732,7 +746,7 @@ fn refuse_if_app_open(state_dir: &Path, wait: Duration) -> anyhow::Result<File> 
                 std::thread::sleep(Duration::from_millis(100));
             }
             Err(std::fs::TryLockError::WouldBlock) => bail!(
-                "another process owns token control in {} (usually Farhelm already open); \
+                "Farhelm appears to be already open for {} (another process holds its launch lock); \
                  nothing was changed",
                 state_dir.display()
             ),
@@ -1467,7 +1481,8 @@ mod tests {
     use std::time::Instant;
 
     /// The desktop binary ships on its own (its archive holds no `farhelm`), so it must carry the dependency notices
-    /// itself (decision D-18); losing them would ship crates without their required attribution.
+    /// itself (the maintainer decided on 2026-11-13 that every shipped binary does); losing them would ship crates
+    /// without their required attribution.
     ///
     /// Spec: `licenses_text` holds the embedded supervisor's ported-code notices (xterm.js and the Unicode License), the
     /// generated notices' header, a dependency only the desktop app links (taffy, through GPUI) with its own copyright
@@ -2367,7 +2382,7 @@ mod tests {
     /// launch beside an open app must refuse before it reads or stops
     /// anything, and a CLI that holds the lock for a moment must not make a
     /// launch refuse. Spec: with `helm-token.lock` held for longer than the
-    /// wait, `refuse_if_app_open` refuses naming token control and saying
+    /// wait, `refuse_if_app_open` refuses saying Farhelm appears to be open and
     /// nothing was changed; a holder that lets go partway through the wait
     /// is waited out; without a holder it returns the held lock, which
     /// blocks a third party until dropped.
@@ -2379,7 +2394,7 @@ mod tests {
         let error = refuse_if_app_open(state.path(), wait).expect_err("a held lock refuses");
         let text = format!("{error:#}");
         assert!(
-            text.contains("token control") && text.contains("nothing was changed"),
+            text.contains("appears to be already open") && text.contains("nothing was changed"),
             "{text}"
         );
         let (released_tx, released_rx) = mpsc::channel();

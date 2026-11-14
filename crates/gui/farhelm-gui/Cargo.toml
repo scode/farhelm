@@ -21,7 +21,11 @@ agent = ["dep:gpui-agent", "gpui/test-support", "gpui_platform/test-support"]
 # GPUI and GPUI Kit at their exact pins (root Cargo.toml), routed through the vendored, patched GPUI trees.
 [dependencies]
 anyhow.workspace = true
-# The one escape table and notation for host-supplied text, shared with the command line (`farhelm_proto::text`).
+# The GUI's connection to its helm (the UI channel), and the protocol crate, for two things: the shared wire types,
+# and the one escape table and notation for host-supplied text, which the command line uses too
+# (`farhelm_proto::text`). Neither depends on the helm crate (scripts/check-crate-layering.py), and the helm client is
+# the one place the GUI's async runtime lives.
+farhelm-helm-client.workspace = true
 farhelm-proto.workspace = true
 gpui.workspace = true
 gpui-agent = { workspace = true, optional = true }

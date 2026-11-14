@@ -1,6 +1,6 @@
 //! Headless screenshot goldens: one per component, per dialog frame and per overlay kind (tooltip, popover, the prompt
-//! over its veil), the keyboard focus ring and host-supplied text over its spoofing corpus, in both appearances,
-//! compared pixel for pixel.
+//! over its veil), the keyboard focus ring, host-supplied text over its spoofing corpus and the notice banner, in both
+//! appearances, compared pixel for pixel.
 //!
 //! These are test references, not documentation media: they pin what each component draws, so a change to a token, a
 //! padding or a font shows up as a failing test with the new picture beside the old one, instead of drifting unnoticed.
@@ -28,6 +28,7 @@ use std::rc::Rc;
 use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, Popover, TooltipOwner};
+use crate::notices::Notice;
 use crate::prompt::{self, Answer, Question};
 use crate::test_support;
 use crate::theme::{self, Preference};
@@ -232,6 +233,16 @@ fn focus_ring_setup(_: &SceneState, window: &mut Window, cx: &mut App) {
     );
 }
 
+/// The connection-lost notice as the main view draws it, full width, with its Dismiss button focused from the keyboard
+/// (the scene's setup is the focus-ring scene's Tab), so the golden pins the banner's red band and the white ring its
+/// button wears there instead of the accent ring.
+fn notice_banner(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    div()
+        .w_full()
+        .child(crate::main_view::banner(Notice::ConnectionLost, cx))
+        .into_any_element()
+}
+
 /// A ghost button that a menu opens below.
 fn popover(state: &SceneState, window: &mut Window, cx: &mut App) -> AnyElement {
     let anchor = Anchor::for_element("menu-anchor", window, cx);
@@ -344,7 +355,7 @@ fn host_text(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
         .into_any_element()
 }
 
-static SCENES: [Scene; 8] = [
+static SCENES: [Scene; 9] = [
     Scene {
         name: "buttons",
         size: (560., 64.),
@@ -392,6 +403,12 @@ static SCENES: [Scene; 8] = [
         size: (420., 440.),
         draw: host_text,
         setup: no_setup,
+    },
+    Scene {
+        name: "notice-banner",
+        size: (760., 64.),
+        draw: notice_banner,
+        setup: focus_ring_setup,
     },
 ];
 

@@ -14,13 +14,17 @@
 //! - [`prompt`]: the one way to ask a question, frozen at the moment it opens.
 //! - [`actions`]: the app's actions and their keys, declared in one place.
 //! - [`host_text`]: host-supplied text, escaped and direction-isolated wherever the GUI shows it.
+//! - [`session`]: the connection to the helm and the resettable UI-session owner (SPEC_impl.md, "One failure path:
+//!   the reset"); [`store`]: the one copy of what the helm pushed, which views read when they draw;
+//!   [`local_state`]: the selected session's id, the one piece of window state that survives a reset.
+//! - [`ticker`]: the one source of time, for animation (at most 10 ticks a second) and for one-shot deadlines.
+//! - [`notices`]: the notice center, the one place that decides what notice shows.
 //! - [`cache`]: the one way to cache a view.
 //! - [`render_count`]: per-view render counts in test builds.
 //! - [`assets`]: the bundled fonts and icons.
 //! - [`marks`]: the agent harnesses' marks as plain geometry, kept from the old Dioxus UI.
 //!
-//! Still to come, each under its own module: the store fed by the UI channel, the operation stores, drafts,
-//! the rest of actions and keys, the ticker and the notice center.
+//! Still to come, each under its own module: the operation stores, drafts and the rest of actions and keys.
 //!
 //! The `agent` feature adds the test-automation bridge (`gpui-agent`), which `scripts/gui-agent.py` drives; see
 //! `docs/gui-agent.md`. It also makes the app read `agent_startup`'s startup overrides (window size, appearance) from
@@ -50,15 +54,22 @@ pub mod components;
 pub mod focus;
 pub mod host_text;
 pub mod layers;
+pub mod local_state;
 pub mod main_view;
 pub mod marks;
+pub mod notices;
 pub mod prompt;
 pub mod render_count;
+pub mod session;
+pub mod store;
 pub mod theme;
+pub mod ticker;
 
 #[cfg(test)]
 mod foundation_tests;
 #[cfg(test)]
 mod goldens;
+#[cfg(test)]
+mod session_tests;
 #[cfg(test)]
 pub mod test_support;
