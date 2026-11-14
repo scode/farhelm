@@ -521,13 +521,15 @@ old launcher's were `left: 0; right: 0` under theirs), taken from the frame bein
 the old width. A popover may also never take focus: opening it moves none, it traps no Tab, closing it returns none, and
 a press on it leaves focus where it was, so the field the user types in keeps the keys, as with the old launcher's
 floating lists, whose options were never focusable. Escape, an outside press and its anchor going close it as any
-popover. The launcher's floating lists and the terminal's overlays on a zero-size anchor element use it, and wherever
-the focus rules say "the topmost layer" (Tab's trap, where focus recovers) they mean the topmost layer that holds focus,
-which such a popover never is. Whether a click on a dialog's empty space (label text included) keeps focus on the
-control in use is a property of each dialog, set as SPEC.md's list says; a dialog without it takes focus itself, so
-Enter then presses its main action. Whether a terminal link's destination disclosure is covered is a hit test, never a
-hand-kept list of covering surfaces. Things the user did not start never open a layer over what they are doing (SPEC.md,
-"Keyboard focus").
+popover, but it closes alone: closing any other layer closes what was opened over it, and this one owns nothing above
+it, so a dialog opened while it shows (a shortcut pressed in the terminal beside a link's disclosure) stays open, with
+focus inside, when it goes. The launcher's floating lists and the terminal's overlays on a zero-size anchor element use
+it, and wherever the focus rules say "the topmost layer" (Tab's trap, where focus recovers) they mean the topmost layer
+that holds focus, which such a popover never is. Whether a click on a dialog's empty space (label text included) keeps
+focus on the control in use is a property of each dialog, set as SPEC.md's list says; a dialog without it takes focus
+itself, so Enter then presses its main action. Whether a terminal link's destination disclosure is covered is a hit
+test, never a hand-kept list of covering surfaces. Things the user did not start never open a layer over what they are
+doing (SPEC.md, "Keyboard focus").
 
 One feature-supplied element is drawn above every layer without being one: the pill (`layers::show_pill`), for SPEC.md's
 quick-launch sequence pill and its candidate list, which stay in view over the launcher's veil, as the old pill sat
