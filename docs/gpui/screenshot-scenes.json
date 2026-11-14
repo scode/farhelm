@@ -242,6 +242,11 @@
       "reference": "rename-dialog"
     },
     {
+      "golden": "text-input-growing",
+      "title": "The growing multi-line text box, grown to its text and held at its cap",
+      "reference": "launcher-scrolled-end"
+    },
+    {
       "golden": "focus-ring",
       "title": "The keyboard focus ring",
       "reference": null

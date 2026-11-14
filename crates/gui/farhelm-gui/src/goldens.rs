@@ -68,17 +68,18 @@ struct Scene {
     setup: fn(&SceneState, &mut Window, &mut App),
 }
 
-/// State a scene keeps across frames: a text input's editable state and two of the kind that keeps line breaks, the
-/// owner token a tooltip scene shows its tooltip for (it must stay alive, or the layer manager takes the tooltip down),
-/// the anchor a popover scene opens its menu below (recorded when the scene draws), the focus handle the focus-ring
-/// scene's button takes, and the terminal views a terminal scene's setup makes (they need the real text system to measure their cells, so they are built after the
-/// window exists), the attached terminals a scene shows, and whatever those must keep alive (the fake helm and terminal
-/// streams behind them, and the subscription that makes them), and what a session list scene does once its list has
-/// drawn ([`AfterDrawn`]).
+/// State a scene keeps across frames: a text input's editable state, two of the kind that keeps line breaks and two
+/// growing boxes, the owner token a tooltip scene shows its tooltip for (it must stay alive, or the layer manager takes
+/// the tooltip down), the anchor a popover scene opens its menu below (recorded when the scene draws), the focus handle
+/// the focus-ring scene's button takes, and the terminal views a terminal scene's setup makes (they need the real text
+/// system to measure their cells, so they are built after the window exists), the attached terminals a scene shows, and
+/// whatever those must keep alive (the fake helm and terminal streams behind them, and the subscription that makes
+/// them), and what a session list scene does once its list has drawn ([`AfterDrawn`]).
 #[derive(Clone)]
 struct SceneState {
     input: TextInputState,
     kept: [TextInputState; 2],
+    growing: [TextInputState; 2],
     tooltip_owner: Entity<TooltipOwner>,
     anchor: Rc<RefCell<Option<Anchor>>>,
     ring: FocusHandle,
@@ -160,6 +161,42 @@ fn text_input(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
             "Session title",
             HoverHelp::tooltip("The session's new title"),
         ))
+        .into_any_element()
+}
+
+/// Fill the two growing boxes: one with four lines, the last long enough to wrap, so the box grows past its three
+/// starting rows to fit them; and one with twenty lines, past the cap, so it stops at the cap and shows the first rows.
+fn growing_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    state.growing[0].set_text(
+        "Fix the reconnect loop.\nKeep the draft when the helm restarts.\n\nThen run the smoke test and report \
+         what it printed, every line of it.",
+        window,
+        cx,
+    );
+    let many: Vec<String> = (1..=20).map(|n| format!("line {n}")).collect();
+    state.growing[1].set_text(many.join("\n"), window, cx);
+}
+
+/// The growing multi-line box twice: grown from three rows to its four lines (one of them wrapped, one empty), and held
+/// at its cap with twenty lines, scrolled to the top.
+fn growing(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    let help = || HoverHelp::tooltip("A first message for the agent");
+    div()
+        .flex()
+        .gap(px(12.))
+        .items_start()
+        .child(div().w(px(280.)).child(TextInput::new(
+            "grown",
+            &state.growing[0],
+            "First message",
+            help(),
+        )))
+        .child(div().w(px(280.)).child(TextInput::new(
+            "capped",
+            &state.growing[1],
+            "First message",
+            help(),
+        )))
         .into_any_element()
 }
 
@@ -1032,6 +1069,12 @@ static SCENES: &[Scene] = &[
         setup: kept_line_breaks_setup,
     },
     Scene {
+        name: "text-input-growing",
+        size: (620., 300.),
+        draw: growing,
+        setup: growing_setup,
+    },
+    Scene {
         name: "dialog",
         size: (540., 300.),
         draw: dialog,
@@ -1197,6 +1240,10 @@ fn component_goldens() -> anyhow::Result<()> {
                 cx.open_window(size(px(scene.size.0), px(scene.size.1)), |window, cx| {
                     let state = SceneState {
                         input: TextInputState::new(window, cx),
+                        growing: [
+                            TextInputState::new_growing(3, window, cx),
+                            TextInputState::new_growing(3, window, cx),
+                        ],
                         kept: [
                             TextInputState::new_keeping_line_breaks(window, cx),
                             TextInputState::new_keeping_line_breaks(window, cx),

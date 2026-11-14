@@ -1085,15 +1085,15 @@ agent choice is independent of that destination:
   paths may be absolute or relative to the session directory; a leading tilde is refused because it does not expand. New
   managed-checkout destinations and command launches refuse a selector. Goose, Cursor and OpenCode show that Farhelm
   will not capture the named conversation and later Restart will be unavailable.
-- Initial prompt: the agent tab offers a resizable multiline **Initial prompt** box directly after the conversation
-  selector for supported agents. Its help says "Sent once, as &lt;agent&gt;'s first message when it starts. Restart,
-  Clone and Replace do not send it again." The summary adds `Prompt: N lines` for a nonempty message. Enter edits the
-  message without launching. Goose, Pi and command launches offer no box. The draft survives recent-setup selection and
-  switching tabs; unsupported selections omit it from the request. A Clone or Replace-with prefill clears it. Template
-  messages with invisible formatting are shown escaped and read-only until explicitly cleared; ordinary newlines and
-  tabs remain editable. The message travels with the create request, including managed checkouts and named conversations
-  where supported, and for a create the command line or an agent sends with an idempotency key, its exact value is part
-  of that key's retry identity.
+- Initial prompt: the agent tab offers a multiline **Initial prompt** box that grows with its text up to a cap and then
+  scrolls, directly after the conversation selector for supported agents. Its help says "Sent once, as &lt;agent&gt;'s
+  first message when it starts. Restart, Clone and Replace do not send it again." The summary adds `Prompt: N lines` for
+  a nonempty message. Enter edits the message without launching. Goose, Pi and command launches offer no box. The draft
+  survives recent-setup selection and switching tabs; unsupported selections omit it from the request. A Clone or
+  Replace-with prefill clears it. Template messages with invisible formatting are shown escaped and read-only until
+  explicitly cleared; ordinary newlines and tabs remain editable. The message travels with the create request, including
+  managed checkouts and named conversations where supported, and for a create the command line or an agent sends with an
+  idempotency key, its exact value is part of that key's retry identity.
 - Command launch: a command launch takes a command line run through `bash -c`, non-login and non-interactive. The text
   reaches Bash unchanged except for Farhelm's placeholders, so `~`, variables, globs, newlines, comments, compound
   commands, pipes and redirection have Bash meaning. Each placeholder must stand as its own unquoted word; a quoted
@@ -1176,24 +1176,24 @@ agent choice is independent of that destination:
   Agent and command choices store their matching launch kind, so applying the template switches tabs. Existing kindless
   templates keep applying as stored; opening one infers its switch in an unsaved draft, and saving stores that switch.
   Choices follow the agent type when one is set, while model text may be arbitrary and other fields need no agent type.
-  The initial prompt uses a resizable multiline textarea, offered on the agent tab when the template's agent supports it
-  or no agent is set. It explains that the message is sent on every launch from the template and can be edited in the
-  launcher first; the list summary mentions it. Newline and tab remain editable. Invisible formatting is shown escaped
-  and read-only, retaining its raw value through unrelated saves; removing and adding the field replaces it.
-  Incompatible fields stay visible and prevent saving until corrected or removed. Saving is explicit; Save is greyed out
-  and does nothing while there are no unsaved changes, and keeps keyboard focus after saving. Leaving an unsaved draft
-  asks Keep editing, Discard, or Save in that reading order, with initial focus still on Save. Its shared header
-  supplies Close; the complete editor keeps scrolling within the dialog, including its editor-local action footer.
-  Template names are unique. Creating a template or renaming one refuses any whitespace in its name, including Unicode
-  whitespace; existing names with whitespace remain usable, can keep their name when other fields are saved, and retain
-  delete undo. The agent's template create command follows the same new-name rule. Duplicate opens an unsaved copy named
-  `<name>-copy`, then `<name>-copy-2` and so on until free, replacing whitespace in the source name with `-` in that
-  suggestion. A workspace-trust field in an older template remains readable but is ignored when applied and omitted on
-  every save, including duplicate and delete undo. Delete takes effect immediately and offers undo inside the dialog for
-  about ten seconds; undo refuses if its old name has been taken. For a stored template that fails current save rules,
-  the control says "Delete permanently" before deletion and no undo is offered. The label the user saw decides: a click
-  on "Delete permanently" never offers undo, and a click on plain "Delete" always does, even if the template list
-  changed in between. Closing the dialog ends its undo notice.
+  The initial prompt uses a multiline box that grows with its text up to a cap and then scrolls, offered on the agent
+  tab when the template's agent supports it or no agent is set. It explains that the message is sent on every launch
+  from the template and can be edited in the launcher first; the list summary mentions it. Newline and tab remain
+  editable. Invisible formatting is shown escaped and read-only, retaining its raw value through unrelated saves;
+  removing and adding the field replaces it. Incompatible fields stay visible and prevent saving until corrected or
+  removed. Saving is explicit; Save is greyed out and does nothing while there are no unsaved changes, and keeps
+  keyboard focus after saving. Leaving an unsaved draft asks Keep editing, Discard, or Save in that reading order, with
+  initial focus still on Save. Its shared header supplies Close; the complete editor keeps scrolling within the dialog,
+  including its editor-local action footer. Template names are unique. Creating a template or renaming one refuses any
+  whitespace in its name, including Unicode whitespace; existing names with whitespace remain usable, can keep their
+  name when other fields are saved, and retain delete undo. The agent's template create command follows the same
+  new-name rule. Duplicate opens an unsaved copy named `<name>-copy`, then `<name>-copy-2` and so on until free,
+  replacing whitespace in the source name with `-` in that suggestion. A workspace-trust field in an older template
+  remains readable but is ignored when applied and omitted on every save, including duplicate and delete undo. Delete
+  takes effect immediately and offers undo inside the dialog for about ten seconds; undo refuses if its old name has
+  been taken. For a stored template that fails current save rules, the control says "Delete permanently" before deletion
+  and no undo is offered. The label the user saw decides: a click on "Delete permanently" never offers undo, and a click
+  on plain "Delete" always does, even if the template list changed in between. Closing the dialog ends its undo notice.
 - Quick launch: at most one saved template is marked with ⚡ in Templates. Its list button shows a muted outline bolt
   when unmarked and a filled amber bolt when marked, at the same size. Cmd+P on macOS or Ctrl+Shift+P elsewhere starts
   it directly in the desktop app when no dialog is open, without showing the launcher on success. While the session
