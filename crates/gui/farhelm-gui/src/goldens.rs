@@ -523,6 +523,89 @@ fn radio_group(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
         .into_any_element()
 }
 
+/// The radio group's launcher and Settings variants, to compare with the old launcher with Codex chosen and the old
+/// Settings' Terminal page: the harness row's chips in no group, the first chip focused from the keyboard (the setup's
+/// Tab) so the golden pins a chip's outside ring; the destination type's glyph segments (with stand-in glyphs: the old
+/// folder and branch are not icons yet); the permission modes with the red unchosen YOLO, then the same chosen;
+/// glyph-only segments; and the terminal link choices with their description lines, stacked.
+fn radio_group_variants(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    let help = |text: &'static str| HoverHelp::tooltip(text);
+    let option = |label: &'static str| RadioOption::new(label, help("Golden scene option"), label);
+    let harness = ["Codex", "Claude", "Muse", "Cursor", "Grok"]
+        .into_iter()
+        .fold(
+            RadioGroup::new(
+                "harness",
+                "Harness",
+                help("Golden scene group"),
+                Role::GenericContainer,
+            )
+            .chips()
+            .chosen(Some("Claude")),
+            |group, label| group.option(option(label)),
+        );
+    let destination = RadioGroup::new(
+        "where",
+        "Destination type",
+        help("Golden scene group"),
+        Role::Group,
+    )
+    .chosen(Some("Folder"))
+    .option(option("Folder").icon(Icon::HostHouse))
+    .option(option("Managed checkout").icon(Icon::HostCloud));
+    let permissions = |id: &'static str, chosen: &'static str| {
+        RadioGroup::new(
+            id,
+            "Permission mode",
+            help("Golden scene group"),
+            Role::Group,
+        )
+        .chosen(Some(chosen))
+        .option(option("Guarded"))
+        .option(option("YOLO").danger())
+        .option(option("Custom"))
+    };
+    let glyphs = RadioGroup::new("glyphs", "Host", help("Golden scene group"), Role::Group)
+        .chosen(Some("Local"))
+        .option(option("Local").icon_only(Icon::HostLaptop))
+        .option(option("Remote").icon_only(Icon::HostCloud));
+    let links = RadioGroup::new(
+        "links",
+        "Terminal web links",
+        help("Golden scene group"),
+        Role::RadioGroup,
+    )
+    .chosen(Some("Open in Farhelm, don't pass the click on"))
+    .option(option("Open in Farhelm, don't pass the click on").description(
+        "Farhelm opens the link once. The program does not receive that click or a drag starting there.",
+    ))
+    .option(option("Open in Farhelm and also pass the click on").description(
+        "Use this when the program needs link clicks. A program that opens links itself may open a second tab.",
+    ))
+    .option(option("Pass the click on only").description(
+        "Let the program handle links. Farhelm does not open them; without mouse reporting, \
+         clicking a link does nothing.",
+    ));
+    div()
+        .w(px(520.))
+        .flex()
+        .flex_col()
+        .items_start()
+        .gap(px(12.))
+        .child(harness)
+        .child(destination)
+        .child(
+            div()
+                .flex()
+                .gap(px(12.))
+                .child(permissions("guarded", "Guarded"))
+                .child(permissions("yolo", "YOLO"))
+                .child(glyphs),
+        )
+        .child(div().w_full().child(links))
+        .into_any_element()
+}
+
 /// The connection-lost notice as the main view draws it, full width, with its Dismiss button focused from the keyboard
 /// (the scene's setup is the focus-ring scene's Tab), so the golden pins the banner's red band and the white ring its
 /// button wears there instead of the accent ring.
@@ -1495,6 +1578,12 @@ static SCENES: &[Scene] = &[
         size: (300., 130.),
         draw: radio_group,
         setup: no_setup,
+    },
+    Scene {
+        name: "radio-group-variants",
+        size: (560., 420.),
+        draw: radio_group_variants,
+        setup: focus_ring_setup,
     },
     Scene {
         name: "popover",

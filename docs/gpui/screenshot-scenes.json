@@ -437,6 +437,11 @@
       "reference": "launcher-command"
     },
     {
+      "golden": "radio-group-variants",
+      "title": "Choice variants: the harness chips, glyph segments, a red unchosen YOLO segment, and described options stacked",
+      "reference": "launcher-codex-choices"
+    },
+    {
       "golden": "host-text",
       "title": "Host-supplied text, escaped",
       "reference": null

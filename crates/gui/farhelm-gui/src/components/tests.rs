@@ -25,6 +25,7 @@ use super::{
     scrollbar,
 };
 use super::{Select, SelectOption};
+use crate::assets::Icon;
 use crate::focus;
 use crate::focus::{Mark, TabReach};
 use crate::layers;
@@ -1568,14 +1569,17 @@ struct Owner {
 }
 
 /// How a test draws its group: its role, its options as (label, unavailable), each option's value being its label,
-/// what starts chosen, and whether it is drawn as plain radios and given the owner's main action as its Enter.
+/// what starts chosen, its look (`look`, applied to the group as built: the segments it starts with, plain radios or
+/// chips; one field, so a spec cannot ask for two), whether it is given the owner's main action as its Enter, and what
+/// else each option is given (`dress`, called with each option's label and the option as built from it).
 #[derive(Clone, Copy)]
 struct GroupSpec {
     role: Role,
     options: &'static [(&'static str, bool)],
     chosen: Option<&'static str>,
-    radios: bool,
+    look: fn(RadioGroup<&'static str>) -> RadioGroup<&'static str>,
     with_enter: bool,
+    dress: fn(&'static str, RadioOption<&'static str>) -> RadioOption<&'static str>,
 }
 
 impl GroupSpec {
@@ -1585,8 +1589,9 @@ impl GroupSpec {
             role: Role::RadioGroup,
             options,
             chosen,
-            radios: false,
+            look: |group| group,
             with_enter: false,
+            dress: |_, option| option,
         }
     }
 }
@@ -1614,11 +1619,10 @@ fn open_group(cx: &mut TestAppContext, spec: GroupSpec) -> (&mut VisualTestConte
         });
         for &(label, unavailable) in spec.options {
             let help = HoverHelp::tooltip(format!("Use {label}"));
-            group = group.option(RadioOption::new(label, help, label).disabled(unavailable));
+            let option = RadioOption::new(label, help, label).disabled(unavailable);
+            group = group.option((spec.dress)(label, option));
         }
-        if spec.radios {
-            group = group.radios();
-        }
+        group = (spec.look)(group);
         if spec.with_enter {
             group = group.on_enter(move |_, _| {
                 launched
@@ -2038,6 +2042,257 @@ fn plain_radios_refuse_the_button_group_role() {
         Role::Group,
     )
     .radios();
+}
+
+/// What the element drawn under `id` painted in `nodes`, the driver record of one frame: the strings its subtree
+/// painted, and how many SVG glyphs that subtree holds. The record has no ink colors, so a glyph's or a word's color
+/// is the goldens' to pin.
+fn painted_under(nodes: &[gpui::DriverNode], id: &str) -> (Vec<String>, usize) {
+    let root = nodes
+        .iter()
+        .position(|node| node.element_id.as_deref() == Some(id))
+        .unwrap_or_else(|| panic!("{id} was drawn"));
+    let within = |mut index: usize| loop {
+        if index == root {
+            return true;
+        }
+        match nodes[index].parent {
+            Some(parent) => index = parent,
+            None => return false,
+        }
+    };
+    let under: Vec<&gpui::DriverNode> = (0..nodes.len())
+        .filter(|&index| within(index))
+        .map(|index| &nodes[index])
+        .collect();
+    let texts = under
+        .iter()
+        .flat_map(|node| node.texts.iter().map(|text| text.text.to_string()))
+        .collect();
+    let glyphs = under
+        .iter()
+        .filter(|node| node.type_name.ends_with("Svg"))
+        .count();
+    (texts, glyphs)
+}
+
+/// The role, accessible name and pressed or checked state the element drawn under `id` reports in `nodes`.
+fn reported(
+    nodes: &[gpui::DriverNode],
+    id: &str,
+) -> Option<(
+    Option<Role>,
+    Option<gpui::SharedString>,
+    Option<gpui::Toggled>,
+)> {
+    nodes
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some(id))
+        .map(|node| (node.role, node.label.clone(), node.toggled))
+}
+
+/// The launcher's destination type drew a glyph before each choice's words, and a glyph says nothing to a screen
+/// reader, so the option must stay named by its label however it is drawn; an option drawn with only its glyph that
+/// lost its name would be an unlabelled button. Specified, in a button group with A drawn with a glyph and its words
+/// and B (chosen) with its glyph alone: A paints one glyph and its words, B one glyph and no words, and both report the
+/// button role, their labels as their names, and B alone pressed.
+#[gpui::test]
+fn a_glyph_option_draws_its_glyph_and_keeps_its_label_as_its_name(cx: &mut TestAppContext) {
+    let spec = GroupSpec {
+        role: Role::Group,
+        dress: |label, option| match label {
+            "A" => option.icon(Icon::HostHouse),
+            _ => option.icon_only(Icon::HostCloud),
+        },
+        ..GroupSpec::radio(&[("A", false), ("B", false)], Some("B"))
+    };
+    let (cx, _) = open_group(cx, spec);
+    let nodes = frame(cx);
+    assert_eq!(
+        painted_under(&nodes, "choice-A"),
+        (vec!["A".to_string()], 1),
+        "A drew its glyph and its words"
+    );
+    assert_eq!(
+        painted_under(&nodes, "choice-B"),
+        (Vec::new(), 1),
+        "B drew its glyph alone"
+    );
+    for (label, on) in [("A", gpui::Toggled::False), ("B", gpui::Toggled::True)] {
+        assert_eq!(
+            reported(&nodes, &format!("choice-{label}")),
+            Some((Some(Role::Button), Some(label.into()), Some(on))),
+            "option {label}"
+        );
+    }
+}
+
+/// A glyph or the danger ink changes how an option looks, never how it is reached or chosen: the old YOLO segment and
+/// the destination type's glyph segments were the same pressed buttons as their neighbours, and a decorated option
+/// that dropped out of Tab or ignored Enter would hide exactly the choices that matter most. Specified, in a button
+/// group with the owner's action, of A with a glyph, B with its glyph alone and C in the danger ink, A chosen: Tab
+/// reaches A, B and C in turn; Enter on C chooses it and then runs the action with C chosen; Shift+Tab back to B and
+/// Space chooses B.
+#[gpui::test]
+fn glyph_and_danger_options_keep_the_button_groups_keys(cx: &mut TestAppContext) {
+    let spec = GroupSpec {
+        role: Role::Group,
+        with_enter: true,
+        dress: |label, option| match label {
+            "A" => option.icon(Icon::HostHouse),
+            "B" => option.icon_only(Icon::HostCloud),
+            _ => option.danger(),
+        },
+        ..GroupSpec::radio(&[("A", false), ("B", false), ("C", false)], Some("A"))
+    };
+    let (cx, owner) = open_group(cx, spec);
+    for id in ["before", "choice-A", "choice-B", "choice-C"] {
+        press_and_draw(cx, "tab");
+        assert_eq!(focused_id(cx).as_deref(), Some(id), "Tab reached {id}");
+    }
+    press_and_draw(cx, "enter");
+    assert_eq!(
+        *owner.launched_with.borrow(),
+        vec![Some("C")],
+        "Enter on the danger option chose it, then ran the action"
+    );
+    press_and_draw(cx, "shift-tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("choice-B"),
+        "the premise: Shift+Tab reached B"
+    );
+    press_and_draw(cx, "space");
+    assert_eq!(
+        owner.chosen.get(),
+        Some("B"),
+        "Space chose the glyph-only B"
+    );
+}
+
+/// Settings' terminal link choices showed what each choice does under its label, because the choices have
+/// consequences a short label cannot carry, and stacked them so every line stays readable. Specified, in a radio group
+/// of A (chosen, "Opens once") and B ("Passes it on"): each option paints its label, then its description below it;
+/// B sits below A at the same left edge; both report the radio button role, their labels (not their descriptions) as
+/// their names, and A alone checked; resting the pointer on B shows B's hover help. The accessible description is not
+/// in the driver record, so that the visible line is also B's description is the module docs' promise, not checked
+/// here.
+#[gpui::test]
+fn a_described_option_draws_its_line_under_the_label_and_the_group_stacks(cx: &mut TestAppContext) {
+    let spec = GroupSpec {
+        dress: |label, option| match label {
+            "A" => option.description("Opens once"),
+            _ => option.description("Passes it on"),
+        },
+        ..GroupSpec::radio(&[("A", false), ("B", false)], Some("A"))
+    };
+    let (cx, _) = open_group(cx, spec);
+    let nodes = frame(cx);
+    for (label, description, on) in [
+        ("A", "Opens once", gpui::Toggled::True),
+        ("B", "Passes it on", gpui::Toggled::False),
+    ] {
+        let id = format!("choice-{label}");
+        assert_eq!(
+            painted_under(&nodes, &id).0,
+            vec![label.to_string(), description.to_string()],
+            "{label} painted its label, then its description"
+        );
+        let lines: Vec<_> = nodes
+            .iter()
+            .flat_map(|node| node.texts.iter())
+            .filter(|text| text.text == label || text.text == description)
+            .map(|text| text.bounds)
+            .collect();
+        assert!(
+            lines[1].top() >= lines[0].bottom(),
+            "{label}'s description is under its label: {lines:?}"
+        );
+        assert_eq!(
+            reported(&nodes, &id),
+            Some((Some(Role::RadioButton), Some(label.into()), Some(on))),
+            "option {label}"
+        );
+    }
+    let (a, b) = (bounds(cx, "choice-A"), bounds(cx, "choice-B"));
+    assert!(
+        b.top() >= a.bottom() && b.left() == a.left(),
+        "B is stacked under A: {a:?}, {b:?}"
+    );
+    let on_b = center(cx, "choice-B");
+    cx.simulate_mouse_move(on_b, None, Modifiers::none());
+    wait_hover_delay(cx);
+    assert_eq!(tooltip(cx), Some("Use B".into()), "B's hover help shows");
+}
+
+/// The launcher's harness row was a plain row of pressed buttons: each its own tab stop, Enter applying the harness
+/// and launching, and no group around them for assistive technology. The chips look and the generic container role
+/// together port it; a row that took the radio keyboard would let the arrows change the harness, and one that
+/// announced a group would add an announced, named group the old row never had. Specified, with B chosen among A, B
+/// and C drawn as chips in a generic container, with the owner's action: the container reports no role and no name
+/// (the name half holds by construction: the driver record reads a name only from an element with a role); each chip
+/// reports the button role, its label and B alone pressed, is 36 pixels high and sits 8 pixels after the chip before
+/// it; Tab reaches A, B and C in turn; Down neither chooses nor moves; Enter on C chooses it and then runs the action.
+#[gpui::test]
+fn chips_in_a_generic_container_are_pressed_buttons_in_no_group(cx: &mut TestAppContext) {
+    let spec = GroupSpec {
+        role: Role::GenericContainer,
+        look: RadioGroup::chips,
+        with_enter: true,
+        ..GroupSpec::radio(&[("A", false), ("B", false), ("C", false)], Some("B"))
+    };
+    let (cx, owner) = open_group(cx, spec);
+    let nodes = frame(cx);
+    assert_eq!(
+        reported(&nodes, "choice"),
+        Some((None, None, None)),
+        "the row is no group: no role, no name"
+    );
+    for (label, on) in [
+        ("A", gpui::Toggled::False),
+        ("B", gpui::Toggled::True),
+        ("C", gpui::Toggled::False),
+    ] {
+        assert_eq!(
+            reported(&nodes, &format!("choice-{label}")),
+            Some((Some(Role::Button), Some(label.into()), Some(on))),
+            "chip {label}"
+        );
+    }
+    let chips = [
+        bounds(cx, "choice-A"),
+        bounds(cx, "choice-B"),
+        bounds(cx, "choice-C"),
+    ];
+    for chip in &chips {
+        assert!(
+            (chip.size.height.as_f32() - 36.).abs() < 0.5,
+            "a chip is 36 pixels high: {chip:?}"
+        );
+    }
+    for pair in chips.windows(2) {
+        assert!(
+            ((pair[1].left() - pair[0].right()).as_f32() - 8.).abs() < 0.5,
+            "chips are 8 pixels apart: {pair:?}"
+        );
+    }
+    for id in ["before", "choice-A", "choice-B", "choice-C"] {
+        press_and_draw(cx, "tab");
+        assert_eq!(focused_id(cx).as_deref(), Some(id), "Tab reached {id}");
+    }
+    press_and_draw(cx, "down");
+    assert_eq!(owner.chosen.get(), Some("B"), "Down chose nothing");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("choice-C"),
+        "and moved nothing"
+    );
+    press_and_draw(cx, "enter");
+    assert_eq!(
+        *owner.launched_with.borrow(),
+        vec![Some("C")],
+        "Enter chose C, then ran the action"
+    );
 }
 
 // ---- The select ---------------------------------------------------------------------------------------------------
