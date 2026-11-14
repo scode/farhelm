@@ -101,8 +101,17 @@ pub(crate) fn install(cx: &mut App, mac: bool) {
 
 /// Window commands act on the key window, as AppKit's own items do. With none (every window minimized, say) they do
 /// nothing; a window that went away meanwhile is not an error.
-fn with_active_window(cx: &mut App, act: impl FnOnce(&mut gpui::Window)) {
-    if let Some(window) = cx.active_window() {
-        let _ = window.update(cx, |_, window, _| act(window));
-    }
+///
+/// Deferred, because GPUI dispatches a menu item's action (and a key's) from inside the active window's own update, and
+/// GPUI refuses to update a window from inside its own update (it answers "window not found"): done at once, Zoom,
+/// Minimize and Toggle Full Screen did nothing at all from the menu (found on the test Mac, 2026-11-14). A refusal is
+/// logged rather than dropped, so another such case shows in the log.
+fn with_active_window(cx: &mut App, act: impl FnOnce(&mut gpui::Window) + 'static) {
+    cx.defer(move |cx| {
+        if let Some(window) = cx.active_window()
+            && let Err(error) = window.update(cx, |_, window, _| act(window))
+        {
+            tracing::debug!(%error, "a window command found no window to act on");
+        }
+    });
 }
