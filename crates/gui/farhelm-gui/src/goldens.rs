@@ -36,6 +36,7 @@ use crate::components::{
 };
 use crate::components::{RadioGroup, RadioOption};
 use crate::components::{Select, SelectOption};
+use crate::components::{TabOption, TabStrip};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -371,6 +372,72 @@ fn dialog(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
     .into_any_element()
 }
 
+/// The dialog frame as the session launcher draws it: the icon tile before the title, a width of its own, a summary
+/// leading the answers' row and a notice pinned above it. Pins the tile's icon, which paints only with a color set on
+/// the svg itself, and the footer's layout with a lead.
+fn dialog_launcher_frame(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    let help = |text: &'static str| HoverHelp::tooltip(text);
+    DialogFrame::new(
+        "launch",
+        "New session",
+        div().child("The launcher's fields go here."),
+        vec![
+            Button::new(
+                "cancel",
+                "Cancel",
+                help("Golden scene button"),
+                Role::Button,
+            )
+            .tier(Tier::Neutral),
+            Button::new(
+                "reset",
+                "Reset choices",
+                help("Golden scene button"),
+                Role::Button,
+            )
+            .tier(Tier::Neutral),
+            Button::new(
+                "launch",
+                "Launch host1",
+                help("Golden scene button"),
+                Role::Button,
+            )
+            .content("Launch")
+            .tier(Tier::Primary)
+            .refused(true),
+        ],
+    )
+    .summary("Start an agent or a command on any host")
+    .tile(
+        gpui::svg()
+            .path(Icon::Launch.path())
+            .size(px(22.))
+            .text_color(crate::theme::color(crate::theme::palette(cx).fg_0)),
+    )
+    .width(px(600.))
+    // The launcher's footer summary is 12-pixel text and its notice 13-pixel, as here.
+    .footer_lead(
+        div()
+            .flex()
+            .flex_col()
+            .text_size(crate::theme::metrics::TEXT_SM)
+            .child("Codex · host1 · ~/src/farhelm")
+            .child("Model: Default · Effort: Default · Permissions: Default"),
+    )
+    .notices(
+        div()
+            .text_size(crate::theme::metrics::TEXT_MD)
+            .child("Not launched. Choose a structured harness before launching"),
+    )
+    .close(
+        "Close session launcher",
+        help("Golden scene button"),
+        false,
+        |_, _, _| {},
+    )
+    .into_any_element()
+}
+
 /// The tooltip scene's help: long enough to wrap inside the tooltip's 280-pixel cap.
 const RESTART_HELP: &str = "Stop the agent and start it again in the same terminal, keeping the session's history and working directory.";
 
@@ -441,6 +508,24 @@ fn focus_ring_setup(_: &SceneState, window: &mut Window, cx: &mut App) {
         }),
         cx,
     );
+}
+
+/// The tab strip as the launcher draws it: Agent chosen, Command not (`.launch-kind-tabs`).
+fn tab_strip(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    let help = |text: &'static str| HoverHelp::tooltip(text);
+    div()
+        .w(px(280.))
+        .child(
+            TabStrip::new("launch-kind", "Launch kind", help("Golden scene group"))
+                .tab(TabOption::new("Agent", help("Golden scene tab"), "agent"))
+                .tab(TabOption::new(
+                    "Command",
+                    help("Golden scene tab"),
+                    "command",
+                ))
+                .chosen("agent"),
+        )
+        .into_any_element()
 }
 
 /// The segmented control both ways the old app used it: a radio group (Appearance's theme) and a button group (the
@@ -1857,6 +1942,18 @@ static SCENES: &[Scene] = &[
         size: (364., 418.),
         draw: hosts_panels,
         setup: hosts_panel_host_unreachable_setup,
+    },
+    Scene {
+        name: "tab-strip",
+        size: (320., 60.),
+        draw: tab_strip,
+        setup: no_setup,
+    },
+    Scene {
+        name: "dialog-launcher-frame",
+        size: (640., 340.),
+        draw: dialog_launcher_frame,
+        setup: no_setup,
     },
 ];
 

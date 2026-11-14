@@ -208,7 +208,7 @@ impl LaunchDraft {
 
     /// The initial prompt this launch sends: only on the Agent tab, only when the agent type can take one (or none is
     /// chosen yet), and only when it is not empty. Text kept while that does not hold stays in the draft unsent.
-    fn active_prompt(&self) -> Option<&str> {
+    pub(super) fn active_prompt(&self) -> Option<&str> {
         let supported = self
             .agent
             .harness
@@ -380,7 +380,7 @@ fn selection_is_compatible(selection: &LaunchSelection, catalog: &[LaunchCatalog
 }
 
 /// A shared rule's error as the launcher shows it: the same words with a capital first letter.
-fn capitalized(text: &str) -> String {
+pub(super) fn capitalized(text: &str) -> String {
     let mut chars = text.chars();
     match chars.next() {
         Some(first) => first.to_uppercase().chain(chars).collect(),

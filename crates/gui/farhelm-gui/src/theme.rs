@@ -107,6 +107,10 @@ pub struct Palette {
     pub warn_bright: Token,
     /// `--warn-bg`: the filled amber band behind the truncated-list warning.
     pub warn_bg: Token,
+    /// `--warn-bg-dim`: the quieter amber band, behind the launcher's refused-launch alert.
+    pub warn_bg_dim: Token,
+    /// `--warn-border`: the edge of an amber band, around the launcher's refused-launch alert.
+    pub warn_border: Token,
     /// `--danger`: the red text tone of destructive actions and waiting.
     pub danger: Token,
     /// `--danger-strong`: failure prose on ordinary surfaces.
@@ -176,6 +180,8 @@ pub const DARK: Palette = Palette {
     warn: rgb_token(0xe5bb6e),
     warn_bright: rgb_token(0xead09b),
     warn_bg: rgb_token(0x3d3424),
+    warn_bg_dim: rgb_token(0x302b23),
+    warn_border: rgb_token(0x6a5533),
     danger: rgb_token(0xee8a8a),
     danger_strong: rgb_token(0xf09595),
     danger_soft: rgb_token(0xf2c0c4),
@@ -234,6 +240,8 @@ pub const LIGHT: Palette = Palette {
     warn: rgb_token(0x79531b),
     warn_bright: rgb_token(0x694719),
     warn_bg: rgb_token(0xfff0d2),
+    warn_bg_dim: rgb_token(0xfaf2e3),
+    warn_border: rgb_token(0xd6bc87),
     danger: rgb_token(0xa63e4d),
     danger_strong: rgb_token(0xa13443),
     danger_soft: rgb_token(0xf2c0c4),

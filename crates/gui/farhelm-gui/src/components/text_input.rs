@@ -68,7 +68,7 @@ use std::rc::Rc;
 use gpui::{
     App, AppContext as _, Context, ElementId, Entity, FocusHandle, Focusable as _,
     InteractiveElement, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Subscription,
-    Window, div,
+    Window, div, prelude::FluentBuilder as _,
 };
 use gpui_component::input::{
     Enter, Input, InputEvent, InputState, MoveDown, MoveUp, Textarea, TextareaState,
@@ -317,6 +317,8 @@ pub struct TextInput {
     help: HoverHelp,
     /// Who takes Up and Down instead of Kit, if anyone ([`TextInput::on_vertical`]).
     on_vertical: Option<VerticalHandler>,
+    /// Drawn in the monospace face ([`TextInput::monospace`]).
+    monospace: bool,
 }
 
 /// What a field hands Up and Down to ([`TextInput::on_vertical`]).
@@ -343,7 +345,16 @@ impl TextInput {
             label: label.into(),
             help,
             on_vertical: None,
+            monospace: false,
         }
+    }
+
+    /// Draw the text in the monospace face, as the old launcher drew its paths, model ids, wrapper prefix and command
+    /// lines (`var(--font-mono)`, JetBrains Mono, which the app bundles for the terminal). One-line fields only: no
+    /// multi-line field has needed it, so the other kinds ignore it.
+    pub fn monospace(mut self) -> Self {
+        self.monospace = true;
+        self
     }
 
     /// Hand Up and Down to `handler` instead of letting Kit take them (the module docs, "Up and Down"). Every press and
@@ -400,7 +411,10 @@ impl RenderOnce for TextInput {
                     .aria_label(self.label)
                     .bg(theme::color(palette.well))
                     .rounded(metrics::RADIUS_SM)
-                    .text_size(metrics::TEXT_MD),
+                    .text_size(metrics::TEXT_MD)
+                    .when(self.monospace, |input| {
+                        input.font_family(crate::assets::TERMINAL_FONT)
+                    }),
             ),
             Field::Row(area) => wrapper
                 // Kit's text area breaks the line on Shift+Enter even when Enter submits. Caught on the way down,

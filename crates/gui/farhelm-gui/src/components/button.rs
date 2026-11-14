@@ -112,6 +112,8 @@ pub struct Button {
     disabled: bool,
     /// Whether the button's action is in flight: drawn as unavailable, ignoring activation, but still focusable.
     busy: bool,
+    /// Whether the button's action would be refused now: drawn as unavailable, but still pressed ([`Button::refused`]).
+    refused: bool,
     /// Whether what the button opens is open; `None` for a button that opens nothing.
     expanded: Option<bool>,
     /// Whether the button's choice is the one in force; `None` for a button that is not a choice.
@@ -143,6 +145,7 @@ impl Button {
             show_label: true,
             disabled: false,
             busy: false,
+            refused: false,
             expanded: None,
             pressed: None,
             content: None,
@@ -178,6 +181,16 @@ impl Button {
     /// it (Rename's Save checks its draft).
     pub fn busy(mut self, busy: bool) -> Self {
         self.busy = busy;
+        self
+    }
+
+    /// A main action that would be refused now (the launcher's Launch while its draft is incomplete): drawn as
+    /// unavailable, with the retired fill for primary and danger, but still focusable and still pressed, so a press
+    /// runs the handler, which says why nothing happened. The old launcher's submit button was `aria-disabled` rather
+    /// than `disabled` for exactly this (`create_form.rs` at reference commit `24bc0580`; SPEC.md, "Creation": "an
+    /// incomplete attempt says why beside Launch, as does a refused Launch press").
+    pub fn refused(mut self, refused: bool) -> Self {
+        self.refused = refused;
         self
     }
 
@@ -277,8 +290,8 @@ impl Button {
             Tier::Rail => (None, palette.bg_2, None, palette.fg_1),
             Tier::Nav => (None, palette.control_hover, None, palette.fg_0),
             Tier::Link => (None, theme::TRANSPARENT, None, palette.link),
-            Tier::Primary if self.disabled || self.busy => retired,
-            Tier::Danger if self.disabled || self.busy => retired,
+            Tier::Primary if self.disabled || self.busy || self.refused => retired,
+            Tier::Danger if self.disabled || self.busy || self.refused => retired,
             Tier::Primary => (
                 Some(palette.accent_fill),
                 palette.accent_fill_hover,

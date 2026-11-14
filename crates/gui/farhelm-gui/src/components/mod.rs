@@ -26,6 +26,7 @@ mod radio_group;
 mod scrollbar;
 mod select;
 mod status_mark;
+mod tab_strip;
 mod text_input;
 
 #[cfg(test)]
@@ -45,6 +46,7 @@ pub use radio_group::{RadioGroup, RadioOption};
 pub use scrollbar::{SCROLLBAR_WIDTH, Scrollbar, ScrollbarEvent, ScrollbarLines};
 pub use select::{Select, SelectOption};
 pub use status_mark::StatusMark;
+pub use tab_strip::{TabOption, TabStrip};
 pub use text_input::{TextInput, TextInputEvent, TextInputState, Vertical};
 
 use std::rc::Rc;

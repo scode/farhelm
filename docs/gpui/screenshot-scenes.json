@@ -442,6 +442,16 @@
       "reference": "launcher-codex-choices"
     },
     {
+      "golden": "tab-strip",
+      "title": "The launcher's Agent and Command tabs, Agent chosen",
+      "reference": "launcher-command"
+    },
+    {
+      "golden": "dialog-launcher-frame",
+      "title": "The dialog frame as the launcher draws it: icon tile, footer summary and a pinned notice",
+      "reference": "launcher-agent"
+    },
+    {
       "golden": "host-text",
       "title": "Host-supplied text, escaped",
       "reference": null

@@ -18,6 +18,9 @@
 //! the old stylesheet): an icon tile left of the title ([`DialogFrame::tile`]), a note at the footer's left beside the
 //! answers ([`DialogFrame::note`]), and Settings alone a size of its own that does not follow its content
 //! ([`DialogFrame::width`], [`DialogFrame::fixed_height`]), so switching sections never moves the frame or its Close.
+//! The session launcher's footer had two more parts (`.launch-composer-footer`): a summary of what its main action
+//! would start, beside the answers ([`DialogFrame::footer_lead`]), and a region above them for what a press of an
+//! answer has to say ([`DialogFrame::notices`]).
 //!
 //! NOTE: The old Close changed only its color on hover; here it is a ghost icon button, which gets the ghost tier's
 //! hover fill. The old one was a 20-pixel "×" character; here it is the close icon at the icon buttons' size.
@@ -43,6 +46,13 @@ const TILE: f32 = 44.;
 /// `.host-settings-footer > span`: the footer note's text size.
 const NOTE_TEXT: f32 = 11.;
 
+/// `.launch-composer-notices`: the footer's notices give up height before the actions do, at most about a quarter of
+/// the window (`max-height: 24dvh`).
+const NOTICES_MAX_SHARE: f32 = 0.24;
+
+/// `.launch-composer-footer-summary`: a footer lead's basis (`flex: 1 1 220px`) before the row wraps the answers.
+const FOOTER_LEAD_BASIS: f32 = 220.;
+
 /// A dialog's frame. The title is the accessible name, and is always the app's own words; the summary may name a host
 /// value through a [`Line`], which then is a labelled node of its own inside the dialog. The answers are drawn
 /// right-aligned in the order given, the old footer's order (Cancel first, the main action last).
@@ -58,6 +68,8 @@ pub struct DialogFrame {
     note: Option<SharedString>,
     width: Option<Pixels>,
     fixed_height: Option<Pixels>,
+    footer_lead: Option<AnyElement>,
+    notices: Option<AnyElement>,
 }
 
 impl DialogFrame {
@@ -79,6 +91,8 @@ impl DialogFrame {
             note: None,
             width: None,
             fixed_height: None,
+            footer_lead: None,
+            notices: None,
         }
     }
 
@@ -139,6 +153,23 @@ impl DialogFrame {
     /// dialog whose body changes under the user, as Settings' sections do, so the frame and its controls stay put.
     pub fn fixed_height(mut self, height: Pixels) -> Self {
         self.fixed_height = Some(height);
+        self
+    }
+
+    /// Something drawn at the start of the answers' row, taking the room the answers leave (the launcher's summary of
+    /// what Launch would start, `.launch-composer-footer-summary`). Unlike [`Self::note`], a short line of the
+    /// dialog's own words, it is any element; a frame has one or the other, and a note wins.
+    pub fn footer_lead(mut self, lead: impl IntoElement) -> Self {
+        self.footer_lead = Some(lead.into_any_element());
+        self
+    }
+
+    /// A region above the answers' row for what pressing an answer has to say (the launcher's refusal beside Launch,
+    /// later its YOLO question). It is pinned with the answers rather than scrolling with the body, so a refusal is
+    /// always seen beside the action that caused it, and it scrolls on its own once taller than about a quarter of the
+    /// window (`.launch-composer-notices`), so long text never pushes the answers away.
+    pub fn notices(mut self, notices: impl IntoElement) -> Self {
+        self.notices = Some(notices.into_any_element());
         self
     }
 }
@@ -214,21 +245,23 @@ impl RenderOnce for DialogFrame {
             .text_color(theme::color(palette.fg_0))
             .child(self.body);
         let body = focus::scroll_region(body, &body_scroll);
-        let footer = div()
-            .debug_selector(|| format!("{}-answers", self.id))
+        let answers = div()
             .flex()
-            .flex_shrink_0()
-            .items_center()
             .flex_wrap()
-            .py(foot_y)
-            .px(foot_x)
-            .bg(theme::color(palette.bg_1))
-            .border_t_1()
-            .border_color(theme::color(palette.border_dim));
-        let footer = match self.note {
+            .justify_end()
+            .items_center()
+            .gap(px(8.))
+            .children(self.answers);
+        // The answers' row. Every shape lets the answers wrap at the footer's width: a row item never shrinks below its
+        // content unless told to (`min_w_0`), and answers that cannot wrap are cut at the frame's start edge, Cancel
+        // first.
+        let row = match (self.note, self.footer_lead) {
             // `.host-settings-footer`: the note and the answers at either end, 12 pixels apart at least, the answers
             // wrapping below the note when the row is too narrow for both.
-            Some(note) => footer
+            (Some(note), _) => div()
+                .flex()
+                .flex_wrap()
+                .items_center()
                 .justify_between()
                 .gap(px(12.))
                 .child(
@@ -238,16 +271,52 @@ impl RenderOnce for DialogFrame {
                         .text_color(theme::color(palette.fg_1))
                         .child(note),
                 )
+                .child(answers.min_w_0()),
+            // `.launch-composer-footer-row`: the lead takes the room the answers leave and is cut rather than wrapped,
+            // 16 pixels from them; the answers wrap onto a line of their own, 8 pixels below, when both do not fit.
+            (None, Some(lead)) => div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .justify_end()
+                .gap_x(px(16.))
+                .gap_y(px(8.))
                 .child(
                     div()
-                        .flex()
-                        .flex_wrap()
-                        .justify_end()
-                        .gap(px(8.))
-                        .children(self.answers),
-                ),
-            None => footer.justify_end().gap(px(8.)).children(self.answers),
+                        .flex_1()
+                        .flex_basis(px(FOOTER_LEAD_BASIS))
+                        .min_w_0()
+                        .child(lead),
+                )
+                .child(answers.min_w_0()),
+            // The answers alone, stretched across the footer, right-aligned.
+            (None, None) => answers,
         };
+        // A scroll region like the body, so a control inside (a question's answers) is scrolled into view when focus
+        // reaches it.
+        let notices = self.notices.map(|notices| {
+            let scroll = scroll_handle(format!("{}-notices-scroll", self.id), window, cx);
+            let region = div()
+                .id(ElementId::Name(format!("{}-notices", self.id).into()))
+                .debug_selector(|| format!("{}-notices", self.id))
+                .max_h(window.viewport_size().height * NOTICES_MAX_SHARE)
+                .overflow_y_scroll()
+                .child(notices);
+            focus::scroll_region(region, &scroll)
+        });
+        let footer = div()
+            .debug_selector(|| format!("{}-answers", self.id))
+            .flex()
+            .flex_col()
+            .flex_shrink_0()
+            .gap(px(8.))
+            .py(foot_y)
+            .px(foot_x)
+            .bg(theme::color(palette.bg_1))
+            .border_t_1()
+            .border_color(theme::color(palette.border_dim))
+            .children(notices)
+            .child(row);
 
         let card = div()
             .id(ElementId::Name(self.id.clone()))

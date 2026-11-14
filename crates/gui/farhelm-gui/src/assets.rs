@@ -105,6 +105,8 @@ pub enum Icon {
     /// Two opposed arrows: start the session over under the same settings (the old app's Replace glyph). Deliberately
     /// not a circular arrow, which reads as resuming, so Replace and a later Restart never look alike beside each other.
     Replace,
+    /// A small rocket: start a session (the old app's Launch glyph, on the session launcher's header tile).
+    Launch,
     /// The first of the host marks, one per `HostIcon` a user can choose for a host
     /// (`farhelm_proto::host_appearance`), in that enum's order. The cloud is a remote host's default.
     HostCloud,
@@ -156,6 +158,7 @@ impl Icon {
         Icon::Check,
         Icon::Stop,
         Icon::Replace,
+        Icon::Launch,
         Icon::HostCloud,
         Icon::HostHouse,
         Icon::HostFlask,
@@ -196,6 +199,7 @@ impl Icon {
             Icon::Check => "icons/check.svg",
             Icon::Stop => "icons/stop.svg",
             Icon::Replace => "icons/replace.svg",
+            Icon::Launch => "icons/launch.svg",
             Icon::HostCloud => "icons/host-cloud.svg",
             Icon::HostHouse => "icons/host-house.svg",
             Icon::HostFlask => "icons/host-flask.svg",
@@ -244,6 +248,7 @@ impl Assets {
             "icons/check.svg" => Some(include_bytes!("../assets/icons/check.svg")),
             "icons/stop.svg" => Some(include_bytes!("../assets/icons/stop.svg")),
             "icons/replace.svg" => Some(include_bytes!("../assets/icons/replace.svg")),
+            "icons/launch.svg" => Some(include_bytes!("../assets/icons/launch.svg")),
             "icons/host-cloud.svg" => Some(include_bytes!("../assets/icons/host-cloud.svg")),
             "icons/host-house.svg" => Some(include_bytes!("../assets/icons/host-house.svg")),
             "icons/host-flask.svg" => Some(include_bytes!("../assets/icons/host-flask.svg")),
