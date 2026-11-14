@@ -14,8 +14,8 @@
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::ui_channel::Preferences;
 use gpui::{
-    App, Div, FocusHandle, InteractiveElement as _, ParentElement as _, Role, Stateful,
-    StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    App, Div, FocusHandle, InteractiveElement as _, ParentElement as _, Role, SharedString,
+    Stateful, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
 use crate::components::{Checkbox, HoverHelp};
@@ -25,12 +25,12 @@ use crate::theme::{self, metrics};
 
 /// The old labels' size: the browser's default 16 pixels, which the Settings rows inherited (the stylesheet's own
 /// comment calls them "the 16px field labels").
-const LABEL_TEXT: f32 = 16.;
+pub(super) const LABEL_TEXT: f32 = 16.;
 /// The labels' line: `line-height: normal` at 16 pixels in the bundled face, which keeps a row as high as its 20-pixel
 /// switch, as in the old app. GPUI's default line is taller, and would push each help paragraph down from its label.
-const LABEL_LINE_HEIGHT: f32 = 19.4;
+pub(super) const LABEL_LINE_HEIGHT: f32 = 19.4;
 /// `.host-settings-help`'s line height in Settings: `line-height: 1.6` at its 12 pixels.
-const HELP_LINE_HEIGHT: f32 = 19.2;
+pub(super) const HELP_LINE_HEIGHT: f32 = 19.2;
 /// `.host-settings-section .setting-group`'s gap: a description sits this close under its own label.
 const GROUP_GAP: f32 = 4.;
 
@@ -49,6 +49,14 @@ pub(super) enum Choice {
     SkipHostSetupConfirmation,
     /// Hosts: Remove hosts without asking, on when the removal confirmation is skipped.
     SkipHostRemoveConfirmation,
+    /// Agent trust: Show the hint when Claude asks about a managed checkout. On unless the shared dismissal is stored,
+    /// so the switch is the dismissal inverted: turning it off stores `claude_trust_hint_dismissed: true`, which the
+    /// band's Don't show again stores too (SPEC.md: "a shared dismissal, reversible beside the switch").
+    ShowClaudeTrustHint,
+    /// Agent trust: the same for Codex's hint.
+    ShowCodexTrustHint,
+    /// Agent trust: the same for Muse's hint. Pi has no hint, so no switch.
+    ShowMuseTrustHint,
 }
 
 impl Choice {
@@ -60,6 +68,9 @@ impl Choice {
         Choice::AutoUpdateRemoteHosts,
         Choice::SkipHostSetupConfirmation,
         Choice::SkipHostRemoveConfirmation,
+        Choice::ShowClaudeTrustHint,
+        Choice::ShowCodexTrustHint,
+        Choice::ShowMuseTrustHint,
     ];
 
     /// The preference row's field this switch saves, as the wire names it.
@@ -71,13 +82,18 @@ impl Choice {
             Choice::AutoUpdateRemoteHosts => "auto_update_remote_hosts",
             Choice::SkipHostSetupConfirmation => "skip_host_setup_confirmation",
             Choice::SkipHostRemoveConfirmation => "skip_host_remove_confirmation",
+            Choice::ShowClaudeTrustHint => "claude_trust_hint_dismissed",
+            Choice::ShowCodexTrustHint => "codex_trust_hint_dismissed",
+            Choice::ShowMuseTrustHint => "muse_trust_hint_dismissed",
         }
     }
 
     /// Whether the helm's stored choice is on. `preferences` is `None` when the helm pushed no row, which reads as
-    /// nothing chosen. Every field but naming reads unset as off; naming is a positive choice that defaults on, so only
-    /// an explicit `false` turns it off (the old app: "treating an absent value like the confirmation opt-outs would
-    /// disable it", and SPEC.md: on "including when the helm has never stored a choice").
+    /// nothing chosen. Every field but naming and the trust hints reads unset as off; naming is a positive choice that
+    /// defaults on, so only an explicit `false` turns it off (the old app: "treating an absent value like the
+    /// confirmation opt-outs would disable it", and SPEC.md: on "including when the helm has never stored a choice").
+    /// A trust hint's switch shows the hint unless its dismissal is stored `true` (the field's doc: "Unset and false
+    /// both allow the hint").
     pub(super) fn stored(self, preferences: Option<&Preferences>) -> bool {
         let field = preferences.and_then(|preferences| match self {
             Choice::SkipSessionConfirmations => preferences.skip_session_confirmations,
@@ -86,9 +102,15 @@ impl Choice {
             Choice::AutoUpdateRemoteHosts => preferences.auto_update_remote_hosts,
             Choice::SkipHostSetupConfirmation => preferences.skip_host_setup_confirmation,
             Choice::SkipHostRemoveConfirmation => preferences.skip_host_remove_confirmation,
+            Choice::ShowClaudeTrustHint => preferences.claude_trust_hint_dismissed,
+            Choice::ShowCodexTrustHint => preferences.codex_trust_hint_dismissed,
+            Choice::ShowMuseTrustHint => preferences.muse_trust_hint_dismissed,
         });
         match self {
             Choice::NameSessionsOnQuickLaunch => field != Some(false),
+            Choice::ShowClaudeTrustHint
+            | Choice::ShowCodexTrustHint
+            | Choice::ShowMuseTrustHint => field != Some(true),
             Choice::SkipSessionConfirmations
             | Choice::ColorTerminalFrames
             | Choice::AutoUpdateRemoteHosts
@@ -97,9 +119,21 @@ impl Choice {
         }
     }
 
-    /// `PUT /api/preferences` with only this switch's field, set to `on` (see the module docs).
+    /// `PUT /api/preferences` with only this switch's field, set to `on`, or for a trust hint's switch to the dismissal
+    /// `!on` (see the module docs).
     pub(super) fn command(self, on: bool) -> Result<Command, PathError> {
-        patch(self.field(), serde_json::Value::Bool(on))
+        let stored = match self {
+            Choice::ShowClaudeTrustHint
+            | Choice::ShowCodexTrustHint
+            | Choice::ShowMuseTrustHint => !on,
+            Choice::SkipSessionConfirmations
+            | Choice::NameSessionsOnQuickLaunch
+            | Choice::ColorTerminalFrames
+            | Choice::AutoUpdateRemoteHosts
+            | Choice::SkipHostSetupConfirmation
+            | Choice::SkipHostRemoveConfirmation => on,
+        };
+        patch(self.field(), serde_json::Value::Bool(stored))
     }
 
     /// The switch's element id, which tests and the test bridge find it by.
@@ -111,6 +145,9 @@ impl Choice {
             Choice::AutoUpdateRemoteHosts => "settings-auto-update-remote-hosts",
             Choice::SkipHostSetupConfirmation => "settings-skip-host-setup",
             Choice::SkipHostRemoveConfirmation => "settings-skip-host-remove",
+            Choice::ShowClaudeTrustHint => "settings-claude-trust-hint",
+            Choice::ShowCodexTrustHint => "settings-codex-trust-hint",
+            Choice::ShowMuseTrustHint => "settings-muse-trust-hint",
         }
     }
 
@@ -127,6 +164,11 @@ impl Choice {
             Choice::AutoUpdateRemoteHosts => "Update remote hosts automatically",
             Choice::SkipHostSetupConfirmation => "Set up new hosts without asking",
             Choice::SkipHostRemoveConfirmation => "Remove hosts without asking",
+            Choice::ShowClaudeTrustHint => {
+                "Show the hint when Claude asks about a managed checkout"
+            }
+            Choice::ShowCodexTrustHint => "Show the hint when Codex asks about a managed checkout",
+            Choice::ShowMuseTrustHint => "Show the hint when Muse asks about a managed checkout",
         }
     }
 
@@ -150,11 +192,21 @@ impl Choice {
             Choice::SkipHostRemoveConfirmation => {
                 "Forget a host as soon as you choose remove, without asking; its sessions keep running"
             }
+            Choice::ShowClaudeTrustHint => {
+                "Show a note above the terminal when Claude asks whether to trust a new managed checkout"
+            }
+            Choice::ShowCodexTrustHint => {
+                "Show a note above the terminal when Codex asks about trust in a managed checkout"
+            }
+            Choice::ShowMuseTrustHint => {
+                "Show a note above the terminal when Muse asks about trust in a managed checkout"
+            }
         }
     }
 
-    /// The help under the switch, which for the two host switches explains the behavior the shown value gives (SPEC.md:
-    /// "Each switch explains the current behavior").
+    /// The help under the switch, which for the two host switches explains the behavior the shown value gives
+    /// (SPEC.md: "Each switch explains the current behavior"). Empty for the trust hints' switches, which had none in
+    /// the old app; [`group`] then draws no paragraph.
     fn help(self, on: bool) -> &'static str {
         match self {
             Choice::SkipSessionConfirmations => {
@@ -187,6 +239,9 @@ impl Choice {
             Choice::SkipHostRemoveConfirmation => {
                 "Farhelm asks before forgetting a host. Its sessions keep running."
             }
+            Choice::ShowClaudeTrustHint
+            | Choice::ShowCodexTrustHint
+            | Choice::ShowMuseTrustHint => "",
         }
     }
 
@@ -216,6 +271,15 @@ impl Choice {
             }
             Choice::SkipHostRemoveConfirmation => {
                 "Could not save whether to remove hosts without asking. Try again."
+            }
+            Choice::ShowClaudeTrustHint => {
+                "Could not save whether to show the Claude trust hint. Try again."
+            }
+            Choice::ShowCodexTrustHint => {
+                "Could not save whether to show the Codex trust hint. Try again."
+            }
+            Choice::ShowMuseTrustHint => {
+                "Could not save whether to show the Muse trust hint. Try again."
             }
         }
     }
@@ -272,14 +336,15 @@ pub(super) fn failure_line(id: String, text: &'static str, cx: &App) -> Stateful
         .child(text)
 }
 
-/// A help paragraph: the old `.host-settings-help` in Settings, in the quieter text color at its line height.
-pub(super) fn help(text: &'static str, cx: &App) -> Div {
+/// A help paragraph: the old `.host-settings-help` in Settings, in the quieter text color at its line height. Takes
+/// fixed text or text built at run time (Agent trust's).
+pub(super) fn help(text: impl Into<SharedString>, cx: &App) -> Div {
     let palette = theme::palette(cx);
     div()
         .text_size(metrics::TEXT_SM)
         .line_height(px(HELP_LINE_HEIGHT))
         .text_color(theme::color(palette.fg_1))
-        .child(text)
+        .child(text.into())
 }
 
 /// One switch with its help under it and, after a refused save, its failure line under that, all in one group so the
@@ -318,6 +383,10 @@ pub(super) fn group(
                     .on_toggle(on_toggle),
                 ),
         )
-        .child(help(choice.help(shown), cx))
+        .children(
+            Some(choice.help(shown))
+                .filter(|text| !text.is_empty())
+                .map(|text| help(text, cx)),
+        )
         .children(failure.map(|failure| failure_line(choice.error_id(), failure, cx)))
 }

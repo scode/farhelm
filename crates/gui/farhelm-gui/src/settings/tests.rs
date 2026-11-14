@@ -2,7 +2,7 @@
 //! which sections it lists and what switching between them keeps, what each switch sends and shows while its save is
 //! in flight, after a refusal and after the dialog closed.
 //!
-//! The dialog is opened the way the sidebar's gear will open it: a button in a root view of the test's own, whose click
+//! The dialog is opened the way the host rail's gear opens it: a button in a root view of the test's own, whose click
 //! takes a mark and calls [`super::open`] with its own focus handle. Every step ends in one of the shared harness's step
 //! helpers, so the focus and layer invariants are checked after each.
 
@@ -17,8 +17,8 @@ use gpui::{
 };
 use serde_json::{Value, json};
 
-use super::Section;
 use super::choices::Choice;
+use super::{Section, TrustAgent};
 use crate::components::{Button, HoverHelp, Role};
 use crate::focus::{self, Mark};
 use crate::main_view::MainView;
@@ -30,7 +30,7 @@ use crate::{layers, root, session, theme};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
-/// The root view the tests open Settings from: the gear the sidebar will draw on its host rail, as a plain button with
+/// The root view the tests open Settings from: the gear the sidebar draws on its host rail, as a plain button with
 /// a focus handle the test holds, after another control ("elsewhere", standing in for whatever held focus before the
 /// gear was clicked, the terminal usually).
 struct Rail {
@@ -74,6 +74,7 @@ fn section_button(section: Section) -> &'static str {
         Section::Hosts => "settings-section-hosts",
         Section::Appearance => "settings-section-appearance",
         Section::Terminal => "settings-section-terminal",
+        Section::AgentTrust => "settings-section-agent-trust",
     }
 }
 
@@ -209,11 +210,11 @@ fn the_gear_opens_settings_at_sessions_with_focus_on_its_first_switch(cx: &mut T
     );
 }
 
-/// SPEC.md lists every section, but this build has only Sessions, Appearance, Hosts and Terminal; listing a section
-/// with nothing behind it would offer a button that shows an empty pane. The list follows SPEC.md's order ("Sessions,
-/// Appearance, Hosts, Recipes, Tensorlake, Containers, Credentials, Terminal, ..."), and the button of the shown
-/// section is the pressed one. Specified: the section list holds exactly the Sessions, Appearance, Hosts and Terminal
-/// buttons, in that order, Sessions pressed and the others not.
+/// SPEC.md lists every section, but this build has only Sessions, Appearance, Hosts, Terminal and Agent trust; listing
+/// a section with nothing behind it would offer a button that shows an empty pane. The list follows SPEC.md's order
+/// ("Sessions, Appearance, Hosts, Recipes, Tensorlake, Containers, Credentials, Terminal, Checkouts, Agent trust ..."),
+/// and the button of the shown section is the pressed one. Specified: the section list holds exactly the Sessions,
+/// Appearance, Hosts, Terminal and Agent trust buttons, in that order, Sessions pressed and the others not.
 #[gpui::test]
 fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
     let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
@@ -241,6 +242,7 @@ fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
             ("Appearance".to_string(), Some(Toggled::False)),
             ("Hosts".to_string(), Some(Toggled::False)),
             ("Terminal".to_string(), Some(Toggled::False)),
+            ("Agent trust".to_string(), Some(Toggled::False)),
         ]
     );
 }
@@ -495,9 +497,11 @@ fn a_refused_save_restores_the_stored_value_and_shows_the_error_beside_the_switc
 }
 
 /// SPEC.md: "Name sessions on quick launch is on by default, including when the helm has never stored a choice", while
-/// every other switch here reads an unset field as off. Reading naming like the opt-outs would turn naming off on every
-/// upgraded helm. Specified: with no preference row, an empty one, and one storing `false`, naming reads on, on and
-/// off; every other switch reads off when unset and on when stored `true`.
+/// every other switch here but the trust hints' reads an unset field as off, and a trust hint's shows the hint unless
+/// its dismissal is stored `true`. Reading naming like the opt-outs would turn naming off on every upgraded helm.
+/// Specified: with no preference row, an empty one, and one storing `false`, naming reads on, on and off; every other
+/// switch but the trust hints' reads off when unset and on when stored `true`; each trust hint's switch reads on when
+/// unset or stored `false`, and off when stored `true`.
 #[test]
 fn name_sessions_on_quick_launch_reads_as_on_when_the_helm_stored_no_choice() {
     let empty = Preferences::default();
@@ -517,12 +521,43 @@ fn name_sessions_on_quick_launch_reads_as_on_when_the_helm_stored_no_choice() {
         "skip_host_remove_confirmation": true,
     }))
     .unwrap();
-    for &choice in Choice::ALL.iter().filter(|&&choice| choice != naming) {
+    let hints = [
+        Choice::ShowClaudeTrustHint,
+        Choice::ShowCodexTrustHint,
+        Choice::ShowMuseTrustHint,
+    ];
+    for &choice in Choice::ALL
+        .iter()
+        .filter(|&&choice| choice != naming && !hints.contains(&choice))
+    {
         assert!(
             !choice.stored(None) && !choice.stored(Some(&empty)),
             "{choice:?} reads unset as off"
         );
         assert!(choice.stored(Some(&all_on)), "{choice:?} reads true as on");
+    }
+    // A hint's switch is its dismissal inverted: "Unset and false both allow the hint".
+    let dismissed = |value: bool| -> Preferences {
+        serde_json::from_value(json!({
+            "claude_trust_hint_dismissed": value,
+            "codex_trust_hint_dismissed": value,
+            "muse_trust_hint_dismissed": value,
+        }))
+        .unwrap()
+    };
+    for hint in hints {
+        assert!(
+            hint.stored(None) && hint.stored(Some(&empty)),
+            "{hint:?} shows the hint unset"
+        );
+        assert!(
+            hint.stored(Some(&dismissed(false))),
+            "{hint:?} shows the hint for an explicit false"
+        );
+        assert!(
+            !hint.stored(Some(&dismissed(true))),
+            "{hint:?} hides the hint once dismissed"
+        );
     }
 }
 
@@ -1111,4 +1146,356 @@ fn the_agent_builds_start_hook_wins_over_the_stored_appearance(cx: &mut TestAppC
     assert!(dark(cx), "the snapshot's Light did not replace the hook");
     push(&mut helm, &Preferences::default(), cx);
     assert!(dark(cx));
+}
+
+// ---- Agent trust ---------------------------------------------------------------------------------------------------
+
+/// The trust reads the window sent since the last call, as (id, path), all GETs.
+fn trust_reads(helm: &mut FakeHelm) -> Vec<(u64, String)> {
+    sent(helm)
+        .into_iter()
+        .map(|command| {
+            assert_eq!(command.method, Method::Get, "only reads: {command:?}");
+            (command.id, command.path)
+        })
+        .collect()
+}
+
+/// The four trust routes, in the section's order.
+const TRUST_PATHS: [&str; 4] = [
+    "/api/checkout-claude-trust",
+    "/api/checkout-agent-trust/codex",
+    "/api/checkout-agent-trust/muse",
+    "/api/checkout-agent-trust/pi",
+];
+
+/// Answer `reads` (in the section's order) with each agent's trust as `enabled`, the hint not dismissed.
+fn answer_trust<const N: usize>(
+    helm: &mut FakeHelm,
+    reads: &[(u64, String)],
+    enabled: [bool; N],
+    cx: &mut VisualTestContext,
+) {
+    for ((id, _), enabled) in reads.iter().zip(enabled) {
+        helm.reply(
+            *id,
+            200,
+            Some(json!({ "enabled": enabled, "hint_dismissed": false })),
+        );
+    }
+    settle(cx);
+}
+
+/// Open Settings and show Agent trust, returning the reads that sent.
+fn show_agent_trust(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<(u64, String)> {
+    open_settings(cx);
+    assert_eq!(sent(helm), [], "the premise: Sessions reads nothing");
+    click(cx, "settings-section-agent-trust");
+    assert_eq!(heading(cx).as_deref(), Some("Agent trust"));
+    trust_reads(helm)
+}
+
+/// The trust switches live behind routes the helm does not push, so the section reads them once when it is shown, and
+/// SPEC.md: "Failed settings reads never count as an off switch": a switch must not offer a toggle over a choice it
+/// does not know. Specified: showing Agent trust sends one GET per agent, in the section's order; until they answer,
+/// a click on a switch sends nothing; once answered (Claude on, the others off), each switch shows its agent's choice,
+/// and showing another section and Agent trust again reads nothing more.
+#[gpui::test]
+fn agent_trust_reads_each_agent_once_when_shown_and_waits_for_the_answer(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let reads = show_agent_trust(&mut helm, cx);
+    let paths: Vec<&str> = reads.iter().map(|(_, path)| path.as_str()).collect();
+    assert_eq!(paths, TRUST_PATHS);
+    click(cx, TrustAgent::Claude.id());
+    assert_eq!(sent(&mut helm), [], "an unknown choice takes no toggle");
+
+    answer_trust(&mut helm, &reads, [true, false, false, false], cx);
+    let shown: Vec<Option<bool>> = TrustAgent::ALL
+        .iter()
+        .map(|agent| switch_on(cx, agent.id()))
+        .collect();
+    assert_eq!(shown, [Some(true), Some(false), Some(false), Some(false)]);
+    click(cx, "settings-section-hosts");
+    click(cx, "settings-section-agent-trust");
+    assert_eq!(sent(&mut helm), [], "read once per opening");
+}
+
+/// Open Settings at Agent trust for `agent`, as its trust hint does, answer the reads with every agent's trust off, and
+/// check that `agent`'s switch then holds focus. The trust hint's way in is also the test's way to a switch below the
+/// dialog's fold, which a click cannot reach.
+fn open_trust_at(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    gear: &FocusHandle,
+    agent: TrustAgent,
+) {
+    cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        super::open_at_agent_trust(agent, gear, &mark, window, cx);
+    });
+    settle(cx);
+    let reads = trust_reads(helm);
+    answer_trust(helm, &reads, [false; 4], cx);
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some(agent.id()),
+        "the premise: {agent:?}'s switch has focus"
+    );
+}
+
+/// The failure line drawn under `agent`'s block, by its accessible name.
+fn trust_failure(cx: &mut VisualTestContext, agent: TrustAgent) -> Option<String> {
+    frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(agent.error_id()))
+        .and_then(|node| node.label.map(|label| label.to_string()))
+}
+
+/// A trust switch saves at once through its agent's own route, and the helm's done reply makes it the choice shown;
+/// a refusal restores the choice read before with the helm's reason beside it (SPEC.md, "Errors and diagnostics").
+/// Specified: Codex's switch sends `PUT /api/checkout-agent-trust/codex` with `{"enabled": true}` under the preference
+/// row's key and shows on while it is in flight, then stays on once the helm answers; in a later opening Pi's sends
+/// `{"enabled": true}` to its route and, refused, shows off again with "Could not save or read Pi trust settings:" and
+/// the helm's words.
+#[gpui::test]
+fn a_trust_switch_saves_through_its_route_and_a_refusal_restores_it(cx: &mut TestAppContext) {
+    let (mut helm, cx, gear) = open_rail(cx, &Preferences::default());
+    open_trust_at(&mut helm, cx, &gear, TrustAgent::Codex);
+    keys(cx, "space");
+    let saves = sent(&mut helm);
+    assert_eq!(saves.len(), 1, "one save: {saves:?}");
+    assert_eq!(
+        (
+            saves[0].method,
+            saves[0].path.as_str(),
+            saves[0].body.clone()
+        ),
+        (
+            Method::Put,
+            TRUST_PATHS[1],
+            Some(json!({ "enabled": true }))
+        )
+    );
+    assert_eq!(preference_work(cx), Some(Work::Save));
+    assert_eq!(switch_on(cx, TrustAgent::Codex.id()), Some(true), "pending");
+    helm.reply(saves[0].id, 204, None);
+    settle(cx);
+    assert_eq!(switch_on(cx, TrustAgent::Codex.id()), Some(true), "saved");
+
+    keys(cx, "escape");
+    open_trust_at(&mut helm, cx, &gear, TrustAgent::Pi);
+    keys(cx, "space");
+    let saves = sent(&mut helm);
+    assert_eq!(
+        (saves[0].path.as_str(), saves[0].body.clone()),
+        (TRUST_PATHS[3], Some(json!({ "enabled": true })))
+    );
+    helm.reply(saves[0].id, 503, Some(json!("fixture trust save refused")));
+    settle(cx);
+    assert_eq!(switch_on(cx, TrustAgent::Pi.id()), Some(false), "restored");
+    assert_eq!(
+        trust_failure(cx, TrustAgent::Pi).as_deref(),
+        Some("Could not save or read Pi trust settings: fixture trust save refused")
+    );
+}
+
+/// A failed read must leave the switch unknown, not off, and say why. Specified: Claude's read refused, its switch
+/// takes no click and its block shows "Could not save or read Claude trust settings:" with the helm's words, while
+/// Codex's switch, read fine, shows its choice.
+#[gpui::test]
+fn a_failed_trust_read_leaves_the_switch_unavailable_with_its_reason(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let reads = show_agent_trust(&mut helm, cx);
+    helm.reply(reads[0].0, 503, Some(json!("fixture trust read refused")));
+    answer_trust(&mut helm, &reads[1..], [true; 3], cx);
+    click(cx, TrustAgent::Claude.id());
+    assert_eq!(sent(&mut helm), [], "no toggle over an unknown choice");
+    assert_eq!(
+        trust_failure(cx, TrustAgent::Claude).as_deref(),
+        Some("Could not save or read Claude trust settings: fixture trust read refused")
+    );
+    assert_eq!(switch_on(cx, TrustAgent::Codex.id()), Some(true));
+}
+
+/// A read answers only the opening it was sent for: a slow reply from an earlier opening must not fill in a newer one,
+/// which has its own read in flight. Each opening is a dialog of its own, so this guards against trust state shared
+/// between openings (a cache), not against how the reply holds its dialog. Specified: Agent trust shown, Settings
+/// closed before the reads answer and opened at Agent trust again, which reads again; answering the first opening's
+/// reads (all on) leaves the new switches unknown and off; answering the new ones shows them.
+#[gpui::test]
+fn a_trust_read_reaches_only_the_opening_it_was_sent_for(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let first = show_agent_trust(&mut helm, cx);
+    keys(cx, "escape");
+    let second = show_agent_trust(&mut helm, cx);
+    assert_eq!(second.len(), 4, "the new opening reads again");
+    answer_trust(&mut helm, &first, [true; 4], cx);
+    assert_eq!(
+        switch_on(cx, TrustAgent::Claude.id()),
+        Some(false),
+        "the old answer reached nobody"
+    );
+    click(cx, TrustAgent::Claude.id());
+    assert_eq!(sent(&mut helm), [], "and the switch is still unknown");
+    answer_trust(&mut helm, &second, [true; 4], cx);
+    assert_eq!(switch_on(cx, TrustAgent::Claude.id()), Some(true));
+}
+
+/// SPEC.md: a hint's Don't show again "stores a shared dismissal, reversible beside the switch". The hint switches are
+/// that dismissal inverted, in the shared preference row the band reads. Specified: with nothing stored, Claude's,
+/// Codex's and Muse's hint switches show on and Pi has none; Codex's, reached by Tab from Codex's trust switch and
+/// turned off with Space, sends only `{"codex_trust_hint_dismissed": true}` to `PUT /api/preferences`; a pushed row
+/// dismissing Muse's shows it off.
+#[gpui::test]
+fn the_hint_switches_are_the_shared_dismissals_inverted(cx: &mut TestAppContext) {
+    let (mut helm, cx, gear) = open_rail(cx, &Preferences::default());
+    open_trust_at(&mut helm, cx, &gear, TrustAgent::Codex);
+    for hint in [
+        Choice::ShowClaudeTrustHint,
+        Choice::ShowCodexTrustHint,
+        Choice::ShowMuseTrustHint,
+    ] {
+        assert_eq!(
+            switch_on(cx, hint.id()),
+            Some(true),
+            "{hint:?} shows the hint"
+        );
+    }
+    assert!(!drawn(cx, "settings-pi-trust-hint"), "Pi has no hint");
+    keys(cx, "tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some(Choice::ShowCodexTrustHint.id())
+    );
+    keys(cx, "space");
+    let (id, body) = one_save(&mut helm);
+    assert_eq!(body, json!({ "codex_trust_hint_dismissed": true }));
+    helm.reply(id, 204, None);
+    settle(cx);
+    push(
+        &mut helm,
+        &Preferences {
+            muse_trust_hint_dismissed: Some(true),
+            ..Preferences::default()
+        },
+        cx,
+    );
+    assert_eq!(switch_on(cx, Choice::ShowMuseTrustHint.id()), Some(false));
+}
+
+/// A trust hint's "Settings and caveats" opens Agent trust at its agent's switch (SPEC.md: "Trust hints instead open
+/// agent trust at the relevant switch"), but the switch cannot hold focus until its read answers. Pi's read is
+/// answered last, so a handover keyed on the wrong agent would focus an earlier switch and take focus off the dialog,
+/// and Pi's switch would never get it. The switch is not scrolled into view yet (a recorded deviation), so this checks
+/// focus only. Specified: opened for Pi, Settings shows Agent trust with the dialog itself holding focus;
+/// once the reads answer, Pi's switch holds focus.
+#[gpui::test]
+fn the_trust_hint_entry_point_focuses_its_agents_switch_once_known(cx: &mut TestAppContext) {
+    let (mut helm, cx, gear) = open_rail(cx, &Preferences::default());
+    cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        super::open_at_agent_trust(TrustAgent::Pi, &gear, &mark, window, cx);
+    });
+    settle(cx);
+    assert_eq!(heading(cx).as_deref(), Some("Agent trust"));
+    assert!(
+        dialog_holds_focus(cx),
+        "the dialog itself holds focus while the reads are out"
+    );
+    let reads = trust_reads(&mut helm);
+    answer_trust(&mut helm, &reads, [false; 4], cx);
+    assert_eq!(focused_id(cx).as_deref(), Some(TrustAgent::Pi.id()));
+}
+
+/// Whether the switch drawn under `id` is available, which a disabled switch shows by taking no focus; `None` when it
+/// is not drawn.
+fn switch_available(cx: &mut VisualTestContext, id: &str) -> Option<bool> {
+    frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(id))
+        .map(|node| node.flags.focusable)
+}
+
+/// Whether the topmost dialog itself (its container, not a control in it) holds focus.
+fn dialog_holds_focus(cx: &mut VisualTestContext) -> bool {
+    cx.update(|window, cx| {
+        layers::top_container(window, cx).is_some_and(|container| container.is_focused(window))
+    })
+}
+
+/// SPEC.md, "Keyboard focus": a result that arrives after the user moved on moves no focus. The handover waits on a
+/// read, and the user may tab away first; taking focus back then would yank it from where they put it. Specified:
+/// opened for Codex, with the dialog itself holding focus while the reads are out, a Tab moves focus into the dialog;
+/// once the reads answer, focus stays where the Tab put it and Codex's switch does not take it.
+#[gpui::test]
+fn a_trust_read_that_answers_after_the_user_moved_on_moves_no_focus(cx: &mut TestAppContext) {
+    let (mut helm, cx, gear) = open_rail(cx, &Preferences::default());
+    cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        super::open_at_agent_trust(TrustAgent::Codex, &gear, &mark, window, cx);
+    });
+    settle(cx);
+    assert!(
+        dialog_holds_focus(cx),
+        "the premise: the dialog waits for the read"
+    );
+    let reads = trust_reads(&mut helm);
+    keys(cx, "tab");
+    let moved_to = focused_id(cx);
+    assert!(
+        moved_to.is_some() && !dialog_holds_focus(cx),
+        "the premise: the Tab moved focus to a control: {moved_to:?}"
+    );
+    answer_trust(&mut helm, &reads, [false; 4], cx);
+    assert_eq!(
+        switch_available(cx, TrustAgent::Codex.id()),
+        Some(true),
+        "the premise: the reads answered and Codex's switch is drawn available"
+    );
+    assert_eq!(
+        focused_id(cx),
+        moved_to,
+        "focus stays where the user put it"
+    );
+    assert_ne!(focused_id(cx).as_deref(), Some(TrustAgent::Codex.id()));
+}
+
+/// SPEC.md, "Keyboard focus", counts any click inside Farhelm as moving on, also one that leaves focus where it was:
+/// Settings keeps focus on the dialog when the user clicks its empty space or its words. Only the mark taken at the
+/// hint's click tells that click apart from no input at all, so this pins the handover's mark check (the Tab test
+/// would still pass without it, since a Tab also takes focus off the dialog). Specified: opened for Codex, a click on
+/// the section's heading leaves the dialog itself holding focus; once the reads answer, the dialog still holds focus
+/// and Codex's switch does not take it.
+#[gpui::test]
+fn a_click_that_leaves_focus_on_the_dialog_still_stops_the_trust_handover(cx: &mut TestAppContext) {
+    let (mut helm, cx, gear) = open_rail(cx, &Preferences::default());
+    cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        super::open_at_agent_trust(TrustAgent::Codex, &gear, &mark, window, cx);
+    });
+    settle(cx);
+    let reads = trust_reads(&mut helm);
+    click(cx, "settings-heading");
+    assert!(
+        dialog_holds_focus(cx),
+        "the premise: the click left the dialog itself holding focus"
+    );
+    answer_trust(&mut helm, &reads, [false; 4], cx);
+    assert_eq!(
+        switch_available(cx, TrustAgent::Codex.id()),
+        Some(true),
+        "the premise: the reads answered and Codex's switch is drawn available"
+    );
+    assert!(dialog_holds_focus(cx), "focus stayed on the dialog");
+    assert_ne!(focused_id(cx).as_deref(), Some(TrustAgent::Codex.id()));
+}
+
+/// The dialog keeps each agent's state at the agent's number (`TrustAgent::index`), and draws the section in
+/// `TrustAgent::ALL`'s order; the two are written separately, so a reordering of one would draw an agent with another's
+/// state. Specified: each agent in `ALL` sits at its own number.
+#[test]
+fn trust_agents_are_listed_at_their_own_numbers() {
+    for (place, agent) in TrustAgent::ALL.iter().enumerate() {
+        assert_eq!(agent.index(), place, "{agent:?}");
+    }
 }

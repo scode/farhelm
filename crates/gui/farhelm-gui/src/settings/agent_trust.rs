@@ -1,0 +1,421 @@
+//! Settings → Agent trust: one all-hosts switch per agent whose "trust this folder?" question Farhelm can answer for
+//! managed checkouts (Claude, Codex, Muse and Pi), each with its help, and for the agents that have a discovery hint,
+//! the switch that shows or hides that hint.
+//!
+//! SPEC.md, "Managed checkouts" (the Agent trust paragraphs). Ported from the old app's `ClaudeTrustSettings`
+//! (`claude_trust.rs`) and `WorkspaceTrustSettings` (`workspace_trust.rs`) at reference commit `24bc0580`, with their
+//! labels, help, Claude's caution box and their failure lines. Here's the TLDR of how the section talks to the helm:
+//!
+//! - **The trust switches are helm configuration, not preferences.** Each lives behind its own route
+//!   (`/api/checkout-claude-trust` for Claude, the route the old app used, and `/api/checkout-agent-trust/<agent>` for
+//!   the others), which the helm does not push. So the section reads all four once, when it is first shown in an
+//!   opening of the dialog (the pattern the migration's orchestrator settled for reads that are not pushed), and a
+//!   reply reaches only the opening it was sent for, since it holds that dialog weakly. A switch whose read has not
+//!   answered, or failed, is unavailable rather than shown off: SPEC.md, "Failed settings reads never count as an off
+//!   switch".
+//! - **A trust save goes through the operation store** under [`crate::operations::OpKey::preferences`], the preference
+//!   row's key, although trust is helm configuration, not a preference: the store admits one request per key, and
+//!   helm configuration has no key of its own. Sharing the key means a trust save is refused while any other Settings
+//!   save is in flight (and the other way round), as the module docs of [`super`] describe for the switches. This
+//!   area accepted that on 2026-11-14, under its goal's instruction not to request a key for helm configuration
+//!   before it is needed: the embedded helm answers these saves in milliseconds, so they rarely meet. While it is in
+//!   flight the switch shows the value being saved; a done save becomes the value the section
+//!   holds (the helm acknowledged it), and a refusal shows the value read before with the helm's reason under the
+//!   switch. Nothing is retried or read back.
+//! - **The hint switches are preferences.** Whether a hint was dismissed is a field of the pushed preference row, which
+//!   the hint band reads too, so those switches are ordinary Settings switches ([`super::choices::Choice`]) drawn here.
+//!   The trust routes also answer with the dismissal; the section ignores it and reads the store, which stays current.
+
+use farhelm_helm_client::{ApiPath, Method, PathError};
+use gpui::{
+    AnyElement, App, Div, FocusHandle, FontWeight, InteractiveElement as _, IntoElement,
+    ParentElement as _, Role, StatefulInteractiveElement as _, Styled as _, Window, div,
+    prelude::FluentBuilder as _, px,
+};
+
+use super::choices::{self, Choice, HELP_LINE_HEIGHT, LABEL_LINE_HEIGHT, LABEL_TEXT};
+use crate::components::{Checkbox, HoverHelp};
+use crate::drafts::Draft;
+use crate::host_text::{HostSentence, HostText};
+use crate::operations::{Command, Work};
+use crate::theme::{self, metrics};
+
+/// `.checkout-claude-trust`'s gap between its rows.
+const BLOCK_GAP: f32 = 8.;
+/// `.checkout-claude-trust + .checkout-claude-trust`: the rule's padding above each block after the first.
+const BLOCK_RULE_PAD: f32 = 16.;
+/// `.claude-trust-caution`: its padding, 12-pixel words at `line-height: 1.5`, and its paragraphs 8 pixels apart.
+const CAUTION_PAD: f32 = 12.;
+const CAUTION_LINE_HEIGHT: f32 = 18.;
+const CAUTION_GAP: f32 = 8.;
+
+/// An agent with a managed-checkout trust switch: the GUI's per-agent trust vocabulary. Everything the section does
+/// differently per agent is an exhaustive method here, so a new trust agent needs a decision at each one (AGENTS.md,
+/// "Code rules"; the per-harness map in `crates/farhelm-supervisor/src/agent_kind/mod.rs` names this enum).
+///
+/// The discriminants are each agent's place in [`TrustAgent::ALL`], where the dialog keeps its state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrustAgent {
+    Claude = 0,
+    Codex = 1,
+    Muse = 2,
+    Pi = 3,
+}
+
+impl TrustAgent {
+    /// Every agent, in the section's order.
+    pub(super) const ALL: [TrustAgent; 4] = [
+        TrustAgent::Claude,
+        TrustAgent::Codex,
+        TrustAgent::Muse,
+        TrustAgent::Pi,
+    ];
+
+    /// Its place in [`TrustAgent::ALL`], where the dialog keeps its state.
+    pub(super) fn index(self) -> usize {
+        self as usize
+    }
+
+    /// The agent's name in the failure lines.
+    fn name(self) -> &'static str {
+        match self {
+            TrustAgent::Claude => "Claude",
+            TrustAgent::Codex => "Codex",
+            TrustAgent::Muse => "Muse",
+            TrustAgent::Pi => "Pi",
+        }
+    }
+
+    /// The trust route: Claude's own, which the old app used, or the shared one with the agent's word. Both answer
+    /// `{enabled, hint_dismissed}` and take `{enabled}`.
+    fn path(self) -> Result<ApiPath, PathError> {
+        match self {
+            TrustAgent::Claude => ApiPath::api(&["checkout-claude-trust"]),
+            TrustAgent::Codex => ApiPath::api(&["checkout-agent-trust", "codex"]),
+            TrustAgent::Muse => ApiPath::api(&["checkout-agent-trust", "muse"]),
+            TrustAgent::Pi => ApiPath::api(&["checkout-agent-trust", "pi"]),
+        }
+    }
+
+    /// The trust switch's element id, which tests and the test bridge find it by.
+    pub(super) fn id(self) -> &'static str {
+        match self {
+            TrustAgent::Claude => "settings-claude-trust",
+            TrustAgent::Codex => "settings-codex-trust",
+            TrustAgent::Muse => "settings-muse-trust",
+            TrustAgent::Pi => "settings-pi-trust",
+        }
+    }
+
+    /// The trust failure line's element id: the switch's, with `-error`.
+    pub(super) fn error_id(self) -> &'static str {
+        match self {
+            TrustAgent::Claude => "settings-claude-trust-error",
+            TrustAgent::Codex => "settings-codex-trust-error",
+            TrustAgent::Muse => "settings-muse-trust-error",
+            TrustAgent::Pi => "settings-pi-trust-error",
+        }
+    }
+
+    /// The switch's words, which name each agent's own mechanism rather than claiming every agent asks the same
+    /// question (the old `choice_label`).
+    fn label(self) -> &'static str {
+        match self {
+            TrustAgent::Claude => "Answer Claude's \"trust this folder?\" for new checkouts",
+            TrustAgent::Codex => "Answer Codex's folder-trust question for managed checkouts",
+            TrustAgent::Muse => "Answer Muse's workspace-trust question for managed checkouts",
+            TrustAgent::Pi => "Approve Pi project resources for managed checkouts",
+        }
+    }
+
+    /// The switch's hover help, the old row's `data-tooltip`: Claude's own, and for the others their help's first part.
+    fn tooltip(self) -> &'static str {
+        match self {
+            TrustAgent::Claude => {
+                "Mark each new managed checkout trusted in Claude's own settings file before the agent starts; see the \
+                 caveats below"
+            }
+            TrustAgent::Codex | TrustAgent::Muse | TrustAgent::Pi => self.mechanism(),
+        }
+    }
+
+    /// What Farhelm does for the agent's managed checkouts, the old `help` for the flag-based agents and the old help
+    /// paragraph for Claude.
+    fn mechanism(self) -> &'static str {
+        match self {
+            TrustAgent::Claude => {
+                "For folders Farhelm clones, including agent-requested checkouts, Farhelm marks the folder trusted \
+                 before the agent starts. Folders you choose yourself still get Claude's question. On a remote host, \
+                 the edit is made to that host's own Claude settings. Changes apply to future checkouts, whatever \
+                 agent they start with."
+            }
+            TrustAgent::Codex => {
+                "For folders Farhelm clones, including agent-requested checkouts, Farhelm passes a command-line trust \
+                 override to Codex. Folders outside managed checkouts keep Codex's own trust behavior. Codex's saved \
+                 configuration is unchanged."
+            }
+            TrustAgent::Muse => {
+                "For folders Farhelm clones, including agent-requested checkouts, Farhelm passes Muse's trust option \
+                 for that launch. Folders outside managed checkouts keep Muse's own trust behavior. Muse's saved \
+                 configuration is unchanged."
+            }
+            TrustAgent::Pi => {
+                "For folders Farhelm clones, including agent-requested checkouts, Farhelm passes Pi's option to \
+                 approve project settings and extensions for that launch. Folders outside managed checkouts keep \
+                 Pi's normal resource approval. Pi's saved configuration is unchanged."
+            }
+        }
+    }
+
+    /// The paragraphs under the switch: Claude's help alone (its risks are in the caution box), and for the others
+    /// their mechanism with which launches use it, then the risk (SPEC.md: "Their help states that the repository's
+    /// hooks, settings and commands may then run as if the user had approved them").
+    fn help(self) -> Vec<String> {
+        match self {
+            TrustAgent::Claude => vec![self.mechanism().to_owned()],
+            TrustAgent::Codex | TrustAgent::Muse | TrustAgent::Pi => vec![
+                format!(
+                    "{} New, Clone, Restart with and Replace with use this setting. Restart and Replace keep the \
+                     session's saved launch.",
+                    self.mechanism()
+                ),
+                "As when you approve it yourself, repository hooks, settings and commands are then trusted. This is \
+                 why the switch is off by default."
+                    .to_owned(),
+            ],
+        }
+    }
+
+    /// Whether the block carries the caution box under its help: only Claude's, whose trust is an edit of Claude's own
+    /// settings file, with the risks that brings (SPEC.md: "The caution explains ..."). The others pass a command-line
+    /// option, whose risk their help states in one sentence.
+    fn has_caution(self) -> bool {
+        match self {
+            TrustAgent::Claude => true,
+            TrustAgent::Codex | TrustAgent::Muse | TrustAgent::Pi => false,
+        }
+    }
+
+    /// The switch that shows or hides the agent's discovery hint; Pi has no hint (SPEC.md: "Pi has a switch but no
+    /// hint band").
+    fn hint(self) -> Option<Choice> {
+        match self {
+            TrustAgent::Claude => Some(Choice::ShowClaudeTrustHint),
+            TrustAgent::Codex => Some(Choice::ShowCodexTrustHint),
+            TrustAgent::Muse => Some(Choice::ShowMuseTrustHint),
+            TrustAgent::Pi => None,
+        }
+    }
+
+    /// `PUT` of the trust route with `{enabled}`.
+    pub(super) fn command(self, enabled: bool) -> Result<Command, PathError> {
+        let path = self.path()?;
+        let shown = format!("PUT {}", path.as_str());
+        Ok(Command::new(
+            Work::Save,
+            Method::Put,
+            path,
+            Some(serde_json::json!({ "enabled": enabled })),
+            shown,
+        ))
+    }
+
+    /// Read the trust route; `on_read` gets whether the agent's trust is on, or why the helm did not say. A path that
+    /// does not build is a failed read too, so the switch never waits on a read that was not sent. `on_read` runs once
+    /// whenever a request was sent (or the path failed), and never without a UI session, which leaves nothing waiting:
+    /// Settings does not open without a session, and a reset closes it. Whenever it runs, it runs on its own, after the
+    /// update that called this has returned, as [`crate::operations::read`]'s answers do: the caller is the dialog's
+    /// own update, and `on_read` updates the dialog.
+    pub(super) fn read(
+        self,
+        cx: &mut App,
+        on_read: impl FnOnce(Result<bool, HostText>, &mut App) + 'static,
+    ) {
+        let path = match self.path() {
+            Ok(path) => path,
+            Err(error) => {
+                let reason = HostText::from_host(error.to_string());
+                cx.defer(move |cx| on_read(Err(reason), cx));
+                return;
+            }
+        };
+        let shown = format!("GET {}", path.as_str());
+        crate::operations::read::<TrustReply>(path, shown, cx, |reply, cx| {
+            on_read(reply.map(|reply| reply.enabled), cx)
+        });
+    }
+}
+
+/// The part of a trust route's answer the section uses (it also carries the hint's dismissal; see the module docs).
+#[derive(serde::Deserialize)]
+struct TrustReply {
+    enabled: bool,
+}
+
+/// What the section knows of one agent's trust choice.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum Known {
+    /// The read has not answered.
+    Reading,
+    /// The helm's choice: read when the section opened, or saved since.
+    Read(bool),
+    /// The read failed, with the helm's reason.
+    Unreadable(HostText),
+}
+
+/// One agent's trust switch in the open dialog.
+pub(super) struct Trust {
+    pub(super) agent: TrustAgent,
+    pub(super) known: Known,
+    /// The value being saved and the last refusal; its loaded value never reaches the screen.
+    pub(super) draft: Draft<bool>,
+    /// The switch's focus handle, which the dialog keeps so the trust hint's entry point can put focus on it.
+    pub(super) focus: FocusHandle,
+}
+
+impl Trust {
+    /// The value the switch shows: the one being saved while its save is in flight, the known choice otherwise, and
+    /// off (with the switch unavailable) while nothing is known.
+    fn shown(&self) -> bool {
+        if self.draft.is_saving() {
+            *self.draft.value()
+        } else {
+            self.known == Known::Read(true)
+        }
+    }
+
+    /// Whether the switch takes a toggle: only once the choice is known.
+    pub(super) fn available(&self) -> bool {
+        matches!(self.known, Known::Read(_))
+    }
+}
+
+/// One agent's block: its trust switch, its help (and Claude's caution box), its hint switch, and the failure lines.
+/// `on_toggle` is what a toggle of the trust switch does; `hint` draws the hint switch through the dialog.
+pub(super) fn block(
+    trust: &Trust,
+    first: bool,
+    on_toggle: impl Fn(bool, &mut Window, &mut App) + 'static,
+    hint: impl FnOnce(Choice) -> AnyElement,
+    cx: &App,
+) -> Div {
+    let palette = theme::palette(cx);
+    let agent = trust.agent;
+    let switch = div()
+        .text_size(px(LABEL_TEXT))
+        .line_height(px(LABEL_LINE_HEIGHT))
+        .child(
+            Checkbox::new(
+                agent.id(),
+                agent.label(),
+                HoverHelp::tooltip(agent.tooltip()),
+                Role::Switch,
+            )
+            .switch()
+            .checked(trust.shown())
+            .disabled(!trust.available())
+            .focus(&trust.focus)
+            .on_toggle(on_toggle),
+        );
+    // The old line said "Could not save or read {name} trust settings" with the helm's words after it, whichever of
+    // the two failed; a refused save is the newer news, so it wins over a failed read.
+    let failure = trust
+        .draft
+        .refusal()
+        .or(match &trust.known {
+            Known::Unreadable(reason) => Some(reason),
+            Known::Reading | Known::Read(_) => None,
+        })
+        .map(|reason| {
+            let sentence = HostSentence::new(agent.error_id())
+                .text(format!(
+                    "Could not save or read {} trust settings: ",
+                    agent.name()
+                ))
+                .host(reason);
+            div()
+                .id(agent.error_id())
+                .debug_selector(|| agent.error_id().to_owned())
+                .role(Role::Alert)
+                .aria_label(sentence.accessible_name())
+                .text_size(metrics::TEXT_SM)
+                .line_height(px(HELP_LINE_HEIGHT))
+                .text_color(theme::color(palette.danger))
+                .child(sentence)
+        });
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(BLOCK_GAP))
+        .min_w_0()
+        .when(!first, |block| {
+            block
+                .border_t_1()
+                .border_color(theme::color(palette.border_dim))
+                .pt(px(BLOCK_RULE_PAD))
+        })
+        .child(switch)
+        .children(
+            agent
+                .help()
+                .into_iter()
+                .map(|text| choices::help(text, cx).into_any_element()),
+        )
+        .children(agent.has_caution().then(|| caution(cx)))
+        .children(
+            agent
+                .hint()
+                .map(|choice| div().mt(px(BLOCK_GAP)).child(hint(choice))),
+        )
+        .children(failure)
+}
+
+/// Claude's caution box (`.claude-trust-caution`): why the switch is off by default, in the amber of a warning, with
+/// the 3-pixel amber rule down its left edge.
+fn caution(cx: &App) -> Div {
+    let palette = theme::palette(cx);
+    let paragraph = |text: &'static str| div().child(text);
+    div()
+        .flex()
+        .my(px(4.))
+        .border_t_1()
+        .border_r_1()
+        .border_b_1()
+        .border_color(theme::color(palette.warn_border))
+        .bg(theme::color(palette.warn_bg_dim))
+        .child(div().w(px(3.)).flex_none().bg(theme::color(palette.warn)))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .p(px(CAUTION_PAD))
+                .flex()
+                .flex_col()
+                .gap(px(CAUTION_GAP))
+                .text_size(metrics::TEXT_SM)
+                .line_height(px(CAUTION_LINE_HEIGHT))
+                .text_color(theme::color(palette.warn_bright))
+                .child(
+                    div()
+                        .font_weight(FontWeight::BOLD)
+                        .child("How this works, and why it's off by default"),
+                )
+                .child(paragraph(
+                    "Claude has no supported way to do this. Farhelm edits Claude's own settings file directly \
+                     (normally ~/.claude.json on the session's host), copying how Claude writes it. That file also \
+                     holds sign-in, settings and per-folder state. Farhelm changes only the folder's trust key and \
+                     replaces the file in one step, so it is never left half-written.",
+                ))
+                .child(paragraph(
+                    "A Claude session exiting at the same instant can rarely undo Farhelm's edit or lose one of its \
+                     own updates. Any Claude update can change the file or its locking without notice: the edit may \
+                     stop working, so Claude asks again, or collide with Claude's writes. Farhelm cannot detect every \
+                     such change. This is best effort; Farhelm cannot promise it stays safe across Claude versions.",
+                ))
+                .child(paragraph(
+                    "As when you answer Yes yourself, the repository's Claude hooks and commands then run without \
+                     Claude's warning. When Farhelm archives the checkout, it removes that folder's trust key again, \
+                     also best effort.",
+                )),
+        )
+}
