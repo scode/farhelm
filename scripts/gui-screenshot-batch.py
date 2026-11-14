@@ -23,7 +23,9 @@ yet, plus two kinds of new-app capture: app scenes, which drive the running app 
 window, and the foundation goldens (`crates/gui/farhelm-gui/tests/goldens/`), shown beside the reference scene they
 relate to. The goldens are copies, so every platform's are shown wherever the batch runs. App scenes are captured once
 per app variant the list names (a theme and a window size): the bridge has no theme or resize command, so each variant
-is its own app run, started with `gui-agent.py start --appearance --window-size`. On Linux each capture is cropped to
+is its own app run, started with `gui-agent.py start --appearance --window-size`. The list's `app_start` names the
+start options (the fleet to seed) its scenes share; a scene that needs another fleet (none at all, say) names its own
+`start`, and the scenes with the same options share an app run, in list order. On Linux each capture is cropped to
 the app's own drawing (`LINUX_FRAME` says why). A reference scene not marked ported is listed on the page as "not yet
 ported"; a capture that this batch did not make says "not captured in this batch" instead, so a missing picture is
 never read as missing work. An entry marked as a mockup is labelled one and never counts as evidence that something is
@@ -55,6 +57,11 @@ GOLDENS = REPO / "crates/gui/farhelm-gui/tests/goldens"
 GUI_AGENT = REPO / "scripts/gui-agent.py"
 
 THEMES = ("light", "dark")
+
+# The `gui-agent.py start` options the batch sets itself for every app run (the variant's theme and size, the build
+# and the shared lock). A scene's own `start` options may not repeat them: the variant would no longer be what the
+# capture's label says. `owned_options` also catches the abbreviations argparse accepts for them (`--appear`).
+BATCH_START_OPTIONS = {"--window-size", "--appearance", "--size", "--no-build", "--lock"}
 
 # How long one bridge command (a scene step or the screenshot) may take. The bridge's own `wait` has a shorter default
 # timeout, so this only catches a command that hangs outright, which would otherwise hang the whole batch. `start`
@@ -122,6 +129,11 @@ def validate_scenes(scenes: dict, goldens: set[str]) -> list[str]:
         if (variant["theme"], variant["size"]) in variants:
             problems.append(f"duplicate app variant {variant['theme']} {variant['size']}")
         variants.add((variant["theme"], variant["size"]))
+    default_start = scenes.get("app_start", [])
+    if not is_start(default_start):
+        problems.append("app_start must be a list of strings")
+    elif owned := owned_options(default_start):
+        problems.append(f"app_start may not set {', '.join(owned)}, which the batch sets")
     for entry in scenes["app_scenes"]:
         if not {"id", "title", "steps"} <= set(entry):
             problems.append(f"app scene needs id, title and steps: {entry}")
@@ -131,6 +143,11 @@ def validate_scenes(scenes: dict, goldens: set[str]) -> list[str]:
             isinstance(step, list) and step and all(isinstance(word, str) for word in step) for step in steps
         )):
             problems.append(f"app scene {entry['id']}: steps must be a list of non-empty lists of strings")
+        start = entry.get("start", [])
+        if not is_start(start):
+            problems.append(f"app scene {entry['id']}: start must be a list of strings")
+        elif owned := owned_options(start):
+            problems.append(f"app scene {entry['id']}: start may not set {', '.join(owned)}, which the batch sets")
     for entry in scenes["foundation_goldens"]:
         if not {"golden", "title"} <= set(entry):
             problems.append(f"foundation golden needs golden and title: {entry}")
@@ -152,6 +169,18 @@ def validate_scenes(scenes: dict, goldens: set[str]) -> list[str]:
     for dup in sorted({i for i in section_ids if section_ids.count(i) > 1}, key=str):
         problems.append(f"duplicate scene id {dup!r}")
     return problems
+
+
+def is_start(start) -> bool:
+    """Whether `start` is a list of `gui-agent.py start` arguments (strings), as `app_start` and `start` must be."""
+    return isinstance(start, list) and all(isinstance(word, str) for word in start)
+
+
+def owned_options(start: list[str]) -> list[str]:
+    """The BATCH_START_OPTIONS that `start` sets, spelled out in full. A word counts when it is one of them, with or
+    without `=value`, or an abbreviation of one, since argparse takes any unambiguous prefix (`--appear dark`)."""
+    names = {word.split("=", 1)[0] for word in start if word.startswith("--") and len(word) > 2}
+    return sorted(option for option in BATCH_START_OPTIONS if any(option.startswith(name) for name in names))
 
 
 def load_scenes(path: Path = SCENE_LIST, goldens: Path = GOLDENS) -> dict:
@@ -326,7 +355,8 @@ def capture(
     The goldens are copied from the tree rather than re-rendered: `scripts/check-gui-goldens.py` is what proves them
     current, and a batch is not a gate. Because they are copies, every platform's goldens are shown wherever the batch
     runs, each labelled with its platform; only a golden that no platform has is an error. Each variant is its own app
-    run in its own fresh directory under `runs` (a new directory under /tmp by default); `start` runs inside the `try`,
+    run per group of scenes that share `start` options ([`start_groups`]), each in its own fresh directory under `runs`
+    (a new directory under /tmp by default); `start` runs inside the `try`,
     so an interrupted or failed start is still followed by `stop` whenever it made the run directory. A start that
     failed is recorded under `start_failures` (also when the list has no app scenes to blame it on) and a `stop` that
     failed under `stop_failures`. `lock` is passed to every `start` (a shared GUI session's lock, as on the test Mac).
@@ -365,53 +395,78 @@ def capture(
 
     frame = LINUX_FRAME if platform == "linux" else 0
     runs = runs or Path(tempfile.mkdtemp(prefix="gui-batch-", dir=RUNS_PARENT))
-    for index, variant in enumerate(scenes["app_variants"]):
+    first_run = True
+    for variant in scenes["app_variants"]:
         theme, size = variant["theme"], variant["size"]
         width, height = variant["window"]
         # The window is asked larger by the frame so that, once the frame is cropped, the app's drawing is the size the
         # variant names (and the size the old app's pictures of it have).
         window = (width + 2 * frame, height + 2 * frame)
-        run = runs / f"{theme}-{size}"
-        start = ["start", "--window-size", f"{window[0]}x{window[1]}", "--appearance", theme]
-        if platform == "linux":
-            monitor = (max(window[0] + MONITOR_MARGIN, MIN_MONITOR[0]), max(window[1] + MONITOR_MARGIN, MIN_MONITOR[1]))
-            start += ["--size", f"{monitor[0]}x{monitor[1]}"]
-        if not build or index > 0:
-            start.append("--no-build")
-        if lock is not None:
-            start += ["--lock", str(lock)]
-        clean = False
-        try:
-            started = clean = run_agent(agent, run, start, timeout=None) == 0
-            if not started:
-                kept = f"; the run is kept at {run}" if run.exists() else ""
-                record["start_failures"].append(f"{theme} {size}: the app did not start{kept}")
-            for entry in scenes["app_scenes"]:
+        for group, (extra, group_scenes) in enumerate(start_groups(scenes["app_scenes"], scenes.get("app_start", []))):
+            # The first group keeps the plain `<theme>-<size>` name; a later one, its own app run, is numbered.
+            run = runs / (f"{theme}-{size}" if group == 0 else f"{theme}-{size}-{group}")
+            label = f"{theme} {size}" + (f" ({' '.join(extra)})" if extra else "")
+            start = ["start", *extra, "--window-size", f"{window[0]}x{window[1]}", "--appearance", theme]
+            if platform == "linux":
+                monitor = (max(window[0] + MONITOR_MARGIN, MIN_MONITOR[0]),
+                           max(window[1] + MONITOR_MARGIN, MIN_MONITOR[1]))
+                start += ["--size", f"{monitor[0]}x{monitor[1]}"]
+            if not build or not first_run:
+                start.append("--no-build")
+            first_run = False
+            if lock is not None:
+                start += ["--lock", str(lock)]
+            clean = False
+            try:
+                started = clean = run_agent(agent, run, start, timeout=None) == 0
                 if not started:
-                    error(entry["id"], f"{theme} {size}: the app did not start")
-                    continue
-                failed = next((step for step in entry["steps"] if run_agent(agent, run, step, step_timeout) != 0), None)
-                target = shots / f"{entry['id']}--{theme}--{size}.png"
-                if failed is None and run_agent(agent, run, ["screenshot", str(target)], step_timeout) == 0:
-                    record["app"].setdefault(entry["id"], {}).setdefault(theme, {})[size] = str(target.relative_to(out))
-                    problem = crop_frame(target, LINUX_FRAME_MARGIN, LINUX_FRAME_BORDER) if frame else None
-                    if problem:
-                        error(entry["id"], f"{theme} {size}: {problem}")
-                else:
-                    clean = False
-                    what = f"step failed: {' '.join(failed)}" if failed else "screenshot failed"
-                    error(entry["id"], f"{theme} {size}: {what}")
-        finally:
-            # A start that failed before making the run directory left nothing to stop.
-            if run.exists():
-                if run_agent(agent, run, ["stop"], timeout=None) != 0:
-                    record["stop_failures"].append(f"{theme} {size}: `stop` failed; {run} may still be running")
-                elif clean:
-                    shutil.rmtree(run)
+                    kept = f"; the run is kept at {run}" if run.exists() else ""
+                    record["start_failures"].append(f"{label}: the app did not start{kept}")
+                for entry in group_scenes:
+                    if not started:
+                        error(entry["id"], f"{label}: the app did not start")
+                        continue
+                    failed = next(
+                        (step for step in entry["steps"] if run_agent(agent, run, step, step_timeout) != 0), None
+                    )
+                    target = shots / f"{entry['id']}--{theme}--{size}.png"
+                    if failed is None and run_agent(agent, run, ["screenshot", str(target)], step_timeout) == 0:
+                        shot = str(target.relative_to(out))
+                        record["app"].setdefault(entry["id"], {}).setdefault(theme, {})[size] = shot
+                        problem = crop_frame(target, LINUX_FRAME_MARGIN, LINUX_FRAME_BORDER) if frame else None
+                        if problem:
+                            error(entry["id"], f"{label}: {problem}")
+                    else:
+                        clean = False
+                        what = f"step failed: {' '.join(failed)}" if failed else "screenshot failed"
+                        error(entry["id"], f"{label}: {what}")
+            finally:
+                # A start that failed before making the run directory left nothing to stop.
+                if run.exists():
+                    if run_agent(agent, run, ["stop"], timeout=None) != 0:
+                        record["stop_failures"].append(f"{label}: `stop` failed; {run} may still be running")
+                    elif clean:
+                        shutil.rmtree(run)
     if runs.exists() and not any(runs.iterdir()):
         runs.rmdir()
     (out / "captures.json").write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     return record
+
+
+def start_groups(app_scenes: list[dict], default: list[str] | None = None) -> list[tuple[list[str], list[dict]]]:
+    """The app scenes grouped by their `start` options (`default`, the list's `app_start`, when a scene names none),
+    each group one app run per variant: the groups in the order their first scene is listed, the scenes in list order
+    within each.
+
+    A scene's steps begin where the previous scene of its group left the app (a menu one scene opened, a session another
+    deleted), so a scene that needs a different fleet, an empty one say, cannot share that run. With no app scenes there
+    is still one group with none in it: each variant's run then only proves the app starts and stops, and a failure to
+    do so still fails the batch.
+    """
+    groups: dict[tuple[str, ...], list[dict]] = {}
+    for entry in app_scenes:
+        groups.setdefault(tuple(entry.get("start", default or [])), []).append(entry)
+    return [(list(extra), entries) for extra, entries in groups.items()] or [(list(default or []), [])]
 
 
 def run_agent(agent: Path, run: Path, args: list[str], timeout: float | None = STEP_TIMEOUT_SECONDS) -> int:
