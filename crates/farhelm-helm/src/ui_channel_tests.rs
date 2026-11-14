@@ -273,7 +273,8 @@ async fn next(driven: &mut Driven) -> ServerMessage {
 fn command(id: u64, method: &str, path: &str, body: Option<Value>) -> ClientMessage {
     ClientMessage::Command(Command {
         id,
-        method: method.to_string(),
+        method: serde_json::from_value(Value::String(method.to_string()))
+            .expect("a test command's method is one the wire knows"),
         // Through deserialization, the helm's only way in: there is no public string constructor (paths are a trust
         // boundary), and a test that needs a non-canonical path sends raw JSON instead.
         path: serde_json::from_value(Value::String(path.to_string()))
@@ -628,6 +629,54 @@ async fn a_command_whose_path_is_not_canonical_ends_the_channel_unrouted() {
         "the non-canonical command was never routed"
     );
     assert!(!seat.is_held(), "the ended channel gave the seat up");
+}
+
+/// A command's method is a closed set on the wire, so one outside it
+/// (`OPTIONS`, or `get` in the wrong case) does not decode, and the channel
+/// closes unrouted as for any message it cannot read, like a non-canonical
+/// path. Before the method was an enum it was a string the helm matched
+/// itself, answering a 400 and carrying on; this pins that the closed set is
+/// enforced where commands are decoded. Each method gets a fresh channel,
+/// whose canonical command before it is routed, so the close is the method's
+/// doing, not a dead channel.
+#[farhelm_testtrace::test]
+async fn a_command_whose_method_is_not_on_the_wire_ends_the_channel_unrouted() {
+    for method in ["OPTIONS", "get"] {
+        let routes = Arc::new(TestRoutes::default());
+        let seat = UiSeat::default();
+        let mut bridged = bridge(Arc::clone(&routes), Writes::Accept, seat.take());
+        assert!(matches!(
+            bridged.next().await,
+            ServerMessage::Snapshot { .. }
+        ));
+
+        bridged.send_text(
+            r#"{"type":"command","id":1,"method":"PUT","path":"/api/test/value","body":"kept"}"#,
+        );
+        let ServerMessage::Reply(reply) = bridged.next().await else {
+            panic!("premise: a canonical command is routed and answered");
+        };
+        assert_eq!((reply.id, reply.status), (1, 204));
+
+        bridged.send_text(&format!(
+            r#"{{"type":"command","id":2,"method":"{method}","path":"/api/test/value","body":"overwritten"}}"#
+        ));
+        tokio::time::timeout(NOTICE, bridged.task)
+            .await
+            .unwrap_or_else(|_| panic!("a command with the method {method:?} ends the channel"))
+            .unwrap();
+        assert_eq!(
+            routes.value.lock().unwrap().as_deref(),
+            Some("\"kept\""),
+            "the {method:?} command reached no route"
+        );
+        assert_eq!(
+            routes.unrouted_hits.load(Ordering::SeqCst),
+            0,
+            "the {method:?} command was never routed"
+        );
+        assert!(!seat.is_held(), "the ended channel gave the seat up");
+    }
 }
 
 /// A write that fails must end the channel and free the seat: before the
