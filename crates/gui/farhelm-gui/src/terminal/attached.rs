@@ -2,8 +2,8 @@
 //!
 //! NOTE: This is cut to what the first milestone's slice needs (the migration's orchestrator trimmed it on 2026-11-13):
 //! attach a terminal, show its output, say when it is not live, take focus and send the program its keys. The terminal
-//! area added paste, committed text from the platform's text input, focus reports, scrollback and the local selection
-//! since. Links, mouse reporting and the reconnect display with its phase and Retry come later in that work. The
+//! area added paste, committed text from the platform's text input, focus reports, scrollback, the local selection and
+//! mouse reporting since. Links and the reconnect display with its phase and Retry come later in that work. The
 //! session pane ([`crate::session_pane`]) mounts one for the selected session.
 //!
 //! [`AttachedTerminal`] owns one stream ([`TerminalHandle`] and [`TerminalEvents`]) and the [`TerminalView`]s that show
@@ -101,7 +101,8 @@ use farhelm_helm_client::terminal::{
     TerminalHandle,
 };
 use farhelm_input_mapping::pointer::{
-    Geometry, WheelAccumulator, WheelUnit, wheel_goes_to_program, wheel_pixels,
+    Geometry, MouseDeduper, WheelAccumulator, WheelUnit, mode_reports, wheel_goes_to_program,
+    wheel_pixels,
 };
 use farhelm_input_mapping::{
     Composition, Decision, KeyDown, NativeIdentity, NativeKey, Platform, Route, committed_text,
@@ -231,6 +232,12 @@ pub struct AttachedTerminal {
     scrollbar_hold: Option<ticker::Deadline>,
     /// The local selection being dragged, from its press to its release.
     select: Option<SelectGesture>,
+    /// The buttons held in a press the program's mouse reporting took, as a bit per button (1 left, 2 middle, 4
+    /// right); 0 while none is. Moves and releases go to the program until the last of them comes up.
+    reporting: u8,
+    /// The last mouse report sent, so motion within one cell is not reported again (the format leaves that to the
+    /// client). Forgotten with each new attachment.
+    mouse_dedupe: MouseDeduper,
     retired: bool,
     /// The pane's focus: a tab stop, which a press on the pane focuses. Lives as long as the owner, so the session
     /// view can name it as home across redraws.
@@ -316,6 +323,8 @@ impl AttachedTerminal {
             pointer_over: false,
             scrollbar_hold: None,
             select: None,
+            reporting: 0,
+            mouse_dedupe: MouseDeduper::default(),
             retired,
             focus: cx.focus_handle().tab_stop(true),
             text_input: {
@@ -610,6 +619,9 @@ impl AttachedTerminal {
             // A new attachment's program has heard nothing from this one, so it gets the current focus state again
             // once it is live and asking, as the old app's freshly built grid did on every attach.
             self.reported_focus = None;
+            // Nor has it had a mouse report: the next one goes out whatever the last one was.
+            self.mouse_dedupe.reset();
+            self.reporting = 0;
             let metrics = self.metrics;
             self.staging = Some(cx.new(|_| TerminalView::new(metrics)));
         }
@@ -744,14 +756,7 @@ impl AttachedTerminal {
             let (true, Some(attachment)) = (self.is_live(), self.attachment) else {
                 return;
             };
-            let mods = farhelm_input_mapping::Modifiers {
-                control: modifiers.control,
-                alt: modifiers.alt,
-                shift: modifiers.shift,
-                platform: modifiers.platform,
-                function: modifiers.function,
-            }
-            .bits();
+            let mods = modifier_bits(modifiers);
             let rows = u16::try_from(view.read(cx).rows.len()).unwrap_or(u16::MAX);
             // The accumulator takes the browser's sign (positive toward newer lines), the opposite of GPUI's.
             let lines =
@@ -763,9 +768,16 @@ impl AttachedTerminal {
             if lines == 0.0 {
                 return;
             }
+            let button = if delta > 0.0 { 0 } else { 1 };
+            // A wheel report resets the deduper's comparison like any report (the next move in this cell is sent);
+            // on the alternate screen without reporting it is an arrow key, which the deduper never sees.
+            if mouse != farhelm_proto::grid::MouseMode::Off {
+                self.mouse_dedupe
+                    .admit(MouseEventKind::Wheel, button, x, y, mods);
+            }
             let wheel = GridInput::Mouse {
                 kind: MouseEventKind::Wheel,
-                button: if delta > 0.0 { 0 } else { 1 },
+                button,
                 x,
                 y,
                 mods,
@@ -1294,18 +1306,27 @@ impl Render for AttachedTerminal {
                     // in frames drawn while a drag is held: a press, its moves and its release can all arrive before
                     // the next frame (a fast drag, or the test bridge's), and a listener that waited for a frame to
                     // appear would miss them. Outside a drag they return at once.
+                    // A press the program's mouse reporting took is followed the same way.
                     let moved = owner.clone();
                     window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
                         if phase == DispatchPhase::Bubble {
-                            let _ = moved.update(cx, |owner, cx| owner.drag_moved(event, cx));
+                            let _ = moved.update(cx, |owner, cx| {
+                                owner.report_moved(event, cx);
+                                owner.drag_moved(event, cx);
+                            });
                         }
                     });
                     let released = owner.clone();
                     window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
-                        if phase == DispatchPhase::Bubble && event.button == MouseButton::Left {
-                            let _ = released
-                                .update(cx, |owner, cx| owner.end_selection(Some(event), cx));
+                        if phase != DispatchPhase::Bubble {
+                            return;
                         }
+                        let _ = released.update(cx, |owner, cx| {
+                            owner.report_released(event, cx);
+                            if event.button == MouseButton::Left {
+                                owner.end_selection(Some(event), cx);
+                            }
+                        });
                     });
                     let height = f32::from(bounds.size.height);
                     let origin = bounds.origin;
@@ -1346,7 +1367,10 @@ impl Render for AttachedTerminal {
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::select_all))
             .on_action(cx.listener(Self::copy_selection))
-            .on_mouse_down(MouseButton::Left, cx.listener(Self::press))
+            .on_any_mouse_down(cx.listener(Self::press))
+            .on_mouse_move(
+                cx.listener(|owner, event: &MouseMoveEvent, _, cx| owner.hover_moved(event, cx)),
+            )
             .on_action(
                 cx.listener(|owner, _: &actions::ScrollTerminalPageUp, _, cx| {
                     owner.scroll_page(-1, cx)
@@ -1414,6 +1438,156 @@ impl Render for AttachedTerminal {
             .child(body)
             .children(placeholder)
             .child(measure)
+    }
+}
+
+// ---- Mouse reporting -------------------------------------------------------------------------------------------------
+
+/// The format's number for `button` in a press, release or move report: 0 left, 1 middle, 2 right; `None` for the
+/// buttons the format has no number for (the old app's `pressButton`).
+fn report_button(button: MouseButton) -> Option<i8> {
+    match button {
+        MouseButton::Left => Some(0),
+        MouseButton::Middle => Some(1),
+        MouseButton::Right => Some(2),
+        MouseButton::Navigate(_) => None,
+    }
+}
+
+/// The input mapping's modifier bits for GPUI's `modifiers`, which a mouse report carries.
+fn modifier_bits(modifiers: Modifiers) -> u8 {
+    farhelm_input_mapping::Modifiers {
+        control: modifiers.control,
+        alt: modifiers.alt,
+        shift: modifiers.shift,
+        platform: modifiers.platform,
+        function: modifiers.function,
+    }
+    .bits()
+}
+
+impl AttachedTerminal {
+    /// Send the program a mouse report of `kind` for `button` at the cell under `position`, if its mouse reporting
+    /// mode asks for that kind (`mode_reports`: presses and releases in every mode, moves with a button held from drag
+    /// mode up, moves without one only in motion mode), the terminal is live, and it is not a move in the same cell as
+    /// the last report (the deduper). A report is input from the user, so like a key it clears the selection and
+    /// brings the view to the live screen (the old app's `mouseMessage`).
+    fn mouse_report(
+        &mut self,
+        kind: MouseEventKind,
+        button: i8,
+        position: Point<Pixels>,
+        modifiers: Modifiers,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(view) = &self.committed else {
+            return;
+        };
+        let mode = view
+            .read(cx)
+            .state
+            .map_or(farhelm_proto::grid::MouseMode::Off, |state| state.mouse);
+        if !mode_reports(mode, kind, button) {
+            return;
+        }
+        let (true, Some(attachment)) = (self.is_live(), self.attachment) else {
+            return;
+        };
+        let Some((x, y)) = self.cell_at(position, cx) else {
+            return;
+        };
+        let mods = modifier_bits(modifiers);
+        if !self.mouse_dedupe.admit(kind, button, x, y, mods) {
+            return;
+        }
+        let report = GridInput::Mouse {
+            kind,
+            button,
+            x,
+            y,
+            mods,
+        };
+        self.send_user(attachment, vec![report], cx);
+    }
+
+    /// A press while the program reports the mouse and the forcing modifier is not held: the program's. Its button is
+    /// held from now until its release, and moves meanwhile go to the program as a drag.
+    fn report_press(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        let Some(button) = report_button(event.button) else {
+            return;
+        };
+        self.reporting |= 1 << button;
+        self.mouse_report(
+            MouseEventKind::Down,
+            button,
+            event.position,
+            event.modifiers,
+            cx,
+        );
+    }
+
+    /// The pointer moved anywhere in the window while the program holds a press: report the move with the button held
+    /// (the old app's `moveButton`: the left first, then the middle, then the right). A move with no button down is a
+    /// release the window never saw (let go outside it): the program hears the release of each button it still
+    /// thinks is held, so it is not left mid-drag.
+    fn report_moved(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        if self.reporting == 0 {
+            return;
+        }
+        let Some(button) = event.pressed_button.and_then(report_button) else {
+            let held = std::mem::take(&mut self.reporting);
+            for button in (0..3).filter(|button| held & (1 << button) != 0) {
+                self.mouse_report(
+                    MouseEventKind::Up,
+                    button,
+                    event.position,
+                    event.modifiers,
+                    cx,
+                );
+            }
+            return;
+        };
+        self.mouse_report(
+            MouseEventKind::Move,
+            button,
+            event.position,
+            event.modifiers,
+            cx,
+        );
+    }
+
+    /// A button came up anywhere in the window: if the program held it, report the release; the press is over when its
+    /// last button is up.
+    fn report_released(&mut self, event: &MouseUpEvent, cx: &mut Context<Self>) {
+        let Some(button) = report_button(event.button) else {
+            return;
+        };
+        if self.reporting & (1 << button) == 0 {
+            return;
+        }
+        self.reporting &= !(1 << button);
+        self.mouse_report(
+            MouseEventKind::Up,
+            button,
+            event.position,
+            event.modifiers,
+            cx,
+        );
+    }
+
+    /// The pointer moved over the grid with no press under way: in motion mode the program hears it, as a move with no
+    /// button (`-1`; the old app's `mousemove` without buttons).
+    fn hover_moved(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        if event.pressed_button.is_some() || self.reporting != 0 || self.select.is_some() {
+            return;
+        }
+        self.mouse_report(
+            MouseEventKind::Move,
+            -1,
+            event.position,
+            event.modifiers,
+            cx,
+        );
     }
 }
 
@@ -1520,8 +1694,8 @@ impl AttachedTerminal {
     /// selection: a click an empty one at the nearest boundary (which clears what was selected), a double click the
     /// word, a triple click the soft-wrapped line, Alt off a Mac a rectangle, and Shift with a selection already there
     /// extends it (the old app's `startSelection`, from xterm.js 6.0.0's `SelectionService`; MIT, notices in
-    /// `farhelm-input-mapping`'s LICENSE-PORTED). Under mouse reporting a plain press is the program's, which the
-    /// mouse-reporting work sends; here it selects nothing.
+    /// `farhelm-input-mapping`'s LICENSE-PORTED). Under mouse reporting a press without the forcing modifier, of any
+    /// button, is the program's ([`AttachedTerminal::report_press`]) and selects nothing.
     fn press(&mut self, event: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         let Some(view) = self.committed.clone() else {
             return;
@@ -1532,6 +1706,10 @@ impl AttachedTerminal {
             .is_some_and(|state| state.mouse != farhelm_proto::grid::MouseMode::Off);
         let forced = forces_selection(event.modifiers);
         if tracking && !forced {
+            self.report_press(event, cx);
+            return;
+        }
+        if event.button != MouseButton::Left {
             return;
         }
         let mac = actions::THIS_PLATFORM == Platform::Mac;
