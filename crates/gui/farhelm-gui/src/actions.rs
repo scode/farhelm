@@ -198,6 +198,14 @@ actions!(
         /// terminal handles it; its keys are its rows of [`TERMINAL_KEYS`], and a menu item that dispatches it reaches
         /// the focused terminal the same way.
         Paste,
+        /// Scroll the focused terminal back through its history by a page less a line (SPEC.md, "Reaching everything
+        /// by keyboard": Shift+PageUp; the old app's step). The terminal handles it; its key is its row of
+        /// [`TERMINAL_KEYS`], so the program never gets the key. Acts on every repeat of a held key, as the old app
+        /// did.
+        ScrollTerminalPageUp,
+        /// Scroll the focused terminal toward its live screen by a page less a line (Shift+PageDown; otherwise as
+        /// [`ScrollTerminalPageUp`]).
+        ScrollTerminalPageDown,
         /// Open the Keyboard shortcuts dialog (SPEC.md, "Desktop window chrome": Cmd+/ on a Mac, Ctrl+Shift+/ on
         /// Linux, by the physical Slash key; a row in [`PHYSICAL_KEYS`]). Runs once per press (`ONCE_PER_PRESS`).
         ShowKeyboardShortcuts,
@@ -371,8 +379,9 @@ pub enum KeyOwner {
     /// The terminal's own command, such as scrolling a page: it never reaches the program, and nothing outside the
     /// terminal takes it. Once the command has an action, its row's [`TerminalKey::bind`] binds the key to it in
     /// [`TERMINAL_CONTEXT`]; until then the key reaches the terminal's listener, which drops it.
-    /// (`farhelm-input-mapping` still classifies paging and select all as well; its own copy of that rule goes when the
-    /// keymap takes it over, and a test compares the two meanwhile.)
+    /// (`farhelm-input-mapping` still classifies paging and select all as well, and a test compares the two. Its paging
+    /// rule also covers Shift+PageUp and Shift+PageDown with more modifiers held, which the terminal pages on, as the
+    /// old app did.)
     Terminal,
     /// The program in the terminal. Every key not in [`TERMINAL_KEYS`] is the program's; the table lists the ones that
     /// some binding outside the terminal would otherwise take.
@@ -444,16 +453,20 @@ pub const TERMINAL_KEYS: &[TerminalKey] = &[
         "rename the open session",
     ),
     // The terminal's own commands.
-    both(
-        "shift-pageup",
-        KeyOwner::Terminal,
-        "scroll the terminal up a page",
-    ),
-    both(
-        "shift-pagedown",
-        KeyOwner::Terminal,
-        "scroll the terminal down a page",
-    ),
+    TerminalKey {
+        mac: Some("shift-pageup"),
+        linux: Some("shift-pageup"),
+        owner: KeyOwner::Terminal,
+        what: "scroll the terminal up a page",
+        bind: Some(bind_page_up),
+    },
+    TerminalKey {
+        mac: Some("shift-pagedown"),
+        linux: Some("shift-pagedown"),
+        owner: KeyOwner::Terminal,
+        what: "scroll the terminal down a page",
+        bind: Some(bind_page_down),
+    },
     mac_only(
         "cmd-a",
         KeyOwner::Terminal,
@@ -524,6 +537,16 @@ pub const TERMINAL_KEYS: &[TerminalKey] = &[
 /// Paste's binding, for its rows of [`TERMINAL_KEYS`].
 fn bind_paste(chord: &'static str) -> KeyBinding {
     KeyBinding::new(chord, Paste, Some(TERMINAL_CONTEXT))
+}
+
+/// Shift+PageUp's binding, for its row of [`TERMINAL_KEYS`].
+fn bind_page_up(chord: &'static str) -> KeyBinding {
+    KeyBinding::new(chord, ScrollTerminalPageUp, Some(TERMINAL_CONTEXT))
+}
+
+/// Shift+PageDown's binding, for its row of [`TERMINAL_KEYS`].
+fn bind_page_down(chord: &'static str) -> KeyBinding {
+    KeyBinding::new(chord, ScrollTerminalPageDown, Some(TERMINAL_CONTEXT))
 }
 
 /// An app shortcut: Command on a Mac, Ctrl+Shift on Linux.

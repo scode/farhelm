@@ -1167,6 +1167,55 @@ fn the_wheel_scrolls_history_and_input_returns_to_the_bottom(cx: &mut TestAppCon
     assert_eq!(h.sent(), [(paste("pasted", true), true)]);
 }
 
+/// Shift+PageUp and Shift+PageDown page through the history a page less a line at a time, the old app's step, so the
+/// line at the edge the user paged from stays in view as a landmark; paging down onto the live screen follows it
+/// again, also with more modifiers held (Ctrl+Shift+PageUp), as in the old app. They are the terminal's own keys: the
+/// program hears nothing of any of them.
+#[gpui::test]
+fn the_page_keys_page_through_history_and_send_nothing(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_with_history(60);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let rows = h.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).rows.len());
+    assert!(
+        rows > 1 && 2 * (rows - 1) < 60,
+        "the premise: two pages fit in the history ({rows} rows)"
+    );
+    keys(h.cx, "shift-pageup");
+    assert!(!h.following());
+    assert_eq!(
+        h.text().unwrap().lines().next(),
+        Some(format!("h{}", 60 - (rows - 1)).as_str()),
+        "a page less a line back"
+    );
+    keys(h.cx, "shift-pageup");
+    assert_eq!(
+        h.text().unwrap().lines().next(),
+        Some(format!("h{}", 60 - 2 * (rows - 1)).as_str())
+    );
+    keys(h.cx, "shift-pagedown");
+    assert!(!h.following());
+    assert_eq!(
+        h.text().unwrap().lines().next(),
+        Some(format!("h{}", 60 - (rows - 1)).as_str()),
+        "a page less a line forward"
+    );
+    keys(h.cx, "shift-pagedown");
+    assert!(h.following(), "paging down onto the screen follows it");
+    // With more modifiers held the keys page all the same, as in the old app; the keymap binds only the plain
+    // chords, so these reach the terminal's own key handling.
+    keys(h.cx, "ctrl-shift-pageup");
+    assert_eq!(
+        h.text().unwrap().lines().next(),
+        Some(format!("h{}", 60 - (rows - 1)).as_str()),
+        "Ctrl+Shift+PageUp pages too"
+    );
+    keys(h.cx, "ctrl-shift-pagedown");
+    assert!(h.following());
+    assert_eq!(h.sent(), [], "the program hears nothing of the page keys");
+}
+
 /// On the alternate screen the wheel is the program's (the supervisor turns it into arrow keys when the program has
 /// not asked for mouse reports): one wheel message per event, up for a notch toward older lines, at the cell under the
 /// pointer, and the view does not scroll (the alternate screen has no history).
@@ -1760,7 +1809,9 @@ fn reduced_motion_keeps_the_cursor_steady(cx: &mut TestAppContext) {
 /// places, so they are compared on both platforms: every chord the keymap gives the program must be one the terminal
 /// sends, and none it keeps for the app or the terminal itself may be, whether pressed or held (the input mapping is
 /// told an app shortcut is one, as its route asks). Then the other way round: every chord the input mapping treats
-/// as the terminal's own command (paging, select all) must be the terminal's in the keymap.
+/// as the terminal's own command (paging, select all) must be the terminal's in the keymap, except Shift+PageUp and
+/// Shift+PageDown with further modifiers held, which the keymap leaves to the terminal's listener on purpose: it pages
+/// them there (`program_input_routes_keys_to_the_program_or_text_input` pins that).
 ///
 /// Some program keys have no legacy encoding, so the terminal sends nothing for them, and both sides are right:
 /// GPUI Kit's inspector toggle (Cmd+Option+I, Ctrl+Shift+I) is the program's only so that Kit's debug-only binding
@@ -1890,7 +1941,7 @@ fn delivers(route: &KeyRoute, event: &KeyDownEvent) -> bool {
     match route {
         KeyRoute::Send(_) => true,
         KeyRoute::TextInput => event.keystroke.key_char.is_some(),
-        KeyRoute::Nothing => false,
+        KeyRoute::Page(_) | KeyRoute::Nothing => false,
     }
 }
 
@@ -1925,6 +1976,12 @@ fn program_input_routes_keys_to_the_program_or_text_input() {
         "one key, one write"
     );
     assert_eq!(on("shift-a"), KeyRoute::TextInput);
+    assert_eq!(
+        on("ctrl-shift-pageup"),
+        KeyRoute::Page(-1),
+        "a page key with more modifiers pages, which the keymap leaves to the listener"
+    );
+    assert_eq!(on("alt-shift-pagedown"), KeyRoute::Page(1));
     assert_eq!(on("space"), KeyRoute::TextInput);
     assert_eq!(on("fn-a"), KeyRoute::Nothing, "a function-modified key");
     // A key with text the platform typed, unknown to the mapping's US inference, is text input's.

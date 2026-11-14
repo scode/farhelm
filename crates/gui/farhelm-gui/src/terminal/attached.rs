@@ -2,7 +2,7 @@
 //!
 //! NOTE: This is cut to what the first milestone's slice needs (the migration's orchestrator trimmed it on 2026-11-13):
 //! attach a terminal, show its output, say when it is not live, take focus and send the program its keys. The terminal
-//! area added paste, committed text from the platform's text input and focus reports since. Scrollback, selection,
+//! area added paste, committed text from the platform's text input, focus reports and scrollback since. Selection,
 //! links and the reconnect display with its phase and Retry come later in that work. The session pane
 //! ([`crate::session_pane`]) mounts one for the selected session.
 //!
@@ -44,18 +44,20 @@
 //!
 //! - An app shortcut whose feature has no binding yet is dropped, press and repeats alike. It is Farhelm's, so it
 //!   must not reach the program in the meantime either.
-//! - The terminal's own commands that have no action yet do nothing: Shift+PageUp and Shift+PageDown will scroll the
-//!   history, Cmd+A select and Cmd+C copy the selection. They are dropped rather than sent, so a program never learns
-//!   to depend on getting them. Paste has its action ([`actions::Paste`], [`AttachedTerminal::paste`]), whose binding
-//!   takes its keys before this listener sees them.
+//! - The terminal's own commands that have no action yet do nothing: Cmd+A will select and Cmd+C copy the selection.
+//!   They are dropped rather than sent, so a program never learns to depend on getting them. Paste
+//!   ([`actions::Paste`], [`AttachedTerminal::paste`]) and the page keys, Shift+PageUp and Shift+PageDown
+//!   ([`actions::ScrollTerminalPageUp`] and its sibling), have their actions, whose bindings take their keys before
+//!   this listener sees them.
 //! - Every other key is the program's. `farhelm-input-mapping`'s `map_key` decides what it means (the supervisor
 //!   encodes the bytes). A key it sends as a key goes out as one, and the listener stops it there. A key it leaves to
 //!   text input (a Shift letter, a space, an Option character, a dead key, a key typed while an input method composes)
 //!   keeps propagating, so GPUI hands it to the platform's text input, which commits whatever text it makes through the
 //!   terminal's input handler (the `EntityInputHandler` impl below): the character, a Mac dead key's `é` once the
 //!   letter follows, an input method's string. That text goes to the program once, as typed text. This is the old
-//!   app's split too, where the browser's hidden input element supplied the text. Held keys repeat to the program, as
-//!   in any terminal: the keymap's repeat guard (`actions::ONCE_PER_PRESS`) stops a held app shortcut's repeats before
+//!   app's split too, where the browser's hidden input element supplied the text. A paging decision (Shift+PageUp or
+//!   Shift+PageDown with Ctrl, Alt or Cmd also held, which the keymap does not bind) pages the history, as the bindings
+//!   do, and sends nothing. Held keys repeat to the program, as in any terminal: the keymap's repeat guard (`actions::ONCE_PER_PRESS`) stops a held app shortcut's repeats before
 //!   they get here, and `map_key` holds back nothing else.
 //!
 //! NOTE: On Linux a key's text reaches text input only when at most Shift is held (GPUI's Linux rule, on Wayland and
@@ -630,6 +632,10 @@ impl AttachedTerminal {
                 }
             }
             KeyRoute::TextInput => {}
+            KeyRoute::Page(direction) => {
+                cx.stop_propagation();
+                self.scroll_page(direction, cx);
+            }
             KeyRoute::Nothing => cx.stop_propagation(),
         }
     }
@@ -752,6 +758,18 @@ impl AttachedTerminal {
         view.update(cx, |view, cx| {
             view.scroll_pixels(pixels as f32, cell.height, cx)
         });
+    }
+
+    /// Shift+PageUp (`direction` -1) or Shift+PageDown (1): scroll the shown screen a page less a line, the old app's
+    /// step, so the line at one edge stays in view as a landmark. Reaching the live screen follows it again. On the
+    /// alternate screen there is no history, so nothing moves, and the key still does not reach the program.
+    fn scroll_page(&mut self, direction: i64, cx: &mut Context<Self>) {
+        let Some(view) = self.committed.clone() else {
+            return;
+        };
+        let page = view.read(cx).rows.len().saturating_sub(1);
+        let lines = direction * i64::try_from(page).unwrap_or(i64::MAX);
+        view.update(cx, |view, cx| view.scroll_lines(lines, cx));
     }
 
     /// The user's Paste ([`actions::Paste`], from a key or a menu): send the clipboard's text to the program as one
@@ -984,6 +1002,9 @@ enum KeyRoute {
     /// character it types, a dead-key composition, an input method's string) arrives once, through the terminal's input
     /// handler ([`AttachedTerminal::replace_text_in_range`]).
     TextInput,
+    /// Page through the history, -1 up and 1 down: Shift+PageUp or Shift+PageDown with more modifiers held, which the
+    /// old app paged on too. The plain chords never get here: their bindings take them first.
+    Page(i64),
     /// Nothing at all: the key is swallowed.
     Nothing,
 }
@@ -994,8 +1015,9 @@ enum KeyRoute {
 /// message. A key it leaves to text input (a Shift letter, a space, an Option character on a Mac, a dead key, a key
 /// typed while an input method composes) goes to the platform's text input, which commits text through the input
 /// handler, as the old app's hidden input element got its text from the browser. A key it cancels and anything it does
-/// not handle send nothing. Its local decisions (paging, select all) are the keymap's to make, which already gave those
-/// keys to the terminal, so they send nothing here either.
+/// not handle send nothing. Its paging decision covers Shift+PageUp and Shift+PageDown with any further modifiers, as
+/// the old app's key handling did; the keymap binds only the plain chords, so the others page from here. Select all is
+/// the keymap's to make, which already gave its key to the terminal, so it sends nothing here.
 ///
 /// NOTE: A key routed to text input must keep propagating (GPUI hands a key's text to the input handler only then),
 /// and a key sent here must not (or its text would arrive a second time through the handler). The listener's
@@ -1035,11 +1057,11 @@ fn program_input(
     match map_key(key, platform, composition, route) {
         Decision::Send(input) => KeyRoute::Send(input),
         Decision::Text { cancel: false } | Decision::Composition => KeyRoute::TextInput,
+        Decision::PageUp => KeyRoute::Page(-1),
+        Decision::PageDown => KeyRoute::Page(1),
         Decision::Text { cancel: true }
         | Decision::AppShortcut
         | Decision::Suppress
-        | Decision::PageUp
-        | Decision::PageDown
         | Decision::SelectAll
         | Decision::Unhandled
         | Decision::Unsupported => KeyRoute::Nothing,
@@ -1211,6 +1233,16 @@ impl Render for AttachedTerminal {
             .key_context(actions::TERMINAL_CONTEXT)
             .on_key_down(cx.listener(Self::key))
             .on_action(cx.listener(Self::paste))
+            .on_action(
+                cx.listener(|owner, _: &actions::ScrollTerminalPageUp, _, cx| {
+                    owner.scroll_page(-1, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|owner, _: &actions::ScrollTerminalPageDown, _, cx| {
+                    owner.scroll_page(1, cx)
+                }),
+            )
             .on_scroll(cx.listener(Self::wheel))
             .relative()
             .flex_1()
