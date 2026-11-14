@@ -43,6 +43,8 @@ serde_json.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+# The fake helm and fake terminal streams GUI tests run against. Only here, so the app itself never compiles them.
+farhelm-helm-client = { workspace = true, features = ["test-support"] }
 # `leak-detection` is what makes GPUI's leak checks check anything: without it they are no-ops (SPEC_impl.md, "GPUI
 # cookbook: traps"). `test-support` brings the test contexts and the headless capture.
 gpui = { workspace = true, features = ["test-support", "leak-detection"] }
