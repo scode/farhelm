@@ -586,13 +586,18 @@
     },
     {
       "golden": "settings-sessions",
-      "title": "Settings as the gear opens it, at Sessions (only Sessions and Hosts are listed so far)",
+      "title": "Settings as the gear opens it, at Sessions (only Sessions, Hosts and Terminal are listed so far)",
       "reference": "settings-sessions"
     },
     {
       "golden": "settings-hosts",
       "title": "Settings at Hosts, automatic remote-host updates on",
       "reference": "settings-hosts"
+    },
+    {
+      "golden": "settings-terminal",
+      "title": "Settings at Terminal, the default link choice chosen",
+      "reference": "settings-terminal"
     },
     {
       "golden": "hosts-panel",
