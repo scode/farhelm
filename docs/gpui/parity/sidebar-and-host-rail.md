@@ -32,3 +32,8 @@ Where the port does not match the old app, and why. Each stays until the work na
 - The old app replaced the whole list with "Failed to load sessions: ..." when a read failed. The port keeps the rows it
   has (a failed read is no evidence that anything went) and shows that line above them, in the style of the old app's
   full-width failure lines (`.restart-error`).
+- While the window was not focused, the old app paused the running pulse (`animation-play-state: paused`), so a dot
+  could stay frozen mid-dip at a level nobody chose. The port draws it at full opacity there instead. That is still,
+  which is all SPEC.md asks ("stand still while the Farhelm window is not focused"), and it is the one still state that
+  does not depend on timing: an exact freeze would need the ticker's shared count to stop for every view, which it
+  cannot promise while anything else animates. This one is meant to stay; no later work removes it.

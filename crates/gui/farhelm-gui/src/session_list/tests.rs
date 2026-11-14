@@ -7,6 +7,8 @@
 //! is the session's key, and read from GPUI's driver record of the frame (what each element painted and its
 //! accessible name).
 
+use std::time::Duration;
+
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::{Collections, collections::decode_state};
 use farhelm_proto::ui_channel::{
@@ -19,13 +21,13 @@ use serde_json::{Value, json};
 
 use super::row::{ROW_ID_PREFIX, abbreviate_home, host_label};
 use super::selection::{self, Change, Listed, Stamped};
-use super::status::Live;
+use super::status::{Live, pulse_opacity};
 use super::{CountLine, SessionList, count_line, empty_fleet};
 use crate::host_text::tests::SPOOFING_CORPUS;
 use crate::main_view::MainView;
 use crate::notices::{self, Notice};
 use crate::session_tests::{meta, session_entry, started};
-use crate::{local_state, render_count, session_pane, test_support, theme};
+use crate::{local_state, render_count, session_pane, test_support, theme, ticker};
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
 
@@ -545,6 +547,130 @@ fn an_empty_fleet_says_so_in_the_list_and_the_pane(cx: &mut TestAppContext) {
     assert_eq!(sent(&mut fake), []);
 }
 
+// ---- The running pulse ---------------------------------------------------------------------------------------------
+
+/// How many times the list rendered while a second passed on the executor's clock: every ticker step in that second,
+/// and anything else that redrew the window.
+fn list_renders_in_a_second(cx: &mut VisualTestContext) -> usize {
+    cx.update(|_, cx| render_count::reset(cx));
+    test_support::advance(cx, Duration::from_secs(1));
+    cx.update(|_, cx| render_count::count("session-list", cx))
+}
+
+/// An idle session, which never pulses.
+fn idle(key: &'static str) -> Fixture {
+    session(key).status(json!({"state": "idle"}))
+}
+
+/// The list is drawn uncached, so whatever wakes it redraws the whole list (and its window). The pulse caps that at
+/// the shared phase's four steps a second, whatever the number of running rows, and never the ticker's ten.
+/// Specified: with three running rows on connected hosts and an idle one, in an active window, a second redraws the
+/// list exactly four times (ten ticks always hold four steps of 300 and 200 ms).
+#[gpui::test]
+fn running_rows_redraw_the_list_four_times_a_second(cx: &mut TestAppContext) {
+    let rows = [session("a"), session("b"), session("c"), idle("d")];
+    let (_fake, cx) = open_main(cx, vec![listing(&["a", "b", "c", "d"], &rows)]);
+    assert!(
+        cx.update(|window, _| window.is_window_active()),
+        "premise: the window is active"
+    );
+    assert_eq!(list_renders_in_a_second(cx), 4);
+}
+
+/// SPEC.md, "Status", stands looping indicators still in an unfocused window "to save CPU and battery", and a running
+/// session in a background window is the app's ordinary state for hours; under reduced motion nothing moves on its
+/// own either. Skipping the redraws is not enough: a list that kept its pulse handle in an inactive window would keep
+/// the ticker's timer firing ten times a second with nothing to show for it. Specified: with a running row in an
+/// active window the tick count moves; once the window is inactive, a second leaves the tick count where it was; active
+/// again, the count moves again; under reduced motion, a second moves neither the tick count nor the list's renders.
+#[gpui::test]
+fn the_tickers_timer_stops_while_inactive_and_under_reduced_motion(cx: &mut TestAppContext) {
+    let (_fake, cx) = open_main(cx, vec![listing(&["a"], &[session("a")])]);
+    let ticks_in_a_second = |cx: &mut VisualTestContext| {
+        let before = cx.update(|_, cx| ticker::ticks(cx));
+        test_support::advance(cx, Duration::from_secs(1));
+        cx.update(|_, cx| ticker::ticks(cx)) - before
+    };
+    assert!(
+        ticks_in_a_second(cx) > 0,
+        "premise: the running row's pulse ticks in an active window"
+    );
+
+    cx.deactivate_window();
+    assert!(
+        !cx.update(|window, _| window.is_window_active()),
+        "premise: the window is inactive"
+    );
+    // The loop's last pending timer may still fire once, finding nobody to tick for; the count does not move for it.
+    assert_eq!(ticks_in_a_second(cx), 0, "no ticks in an inactive window");
+
+    cx.update(|window, _| window.activate_window());
+    test_support::settle(cx);
+    assert!(
+        ticks_in_a_second(cx) > 0,
+        "premise: active again, the pulse ticks again"
+    );
+
+    cx.update(|_, cx| {
+        ticker::set_reduced_motion(true, cx);
+        render_count::reset(cx);
+    });
+    assert_eq!(ticks_in_a_second(cx), 0, "no ticks under reduced motion");
+    assert_eq!(
+        cx.update(|_, cx| render_count::count("session-list", cx)),
+        0,
+        "no redraws under reduced motion"
+    );
+}
+
+/// A handle kept after the last running row stops would redraw the list four times a second for nothing, for as long
+/// as the window is open. Specified: once the helm pushes the only running row as idle, a second in an active window
+/// redraws the list not once.
+#[gpui::test]
+fn a_row_that_stops_running_drops_the_pulse(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, vec![listing(&["a", "b"], &[session("a"), idle("b")])]);
+    assert!(
+        list_renders_in_a_second(cx) > 0,
+        "premise: the running row pulses"
+    );
+    fake.push(change(
+        listing_meta(&["a", "b"], 2, false),
+        &[idle("a")],
+        &[],
+    ));
+    test_support::settle(cx);
+    assert_eq!(list_renders_in_a_second(cx), 0);
+}
+
+/// SPEC.md, "Status": "a session on an unreachable host shows a grey, still dot whatever its status says", because
+/// motion reads as evidence that something is happening now, and nobody can know that of an unreachable host. Still
+/// means no pulse handle at all, not a pulse drawn at full opacity. Specified: a list whose only running row is stale
+/// redraws not once in a second in an active window, and the same row pushed again on a connected host makes it
+/// redraw.
+#[gpui::test]
+fn a_stale_running_row_holds_no_pulse(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(
+        cx,
+        vec![listing(&["a", "b"], &[session("a").stale(), idle("b")])],
+    );
+    assert!(
+        cx.update(|window, _| window.is_window_active()),
+        "premise: the window is active"
+    );
+    assert_eq!(list_renders_in_a_second(cx), 0, "stale");
+
+    fake.push(change(
+        listing_meta(&["a", "b"], 2, false),
+        &[session("a")],
+        &[],
+    ));
+    test_support::settle(cx);
+    assert!(
+        list_renders_in_a_second(cx) > 0,
+        "the same row pulses once its host is connected"
+    );
+}
+
 // ---- The rules as pure functions -----------------------------------------------------------------------------------
 
 /// Which listings may say "No sessions" and what the pane says: only an available, complete listing with no rows is an
@@ -763,6 +889,51 @@ fn a_mark_on_a_disconnected_host_is_grey_whatever_its_status() {
         );
     }
     assert_eq!(Live::Running.mark_color(palette, false, false), palette.ok);
+}
+
+/// The pulse's look is the old `farhelm-status-pulse`: a linear dip to the minimum and back, held at each quarter's
+/// start by `steps(4)`, so a step's opacity is where the stylesheet's would be at the same moment. Specified: at a 60%
+/// minimum the eight steps read 1.0, 0.9, 0.8, 0.7, 0.6, 0.7, 0.8, 0.9; at 85% the dimmest is 0.85; the cycle
+/// repeats past its end.
+#[test]
+fn the_pulse_dips_to_its_minimum_in_four_steps_and_climbs_back_in_four() {
+    let levels: Vec<f32> = (0..ticker::PULSE_STEPS)
+        .map(|step| pulse_opacity(step, 60))
+        .collect();
+    let expected = [1.0, 0.9, 0.8, 0.7, 0.6, 0.7, 0.8, 0.9];
+    for (level, expected) in levels.iter().zip(expected) {
+        assert!((level - expected).abs() < 1e-5, "{levels:?}");
+    }
+    assert!((pulse_opacity(4, 85) - 0.85).abs() < 1e-5);
+    assert_eq!(pulse_opacity(ticker::PULSE_STEPS, 60), 1.0);
+}
+
+/// The opacity a mark draws at is the pulse's level only for a running mark on a connected host, at the shallower
+/// minimum on the solid selection (the old sheet's `--selected-status-pulse-min`, since a deep dip loses the mark
+/// against the fill). Specified, at the dimmest step: an ordinary running mark is at 0.6 in the dark appearance and
+/// 0.73 in the light one, a selected one at 0.85 in either, and a stale running mark and every other live mark at 1.0.
+#[test]
+fn only_a_running_mark_on_a_connected_host_dims_and_less_when_selected() {
+    let dimmest = ticker::PULSE_STEPS / 2;
+    let opacity =
+        |live: Live, palette, selected, stale| live.mark_opacity(palette, selected, stale, dimmest);
+    let close = |a: f32, b: f32| (a - b).abs() < 1e-5;
+    assert!(close(
+        opacity(Live::Running, &theme::DARK, false, false),
+        0.6
+    ));
+    assert!(close(
+        opacity(Live::Running, &theme::LIGHT, false, false),
+        0.73
+    ));
+    for palette in [&theme::DARK, &theme::LIGHT] {
+        assert!(close(opacity(Live::Running, palette, true, false), 0.85));
+        assert_eq!(opacity(Live::Running, palette, false, true), 1.0, "stale");
+        assert_eq!(opacity(Live::Running, palette, true, true), 1.0, "stale");
+        for live in [Live::Waiting, Live::IdleUnseen, Live::Idle] {
+            assert_eq!(opacity(live, palette, false, false), 1.0, "{live:?}");
+        }
+    }
 }
 
 /// The host part of a row names the host as the old app did. A sandbox or container host has no destination, so its

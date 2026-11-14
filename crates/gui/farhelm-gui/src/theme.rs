@@ -121,6 +121,13 @@ pub struct Palette {
     pub info: Token,
     /// `--on-accent-dim`: secondary text on a selection fill.
     pub on_accent_dim: Token,
+    /// `--status-pulse-min`, in percent: the running pulse's dimmest opacity on an ordinary row. Shallow, never off, so
+    /// it reads as a heartbeat rather than a blink; the light appearance's is higher because its dark green fades into
+    /// a light hover sooner.
+    pub status_pulse_min: u8,
+    /// `--selected-status-pulse-min`, in percent: the same on the solid selection, where a deeper dip loses the
+    /// mark's contrast against the fill.
+    pub selected_status_pulse_min: u8,
     /// `--scrim-dialog`, as `0xRRGGBBAA`: the veil behind a modal dialog.
     pub scrim_dialog: Token,
     /// `--shadow-menu`'s color, as `0xRRGGBBAA`: under menus and tooltips.
@@ -164,6 +171,8 @@ pub const DARK: Palette = Palette {
     danger_fill_hover: rgb_token(0x983644),
     info: rgb_token(0x8ea2f5),
     on_accent_dim: rgb_token(0xf4f6ff),
+    status_pulse_min: 60,
+    selected_status_pulse_min: 85,
     // rgb(8 11 17 / 62%)
     scrim_dialog: rgba_token(0x080b119e),
     // rgba(0, 0, 0, 0.35)
@@ -214,6 +223,8 @@ pub const LIGHT: Palette = Palette {
     danger_fill_hover: rgb_token(0x983644),
     info: rgb_token(0x445acf),
     on_accent_dim: rgb_token(0xf4f6ff),
+    status_pulse_min: 73,
+    selected_status_pulse_min: 85,
     // rgb(27 33 48 / 30%)
     scrim_dialog: rgba_token(0x1b21304d),
     // rgba(27, 33, 48, 0.15)

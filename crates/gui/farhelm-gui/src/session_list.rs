@@ -18,6 +18,15 @@
 //! The list is drawn uncached (the maintainer's foundations decision of 2026-11-14): SPEC's fleet is tens of sessions,
 //! so a whole-list redraw per change is cheap, and caching is settled when profiling at the listing cap asks for it.
 //!
+//! The running pulse is the one thing that redraws the list on its own, and its cost is bounded by the list, not by its
+//! rows. The list holds one [`ticker::Pulsing`] handle while the window is active and any listed row pulses (running,
+//! on a connected host), and none otherwise. Every running mark reads the same shared step from it, so the window
+//! redraws at most once per step (four times a second) whatever the number of running rows, and not at all while the
+//! window is inactive, under reduced motion, or with nothing running. Without a handle a running mark draws at full
+//! opacity, which is how an inactive window shows a still dot. The dot is deliberately not a view of its own: GPUI
+//! redraws a notified view's whole window, re-rendering every uncached view in it and dirtying the notified view's
+//! ancestors, so per-row views would not have limited what a step redraws, only multiplied the notifications.
+//!
 //! NOTE: Not ported yet, each with the area that brings it: the order menu (the title is the stored order's name, not a
 //! control), filters and their counts, compact rows, marking, pins, the row menu, and the host rail.
 
@@ -40,6 +49,7 @@ use crate::local_state::{self, LocalState};
 use crate::render_count;
 use crate::session::{self, PerSession};
 use crate::theme::{self, metrics};
+use crate::ticker;
 use selection::{Change, Stamped};
 
 /// The session list view. The main view holds one for the window's life.
@@ -51,6 +61,11 @@ pub struct SessionList {
     current: PerSession<Current>,
     /// Settle on a change of the connection and of the selection (which also redraws the list).
     _observing: Vec<Subscription>,
+    /// The pulse's ticks (see the module docs), held exactly while the window is active and some listed row pulses.
+    /// Taken and dropped at the top of each frame, before the frame reads its step, as the terminal cursor's blink
+    /// is: everything that decides it (the store, the connection, the window's activation) redraws the list when it
+    /// changes, so working it out there cannot miss a change.
+    pulse: Option<ticker::Pulsing>,
 }
 
 /// What the list keeps for one UI session.
@@ -77,6 +92,7 @@ impl SessionList {
         let mut list = SessionList {
             current: PerSession::default(),
             _observing: observing,
+            pulse: None,
         };
         list.settle(cx);
         list
@@ -130,7 +146,7 @@ impl SessionList {
 }
 
 impl Render for SessionList {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         render_count::record("session-list", cx);
 
         let list = div()
@@ -142,13 +158,22 @@ impl Render for SessionList {
             .flex_col()
             .min_h_0();
         let Some(store) = session::current_store(cx) else {
+            self.pulse = None;
             return list;
         };
+        let pulses = ticker::is_active(window, cx)
+            && selection::listed(store.read(cx).collections())
+                .iter()
+                .any(|session| status::pulses(session.row));
+        if pulses != self.pulse.is_some() {
+            self.pulse = pulses.then(|| ticker::pulse(window, cx));
+        }
+        let pulse_step = self.pulse.as_ref().map_or(0, |pulse| pulse.step(cx));
         let collections = store.read(cx).collections();
+        let listed = selection::listed(collections);
         let Some(meta) = collections.meta(Collection::Sessions) else {
             return list.child(status_line("Loading sessions…"));
         };
-        let listed = selection::listed(collections);
         let selected = local_state::selected(cx);
         let palette = theme::palette(cx);
 
@@ -212,6 +237,7 @@ impl Render for SessionList {
                         *session,
                         collections,
                         selected.as_deref() == Some(session.key),
+                        pulse_step,
                         move |_, cx| selection::choose(&key, cx),
                         cx,
                     )

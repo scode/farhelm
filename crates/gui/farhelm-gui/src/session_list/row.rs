@@ -37,11 +37,13 @@ fn under_title() -> gpui::Pixels {
     (metrics::ROW_SLOT + metrics::ROW_SLOT_GAP) * 2.
 }
 
-/// Draw `session`'s row. `on_open` runs when the user activates it.
+/// Draw `session`'s row, its status mark at the list's pulse step `pulse_step` (which only a pulsing mark uses).
+/// `on_open` runs when the user activates it.
 pub(crate) fn row(
     session: Listed,
     collections: &Collections,
     selected: bool,
+    pulse_step: u64,
     on_open: impl Fn(&mut Window, &mut App) + 'static,
     cx: &App,
 ) -> AnyElement {
@@ -82,7 +84,7 @@ pub(crate) fn row(
                 .flex()
                 .items_center()
                 .justify_center()
-                .children(live.map(|live| live.mark(palette, selected, row.stale))),
+                .children(live.map(|live| live.mark(palette, selected, row.stale, pulse_step))),
         )
         .child(div().w(metrics::ROW_SLOT).flex_none())
         .child(

@@ -877,6 +877,61 @@ fn a_blink_wakes_its_view_only_when_it_changes_half(cx: &mut TestAppContext) {
     );
 }
 
+/// A view that draws the running pulse for as long as it holds the ticker's pulse handle.
+struct Pulser {
+    pulsing: ticker::Pulsing,
+}
+
+impl Render for Pulser {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        render_count::record("pulser", cx);
+        div()
+    }
+}
+
+/// The running pulse is the old app's two-second, eight-step `farhelm-status-pulse`, as one phase for the whole app,
+/// and a view is woken only when that phase steps: four times a second rather than at every tick. Specified: from a
+/// fresh ticker, the step read after each of a cycle's 20 ticks is 0, 0, 1, 1, 2, 2, 2, 3, 3, 4, 4, 4, 5, 5, 6, 6, 6,
+/// 7, 7, 0 (steps of 300 and 200 ms in turn, since 250 ms steps do not land on 100 ms ticks), and the view is woken
+/// eight times; under reduced motion the step reads 0.
+#[gpui::test]
+fn a_pulse_steps_at_one_shared_phase_and_wakes_its_view_once_per_step(cx: &mut TestAppContext) {
+    test_support::install(cx);
+    let (pulser, cx) = cx.add_window_view(|window, cx| Pulser {
+        pulsing: ticker::pulse(window, cx),
+    });
+    cx.update(|window, _| window.activate_window());
+    cx.run_until_parked();
+    let step = |cx: &mut VisualTestContext| cx.update(|_, cx| pulser.read(cx).pulsing.step(cx));
+    assert_eq!(
+        step(cx),
+        0,
+        "premise: a fresh ticker starts at full brightness"
+    );
+    cx.update(|_, cx| render_count::reset(cx));
+    let mut cycle = Vec::new();
+    for _ in 0..ticker::PULSE_CYCLE_TICKS {
+        cx.executor().advance_clock(ticker::TICK);
+        cx.run_until_parked();
+        cycle.push(step(cx));
+    }
+    assert_eq!(
+        cycle,
+        [0, 0, 1, 1, 2, 2, 2, 3, 3, 4, 4, 4, 5, 5, 6, 6, 6, 7, 7, 0]
+    );
+    assert_eq!(
+        cx.update(|_, cx| render_count::count("pulser", cx)),
+        ticker::PULSE_STEPS as usize,
+        "woken once per step"
+    );
+
+    cx.executor().advance_clock(ticker::TICK * 3);
+    cx.run_until_parked();
+    assert_eq!(step(cx), 1, "premise: the pulse is off full brightness");
+    cx.update(|_, cx| ticker::set_reduced_motion(true, cx));
+    assert_eq!(step(cx), 0, "still under reduced motion");
+}
+
 /// One-shot deadlines are about the user's time, not drawing: they fire on time even with every window inactive, and
 /// dropping one cancels it (how a hover that ends cancels its tooltip).
 #[gpui::test]
