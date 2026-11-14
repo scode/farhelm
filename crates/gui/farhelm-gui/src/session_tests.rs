@@ -1,6 +1,7 @@
 //! Tests of the connection and UI-session owner, and of what its reset does to the window: the replies and failures it
 //! keeps from the new session, the notice it posts, the dialogs it closes, the terminal streams it refuses to open for a
-//! retired session, and the selected session that survives it.
+//! retired session, and the selected session that survives it; and of following the current UI session from a view
+//! across resets (`session::observe_current`).
 //!
 //! The helm is the helm client's fake: in process, ordered like the real channel, and moved only by the test, which is
 //! what GPUI's deterministic scheduler needs. Each test stages exactly the feed it is about (a reply queued before a
@@ -16,7 +17,8 @@ use farhelm_helm_client::terminal::{
 };
 use farhelm_helm_client::{ApiPath, ChannelState, Method};
 use farhelm_proto::ui_channel::{
-    Availability, Collection, CollectionMeta, CollectionState, ListCounts,
+    Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, ListCounts,
+    SessionRow,
 };
 use gpui::{
     AppContext as _, Context, Entity, FocusHandle, IntoElement, Modifiers, ParentElement, Render,
@@ -30,9 +32,11 @@ use crate::layers::{self, Dialog};
 use crate::local_state;
 use crate::main_view::MainView;
 use crate::notices::{self, Notice};
-use crate::session::{Connection, UiSession};
+use crate::session::{self, Connection, ObservingCurrent, UiSession};
 use crate::terminal::attached::OpenStream;
-use crate::test_support::{self, check_store, current, sessions, started, state};
+use crate::test_support::{
+    self, check_store, current, meta, session_entry, sessions, started, state,
+};
 
 // ---- The UI-session owner -------------------------------------------------------------------------------------------
 
@@ -507,4 +511,181 @@ fn truncated_sessions(keys: &[&str]) -> CollectionState {
         truncated: true,
     });
     state
+}
+
+// ---- Following the current UI session -------------------------------------------------------------------------------
+
+/// What a [`Follower`] saw on each call, in order: how many sessions the current store listed, `None` while the window
+/// was inert.
+type Seen = Rc<RefCell<Vec<Option<usize>>>>;
+
+/// A view that follows the current UI session through [`session::observe_current`], recording what it saw on each
+/// call. It reads the store inside the call, as a real follower does (the Appearance section reads the stored
+/// preference), so a call made from inside the store's own update would panic here rather than pass.
+struct Follower {
+    seen: Seen,
+    /// `None` once a test drops the handle.
+    observing: Option<ObservingCurrent>,
+}
+
+impl Follower {
+    fn new(seen: Seen, cx: &mut Context<Self>) -> Self {
+        let observing = session::observe_current(cx, |follower: &mut Follower, cx| {
+            let listed = session::current_store(cx)
+                .map(|store| store.read(cx).collections().ordered::<SessionRow>().len());
+            follower.seen.borrow_mut().push(listed);
+        });
+        Follower {
+            seen,
+            observing: Some(observing),
+        }
+    }
+}
+
+/// A follower made now, with the record of what it sees.
+fn follower(cx: &mut TestAppContext) -> (Entity<Follower>, Seen) {
+    let seen = Seen::default();
+    let record = seen.clone();
+    (cx.new(|cx| Follower::new(record, cx)), seen)
+}
+
+/// A change that adds the session `key` at the end of a list that held `before`.
+fn adding(before: &[&str], key: &'static str) -> CollectionChanges {
+    let mut order = before.to_vec();
+    order.push(key);
+    CollectionChanges {
+        collection: Collection::Sessions,
+        meta: meta(&order),
+        upsert: vec![session_entry(key)],
+        remove: vec![],
+    }
+}
+
+/// A view that acts on pushed state (the Appearance section applying the stored theme preference) has to act once on
+/// what is there when it starts, again when the first snapshot arrives, and on every later change, or the window
+/// shows a theme the user did not choose until something unrelated happens. Specified: one call when the follower is
+/// made (here while the window is inert, so it sees no store), one that sees the first snapshot's store, and exactly
+/// one more for one pushed change, which sees the change.
+#[gpui::test]
+fn following_the_current_session_calls_once_at_the_start_and_on_every_store_change(
+    cx: &mut TestAppContext,
+) {
+    let (mut fake, connection) = started(cx);
+    let (_follower, seen) = follower(cx);
+    cx.run_until_parked();
+    assert_eq!(
+        *seen.borrow(),
+        vec![None],
+        "one call when made, while inert"
+    );
+
+    fake.connect(vec![sessions(&["a"])]);
+    cx.run_until_parked();
+    assert_eq!(
+        seen.borrow().last(),
+        Some(&Some(1)),
+        "the first snapshot reached the follower"
+    );
+
+    let before = seen.borrow().len();
+    fake.push(adding(&["a"], "b"));
+    cx.run_until_parked();
+    check_store(&connection, &[sessions(&["a", "b"])], cx);
+    assert_eq!(
+        seen.borrow()[before..],
+        [Some(2)],
+        "one call for the pushed change, seeing it"
+    );
+}
+
+/// A reset replaces the store under a view that is not rebuilt, so the follower must move to the new store: one that
+/// kept only the first store's subscription would stop hearing changes after the first reset, and one that never
+/// dropped it would go on observing every retired store, one more per reset. Specified: after a break and a reconnect
+/// the follower sees the window go inert and the new snapshot, it hears a change of the new store exactly once, and a
+/// notification from the retired store reaches it no more. Nothing pushes to a retired store in the app, so the test
+/// notifies the old store itself, which only a subscription still on it can hear.
+#[gpui::test]
+fn following_the_current_session_moves_to_the_new_store_on_a_reset(cx: &mut TestAppContext) {
+    let (mut fake, connection) = started(cx);
+    fake.connect(vec![sessions(&["a"])]);
+    cx.run_until_parked();
+    let (_follower, seen) = follower(cx);
+    cx.run_until_parked();
+    assert_eq!(*seen.borrow(), vec![Some(1)], "the premise: the first call");
+    let old = cx.update(|cx| session::current_store(cx)).unwrap();
+
+    fake.break_channel();
+    cx.run_until_parked();
+    assert_eq!(
+        seen.borrow().last(),
+        Some(&None),
+        "the break reached the follower"
+    );
+
+    fake.connect(vec![sessions(&["a", "b"])]);
+    cx.run_until_parked();
+    let new = cx.update(|cx| session::current_store(cx)).unwrap();
+    assert_ne!(
+        old.entity_id(),
+        new.entity_id(),
+        "the premise: the reset replaced the store"
+    );
+    assert_eq!(
+        seen.borrow().last(),
+        Some(&Some(2)),
+        "the new snapshot reached the follower"
+    );
+
+    let before = seen.borrow().len();
+    cx.update(|cx| old.update(cx, |_, cx| cx.notify()));
+    cx.run_until_parked();
+    assert_eq!(
+        seen.borrow().len(),
+        before,
+        "the retired store is no longer observed"
+    );
+
+    fake.push(adding(&["a", "b"], "c"));
+    cx.run_until_parked();
+    check_store(&connection, &[sessions(&["a", "b", "c"])], cx);
+    assert_eq!(
+        seen.borrow()[before..],
+        [Some(3)],
+        "one call for the new store's change"
+    );
+}
+
+/// The handle is the follower's whole lifetime, as a ticker handle is: a view that drops it (or is dropped) must hear
+/// nothing more, or a closed section would go on applying preferences. Specified: once the handle is dropped, neither
+/// a pushed change nor a reset and reconnect calls it, and a handle dropped before its first call never makes that
+/// call either.
+#[gpui::test]
+fn dropping_the_handle_ends_the_calls(cx: &mut TestAppContext) {
+    let (mut fake, _connection) = started(cx);
+    fake.connect(vec![sessions(&["a"])]);
+    cx.run_until_parked();
+    let (follower, seen) = follower(cx);
+    cx.run_until_parked();
+    assert_eq!(*seen.borrow(), vec![Some(1)], "the premise: the first call");
+
+    cx.update(|cx| follower.update(cx, |follower, _| follower.observing = None));
+    fake.push(adding(&["a"], "b"));
+    cx.run_until_parked();
+    fake.break_channel();
+    fake.connect(vec![sessions(&["a"])]);
+    cx.run_until_parked();
+    assert_eq!(*seen.borrow(), vec![Some(1)], "no call after the drop");
+
+    let early = Seen::default();
+    let record = early.clone();
+    let _dropped_at_once = cx.new(|cx| {
+        let mut follower = Follower::new(record, cx);
+        follower.observing = None;
+        follower
+    });
+    cx.run_until_parked();
+    assert!(
+        early.borrow().is_empty(),
+        "a handle dropped before its first call never makes it"
+    );
 }

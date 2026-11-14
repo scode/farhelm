@@ -23,10 +23,16 @@
 //! The one thing besides the helm's own state that survives a reset, the selected session's id, lives outside the
 //! session ([`crate::local_state`]); the connection drops it only when a complete snapshot no longer has that session.
 //!
+//! A view that must act on pushed state as it changes, not only draw it (apply a stored preference, settle a rule),
+//! follows the current session with [`observe_current`]. That is the one place that knows a reset replaces the store
+//! under the view, so the view never keeps a subscription to a store the reset retired, and never misses the first
+//! change of the store that replaced it. The session list and the session pane predate it and still follow the
+//! session by hand.
+//!
 //! The connection's pump is the one task that reads the feed. It never awaits a command (that would deadlock, see the
 //! helm client's `ChannelEvents`); commands are awaited by tasks the UI session owns.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -38,7 +44,9 @@ use farhelm_helm_client::{
     CommandError, HelmConnection, HelmEndpoint, Method,
 };
 use farhelm_proto::ui_channel::{Availability, Collection, Reply, SessionRow};
-use gpui::{App, AppContext as _, Context, Entity, EntityId, Global, Task, WeakEntity};
+use gpui::{
+    App, AppContext as _, Context, Entity, EntityId, Global, Subscription, Task, WeakEntity,
+};
 use serde_json::Value;
 
 use crate::layers::{self, Subject};
@@ -318,6 +326,111 @@ impl<T: Default> PerSession<T> {
         }
         &mut self.state
     }
+}
+
+/// Call `on_change` on the view once just after this is made, on every change of the connection (its state, and so
+/// its UI session), and on every change the current UI session's store applies, until the view drops the handle this
+/// returns.
+///
+/// It is for a view that must act on pushed state rather than only draw it, such as applying the stored appearance to
+/// the theme when the first snapshot arrives and whenever it changes. Drawing needs none of this (a view that reads the
+/// store while it draws is redrawn by GPUI), but acting does, and following the current store by hand means watching
+/// the connection, subscribing to each new session's store, and dropping the old subscription on a reset. This does
+/// all three, so a view built on it can neither miss the first change of a store a reset brought in nor go on
+/// observing a retired one. `on_change` reads whatever it needs through [`current_store`] each time; with the window
+/// inert there is no store, and it is called then too, so it can tell the window went inert.
+///
+/// `on_change` runs inside an update of the view `V` (it is handed `&mut V`), never nested in the store's or the
+/// connection's update: from GPUI's own observer callbacks or, for the first call, deferred to after the update that
+/// made the handle (usually the view's own construction, when the view does not exist yet). So it may read the store
+/// and the connection, and change the view through the `&mut V` it is given, but must not update the view again
+/// through an entity handle, which would be a re-entrant update. Several
+/// changes made in one update may reach it as one call, so it works from the state as it is then and never counts
+/// calls.
+///
+/// It gets no `Window`, as GPUI's `Context::observe` gives none; applying a preference to the theme
+/// (`theme::set_preference`) is app-wide and needs none.
+///
+/// It must be made after the connection ([`start`]): it watches the connection it finds when it is made, and without
+/// one it makes only the first call. The bootstrap starts the connection before it opens a window.
+pub fn observe_current<V: 'static>(
+    cx: &mut Context<V>,
+    on_change: impl Fn(&mut V, &mut Context<V>) + 'static,
+) -> ObservingCurrent {
+    let on_change: OnChange<V> = Rc::new(on_change);
+    let watched = Rc::new(RefCell::new(None));
+    follow_store(&watched, &on_change, cx);
+    let connection = connection(cx).map(|connection| {
+        // Weak, so dropping the handle drops the store subscription at once; a strong reference would not leak (GPUI
+        // drops the observer with the view), but it would keep the old store observed until the view went.
+        let follows = Rc::downgrade(&watched);
+        let on_change = on_change.clone();
+        cx.observe(&connection, move |view, _, cx| {
+            let Some(watched) = follows.upgrade() else {
+                return;
+            };
+            // Resubscribe before calling. A view must not notify the store from `on_change`, so the order only keeps
+            // the subscription current for whatever `on_change` reads next.
+            follow_store(&watched, &on_change, cx);
+            on_change(view, cx);
+        })
+    });
+    let view = cx.weak_entity();
+    let alive = Rc::downgrade(&watched);
+    cx.defer(move |cx| {
+        if alive.upgrade().is_some() {
+            let _ = view.update(cx, |view, cx| on_change(view, cx));
+        }
+    });
+    ObservingCurrent {
+        _connection: connection,
+        _watched: watched,
+    }
+}
+
+/// What [`observe_current`] hands back: the view keeps it as a field, and dropping it, or the view that holds it, ends
+/// the calls at once, the first one included if it has not run yet.
+///
+/// It is the only strong owner of the subscription to the current store: the connection's observer reaches it
+/// weakly, so the store subscription ends with the handle rather than with the view.
+#[must_use = "dropping it ends the calls at once"]
+pub struct ObservingCurrent {
+    _connection: Option<Subscription>,
+    _watched: Rc<RefCell<Option<WatchedStore>>>,
+}
+
+/// The store an [`ObservingCurrent`] is subscribed to. Its entity id is how a change of the connection tells whether
+/// a reset replaced the store: a new UI session always brings a new store entity.
+struct WatchedStore {
+    store: EntityId,
+    _changes: Subscription,
+}
+
+/// The callback an [`ObservingCurrent`] calls, shared by its connection and store subscriptions.
+type OnChange<V> = Rc<dyn Fn(&mut V, &mut Context<V>)>;
+
+/// Point `watched` at the current UI session's store: keep it if the store is the one already watched, otherwise drop
+/// the old subscription (so a retired store is no longer observed) and subscribe to the new store, or to nothing while
+/// the window is inert.
+fn follow_store<V: 'static>(
+    watched: &RefCell<Option<WatchedStore>>,
+    on_change: &OnChange<V>,
+    cx: &mut Context<V>,
+) {
+    let store = current_store(cx);
+    let current = store.as_ref().map(|store| store.entity_id());
+    if watched.borrow().as_ref().map(|watched| watched.store) == current {
+        return;
+    }
+    let next = store.map(|store| {
+        let on_change = on_change.clone();
+        WatchedStore {
+            store: store.entity_id(),
+            _changes: cx.observe(&store, move |view, _, cx| on_change(view, cx)),
+        }
+    });
+    // The old subscription drops here, once the borrow has ended.
+    drop(watched.replace(next));
 }
 
 /// Retire `session`: cancel its work and mark it, so a completion still on its way is dropped.
