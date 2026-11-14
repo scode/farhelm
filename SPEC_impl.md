@@ -459,6 +459,13 @@ only and Option-Tab reaches every control; on: Tab reaches every control); on Li
 toward "the user moved on" where GPUI shows every keystroke before any binding runs: a key a binding handles (Farhelm's
 Tab and Escape, GPUI Kit's editing keys in a text input) never reaches an ordinary key listener.
 
+A focus move made by the keyboard or by the app, never by a pointer press or hover itself, scrolls every scrolling
+container around the focused control that opted in (`focus::scroll_region`, as the dialog frame's body and card do),
+innermost first, by the least distance that shows the whole control, as a browser's scroll-into-view does. It works from
+where controls were last drawn, moved by any scroll since, and asks for its own frame; virtualized lists keep their own
+reveal. A control focused before it is first drawn (a layer's start) has no position and is not scrolled to; its owner
+scrolls it, as Settings' trust hints and the archive's global confirmation will need to (SPEC.md).
+
 Enforced by clippy `disallowed-methods` on GPUI's focus calls and on `track_focus` everywhere in the GUI crates except
 the coordinator, and by the focus invariant that in-process tests check after every step: exactly one focused element,
 inside the topmost modal (or a menu opened above it) or in an agent approval card if a modal is open (SPEC.md, "Keyboard

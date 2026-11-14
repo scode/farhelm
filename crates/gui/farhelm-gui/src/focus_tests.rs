@@ -13,18 +13,19 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gpui::{
-    AppContext as _, Context, FocusHandle, InteractiveElement as _, IntoElement, KeyDownEvent,
-    Keystroke, Modifiers, MouseButton, MouseDownEvent, ParentElement, Render, ScrollDelta,
-    ScrollEvent, Styled, TestAppContext, VisualTestContext, Window, div, point, px,
+    AnyElement, AppContext as _, Context, FocusHandle, InteractiveElement as _, IntoElement,
+    KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, ParentElement, Render,
+    ScrollDelta, ScrollEvent, ScrollHandle, StatefulInteractiveElement as _, Styled,
+    TestAppContext, VisualTestContext, Window, div, point, px, size,
 };
 
-use crate::components::{HoverHelp, TextInput, TextInputState};
+use crate::components::{DialogFrame, HoverHelp, TextInput, TextInputState};
 use crate::focus::{self, Mark, OnPress};
 use crate::layers::{self, Anchor, Dialog};
 use crate::prompt::{self, Presentation};
 use crate::test_support::{
     anchor_element, bounds, button, center, check, click, focused, follow, handle, is_open, keys,
-    open, open_dialog, open_dialog_returning, open_menu, question, redraw,
+    open, open_dialog, open_dialog_returning, open_menu, question, redraw, settle,
 };
 
 // ---- Helpers on top of the shared harness ----------------------------------------------------------------------------
@@ -1413,5 +1414,395 @@ fn what_counts_as_the_user_moving_on(cx: &mut TestAppContext) {
     assert!(
         moved(cx, &before_arrow),
         "an arrow key in a text field is moving on"
+    );
+}
+
+// ---- Scrolling the focused control into view -------------------------------------------------------------------------
+
+/// A dialog frame drawn on the page, as the component tests draw one, with `body` as its body and no answers. In a
+/// window 400 pixels tall the frame keeps to 352, so a body much taller than that scrolls inside "tall-body".
+fn tall_dialog(body: impl IntoElement) -> AnyElement {
+    DialogFrame::new("tall", "A tall dialog", body, Vec::new()).into_any_element()
+}
+
+/// Whether the element drawn under `selector` lies wholly inside the element drawn under `region`, as last drawn.
+fn shows_whole(cx: &mut VisualTestContext, selector: &'static str, region: &'static str) -> bool {
+    let (inner, outer) = (bounds(cx, selector), bounds(cx, region));
+    inner.top() >= outer.top() && inner.bottom() <= outer.bottom()
+}
+
+/// How far the element drawn under `selector` sits inside the edge of the element drawn under `region`: `top` from its
+/// top edge, otherwise from its bottom edge. A reveal by the least distance leaves the control within a few pixels of
+/// the edge (about the reveal margin, which the coordinator measures from inside the control's border).
+fn gap_to_edge(
+    cx: &mut VisualTestContext,
+    selector: &'static str,
+    region: &'static str,
+    top: bool,
+) -> f32 {
+    let (inner, outer) = (bounds(cx, selector), bounds(cx, region));
+    f32::from(if top {
+        inner.top() - outer.top()
+    } else {
+        outer.bottom() - inner.bottom()
+    })
+}
+
+/// Whether a gap from [`gap_to_edge`] is what a least-distance reveal leaves: the control inside the edge by four pixels
+/// at most, a little more than the reveal margin.
+fn at_edge(gap: f32) -> bool {
+    (0. ..=4.).contains(&gap)
+}
+
+/// Tab onto controls below the fold of a dialog's body scrolls each into view, ending on a text field, and Shift+Tab
+/// back scrolls up again. Without this, keyboard focus goes where the user cannot see it, and SPEC.md's "Reaching
+/// everything by keyboard" holds only for a user who also scrolls with the pointer. Going back up onto a control above
+/// the view that is not the body's first, the body scrolls by the least distance: the control lands at the top edge,
+/// not at the bottom, where an algorithm that always aligns one way would put it. The field is a GPUI Kit input, which
+/// tracks its own focus and only records its position, so this also covers that path.
+#[gpui::test]
+fn tab_to_a_field_below_the_fold_scrolls_it_into_view_and_shift_tab_scrolls_back(
+    cx: &mut TestAppContext,
+) {
+    let stops = Rc::new(RefCell::new(None::<(FocusHandle, FocusHandle)>));
+    let field: FieldState = Rc::default();
+    let (drawn, drawn_field) = (stops.clone(), field.clone());
+    let cx = open(cx, move |window, cx| {
+        let Some((top, middle)) = drawn.borrow().clone() else {
+            return div().into_any_element();
+        };
+        let state = drawn_field
+            .borrow_mut()
+            .get_or_insert_with(|| TextInputState::new(window, cx))
+            .clone();
+        let help = HoverHelp::tooltip("A test field");
+        tall_dialog(
+            div()
+                .child(button("top", &top))
+                .child(div().h(px(600.)))
+                .child(button("middle", &middle))
+                .child(div().h(px(600.)))
+                .child(
+                    div()
+                        .debug_selector(|| "field".into())
+                        .w(px(200.))
+                        .child(TextInput::new("field-input", &state, "Field", help)),
+                ),
+        )
+    });
+    cx.simulate_resize(size(px(720.), px(400.)));
+    let (top, middle) = (handle(cx), handle(cx));
+    let field_focused = move |cx: &mut VisualTestContext| {
+        let state = field.borrow().clone();
+        cx.update(|window, cx| state.is_some_and(|state| state.focus_handle(cx).is_focused(window)))
+    };
+    stops.replace(Some((top.clone(), middle.clone())));
+    redraw(cx);
+    assert!(
+        shows_whole(cx, "top", "tall-body")
+            && bounds(cx, "middle").top() >= bounds(cx, "tall-body").bottom(),
+        "the premise: the top control shows and the next one is below the fold"
+    );
+
+    keys(cx, "tab tab");
+    assert!(
+        focused(cx, &middle),
+        "the premise: Tab reached the middle control"
+    );
+    assert!(
+        shows_whole(cx, "middle", "tall-body"),
+        "the body scrolled it into view"
+    );
+    keys(cx, "tab");
+    assert!(field_focused(cx), "the premise: Tab reached the field");
+    assert!(
+        shows_whole(cx, "field", "tall-body"),
+        "the body scrolled the whole field into view"
+    );
+    assert!(
+        bounds(cx, "middle").bottom() <= bounds(cx, "tall-body").top(),
+        "the premise of going back: the middle control is above the view"
+    );
+
+    keys(cx, "shift-tab");
+    assert!(
+        focused(cx, &middle),
+        "the premise: Shift+Tab went back to the middle control"
+    );
+    let gap = gap_to_edge(cx, "middle", "tall-body", true);
+    assert!(
+        at_edge(gap),
+        "the body scrolled up by the least distance: {gap} below the top edge"
+    );
+    keys(cx, "shift-tab");
+    assert!(
+        focused(cx, &top),
+        "the premise: Shift+Tab went back to the top control"
+    );
+    assert!(
+        shows_whole(cx, "top", "tall-body"),
+        "the body scrolled back to show it"
+    );
+}
+
+/// Focus moving down onto a control below the view scrolls it by the least distance, to the bottom edge, and focus
+/// moving onto a control that already shows whole scrolls nothing, as in a browser. The body jumping on every Tab, to
+/// put each control at one edge, would lose the user's place. The second half runs with the body already scrolled
+/// partway, where a scroll in either direction could show.
+#[gpui::test]
+fn tab_scrolls_the_least_distance_and_not_at_all_for_a_control_already_in_view(
+    cx: &mut TestAppContext,
+) {
+    let stops = Rc::new(RefCell::new(
+        None::<(FocusHandle, FocusHandle, FocusHandle)>,
+    ));
+    let drawn = stops.clone();
+    let cx = open(cx, move |_, _| {
+        let Some((top, first, second)) = drawn.borrow().clone() else {
+            return div().into_any_element();
+        };
+        tall_dialog(
+            div()
+                .child(button("top", &top))
+                .child(div().h(px(600.)))
+                .child(button("first", &first))
+                .child(button("second", &second))
+                .child(div().h(px(600.))),
+        )
+    });
+    cx.simulate_resize(size(px(720.), px(400.)));
+    let (top, first, second) = (handle(cx), handle(cx), handle(cx));
+    stops.replace(Some((top.clone(), first.clone(), second.clone())));
+    redraw(cx);
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &top),
+        "the premise: the first Tab reaches the top control"
+    );
+    assert!(
+        bounds(cx, "first").top() >= bounds(cx, "tall-body").bottom(),
+        "the premise: the next control is below the fold"
+    );
+
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &first),
+        "the premise: Tab reached the first control below"
+    );
+    let gap = gap_to_edge(cx, "first", "tall-body", false);
+    assert!(
+        at_edge(gap),
+        "the body scrolled down by the least distance: {gap} above the bottom edge"
+    );
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &second),
+        "the premise: Tab reached the control right under it"
+    );
+    let before = bounds(cx, "first");
+    assert!(
+        shows_whole(cx, "first", "tall-body") && before.top() > bounds(cx, "tall-body").top(),
+        "the premise: the body is scrolled partway and the first control shows whole, below the top edge"
+    );
+
+    keys(cx, "shift-tab");
+    assert!(
+        focused(cx, &first),
+        "the premise: Shift+Tab went back to it"
+    );
+    assert_eq!(bounds(cx, "first"), before, "the body did not scroll");
+}
+
+/// In a window so short that the dialog's whole card scrolls (the frame's mode for when even the title and answers do
+/// not fit), the body sits at its floor and partly outside the card's visible box. Tab onto a control below the body's
+/// fold must scroll both: the body to the control, then the card to the body's part that holds it. Scrolling only the
+/// nearest region leaves the control cut off by the card.
+///
+/// Then two of the app's focus moves before a frame: the first, to the answer below the card's fold, scrolls the card,
+/// which moves the body with it; the second, back to the body's control, must measure the body's box where the card's
+/// scroll put it. Measured where the frame on screen drew it, the body would look misplaced by the card's scroll and
+/// scroll the control out of its own view.
+#[gpui::test]
+fn tab_in_a_dialog_whose_card_scrolls_scrolls_body_and_card_until_the_control_shows(
+    cx: &mut TestAppContext,
+) {
+    let stops = Rc::new(RefCell::new(
+        None::<(FocusHandle, FocusHandle, FocusHandle)>,
+    ));
+    let drawn = stops.clone();
+    let cx = open(cx, move |_, _| {
+        let Some((top, deep, answer)) = drawn.borrow().clone() else {
+            return div().into_any_element();
+        };
+        let body = div()
+            .child(button("top", &top))
+            .child(div().h(px(300.)))
+            .child(button("deep", &deep));
+        let answers = vec![button("answer", &answer)];
+        DialogFrame::new("short", "A dialog in a very short window", body, answers)
+            .summary("with a summary line under the title")
+            .into_any_element()
+    });
+    cx.simulate_resize(size(px(720.), px(160.)));
+    let (top, deep, answer) = (handle(cx), handle(cx), handle(cx));
+    stops.replace(Some((top.clone(), deep.clone(), answer.clone())));
+    redraw(cx);
+    assert!(
+        bounds(cx, "short-body").bottom() > bounds(cx, "short").bottom()
+            && !shows_whole(cx, "deep", "short-body"),
+        "the premise: the card scrolls, the body reaches below its visible box, and the control is below the body's fold"
+    );
+
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &top),
+        "the premise: the first Tab reaches the top control"
+    );
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &deep),
+        "the premise: Tab reached the control below the fold"
+    );
+    assert!(
+        shows_whole(cx, "deep", "short-body"),
+        "the body scrolled the control into its view"
+    );
+    assert!(
+        shows_whole(cx, "deep", "short"),
+        "the card scrolled so the control shows in the window too"
+    );
+
+    assert!(
+        !shows_whole(cx, "answer", "short"),
+        "the premise of the second half: the answer is below the card's fold, so moving to it scrolls the card"
+    );
+    let now = cx.update(|_, cx| Mark::take(cx));
+    let (to_answer, to_deep) = (answer.clone(), deep.clone());
+    cx.update(move |window, cx| {
+        focus::focus_control(&to_answer, &now, window, cx);
+        focus::focus_control(&to_deep, &now, window, cx);
+    });
+    settle(cx);
+    assert!(
+        focused(cx, &deep),
+        "the premise: the second move took focus back to the control"
+    );
+    assert!(
+        shows_whole(cx, "deep", "short-body") && shows_whole(cx, "deep", "short"),
+        "the control still shows whole in the body and the card"
+    );
+}
+
+/// A pointer press that focuses a partly hidden control leaves the scroll where it is: browsers do the same, and
+/// scrolling would move the very control under the pointer while the user clicks it. A focus move the app then makes
+/// onto that control, which already holds focus, does scroll it into view, in a frame of its own: GPUI draws nothing
+/// for a focus move onto the control that holds focus, so the scroll has to ask for that frame. The region is a plain
+/// page region opted in through `scroll_region`, as the sidebar's host list will be once the sidebar draws it through
+/// that.
+#[gpui::test]
+fn a_press_leaves_a_partly_hidden_control_where_it_is_and_the_apps_focus_move_reveals_it(
+    cx: &mut TestAppContext,
+) {
+    let scroll = ScrollHandle::new();
+    let stops = Rc::new(RefCell::new(None::<(FocusHandle, FocusHandle)>));
+    let (drawn, region) = (stops.clone(), scroll.clone());
+    let cx = open(cx, move |_, _| {
+        let Some((first, partial)) = drawn.borrow().clone() else {
+            return div().into_any_element();
+        };
+        // 100 pixels tall, with "partial" 80 pixels down: the region's bottom edge cuts through it.
+        let content = div()
+            .id("region")
+            .debug_selector(|| "region".into())
+            .w(px(200.))
+            .h(px(100.))
+            .overflow_y_scroll()
+            .child(div().h(px(80.)).child(button("first", &first)))
+            .child(button("partial", &partial))
+            .child(div().h(px(300.)));
+        focus::scroll_region(content, &region).into_any_element()
+    });
+    let (first, partial) = (handle(cx), handle(cx));
+    stops.replace(Some((first, partial.clone())));
+    redraw(cx);
+    let (before, view) = (bounds(cx, "partial"), bounds(cx, "region"));
+    assert!(
+        before.top() < view.bottom() - px(10.) && before.bottom() > view.bottom(),
+        "the premise: the region's edge cuts through the control: {before:?} in {view:?}"
+    );
+
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    cx.simulate_click(
+        point(before.center().x, before.top() + px(5.)),
+        Modifiers::none(),
+    );
+    check(cx);
+    assert!(
+        focused(cx, &partial),
+        "the premise: the click focused the control"
+    );
+    assert_eq!(bounds(cx, "partial"), before, "the press scrolled nothing");
+
+    let now = cx.update(|_, cx| Mark::take(cx));
+    let target = partial.clone();
+    cx.update(move |window, cx| focus::focus_control(&target, &now, window, cx));
+    settle(cx);
+    assert!(
+        focused(cx, &partial),
+        "the premise: focus stayed on the control"
+    );
+    assert!(
+        shows_whole(cx, "partial", "region"),
+        "the app's focus move scrolled the whole control into view"
+    );
+}
+
+/// Two focus moves made before a frame is drawn measure the second control where it is, not where the frame on screen
+/// shows it. A reveal scrolls without drawing, so after the first move scrolled the region down, the control at its top
+/// is drawn as in view but no longer is; measuring it there would leave focus out of sight. Key presses handled back to
+/// back during a slow frame do this in the app.
+#[gpui::test]
+fn a_second_focus_move_before_a_frame_measures_the_scroll_the_first_made(cx: &mut TestAppContext) {
+    let scroll = ScrollHandle::new();
+    let stops = Rc::new(RefCell::new(None::<(FocusHandle, FocusHandle)>));
+    let (drawn, region) = (stops.clone(), scroll.clone());
+    let cx = open(cx, move |_, _| {
+        let Some((first, far)) = drawn.borrow().clone() else {
+            return div().into_any_element();
+        };
+        let content = div()
+            .id("region")
+            .debug_selector(|| "region".into())
+            .w(px(200.))
+            .h(px(100.))
+            .overflow_y_scroll()
+            .child(button("first", &first))
+            .child(div().h(px(300.)))
+            .child(button("far", &far));
+        focus::scroll_region(content, &region).into_any_element()
+    });
+    let (first, far) = (handle(cx), handle(cx));
+    stops.replace(Some((first.clone(), far.clone())));
+    redraw(cx);
+    assert!(
+        shows_whole(cx, "first", "region")
+            && bounds(cx, "far").top() >= bounds(cx, "region").bottom(),
+        "the premise: the first control shows and the far one is below the fold"
+    );
+
+    let now = cx.update(|_, cx| Mark::take(cx));
+    let (to_far, to_first) = (far.clone(), first.clone());
+    cx.update(move |window, cx| {
+        focus::focus_control(&to_far, &now, window, cx);
+        focus::focus_control(&to_first, &now, window, cx);
+    });
+    settle(cx);
+    assert!(
+        focused(cx, &first),
+        "the premise: the second move took focus back to the first control"
+    );
+    assert!(
+        shows_whole(cx, "first", "region"),
+        "the region scrolled back up: the second move saw the first one's scroll"
     );
 }

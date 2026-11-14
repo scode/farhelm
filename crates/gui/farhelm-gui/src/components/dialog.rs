@@ -4,7 +4,9 @@
 //! and the answers did not fit a short window, the whole card scrolled instead (`.host-dialog-framed` in the old
 //! stylesheet). That guarantee is what kept answers reachable at small window sizes, a bug class the old app fixed one
 //! dialog at a time; here every dialog gets it from the frame. The frame only lays out: the layer manager places it,
-//! draws the veil behind it and keeps focus inside it.
+//! draws the veil behind it and keeps focus inside it. Both scrolling parts, the body and the whole card, are the focus
+//! coordinator's scroll regions, so a control that Tab reaches below the fold scrolls into view rather than taking focus
+//! out of sight.
 //!
 //! A dialog may also have the shared header Close control SPEC.md gives editors such as Rename ("a shared title and
 //! Close header"): the old `.dialog-close` "×" at the header's top right. Drawn in the header, it comes first in Tab
@@ -17,12 +19,13 @@
 
 use gpui::{
     AnyElement, App, BoxShadow, ClickEvent, ElementId, FontWeight, InteractiveElement, IntoElement,
-    ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Window, div,
-    point, px,
+    ParentElement, RenderOnce, Role, ScrollHandle, SharedString, StatefulInteractiveElement,
+    Styled, Window, div, point, px,
 };
 
 use super::{Button, HoverHelp, IconButton};
 use crate::assets::Icon;
+use crate::focus;
 use crate::host_text::Line;
 use crate::theme::{self, metrics};
 
@@ -131,6 +134,11 @@ impl RenderOnce for DialogFrame {
                 self.close
                     .map(|close| div().flex_shrink_0().self_start().child(close)),
             );
+        // Both scrolling parts scroll a control Tab or the app focuses into view (the focus coordinator's
+        // `scroll_region`): the body for its fields, the whole card for the header's Close and the answers when even
+        // they do not fit. Their scroll handles live in keyed element state, since a frame is rebuilt on every draw.
+        let body_scroll = scroll_handle(format!("{}-body-scroll", self.id), window, cx);
+        let card_scroll = scroll_handle(format!("{}-card-scroll", self.id), window, cx);
         let body = div()
             .id(ElementId::Name(format!("{}-body", self.id).into()))
             .debug_selector(|| format!("{}-body", self.id))
@@ -142,6 +150,7 @@ impl RenderOnce for DialogFrame {
             .text_size(metrics::TEXT_SM)
             .text_color(theme::color(palette.fg_0))
             .child(self.body);
+        let body = focus::scroll_region(body, &body_scroll);
         let footer = div()
             .debug_selector(|| format!("{}-answers", self.id))
             .flex()
@@ -157,7 +166,7 @@ impl RenderOnce for DialogFrame {
             .border_color(theme::color(palette.border_dim))
             .children(self.answers);
 
-        div()
+        let card = div()
             .id(ElementId::Name(self.id.clone()))
             .debug_selector(|| self.id.to_string())
             .role(Role::Dialog)
@@ -175,8 +184,19 @@ impl RenderOnce for DialogFrame {
             .shadow(dialog_shadow(palette))
             .child(header)
             .child(body)
-            .child(footer)
+            .child(footer);
+        focus::scroll_region(card, &card_scroll)
     }
+}
+
+/// The scroll handle kept under `key` for as long as the frame is drawn in consecutive frames, so a scrolled body stays
+/// where it was. `key` must differ from the scrolling element's own id, because GPUI keys element state by path and
+/// type.
+fn scroll_handle(key: String, window: &mut Window, cx: &mut App) -> ScrollHandle {
+    window
+        .use_keyed_state(ElementId::Name(key.into()), cx, |_, _| ScrollHandle::new())
+        .read(cx)
+        .clone()
 }
 
 /// `--shadow-dialog`: `0 10px 24px` in the token's color, under the dialog frame and under the one modal panel the old
