@@ -422,6 +422,16 @@
       "reference": null
     },
     {
+      "golden": "segmented-control",
+      "title": "The segmented control as a radio group (its choice focused), as a button group, and unavailable",
+      "reference": "settings-appearance"
+    },
+    {
+      "golden": "radio-group",
+      "title": "Plain radios: the YOLO question unanswered, answered, and answered but unavailable",
+      "reference": "launcher-command"
+    },
+    {
       "golden": "host-text",
       "title": "Host-supplied text, escaped",
       "reference": null
