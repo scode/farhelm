@@ -2,9 +2,9 @@
 //!
 //! NOTE: This is cut to what the first milestone's slice needs (the migration's orchestrator trimmed it on 2026-11-13):
 //! attach a terminal, show its output, say when it is not live, take focus and send the program its keys. The terminal
-//! area added paste since. Focus reports (mode 1004), an input method handler, scrollback, selection, links and the
-//! reconnect display with its phase and Retry come later in that work. The session pane ([`crate::session_pane`]) mounts
-//! one for the selected session.
+//! area added paste, committed text from the platform's text input and focus reports since. Scrollback, selection,
+//! links and the reconnect display with its phase and Retry come later in that work. The session pane
+//! ([`crate::session_pane`]) mounts one for the selected session.
 //!
 //! [`AttachedTerminal`] owns one stream ([`TerminalHandle`] and [`TerminalEvents`]) and the [`TerminalView`]s that show
 //! it. Here's the TLDR of what it adds on top of the stream and the renderer, each a rule the old app or the GPUI
@@ -49,17 +49,27 @@
 //!   to depend on getting them. Paste has its action ([`actions::Paste`], [`AttachedTerminal::paste`]), whose binding
 //!   takes its keys before this listener sees them.
 //! - Every other key is the program's. `farhelm-input-mapping`'s `map_key` decides what it means (the supervisor
-//!   encodes the bytes). A key it sends as a key goes out as one; a key it leaves to text input goes out as the text
-//!   the platform says it typed, because there is no input method handler yet to insert it (GPUI inserts text only
-//!   through one). Held keys repeat to the program, as in any terminal: the keymap's repeat guard
-//!   (`actions::ONCE_PER_PRESS`) stops a held app shortcut's repeats before they get here, and `map_key` holds back
-//!   nothing else.
+//!   encodes the bytes). A key it sends as a key goes out as one, and the listener stops it there. A key it leaves to
+//!   text input (a Shift letter, a space, an Option character, a dead key, a key typed while an input method composes)
+//!   keeps propagating, so GPUI hands it to the platform's text input, which commits whatever text it makes through the
+//!   terminal's input handler (the `EntityInputHandler` impl below): the character, a Mac dead key's `é` once the
+//!   letter follows, an input method's string. That text goes to the program once, as typed text. This is the old
+//!   app's split too, where the browser's hidden input element supplied the text. Held keys repeat to the program, as
+//!   in any terminal: the keymap's repeat guard (`actions::ONCE_PER_PRESS`) stops a held app shortcut's repeats before
+//!   they get here, and `map_key` holds back nothing else.
 //!
-//! NOTE: Two kinds of typing do not work yet, and sending the platform's text cannot fix either; both need the input
-//! method handler. A Mac dead key (Option-E, US-International's `'`, German `^`) arrives with the spacing accent as its
-//! text, so the terminal sends `´` and then a plain `e` where the old app typed `é`. On Linux, text an input method
-//! (XIM, IBus) commits goes to the handler GPUI asks for, and with none it is dropped. Linux's own dead keys do work:
-//! the composed key arrives with the composed character as its text.
+//! NOTE: On Linux a key's text reaches text input only when at most Shift is held (GPUI's Linux rule, on Wayland and
+//! X11 alike), so a key the mapping leaves to text input with Alt or Ctrl+Alt held types nothing there. The old app
+//! never had a Linux window to compare with; the gap is recorded, not built around.
+//!
+//! An input method's composition in progress (marked text) is not shown at the cursor, and its candidate window sits
+//! wherever the platform puts it for a field it cannot locate, as in the old app: input method work stays at what
+//! GPUI gives (decided by the maintainer on 2026-11-12). Shift+Enter is a key the mapping sends, so it still reaches
+//! the program as one write. The keymap's once-per-press guard cannot see a composition (actions.rs says why); a
+//! listed shortcut typed mid-composition still runs, which is recorded, not built around.
+//!
+//! When the program asks for focus reports (mode 1004), it is told when the terminal gains or loses focus, and the
+//! current state when it starts asking or a new attachment goes live ([`AttachedTerminal::report_focus`]).
 //!
 //! Input goes out only while the terminal is live ([`AttachedTerminal::is_live`]): never while it catches up on a
 //! replay, reconnects, waits detached or refused, after a protocol fault, or once retired. Keys typed then are
@@ -75,6 +85,7 @@
 mod tests;
 
 use std::future::Future;
+use std::ops::Range;
 use std::pin::Pin;
 use std::task::Poll;
 
@@ -91,9 +102,10 @@ use farhelm_input_mapping::{
 use farhelm_proto::DetachCode;
 use farhelm_proto::grid::GridInput;
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, ClipboardEntry, ClipboardItem, Context, Entity,
-    FocusHandle, InteractiveElement, IntoElement, KeyDownEvent, NativeKeyIdentity, ParentElement,
-    Pixels, Render, SharedString, Styled, Subscription, Task, Window, canvas, div,
+    AnyElement, App, AppContext as _, Bounds, ClipboardEntry, ClipboardItem, Context,
+    ElementInputHandler, Entity, EntityInputHandler, FocusHandle, InteractiveElement, IntoElement,
+    KeyDownEvent, NativeKeyIdentity, ParentElement, Pixels, Render, SharedString, Styled,
+    Subscription, Task, UTF16Selection, WeakEntity, Window, canvas, div,
     prelude::FluentBuilder as _, px,
 };
 
@@ -204,11 +216,30 @@ pub struct AttachedTerminal {
     /// The input mapping's dead-key state across key presses. Forgotten whenever the terminal does not take input, so
     /// a dead key pressed before focus moved away cannot change a key pressed after it came back.
     composition: Composition,
+    /// The length, in UTF-16 units, of the text an input method is composing (its marked text), which is never drawn
+    /// and never sent; `None` while nothing is being composed. Kept beside `composition.marked`, which the input
+    /// mapping reads, through [`AttachedTerminal::set_marked`].
+    marked: Option<usize>,
+    /// The focus state last reported to the program (mode 1004), for the attachment that is live now; `None` when
+    /// nothing has been reported to it, or it is not asking for reports. See [`AttachedTerminal::report_focus`].
+    reported_focus: Option<bool>,
+    /// Whether the pane holds focus in a window the platform says is active, as last seen while drawing or when the
+    /// window's activation changed ([`AttachedTerminal::window_focus`]). Kept so that a report due without a frame (a
+    /// program that starts asking, a reconnect going live, while the window is hidden and draws nothing) can still be
+    /// sent at once. A focus move asks for a frame, so in an active window this can lag one by a frame (a program that
+    /// starts asking in that gap hears the old state, then the correction); in an inactive window it is false wherever
+    /// focus sits.
+    window_focus: bool,
     /// The cursor blink's ticks, held while the cursor blinks (see the module docs, "Input").
     blink: Option<ticker::Blinking>,
     /// The latest paste still waiting for the clipboard, which holds the one before it (see
     /// [`AttachedTerminal::paste`]). Dropped on retirement, which cancels every waiting paste.
     paste: Option<Task<()>>,
+    /// The input handler GPUI is given each frame ([`TerminalInputHandler`]), made once so its identity is stable.
+    text_input: Entity<TerminalInputHandler>,
+    /// Reports focus to the program when the window's activation changes, at the moment it changes (see
+    /// [`AttachedTerminal::report_focus`]). Set up on the first render, which is where the owner first has its window.
+    activation: Option<Subscription>,
     _session: [Subscription; 2],
     /// How many delivery turns ran, and how many times output was applied to a view, so tests can check the per-turn
     /// bound and that consecutive output is applied as one batch.
@@ -257,8 +288,16 @@ impl AttachedTerminal {
             room: None,
             retired,
             focus: cx.focus_handle().tab_stop(true),
+            text_input: {
+                let owner = cx.weak_entity();
+                cx.new(|_| TerminalInputHandler { owner })
+            },
+            activation: None,
             attachment: None,
             composition: Composition::default(),
+            marked: None,
+            reported_focus: None,
+            window_focus: false,
             blink: None,
             paste: None,
             _session: subscriptions,
@@ -495,6 +534,9 @@ impl AttachedTerminal {
         // nothing but a new state.
         if live && view.read(cx).state != state {
             cx.notify();
+            // Not left to the redraw: a hidden window draws no frame, and a program that starts asking for focus
+            // reports there must hear that it is unfocused now, not when the window next draws.
+            self.report_focus(self.window_focus, cx);
         }
         // A program's own copy (OSC 52), as the old app applied it. The supervisor sends clipboard writes only once a
         // replay is complete, so a replay never repeats an old one.
@@ -517,6 +559,8 @@ impl AttachedTerminal {
                 self.committed = Some(staging);
                 self.live = true;
                 cx.notify();
+                // As for a state change in `output`: a reconnect that goes live in a hidden window draws nothing.
+                self.report_focus(self.window_focus, cx);
             }
             Err(error) => self.fail(error, cx),
         }
@@ -530,6 +574,9 @@ impl AttachedTerminal {
         self.live = false;
         if let StreamState::Attached(attachment) = state {
             self.attachment = Some(attachment);
+            // A new attachment's program has heard nothing from this one, so it gets the current focus state again
+            // once it is live and asking, as the old app's freshly built grid did on every attach.
+            self.reported_focus = None;
             let metrics = self.metrics;
             self.staging = Some(cx.new(|_| TerminalView::new(metrics)));
         }
@@ -551,22 +598,29 @@ impl AttachedTerminal {
     }
 
     /// A key reached the pane's listener. Only the program's keys are sent, and only while live; every key that gets
-    /// here is consumed, whoever it belongs to (see the module docs, "Input").
+    /// here is consumed, whoever it belongs to, except one left to the platform's text input, which commits its text
+    /// through the input handler (see the module docs, "Input").
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         // Only the pane that holds focus types into its program. Nothing inside the pane takes focus today, so this is
         // a guard for when something does (a link card, say): that element's keys are its own, not the program's.
         if !self.focus.is_focused(window) {
             return;
         }
-        cx.stop_propagation();
-        let group = match actions::terminal_key_owner(event) {
-            KeyOwner::App | KeyOwner::Terminal => return,
+        let route = match actions::terminal_key_owner(event) {
+            KeyOwner::App | KeyOwner::Terminal => KeyRoute::Nothing,
             KeyOwner::Program => {
                 program_input(event, actions::THIS_PLATFORM, &mut self.composition)
             }
         };
-        if let Some(attachment) = self.attachment {
-            self.send(attachment, group);
+        match route {
+            KeyRoute::Send(input) => {
+                cx.stop_propagation();
+                if let Some(attachment) = self.attachment {
+                    self.send(attachment, vec![input]);
+                }
+            }
+            KeyRoute::TextInput => {}
+            KeyRoute::Nothing => cx.stop_propagation(),
         }
     }
 
@@ -631,8 +685,11 @@ impl AttachedTerminal {
     fn cursor_phase(&mut self, window: &Window, cx: &mut Context<Self>) -> CursorPhase {
         let focused =
             self.is_live() && self.focus.is_focused(window) && ticker::is_active(window, cx);
+        self.window_focus = self.focus_in_active_window(window);
+        self.report_focus(self.window_focus, cx);
         if !focused {
             self.composition = Composition::default();
+            self.marked = None;
         }
         let blinks = focused
             && self.committed.as_ref().is_some_and(|view| {
@@ -647,6 +704,52 @@ impl AttachedTerminal {
         CursorPhase {
             focused,
             on: self.blink.as_ref().is_none_or(|blink| blink.is_on(cx)),
+        }
+    }
+
+    /// Whether the pane holds focus in a window the platform says is active: the focus state focus reports carry
+    /// (whether the program is live and asking is [`AttachedTerminal::report_focus`]'s question).
+    ///
+    /// It asks GPUI about the window, not the ticker (`ticker::is_active`), which the cursor uses: agent builds pin the
+    /// ticker's notion of an active window on, because headless Mutter reports every window inactive, and a focus
+    /// report taken from that pin would never tell a program its window went to the background, in the bridge runs
+    /// that check exactly that on a Mac. The flip side: on headless Linux, where Mutter reports every window inactive,
+    /// a program asking for reports always hears that it is unfocused, while the cursor (on the ticker's pin) shows
+    /// the terminal focused. Only bridge runs there are affected, and none of them asks for reports today.
+    fn focus_in_active_window(&self, window: &Window) -> bool {
+        self.focus.is_focused(window) && window.is_window_active()
+    }
+
+    /// Record what an input method is composing: `Some(length)` while it composes, `None` once it commits or gives up.
+    /// The input mapping holds a composing key back from the program (`Composition::marked`), so both are set here.
+    fn set_marked(&mut self, marked: Option<usize>) {
+        self.marked = marked;
+        self.composition.marked = marked.is_some();
+    }
+
+    /// Tell the program that its terminal gained or lost focus, when it asked to hear about it (mode 1004), as the old
+    /// app did: once whenever the state changes, and once with the current state when the program starts asking or a
+    /// new attachment goes live. `focused` is [`AttachedTerminal::focus_in_active_window`], so switching to another app
+    /// reports focus out, as a browser's blur did in the old app.
+    ///
+    /// Called while drawing (a focus move redraws the whole window), from the window's activation observer, and where
+    /// the program starts asking or a new attachment goes live, with the focus last seen. Not only while drawing,
+    /// because a redraw is only a request for a frame: on macOS a window that is hidden (Cmd-H, minimized, fully
+    /// covered) draws none, so a report made only while drawing would miss the switch away and, the state being
+    /// unchanged by the time it draws again, the switch back too.
+    fn report_focus(&mut self, focused: bool, cx: &App) {
+        let asking = self.is_live()
+            && self
+                .committed
+                .as_ref()
+                .is_some_and(|view| view.read(cx).state.is_some_and(|state| state.focus));
+        let report = asking.then_some(focused);
+        if report == self.reported_focus {
+            return;
+        }
+        self.reported_focus = report;
+        if let (Some(focused), Some(attachment)) = (report, self.attachment) {
+            self.send(attachment, vec![GridInput::Focus { focused }]);
         }
     }
 
@@ -753,24 +856,36 @@ pub(crate) fn exit_text(exit: ExitState) -> String {
     }
 }
 
-/// What the program gets for a key that is its own, typed on `platform`: the key itself, the text it typed, or nothing.
+/// What becomes of a key that is the program's (see [`program_input`]).
+#[derive(Clone, Debug, PartialEq)]
+enum KeyRoute {
+    /// Send these messages: the key itself, as the input mapping encodes it.
+    Send(GridInput),
+    /// Leave the key to the platform's text input: the listener lets it propagate, and whatever text it commits (the
+    /// character it types, a dead-key composition, an input method's string) arrives once, through the terminal's input
+    /// handler ([`AttachedTerminal::replace_text_in_range`]).
+    TextInput,
+    /// Nothing at all: the key is swallowed.
+    Nothing,
+}
+
+/// What becomes of a key that is the program's, typed on `platform`: sent as a key, left to text input, or nothing.
 ///
-/// `map_key` (`farhelm-input-mapping`, ported from the old app's key handling) decides. A key it sends is one
-/// `Key` message. A key it leaves to text input (a Shift letter, a space, an Option character on a Mac) becomes the
-/// text the platform says the key typed, in `Text` messages: with no input method handler, nothing else would insert
-/// it. A dead key, a key it cancels and anything it does not handle send nothing. Its local decisions (paging, select
-/// all) are the keymap's to make, which already gave those keys to the terminal, so they send nothing here either.
+/// `map_key` (`farhelm-input-mapping`, ported from the old app's key handling) decides. A key it sends is one `Key`
+/// message. A key it leaves to text input (a Shift letter, a space, an Option character on a Mac, a dead key, a key
+/// typed while an input method composes) goes to the platform's text input, which commits text through the input
+/// handler, as the old app's hidden input element got its text from the browser. A key it cancels and anything it does
+/// not handle send nothing. Its local decisions (paging, select all) are the keymap's to make, which already gave those
+/// keys to the terminal, so they send nothing here either.
 ///
-/// NOTE: The `Text` branch and the listener's `stop_propagation` for these keys must change together when the
-/// terminal gets an input method handler. GPUI hands text to a handler only for a key that keeps propagating, so with
-/// the listener as it is a handler would never see these keys (and input methods and Mac dead keys would stay broken);
-/// letting them propagate while keeping this branch would send each one twice. The module docs, "Input", name what
-/// this branch cannot do.
+/// NOTE: A key routed to text input must keep propagating (GPUI hands a key's text to the input handler only then),
+/// and a key sent here must not (or its text would arrive a second time through the handler). The listener's
+/// `stop_propagation` follows the route for exactly that reason.
 fn program_input(
     event: &KeyDownEvent,
     platform: Platform,
     composition: &mut Composition,
-) -> Vec<GridInput> {
+) -> KeyRoute {
     let keystroke = &event.keystroke;
     let modifiers = keystroke.modifiers;
     let native = event.native_key.as_ref().map(|native| NativeKey {
@@ -799,26 +914,16 @@ fn program_input(
         ..Route::default()
     };
     match map_key(key, platform, composition, route) {
-        Decision::Send(input) => vec![input],
-        Decision::Text { cancel: false } => match keystroke.key_char.as_deref() {
-            // This is the committed insert, so it ends a dead-key sequence, as an input method handler's commit would
-            // (the old app cleared it on every text it sent). Left set, the mapping would hold back the next key that
-            // sends a sequence: Enter after a composed `é` would send nothing.
-            Some(text) => {
-                composition.dead_pending = false;
-                committed_text(text)
-            }
-            None => Vec::new(),
-        },
+        Decision::Send(input) => KeyRoute::Send(input),
+        Decision::Text { cancel: false } | Decision::Composition => KeyRoute::TextInput,
         Decision::Text { cancel: true }
-        | Decision::Composition
         | Decision::AppShortcut
         | Decision::Suppress
         | Decision::PageUp
         | Decision::PageDown
         | Decision::SelectAll
         | Decision::Unhandled
-        | Decision::Unsupported => Vec::new(),
+        | Decision::Unsupported => KeyRoute::Nothing,
     }
 }
 
@@ -914,6 +1019,12 @@ impl AttachedTerminal {
 impl Render for AttachedTerminal {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         render_count::record("attached-terminal", cx);
+        if self.activation.is_none() {
+            self.activation = Some(cx.observe_window_activation(window, |owner, window, cx| {
+                owner.window_focus = owner.focus_in_active_window(window);
+                owner.report_focus(owner.window_focus, cx);
+            }));
+        }
         // Handed to the shown view before it draws in this same frame, as a parent passes a child its props: the view's
         // own notify is not acted on while the frame is drawn, and is not needed, since the view draws next. That holds
         // only while the view stays uncached (drawn as a plain view in `screen`): a cached view would check whether it
@@ -944,12 +1055,17 @@ impl Render for AttachedTerminal {
             });
         let owner = cx.weak_entity();
         // Measures the room the screen has, below the status line and inside the padding, handed over after the frame
-        // like the pane's fit. It is there before any screen is, so a first screen is placed in its first frame.
+        // like the pane's fit. It is there before any screen is, so a first screen is placed in its first frame. It
+        // also hands the platform the terminal's input handler for this frame (see "Input" in the module docs), which
+        // GPUI takes only during paint and uses only while the pane holds focus.
         let room = {
             let owner = owner.clone();
+            let focus = self.focus.clone();
+            let text_input = self.text_input.clone();
             canvas(
                 |_, _, _| (),
                 move |bounds, (), window, cx| {
+                    window.handle_input(&focus, ElementInputHandler::new(bounds, text_input), cx);
                     let height = f32::from(bounds.size.height);
                     window.defer(cx, move |_, cx| {
                         let _ = owner.update(cx, |owner, cx| owner.grid_measured(height, cx));
@@ -1015,6 +1131,149 @@ impl Render for AttachedTerminal {
             .child(body)
             .children(placeholder)
             .child(measure)
+    }
+}
+
+// ---- Text input ------------------------------------------------------------------------------------------------------
+
+impl AttachedTerminal {
+    /// Text the platform committed: the character a key typed, a finished dead-key sequence, an input method's string.
+    /// It ends any composition and dead-key sequence (left pending, the input mapping would hold back the next key
+    /// that sends a sequence, so Enter after a composed `é` would send nothing), and goes to the program as typed text
+    /// while the terminal is live.
+    fn commit_text(&mut self, text: &str) {
+        self.set_marked(None);
+        self.composition.dead_pending = false;
+        if let Some(attachment) = self.attachment {
+            self.send(attachment, committed_text(text));
+        }
+    }
+
+    /// An input method is composing `text` (empty when it gave up): recorded, neither drawn nor sent.
+    fn mark_text(&mut self, text: &str) {
+        self.set_marked((!text.is_empty()).then(|| text.encode_utf16().count()));
+    }
+
+    /// A paste handed to the focused text input by the platform: the same as the app's own Paste
+    /// ([`AttachedTerminal::paste`]), never typed text.
+    ///
+    /// NOTE: No platform GPUI ships for Farhelm calls this today (GPUI names only the web's DOM paste as a caller); it
+    /// is here so that the input handler's default, which would type a paste as text, can never apply to a terminal.
+    /// It does not wait behind the app's own pastes still reading the clipboard.
+    fn paste_item(&mut self, item: &ClipboardItem) {
+        let Some(text) = clipboard_text(item).filter(|text| !text.is_empty()) else {
+            return;
+        };
+        if let Some(attachment) = self.attachment {
+            self.send(attachment, pasted_text(&text));
+        }
+    }
+}
+
+/// The terminal's input handler: where the platform's text input commits text (see "Input" in the module docs).
+///
+/// A terminal has no document for an input method to edit, so this answers as an empty field with the caret at the
+/// end of whatever is being composed: no text to read back, no position on screen for the candidate window (the old
+/// app left it where the browser put it, too), and committed text goes straight to the program as typed text. Marked
+/// text (an input method's composition, a Mac dead key's accent) is recorded but neither drawn nor sent: showing it
+/// at the cursor was left out of the old app as not worth its complexity, and the migration keeps input method work
+/// to what GPUI gives (decided by the maintainer on 2026-11-12).
+///
+/// NOTE: It is an entity of its own that points at its terminal weakly, rather than the terminal itself. GPUI keeps
+/// the frame's input handler (and so a strong handle to whatever implements it) past the frame that drew it, so a
+/// terminal that was its own handler outlived its retirement by a frame, and with it its focus handle: focus stayed
+/// on a terminal nobody drew, the focus coordinator's recovery never ran, and the window was left with nothing
+/// focused (`session_pane`'s reset test caught it). Once the terminal is gone, every call here does nothing.
+struct TerminalInputHandler {
+    owner: WeakEntity<AttachedTerminal>,
+}
+
+impl TerminalInputHandler {
+    /// Run `f` on the terminal, if it still exists.
+    fn on_owner<R>(
+        &self,
+        cx: &mut Context<Self>,
+        f: impl FnOnce(&mut AttachedTerminal) -> R,
+    ) -> Option<R> {
+        self.owner.update(cx, |owner, _| f(owner)).ok()
+    }
+}
+
+impl EntityInputHandler for TerminalInputHandler {
+    fn text_for_range(
+        &mut self,
+        _: Range<usize>,
+        _: &mut Option<Range<usize>>,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<String> {
+        None
+    }
+
+    fn selected_text_range(
+        &mut self,
+        _: bool,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<UTF16Selection> {
+        let caret = self.owner.upgrade()?.read(cx).marked.unwrap_or(0);
+        Some(UTF16Selection {
+            range: caret..caret,
+            reversed: false,
+        })
+    }
+
+    fn marked_text_range(&self, _: &mut Window, cx: &mut Context<Self>) -> Option<Range<usize>> {
+        let marked = self.owner.upgrade()?.read(cx).marked;
+        marked.map(|length| 0..length)
+    }
+
+    fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        self.on_owner(cx, |owner| owner.set_marked(None));
+    }
+
+    fn replace_text_in_range(
+        &mut self,
+        _: Option<Range<usize>>,
+        text: &str,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.on_owner(cx, |owner| owner.commit_text(text));
+    }
+
+    fn replace_and_mark_text_in_range(
+        &mut self,
+        _: Option<Range<usize>>,
+        new_text: &str,
+        _: Option<Range<usize>>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.on_owner(cx, |owner| owner.mark_text(new_text));
+    }
+
+    fn paste(&mut self, item: ClipboardItem, _: &mut Window, cx: &mut Context<Self>) {
+        self.on_owner(cx, |owner| owner.paste_item(&item));
+    }
+
+    fn bounds_for_range(
+        &mut self,
+        _: Range<usize>,
+        _: Bounds<Pixels>,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<Bounds<Pixels>> {
+        None
+    }
+
+    fn character_index_for_point(
+        &mut self,
+        _: gpui::Point<Pixels>,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<usize> {
+        None
     }
 }
 
