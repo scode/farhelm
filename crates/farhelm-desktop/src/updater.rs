@@ -35,7 +35,7 @@
 use super::*;
 
 use std::ffi::OsString;
-use std::sync::Condvar;
+use std::sync::{Condvar, MutexGuard, PoisonError};
 use std::time::SystemTime;
 
 use farhelm_helm::{build_is_newer, is_development_build};
@@ -262,7 +262,7 @@ impl UpdaterHandle {
         // The worker uses the same status-before-file lock order. Hold it
         // through the saved choice so an in-flight failure cannot write an
         // old streak back over a successful re-enable.
-        let mut status = self.shared.status.lock().expect("updater status poisoned");
+        let mut status = self.shared.lock_status();
         let mut reenabled = false;
         state::update_state(&self.state_path, |state| {
             reenabled = on && !state.install_updates_automatically.unwrap_or(true);
@@ -753,6 +753,13 @@ impl Status {
 }
 
 impl Shared {
+    /// Lock the worker's status. A thread that panicked while holding the lock leaves plain bookkeeping behind, which
+    /// is still the best account of the updater there is, so the lock is recovered rather than the panic spread: this
+    /// runs in the desktop app's process, where a panic inside a platform callback aborts the app.
+    fn lock_status(&self) -> MutexGuard<'_, Status> {
+        self.status.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     pub(crate) fn new(running: &str) -> Self {
         let (published, _) = tokio::sync::watch::channel(UpdaterState {
             running: running.to_string(),
@@ -794,7 +801,7 @@ impl Shared {
     /// a persistent presentation identity so subscribers can distinguish equal
     /// final answers even when watch delivery coalesces their intermediate steps.
     pub(crate) fn check_now(&self) {
-        let mut status = self.status.lock().expect("updater status poisoned");
+        let mut status = self.lock_status();
         if !status.user_waiting {
             status.notice_id = status.notice_id.wrapping_add(1);
             status.user_update_ready = false;
@@ -815,7 +822,7 @@ impl Shared {
     /// Show an outcome the user caused outside a check (a failed Restart to
     /// update), until the next run starts.
     fn show_outcome(&self, outcome: Activity) {
-        let mut status = self.status.lock().expect("updater status poisoned");
+        let mut status = self.lock_status();
         status.shown_outcome = Some(outcome);
         status.retain_failure = false;
         status.user_update_ready = false;
@@ -896,11 +903,7 @@ impl CheckResult {
 
 impl Engine {
     pub(crate) fn new(deps: Deps, shared: Arc<Shared>) -> Self {
-        shared
-            .status
-            .lock()
-            .expect("updater status poisoned")
-            .probe_failure_since = (deps.read_probe_failure_since)();
+        shared.lock_status().probe_failure_since = (deps.read_probe_failure_since)();
         Self {
             deps,
             shared,
@@ -912,12 +915,12 @@ impl Engine {
     fn run_forever(mut self) {
         loop {
             self.wake_once();
-            let status = self.shared.status.lock().expect("updater status poisoned");
+            let status = self.shared.lock_status();
             let (_status, _) = self
                 .shared
                 .wake
                 .wait_timeout_while(status, TICK, |status| !status.requested)
-                .expect("updater status poisoned");
+                .unwrap_or_else(PoisonError::into_inner);
         }
     }
 
@@ -926,7 +929,7 @@ impl Engine {
     pub(crate) fn wake_once(&mut self) {
         let installed = (self.deps.read_installed)();
         let requested = {
-            let mut status = self.shared.status.lock().expect("updater status poisoned");
+            let mut status = self.shared.lock_status();
             status.record_installed(installed);
             self.shared.publish(&status);
             status.requested
@@ -957,14 +960,14 @@ impl Engine {
 
     /// Set or clear the reinstall notice and publish it.
     fn set_needs_reinstall(&self, reason: Option<ReinstallReason>) {
-        let mut status = self.shared.status.lock().expect("updater status poisoned");
+        let mut status = self.shared.lock_status();
         status.reinstall = reason;
         self.shared.publish(&status);
     }
 
     /// Set what the worker is doing and publish it.
     fn set_current(&self, activity: Activity) {
-        let mut status = self.shared.status.lock().expect("updater status poisoned");
+        let mut status = self.shared.lock_status();
         status.current = activity;
         self.shared.publish(&status);
     }
@@ -973,7 +976,7 @@ impl Engine {
     fn run_check(&mut self) {
         self.last_check = Some((self.deps.now)());
         let automatic = {
-            let mut status = self.shared.status.lock().expect("updater status poisoned");
+            let mut status = self.shared.lock_status();
             status.requested = false;
             if !status.retain_failure {
                 status.shown_outcome = None;
@@ -990,7 +993,7 @@ impl Engine {
             self.last_check = None;
         }
         let installed = (self.deps.read_installed)();
-        let mut status = self.shared.status.lock().expect("updater status poisoned");
+        let mut status = self.shared.lock_status();
         let qualifies = match &outcome {
             CheckResult::ProbeFailed(_) => {
                 let now = (self.deps.now)();
@@ -1119,7 +1122,7 @@ impl Engine {
         };
         {
             // Cleared only by a record seen complete.
-            let mut status = self.shared.status.lock().expect("updater status poisoned");
+            let mut status = self.shared.lock_status();
             status.interrupted = interrupted;
             self.shared.publish(&status);
         }
@@ -1157,7 +1160,7 @@ impl Engine {
             }
         };
         {
-            let mut status = self.shared.status.lock().expect("updater status poisoned");
+            let mut status = self.shared.lock_status();
             self.save_streak(&mut status, None);
             status.last_probe_clock = Some((self.deps.now)());
         }
@@ -1169,7 +1172,7 @@ impl Engine {
         // once an update waits.
         let installed = (self.deps.read_installed)();
         let (baseline, automatic_should_wait, refusal) = {
-            let mut status = self.shared.status.lock().expect("updater status poisoned");
+            let mut status = self.shared.lock_status();
             status.record_installed(installed);
             self.shared.publish(&status);
             let baseline = status
@@ -1263,13 +1266,7 @@ impl Engine {
         if (self.deps.read_installed)().as_deref() == Some(latest.as_str()) {
             tracing::info!("updater: {latest} is installed; a restart finishes the update");
             self.set_needs_reinstall(None);
-            let running = self
-                .shared
-                .status
-                .lock()
-                .expect("updater status poisoned")
-                .running
-                .clone();
+            let running = self.shared.lock_status().running.clone();
             if build_is_newer(&latest, &running) {
                 // The update marker says it from here on.
                 CheckResult::Success(Activity::Idle)
@@ -1331,7 +1328,7 @@ impl Engine {
         }
         match (self.deps.advisories)(&|| self.check_allowed()) {
             Ok(Some(advisories)) => {
-                let mut status = self.shared.status.lock().expect("updater status poisoned");
+                let mut status = self.shared.lock_status();
                 status.advisories = advisories;
                 self.shared.publish(&status);
             }
@@ -1343,12 +1340,7 @@ impl Engine {
     /// A user-joined check can continue after automatic updates are disabled.
     /// An unjoined automatic check cannot begin another request or install.
     fn check_allowed(&self) -> bool {
-        self.shared
-            .status
-            .lock()
-            .expect("updater status poisoned")
-            .user_waiting
-            || (self.deps.automatic_enabled)()
+        self.shared.lock_status().user_waiting || (self.deps.automatic_enabled)()
     }
 }
 

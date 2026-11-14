@@ -210,15 +210,16 @@ GUI cannot grow a dependency on helm internals that would make it impossible.
 GUI crates live under `crates/gui/`, and so do the framework-free GUI crates (the terminal grid model, input mapping,
 the escape table, the store and drafts logic), so every ban covers them too. Framework-free crates have no `gpui`
 dependency and can be tested without a window. Of these, only the escape table is shared with the command line. The
-desktop binary, which embeds the helm and holds the bootstrap, menus and quit, stays outside `crates/gui/`; it denies
-`unwrap_used` and `expect_used` in its own `[lints]`. Network I/O (the UI channel's socket, terminal streams, HTTP
-transfers) lives in the helm client, a framework-free crate outside `crates/gui/`: it is the one runtime owner, owning
-the async runtime and its threads, and it hands results to the GUI through GPUI's executor. The helm client is the GUI's
-one exemption from the ban on threads and other runtimes, and it counts as a lint exception like any `#[allow]`; no
-other crate the GUI depends on gets one.
+desktop binary, which embeds the helm and holds the bootstrap, menus and quit, stays outside `crates/gui/`; it and the
+helm client deny `unwrap_used` and `expect_used` in their own `[lints]`, like the GUI crates. Network I/O (the UI
+channel's socket, terminal streams, HTTP transfers) lives in the helm client, a framework-free crate outside
+`crates/gui/`: it is the one runtime owner, owning the async runtime and its threads, and it hands results to the GUI
+through GPUI's executor. The helm client is the GUI's one exemption from the ban on threads and other runtimes, and it
+counts as a lint exception like any `#[allow]`; no other crate the GUI depends on gets one.
 
 Enforced by `scripts/check-crate-layering.py`, which reads `cargo metadata` and fails when a GUI crate depends, directly
-or transitively, on the helm crate, or when a framework-free crate depends on `gpui`.
+or transitively, on the helm crate, when a framework-free crate depends on `gpui`, or when a GUI crate, the desktop
+binary's crate or the helm client stops denying `unwrap_used` and `expect_used`.
 
 ### The UI channel
 
@@ -568,7 +569,9 @@ One bootstrap installs all app-wide state (globals, the channel, the stores, the
 `unwrap` or `expect` in code that platform callbacks can reach: a panic inside an AppKit callback aborts the process.
 State is saved continuously, because GPUI gives quit handlers only 200 ms.
 
-Enforced by denying clippy's `unwrap_used` and `expect_used` crate-wide in the GUI crates, with tests exempt.
+Enforced by denying clippy's `unwrap_used` and `expect_used` crate-wide in the GUI crates, the desktop binary's crate
+and the helm client, with tests exempt (each crate's `clippy.toml`), and by `scripts/check-crate-layering.py` failing
+when one of those crates loses the denial.
 
 ### Dependencies and licenses
 
