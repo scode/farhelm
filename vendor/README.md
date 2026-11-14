@@ -1251,7 +1251,8 @@ test-automation bridge that lets an agent drive the running app.
 
 These trees came from a private GPUI prototype of Farhelm, which built and measured them; the changes were ported, not
 re-derived. They are the prototype's trees minus its two measurement-only layers (per-draw CPU attribution and a
-frame-wake counter for one test), plus the change notices below and one layer of Farhelm's own, `frame-source`.
+frame-wake counter for one test), plus the change notices below and two layers of Farhelm's own, `frame-source` and
+`no-kde-blur`.
 
 ### What is here
 
@@ -1314,9 +1315,10 @@ Here's what each layer changes and why, in application order. Sizes are `git app
 | `attachment-clipboard` | gpui-pre-linux 159 / 1, gpui-pre-macos 92 / 0                                  | Image-before-text async clipboard reads for paste          |
 | `activation-token`     | gpui-pre 13 / 0, gpui-pre-linux 9 / 0                                          | Activate a window with another client's Wayland token      |
 | `frame-source`         | gpui-pre-macos 10 / 1                                                          | Keep the lower-latency frame source on macOS 14 and later  |
+| `no-kde-blur`          | gpui-pre-linux 4 / 36, gpui-agent 0 / 14                                       | Drop the KDE-blur fallback and its LGPL-bundling crate     |
 | `modified-notices`     | gpui-pre 11, gpui-pre-linux 8, gpui-pre-wgpu 1, gpui-pre-macos 4, gpui-agent 5 | The license's change notices (above)                       |
 
-Without the bridge's own two patches and the notices, the GPUI changes come to 1,347 added and 141 removed lines, tests
+Without the bridge's own patches and the notices, the GPUI changes come to 1,351 added and 177 removed lines, tests
 included.
 
 - **bridge.** The bridge records what each frame drew (elements, text, accessibility roles and names, focus and input
@@ -1364,6 +1366,17 @@ included.
   it. Drop the layer when an upstream GPUI presents `CAMetalDisplayLink` frames within one refresh, measured the same
   way. The maintainer chose to keep it with those costs (2026-11-13); a TODO.md entry revisits it, in particular whether
   Apple or GPUI may drop the older path.
+- **no-kde-blur.** `wayland-protocols-plasma` declares the MIT license but bundles KDE's protocol XML files, several of
+  them LGPL-2.1-or-later, which `wayland-scanner` turns into bindings compiled into the Linux build, and SPEC_impl lets
+  no GPL-family code into the tree as a dependency. GPUI's Linux backend used the crate only for the KDE-blur protocol,
+  its fallback for blurring behind a window whose background appearance is `Blurred` when the compositor lacks the
+  DE-agnostic `ext-background-effect` protocol (KDE itself dropped KDE blur in Plasma 6.7). The layer removes the crate
+  from the backend's `wayland` feature and its dependencies, and deletes the fallback; `ext-background-effect` blur is
+  unchanged. Nothing Farhelm draws is lost: no Farhelm window asks for `Blurred`. A compositor without
+  `ext-background-effect` would no longer blur such a window. The second patch drops the crate from the bridge
+  workspace's `gpui/Cargo.lock`, so `cargo metadata --locked` on that workspace still succeeds. Removed by the
+  maintainer's decision (2026-11-13); a TODO.md entry revisits it. Drop the layer if an upstream GPUI stops depending on
+  the crate.
 
 Two Linux hunks are carried but not compiled: the bridge's capture hook in `src/linux/x11/window.rs` and native-key's
 event conversion in `src/linux/x11/client.rs`. The workspace builds `gpui-pre-platform` without its `x11` feature, so
@@ -1403,6 +1416,8 @@ git apply --directory=vendor/gpui-pre patches/gpui/activation-token/gpui-pre-0.3
 git apply --directory=vendor/gpui-pre-linux patches/gpui/activation-token/gpui-pre-linux-0.3.12.patch
 git apply --directory=vendor/gpui-pre-macos patches/gpui/frame-source/gpui-pre-macos-0.3.12.patch
 git apply --directory=vendor/gpui-agent patches/gpui/gpui-agent/gpui-agent-lockfile.patch
+git apply --directory=vendor/gpui-pre-linux patches/gpui/no-kde-blur/gpui-pre-linux-0.3.12.patch
+git apply --directory=vendor/gpui-agent patches/gpui/no-kde-blur/gpui-agent-lockfile.patch
 git apply --directory=vendor/gpui-pre patches/gpui/modified-notices/gpui-pre-0.3.12.patch
 git apply --directory=vendor/gpui-pre-linux patches/gpui/modified-notices/gpui-pre-linux-0.3.12.patch
 git apply --directory=vendor/gpui-pre-wgpu patches/gpui/modified-notices/gpui-pre-wgpu-0.3.12.patch
@@ -1416,7 +1431,8 @@ git apply --directory=vendor/gpui-agent patches/gpui/modified-notices/gpui-agent
   from a `target/` left by building its CLI in the checkout).
 
 Every layer applies without offsets. The sequence was checked end to end on 2026-11-13, and against the prototype: its
-trees equal these minus the notices and `frame-source`, with its two measurement layers added back for `gpui-pre`.
+trees equal these minus the notices, `frame-source` and `no-kde-blur`, with its two measurement layers added back for
+`gpui-pre`.
 
 Layers touch overlapping files, so to check one layer by itself with `git apply --reverse --check`, first reverse every
 later layer in a disposable copy.
