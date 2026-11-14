@@ -57,15 +57,16 @@ struct Scene {
     setup: fn(&SceneState, &mut Window, &mut App),
 }
 
-/// State a scene keeps across frames: a text input's editable state, the owner token a tooltip scene shows its tooltip
-/// for (it must stay alive, or the layer manager takes the tooltip down), the anchor a popover scene opens its menu
-/// below (recorded when the scene draws), the focus handle the focus-ring scene's button takes, and the terminal views
-/// a terminal scene's setup makes (they need the real text system to measure their cells, so they are built after the
+/// State a scene keeps across frames: a text input's editable state and two of the kind that keeps line breaks, the
+/// owner token a tooltip scene shows its tooltip for (it must stay alive, or the layer manager takes the tooltip down),
+/// the anchor a popover scene opens its menu below (recorded when the scene draws), the focus handle the focus-ring
+/// scene's button takes, and the terminal views a terminal scene's setup makes (they need the real text system to measure their cells, so they are built after the
 /// window exists), the attached terminals a scene shows, and whatever those must keep alive (the fake helm and terminal
 /// streams behind them, and the subscription that makes them).
 #[derive(Clone)]
 struct SceneState {
     input: TextInputState,
+    kept: [TextInputState; 2],
     tooltip_owner: Entity<TooltipOwner>,
     anchor: Rc<RefCell<Option<Anchor>>>,
     ring: FocusHandle,
@@ -145,6 +146,38 @@ fn text_input(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
             "Session title",
             HoverHelp::tooltip("The session's new title"),
         ))
+        .into_any_element()
+}
+
+/// Fill the two fields that keep line breaks: one with an ordinary title, and one with two lines, each wider than the
+/// field, as a paste might bring. The long lines are what make the second picture change if the field ever wrapped or
+/// grew: a short value would look the same either way.
+fn kept_line_breaks_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    state.kept[0].set_text("api-refactor", window, cx);
+    state.kept[1].set_text(
+        "fix the reconnect loop that drops the session list\nand keep the draft when the helm restarts",
+        window,
+        cx,
+    );
+}
+
+/// The field that keeps line breaks, twice: holding one line, where it has the single-line input's fill, border and
+/// type (and the old Rename field's height, see [`TextInput`]), and holding two long lines, of which it shows one row,
+/// clipped at the field's edge rather than wrapped.
+fn kept_line_breaks(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    div()
+        .w(px(280.))
+        .flex()
+        .flex_col()
+        .gap(px(8.))
+        .children(state.kept.iter().enumerate().map(|(index, kept)| {
+            TextInput::new(
+                format!("title-{index}"),
+                kept,
+                "Session title",
+                HoverHelp::tooltip("The session's new title"),
+            )
+        }))
         .into_any_element()
 }
 
@@ -731,7 +764,7 @@ fn terminals(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
         .into_any_element()
 }
 
-static SCENES: [Scene; 14] = [
+static SCENES: [Scene; 15] = [
     Scene {
         name: "buttons",
         size: (560., 64.),
@@ -743,6 +776,12 @@ static SCENES: [Scene; 14] = [
         size: (320., 64.),
         draw: text_input,
         setup: text_input_setup,
+    },
+    Scene {
+        name: "text-input-line-breaks",
+        size: (320., 140.),
+        draw: kept_line_breaks,
+        setup: kept_line_breaks_setup,
     },
     Scene {
         name: "dialog",
@@ -868,6 +907,10 @@ fn component_goldens() -> anyhow::Result<()> {
                 cx.open_window(size(px(scene.size.0), px(scene.size.1)), |window, cx| {
                     let state = SceneState {
                         input: TextInputState::new(window, cx),
+                        kept: [
+                            TextInputState::new_keeping_line_breaks(window, cx),
+                            TextInputState::new_keeping_line_breaks(window, cx),
+                        ],
                         tooltip_owner: cx.new(|_| TooltipOwner),
                         anchor: Rc::new(RefCell::new(None)),
                         ring: cx.focus_handle().tab_stop(true),
