@@ -11,7 +11,8 @@ use std::rc::Rc;
 use gpui::{
     App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
     KeyDownEvent, Keystroke, Modifiers, MouseButton, MouseDownEvent, ParentElement, Render,
-    ScrollDelta, ScrollEvent, Styled, TestAppContext, VisualTestContext, Window, div, point, px,
+    ScrollDelta, ScrollEvent, StatefulInteractiveElement as _, Styled, TestAppContext,
+    VisualTestContext, Window, div, point, px,
 };
 
 use crate::cache::{self, Cached};
@@ -19,9 +20,9 @@ use crate::components::{Button, HoverHelp, Role, TextInput, TextInputState, Tier
 use crate::focus::{self, Mark, OnPress};
 use crate::host_text::{HostSentence, HostText};
 use crate::layers::{self, Anchor, Dialog, LayerId, Popover, Subject};
-use crate::prompt::{self, Answer, Question};
+use crate::prompt::{self, Answer, Presentation, Question};
 use crate::render_count;
-use crate::test_support::{center, check, click, keys, open, redraw};
+use crate::test_support::{bounds, center, check, click, keys, open, redraw};
 
 // ---- Helpers on top of the shared harness ----------------------------------------------------------------------------
 
@@ -469,6 +470,7 @@ fn a_disabled_control_takes_no_focus(cx: &mut TestAppContext) {
     let asked = cx.update(|window, cx| {
         let mark = Mark::take(cx);
         prompt::ask_for_test(
+            Presentation::Centered,
             question("alpha").confirm_enabled(false),
             None,
             &mark,
@@ -1720,6 +1722,59 @@ fn opening_and_closing_a_layer_redraws_only_the_root(cx: &mut TestAppContext) {
 
 // ---- The prompt ------------------------------------------------------------------------------------------------------
 
+/// The page a question about a row is asked from: a spot elsewhere to click, then the row's menu button, whose focus
+/// handle the test holds and whose anchor an anchored question opens below. `shown` takes the button away, as a
+/// deleted row would go.
+struct Row {
+    anchor: Rc<RefCell<Option<Anchor>>>,
+    shown: Rc<Cell<bool>>,
+    opener: FocusHandle,
+}
+
+impl Row {
+    /// Both ways to show a question, the anchored one below this row's menu button.
+    fn presentations(&self) -> [(&'static str, Presentation); 2] {
+        let Some(anchor) = self.anchor.borrow().clone() else {
+            panic!("the premise: the row's menu button was drawn")
+        };
+        [
+            ("centered", Presentation::Centered),
+            ("anchored", Presentation::Anchored(anchor)),
+        ]
+    }
+}
+
+/// Open the harness on a [`Row`].
+fn open_row(cx: &mut TestAppContext) -> (&mut VisualTestContext, Row) {
+    let opener = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let row = Row {
+        anchor: Rc::new(RefCell::new(None)),
+        shown: Rc::new(Cell::new(true)),
+        opener: opener.clone(),
+    };
+    let (out, shown) = (row.anchor.clone(), row.shown.clone());
+    let cx = open(cx, move |window, cx| {
+        let mut column = div()
+            .flex()
+            .flex_col()
+            .child(div().debug_selector(|| "elsewhere".into()).size(px(40.)));
+        if shown.get() {
+            let anchor = Anchor::for_element("row-menu-anchor", window, cx);
+            out.replace(Some(anchor.clone()));
+            column = column.child(
+                div()
+                    .relative()
+                    .debug_selector(|| "row-menu".into())
+                    .w(px(80.))
+                    .child(button("opener", &opener))
+                    .child(anchor.track()),
+            );
+        }
+        column.into_any_element()
+    });
+    (cx, row)
+}
+
 /// A question about a thing, frozen at `name`.
 fn question(name: &str) -> Question<String> {
     Question::new(
@@ -1745,9 +1800,12 @@ fn question(name: &str) -> Question<String> {
 /// state and ignore its argument. The step gains teeth when each real prompt kind runs it with its own subject and
 /// command (SPEC_impl.md, "Questions: the prompt"); this test's teeth are the answer ordering (without the
 /// first-answer-wins guard, Cancel then Confirm would send).
+///
+/// It runs for both presentations, centered and anchored: the anchored one is a different layer kind with its own
+/// answer wiring, and the guarantee must not depend on where the question is drawn.
 #[gpui::test]
 fn a_confirmation_acts_only_on_what_it_showed(cx: &mut TestAppContext) {
-    let cx = open(cx, |_, _| div().into_any_element());
+    let (cx, row) = open_row(cx);
     let thing = cx.update(|_, cx| {
         cx.new(|_| Thing {
             name: "alpha".into(),
@@ -1755,11 +1813,14 @@ fn a_confirmation_acts_only_on_what_it_showed(cx: &mut TestAppContext) {
     });
     let sent = Rc::new(RefCell::new(Vec::<String>::new()));
 
-    for order in [
-        ["cancel", "confirm"],
-        ["confirm", "cancel"],
-        ["confirm", "confirm"],
-    ] {
+    for ((kind, presentation), order) in row.presentations().into_iter().flat_map(|shown| {
+        [
+            ["cancel", "confirm"],
+            ["confirm", "cancel"],
+            ["confirm", "confirm"],
+        ]
+        .map(|order| (shown.clone(), order))
+    }) {
         thing.update(cx, |thing, _| thing.name = "alpha".into());
         sent.borrow_mut().clear();
         let shown = thing.read_with(cx, |thing, _| thing.name.clone());
@@ -1767,6 +1828,7 @@ fn a_confirmation_acts_only_on_what_it_showed(cx: &mut TestAppContext) {
         let asked = cx.update(|window, cx| {
             let mark = Mark::take(cx);
             prompt::ask_for_test(
+                presentation,
                 question(&shown),
                 Some(Subject::of(&thing)),
                 &mark,
@@ -1800,9 +1862,9 @@ fn a_confirmation_acts_only_on_what_it_showed(cx: &mut TestAppContext) {
         assert_eq!(
             *sent.borrow(),
             expected,
-            "answers {order:?}: only the first ran, on the frozen target"
+            "{kind}, answers {order:?}: only the first ran, on the frozen target"
         );
-        assert!(!is_open(cx, asked.layer), "the question closed");
+        assert!(!is_open(cx, asked.layer), "{kind}: the question closed");
     }
 }
 
@@ -1827,6 +1889,7 @@ fn a_question_starts_on_the_answer_the_rules_pick(cx: &mut TestAppContext) {
         let asked = cx.update(|window, cx| {
             let mark = Mark::take(cx);
             prompt::ask_for_test(
+                Presentation::Centered,
                 adjust(question("alpha")),
                 None,
                 &mark,
@@ -1856,10 +1919,15 @@ fn a_question_starts_on_the_answer_the_rules_pick(cx: &mut TestAppContext) {
 /// Without it a click on the question's text focuses the question itself, and a following Enter presses Confirm; with
 /// it, focus stays on Cancel (where a risky question starts) and Enter cancels. The opt-in's plumbing through the
 /// question to its dialog is what this guards: lose it and those four questions confirm on a stray click and Enter.
+/// Both presentations: the row's questions are the anchored ones.
 #[gpui::test]
 fn a_question_that_opts_in_keeps_focus_on_an_empty_space_click(cx: &mut TestAppContext) {
-    let cx = open(cx, |_, _| div().into_any_element());
-    for (case, keeps, sent_after_enter) in [("opted in", true, 0), ("not opted in", false, 1)] {
+    let (cx, row) = open_row(cx);
+    for ((kind, presentation), (case, keeps, sent_after_enter)) in
+        row.presentations().into_iter().flat_map(|shown| {
+            [("opted in", true, 0), ("not opted in", false, 1)].map(|case| (shown.clone(), case))
+        })
+    {
         let sent = Rc::new(Cell::new(0));
         let record = sent.clone();
         let asked = cx.update(|window, cx| {
@@ -1871,6 +1939,7 @@ fn a_question_that_opts_in_keeps_focus_on_an_empty_space_click(cx: &mut TestAppC
                 question
             };
             prompt::ask_for_test(
+                presentation,
                 question,
                 None,
                 &mark,
@@ -1882,9 +1951,15 @@ fn a_question_that_opts_in_keeps_focus_on_an_empty_space_click(cx: &mut TestAppC
         cx.run_until_parked();
         check(cx);
         let asked = asked.expect("the question opened");
-        let body = match cx.debug_bounds("prompt-body") {
+        // Empty space: the centered body's padding, or the anchored panel's own padding.
+        let empty = if kind == "centered" {
+            "prompt-body"
+        } else {
+            "prompt"
+        };
+        let body = match cx.debug_bounds(empty) {
             Some(bounds) => bounds,
-            None => panic!("{case}: the question's body was not drawn"),
+            None => panic!("{kind}, {case}: the question was not drawn"),
         };
         cx.simulate_click(
             point(body.left() + px(4.), body.top() + px(4.)),
@@ -1893,13 +1968,13 @@ fn a_question_that_opts_in_keeps_focus_on_an_empty_space_click(cx: &mut TestAppC
         check(cx);
         assert!(
             is_open(cx, asked.layer),
-            "{case}: the click on its empty space left the question open"
+            "{kind}, {case}: the click on its empty space left the question open"
         );
         keys(cx, "enter");
         assert_eq!(
             sent.get(),
             sent_after_enter,
-            "{case}: Enter after the click answered what kept focus"
+            "{kind}, {case}: Enter after the click answered what kept focus"
         );
     }
 }
@@ -2038,7 +2113,15 @@ fn ask_and_record(
     cx.update(|window, _| window.set_driver_enabled(true));
     let asked = cx.update(|window, cx| {
         let mark = Mark::take(cx);
-        prompt::ask_for_test(question, None, &mark, |_, _, _| {}, window, cx)
+        prompt::ask_for_test(
+            Presentation::Centered,
+            question,
+            None,
+            &mark,
+            |_, _, _| {},
+            window,
+            cx,
+        )
     });
     let Some(asked) = asked else {
         panic!("the question did not open")
@@ -2197,4 +2280,348 @@ fn a_summary_that_names_a_host_value_is_drawn_and_named_escaped(cx: &mut TestApp
     cx.update(|window, cx| asked.cancel(window, cx));
     cx.run_until_parked();
     check(cx);
+}
+
+/// Ask `question("alpha")` below the row's menu button, counting confirmations in `sent`.
+fn ask_below(
+    cx: &mut VisualTestContext,
+    row: &Row,
+    subject: Option<Subject>,
+    sent: &Rc<Cell<usize>>,
+) -> LayerId {
+    let Some(anchor) = row.anchor.borrow().clone() else {
+        panic!("the premise: the row's menu button was drawn")
+    };
+    let record = sent.clone();
+    let layer = cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        prompt::ask_anchored(
+            question("alpha"),
+            anchor,
+            subject,
+            &mark,
+            move |_, _, _| record.set(record.get() + 1),
+            window,
+            cx,
+        )
+    });
+    cx.run_until_parked();
+    check(cx);
+    match layer {
+        Some(layer) => layer,
+        None => panic!("the anchored question did not open"),
+    }
+}
+
+/// Why this matters: the row's Delete question is asked beside the row it is about, as the old app's was (the row's
+/// menu turned into the question), and it carries a destructive answer. It must keep every rule a centered question
+/// keeps, and close in the ways a menu closes, or a question about a row that went away would stay on screen
+/// answering for it.
+///
+/// Specification: the question is drawn just below its anchor, aligned with it. Focus starts on Confirm, Enter confirms
+/// once and focus returns to the control that held it. Escape closes it unanswered and returns focus. Tab stays inside
+/// it. A press outside closes it unanswered. It closes unanswered when its anchor is no longer drawn, and when its
+/// subject is gone.
+#[gpui::test]
+fn an_anchored_question_sits_below_its_anchor_and_closes_like_a_menu(cx: &mut TestAppContext) {
+    let (cx, row) = open_row(cx);
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &row.opener),
+        "the premise: the row's menu button has focus"
+    );
+    let sent = Rc::new(Cell::new(0));
+
+    let layer = ask_below(cx, &row, None, &sent);
+    let (drawn, anchor) = (bounds(cx, "prompt"), bounds(cx, "row-menu"));
+    assert_eq!(
+        (drawn.top(), drawn.left()),
+        (anchor.bottom() + px(4.), anchor.left()),
+        "the question sits just below its anchor, aligned with it: {drawn:?} under {anchor:?}"
+    );
+    keys(cx, "enter");
+    assert_eq!(sent.get(), 1, "Enter pressed Confirm, where focus started");
+    assert!(!is_open(cx, layer));
+    assert!(
+        focused(cx, &row.opener),
+        "focus went back to the row's menu button"
+    );
+
+    let layer = ask_below(cx, &row, None, &sent);
+    for _ in 0..3 {
+        keys(cx, "tab");
+        assert!(!focused(cx, &row.opener), "Tab stays inside the question");
+    }
+    keys(cx, "escape");
+    assert!(!is_open(cx, layer), "Escape closed it");
+    assert!(focused(cx, &row.opener), "and focus went back");
+
+    let layer = ask_below(cx, &row, None, &sent);
+    click(cx, "elsewhere");
+    assert!(!is_open(cx, layer), "a press outside closed it");
+
+    let layer = ask_below(cx, &row, None, &sent);
+    row.shown.set(false);
+    redraw(cx);
+    assert!(!is_open(cx, layer), "it closed when its anchor went");
+    row.shown.set(true);
+    redraw(cx);
+
+    let thing = cx.update(|_, cx| {
+        cx.new(|_| Thing {
+            name: "alpha".into(),
+        })
+    });
+    let layer = ask_below(cx, &row, Some(Subject::of(&thing)), &sent);
+    drop(thing);
+    cx.run_until_parked();
+    check(cx);
+    assert!(!is_open(cx, layer), "it closed when its subject went");
+    assert_eq!(
+        sent.get(),
+        1,
+        "nothing but the first Enter confirmed anything"
+    );
+}
+
+// ---- Layers: a session as a subject ----------------------------------------------------------------------------------
+
+/// Why this matters: a Delete question about a session must close when that session is deleted from another window or
+/// by an agent (SPEC.md: a layer goes away "when the thing it is about is gone"), but a session missing from one pushed
+/// listing is not always gone: the helm cuts long lists at its cap, a filter hides rows, and a failed read lists
+/// nothing. A question that closed on those would vanish under the user's pointer on a passing read error. The rule is
+/// the one the selected session's survivor uses, so the two can never disagree about the same session.
+///
+/// Specification: a question with `Subject::session("b")` stays open while another session goes, and while listings
+/// that are truncated, filtered or unavailable lack `b`; it closes once a complete, available, unfiltered listing lacks
+/// it. A question about a session such a listing already lacks closes as soon as it opens.
+#[gpui::test]
+fn a_question_about_a_session_closes_only_when_a_complete_listing_proves_it_gone(
+    cx: &mut TestAppContext,
+) {
+    use farhelm_helm_client::fake::FakeHelm;
+    use farhelm_proto::ui_channel::{
+        Availability, Collection, CollectionChanges, CollectionMeta, ListCounts, SessionRow,
+    };
+
+    use crate::session_tests::{meta, sessions};
+
+    let cx = open(cx, |_, _| div().into_any_element());
+    let (mut fake, handle, events) = FakeHelm::new();
+    let _connection = cx.update(|_, cx| crate::session::start(handle, events, None, cx));
+    fake.connect(vec![sessions(&["a", "b"])]);
+    cx.run_until_parked();
+    let listed = cx.update(|_, cx| {
+        crate::session::current_store(cx).map(|store| {
+            let collections = store.read(cx).collections();
+            ["a", "b"].map(|key| collections.get::<SessionRow>(key).is_some())
+        })
+    });
+    assert_eq!(
+        listed,
+        Some([true, true]),
+        "the premise: the store holds both sessions"
+    );
+    /// Ask about `key`, with the session as the question's subject; `None` if nothing opened.
+    fn ask(cx: &mut VisualTestContext, key: &'static str) -> Option<LayerId> {
+        let layer = cx.update(|window, cx| {
+            let mark = Mark::take(cx);
+            let Some(subject) = Subject::session(key, cx) else {
+                panic!("the premise: a UI session is live, so a session subject can be made")
+            };
+            prompt::ask(
+                question(key),
+                Some(subject),
+                &mark,
+                |_, _, _| {},
+                window,
+                cx,
+            )
+        });
+        cx.run_until_parked();
+        check(cx);
+        layer
+    }
+    fn push(
+        fake: &mut FakeHelm,
+        cx: &mut VisualTestContext,
+        meta: CollectionMeta,
+        remove: &[&str],
+    ) {
+        fake.push(CollectionChanges {
+            collection: Collection::Sessions,
+            meta,
+            upsert: vec![],
+            remove: remove.iter().map(|key| key.to_string()).collect(),
+        });
+        cx.run_until_parked();
+        check(cx);
+    }
+    fn counts(truncated: bool, matching: Option<u64>) -> Option<ListCounts> {
+        Some(ListCounts {
+            total: 2,
+            matching,
+            truncated,
+        })
+    }
+
+    let Some(layer) = ask(cx, "b") else {
+        panic!("the premise: the question about b opened")
+    };
+    push(&mut fake, cx, meta(&["b"]), &["a"]);
+    assert!(is_open(cx, layer), "another session going leaves it open");
+    let mut truncated = meta(&[]);
+    truncated.counts = counts(true, None);
+    push(&mut fake, cx, truncated, &["b"]);
+    assert!(is_open(cx, layer), "a truncated listing proves nothing");
+    let mut filtered = meta(&[]);
+    filtered.counts = counts(false, Some(0));
+    push(&mut fake, cx, filtered, &[]);
+    assert!(is_open(cx, layer), "a filtered listing proves nothing");
+    let mut unavailable = meta(&[]);
+    unavailable.availability = Availability::Unavailable {
+        error: "the session store could not be read".into(),
+    };
+    push(&mut fake, cx, unavailable, &[]);
+    assert!(is_open(cx, layer), "an unavailable listing proves nothing");
+    push(&mut fake, cx, meta(&[]), &[]);
+    assert!(
+        !is_open(cx, layer),
+        "a complete listing without b closed it"
+    );
+
+    let Some(gone) = ask(cx, "b") else {
+        panic!("the premise: a question about a session already proven gone still opens")
+    };
+    assert!(!is_open(cx, gone), "and closes at once");
+}
+
+// ---- Menus: arrows and the pointer -----------------------------------------------------------------------------------
+
+/// A menu whose items take the highlight when the pointer enters them, as the session row's menu items will.
+struct HoverMenu {
+    items: Vec<(&'static str, FocusHandle)>,
+}
+
+impl Render for HoverMenu {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        layers::panel(cx)
+            .debug_selector(|| "menu".into())
+            .w(px(160.))
+            .children(self.items.iter().map(|(id, focus)| hover_item(id, focus)))
+    }
+}
+
+/// `button(id, focus)`, taking the highlight when the pointer enters it.
+fn hover_item(id: &'static str, focus: &FocusHandle) -> impl IntoElement + use<> {
+    let highlight = focus.clone();
+    div()
+        .id(gpui::ElementId::Name(format!("{id}-hover").into()))
+        .on_hover(move |hovered, window, cx| {
+            if *hovered {
+                focus::highlight(&highlight, window, cx);
+            }
+        })
+        .child(button(id, focus))
+}
+
+/// Why this matters: SPEC.md has menus use their own arrow keys and "A menu has one highlight. Whichever moved last,
+/// the pointer or the keys, sets it". The old menus walked every item with the arrows and wrapped at both ends
+/// (`sidebar.spec.ts` at reference commit `24bc0580`). Tab is no substitute: on a Mac with Keyboard navigation off it
+/// skips buttons, and every menu item is one.
+///
+/// Specification: with Tab reaching text fields only, Down and Up in a menu move through every item and wrap at both
+/// ends, never reaching the page behind. Moving the pointer onto an item moves the highlight there, and the arrows go
+/// on from it. The pointer over the page behind an open menu takes nothing out of the menu.
+#[gpui::test]
+fn arrows_walk_every_menu_item_and_wrap_and_the_pointer_moves_the_same_highlight(
+    cx: &mut TestAppContext,
+) {
+    let anchor_out: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));
+    let page = Rc::new(RefCell::new(None::<FocusHandle>));
+    let (out, drawn) = (anchor_out.clone(), page.clone());
+    let cx = open(cx, move |window, cx| {
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .children(
+                drawn
+                    .borrow()
+                    .clone()
+                    .map(|focus| hover_item("page", &focus)),
+            )
+            .child(anchor_element("opener", &out, window, cx))
+            .into_any_element()
+    });
+    let reach = Rc::new(Cell::new(focus::TabReach::TextFieldsAndPopups));
+    follow(cx, &reach);
+    let behind = handle(cx);
+    page.replace(Some(behind.clone()));
+    redraw(cx);
+    let items = [handle(cx), handle(cx), handle(cx)];
+    let anchor = anchor_out.borrow().clone().unwrap();
+    let start = items[0].clone();
+    let view_items = vec![
+        ("first", items[0].clone()),
+        ("second", items[1].clone()),
+        ("third", items[2].clone()),
+    ];
+    let id = cx.update(move |window, cx| {
+        let view = cx.new(|_| HoverMenu { items: view_items });
+        let mark = Mark::take(cx);
+        layers::open_popover(
+            Popover {
+                view: view.into(),
+                container: cx.focus_handle(),
+                start,
+                anchor,
+            },
+            &mark,
+            window,
+            cx,
+        )
+    });
+    cx.run_until_parked();
+    check(cx);
+    assert!(id.is_some(), "the premise: the menu opened");
+    let at = |cx: &mut VisualTestContext| items.iter().position(|item| focused(cx, item));
+    assert_eq!(
+        at(cx),
+        Some(0),
+        "the premise: the menu starts on its first item"
+    );
+
+    for expected in [1, 2, 0] {
+        keys(cx, "down");
+        assert_eq!(at(cx), Some(expected), "Down reaches every item and wraps");
+    }
+    for expected in [2, 1, 0, 2] {
+        keys(cx, "up");
+        assert_eq!(at(cx), Some(expected), "Up reaches every item and wraps");
+    }
+
+    let second = center(cx, "second");
+    cx.simulate_mouse_move(second, None, Modifiers::none());
+    check(cx);
+    assert_eq!(
+        at(cx),
+        Some(1),
+        "the pointer moved the highlight to the item under it"
+    );
+    keys(cx, "down");
+    assert_eq!(
+        at(cx),
+        Some(2),
+        "the keys go on from where the pointer left it"
+    );
+
+    let page_button = center(cx, "page");
+    cx.simulate_mouse_move(page_button, None, Modifiers::none());
+    check(cx);
+    assert!(
+        !focused(cx, &behind),
+        "the page behind the menu took nothing"
+    );
+    assert_eq!(at(cx), Some(2), "the highlight stayed in the menu");
 }

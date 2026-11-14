@@ -34,10 +34,10 @@ fn operations(cx: &mut TestAppContext) -> Entity<SessionOperations> {
     }
 }
 
-/// Start `command` as `work` on `session`, recording its completion under `label`.
+/// Start `command` on `session`, recording its completion under `label`.
 fn start(
     operations: &Entity<SessionOperations>,
-    (session, work, command): (&str, Work, Command),
+    (session, command): (&str, Command),
     label: &'static str,
     delivered: &Delivered,
     cx: &mut TestAppContext,
@@ -45,7 +45,7 @@ fn start(
     let delivered = delivered.clone();
     cx.update(|cx| {
         operations.update(cx, |operations, cx| {
-            operations.start(session, work, command, cx, move |settled, _| {
+            operations.start(session, command, cx, move |settled, _| {
                 delivered.borrow_mut().push((label, settled.clone()));
             })
         })
@@ -77,17 +77,15 @@ fn independent_work_on_two_sessions_keeps_its_own_completion(cx: &mut TestAppCon
     let (mut fake, _connection) = connected(&["a", "b"], cx);
     let operations = operations(cx);
     let delivered = Delivered::default();
-    let renaming = ("a", Work::Rename, rename("a", "new"));
+    let renaming = ("a", rename("a", "new"));
     start(&operations, renaming, "rename a", &delivered, cx).unwrap();
     let deleting = (
         "b",
-        Work::Delete,
         Command::delete("b", DeleteGuard::NothingAlive).unwrap(),
     );
     start(&operations, deleting, "delete b", &delivered, cx).unwrap();
     let again = (
         "a",
-        Work::Delete,
         Command::delete("a", DeleteGuard::Unconditional).unwrap(),
     );
     assert_eq!(
@@ -125,8 +123,8 @@ fn independent_work_on_two_sessions_keeps_its_own_completion(cx: &mut TestAppCon
         assert_eq!(operations.in_flight("a"), None, "a settled");
         assert_eq!(
             operations.in_flight("b"),
-            Some(Work::Delete),
-            "b is still in flight"
+            Some(Work::Delete(DeleteGuard::NothingAlive)),
+            "b is still in flight, as the Delete the command sent, guard included"
         );
         let failure = operations
             .failure("a")
@@ -158,7 +156,7 @@ fn independent_work_on_two_sessions_keeps_its_own_completion(cx: &mut TestAppCon
         "the premise: a's failure is still on its row"
     );
 
-    let retry = ("a", Work::Rename, rename("a", "newer"));
+    let retry = ("a", rename("a", "newer"));
     start(&operations, retry, "rename a again", &delivered, cx).unwrap();
     assert_eq!(
         cx.update(|cx| operations.read(cx).failure("a").cloned()),
@@ -182,6 +180,54 @@ fn independent_work_on_two_sessions_keeps_its_own_completion(cx: &mut TestAppCon
         )),
         "a refusal with no words names the command, not the session's id"
     );
+}
+
+/// Why this matters: while a Delete runs, its row says what is happening ("stopping the agent", "stopping its terminal
+/// tabs" or "deleting", SPEC.md, "Lifecycle operations"), and the only honest source for that is the precondition the
+/// request actually carries. Were the in-flight work recorded apart from the command, a caller could start an
+/// unconditional Delete while the row claimed there was nothing alive to stop.
+///
+/// Specification: for each guard, a started Delete is in flight as `Work::Delete` with the guard its command sent, and
+/// the command's path carries that guard's flag.
+#[gpui::test]
+fn a_delete_in_flight_reports_the_guard_its_command_sent(cx: &mut TestAppContext) {
+    let guards = [
+        ("a", DeleteGuard::Unconditional, "/api/sessions/a"),
+        (
+            "b",
+            DeleteGuard::AgentEnded,
+            "/api/sessions/b?only_if_agent_ended=true",
+        ),
+        (
+            "c",
+            DeleteGuard::NothingAlive,
+            "/api/sessions/c?only_if_nothing_alive=true",
+        ),
+    ];
+    let (mut fake, _connection) = connected(&["a", "b", "c"], cx);
+    let operations = operations(cx);
+    let delivered = Delivered::default();
+    for (key, guard, _) in guards {
+        let deleting = (key, Command::delete(key, guard).unwrap());
+        start(&operations, deleting, "delete", &delivered, cx).unwrap();
+    }
+    cx.run_until_parked();
+    let paths: Vec<String> = fake
+        .commands()
+        .iter()
+        .map(|sent| sent.path.as_str().to_owned())
+        .collect();
+    for (key, guard, path) in guards {
+        assert_eq!(
+            cx.update(|cx| operations.read(cx).in_flight(key)),
+            Some(Work::Delete(guard)),
+            "{key} is in flight with its own guard"
+        );
+        assert!(
+            paths.iter().any(|sent| sent == path),
+            "{key}'s command carries its guard: {paths:?}"
+        );
+    }
 }
 
 /// The design's core claim: the store, not the view that started the work, owns its completion. The old GUI once lost
@@ -239,14 +285,7 @@ fn a_reset_drops_pending_completions_without_cancelling_the_helms_work(cx: &mut 
     let (mut fake, _connection) = connected(&["a", "b", "c"], cx);
     let first = operations(cx);
     let delivered = Delivered::default();
-    start(
-        &first,
-        ("c", Work::Rename, rename("c", "x")),
-        "rename c",
-        &delivered,
-        cx,
-    )
-    .unwrap();
+    start(&first, ("c", rename("c", "x")), "rename c", &delivered, cx).unwrap();
     cx.run_until_parked();
     let sent = fake.commands();
     fake.reply(sent[0].id, 400, Some(json!("refused")));
@@ -259,7 +298,7 @@ fn a_reset_drops_pending_completions_without_cancelling_the_helms_work(cx: &mut 
 
     start(
         &first,
-        ("a", Work::Rename, rename("a", "new")),
+        ("a", rename("a", "new")),
         "rename a",
         &delivered,
         cx,
@@ -267,7 +306,6 @@ fn a_reset_drops_pending_completions_without_cancelling_the_helms_work(cx: &mut 
     .unwrap();
     let deleting = (
         "b",
-        Work::Delete,
         Command::delete("b", DeleteGuard::Unconditional).unwrap(),
     );
     start(&first, deleting, "delete b", &delivered, cx).unwrap();
@@ -309,7 +347,7 @@ fn a_reset_drops_pending_completions_without_cancelling_the_helms_work(cx: &mut 
         assert_eq!(second.read(cx).in_flight("b"), None);
         assert_eq!(second.read(cx).failure("c"), None);
     });
-    let late = ("a", Work::Rename, rename("a", "late"));
+    let late = ("a", rename("a", "late"));
     assert_eq!(
         start(&first, late, "late", &delivered, cx),
         Err(NotStarted::Retired)
@@ -335,7 +373,7 @@ fn a_completion_says_whether_the_user_moved_on_since_the_work_started(cx: &mut T
 
     start(
         &operations,
-        ("a", Work::Rename, rename("a", "x")),
+        ("a", rename("a", "x")),
         "typed",
         &delivered,
         window,
@@ -349,7 +387,7 @@ fn a_completion_says_whether_the_user_moved_on_since_the_work_started(cx: &mut T
 
     start(
         &operations,
-        ("b", Work::Rename, rename("b", "y")),
+        ("b", rename("b", "y")),
         "idle",
         &delivered,
         window,
@@ -385,7 +423,6 @@ impl Editor {
             self,
             |editor| &mut editor.title,
             &session,
-            Work::Rename,
             |title| Command::rename(&session, title),
             cx,
             |editor, settled, _| editor.settled.push(settled.outcome.clone()),

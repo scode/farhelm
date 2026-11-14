@@ -34,14 +34,14 @@ use farhelm_helm_client::terminal::{
     TerminalAttach, TerminalEvents, TerminalHandle, closed_terminal,
 };
 use farhelm_helm_client::{
-    ApiPath, ChannelConfig, ChannelEvent, ChannelEvents, ChannelHandle, ChannelState, CommandError,
-    HelmConnection, HelmEndpoint, Method,
+    ApiPath, ChannelConfig, ChannelEvent, ChannelEvents, ChannelHandle, ChannelState, Collections,
+    CommandError, HelmConnection, HelmEndpoint, Method,
 };
 use farhelm_proto::ui_channel::{Availability, Collection, Reply, SessionRow};
 use gpui::{App, AppContext as _, Context, Entity, Global, Task, WeakEntity};
 use serde_json::Value;
 
-use crate::layers;
+use crate::layers::{self, Subject};
 use crate::local_state::LocalState;
 use crate::notices::{self, Notice};
 use crate::operations::SessionOperations;
@@ -232,12 +232,49 @@ fn receive(connection: &WeakEntity<Connection>, event: ChannelEvent, cx: &mut Ap
     true
 }
 
-/// Drop the selected session if the new snapshot shows it is gone.
+/// Whether `collections` prove that the session filed under `key` is gone: the one evidence rule for "this session no
+/// longer exists", shared by the selected session's survivor ([`keep_survivors`]) and the session subject of a layer
+/// ([`Subject::session`]), so a selection and a confirmation about the same session can never disagree.
 ///
 /// Only a complete, successful read can show that: the sessions collection is the channel's session query, cut at the
 /// helm's listing cap, and a failed read arrives as `Unavailable` with no entries. A missing row in a truncated,
 /// filtered or unavailable list is not evidence that the session was deleted (SPEC_impl.md, "What is pushed, and how
-/// changes are found"), so the selection is kept then.
+/// changes are found"), so this says `false` then, as it does before the collection has arrived at all.
+pub(crate) fn listing_proves_gone(collections: &Collections, key: &str) -> bool {
+    let complete = collections.meta(Collection::Sessions).is_some_and(|meta| {
+        meta.availability == Availability::Available
+            && meta
+                .counts
+                .is_none_or(|counts| !counts.truncated && counts.matching.is_none())
+    });
+    complete && collections.get::<SessionRow>(key).is_none()
+}
+
+impl Subject {
+    /// A layer about the session the helm files under `key`, for a question or editor that must go when the session
+    /// does: it closes once the current UI session's store proves the session gone ([`listing_proves_gone`]). A
+    /// truncated, filtered or unavailable listing proves nothing, so a confirmation stays open through a passing read
+    /// error rather than vanishing under the user's pointer. A layer asked about a session already proven gone closes as
+    /// soon as it opens.
+    ///
+    /// `None` while the window is inert: with no UI session there is no store to watch and no evidence, and the layer is
+    /// left to its opener. It watches the store current when it is made. A reset replaces that store, but a reset also
+    /// closes every layer (`layers::close_all`, called when the session retires), so no layer outlives the store it
+    /// watches.
+    ///
+    /// It lives here rather than in the layer manager so that the layer manager knows nothing of the store: it takes the
+    /// store and the evidence rule through [`Subject::when`].
+    pub fn session(key: impl Into<String>, cx: &App) -> Option<Subject> {
+        let key: String = key.into();
+        let store = current_store(cx)?;
+        Some(Subject::when(store, move |store: &HelmStore, _| {
+            listing_proves_gone(store.collections(), &key)
+        }))
+    }
+}
+
+/// Drop the selected session if the new snapshot proves it gone ([`listing_proves_gone`]); a list that proves nothing
+/// keeps the selection.
 fn keep_survivors(session: &Entity<UiSession>, cx: &mut App) {
     // Checked rather than assumed, as the notice center and the layer manager do: `global` panics on a missing global.
     let Some(key) = cx
@@ -247,13 +284,7 @@ fn keep_survivors(session: &Entity<UiSession>, cx: &mut App) {
         return;
     };
     let collections = session.read(cx).store.read(cx).collections();
-    let complete = collections.meta(Collection::Sessions).is_some_and(|meta| {
-        meta.availability == Availability::Available
-            && meta
-                .counts
-                .is_none_or(|counts| !counts.truncated && counts.matching.is_none())
-    });
-    if complete && collections.get::<SessionRow>(&key).is_none() {
+    if listing_proves_gone(collections, &key) {
         cx.global_mut::<LocalState>().selected_session = None;
     }
 }
