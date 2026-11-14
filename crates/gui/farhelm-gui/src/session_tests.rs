@@ -39,7 +39,7 @@ use crate::{render_count, test_support, ticker};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
-fn meta(order: &[&str]) -> CollectionMeta {
+pub(crate) fn meta(order: &[&str]) -> CollectionMeta {
     CollectionMeta {
         availability: Availability::Available,
         order: order.iter().map(|key| key.to_string()).collect(),
@@ -48,7 +48,7 @@ fn meta(order: &[&str]) -> CollectionMeta {
 }
 
 /// A session row under `key`: the helm's own pinned list fixture, so the test follows the wire shape the helm serves.
-fn session_entry(key: &str) -> KeyedEntry {
+pub(crate) fn session_entry(key: &str) -> KeyedEntry {
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
         "../../../farhelm-helm/http-contract/session-list.json"
     ))
@@ -60,7 +60,7 @@ fn session_entry(key: &str) -> KeyedEntry {
 }
 
 /// The sessions collection holding rows under `keys`, in that order.
-fn sessions(keys: &[&str]) -> CollectionState {
+pub(crate) fn sessions(keys: &[&str]) -> CollectionState {
     CollectionState {
         collection: Collection::Sessions,
         meta: meta(keys),
@@ -69,7 +69,7 @@ fn sessions(keys: &[&str]) -> CollectionState {
 }
 
 /// The app, bootstrapped as for real, serving the fake helm's channel. The channel starts `Connecting`.
-fn started(cx: &mut TestAppContext) -> (FakeHelm, Entity<Connection>) {
+pub(crate) fn started(cx: &mut TestAppContext) -> (FakeHelm, Entity<Connection>) {
     test_support::install(cx);
     let (fake, handle, events) = FakeHelm::new();
     let connection = cx.update(|cx| session::start(handle, events, None, cx));

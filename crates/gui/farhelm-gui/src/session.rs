@@ -8,12 +8,12 @@
 //!
 //! Here's the TLDR of a reset. However the channel broke, the same code runs: the channel announces its new state
 //! (`Reconnecting`, `Displaced`, `CannotConnect` or `HelmEnded`), and the connection retires the current UI session
-//! before anything else happens. Retiring drops the session's store and cancels every task the session owns, including
-//! the task waiting on a completion that was already on its way, so that completion is never delivered. Then every
-//! window's dialogs and menus close, through the layer manager. Only then does the channel fail the commands it lost,
-//! so those failures land on nobody. When the channel is back, its snapshot builds a brand-new session, and the
-//! connection posts the generic connection-lost notice. Nothing in between tracks
-//! what became of an individual action.
+//! before anything else happens. Retiring drops the session's store and cancels every task the session owns, its
+//! operation store's included ([`crate::operations`]), down to the task waiting on a completion that was already on its
+//! way, so that completion is never delivered. Then every window's dialogs and menus close, through the layer manager.
+//! Only then does the channel fail the commands it lost, so those failures land on nobody. When the channel is back,
+//! its snapshot builds a brand-new session, and the connection posts the generic connection-lost notice. Nothing in
+//! between tracks what became of an individual action.
 //!
 //! Terminal streams are not on the UI channel (SPEC_impl.md, "Bulk data stays separate"), but they are opened through
 //! the UI session all the same ([`UiSession::terminal_opener`]), so that a terminal view made for a session that a
@@ -44,6 +44,7 @@ use serde_json::Value;
 use crate::layers;
 use crate::local_state::LocalState;
 use crate::notices::{self, Notice};
+use crate::operations::SessionOperations;
 use crate::store::HelmStore;
 use crate::terminal::attached::OpenStream;
 
@@ -73,6 +74,8 @@ pub struct Connection {
 /// session's data.
 pub struct UiSession {
     store: Entity<HelmStore>,
+    /// Work on the sessions in this store that finishes later, retired with the session.
+    operations: Entity<SessionOperations>,
     handle: ChannelHandle,
     /// Where this session's terminal streams come from: the connection's source when the snapshot made the session.
     terminals: TerminalSource,
@@ -164,6 +167,15 @@ pub fn current_store(cx: &App) -> Option<Entity<HelmStore>> {
     Some(session.read(cx).store.clone())
 }
 
+/// The current UI session's operation store, looked up the same way as [`current_store`] and for the same reason: a
+/// view that reads it while drawing, or starts work from a handler, always reaches the live session's. `None` while the
+/// window is inert.
+pub fn current_operations(cx: &App) -> Option<Entity<SessionOperations>> {
+    let connection = connection(cx)?;
+    let session = connection.read(cx).session.clone()?;
+    Some(session.read(cx).operations.clone())
+}
+
 /// Apply one event from the feed. Returns whether the connection still exists.
 fn receive(connection: &WeakEntity<Connection>, event: ChannelEvent, cx: &mut App) -> bool {
     let Some(connection) = connection.upgrade() else {
@@ -194,6 +206,7 @@ fn receive(connection: &WeakEntity<Connection>, event: ChannelEvent, cx: &mut Ap
                 let terminals = connection.terminals.clone();
                 UiSession {
                     store: cx.new(|_| HelmStore::from_snapshot(&snapshot)),
+                    operations: cx.new(|_| SessionOperations::new(handle.clone())),
                     handle,
                     terminals,
                     retired: Rc::new(Cell::new(false)),
@@ -250,6 +263,9 @@ fn retire(session: &Entity<UiSession>, cx: &mut App) {
     session.update(cx, |session, cx| {
         session.retired.set(true);
         session.pending.clear();
+        session
+            .operations
+            .update(cx, |operations, cx| operations.retire(cx));
         cx.notify();
     });
 }
