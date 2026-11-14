@@ -10,7 +10,12 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::WebSocketStream;
-use tokio_tungstenite::tungstenite::handshake::server::{Request as Upgrade, Response};
+use tokio_tungstenite::tungstenite::handshake::server::{
+    ErrorResponse, Request as Upgrade, Response,
+};
+use tokio_tungstenite::tungstenite::http::StatusCode;
+
+mod parity;
 
 /// One accepted socket and the path-and-query it was opened with.
 struct Accepted {
@@ -20,38 +25,88 @@ struct Accepted {
 
 /// Accept sockets as a helm would, refusing any upgrade without the device credential.
 async fn server() -> (SocketAddr, mpsc::UnboundedReceiver<Accepted>) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
+    let (addr, mut connections) = listen().await;
     let (tx, rx) = mpsc::unbounded_channel();
     tokio::spawn(async move {
-        while let Ok((tcp, _)) = listener.accept().await {
-            let (uri_tx, uri_rx) = std::sync::mpsc::channel();
-            #[expect(
-                clippy::result_large_err,
-                reason = "tungstenite's handshake callback fixes the error type"
-            )]
-            let callback = move |request: &Upgrade, mut response: Response| {
-                let offered = request
-                    .headers()
-                    .get("Sec-WebSocket-Protocol")
-                    .and_then(|v| v.to_str().ok());
-                assert_eq!(offered, Some("farhelm, farhelm-device-test-secret"));
-                response
-                    .headers_mut()
-                    .insert("Sec-WebSocket-Protocol", "farhelm".parse().unwrap());
-                uri_tx.send(request.uri().to_string()).unwrap();
-                Ok(response)
-            };
-            let socket = tokio_tungstenite::accept_hdr_async(tcp, callback)
-                .await
-                .unwrap();
-            let uri = uri_rx.recv().unwrap();
-            if tx.send(Accepted { uri, socket }).is_err() {
+        while let Some(tcp) = connections.recv().await {
+            if tx.send(accept_upgrade(tcp).await).is_err() {
                 break;
             }
         }
     });
     (addr, rx)
+}
+
+/// Accept TCP connections and hand them over before any handshake, so the test decides when and how each attach is
+/// answered ([`accept_upgrade`], [`refuse_upgrade`]) or fails (by dropping the connection). Until then the stream
+/// waits in its connect.
+async fn listen() -> (SocketAddr, mpsc::UnboundedReceiver<TcpStream>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Ok((tcp, _)) = listener.accept().await {
+            if tx.send(tcp).is_err() {
+                break;
+            }
+        }
+    });
+    (addr, rx)
+}
+
+/// Accept one attach's upgrade as the helm would, after checking the device credential.
+async fn accept_upgrade(tcp: TcpStream) -> Accepted {
+    let (uri, socket) = handshake(tcp, None).await;
+    match (uri, socket) {
+        (Some(uri), Ok(socket)) => Accepted { uri, socket },
+        (_, Err(error)) => panic!("the upgrade failed: {error}"),
+        (None, Ok(_)) => panic!("an upgrade went through without reaching the credential check"),
+    }
+}
+
+/// Refuse one attach's upgrade with HTTP `status` after checking the device credential, as the helm refuses a revoked
+/// credential (401) or a session that is gone (404).
+async fn refuse_upgrade(tcp: TcpStream, status: u16) {
+    let (_, socket) = handshake(tcp, Some(status)).await;
+    assert!(
+        socket.is_err(),
+        "an upgrade refused with {status} went through"
+    );
+}
+
+/// The server side of one upgrade: check the credential subprotocol, then answer with `refusal`'s status or accept.
+/// Returns the path-and-query the attach asked for (`None` when the handshake ended before the request was read).
+async fn handshake(
+    tcp: TcpStream,
+    refusal: Option<u16>,
+) -> (
+    Option<String>,
+    Result<WebSocketStream<TcpStream>, tokio_tungstenite::tungstenite::Error>,
+) {
+    let (uri_tx, uri_rx) = std::sync::mpsc::channel();
+    #[expect(
+        clippy::result_large_err,
+        reason = "tungstenite's handshake callback fixes the error type"
+    )]
+    let callback = move |request: &Upgrade, mut response: Response| {
+        let offered = request
+            .headers()
+            .get("Sec-WebSocket-Protocol")
+            .and_then(|v| v.to_str().ok());
+        assert_eq!(offered, Some("farhelm, farhelm-device-test-secret"));
+        uri_tx.send(request.uri().to_string()).unwrap();
+        if let Some(status) = refusal {
+            let mut refused = ErrorResponse::new(None);
+            *refused.status_mut() = StatusCode::from_u16(status).unwrap();
+            return Err(refused);
+        }
+        response
+            .headers_mut()
+            .insert("Sec-WebSocket-Protocol", "farhelm".parse().unwrap());
+        Ok(response)
+    };
+    let socket = tokio_tungstenite::accept_hdr_async(tcp, callback).await;
+    (uri_rx.try_recv().ok(), socket)
 }
 
 async fn next_event(events: &mut TerminalEvents) -> TerminalEvent {

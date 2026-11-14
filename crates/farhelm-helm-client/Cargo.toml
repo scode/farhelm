@@ -11,6 +11,11 @@ description = "The GPUI desktop app's connection to its helm: the UI channel and
 [package.metadata.dist]
 dist = false
 
+[features]
+# The in-process fakes of the UI channel and the terminal streams (`src/fake.rs`) that GUI tests drive in place of a
+# helm. A shipped build never needs them, so only test builds turn this on: farhelm-gui's dev-dependency does.
+test-support = []
+
 # This crate lives outside `crates/gui/` on purpose: it owns the async runtime and its threads, which the GUI crates'
 # bans (crates/gui/clippy.toml) forbid everywhere else. SPEC_impl.md, "Where the GUI meets the helm", names it the
 # GUI's one exemption from that ban. It must never depend on the helm crate (dev-dependencies excepted, for tests
