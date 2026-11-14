@@ -201,6 +201,34 @@ class SeedTest(unittest.TestCase):
                 self.assertIsNone(body["command"]["agent"])
                 self.assertNotIn("{farhelm_args}", body["command"]["command"])
 
+    def test_seeded_sessions_run_in_the_neutral_folder_and_keep_transcripts_in_the_run(self):
+        """Every row shows its session's folder, and pictures of the app are compared from one run to the next;
+        seeding into the run's own random directory made every capture differ and put a scratch path in front of the
+        maintainer. Specified: every seeded session, basic or replayed, is created with `/tmp` as its folder, in the
+        order given, and a replayed session's transcript is still written inside the run directory."""
+        sent = []
+
+        def fake_request(run, method, path, body=None):
+            sent.append((method, path, body))
+            return {"id": f"s{len(sent)}"}
+
+        real_request = gui_agent.helm_request
+        gui_agent.helm_request = fake_request
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                run = pathlib.Path(tmp)
+                ids = gui_agent.seed_sessions(run, ["basic", "idle"], "/fx")
+                self.assertEqual(ids, ["s1", "s2"])
+                self.assertEqual([body["cwd"] for _, _, body in sent], ["/tmp", "/tmp"])
+                self.assertEqual([body["title"] for _, _, body in sent], ["Fixture 1", "Fixture 2"])
+                self.assertTrue(all(method == "POST" and path == "/api/sessions" for method, path, _ in sent))
+                words = sent[1][2]["command"]["command"].split(" ")
+                transcript = pathlib.Path(words[words.index("--transcript") + 1])
+                self.assertEqual(transcript.parent, run / "work", "the transcript stays in the run directory")
+                self.assertIn("now holds its idle screen", transcript.read_text())
+        finally:
+            gui_agent.helm_request = real_request
+
     def test_a_transcript_fits_a_narrow_terminal_and_ends_on_its_kind(self):
         """The screenshot batch waits for a fleet session's last transcript line and photographs it in a 900-pixel
         window, whose terminal is about 55 columns wide: a longer line wraps, and the wrap plus the row an exited
