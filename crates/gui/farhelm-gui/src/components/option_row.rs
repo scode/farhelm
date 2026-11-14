@@ -3,10 +3,16 @@
 //!
 //! The old quick switcher kept focus in its search field the whole time it was open: its rows were buttons with
 //! `tabindex="-1"`, the arrow keys moved the selected row while the caret stayed in the field, and Tab went from the
-//! field straight to Close. This control is that row. It is never a tab stop and a press never focuses it: it tracks
-//! no focus handle at all, and it marks its presses as handled, so neither Tab nor a click moves focus off the field,
-//! not even through the empty-space rule of the dialog or page around it. It has no keyboard activation of its own
-//! (the field's owner handles Enter and the arrows). A click activates it, as a click on the old row did.
+//! field straight to Close. This control is that row. It is never a tab stop, so Tab never reaches it, and a press
+//! never focuses it: it tracks no focus handle at all, and it marks its presses as handled.
+//!
+//! Whether a click on it leaves focus in the field depends on the surface it is drawn in. The page's own empty-space
+//! rule respects the handled mark, so on the page focus stays put, unless something between the row and the page takes
+//! focus on a press (a terminal does). A dialog or anchored question opened with `keeps_focus_on_empty_click` (the
+//! quick switcher's dialog) keeps focus too. A dialog whose empty space takes focus ignores the mark: it goes by what
+//! focus did during the press, and this row moves none, so a click on the row there moves focus to the dialog. Draw it
+//! only where focus stays. It has no keyboard activation of its own (the field's owner handles Enter and the arrows). A
+//! click activates it, as a click on the old row did.
 //!
 //! Its constructor takes the label, hover help and role every control takes. The label is the accessible name, not
 //! drawn text: the row draws its own content, host text among it, which only host text may draw. Whether it is the
@@ -122,9 +128,9 @@ impl RenderOnce for OptionRow {
             .bg(theme::color(fill))
             .cursor_pointer()
             .hover(move |style| style.bg(theme::color(hover_fill)))
-            // The press is this control's, though it takes no focus: marked, it never reaches the empty-space rule of
-            // the page or dialog around it, which would otherwise move focus off the field (as a disabled button's
-            // press is kept from it).
+            // The press is this control's, though it takes no focus. Marked, it leaves focus on the field under the
+            // page's empty-space rule (as a disabled button's press does); a dialog whose empty space takes focus
+            // ignores the mark, which is why the module docs limit where the row is drawn.
             .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
             .children(self.children);
         let row = super::with_hover_help(row, &self.id, &self.help, true, window, cx);

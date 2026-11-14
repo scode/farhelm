@@ -790,6 +790,13 @@ Traps that an earlier rule already prevents get one line pointing at it.
   nobody drew and the coordinator's recovery never ran (found when the terminal got its input handler). Rule: the
   handler is a small entity of its own holding a weak reference to the view.
 - **A focus handle is a Tab stop only when built with `.tab_stop(true)`.** The default blocks Tab.
+- **A press reaches every element under the pointer** until one blocks it, so a card drawn over the page without a veil
+  passes a click on it through to what lies under it (a click on an anchored question's answer also focused the terminal
+  under the card). Rule: the layer manager's popover and anchored cards `occlude()`.
+- **GPUI turns the release of Enter or Space on a focused element into a click,** when focus stayed on it from the
+  key-down, which already reached the element's key handler, and also on a held key's repeat. A control that activates
+  on key-down and on click therefore acted twice per press, and a held Enter that answered one question answered the
+  next one too. Rule: controls take clicks through `components::activate_on_click`, which ignores that keyboard click.
 - **A virtualized row keeps focus only if registered with `ListState::splice_focusable`.** Otherwise a focused row that
   scrolls out, or is re-spliced, fires focus-lost.
 - **Key bindings beat key listeners.** Bindings dispatch before capture-phase key listeners, and a binding with no
