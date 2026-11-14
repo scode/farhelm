@@ -220,6 +220,52 @@ async fn a_dot_session_id_never_becomes_a_path() {
     .expect("the stream test finished in time");
 }
 
+/// `Closed` is how the GUI learns a stream is over ([`StreamState::Closed`]: a close, or every handle dropped), and the
+/// states that wait for the user are where a GUI most often lets a terminal go. The stream once returned from those
+/// waits without emitting it, so the feed just ended. Pinned for a refusal ended by `close` and a takeover detach
+/// ended by dropping the last handle.
+#[tokio::test]
+async fn a_stream_closed_while_waiting_for_the_user_still_reports_closed() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let (addr, _accepted) = server().await;
+        let (handle, mut events) = open_terminal(
+            HelmEndpoint::new(addr, "test-secret"),
+            attach(".."),
+            ChannelConfig::default(),
+        );
+        until_event(
+            &mut events,
+            TerminalEvent::State(StreamState::Refused { status: 404 }),
+        )
+        .await;
+        handle.close();
+        assert_eq!(
+            next_event(&mut events).await,
+            TerminalEvent::State(StreamState::Closed)
+        );
+
+        let (handle, mut events, _accepted, mut first) = attached(ChannelConfig::default()).await;
+        let notice =
+            r#"{"type":"detached","reason":"another client took over","code":"taken_over"}"#;
+        first.socket.send(Message::text(notice)).await.unwrap();
+        until_event(
+            &mut events,
+            TerminalEvent::State(StreamState::Detached {
+                code: Some(DetachCode::TakenOver),
+                reason: "another client took over".into(),
+            }),
+        )
+        .await;
+        drop(handle);
+        assert_eq!(
+            next_event(&mut events).await,
+            TerminalEvent::State(StreamState::Closed)
+        );
+    })
+    .await
+    .expect("the stream test finished in time");
+}
+
 /// An agent-terminal attach for `session` at 80x24.
 fn attach(session: &str) -> TerminalAttach {
     TerminalAttach {
