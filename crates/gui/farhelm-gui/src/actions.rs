@@ -206,6 +206,12 @@ actions!(
         /// Scroll the focused terminal toward its live screen by a page less a line (Shift+PageDown; otherwise as
         /// [`ScrollTerminalPageUp`]).
         ScrollTerminalPageDown,
+        /// Select everything the focused terminal can show, its history included (Cmd+A on a Mac, the old app's
+        /// terminal key). The terminal handles it; selecting does not copy.
+        SelectAllInTerminal,
+        /// Copy the focused terminal's selection to the clipboard (Cmd+C on a Mac, WebKit's copy in the old app's
+        /// terminal). The terminal handles it; with nothing selected it does nothing.
+        CopyTerminalSelection,
         /// Open the Keyboard shortcuts dialog (SPEC.md, "Desktop window chrome": Cmd+/ on a Mac, Ctrl+Shift+/ on
         /// Linux, by the physical Slash key; a row in [`PHYSICAL_KEYS`]). Runs once per press (`ONCE_PER_PRESS`).
         ShowKeyboardShortcuts,
@@ -421,8 +427,8 @@ impl TerminalKey {
 /// The app shortcuts are the ones SPEC.md says work from a focused terminal or never reach its program, with the old
 /// app's modifiers at the reference commit: Command on a Mac, Ctrl+Shift on Linux. The terminal's own keys are the old
 /// grid terminal's (Shift+PageUp/PageDown, and Cmd+A on a Mac), plus the Mac's Cmd+C and Cmd+V, which were WebKit's
-/// copy and paste in the old app's terminal, and Linux's paste chords (the paste rows below). Linux has no copy chord
-/// here yet: neither SPEC.md nor the old app's terminal settles one, so it waits for the copy work.
+/// copy and paste in the old app's terminal, and Linux's paste chords (the paste rows below). Linux has no copy chord:
+/// neither SPEC.md nor the old app's terminal settles one, and every completed selection is copied as it is made.
 ///
 /// NOTE: Not in this table, because a key binding cannot express them: the number keys (Cmd or Ctrl+Shift with 0-9),
 /// the Keyboard shortcuts dialog (with `/`) and terminal text size (with `=` and `-`), which SPEC.md matches by the
@@ -467,16 +473,20 @@ pub const TERMINAL_KEYS: &[TerminalKey] = &[
         what: "scroll the terminal down a page",
         bind: Some(bind_page_down),
     },
-    mac_only(
-        "cmd-a",
-        KeyOwner::Terminal,
-        "select all of the terminal's text",
-    ),
-    mac_only(
-        "cmd-c",
-        KeyOwner::Terminal,
-        "copy the terminal's selection (GPUI Kit's root binds it to its Copy)",
-    ),
+    TerminalKey {
+        mac: Some("cmd-a"),
+        linux: None,
+        owner: KeyOwner::Terminal,
+        what: "select all of the terminal's text",
+        bind: Some(bind_select_all),
+    },
+    TerminalKey {
+        mac: Some("cmd-c"),
+        linux: None,
+        owner: KeyOwner::Terminal,
+        what: "copy the terminal's selection (outranking GPUI Kit's root binding of Copy)",
+        bind: Some(bind_copy),
+    },
     TerminalKey {
         mac: Some(PASTE_MAC),
         linux: Some(PASTE_LINUX),
@@ -549,6 +559,16 @@ fn bind_page_down(chord: &'static str) -> KeyBinding {
     KeyBinding::new(chord, ScrollTerminalPageDown, Some(TERMINAL_CONTEXT))
 }
 
+/// Cmd+A's binding, for its row of [`TERMINAL_KEYS`].
+fn bind_select_all(chord: &'static str) -> KeyBinding {
+    KeyBinding::new(chord, SelectAllInTerminal, Some(TERMINAL_CONTEXT))
+}
+
+/// Cmd+C's binding, for its row of [`TERMINAL_KEYS`].
+fn bind_copy(chord: &'static str) -> KeyBinding {
+    KeyBinding::new(chord, CopyTerminalSelection, Some(TERMINAL_CONTEXT))
+}
+
 /// An app shortcut: Command on a Mac, Ctrl+Shift on Linux.
 const fn app(mac: &'static str, linux: &'static str, what: &'static str) -> TerminalKey {
     TerminalKey {
@@ -565,17 +585,6 @@ const fn both(chord: &'static str, owner: KeyOwner, what: &'static str) -> Termi
     TerminalKey {
         mac: Some(chord),
         linux: Some(chord),
-        owner,
-        what,
-        bind: None,
-    }
-}
-
-/// A chord only a Mac has.
-const fn mac_only(chord: &'static str, owner: KeyOwner, what: &'static str) -> TerminalKey {
-    TerminalKey {
-        mac: Some(chord),
-        linux: None,
         owner,
         what,
         bind: None,

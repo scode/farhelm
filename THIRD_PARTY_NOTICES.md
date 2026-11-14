@@ -54,8 +54,9 @@ Dioxus UI's JavaScript grid client carried further ports from xterm.js, its `@xt
 The GPUI app's own Rust ports of those JavaScript rules live in `crates/gui/farhelm-grid-model` (`src/selection.rs` and
 `src/links.rs`: selection text, word selection, the URL pattern and line window) and `crates/gui/farhelm-input-mapping`
 (`src/keys.rs`, `src/pointer.rs` and `src/cursor.rs`: the keydown decision, the terminal's cell size, mouse cell
-rounding, move de-duplication, wheel accumulation and the Alt-click cursor move). Their complete notices are in each
-crate's `LICENSE-PORTED`.
+rounding, move de-duplication, wheel accumulation and the Alt-click cursor move), and the desktop terminal's own
+`crates/gui/farhelm-gui/src/terminal/attached.rs` (the fit, the selection press and the drag-scroll speed), whose
+notices are `farhelm-input-mapping`'s. Their complete notices are in each crate's `LICENSE-PORTED`.
 
 Each ported function names its origin in a source comment. The code is MIT-licensed: copyright the xterm.js authors,
 SourceLair Private Company and Christopher Jeffrey. The complete notices are in

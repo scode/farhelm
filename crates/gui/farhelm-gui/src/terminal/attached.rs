@@ -2,9 +2,9 @@
 //!
 //! NOTE: This is cut to what the first milestone's slice needs (the migration's orchestrator trimmed it on 2026-11-13):
 //! attach a terminal, show its output, say when it is not live, take focus and send the program its keys. The terminal
-//! area added paste, committed text from the platform's text input, focus reports and scrollback since. Selection,
-//! links and the reconnect display with its phase and Retry come later in that work. The session pane
-//! ([`crate::session_pane`]) mounts one for the selected session.
+//! area added paste, committed text from the platform's text input, focus reports, scrollback and the local selection
+//! since. Links, mouse reporting and the reconnect display with its phase and Retry come later in that work. The
+//! session pane ([`crate::session_pane`]) mounts one for the selected session.
 //!
 //! [`AttachedTerminal`] owns one stream ([`TerminalHandle`] and [`TerminalEvents`]) and the [`TerminalView`]s that show
 //! it. Here's the TLDR of what it adds on top of the stream and the renderer, each a rule the old app or the GPUI
@@ -44,11 +44,11 @@
 //!
 //! - An app shortcut whose feature has no binding yet is dropped, press and repeats alike. It is Farhelm's, so it
 //!   must not reach the program in the meantime either.
-//! - The terminal's own commands that have no action yet do nothing: Cmd+A will select and Cmd+C copy the selection.
-//!   They are dropped rather than sent, so a program never learns to depend on getting them. Paste
-//!   ([`actions::Paste`], [`AttachedTerminal::paste`]) and the page keys, Shift+PageUp and Shift+PageDown
-//!   ([`actions::ScrollTerminalPageUp`] and its sibling), have their actions, whose bindings take their keys before
-//!   this listener sees them.
+//! - The terminal's own commands have their actions, whose bindings take their keys before this listener sees them:
+//!   paste ([`actions::Paste`], [`AttachedTerminal::paste`]), the page keys, Shift+PageUp and Shift+PageDown
+//!   ([`actions::ScrollTerminalPageUp`] and its sibling), and on a Mac select all and copy, Cmd+A and Cmd+C
+//!   ([`actions::SelectAllInTerminal`], [`actions::CopyTerminalSelection`]). Should one of their keys reach the
+//!   listener anyway it is dropped rather than sent, so a program never learns to depend on getting it.
 //! - Every other key is the program's. `farhelm-input-mapping`'s `map_key` decides what it means (the supervisor
 //!   encodes the bytes). A key it sends as a key goes out as one, and the listener stops it there. A key it leaves to
 //!   text input (a Shift letter, a space, an Option character, a dead key, a key typed while an input method composes)
@@ -57,8 +57,9 @@
 //!   letter follows, an input method's string. That text goes to the program once, as typed text. This is the old
 //!   app's split too, where the browser's hidden input element supplied the text. A paging decision (Shift+PageUp or
 //!   Shift+PageDown with Ctrl, Alt or Cmd also held, which the keymap does not bind) pages the history, as the bindings
-//!   do, and sends nothing. Held keys repeat to the program, as in any terminal: the keymap's repeat guard (`actions::ONCE_PER_PRESS`) stops a held app shortcut's repeats before
-//!   they get here, and `map_key` holds back nothing else.
+//!   do, and sends nothing. Held keys repeat to the program, as in any terminal: the keymap's repeat guard
+//!   (`actions::ONCE_PER_PRESS`) stops a held app shortcut's repeats before they get here, and `map_key` holds back
+//!   nothing else.
 //!
 //! NOTE: On Linux a key's text reaches text input only when at most Shift is held (GPUI's Linux rule, on Wayland and
 //! X11 alike), so a key the mapping leaves to text input with Alt or Ctrl+Alt held types nothing there. The old app
@@ -92,7 +93,7 @@ use std::pin::Pin;
 use std::task::Poll;
 use std::time::Duration;
 
-use farhelm_grid_model::{ExitState, GridError, GridOutput};
+use farhelm_grid_model::{ExitState, GridError, GridOutput, Position, Selection, SelectionMode};
 use farhelm_helm_client::terminal::{
     Attachment, AttachmentLease, StreamState, TerminalAttach, TerminalEvent, TerminalEvents,
     TerminalHandle,
@@ -108,11 +109,11 @@ use farhelm_proto::DetachCode;
 use farhelm_proto::grid::{GridInput, MouseEventKind};
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, ClipboardEntry, ClipboardItem, Context,
-    ElementInputHandler, Entity, EntityInputHandler, FocusHandle, HoverListenerMode,
-    InteractiveElement, IntoElement, KeyDownEvent, NativeKeyIdentity, ParentElement, Pixels, Point,
-    Render, ScrollDelta, ScrollEvent, SharedString, StatefulInteractiveElement, Styled,
-    Subscription, Task, UTF16Selection, WeakEntity, Window, canvas, div,
-    prelude::FluentBuilder as _, px,
+    DispatchPhase, ElementInputHandler, Entity, EntityInputHandler, FocusHandle, HoverListenerMode,
+    InteractiveElement, IntoElement, KeyDownEvent, Modifiers, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, NativeKeyIdentity, ParentElement, Pixels, Point, Render,
+    ScrollDelta, ScrollEvent, SharedString, StatefulInteractiveElement, Styled, Subscription, Task,
+    UTF16Selection, WeakEntity, Window, canvas, div, prelude::FluentBuilder as _, px,
 };
 
 use super::{CellMetrics, CursorPhase, TerminalView, style};
@@ -226,6 +227,8 @@ pub struct AttachedTerminal {
     pointer_over: bool,
     /// Keeps the scrollbar shown for [`SCROLLBAR_HOLD`] after the last scroll; it clears itself when it fires.
     scrollbar_hold: Option<ticker::Deadline>,
+    /// The local selection being dragged, from its press to its release.
+    select: Option<SelectGesture>,
     retired: bool,
     /// The pane's focus: a tab stop, which a press on the pane focuses. Lives as long as the owner, so the session
     /// view can name it as home across redraws.
@@ -310,6 +313,7 @@ impl AttachedTerminal {
             program_wheel: WheelAccumulator::default(),
             pointer_over: false,
             scrollbar_hold: None,
+            select: None,
             retired,
             focus: cx.focus_handle().tab_stop(true),
             text_input: {
@@ -582,6 +586,8 @@ impl AttachedTerminal {
         match staging.update(cx, |view, cx| view.mark_replay_complete(cx)) {
             Ok(()) => {
                 self.committed = Some(staging);
+                // A drag on the replaced view ends with it: its anchor names that view's lines.
+                self.select = None;
                 self.live = true;
                 cx.notify();
                 // As for a state change in `output`: a reconnect that goes live in a hidden window draws nothing.
@@ -673,8 +679,12 @@ impl AttachedTerminal {
         if !self.is_live() || group.is_empty() {
             return;
         }
+        // Input clears the selection and brings the view to the bottom, where it lands, as in the old app.
         if let Some(view) = &self.committed {
-            view.update(cx, |view, cx| view.follow(cx));
+            view.update(cx, |view, cx| {
+                view.follow(cx);
+                view.set_selection(None, cx);
+            });
         }
         self.send(attachment, group);
     }
@@ -971,6 +981,7 @@ impl AttachedTerminal {
         }
         self.pump = None;
         self.committed = None;
+        self.select = None;
         self.staging = None;
         self.live = false;
         self.blink = None;
@@ -1276,6 +1287,23 @@ impl Render for AttachedTerminal {
                 |_, _, _| (),
                 move |bounds, (), window, cx| {
                     window.handle_input(&focus, ElementInputHandler::new(bounds, text_input), cx);
+                    // A selection drag follows the pointer anywhere in the window, and ends at the release wherever
+                    // it happens, as the old app's document-level listeners did. Registered in every frame, not only
+                    // in frames drawn while a drag is held: a press, its moves and its release can all arrive before
+                    // the next frame (a fast drag, or the test bridge's), and a listener that waited for a frame to
+                    // appear would miss them. Outside a drag they return at once.
+                    let moved = owner.clone();
+                    window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                        if phase == DispatchPhase::Bubble {
+                            let _ = moved.update(cx, |owner, cx| owner.drag_moved(event, cx));
+                        }
+                    });
+                    let released = owner.clone();
+                    window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                        if phase == DispatchPhase::Bubble && event.button == MouseButton::Left {
+                            let _ = released.update(cx, |owner, cx| owner.end_selection(cx));
+                        }
+                    });
                     let height = f32::from(bounds.size.height);
                     let origin = bounds.origin;
                     window.defer(cx, move |_, cx| {
@@ -1313,6 +1341,9 @@ impl Render for AttachedTerminal {
             .key_context(actions::TERMINAL_CONTEXT)
             .on_key_down(cx.listener(Self::key))
             .on_action(cx.listener(Self::paste))
+            .on_action(cx.listener(Self::select_all))
+            .on_action(cx.listener(Self::copy_selection))
+            .on_mouse_down(MouseButton::Left, cx.listener(Self::press))
             .on_action(
                 cx.listener(|owner, _: &actions::ScrollTerminalPageUp, _, cx| {
                     owner.scroll_page(-1, cx)
@@ -1380,6 +1411,334 @@ impl Render for AttachedTerminal {
             .child(body)
             .children(placeholder)
             .child(measure)
+    }
+}
+
+// ---- Selection -------------------------------------------------------------------------------------------------------
+
+/// A drag held past the top or bottom of the screen scrolls a step this often while it stays there: 20 steps a second,
+/// the old app's `DRAG_SCROLL_INTERVAL_MS`.
+const DRAG_SCROLL_INTERVAL: Duration = Duration::from_millis(50);
+
+/// How far past the screen's edge the pointer must be for the fastest drag scroll, in pixels, and how many lines that
+/// step moves (`DRAG_SCROLL_MAX_DISTANCE` and `DRAG_SCROLL_MAX_LINES`, from xterm.js 6.0.0's
+/// `DRAG_SCROLL_MAX_THRESHOLD` and `DRAG_SCROLL_MAX_SPEED`; MIT, notices in `farhelm-input-mapping`'s LICENSE-PORTED).
+const DRAG_SCROLL_MAX_DISTANCE: f32 = 50.;
+const DRAG_SCROLL_MAX_LINES: f32 = 15.;
+
+/// What a selection gesture's moving end selects, set by the press that started it, with what stays put.
+#[derive(Clone, Copy, Debug)]
+enum SelectMode {
+    /// From the press's cell boundary (`anchor`) to the pointer's: a plain or Shift drag.
+    Char { anchor: Position },
+    /// A rectangle from the press's corner (`anchor`) to the pointer's (Alt-drag off a Mac).
+    Column { anchor: Position },
+    /// Whole words, always keeping the double-clicked one (`pressed`).
+    Word { pressed: Selection },
+    /// Whole soft-wrapped lines, always keeping the triple-clicked one (`pressed`).
+    Line { pressed: Selection },
+}
+
+/// A local selection being dragged, from its press to its release. The view holds the selection itself; this holds
+/// what the drag needs to move its far end. One exists only for a press that was allowed to select (mouse reporting
+/// off, or the forcing modifier held), so its release always copies what was selected.
+struct SelectGesture {
+    mode: SelectMode,
+    /// Where the pointer last was (window coordinates): where a drag-scroll step extends the selection to.
+    pointer: Point<Pixels>,
+    /// Lines a drag-scroll step moves, negative toward older lines; 0 while the pointer is over the screen.
+    scroll_lines: i64,
+    /// The next drag-scroll step, while one is due.
+    scroll_tick: Option<ticker::Deadline>,
+}
+
+/// Whether a press holds this platform's modifier that forces a local selection over mouse reporting: Option on a
+/// Mac, Shift elsewhere (SPEC.md's selection paragraph; the old app's `pressForcesSelection`).
+fn forces_selection(modifiers: Modifiers) -> bool {
+    match actions::THIS_PLATFORM {
+        Platform::Mac => modifiers.alt,
+        Platform::Linux => modifiers.shift,
+    }
+}
+
+/// Lines a drag-scroll step moves for a pointer `distance` pixels past the screen's edge (negative above it): at least
+/// one, and up to [`DRAG_SCROLL_MAX_LINES`] at [`DRAG_SCROLL_MAX_DISTANCE`] or farther, the old app's
+/// `updateDragScroll`.
+fn drag_scroll_lines(distance: f32) -> i64 {
+    if distance == 0. || !distance.is_finite() {
+        return 0;
+    }
+    let speed = (distance.abs().min(DRAG_SCROLL_MAX_DISTANCE) / DRAG_SCROLL_MAX_DISTANCE
+        * DRAG_SCROLL_MAX_LINES)
+        .round()
+        .max(1.);
+    speed as i64 * distance.signum() as i64
+}
+
+impl AttachedTerminal {
+    /// The line position under `position` (window coordinates) for a selection: the nearest cell boundary when
+    /// `boundary` (how a character or column selection's ends move), else the cell itself. Rows above or below the
+    /// screen clamp to its first or last row, so a drag past an edge selects to it; the notice line stands for the
+    /// line below it. `None` before the grid is measured.
+    fn selection_position(
+        &self,
+        position: Point<Pixels>,
+        boundary: bool,
+        cx: &App,
+    ) -> Option<Position> {
+        let origin = self.grid_origin?;
+        let view = self.committed.as_ref()?.read(cx);
+        let placement = self.placement(view, cx)?;
+        let cell = self.cell(cx)?;
+        let geometry = Geometry {
+            cell_width: f64::from(cell.width),
+            cell_height: f64::from(placement.cell_height),
+            columns: view.cols,
+            rows: placement.rows,
+        };
+        let (col, row) = geometry.selection_cell(
+            f64::from(f32::from(position.x - origin.x)),
+            f64::from(f32::from(position.y - origin.y) + placement.lift),
+            boundary,
+        )?;
+        let line = view.line_at_row(row)?;
+        Some(Position { line, col })
+    }
+
+    /// A primary press on the grid. With mouse reporting off, or with the forcing modifier held, it starts a local
+    /// selection: a click an empty one at the nearest boundary (which clears what was selected), a double click the
+    /// word, a triple click the soft-wrapped line, Alt off a Mac a rectangle, and Shift with a selection already there
+    /// extends it (the old app's `startSelection`, from xterm.js 6.0.0's `SelectionService`; MIT, notices in
+    /// `farhelm-input-mapping`'s LICENSE-PORTED). Under mouse reporting a plain press is the program's, which the
+    /// mouse-reporting work sends; here it selects nothing.
+    fn press(&mut self, event: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(view) = self.committed.clone() else {
+            return;
+        };
+        let tracking = view
+            .read(cx)
+            .state
+            .is_some_and(|state| state.mouse != farhelm_proto::grid::MouseMode::Off);
+        let forced = forces_selection(event.modifiers);
+        if tracking && !forced {
+            return;
+        }
+        let mac = actions::THIS_PLATFORM == Platform::Mac;
+        let current = view.read(cx).selection();
+        let (mode, selection) = match event.click_count {
+            2 | 3 => {
+                let Some(cell) = self.selection_position(event.position, false, cx) else {
+                    return;
+                };
+                let range = if event.click_count == 2 {
+                    view.read(cx).word_range(cell)
+                } else {
+                    view.read(cx).line_range(cell)
+                };
+                let Some(range) = range else {
+                    return;
+                };
+                let mode = if event.click_count == 2 {
+                    SelectMode::Word { pressed: range }
+                } else {
+                    SelectMode::Line { pressed: range }
+                };
+                (mode, range)
+            }
+            _ => {
+                let Some(at) = self.selection_position(event.position, true, cx) else {
+                    return;
+                };
+                if event.modifiers.alt && !mac {
+                    let selection = Selection::new(at, at, SelectionMode::Column);
+                    (SelectMode::Column { anchor: at }, selection)
+                } else if let Some(current) = current.filter(|current| {
+                    event.modifiers.shift
+                        && !current.is_empty()
+                        && current.mode == SelectionMode::Linear
+                }) {
+                    let selection = Selection::new(current.start, at, SelectionMode::Linear);
+                    (
+                        SelectMode::Char {
+                            anchor: current.start,
+                        },
+                        selection,
+                    )
+                } else {
+                    let selection = Selection::new(at, at, SelectionMode::Linear);
+                    (SelectMode::Char { anchor: at }, selection)
+                }
+            }
+        };
+        view.update(cx, |view, cx| view.set_selection(Some(selection), cx));
+        self.select = Some(SelectGesture {
+            mode,
+            pointer: event.position,
+            scroll_lines: 0,
+            scroll_tick: None,
+        });
+    }
+
+    /// Move a selection drag's far end to `pointer`, by its mode (the old app's `extendTo`).
+    fn extend_selection(&mut self, pointer: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(gesture) = &self.select else {
+            return;
+        };
+        let mode = gesture.mode;
+        let boundary = matches!(mode, SelectMode::Char { .. } | SelectMode::Column { .. });
+        let Some(at) = self.selection_position(pointer, boundary, cx) else {
+            return;
+        };
+        let Some(view) = self.committed.clone() else {
+            return;
+        };
+        // The view cleared the selection under the drag: a reset (a resize, a history reset, the alternate screen
+        // switching) made its line numbers name other text, history trimming dropped all of it, or input went to the
+        // program. The drag ends with it, and copies nothing; extending from the old anchor would select text the
+        // user never pointed at.
+        if view.read(cx).selection().is_none() {
+            self.select = None;
+            return;
+        }
+        let selection = match mode {
+            SelectMode::Char { anchor } => Selection::new(anchor, at, SelectionMode::Linear),
+            SelectMode::Column { anchor } => Selection::new(anchor, at, SelectionMode::Column),
+            SelectMode::Word { pressed } | SelectMode::Line { pressed } => {
+                let found = match mode {
+                    SelectMode::Word { .. } => view.read(cx).word_range(at),
+                    _ => view.read(cx).line_range(at),
+                };
+                let found = found.unwrap_or(Selection::new(at, at, SelectionMode::Linear));
+                Selection::new(
+                    found.start.min(pressed.start),
+                    found.end.max(pressed.end),
+                    SelectionMode::Linear,
+                )
+            }
+        };
+        view.update(cx, |view, cx| view.set_selection(Some(selection), cx));
+    }
+
+    /// The pointer moved while a selection is dragged (anywhere in the window): extend the selection, and scroll while
+    /// the pointer is held past the screen's top or bottom. A move with the primary button up is a release the window
+    /// never saw (let go outside it), which ends the drag.
+    fn drag_moved(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        if self.select.is_none() {
+            return;
+        }
+        if event.pressed_button != Some(MouseButton::Left) {
+            self.end_selection(cx);
+            return;
+        }
+        if let Some(gesture) = &mut self.select {
+            gesture.pointer = event.position;
+        }
+        self.extend_selection(event.position, cx);
+        let lines = self
+            .drag_scroll_distance(event.position, cx)
+            .map_or(0, drag_scroll_lines);
+        let Some(gesture) = &mut self.select else {
+            return;
+        };
+        gesture.scroll_lines = lines;
+        if lines == 0 {
+            gesture.scroll_tick = None;
+        } else if gesture.scroll_tick.is_none() {
+            self.schedule_drag_scroll(cx);
+        }
+    }
+
+    /// How far `pointer` is past the shown screen's top (negative) or bottom (positive), 0 inside it.
+    fn drag_scroll_distance(&self, pointer: Point<Pixels>, cx: &App) -> Option<f32> {
+        let origin = self.grid_origin?;
+        let view = self.committed.as_ref()?.read(cx);
+        let placement = self.placement(view, cx)?;
+        let top = f32::from(origin.y);
+        let bottom = top + f32::from(placement.rows) * placement.cell_height - placement.lift;
+        let y = f32::from(pointer.y);
+        Some(if y < top {
+            y - top
+        } else if y > bottom {
+            y - bottom
+        } else {
+            0.
+        })
+    }
+
+    /// Arm the next drag-scroll step: one [`DRAG_SCROLL_INTERVAL`] from now it scrolls by the gesture's current step,
+    /// extends the selection to the pointer's last place, and arms the next while the drag is still held past an edge.
+    fn schedule_drag_scroll(&mut self, cx: &mut Context<Self>) {
+        let owner = cx.weak_entity();
+        let tick = ticker::after(DRAG_SCROLL_INTERVAL, cx, move |cx| {
+            let _ = owner.update(cx, |owner, cx| {
+                let Some(gesture) = &mut owner.select else {
+                    return;
+                };
+                gesture.scroll_tick = None;
+                let (lines, pointer) = (gesture.scroll_lines, gesture.pointer);
+                if lines == 0 {
+                    return;
+                }
+                if let Some(view) = &owner.committed {
+                    view.update(cx, |view, cx| view.scroll_lines(lines, cx));
+                }
+                owner.hold_scrollbar(cx);
+                owner.extend_selection(pointer, cx);
+                owner.schedule_drag_scroll(cx);
+            });
+        });
+        if let Some(gesture) = &mut self.select {
+            gesture.scroll_tick = Some(tick);
+        }
+    }
+
+    /// The primary button came up while a selection is dragged: the gesture ends, and a non-empty selection goes to the
+    /// clipboard, every time, even when it is the text already there (SPEC.md: every completed selection re-copies;
+    /// the old app's `copySelectionOnMouseUp`). A plain click left an empty selection, so it copies nothing and leaves
+    /// the clipboard alone.
+    fn end_selection(&mut self, cx: &mut Context<Self>) {
+        if self.select.take().is_none() {
+            return;
+        }
+        let text = self
+            .committed
+            .as_ref()
+            .and_then(|view| view.read(cx).selected_text());
+        if let Some(text) = text {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+        }
+    }
+
+    /// Select everything the terminal shows, history included ([`actions::SelectAllInTerminal`], Cmd+A on a Mac).
+    /// Selecting is not copying, as in the old app: Cmd+C copies it.
+    fn select_all(
+        &mut self,
+        _: &actions::SelectAllInTerminal,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // A drag in progress ends: its anchor would otherwise rebuild a selection over this one at the next move.
+        self.select = None;
+        if let Some(view) = &self.committed {
+            view.update(cx, |view, cx| view.select_all(cx));
+        }
+    }
+
+    /// Copy the local selection to the clipboard ([`actions::CopyTerminalSelection`], Cmd+C on a Mac). With nothing
+    /// selected it does nothing, so the clipboard keeps what another program put there.
+    fn copy_selection(
+        &mut self,
+        _: &actions::CopyTerminalSelection,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let text = self
+            .committed
+            .as_ref()
+            .and_then(|view| view.read(cx).selected_text());
+        if let Some(text) = text {
+            cx.write_to_clipboard(ClipboardItem::new_string(text));
+        }
     }
 }
 

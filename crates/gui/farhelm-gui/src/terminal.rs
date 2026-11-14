@@ -12,8 +12,9 @@
 //! the port review kept: one custom element with no per-cell layout nodes, a shaped-row cache that survives scrolling,
 //! printable ASCII shaped as one batch and split at its known one-byte cell boundaries, every other run kept whole so
 //! combining marks and emoji sequences stay together, and ink clipped to the cell box the wire assigns so a fallback
-//! glyph never moves later columns. Selection, link and scrollback views are not here yet; they come with the
-//! terminal area's later work.
+//! glyph never moves later columns. The view also scrolls through the history and draws the local selection; the
+//! gestures that make a selection are its owner's ([`attached`]). Links are not here yet; they come with the terminal
+//! area's later work.
 //!
 //! [`attached`] holds the owner that connects a view to a terminal stream: when to attach, which view receives a
 //! replay, and what the pane says while the stream is not live.
@@ -25,12 +26,13 @@ mod tests;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::ops::Range;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use farhelm_grid_model::{
-    ApplyEffects, Cursor, CursorShape, Damage, GridError, GridModel, GridOutput, GridRow,
-    TerminalState, ViewRow, Viewport, display_text,
+    ApplyEffects, Cursor, CursorShape, Damage, GridError, GridModel, GridOutput, GridRow, Position,
+    Selection, SelectionMode, TerminalState, ViewRow, Viewport, display_text,
 };
 use farhelm_input_mapping::pointer::Geometry;
 use gpui::{
@@ -248,6 +250,10 @@ enum ShownRow {
 /// reference commit; SPEC.md, "Terminal experience").
 pub(crate) const TRIMMED_TEXT: &str = "Some earlier output could not be recovered";
 
+/// The local selection's opacity over the terminal's white (`SELECTION_COLOR`, `rgba(255, 255, 255, 0.3)`, in
+/// grid-terminal.js at the reference commit).
+const SELECTION_ALPHA: f32 = 0.3;
+
 /// One terminal's committed screen and its scrollback, and the view that paints them.
 ///
 /// ## Scrollback
@@ -275,6 +281,11 @@ pub struct TerminalView {
     /// small steps add up; a remainder gathered at another cell height (a text-size change) does not carry over.
     wheel_remainder: f32,
     wheel_cell: f32,
+    /// The local selection, in line numbers like the viewport's anchor, so it spans history and screen and stays on
+    /// its text while output arrives. Cleared when line numbers stop naming the same lines (a resize, a history reset,
+    /// the alternate screen switching) and by the owner when the user sends the program input; trimmed as the oldest
+    /// history it covers is dropped.
+    selection: Option<Selection>,
     cols: u16,
     cursor: Option<Cursor>,
     visible: bool,
@@ -295,6 +306,7 @@ impl TerminalView {
             history_rows: HashMap::new(),
             wheel_remainder: 0.,
             wheel_cell: 0.,
+            selection: None,
             cols: 0,
             cursor: None,
             visible: false,
@@ -477,11 +489,118 @@ impl TerminalView {
         // of the anchor, so `update_shown` below follows the screen and drops the history cache.
         let reset = self.viewport.synchronize(&self.model, &damage);
         let scrolled_change = !self.viewport.is_following() && damage != Damage::default();
+        let selection = self.selection;
+        self.selection = if reset {
+            None
+        } else {
+            self.selection
+                .and_then(|selection| selection.trim_before(self.oldest_line()))
+        };
         let changed = self.update_grid(damage);
         self.update_shown();
-        if changed || reset || scrolled_change {
+        if changed || reset || scrolled_change || self.selection != selection {
             cx.notify();
         }
+    }
+
+    // ---- Selection ---------------------------------------------------------------------------------------------------
+
+    /// The oldest line the model keeps: the first history line, or the screen's top line without history. A selection
+    /// never reaches above it (`Selection::trim_before`).
+    fn oldest_line(&self) -> u64 {
+        self.model
+            .history()
+            .front()
+            .map_or(self.model.screen_base(), |line| line.number)
+    }
+
+    /// The line shown in view row `row`, if any: a history or screen line by its number. The notice line is not text,
+    /// so it stands for the oldest line below it, as a press on it did in the old app; a blank row past the screen
+    /// names nothing.
+    pub fn line_at_row(&self, row: u16) -> Option<u64> {
+        let position = self.viewport.top(&self.model) + u64::from(row);
+        let bottom = self.viewport.bottom(&self.model);
+        if position >= bottom {
+            let y = position - bottom;
+            return (y < self.rows.len() as u64).then(|| self.model.screen_base() + y);
+        }
+        match self.viewport.row_at(&self.model, position) {
+            ViewRow::Notice => Some(self.oldest_line()),
+            ViewRow::Line(number) => Some(number),
+        }
+    }
+
+    /// The local selection, if any.
+    pub fn selection(&self) -> Option<Selection> {
+        self.selection
+    }
+
+    /// Replace the local selection (`None` clears it), redrawing when it changed.
+    pub fn set_selection(&mut self, selection: Option<Selection>, cx: &mut Context<Self>) {
+        if self.selection != selection {
+            self.selection = selection;
+            cx.notify();
+        }
+    }
+
+    /// Select everything the view can show: the history (none on the alternate screen) and the screen, the old app's
+    /// select all.
+    pub fn select_all(&mut self, cx: &mut Context<Self>) {
+        let alternate = self.state.is_some_and(|state| state.alt_screen);
+        let first = if alternate {
+            self.model.screen_base()
+        } else {
+            self.oldest_line()
+        };
+        let last = self.model.screen_base() + (self.rows.len() as u64).saturating_sub(1);
+        let selection = Selection::new(
+            Position {
+                line: first,
+                col: 0,
+            },
+            Position {
+                line: last,
+                col: self.cols,
+            },
+            SelectionMode::Linear,
+        );
+        self.set_selection(Some(selection), cx);
+    }
+
+    /// The selected text, by the grid model's copy rules; `None` for no selection or an empty one, which must not
+    /// replace what another program put on the clipboard.
+    pub fn selected_text(&self) -> Option<String> {
+        let selection = self.selection.filter(|selection| !selection.is_empty())?;
+        let text = self
+            .model
+            .selection_text(selection.start, selection.end, selection.mode);
+        (!text.is_empty()).then_some(text)
+    }
+
+    /// The word around `position` (double click), as the grid model finds it.
+    pub fn word_range(&self, position: Position) -> Option<Selection> {
+        self.model.word_range(position)
+    }
+
+    /// The soft-wrapped line around `position` (triple click), as the grid model finds it.
+    pub fn line_range(&self, position: Position) -> Option<Selection> {
+        self.model.line_range(position)
+    }
+
+    /// The selected columns of each view row, for the element to draw: one range per row the selection touches, by
+    /// the row's line, clipped to the screen's width.
+    fn selected_rows(&self) -> Vec<(usize, Range<u16>)> {
+        let Some(selection) = self.selection.filter(|selection| !selection.is_empty()) else {
+            return Vec::new();
+        };
+        (0..self.shown.len())
+            .filter(|&row| !matches!(self.shown[row], ShownRow::Notice | ShownRow::Blank))
+            .filter_map(|row| {
+                let line = self.line_at_row(u16::try_from(row).ok()?)?;
+                let columns = selection.columns(line, self.cols);
+                (!columns.is_empty()).then_some((row, columns))
+            })
+            .collect()
     }
 
     /// Rebuild what the element draws from the screen cache, the model's history and the viewport. A history line
@@ -610,6 +729,7 @@ impl Render for TerminalView {
         TerminalElement {
             rows: self.shown.clone(),
             cursor_row: self.cursor_row(),
+            selected: self.selected_rows(),
             cols: self.cols,
             cursor: self.cursor,
             visible: self.visible,
@@ -627,6 +747,8 @@ struct TerminalElement {
     rows: Vec<ShownRow>,
     /// The row the cursor is drawn in, `None` when the view is scrolled away from it.
     cursor_row: Option<usize>,
+    /// The local selection's columns on each row it covers.
+    selected: Vec<(usize, Range<u16>)>,
     cols: u16,
     cursor: Option<Cursor>,
     visible: bool,
@@ -826,12 +948,32 @@ impl Element for TerminalElement {
                 return;
             }
             self.paint_rows(bounds, window, cx);
+            self.paint_selection(bounds, window);
             self.paint_cursor(bounds, window, cx);
         });
     }
 }
 
 impl TerminalElement {
+    /// Paint the local selection over the text: one box per row, from its first selected column to its last, in the
+    /// old app's `SELECTION_COLOR`, white at 30% (the terminal palette's foreground token is that white), drawn over
+    /// the glyphs as the old selection layer was.
+    fn paint_selection(&self, bounds: Bounds<Pixels>, window: &mut Window) {
+        let color = TerminalColor::of(TERMINAL.foreground).hsla(SELECTION_ALPHA);
+        for (row, columns) in &self.selected {
+            let origin = bounds.origin
+                + point(
+                    px(f32::from(columns.start) * self.cell.width),
+                    px(*row as f32 * self.cell.height),
+                );
+            let width = f32::from(columns.end - columns.start) * self.cell.width;
+            window.paint_quad(fill(
+                Bounds::new(origin, size(px(width), px(self.cell.height))),
+                color,
+            ));
+        }
+    }
+
     /// Paint every row's backgrounds, glyphs and decorations from the shaped cache.
     fn paint_rows(&self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
         let m = self.cell;

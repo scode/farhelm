@@ -210,6 +210,7 @@ fn a_cursor_covers_a_wide_characters_whole_box() {
     let element = TerminalElement {
         rows: view.shown.clone(),
         cursor_row: None,
+        selected: Vec::new(),
         cols: view.cols,
         cursor: view.cursor,
         visible: view.visible,
@@ -746,6 +747,107 @@ fn the_scroll_position_counts_what_navigation_can_reach(cx: &mut TestAppContext)
         !position(cx).scrollable(),
         "the alternate screen has no history"
     );
+}
+
+// ---- Selection ---------------------------------------------------------------------------------------------------
+
+/// A history line arriving at `first`, which drops the oldest when the fixture's 3-line cap is full.
+fn history_line(first: u64, text: &str) -> GridOutput {
+    serde_json::from_value(serde_json::json!({
+        "t":"history","first":first,"rows":[{"w":false,"r":[[0,text.len(),text,[0,-1,-1]]]}],"cols":20
+    }))
+    .unwrap()
+}
+
+/// The selection is held in line numbers, as the old app held it: the view's rows name their lines (the notice line
+/// standing for the line below it), so a selection made scrolled back is the same text when the view follows again,
+/// and the element draws a box only on the rows the selection covers. Selecting all covers the history and the
+/// screen.
+#[gpui::test]
+fn a_selection_names_lines_and_select_all_covers_history_and_screen(cx: &mut TestAppContext) {
+    let terminal = attached_with_history(cx);
+    // The fixture: history lines 41 (empty), 42 "three" and 43 "four" above a screen whose first line is 44.
+    let read =
+        |cx: &mut TestAppContext, row: u16| terminal.read_with(cx, |view, _| view.line_at_row(row));
+    assert_eq!(read(cx, 0), Some(44));
+    terminal.update(cx, |view, cx| view.scroll_lines(-3, cx));
+    assert_eq!(read(cx, 0), Some(41));
+    assert_eq!(read(cx, 3), Some(44));
+
+    let three = Selection::new(
+        Position { line: 42, col: 0 },
+        Position { line: 42, col: 5 },
+        SelectionMode::Linear,
+    );
+    terminal.update(cx, |view, cx| view.set_selection(Some(three), cx));
+    assert_eq!(
+        terminal.read_with(cx, |view, _| view.selected_rows()),
+        [(1, 0..5)],
+        "drawn on the row showing line 42 only"
+    );
+    terminal.update(cx, |view, cx| view.follow(cx));
+    assert_eq!(
+        terminal.read_with(cx, |view, _| view.selected_text()),
+        Some("three".into())
+    );
+    assert_eq!(
+        terminal.read_with(cx, |view, _| view.selected_rows()),
+        [],
+        "not drawn while its line is out of view"
+    );
+
+    terminal.update(cx, |view, cx| view.select_all(cx));
+    let all = terminal
+        .read_with(cx, |view, _| view.selected_text())
+        .unwrap();
+    assert!(all.contains("three\nfour\n$ echo\nhello"), "{all:?}");
+}
+
+/// What makes the selection's line numbers stop naming its text ends it: here the alternate screen switching, one of
+/// the viewport's resets (a resize and a history reset are the others, which reset the viewport the same way; its own
+/// tests pin those). History dropped at the cap trims it to what is left, rather than letting it name lines that are
+/// gone. An empty selection (a click) has no text, so it never reaches the clipboard.
+#[gpui::test]
+fn a_selection_is_trimmed_by_dropped_history_and_cleared_by_a_reset(cx: &mut TestAppContext) {
+    let terminal = attached_with_history(cx);
+    let selection = |cx: &mut TestAppContext| terminal.read_with(cx, |view, _| view.selection());
+    let from_41 = Selection::new(
+        Position { line: 41, col: 0 },
+        Position { line: 42, col: 5 },
+        SelectionMode::Linear,
+    );
+    terminal.update(cx, |view, cx| view.set_selection(Some(from_41), cx));
+    terminal.update(cx, |view, cx| {
+        let (_, applied) = view.apply([history_line(44, "five")], cx);
+        applied.unwrap();
+    });
+    assert_eq!(
+        selection(cx).map(|selection| selection.start),
+        Some(Position { line: 42, col: 0 }),
+        "line 41 was dropped; the selection keeps the rest"
+    );
+
+    let alternate: GridOutput =
+        serde_json::from_value(serde_json::json!({"t":"state","mouse":"off","focus":false,
+        "alt_screen":true,"default_fg":null,"default_bg":null,"history_trimmed":false,"exit":null}))
+        .unwrap();
+    terminal.update(cx, |view, cx| {
+        let (_, applied) = view.apply([alternate], cx);
+        applied.unwrap();
+    });
+    assert_eq!(
+        selection(cx),
+        None,
+        "the alternate screen switching clears it"
+    );
+
+    let click = Selection::new(
+        Position { line: 44, col: 2 },
+        Position { line: 44, col: 2 },
+        SelectionMode::Linear,
+    );
+    terminal.update(cx, |view, cx| view.set_selection(Some(click), cx));
+    assert_eq!(terminal.read_with(cx, |view, _| view.selected_text()), None);
 }
 
 /// A refused message ends the batch with its error and changes nothing itself, but what came before it in the batch
