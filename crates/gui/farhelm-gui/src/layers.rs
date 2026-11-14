@@ -2,33 +2,476 @@
 //!
 //! SPEC_impl.md, "Overlays: the layer manager": one owner draws the dialog slot, the popover stack and tooltips, and
 //! GPUI's `deferred`/`anchored` are banned everywhere else in the GUI crates (`crates/gui/clippy.toml`). This module
-//! holds that one exemption.
+//! holds that one exemption. Its rules:
 //!
-//! NOTE: Phase 1 of the foundations builds only the tooltip slot, because the component layer's hover help needs
-//! somewhere to draw. The dialog slot, the popover stack, element anchoring and the covered-link hit test arrive with
-//! the rest of the layer manager. Until then a tooltip is placed below and right of the pointer where the hover began,
-//! without the old tooltip's pointer notch and the target ring on its control (both follow element anchoring), and it
-//! appears at once: the hover delay is a one-shot deadline the ticker will serve.
+//! - **Who opened what.** Opening a layer returns its [`LayerId`], and only that id closes it ([`close`]): nothing
+//!   closes a dialog, menu or confirmation it did not open. The user closes the topmost layer with Escape
+//!   ([`dismiss_top`]) or, for a popover, by clicking outside it.
+//! - **Things the user did not start never open a layer.** Every open takes the [`Mark`] the feature took when the user
+//!   acted, and is refused once the user has moved on since (the focus coordinator's counter). Work that finishes later
+//!   shows its result where it belongs instead.
+//! - **An overlay closes when its subject is gone, not when it moves.** A popover is anchored to an element through an
+//!   [`Anchor`], state the anchor element keeps in its element state: it follows the element wherever it is drawn,
+//!   and closes when the element is no longer drawn (a deleted row's menu). A layer may also name a [`Subject`], an
+//!   entity whose release closes it (a confirmation about a session that was deleted elsewhere). Every overlay is
+//!   anchored to an element: SPEC.md has no menu opened at a pointer position.
+//! - **A dialog is modal.** It draws a veil over the window that takes every click, and a click on its empty space
+//!   keeps focus on the control in use. Tab stays inside the topmost layer, dialog or menu alike (the focus
+//!   coordinator walks GPUI's tab order within [`trap`]). Closing any layer returns focus to what held it when the layer
+//!   opened.
+//! - **One tooltip at a time**, owned by the control that showed it (see [`TooltipOwner`]).
 //!
-//! How the slot stays cheap and honest:
+//! State is kept per window: multi-window support is a watch-list item, and the one thing it asks of the foundations
+//! now is that overlays are not shared between windows. Each window's [`LayerStack`] is an entity that notifies, and
+//! only that window's root view observes it ([`attach`]), so opening a layer or showing a tooltip redraws the root,
+//! which draws the overlay, while cached views below it replay. A whole-window refresh would instead re-render every
+//! cached view, which on a 200-row session list is every row each time the pointer crosses a control.
 //!
-//! - The slot is an entity that notifies, and only a root view observes it ([`observe`]). Showing or hiding a tooltip
-//!   redraws that root, which draws the overlay; cached views below it replay. A whole-window refresh would instead
-//!   re-render every cached view on every hover, which on a 200-row session list is every row each time the pointer
-//!   crosses a control.
-//! - A tooltip belongs to a [`TooltipOwner`], a token each tooltip-bearing control keeps in its element state
-//!   ([`TooltipOwner::for_control`]). The token is unique per control instance in the window (it is keyed by the
-//!   control's full element path, not its sibling-unique id), and GPUI drops it when the control is no longer drawn.
-//!   The slot watches the token's release, so a tooltip closes when its control is gone (a dialog closed, a row was
-//!   deleted) even though no hover-leave ever fires for it: an overlay closes when its subject is gone.
+//! NOTE: Still to come here: the covered-terminal-link hit test, which needs the terminal, and the tooltip's hover delay
+//! (a one-shot deadline the ticker serves), its pointer notch and the target ring on its control (both follow element
+//! anchoring for tooltips). Until then a tooltip appears at once, below and right of where the pointer was. Menu items
+//! are plain buttons until the session row's menu brings the menu item component, so the popover golden shows
+//! centered item labels, which the old menus did not have; it is captured again with that component.
+
+use std::cell::Cell;
+use std::collections::HashMap;
+use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, AppContext as _, BoxShadow, Context, ElementId, Entity, EntityId, Global,
-    IntoElement, ParentElement, Pixels, Point, SharedString, Styled, Subscription, Window, div,
-    point, px,
+    AnyElement, AnyView, AnyWindowHandle, App, AppContext as _, Bounds, BoxShadow, Context,
+    Element, ElementId, Entity, EntityId, FocusHandle, Global, GlobalElementId, InspectorElementId,
+    InteractiveElement, IntoElement, LayoutId, ParentElement, Pixels, Point, SharedString, Style,
+    Styled, Subscription, WeakEntity, WeakFocusHandle, Window, WindowId, canvas, div, point, px,
 };
 
+use crate::focus::{self, Mark};
 use crate::theme::{self, metrics};
+
+// ---- Per-window state ------------------------------------------------------------------------------------------------
+
+/// Identifies one open layer. Returned by the open functions; the only way to close that layer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LayerId(u64);
+
+/// One window's overlays: its open layers, bottom to top, and its tooltip.
+pub struct LayerStack {
+    window: AnyWindowHandle,
+    layers: Vec<Layer>,
+    next_id: u64,
+    tooltip: Option<ShownTooltip>,
+    /// Takes the tooltip down when its owner is released; replaced with each new tooltip.
+    tooltip_release: Option<Subscription>,
+}
+
+/// An open dialog or popover.
+struct Layer {
+    id: LayerId,
+    kind: Kind,
+    view: AnyView,
+    /// The layer's own focus handle, tracked by the element that wraps its content: Tab stays inside it (dialogs), and
+    /// focus recovers to it when its focused control disappears.
+    container: FocusHandle,
+    /// What held focus when the layer opened, so closing it can return focus there.
+    opener: Option<WeakFocusHandle>,
+    /// What Enter does while the dialog itself (not one of its controls) has focus.
+    main_action: Option<MainAction>,
+    /// Closes the layer when its subject or anchor is released.
+    _subject: Option<Subscription>,
+}
+
+/// A dialog's main action, which Enter presses while the dialog itself has focus.
+pub type MainAction = Rc<dyn Fn(&mut Window, &mut App)>;
+
+enum Kind {
+    Dialog,
+    /// A popover, drawn below (or, without room, above) its anchor element and following it as it moves; the bounds
+    /// are where the anchor was last drawn.
+    Popover(AnchorBounds),
+}
+
+/// Where an anchor element was last drawn, written by its tracker as frames are prepared.
+type AnchorBounds = Rc<Cell<Option<Bounds<Pixels>>>>;
+
+/// Where each window's layer stack lives, by window. Weak, so a closed window's stack goes with its root view.
+#[derive(Default)]
+struct Windows(HashMap<WindowId, WeakEntity<LayerStack>>);
+
+impl Global for Windows {}
+
+/// Install the app-wide registry. The bootstrap calls this before any window opens.
+pub fn install(cx: &mut App) {
+    cx.set_global(Windows::default());
+}
+
+/// What a root view keeps so its window has overlays: the window's layer stack and the root's subscription to it.
+pub struct Attachment {
+    _stack: Entity<LayerStack>,
+    _observe: Subscription,
+}
+
+/// Give the root view's window a layer stack, and redraw the root whenever an overlay changes. Every root view calls
+/// this once, from its constructor, and draws [`overlay`] as its last child.
+pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachment {
+    let handle = window.window_handle();
+    let stack = cx.new(|_| LayerStack {
+        window: handle,
+        layers: Vec::new(),
+        next_id: 0,
+        tooltip: None,
+        tooltip_release: None,
+    });
+    // Checked first: `global_mut` panics on a missing global, and a bare test fixture may not have installed it.
+    if cx.has_global::<Windows>() {
+        let windows = cx.global_mut::<Windows>();
+        windows.0.retain(|_, stack| stack.upgrade().is_some());
+        windows.0.insert(handle.window_id(), stack.downgrade());
+    }
+    let observe = cx.observe(&stack, |_, _, cx| cx.notify());
+    Attachment {
+        _stack: stack,
+        _observe: observe,
+    }
+}
+
+fn stack(window: &Window, cx: &App) -> Option<Entity<LayerStack>> {
+    cx.try_global::<Windows>()?
+        .0
+        .get(&window.window_handle().window_id())?
+        .upgrade()
+}
+
+// ---- Subjects and anchors --------------------------------------------------------------------------------------------
+
+/// What a layer is about. When the subject's entity is released, the layer closes: SPEC.md, "Nothing closes a dialog …
+/// it did not open. Each goes away when … the thing it is about is gone".
+///
+/// NOTE: The store the channel feeds (the next phase) keeps collections keyed by id with entries replaced whole, not
+/// one entity per session, so "this session is gone" will be a store fact rather than an entity's release. How a
+/// subject maps onto an id-keyed store entry is settled with the store, which is the first real consumer (the session
+/// delete confirmation).
+pub struct Subject(Watch);
+
+/// Starts watching a subject for the layer with the given id: the subscription that closes it on release.
+type Watch = Box<dyn FnOnce(&mut Context<LayerStack>, LayerId) -> Subscription>;
+
+impl Subject {
+    /// The layer is about `entity`: it closes when `entity` is released.
+    pub fn of<T: 'static>(entity: &Entity<T>) -> Self {
+        let entity = entity.clone();
+        Subject(Box::new(move |cx, id| {
+            cx.observe_release(&entity, move |stack, _, cx| stack.close_later(id, cx))
+        }))
+    }
+}
+
+/// An element a popover can be anchored to. Built while the element renders ([`Anchor::for_element`]); the element
+/// draws [`Anchor::track`] as a child so the popover knows where it is.
+///
+/// It refers to the element's state weakly: keeping an `Anchor` around (in a view, a test) does not keep the element
+/// "drawn", so a popover anchored to it still closes when the element goes.
+#[derive(Clone)]
+pub struct Anchor {
+    state: WeakEntity<AnchorState>,
+    bounds: AnchorBounds,
+}
+
+/// An anchor element's state between frames, kept in its keyed element state: GPUI releases it when the element is not
+/// drawn in a frame, and that release is the signal that the anchor is gone. It holds the bounds its tracker records.
+pub struct AnchorState {
+    bounds: AnchorBounds,
+}
+
+impl Anchor {
+    /// The anchor of the element being rendered under `key`, kept for as long as the element is drawn in consecutive
+    /// frames (GPUI's keyed element state). `key` must differ from the element's own id: GPUI keys element state by
+    /// path and type.
+    pub fn for_element(key: impl Into<ElementId>, window: &mut Window, cx: &mut App) -> Anchor {
+        let state = window.use_keyed_state(key, cx, |_, _| AnchorState {
+            bounds: Rc::new(Cell::new(None)),
+        });
+        Anchor {
+            bounds: state.read(cx).bounds.clone(),
+            state: state.downgrade(),
+        }
+    }
+
+    /// A zero-cost child that records where the anchor element is drawn, every frame, before any overlay is placed. The
+    /// anchor element must be positioned (`relative()`) so the tracker covers it.
+    pub fn track(&self) -> impl IntoElement {
+        let bounds = self.bounds.clone();
+        // Pinned to the element's corner: an absolute child without insets would sit wherever it falls in the flow,
+        // after the element's other children, and record the wrong place.
+        canvas(move |at, _, _| bounds.set(Some(at)), |_, _, _, _| {})
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+    }
+}
+
+// ---- Opening and closing ---------------------------------------------------------------------------------------------
+
+/// A dialog to open: its view, the focus handle of its container, and where focus starts.
+pub struct Dialog {
+    /// What the dialog draws, usually a [`crate::components::DialogFrame`] inside a view the feature owns.
+    pub view: AnyView,
+    /// The dialog's own focus handle. The layer manager tracks it on the element around `view`; the dialog may use it
+    /// to tell when its container (rather than one of its controls) has focus.
+    pub container: FocusHandle,
+    /// Where focus starts. SPEC.md, "Opening and closing", says which control that is; the prompt decides it for
+    /// questions.
+    pub start: FocusHandle,
+    /// What the dialog is about, if anything: it closes when that is gone.
+    pub subject: Option<Subject>,
+    /// What Enter does while the dialog itself has focus: its enabled main action, if it has exactly one (SPEC.md:
+    /// "If a dialog container itself has focus, Enter presses its enabled main action"). `None` does nothing.
+    pub main_action: Option<MainAction>,
+}
+
+/// A popover to open: a menu or a popup list.
+pub struct Popover {
+    /// What the popover draws.
+    pub view: AnyView,
+    /// The popover's own focus handle, tracked on the element around `view`.
+    pub container: FocusHandle,
+    /// Where focus starts (a menu's first item, usually).
+    pub start: FocusHandle,
+    /// The element it is drawn below, following it as it moves; it closes when the element is no longer drawn.
+    pub anchor: Anchor,
+}
+
+/// Open `dialog` on top of everything else, unless the user has moved on since `mark` (then nothing opens, and the
+/// result belongs where the feature shows it otherwise).
+pub fn open_dialog(
+    dialog: Dialog,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
+    let Dialog {
+        view,
+        container,
+        start,
+        subject,
+        main_action,
+    } = dialog;
+    open(
+        Kind::Dialog,
+        view,
+        container,
+        start,
+        subject,
+        main_action,
+        mark,
+        window,
+        cx,
+    )
+}
+
+/// Open `popover` on top of everything else, unless the user has moved on since `mark`.
+pub fn open_popover(
+    popover: Popover,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
+    let Popover {
+        view,
+        container,
+        start,
+        anchor,
+    } = popover;
+    // An anchor that is already gone has nowhere to show a popover.
+    let state = anchor.state.upgrade()?;
+    let subject = Subject(Box::new(move |cx, id| {
+        cx.observe_release(&state, move |stack, _, cx| stack.close_later(id, cx))
+    }));
+    open(
+        Kind::Popover(anchor.bounds),
+        view,
+        container,
+        start,
+        Some(subject),
+        None,
+        mark,
+        window,
+        cx,
+    )
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the private join of the two public open functions"
+)]
+fn open(
+    kind: Kind,
+    view: AnyView,
+    container: FocusHandle,
+    start: FocusHandle,
+    subject: Option<Subject>,
+    main_action: Option<MainAction>,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
+    if focus::has_moved_on(mark, cx) {
+        tracing::debug!(
+            "a layer was not opened: the user moved on since the action that asked for it"
+        );
+        return None;
+    }
+    let stack = stack(window, cx)?;
+    // A layer's container holds focus only as a fallback; Tab moves between its controls, never onto the container.
+    let container = container.tab_stop(false);
+    let opener = window.focused(cx).map(|focused| focused.downgrade());
+    let id = stack.update(cx, |stack, cx| {
+        let id = LayerId(stack.next_id);
+        stack.next_id += 1;
+        let subject = subject.map(|subject| (subject.0)(cx, id));
+        stack.layers.push(Layer {
+            id,
+            kind,
+            view,
+            container,
+            opener,
+            main_action,
+            _subject: subject,
+        });
+        // A layer covers the tooltip of whatever is under it.
+        stack.tooltip = None;
+        stack.tooltip_release = None;
+        cx.notify();
+        id
+    });
+    focus::enter_layer(&start, window, cx);
+    Some(id)
+}
+
+impl LayerStack {
+    /// Close `id` from inside the stack's own update (a subject's release), once that update has returned.
+    fn close_later(&mut self, id: LayerId, cx: &mut Context<Self>) {
+        let window = self.window;
+        cx.defer(move |cx| {
+            // The window may have closed meanwhile; then there is nothing left to close.
+            let _ = window.update(cx, |_, window, cx| close(id, window, cx));
+        });
+    }
+}
+
+/// Close the layer `id`, if it is still open, and anything opened on top of it. If focus was inside what closed, it
+/// returns to what held it when `id` opened.
+pub fn close(id: LayerId, window: &mut Window, cx: &mut App) {
+    let Some(stack) = stack(window, cx) else {
+        return;
+    };
+    let closed = stack.update(cx, |stack, cx| {
+        let index = stack.layers.iter().position(|layer| layer.id == id)?;
+        let closed: Vec<Layer> = stack.layers.drain(index..).collect();
+        cx.notify();
+        Some(closed)
+    });
+    let Some(closed) = closed else {
+        return;
+    };
+    let focus_was_inside = closed
+        .iter()
+        .any(|layer| layer.container.contains_focused(window, cx));
+    if focus_was_inside || window.focused(cx).is_none() {
+        focus::return_to(
+            closed.first().and_then(|layer| layer.opener.as_ref()),
+            window,
+            cx,
+        );
+    }
+}
+
+/// The user closes the topmost layer (Escape), or the tooltip if no layer is open. Returns whether anything closed, so
+/// the key can go on to whatever else wants it when nothing did.
+pub fn dismiss_top(window: &mut Window, cx: &mut App) -> bool {
+    let Some(stack) = stack(window, cx) else {
+        return false;
+    };
+    if let Some(top) = stack.read(cx).layers.last().map(|layer| layer.id) {
+        close(top, window, cx);
+        return true;
+    }
+    stack.update(cx, |stack, cx| {
+        let shown = stack.tooltip.take().is_some();
+        stack.tooltip_release = None;
+        if shown {
+            cx.notify();
+        }
+        shown
+    })
+}
+
+/// Whether the layer `id` is still open.
+pub fn is_open(id: LayerId, window: &Window, cx: &App) -> bool {
+    stack(window, cx).is_some_and(|stack| stack.read(cx).layers.iter().any(|layer| layer.id == id))
+}
+
+/// Whether any dialog or popover is open in `window`.
+pub fn any_open(window: &Window, cx: &App) -> bool {
+    stack(window, cx).is_some_and(|stack| !stack.read(cx).layers.is_empty())
+}
+
+/// The container Tab must stay inside: the topmost layer's, dialog or menu alike (SPEC.md: "Inside a dialog or menu,
+/// focus stays inside"). A menu opened over a dialog holds Tab until it closes.
+///
+/// NOTE: Every popover traps Tab, which suits a menu. A pop-up suggestion list keeps focus in its field, outside the
+/// popover (SPEC.md, the repository suggestions), so Tab must not be trapped in it: whoever builds one gives it its own
+/// layer kind, or a no-trap flag, rather than relying on this.
+pub fn trap(window: &Window, cx: &App) -> Option<FocusHandle> {
+    top_container(window, cx)
+}
+
+/// Whether focus is inside the topmost dialog or a layer above it (a menu opened from inside the dialog): where SPEC.md
+/// lets focus be while a dialog is open. `true` when no dialog is open.
+pub fn focus_is_where_dialogs_allow(window: &Window, cx: &App) -> bool {
+    let Some(stack) = stack(window, cx) else {
+        return true;
+    };
+    let stack = stack.read(cx);
+    let Some(top_dialog) = stack
+        .layers
+        .iter()
+        .rposition(|layer| matches!(layer.kind, Kind::Dialog))
+    else {
+        return true;
+    };
+    stack.layers[top_dialog..]
+        .iter()
+        .any(|layer| layer.container.contains_focused(window, cx))
+}
+
+/// The topmost layer's container, where focus recovers to when its holder disappears inside an open layer.
+pub(crate) fn top_container(window: &Window, cx: &App) -> Option<FocusHandle> {
+    let stack = stack(window, cx)?;
+    stack
+        .read(cx)
+        .layers
+        .last()
+        .map(|layer| layer.container.clone())
+}
+
+/// What breaks the overlay rules in `window` right now, if anything: a popover anchored to an element that was never
+/// drawn has nowhere to be. The test harness runs this after every step.
+pub fn invariant_violation(window: &Window, cx: &App) -> Option<String> {
+    let stack = stack(window, cx)?;
+    stack
+        .read(cx)
+        .layers
+        .iter()
+        .find_map(|layer| match &layer.kind {
+            Kind::Popover(bounds) if bounds.get().is_none() => Some(format!(
+                "popover {:?} is open but its anchor was never drawn",
+                layer.id
+            )),
+            _ => None,
+        })
+}
+
+// ---- Tooltips --------------------------------------------------------------------------------------------------------
 
 /// The token that says which control a tooltip belongs to. It carries no data: its entity id is the owner's identity,
 /// and its release is the signal that the control is gone.
@@ -37,8 +480,8 @@ pub struct TooltipOwner;
 impl TooltipOwner {
     /// The owner token of the control being rendered under `key`, created on its first frame and kept for as long as
     /// the control is drawn in consecutive frames (GPUI's keyed element state, which cached views carry over when they
-    /// replay). `key` must differ from the control's own element id: GPUI keys element state by path and type, and a
-    /// second state type under the same path panics.
+    /// replay). The token is unique per control instance in the window: it is keyed by the control's full element path,
+    /// not its sibling-unique id. `key` must differ from the control's own element id.
     pub fn for_control(
         key: impl Into<ElementId>,
         window: &mut Window,
@@ -59,32 +502,6 @@ pub struct ShownTooltip {
     pub at: Point<Pixels>,
 }
 
-/// The tooltip slot. Changed only through [`show_tooltip`] and [`hide_tooltip`], which notify.
-#[derive(Default)]
-pub struct TooltipSlot {
-    shown: Option<ShownTooltip>,
-    /// Takes the tooltip down when its owner is released; replaced with each new tooltip.
-    _owner_release: Option<Subscription>,
-}
-
-/// Where the app keeps its one tooltip slot.
-struct Slot(Entity<TooltipSlot>);
-impl Global for Slot {}
-
-/// Create the tooltip slot. The bootstrap calls this with the rest of the app-wide state, before any window opens.
-pub fn install(cx: &mut App) {
-    let slot = cx.new(|_| TooltipSlot::default());
-    cx.set_global(Slot(slot));
-}
-
-/// Redraw `root` whenever the overlay changes. A root view that draws [`overlay`] calls this once and keeps the
-/// subscription; without it a tooltip would show only on the root's next unrelated redraw. Returns `None` before
-/// [`install`] (a bare fixture), where there is nothing to observe.
-pub fn observe<V: 'static>(cx: &mut Context<V>) -> Option<Subscription> {
-    let slot = cx.try_global::<Slot>()?.0.clone();
-    Some(cx.observe(&slot, |_, _, cx| cx.notify()))
-}
-
 /// Show `text` as hover help for the control `owner`, replacing any other tooltip, at the pointer's position.
 pub fn show_tooltip(
     owner: &Entity<TooltipOwner>,
@@ -93,34 +510,48 @@ pub fn show_tooltip(
     cx: &mut App,
 ) {
     let at = window.mouse_position();
-    show_tooltip_at(owner, text, at, cx);
+    show_tooltip_from(owner, text, at, window, cx);
 }
 
-/// Show `text` for `owner` with the hover beginning at `at`. [`show_tooltip`] reads `at` from the pointer; the
-/// screenshot goldens pass a fixed point.
-pub fn show_tooltip_at(
+/// [`show_tooltip`] with the hover beginning at a fixed point, for the screenshot goldens.
+#[cfg(test)]
+pub(crate) fn show_tooltip_at(
     owner: &Entity<TooltipOwner>,
     text: SharedString,
     at: Point<Pixels>,
+    window: &mut Window,
     cx: &mut App,
 ) {
-    let Some(slot) = cx.try_global::<Slot>().map(|slot| slot.0.clone()) else {
+    show_tooltip_from(owner, text, at, window, cx);
+}
+
+/// Show `text` for `owner` with the hover beginning at `at`.
+fn show_tooltip_from(
+    owner: &Entity<TooltipOwner>,
+    text: SharedString,
+    at: Point<Pixels>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let Some(stack) = stack(window, cx) else {
         return;
     };
     let owner_id = owner.entity_id();
-    slot.update(cx, |slot, cx| {
-        slot.shown = Some(ShownTooltip {
+    stack.update(cx, |stack, cx| {
+        stack.tooltip = Some(ShownTooltip {
             owner: owner_id,
             text,
             at,
         });
-        slot._owner_release = Some(cx.observe_release(owner, move |slot, _, cx| {
-            if slot
-                .shown
+        // The tooltip closes when its control is gone, though no hover-leave ever fires for a control that simply
+        // stops being drawn (a dialog closing on Enter, a deleted row).
+        stack.tooltip_release = Some(cx.observe_release(owner, move |stack, _, cx| {
+            if stack
+                .tooltip
                 .as_ref()
                 .is_some_and(|shown| shown.owner == owner_id)
             {
-                slot.shown = None;
+                stack.tooltip = None;
                 cx.notify();
             }
         }));
@@ -130,43 +561,122 @@ pub fn show_tooltip_at(
 
 /// Take down the tooltip if `owner` is the control showing it. A control leaving never hides another's tooltip, which
 /// matters when the pointer moves straight from one control onto the next and the new control's hover arrives first.
-pub fn hide_tooltip(owner: &Entity<TooltipOwner>, cx: &mut App) {
-    let Some(slot) = cx.try_global::<Slot>().map(|slot| slot.0.clone()) else {
+pub fn hide_tooltip(owner: &Entity<TooltipOwner>, window: &mut Window, cx: &mut App) {
+    let Some(stack) = stack(window, cx) else {
         return;
     };
     let owner_id = owner.entity_id();
-    slot.update(cx, |slot, cx| {
-        if slot
-            .shown
+    stack.update(cx, |stack, cx| {
+        if stack
+            .tooltip
             .as_ref()
             .is_some_and(|shown| shown.owner == owner_id)
         {
-            slot.shown = None;
-            slot._owner_release = None;
+            stack.tooltip = None;
+            stack.tooltip_release = None;
             cx.notify();
         }
     });
 }
 
-/// The tooltip showing now, for tests and the bridge's snapshot.
-pub fn shown_tooltip(cx: &App) -> Option<ShownTooltip> {
-    cx.try_global::<Slot>()
-        .and_then(|slot| slot.0.read(cx).shown.clone())
+/// The tooltip showing now in `window`, for tests and the bridge's snapshot.
+pub fn shown_tooltip(window: &Window, cx: &App) -> Option<ShownTooltip> {
+    stack(window, cx)?.read(cx).tooltip.clone()
 }
 
-/// The overlay layer the root view draws last: the tooltip, if one is showing, styled as the old `.farhelm-tooltip`.
+// ---- Drawing ---------------------------------------------------------------------------------------------------------
+
+/// Everything above the window's content, which the root view draws as its last child: each open layer, bottom to top,
+/// then the tooltip.
 #[allow(
     clippy::disallowed_methods,
     reason = "the layer manager is the one owner of deferred and anchored"
 )]
 pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
-    let shown = shown_tooltip(cx)?;
+    let stack = stack(window, cx)?;
+    let stack = stack.read(cx);
+    if stack.layers.is_empty() && stack.tooltip.is_none() {
+        return None;
+    }
+    let palette = theme::palette(cx);
+    let mut overlay = div().absolute().top_0().left_0().size_full();
+    for (depth, layer) in stack.layers.iter().enumerate() {
+        let id = layer.id;
+        let main_action = layer.main_action.clone();
+        let container = layer.container.clone();
+        let content = div()
+            .id(ElementId::Name(format!("layer-{}", id.0).into()))
+            .debug_selector(move || format!("layer-{}", id.0));
+        // A press that no control inside the layer took (empty space, a label) keeps focus on the control in use,
+        // instead of moving it to the layer's container (SPEC.md, "Opening and closing").
+        let content = focus::track(content, &layer.container, focus::OnPress::Keep)
+            // Enter on the dialog itself presses its main action; a held or modified Enter does not.
+            .on_key_down(move |event, window, cx| {
+                if event.keystroke.key == "enter"
+                    && !event.is_held
+                    && !event.keystroke.modifiers.modified()
+                    && container.is_focused(window)
+                    && let Some(action) = &main_action
+                {
+                    cx.stop_propagation();
+                    action(window, cx);
+                }
+            })
+            .child(layer.view.clone());
+        let element = match &layer.kind {
+            Kind::Dialog => div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .occlude()
+                .bg(theme::color(palette.scrim_dialog))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(content)
+                .into_any_element(),
+            Kind::Popover(anchor) => {
+                let below = anchor.clone();
+                let content = content.on_mouse_down_out(move |event, window, cx| {
+                    // A press on the anchor itself is left to the anchor, which toggles its popover: closing here first
+                    // would let the same click reopen it.
+                    let on_anchor = below
+                        .get()
+                        .is_some_and(|bounds| bounds.contains(&event.position));
+                    if !on_anchor {
+                        close(id, window, cx);
+                    }
+                });
+                PlacedPopover {
+                    anchor: anchor.clone(),
+                    child: content.into_any_element(),
+                }
+                .into_any_element()
+            }
+        };
+        overlay = overlay.child(gpui::deferred(element).with_priority(depth + 1));
+    }
+    if let Some(shown) = &stack.tooltip {
+        // Offset like a native tooltip so the pointer never covers the text.
+        let at = point(shown.at.x + px(8.), shown.at.y + px(16.));
+        let placed = gpui::anchored()
+            .position(at)
+            .snap_to_window()
+            .child(tooltip_card(shown, window, cx));
+        overlay = overlay.child(gpui::deferred(placed).with_priority(stack.layers.len() + 1));
+    }
+    Some(overlay.into_any_element())
+}
+
+/// The tooltip's card, styled as the old `.farhelm-tooltip`.
+fn tooltip_card(shown: &ShownTooltip, window: &Window, cx: &App) -> gpui::Div {
     let palette = theme::palette(cx);
     let (pad_y, pad_x) = metrics::TOOLTIP_PAD;
     let viewport = window.viewport_size();
     // `max-width: min(280px, 100vw - 8px)` and `max-height: 100vh - 8px`, as the old tooltip.
     let max_width = metrics::TOOLTIP_MAX_WIDTH.min(viewport.width - px(8.));
-    let card = div()
+    div()
         .max_w(max_width)
         .max_h(viewport.height - px(8.))
         .overflow_hidden()
@@ -177,23 +687,131 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
         .border_1()
         .border_color(theme::color(palette.border))
         .rounded(metrics::RADIUS_MD)
-        // `--shadow-menu`: `0 6px 18px` in the token's color.
-        .shadow(vec![BoxShadow {
-            color: theme::color(palette.shadow_menu),
-            offset: point(px(0.), px(6.)),
-            blur_radius: px(18.),
-            spread_radius: px(0.),
-            inset: false,
-        }])
+        .shadow(menu_shadow(palette))
         .text_size(metrics::TEXT_SM)
         .line_height(metrics::TOOLTIP_LINE_HEIGHT)
         .line_clamp(metrics::TOOLTIP_MAX_LINES)
-        .child(shown.text);
-    // Offset like a native tooltip so the pointer never covers the text.
-    let at = point(shown.at.x + px(8.), shown.at.y + px(16.));
-    Some(
-        gpui::deferred(gpui::anchored().position(at).snap_to_window().child(card))
-            .with_priority(1)
-            .into_any_element(),
-    )
+        .child(shown.text.clone())
+}
+
+/// `--shadow-menu`: `0 6px 18px` in the token's color, shared by menus, popovers and tooltips.
+fn menu_shadow(palette: &theme::Palette) -> Vec<BoxShadow> {
+    vec![BoxShadow {
+        color: theme::color(palette.shadow_menu),
+        offset: point(px(0.), px(6.)),
+        blur_radius: px(18.),
+        spread_radius: px(0.),
+        inset: false,
+    }]
+}
+
+/// Draws a popover where its placement says, deciding the position while the frame is laid out rather than when it is
+/// built. An anchor element records its bounds as the frame is prepared, and overlays are prepared after the rest of
+/// the window, so a popover lands under its anchor in the very frame the anchor moved: no frame shows it at the old
+/// place, and nothing has to ask for a second frame.
+struct PlacedPopover {
+    anchor: AnchorBounds,
+    child: AnyElement,
+}
+
+/// The gap between an anchor and the popover below it, as the old menus had.
+const POPOVER_GAP: Pixels = px(4.);
+
+impl IntoElement for PlacedPopover {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl Element for PlacedPopover {
+    type RequestLayoutState = LayoutId;
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, LayoutId) {
+        let child = self.child.request_layout(window, cx);
+        let style = Style {
+            position: gpui::Position::Absolute,
+            ..Style::default()
+        };
+        (window.request_layout(style, [child], cx), child)
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        child: &mut LayoutId,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let size = window.layout_bounds(*child).size;
+        let viewport = window.viewport_size();
+        let mut origin = match self.anchor.get() {
+            Some(anchor) => {
+                let below = anchor.bottom() + POPOVER_GAP;
+                let above = anchor.top() - POPOVER_GAP - size.height;
+                // Below unless it would run off the bottom and there is more room above.
+                let y = if below + size.height > viewport.height && above >= px(0.) {
+                    above
+                } else {
+                    below
+                };
+                point(anchor.left(), y)
+            }
+            None => point(px(0.), px(0.)),
+        };
+        // Keep it inside the window: shift left when it overflows the right edge, down from the top as a last resort.
+        origin.x = origin.x.min(viewport.width - size.width).max(px(0.));
+        origin.y = origin.y.min(viewport.height - size.height).max(px(0.));
+        let offset = origin - bounds.origin;
+        window.with_element_offset(point(offset.x.round(), offset.y.round()), |window| {
+            self.child.prepaint(window, cx)
+        });
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut LayoutId,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.child.paint(window, cx);
+    }
+}
+
+/// The popover panel the old menus drew: the floating surface, its outline and the menu shadow. Popover views wrap
+/// their content in it. The menu role goes on the menu component that the session row's menu brings, which has the
+/// element id a role needs.
+pub fn panel(cx: &App) -> gpui::Div {
+    let palette = theme::palette(cx);
+    div()
+        .flex()
+        .flex_col()
+        .py(px(4.))
+        .bg(theme::color(palette.bg_2))
+        .border_1()
+        .border_color(theme::color(palette.border))
+        .rounded(metrics::RADIUS_MD)
+        .shadow(menu_shadow(palette))
 }

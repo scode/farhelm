@@ -669,12 +669,13 @@ systemd or SSH substrate ran.
   Run it when a manifest under `crates/gui/` or `Cargo.lock` changes. CI's `deny` job runs both.
 - `python3 scripts/record-test-run.py --kind development --selection 'GPUI app goldens' --concurrency 'libtest default threads' -- python3 scripts/check-gui-goldens.py`
   — the GPUI app's screenshot goldens (`crates/gui/farhelm-gui/src/goldens.rs`): every component, the dialog frame and
-  the layer manager's tooltip, light and dark, compared pixel for pixel with the PNGs under
-  `crates/gui/farhelm-gui/tests/goldens/<os>/`. The test is ignored in workspace runs because it needs the software
-  renderer, which the script selects (Mesa's lavapipe on Linux: the `mesa-vulkan-drivers` and `libegl-mesa0` packages).
-  After an intended visual change, `--update` rewrites the references; look at each changed PNG before keeping it. A
-  failure leaves the new captures in `gui-goldens/` beside the test binary. Run it when anything under
-  `crates/gui/farhelm-gui/` that draws, its fonts, or GPUI or GPUI Kit change; CI does not run it yet.
+  the layer manager's overlays (a tooltip, a popover, the prompt over its veil) and the keyboard focus ring, light and
+  dark, compared pixel for pixel with the PNGs under `crates/gui/farhelm-gui/tests/goldens/<os>/`. The test is ignored
+  in workspace runs because it needs the software renderer, which the script selects (Mesa's lavapipe on Linux: the
+  `mesa-vulkan-drivers` and `libegl-mesa0` packages). After an intended visual change, `--update` rewrites the
+  references; look at each changed PNG before keeping it. A failure leaves the new captures in `gui-goldens/` beside the
+  test binary. Run it when anything under `crates/gui/farhelm-gui/` that draws, its fonts, or GPUI or GPUI Kit change;
+  CI does not run it yet.
 - `python3 -B scripts/test-gui-agent.py` — the harness that drives the GPUI app (`scripts/gui-agent.py`,
   `docs/gui-agent.md`; headless on Linux, in the GUI session on a Mac): the run directory's checks (absolute, and
   shallow enough for the deepest socket's path limit), the app's environment (nothing of the caller's display, bus,

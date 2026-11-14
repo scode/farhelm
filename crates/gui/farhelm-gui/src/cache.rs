@@ -90,9 +90,7 @@ pub fn element<S: 'static, I: PartialEq + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{
-        AppContext as _, Context, ParentElement, Styled, Subscription, TestAppContext, div, px,
-    };
+    use gpui::{AppContext as _, Context, ParentElement, Styled, TestAppContext, div, px};
 
     use crate::components::{Button, HoverHelp, Role};
     use crate::{layers, test_support};
@@ -110,7 +108,7 @@ mod tests {
     /// with hover help and the layer manager's overlay, as the main view draws them.
     struct List {
         rows: Vec<Entity<Cached<Rows, String>>>,
-        _layers: Option<Subscription>,
+        _layers: layers::Attachment,
     }
     impl Render for List {
         fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -140,7 +138,7 @@ mod tests {
     ) -> &'a mut gpui::VisualTestContext {
         test_support::install(cx);
         let rows = rows.clone();
-        let (_list, cx) = cx.add_window_view(move |_, cx| List {
+        let (_list, cx) = cx.add_window_view(move |window, cx| List {
             rows: (0..n)
                 .map(|index| {
                     cx.new(|cx| {
@@ -154,7 +152,7 @@ mod tests {
                     })
                 })
                 .collect(),
-            _layers: layers::observe(cx),
+            _layers: layers::attach(window, cx),
         });
         cx.run_until_parked();
         cx
@@ -216,7 +214,8 @@ mod tests {
         });
         cx.run_until_parked();
         assert!(
-            cx.update(|_, cx| layers::shown_tooltip(cx)).is_some(),
+            cx.update(|window, cx| layers::shown_tooltip(window, cx))
+                .is_some(),
             "the premise: the tooltip is showing"
         );
         assert!(
@@ -229,10 +228,10 @@ mod tests {
             "showing redraws no row"
         );
 
-        cx.update(|_, cx| layers::hide_tooltip(&owner, cx));
+        cx.update(|window, cx| layers::hide_tooltip(&owner, window, cx));
         cx.run_until_parked();
         assert_eq!(
-            cx.update(|_, cx| layers::shown_tooltip(cx)),
+            cx.update(|window, cx| layers::shown_tooltip(window, cx)),
             None,
             "the premise: it is hidden"
         );

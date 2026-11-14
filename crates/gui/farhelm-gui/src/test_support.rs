@@ -7,16 +7,16 @@
 //! [`headless`] gives a real text system with the bundled fonts and a real (software, on Linux) renderer, the same
 //! setup the screenshot goldens use.
 //!
-//! [`check_invariants`] is the hook every test step calls. In this phase it checks nothing: GPUI cannot hold two focus
-//! handles in one window, so "at most one focused element" needs no check, and the rules that do need one (focus inside
-//! the topmost modal, or in an approval card) arrive with the focus coordinator. The tests call it already so those
-//! checks run after every existing step the moment they exist.
+//! [`check_invariants`] is the hook every test step calls: the focus coordinator's rules (with a dialog open, focus is
+//! inside the topmost one; with a home set, something holds focus) and the layer manager's (every open popover's anchor
+//! was drawn). GPUI cannot hold two focused elements in one window, so "exactly one" needs only the "at least one" half,
+//! which the rules give wherever SPEC.md requires it.
 
 use std::sync::Arc;
 
 use gpui::{App, HeadlessAppContext, TestAppContext, Window};
 
-use crate::{assets, bootstrap};
+use crate::{assets, bootstrap, focus, layers};
 
 /// Install the app-wide state a test needs, as the real bootstrap does, on a fake-platform test context.
 pub fn install(cx: &mut TestAppContext) {
@@ -48,8 +48,10 @@ pub fn headless() -> anyhow::Result<HeadlessAppContext> {
 /// The checks every test step runs against `window`, called from inside an update of that window. Panics with what
 /// was wrong, so the failing step is the one that broke the invariant, not a later assertion that tripped over its
 /// consequences.
-///
-/// NOTE: Empty until the focus coordinator exists; see the module doc. It asserts nothing yet.
 pub fn check_invariants(window: &mut Window, cx: &mut App) {
-    let _ = (window, cx);
+    if let Some(problem) =
+        focus::invariant_violation(window, cx).or_else(|| layers::invariant_violation(window, cx))
+    {
+        panic!("invariant broken: {problem}");
+    }
 }

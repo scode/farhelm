@@ -6,13 +6,12 @@
 //! inventory, entry B1). The only way to get an input's state is [`TextInputState::new`], so no input can skip that.
 
 use gpui::{
-    App, AppContext as _, ElementId, Entity, InteractiveElement, IntoElement, ParentElement,
-    RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, div,
+    App, AppContext as _, ElementId, Entity, Focusable as _, InteractiveElement, IntoElement,
+    ParentElement, RenderOnce, SharedString, Styled, Window, div,
 };
 use gpui_component::input::{Input, InputState};
 
 use super::HoverHelp;
-use crate::layers::{self, TooltipOwner};
 use crate::theme::{self, metrics};
 
 /// The editable state behind a [`TextInput`]: the text, the selection and the undo history, owned by the view that
@@ -73,31 +72,21 @@ impl TextInput {
 impl RenderOnce for TextInput {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let palette = theme::palette(cx);
-        let owner = TooltipOwner::for_control(
-            ElementId::Name(format!("{}-tooltip-owner", self.id).into()),
-            window,
-            cx,
-        );
-        let tooltip = self.help.text().clone();
-        div()
-            .id(ElementId::Name(self.id.clone()))
-            .w_full()
-            .on_hover(move |hovered, window, cx| {
-                if *hovered {
-                    layers::show_tooltip(&owner, tooltip.clone(), window, cx);
-                } else {
-                    layers::hide_tooltip(&owner, cx);
-                }
-            })
-            .child(
-                // Kit fills a dark-mode input with its border color at 30%, not the old stylesheet's recessed `--well`,
-                // and rounds it at its general radius; these override that with the old input's fill, corner and type
-                // size. Kit's padding and height stay (a few pixels taller than the old 4-by-8 padding).
-                Input::new(&self.state.0)
-                    .aria_label(self.label)
-                    .bg(theme::color(palette.well))
-                    .rounded(metrics::RADIUS_SM)
-                    .text_size(metrics::TEXT_MD),
-            )
+        // Not described: the wrapper is not the input's accessible node, and Kit's input takes no description.
+        let wrapper = div().id(ElementId::Name(self.id.clone())).w_full();
+        // Kit tracks the input's focus itself; the coordinator only records where it is drawn, so a field can take over
+        // focus when the control beside it disappears.
+        let handle = self.state.0.read(cx).focus_handle(cx);
+        let wrapper = crate::focus::record_position(wrapper, &handle);
+        super::with_hover_help(wrapper, &self.id, &self.help, false, window, cx).child(
+            // Kit fills a dark-mode input with its border color at 30%, not the old stylesheet's recessed `--well`,
+            // and rounds it at its general radius; these override that with the old input's fill, corner and type
+            // size. Kit's padding and height stay (a few pixels taller than the old 4-by-8 padding).
+            Input::new(&self.state.0)
+                .aria_label(self.label)
+                .bg(theme::color(palette.well))
+                .rounded(metrics::RADIUS_SM)
+                .text_size(metrics::TEXT_MD),
+        )
     }
 }

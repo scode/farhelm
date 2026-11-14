@@ -179,7 +179,8 @@ second release binary for the Mac desktop alone, never provisioned to a host.
 ## GUI architecture
 
 This section governs the GPUI desktop app (macOS and Linux) that replaces the Dioxus GUI. Where a rule names an owner
-that is not built yet, its path is recorded in the foundation ownership table when it is built.
+that is not built yet, its path is recorded in the foundation ownership table (`docs/gpui/foundation-ownership.md`) when
+it is built.
 
 This is a rulebook in the style of SPEC.md's "Keyboard focus": each app-wide concern has one owner, a rule, and the
 mechanism that enforces it. The old GUI decided these concerns one feature at a time (focus, popover placement, late
@@ -398,18 +399,26 @@ It is the only Farhelm code that moves focus. In GPUI, moving focus also redraws
 keystrokes, which is one more reason for one owner. GPUI Kit moves focus inside its own text inputs on user clicks;
 those moves are accepted, and the per-step focus invariant covers them.
 
-Enforced by clippy `disallowed-methods` on GPUI's focus calls everywhere in the GUI crates except the coordinator, and
-by the focus invariant that in-process tests check after every step: exactly one focused element, inside the topmost
-modal or in an agent approval card if a modal is open (SPEC.md, "Keyboard focus").
+GPUI also focuses any element that tracks a focus handle when it is pressed, so tracking focus goes through the
+coordinator too (`focus::track`), which applies its own press rule in place of GPUI's. Key presses count toward "the
+user moved on" where GPUI shows every keystroke before any binding runs: a key a binding handles (Farhelm's Tab and
+Escape, GPUI Kit's editing keys in a text input) never reaches an ordinary key listener.
+
+Enforced by clippy `disallowed-methods` on GPUI's focus calls and on `track_focus` everywhere in the GUI crates except
+the coordinator, and by the focus invariant that in-process tests check after every step: exactly one focused element,
+inside the topmost modal (or a menu opened above it) or in an agent approval card if a modal is open (SPEC.md, "Keyboard
+focus"). When nothing else holds focus it rests where SPEC.md's "Where focus rests" says (the selected session's
+terminal, New, a stopped session's card), and on the window's root view only when none of those is on screen, so a key
+press always reaches Farhelm's own key bindings rather than GPUI Kit's.
 
 ### Overlays: the layer manager
 
 Owner: the layer manager. It owns the dialog slot, the popover stack and tooltips.
 
-Every overlay is anchored to an element, not to coordinates; menus opened at a right-click point are the exception.
-Escape from a focused terminal goes to its program (SPEC.md); otherwise it closes only the topmost layer, unless a mode
-SPEC.md says captures the keyboard (the quick-launch sequence) is armed. An overlay closes when its subject is gone, not
-when it moves; anchoring to the element makes a moved row's menu follow the row. Whether a terminal link's destination
+Every overlay is anchored to an element, not to coordinates (SPEC.md has no menu opened at a pointer position). Escape
+from a focused terminal goes to its program (SPEC.md); otherwise it closes only the topmost layer, unless a mode SPEC.md
+says captures the keyboard (the quick-launch sequence) is armed. An overlay closes when its subject is gone, not when it
+moves; anchoring to the element makes a moved row's menu follow the row. Whether a terminal link's destination
 disclosure is covered is a hit test, never a hand-kept list of covering surfaces. Things the user did not start never
 open a layer over what they are doing (SPEC.md, "Keyboard focus").
 
