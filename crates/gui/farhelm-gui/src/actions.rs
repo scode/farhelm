@@ -99,6 +99,14 @@ pub const TEXT_INPUT_CONTEXT: &str = "Input";
 /// `24bc0580`: "the actions menu walks every item and wraps at both ends").
 pub const MENU_CONTEXT: &str = "Menu";
 
+/// The Delete shortcut's chord on this platform: Cmd+W on a Mac, Ctrl+Shift+Backspace on Linux (SPEC.md, "Desktop window
+/// chrome"). The same chords as its row in [`TERMINAL_KEYS`].
+pub(crate) const DELETE_SESSION_CHORD: &str = if cfg!(target_os = "macos") {
+    "cmd-w"
+} else {
+    "ctrl-shift-backspace"
+};
+
 /// The chords a focused text field keeps for itself although Farhelm binds them elsewhere. [`install`] binds each to
 /// `NoAction` in [`TEXT_INPUT_CONTEXT`], which hides every binding further out for the same chord, so the key goes on
 /// to the field's own handling (here, nothing: Kit binds none of them). Bound on every platform: on macOS the Delete
@@ -144,6 +152,10 @@ pub fn install(cx: &mut App) {
         KeyBinding::new("escape", Dismiss, Some(CONTEXT)),
         KeyBinding::new("down", FocusNextControl, Some(MENU_CONTEXT)),
         KeyBinding::new("up", FocusPreviousControl, Some(MENU_CONTEXT)),
+        // SPEC.md, "Desktop window chrome". The main view handles it for the open session; it works from a focused
+        // terminal because its `TERMINAL_KEYS` row is an app shortcut, and a text field keeps the Linux chord
+        // (`TEXT_FIELD_KEYS`).
+        KeyBinding::new(DELETE_SESSION_CHORD, DeleteSession, Some(CONTEXT)),
     ]);
     cx.bind_keys(
         TEXT_FIELD_KEYS

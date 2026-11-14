@@ -17,6 +17,7 @@ mod banner;
 mod button;
 mod dialog;
 mod list_row;
+mod menu_item;
 mod text_input;
 
 #[cfg(test)]
@@ -27,6 +28,7 @@ pub use button::{Button, IconButton, Tier};
 pub use dialog::DialogFrame;
 pub use gpui::Role;
 pub use list_row::ListRow;
+pub use menu_item::MenuItem;
 pub use text_input::{TextInput, TextInputEvent, TextInputState};
 
 use std::rc::Rc;
@@ -42,8 +44,8 @@ use crate::layers::{self, TooltipOwner};
 ///
 /// Every control has one: the layer manager shows it as a tooltip on hover, and it doubles as the control's accessible
 /// description. SPEC_impl.md lets a control that already shows its explanation beside itself (a menu item with a
-/// description line) count that text as its hover help instead; that form arrives with the first component that draws
-/// such a description, so that no control can claim help it never shows.
+/// description line) count that text as its hover help instead. That form is not built: [`MenuItem`], the first control
+/// to draw such a description, takes a tooltip as well and makes its description line its accessible description.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HoverHelp(SharedString);
 

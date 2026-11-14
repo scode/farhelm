@@ -14,8 +14,8 @@
 //!   [`SessionOperations::in_flight`]. This is the request half of SPEC.md's rule that "an open lifecycle confirmation
 //!   or a pending request refuses another lifecycle action" (the old app's row exclusion for requests, `admit_row_op`
 //!   and `row_pending` in `list/view.rs` at reference commit `24bc0580`). The confirmation half is not here: an open
-//!   Delete question or Rename editor belongs to the slice's prompt and editor, and today their modal veil keeps the
-//!   row menu out of reach while they are open. Work on different sessions is independent: each keeps its own
+//!   Delete question belongs to the session list, which keeps the row's menu button inert while its question is open,
+//!   and the Rename editor to its own feature. Work on different sessions is independent: each keeps its own
 //!   completion handling until it settles.
 //! - "Latest wins" is not built. It applies only to work that is explicitly supersedable for the same resource (a
 //!   search being retyped), and none of the work here is. The first supersedable work adds it here, as a property of
@@ -238,6 +238,13 @@ impl SessionOperations {
     /// The work in flight on `session`, keyed as the helm files the session.
     pub fn in_flight(&self, session: &str) -> Option<Work> {
         self.in_flight.get(session).map(|running| running.work)
+    }
+
+    /// Whether any session has work in flight that `matches`: the session list asks it about Deletes, whose settling
+    /// its automatic selection waits for (SPEC.md: "Automatic selection after Delete waits until every admitted Delete
+    /// has settled"), wherever they were started.
+    pub fn any_in_flight(&self, matches: impl Fn(Work) -> bool) -> bool {
+        self.in_flight.values().any(|running| matches(running.work))
     }
 
     /// The last refusal of work on `session`, until the next operation on it starts. A session that is gone keeps its

@@ -27,11 +27,13 @@
 //!   that is what makes a manual mark-unread of the open session stick until new output arrives or the user opens
 //!   another session. A failed mark is silent (SPEC.md, "Errors and diagnostics"): it costs a dot that is one visit
 //!   behind, and the next mark corrects it.
+//! - **A Delete holds the automatic choice back.** While any Delete the list sent is in flight, no session is opened
+//!   automatically, and a selection proven gone is cleared rather than replaced ([`hold_for_deletes`]); the choice is
+//!   made once every Delete has settled. SPEC.md: "Automatic selection after Delete waits until every admitted Delete
+//!   has settled … and never opens a session that is still being deleted". A user's own click is not held back.
 //!
-//! NOTE: Not ported yet, because nothing in the app can cause them: the selection after a Delete waits until every
-//! admitted Delete has settled and never picks a session being deleted (the row Delete brings the operation store's
-//! in-flight deletes into the exclusion); and the old app's refusal to stamp a retired environment's session, which
-//! arrives with environment sessions.
+//! NOTE: Not ported yet, because nothing in the app can cause it: the old app's refusal to stamp a retired
+//! environment's session, which arrives with environment sessions.
 
 use farhelm_helm_client::{ApiPath, Collections, Method};
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences, SessionRow};
@@ -95,6 +97,18 @@ pub(crate) fn settle(
         Some(key) => Change::Select(key.to_owned()),
         None if selected.is_some() => Change::Clear,
         None => Change::Keep,
+    }
+}
+
+/// `change`, held back while `deleting` (any Delete the list sent is still in flight): an automatic choice becomes
+/// [`Change::Clear`], so a selection proven gone is dropped with nothing opened in its place (and with nothing
+/// selected, clearing changes nothing). The list settles again when the operation store changes, so the choice is made
+/// once the last Delete has settled. The old app likewise dropped the deleted session at once and deferred its pick
+/// while any delete was pending. Keeping and clearing pass through unchanged.
+pub(crate) fn hold_for_deletes(change: Change, deleting: bool) -> Change {
+    match change {
+        Change::Select(_) if deleting => Change::Clear,
+        change => change,
     }
 }
 
