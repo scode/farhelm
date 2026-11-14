@@ -1,7 +1,8 @@
 //! Headless screenshot goldens: one per component, per dialog frame and per overlay kind (tooltip, popover, the prompt
-//! over its veil), the keyboard focus ring, host-supplied text over its spoofing corpus, the notice banner, and the
-//! terminal's styles and cursor shapes, in both appearances, compared pixel for pixel. (The terminal stays dark in both
-//! appearances, so it draws identically in both pictures; only the scene's ground around it differs.)
+//! over its veil, once more with a summary that names a host value), the keyboard focus ring, host-supplied text over
+//! its spoofing corpus, the notice banner, and the terminal's styles and cursor shapes, in both appearances, compared
+//! pixel for pixel. (The terminal stays dark in both appearances, so it draws identically in both pictures; only the
+//! scene's ground around it differs.)
 //!
 //! These are test references, not documentation media: they pin what each component draws, so a change to a token, a
 //! padding or a font shows up as a failing test with the new picture beside the old one, instead of drifting unnoticed.
@@ -330,6 +331,30 @@ fn prompt_setup(_: &SceneState, window: &mut Window, cx: &mut App) {
     prompt::ask(question, None, &mark, |_, _, _| {}, window, cx);
 }
 
+/// The same delete confirmation with its summary naming the session by a title a host wrote, as the session delete
+/// confirmation does: the title's right-to-left override shows as `<U+202E>` inside the dialog's header, and the app's
+/// words around it keep their order.
+fn prompt_host_text_setup(_: &SceneState, window: &mut Window, cx: &mut App) {
+    let mark = Mark::take(cx);
+    let title = HostText::from_host("invoice\u{202E}fdp.exe");
+    let question = Question::new(
+        "Delete session?",
+        Answer {
+            label: "Delete".into(),
+            help: HoverHelp::tooltip("Delete the session"),
+            tier: Tier::Danger,
+        },
+        "invoice".to_string(),
+    )
+    .summary(
+        HostSentence::new("prompt-summary")
+            .host(&title)
+            .text(", on this machine"),
+    )
+    .line("The session's terminal and its history are removed. The working directory stays.");
+    prompt::ask(question, None, &mark, |_, _, _| {}, window, cx);
+}
+
 /// The host-text element over the spoofing corpus, one value per line, then a sentence mixing the app's words with two
 /// host values: every hidden or direction-changing character shows as `<U+XXXX>`.
 ///
@@ -539,7 +564,7 @@ fn terminals(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
         .into_any_element()
 }
 
-static SCENES: [Scene; 11] = [
+static SCENES: [Scene; 12] = [
     Scene {
         name: "buttons",
         size: (560., 64.),
@@ -581,6 +606,12 @@ static SCENES: [Scene; 11] = [
         size: (560., 320.),
         draw: empty,
         setup: prompt_setup,
+    },
+    Scene {
+        name: "prompt-host-text",
+        size: (560., 320.),
+        draw: empty,
+        setup: prompt_host_text_setup,
     },
     Scene {
         name: "host-text",

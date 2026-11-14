@@ -19,6 +19,7 @@ use gpui_component::Root;
 use crate::cache::{self, Cached};
 use crate::components::{Button, HoverHelp, Role, TextInput, TextInputState, Tier};
 use crate::focus::{self, Mark, OnPress};
+use crate::host_text::{HostSentence, HostText};
 use crate::layers::{self, Anchor, Dialog, LayerId, Popover, Subject};
 use crate::prompt::{self, Answer, Question};
 use crate::{render_count, test_support};
@@ -1850,4 +1851,174 @@ fn a_question_closes_when_its_subject_is_gone(cx: &mut TestAppContext) {
         "the question closed with its subject"
     );
     assert!(!sent.get());
+}
+
+/// Ask `question` with no subject, draw it with GPUI's driver record on, and hand back that frame's record: every node
+/// drawn and the text each painted. The question stays open; the caller answers it.
+fn ask_and_record(
+    cx: &mut VisualTestContext,
+    question: Question<String>,
+) -> (prompt::Asked<String>, Vec<gpui::DriverNode>) {
+    cx.update(|window, _| window.set_driver_enabled(true));
+    let asked = cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        prompt::ask_for_test(question, None, &mark, |_, _, _| {}, window, cx)
+    });
+    let Some(asked) = asked else {
+        panic!("the question did not open")
+    };
+    redraw(cx);
+    let nodes = cx.update(|window, _| window.driver_nodes().to_vec());
+    (asked, nodes)
+}
+
+/// Why this matters: a prompt's summary is where a confirmation names its target, and the first real one (a session's
+/// delete confirmation) names a session whose title a host wrote. When the summary took only a string, the one way to
+/// put that title there was its raw value, so an override character in it would reverse the summary on screen and a
+/// zero-width one would make two sessions' confirmations look identical, to a screen reader too (SPEC.md: "including
+/// in accessible names"). A long title must wrap, not run past the dialog's edge: while a sentence's parts could not
+/// shrink below their one-line width, a 108-character title was clipped at the border, so two sessions whose titles
+/// share a long start got confirmations that looked the same, the very problem escaping exists to prevent. The
+/// plain-string case guards the other direction: every existing question passes app wording as a string, and it must
+/// draw as it did before.
+///
+/// Specification: a question whose summary is a [`HostSentence`] paints the host value in its escaped presentation,
+/// and no text the frame paints holds a presentation-unsafe character; inside the dialog the sentence is one `Label`
+/// node under its id, named with the value escaped; the dialog's own accessible name is still the question's title.
+/// With a summary naming a title too long for one line and a sentence line of app words too long for one line, every
+/// text painted inside the dialog lies within the dialog's left and right edges and is not clipped. A question whose
+/// summary is a plain string paints that string as one line, exactly as given.
+#[gpui::test]
+fn a_summary_that_names_a_host_value_is_drawn_and_named_escaped(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    // Inside the dialog drawn under `prompt`, at any depth.
+    let inside_dialog = |nodes: &[gpui::DriverNode], mut index: usize| {
+        while let Some(parent) = nodes[index].parent {
+            if nodes[parent].element_id.as_deref() == Some("prompt") {
+                return true;
+            }
+            index = parent;
+        }
+        false
+    };
+    // The accessible name of the dialog drawn under `prompt`, if it was recorded as a dialog.
+    let dialog_label = |nodes: &[gpui::DriverNode]| {
+        nodes
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some("prompt"))
+            .filter(|node| node.role == Some(Role::Dialog))
+            .and_then(|node| node.label.clone())
+    };
+    // Every line of text the frame painted, in record order.
+    let painted = |nodes: &[gpui::DriverNode]| -> Vec<String> {
+        nodes
+            .iter()
+            .flat_map(|node| node.texts.iter().map(|text| text.text.to_string()))
+            .collect()
+    };
+
+    // A host value with a right-to-left override and a zero-width space, in the summary.
+    let title = HostText::from_host("invoice\u{202E}fdp\u{200B}.exe");
+    let summary = HostSentence::new("prompt-summary")
+        .text("Delete ")
+        .host(&title)
+        .text(" on this machine?");
+    let (asked, nodes) = ask_and_record(cx, question("alpha").summary(summary));
+    let texts = painted(&nodes);
+    assert!(
+        texts
+            .iter()
+            .any(|text| text == "invoice<U+202E>fdp<U+200B>.exe"),
+        "the host value is painted escaped; painted: {texts:?}"
+    );
+    assert!(
+        !texts.iter().any(|text| text
+            .chars()
+            .any(farhelm_proto::text::is_presentation_unsafe)),
+        "nothing painted holds a hidden character; painted: {texts:?}"
+    );
+    let Some(sentence) = nodes
+        .iter()
+        .position(|node| node.element_id.as_deref() == Some("prompt-summary"))
+    else {
+        let ids: Vec<_> = nodes.iter().map(|node| &node.element_id).collect();
+        panic!("the summary sentence was not recorded; recorded ids: {ids:?}");
+    };
+    assert!(
+        inside_dialog(&nodes, sentence),
+        "the sentence is drawn inside the dialog"
+    );
+    assert_eq!(nodes[sentence].role, Some(Role::Label));
+    assert_eq!(
+        nodes[sentence].label.as_deref(),
+        Some("Delete invoice<U+202E>fdp<U+200B>.exe on this machine?")
+    );
+    assert_eq!(dialog_label(&nodes).as_deref(), Some("Delete it?"));
+    cx.update(|window, cx| asked.cancel(window, cx));
+    cx.run_until_parked();
+    check(cx);
+
+    // App wording as a string, as every question before host sentences passed it.
+    let (asked, nodes) = ask_and_record(cx, question("api-refactor, on this machine"));
+    let texts = painted(&nodes);
+    assert!(
+        texts
+            .iter()
+            .any(|text| text == "api-refactor, on this machine"),
+        "the string summary is painted as given; painted: {texts:?}"
+    );
+    assert_eq!(dialog_label(&nodes).as_deref(), Some("Delete it?"));
+    cx.update(|window, cx| asked.cancel(window, cx));
+    cx.run_until_parked();
+    check(cx);
+
+    // A title with no spaces, far wider than the dialog, and a line of app words that is too.
+    let long = "a-very-long-session-title-that-a-host-wrote-without-any-spaces-\
+                at-all-so-it-cannot-wrap-at-a-word-boundary";
+    let words = "The session's terminal and its history are removed, and the working directory stays where it is on \
+                 the host.";
+    let summary = HostSentence::new("prompt-summary")
+        .text("Delete ")
+        .host(&HostText::from_host(long))
+        .text(" on this machine?");
+    let line = HostSentence::new("prompt-line").text(words);
+    let (asked, nodes) = ask_and_record(cx, question("alpha").summary(summary).line(line));
+    let Some(dialog) = nodes
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some("prompt"))
+    else {
+        panic!("the dialog was not recorded")
+    };
+    let inside: Vec<_> = (0..nodes.len())
+        .filter(|&index| inside_dialog(&nodes, index))
+        .flat_map(|index| nodes[index].texts.iter())
+        .collect();
+    for expected in [long, words] {
+        assert!(
+            inside.iter().any(|text| text.text.as_ref() == expected),
+            "the premise: {expected:?} is painted inside the dialog"
+        );
+    }
+    // Text bounds are floats from layout, so allow half a pixel of rounding at each edge.
+    let slack = px(0.5);
+    for text in &inside {
+        assert!(
+            text.bounds.left() >= dialog.bounds.left() - slack
+                && text.bounds.right() <= dialog.bounds.right() + slack,
+            "{:?} is painted within the dialog's edges: text {:?}, dialog {:?}",
+            text.text,
+            text.bounds,
+            dialog.bounds
+        );
+        assert!(
+            text.visible_bounds.size.width >= text.bounds.size.width - slack,
+            "{:?} is not clipped: painted {:?}, visible {:?}",
+            text.text,
+            text.bounds,
+            text.visible_bounds
+        );
+    }
+    cx.update(|window, cx| asked.cancel(window, cx));
+    cx.run_until_parked();
+    check(cx);
 }
