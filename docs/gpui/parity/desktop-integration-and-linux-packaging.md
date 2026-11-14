@@ -8,4 +8,3 @@ sections: Desktop window chrome, Installation and updates, Desktop Quit, Status.
 | ---------------------------------- | ----- | ------------------------------------------------------------------------ | -------------- |
 | `tests/window-chrome.spec.ts`      | 6     | the macOS inset belongs to the merged top row and leaves details compact | not yet ported |
 | `tests/update-readout-css.spec.ts` | 3     | version hint brightens and turns on hover and keyboard focus             | not yet ported |
-| `tests/notifications.spec.ts`      | 12    | session notifications                                                    | not yet ported |

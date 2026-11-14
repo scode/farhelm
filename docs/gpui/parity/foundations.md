@@ -7,8 +7,8 @@ SPEC_impl.md, GUI architecture.
 
 The popover-movement specs asserted that a menu closes when its anchor moves. SPEC.md now says an open menu moves with
 its session, so those rows are superseded. One closing rule still stands: changes in the Hosts attention list retire
-session menus anchored below it (SPEC.md, "Session list"); that case belongs to the host-updates row in
-[Settings and hosts](settings-and-hosts.md).
+session menus anchored below it (SPEC.md, "Session list"); that case belongs to the attention-list row of
+`tests/host-updates.spec.ts` in [Sidebar and session view](sidebar-and-session-view.md).
 
 The screenshot batch (`docs/gpui/screenshot-batch.md`) captures the first slice (session list, the open session's
 terminal, row menu, Delete question, rename dialog, empty fleet) beside the foundation goldens; of its reference scenes,
