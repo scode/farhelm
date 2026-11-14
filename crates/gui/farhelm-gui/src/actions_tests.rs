@@ -425,11 +425,11 @@ fn every_key_the_terminal_or_its_program_owns_reaches_the_terminal(cx: &mut Test
     }
 }
 
-/// The terminal's own commands with an action (paste) are bound where a terminal has focus, and only there. A binding
-/// placed before the table's `NoAction` rows would be hidden by them, and an action on a row the terminal does not own
-/// would bind a key the table gives to the app or the program, so this pins both on both platforms: every row with an
-/// action ([`TerminalKey::bind`]) is a [`KeyOwner::Terminal`] row, and on this platform the first binding GPUI tries
-/// for its chord in a focused terminal is its own action.
+/// The terminal's own commands with an action (paste and the page keys) are bound where a terminal has focus, and only
+/// there. A binding placed before the table's `NoAction` rows would be hidden by them, and an action on a row the
+/// terminal does not own would bind a key the table gives to the app or the program, so this pins both on both
+/// platforms: every row with an action ([`TerminalKey::bind`]) is a [`KeyOwner::Terminal`] row, and on this platform
+/// the first binding GPUI tries for its chord in a focused terminal is its own action.
 #[gpui::test]
 fn the_terminals_own_actions_take_their_keys_in_a_focused_terminal(cx: &mut TestAppContext) {
     for key in TERMINAL_KEYS.iter().filter(|key| key.bind.is_some()) {

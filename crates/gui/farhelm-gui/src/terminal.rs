@@ -389,8 +389,7 @@ impl TerminalView {
     }
 
     /// Scroll by whole lines, positive toward the live screen and negative into history: the page keys' step
-    /// (Shift+PageUp and Shift+PageDown, a page less a line, once they are bound). Reaching the screen follows the
-    /// bottom again.
+    /// (Shift+PageUp and Shift+PageDown, a page less a line). Reaching the screen follows the bottom again.
     pub fn scroll_lines(&mut self, lines: i64, cx: &mut Context<Self>) {
         self.wheel_remainder = 0.;
         if self.viewport.scroll_lines(&self.model, lines) {
