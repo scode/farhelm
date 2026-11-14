@@ -16,6 +16,7 @@ use farhelm_proto::ui_channel::{
 use gpui::{TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
 
+use crate::focus;
 use crate::hosts::add::tests::{
     alias, any_open, destination, dialog_key, error_line, label, one_command, one_probe,
     open_dialog, open_rail_with, type_text,
@@ -477,12 +478,15 @@ fn with_the_preference_on_a_plan_is_submitted_without_asking(cx: &mut TestAppCon
 // ---- A refused setup -----------------------------------------------------------------------------------------------
 
 /// The old app reopened the form after a definite refusal ("a refused ADD attempt reopens the form"), so the user can
-/// fix what was refused and try again; the plan is spent, so Add probes again. Specified: a 409 to the provision request
-/// reopens Add host holding `dev@newbox` and `newbox1` with the helm's words in its error line, and the setup
-/// confirmation does not come back.
+/// fix what was refused and try again; the plan is spent, so Add probes again. The reopened dialog still belongs to the
+/// Add host button that opened the first one, so closing it returns focus there; run under macOS's click rule, where
+/// no click focused that button and nothing focuses it before the dialog opens. Specified: a 409 to the provision
+/// request reopens Add host holding `dev@newbox` and `newbox1` with the helm's words in its error line, and the setup
+/// confirmation does not come back; Escape then closes it and focus goes back to Add host.
 #[gpui::test]
 fn a_refused_setup_reopens_add_host_with_the_destination_alias_and_reason(cx: &mut TestAppContext) {
-    let (mut helm, cx, _add) = open_rail_with(cx, Vec::new());
+    let (mut helm, cx, add) = open_rail_with(cx, Vec::new());
+    cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
     probe_a_plan(&mut helm, cx);
     click(cx, "prompt-confirm");
     let (id, _) = one_command(&mut helm, Method::Post, "/api/hosts/provision");
@@ -492,6 +496,15 @@ fn a_refused_setup_reopens_add_host_with_the_destination_alias_and_reason(cx: &m
     assert_eq!(error_line(cx).as_deref(), Some(USED));
     assert_eq!(label(cx, "prompt"), None, "no setup question");
     assert_eq!(alias(cx), "newbox1");
+    keys(cx, "escape");
+    assert!(
+        !any_open(cx),
+        "the premise: Escape closed the reopened dialog"
+    );
+    assert!(
+        focused(cx, &add),
+        "focus went back to the Add host button that opened the first dialog, which the click never focused"
+    );
 }
 
 /// SPEC.md, "Keyboard focus": once the user has moved on, a result opens no dialog and shows where it belongs. A

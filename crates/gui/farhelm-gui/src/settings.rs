@@ -113,11 +113,11 @@ const CLOSE_HELP: &str = "Close settings; unsaved fields are discarded";
 /// Open Settings at Sessions with focus on its first switch, on top of everything else in `window`: the gear's entry
 /// point (SPEC.md: "The gear always opens sessions and focuses its first switch").
 ///
-/// `opener` is the gear's focus handle and `mark` the [`Mark`] taken in its click handler. The gear takes focus first,
-/// so that closing Settings returns focus to it on every platform, also where a click leaves a button unfocused (macOS):
-/// the old app returned focus to the gear explicitly (`RETURN_FOCUS`), and SPEC.md has "Escape and either close control
-/// return focus to the gear". Nothing opens, and the gear takes no focus, when the user has moved on since `mark` or the
-/// window is inert.
+/// `opener` is the gear's focus handle and `mark` the [`Mark`] taken in its click handler. Settings names the gear as
+/// where closing returns focus ([`ReturnTo::Control`]), so it goes back there on every platform, also where a click
+/// leaves a button unfocused (macOS): the old app returned focus to the gear explicitly (`RETURN_FOCUS`), and SPEC.md
+/// has "Escape and either close control return focus to the gear". Nothing opens when the user has moved on since
+/// `mark` or the window is inert.
 ///
 /// Returns the dialog's layer, or `None` when nothing opened.
 pub fn open(
@@ -155,7 +155,6 @@ fn open_dialog(
     if focus::has_moved_on(mark, cx) {
         return None;
     }
-    focus::focus_control(opener, mark, window, cx);
     let dialog = cx.new(|cx| SettingsDialog::new(section, cx));
     let container = cx.focus_handle();
     let start = dialog
@@ -175,7 +174,7 @@ fn open_dialog(
             // SPEC.md lists the dialogs that share the Settings installer among those that keep focus on the control in
             // use, and the old Settings did (`DialogFocus::remembered`, whose gap rule is on).
             keeps_focus_on_empty_click: true,
-            returns_to: ReturnTo::Opener,
+            returns_to: ReturnTo::Control(opener.clone()),
             // None: closing never waits. A save in flight goes on in the operation store after the dialog is gone.
             on_dismiss: None,
             placement: layers::DialogPlacement::Centered,

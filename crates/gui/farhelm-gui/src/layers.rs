@@ -33,9 +33,9 @@
 //!   dialog itself in the others ([`Dialog::keeps_focus_on_empty_click`]); a click on a menu's empty space keeps focus
 //!   on its item. Tab stays inside the topmost layer, dialog or menu alike (the focus coordinator walks GPUI's tab
 //!   order within [`trap`]). Closing any layer returns focus to what held it when the layer opened, unless a dialog's
-//!   opener named home instead ([`Dialog::returns_to`]). A press reaches a dialog's empty-space rule only after the
-//!   controls under it have handled it, and one that gave focus to a control (a click into a text field) is not a
-//!   press on empty space (the focus coordinator's [`focus::OnPress::Focus`]).
+//!   opener named home or a control (the button that opened it) instead ([`Dialog::returns_to`]). A press reaches a
+//!   dialog's empty-space rule only after the controls under it have handled it, and one that gave focus to a control
+//!   (a click into a text field) is not a press on empty space (the focus coordinator's [`focus::OnPress::Focus`]).
 //! - **A popover's card takes the pointer from what it covers.** It has no veil, so the page around it stays live, but
 //!   a press, click, wheel, hover or move on the card itself never reaches the element under it: a click on a
 //!   question's answer over a terminal must not also focus the terminal or click a control there.
@@ -173,7 +173,7 @@ struct Layer {
     /// Whether the layer took focus when it opened and holds it while open: every layer but a popover opened without
     /// a start ([`Popover::start`]), which Tab's trap, focus recovery and the focus return on close all pass over.
     takes_focus: bool,
-    /// Where closing it returns focus: `opener`, unless its opener named home ([`Dialog::returns_to`]).
+    /// Where closing it returns focus: `opener`, unless its opener named home or a control ([`Dialog::returns_to`]).
     returns_to: focus::ReturnTo,
     /// What a dismissal of it does ([`Dialog::on_dismiss`]); `None` always closes.
     on_dismiss: Option<DismissHook>,
@@ -443,7 +443,9 @@ pub struct Dialog {
     /// action. Per dialog, never a global rule: SPEC.md says which dialogs "do not have this rule yet".
     pub keeps_focus_on_empty_click: bool,
     /// Where focus goes when the dialog closes with focus inside it: [`focus::ReturnTo::Opener`] (what held focus when
-    /// it opened) for every dialog SPEC.md does not send elsewhere.
+    /// it opened) for every dialog SPEC.md does not send elsewhere, and [`focus::ReturnTo::Control`] with the button's
+    /// handle for a dialog a button opens, so closing returns to that button also where a click leaves it unfocused
+    /// (macOS). An opener names the button here rather than focusing it before opening.
     pub returns_to: focus::ReturnTo,
     /// What the dialog does when the user dismisses it, asked on every dismissal: Escape, wherever focus is inside the
     /// dialog, the dialog itself included; a press outside a dialog opened with [`Dialog::dismiss_on_outside_press`];
@@ -799,10 +801,10 @@ fn close_taking(
     if (focus_was_inside || window.focused(cx).is_none())
         && let Some(bottom) = closed.iter().find(|layer| layer.takes_focus)
     {
-        let returns_to = match bottom.returns_to {
+        let returns_to = match &bottom.returns_to {
             focus::ReturnTo::HomeOnEscape if dismissed => focus::ReturnTo::Home,
             focus::ReturnTo::HomeOnEscape => focus::ReturnTo::Opener,
-            other => other,
+            other => other.clone(),
         };
         focus::return_to(returns_to, bottom.opener.as_ref(), window, cx);
     }

@@ -15,8 +15,8 @@
 //!   to open a layer for a mark the user has moved on from, which is how "things the user did not start never open over
 //!   what they are doing" is kept. The three public moves a feature makes after the user acted, [`choose_terminal`],
 //!   [`focus_control`] and [`focus_in_layer`], take the mark of that action for the same reason. A fourth,
-//!   [`move_within_control`], needs none: it carries focus inside the control whose key is being handled (a radio
-//!   group's arrows).
+//!   [`move_within_control`], needs none and is the component layer's alone: it carries focus inside the control whose
+//!   arrow key is being handled (a radio group, a tab strip).
 //! - **Home.** When nothing holds focus and no layer that holds focus is open, focus goes home, which SPEC.md's "Where
 //!   focus rests" defines: the selected session's terminal, New when there are no sessions, a stopped session's card
 //!   when the selected session has stopped. The views that own those set it: [`set_home`] in general, and
@@ -26,15 +26,26 @@
 //!   a move of its own, which the terminal tabs add here when they arrive.
 //! - **The dialog stack's trap and restore**, together with the layer manager, which records who opened each layer and
 //!   what was focused at the time. Tab and Shift+Tab stay inside the topmost layer; closing a layer returns focus to
-//!   where it was before it opened, or home when its opener asked for that ([`ReturnTo`]); when the focused control
-//!   disappears inside a dialog or menu, focus moves to the closest remaining control there (by the controls' last
-//!   drawn positions), and to the layer itself only when no control is left. A menu traps Tab like a dialog (SPEC.md:
-//!   "Inside a dialog or menu, focus stays inside"). A popover that never takes focus (a list floating under the field
-//!   the user types in) is not a layer for any of this: it traps nothing and gives nothing back, and while only such a
-//!   popover is open, focus moves on the page as if nothing were open ([`layers::focus_layer_open`]). Inside the
-//!   topmost layer, focus moves between parts of it only through [`move_within_control`] (within a radio group, and
-//!   into and out of a question the prompt draws inline in a dialog) or, to another control of the layer (because of
-//!   the user's action there, or a result that arrived later), through [`focus_in_layer`].
+//!   where it was before it opened, or home or a control its opener named instead ([`ReturnTo`]); when the focused
+//!   control disappears inside a dialog or menu, focus moves to the closest remaining control there (by the controls'
+//!   last drawn positions), and to the layer itself only when no control is left. A menu traps Tab like a dialog
+//!   (SPEC.md: "Inside a dialog or menu, focus stays inside"). A popover that never takes focus (a list floating under
+//!   the field the user types in) is not a layer for any of this: it traps nothing and gives nothing back, and while
+//!   only such a popover is open, focus moves on the page as if nothing were open ([`layers::focus_layer_open`]).
+//!   Inside the topmost layer, the app moves focus to another control of the layer (because of the user's action
+//!   there, a result that arrived later, or a question the prompt draws inline in the dialog opening and closing) only
+//!   through [`focus_in_layer`], and along a radio group or tab strip through [`move_within_control`].
+//! - **The one move waiting for a frame.** A control the user's action makes appear (the launcher's flags field once
+//!   Custom is chosen, an inline question's starting answer) is not drawn while the action is handled, so
+//!   [`focus_in_layer`] keeps a move to it as the window's one pending move and makes it once a frame has drawn the
+//!   control inside the layer. The hook is the position record every control already draws ([`record_position`] and
+//!   [`track`]): when the pending target records itself while a frame is prepared, the coordinator queues the move with
+//!   `window.defer`, which GPUI runs once that frame is drawn and on screen, where the layer's containment can be read.
+//!   Nothing polls, and area code never schedules a focus move on a frame itself. Any later focus move but the
+//!   coordinator's own recovery drops it (another move the app makes, Tab, a click that focuses a control, a layer
+//!   opening), and so do a layer that took focus closing with focus returned, and the user moving on since its mark.
+//!   A dialog closed before its first frame (a reset before the next draw) returns no focus and keeps the move,
+//!   harmlessly: its target belonged to that dialog and is never drawn elsewhere, so the later judgement refuses it.
 //! - **Which press focuses an element.** Every focusable element is tracked through [`track`], which suppresses GPUI's
 //!   own focus-on-press (GPUI focuses any tracked element on a press of any mouse button, a move no lint could see)
 //!   and applies the coordinator's rule instead: on Linux a click focuses the control it lands on; on macOS it does
@@ -64,13 +75,14 @@
 //!   remaining one scrolls that one into view, as any recovery does. Virtualized lists keep their own reveal: their
 //!   rows are not all drawn, so a row Tab has not reached may have no position to scroll to.
 //!
-//!   A control focused before it is first drawn (a layer's start, or a control shown in the same update that focuses
-//!   it) has no position yet and is not scrolled to, and [`move_within_control`] scrolls nothing. A move to another
-//!   control of the open dialog goes through [`focus_in_layer`], which scrolls it into view once a frame has drawn it:
-//!   Settings' trust hints, which open agent trust and, once the agent's read answers, move focus to its switch and
-//!   scroll its block into view, and the launcher's Custom choice, which moves focus into the flags field it shows
-//!   (SPEC.md). Nothing yet scrolls to a layer's start below the fold; SPEC.md's archive global confirmation, whose
-//!   actions are brought into view when it opens, will need it.
+//!   A control focused before it is first drawn (a layer's start, or a control [`focus_control`] focuses in the same
+//!   update that shows it) has no position yet and is not scrolled to, and [`move_within_control`] scrolls nothing. A
+//!   move to another control of the open dialog goes through [`focus_in_layer`], which moves and scrolls only once a
+//!   frame has drawn the control: Settings' trust hints, which open agent trust and, once the agent's read answers,
+//!   move focus to its switch and scroll its block into view, the launcher's Custom choice, which moves focus into the
+//!   flags field it shows (SPEC.md), and an inline question's starting answer. Nothing yet scrolls to a layer's start
+//!   below the fold; SPEC.md's archive global confirmation, whose actions are brought into view when it opens, will
+//!   need it.
 //!
 //! NOTE: Agent approval cards, which keep focus while a dialog is open, do not exist yet, so [`invariant_violation`]
 //! knows only the topmost dialog.
@@ -262,6 +274,20 @@ pub struct WindowFocus {
     /// count (a double click's second press) still matches it, and [`press_was_taken`] then falls through to its rule
     /// about a press on the focused control, which decides as it would have without the note.
     returned: Option<(Mark, WeakFocusHandle)>,
+    /// The move [`focus_in_layer`] is waiting to make once a frame draws its target ([`Pending`]). One per window: a
+    /// newer move replaces it, [`apply`] drops it with every focus move but recovery, and [`return_to`] when a layer
+    /// that took focus closes and focus is returned. A dialog closed before its first frame (a reset before the next
+    /// draw) returns no focus and keeps it, harmlessly: its target belonged to that dialog and is never drawn
+    /// elsewhere, so a later judgement refuses it or it never fires.
+    pending: Option<Pending>,
+}
+
+/// A [`focus_in_layer`] move to a control not drawn yet, kept until the frame that draws it or until something drops
+/// it. Weak, so a target that goes away never keeps its handle alive.
+struct Pending {
+    target: WeakFocusHandle,
+    /// The mark of the user's action the move answers: still checked when the move is made.
+    chosen: Mark,
 }
 
 /// One recorded control: its handle, where it was last drawn, its kind, and the scroll regions around it then.
@@ -331,6 +357,7 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
         last_focused: None,
         returned: None,
         regions_open: Vec::new(),
+        pending: None,
     });
     let id = window.window_handle().window_id();
     if let Some(windows) = installed_mut::<Windows>(cx) {
@@ -413,61 +440,138 @@ pub fn focus_control(target: &FocusHandle, chosen: &Mark, window: &mut Window, c
     apply_and_reveal(Move::To(target), window, cx);
 }
 
-/// Move focus to `target`, a control drawn inside the topmost layer that holds focus (a dialog, or a menu above it),
-/// because of something the user did there, and scroll it into view as after Tab. Two kinds of caller:
+/// Move focus to `target`, a control inside the topmost layer that holds focus (a dialog, or a menu above it), because
+/// of something the user did there, and scroll it into view as after Tab; at once if a frame has drawn `target` there,
+/// or else after the first frame that does. The callers:
 ///
 /// - A result that arrives later than the user's action: Settings opened at agent trust from a trust hint, with focus
 ///   on the dialog, moving focus to the agent's switch once that agent's read answers.
 /// - The user's own action moving focus to another control of the same layer: choosing Custom in the launcher (a click
-///   or Enter) moving focus into its permission flags field.
+///   or Enter) moving focus into its permission flags field, which the same action makes appear.
+/// - The prompt, moving focus into a question it draws inline in its owner's dialog and back out when it closes.
 ///
 /// [`focus_control`]'s rule for the topmost layer instead of the page: `chosen` is the mark taken when the user acted,
 /// and it does nothing once they have moved on since (a key press or a click), with no layer that holds focus open (the
-/// user's dialog closed), or when `target` was not drawn inside the topmost such layer in the frame on screen (another
-/// layer opened above the dialog). It also checks that focus is inside that layer, which the focus invariant already
-/// guarantees: a defensive check, so a broken state never lets the move pull focus.
+/// user's dialog closed), or when `target` is drawn in the frame on screen but outside the topmost such layer (on the
+/// page behind it, or in a dialog another layer now covers). Once the layer is drawn it also checks that focus is
+/// inside it, which the focus invariant then guarantees: a defensive check, so a broken state never lets the move pull
+/// focus.
 ///
-/// Call it once a frame has drawn `target`, or it refuses quietly: a control not yet drawn has no position to scroll
-/// to and is not known to be inside the layer. A target that the action itself makes appear (the flags field, drawn
-/// only once Custom is chosen) is not drawn while the action is handled, nor in a `window.defer` queued there, which
-/// runs before the next frame. Its owner calls this from the next frame instead: a `window.defer` queued from the
-/// render that first draws the target runs once that frame is drawn. (`window.on_next_frame` is the ticker's alone,
-/// by the GUI lints.)
+/// A `target` not drawn in the frame on screen (the flags field, shown only once Custom is chosen) has no position to
+/// scroll to and is not known to be inside the layer yet, so the coordinator keeps the move as the window's one pending
+/// move and makes it, with the same checks, once a frame has drawn `target`: the caller just calls this from its
+/// action and never schedules anything itself (no `window.defer` for a focus move in area code). The same holds when
+/// the layer itself is not drawn yet, because it opened in the same update (Settings opened at agent trust with the
+/// agent's read already answered): the move waits for the frame that draws the layer and its target. The pending move
+/// is dropped if the user moves on since `chosen`, if any other focus move happens first (a newer call to this, the
+/// keyboard, a layer opening or closing; not the coordinator's recovery when the focused control vanishes, so an action
+/// that replaces the control holding focus still lands on its target), or if the frame that draws `target` draws it
+/// outside the layer. A `target` not drawn yet must be a tab stop drawn through [`track`] or [`record_position`], as
+/// every control is: only their position record tells the coordinator it was drawn, so a debug build fails on one that
+/// is not, which would otherwise wait unnoticed until the next focus move dropped it.
 pub fn focus_in_layer(target: &FocusHandle, chosen: &Mark, window: &mut Window, cx: &mut App) {
-    if state(window, cx).is_none() || has_moved_on(chosen, cx) {
+    let Some(state) = state(window, cx) else {
         return;
-    }
-    // `contains` reads the frame on screen, so a target not drawn there, or drawn outside the layer, is refused.
-    let inside_topmost = layers::top_container(window, cx)
-        .is_some_and(|top| top.contains_focused(window, cx) && top.contains(target, window));
-    if inside_topmost {
-        apply_and_reveal(Move::To(target), window, cx);
+    };
+    match in_layer(target, chosen, window, cx) {
+        InLayer::Move => apply_and_reveal(Move::To(target), window, cx),
+        InLayer::Wait => {
+            debug_assert!(
+                target.tab_stop,
+                "focus_in_layer waits for a target that is not a tab stop: no frame will report it drawn"
+            );
+            state.update(cx, |state, _| {
+                state.pending = Some(Pending {
+                    target: target.downgrade(),
+                    chosen: *chosen,
+                });
+            });
+        }
+        InLayer::Refuse => {}
     }
 }
 
-/// Carry focus from `from` to `to`, two parts of one place inside the topmost layer (or the page), because what the
-/// user just did moved the place's own position there. Two callers:
-///
-/// - A radio group: the key being handled on `from` moved the choice, and the arrows move the choice and focus
-///   together, as native radios do. The caller draws `to` inside the same control as `from`.
-/// - A question the prompt draws inline in its owner's dialog (SPEC.md's YOLO confirmation in the launcher). On
-///   opening, `from` is what held focus when the question was asked and `to` its starting answer, drawn in the same
-///   dialog from the next frame on; the prompt checks [`has_moved_on`] first, so a question that arrives after the user
-///   moved on shows and waits. On closing, `from` is each of its answers and `to` what held focus when it opened, so
-///   focus goes back only from the answer that holds it, and stays wherever the user took it otherwise.
+/// What a [`focus_in_layer`] move may do now, judged against the frame on screen.
+enum InLayer {
+    /// The target is drawn inside the layer: move.
+    Move,
+    /// The target, or the layer itself, is not drawn yet: keep the move until a frame draws the target.
+    Wait,
+    /// Never: the user moved on, no layer that holds focus is open, focus is not in it, or the target is drawn outside
+    /// it.
+    Refuse,
+}
+
+/// Judge a move to `target` for `chosen` inside the topmost layer that holds focus. The same checks decide the move
+/// when it is asked for and, for a pending one, once a frame has drawn its target. The layer is the topmost one at each
+/// judgement, not the one the move was asked in: every way into another layer is a focus move that drops a pending
+/// move, and a layer that took focus closing with focus returned drops it too. The one way the two can differ is a
+/// dialog closed before its first frame, which returns no focus: its pending move is then judged against the layer
+/// below, harmlessly, since its target belonged to the closed dialog and is never drawn there.
+fn in_layer(target: &FocusHandle, chosen: &Mark, window: &Window, cx: &App) -> InLayer {
+    if has_moved_on(chosen, cx) {
+        return InLayer::Refuse;
+    }
+    let (Some(layer), Some(root)) = (layers::top_container(window, cx), root_handle(window, cx))
+    else {
+        return InLayer::Refuse;
+    };
+    // `contains` reads the frame on screen; the root contains everything drawn there, overlays included. A layer
+    // opened in this update is not in it yet, nor is anything inside it, focus included.
+    if !root.contains(&layer, window) {
+        return InLayer::Wait;
+    }
+    if !layer.contains_focused(window, cx) {
+        return InLayer::Refuse;
+    }
+    if layer.contains(target, window) {
+        InLayer::Move
+    } else if root.contains(target, window) {
+        InLayer::Refuse
+    } else {
+        InLayer::Wait
+    }
+}
+
+/// The window's root view's focus handle: it contains every element drawn in the frame on screen, overlays included.
+fn root_handle(window: &Window, cx: &App) -> Option<FocusHandle> {
+    state(window, cx)?.read(cx).root.upgrade()
+}
+
+/// Make the pending [`focus_in_layer`] move if it may move now, after a frame that drew its target. [`record`] queues
+/// this with `window.defer` while the frame is prepared, so it runs once that frame is drawn and swapped in.
+fn apply_pending(window: &mut Window, cx: &mut App) {
+    let Some(state) = state(window, cx) else {
+        return;
+    };
+    // Taken, and put back only if it must go on waiting: a move made or refused is done.
+    let Some(pending) = state.update(cx, |state, _| state.pending.take()) else {
+        return;
+    };
+    let Some(target) = pending.target.upgrade() else {
+        return;
+    };
+    match in_layer(&target, &pending.chosen, window, cx) {
+        InLayer::Move => apply_and_reveal(Move::To(&target), window, cx),
+        InLayer::Wait => state.update(cx, |state, _| state.pending = Some(pending)),
+        InLayer::Refuse => {}
+    }
+}
+
+/// Carry focus from `from` to `to`, two parts of one control, because the arrow key being handled on `from` moved the
+/// control's own position there: a radio group's arrows move the choice and focus together, as native radios do, and a
+/// tab strip's arrows move between its tabs. The component layer's controls are its only callers, and every move the
+/// app makes to another control goes through [`focus_in_layer`] or [`focus_control`]. `pub(crate)` keeps it out of
+/// other crates only: area code lives in this crate too, so the review gate is what holds the component-only rule.
 ///
 /// It moves nothing unless `from` holds focus, so it only ever carries focus along from where it is and never takes it
 /// from anywhere else; it needs no [`Mark`] of its own. Unlike [`focus_control`], it works inside a dialog. The caller
-/// must draw `to` beside `from` in the same layer: the coordinator cannot check a target that is not drawn yet, the
-/// per-step focus invariant catches a caller that breaks this, and a target not drawn in the next frame loses focus to
-/// the closest control left in the layer.
+/// draws `to` inside the same control as `from`: the per-step focus invariant catches a caller that breaks this, and a
+/// target not drawn in the next frame loses focus to the closest control left in the layer.
 ///
-/// Both kinds carry focus along inside one place as part of the key the user just pressed there, so this scrolls
-/// nothing into view and checks no mark. A move to another control of the layer, because of the user's action or a
-/// result that arrived later, uses [`focus_in_layer`] instead, which checks that the user has not moved on (`from`
-/// still holding focus does not show that, and on macOS a clicked button never held focus) and scrolls the control
-/// into view.
-pub fn move_within_control(
+/// It carries focus along inside one control as part of the key the user just pressed there, so it scrolls nothing
+/// into view and checks no mark.
+pub(crate) fn move_within_control(
     from: &FocusHandle,
     to: &FocusHandle,
     window: &mut Window,
@@ -663,6 +767,12 @@ fn track_raw<E: InteractiveElement>(element: E, handle: &FocusHandle) -> E {
 }
 
 /// Record where `control` (of `kind`) was drawn this frame, and whether it held focus there.
+///
+/// It is also the hook a pending [`focus_in_layer`] move waits on: when `control` is that move's target, the frame
+/// being prepared draws it, and the move is queued to run once the frame is drawn ([`apply_pending`]). A `window.defer`
+/// queued here runs after GPUI has swapped the new frame in, so the move reads the frame that drew its target; it
+/// could not run any earlier, since containment is read only from a finished frame. A view replayed from the cache
+/// runs no prepaint, but the frame that first draws a target is never a replay: drawing something new re-renders.
 fn record(
     control: &WeakFocusHandle,
     bounds: Bounds<Pixels>,
@@ -673,6 +783,14 @@ fn record(
     let Some(state) = state(window, cx) else {
         return;
     };
+    let awaited = state
+        .read(cx)
+        .pending
+        .as_ref()
+        .is_some_and(|pending| &pending.target == control);
+    if awaited {
+        window.defer(cx, apply_pending);
+    }
     let focused = control
         .upgrade()
         .is_some_and(|handle| handle.is_focused(window));
@@ -752,8 +870,8 @@ fn distance_squared(a: gpui::Point<Pixels>, b: gpui::Point<Pixels>) -> f32 {
 /// container's scroll state (`track_scroll`); keep it across frames (in the view, or in keyed element state), or the
 /// scroll position resets on every draw.
 ///
-/// For a container that scrolls vertically and draws all its content, such as a dialog's body, or the sidebar's host
-/// list once the sidebar draws it through this. Not for a virtualized list: it draws only the rows in view, so the row
+/// For a container that scrolls vertically and draws all its content, such as a dialog's body or the sidebar's host
+/// list. Not for a virtualized list: it draws only the rows in view, so the row
 /// focus lands on next may have no position yet, and it keeps its own reveal. Regions may nest (a dialog's body inside
 /// its card): each one around the control scrolls as needed, innermost first. Style the container before wrapping it;
 /// the region adds no box of its own.
@@ -935,21 +1053,33 @@ fn scroll_into_view(
 
 // ---- Moving focus ----------------------------------------------------------------------------------------------------
 
-/// The one focus move the coordinator makes, in one of three forms.
+/// The one focus move the coordinator makes, in one of four forms.
 enum Move<'a> {
     To(&'a FocusHandle),
+    /// A move to the handle that [`recover`] chose, the one move that keeps a pending [`focus_in_layer`] move: when the
+    /// control holding focus vanishes in the same frame that draws the pending move's target (an action that replaces
+    /// the control it was pressed on, or an inline question taking the place of the button that asked it), focus is
+    /// recovered inside the layer before the pending move runs, and that recovery must not cancel it.
+    Recover(&'a FocusHandle),
     Next,
     Previous,
 }
 
-/// Every focus move in the GUI crates goes through here.
+/// Every focus move in the GUI crates goes through here, and every one of them but a [`Move::Recover`] drops the
+/// pending [`focus_in_layer`] move: a newer move replaces it, and a layer opening above is such a move too. A layer
+/// that took focus closing drops it in [`return_to`] when focus is returned, whichever way it goes back.
 #[allow(
     clippy::disallowed_methods,
     reason = "the focus coordinator is the one owner of focus moves"
 )]
 fn apply(target: Move, window: &mut Window, cx: &mut App) {
+    if !matches!(target, Move::Recover(_))
+        && let Some(state) = state(window, cx)
+    {
+        state.update(cx, |state, _| state.pending = None);
+    }
     match target {
-        Move::To(handle) => window.focus(handle, cx),
+        Move::To(handle) | Move::Recover(handle) => window.focus(handle, cx),
         Move::Next => window.focus_next(cx),
         Move::Previous => window.focus_prev(cx),
     }
@@ -1118,11 +1248,25 @@ pub(crate) fn enter_layer(handle: &FocusHandle, window: &mut Window, cx: &mut Ap
 
 /// Where focus goes when a dialog closes with focus inside it. The dialog's opener chooses
 /// ([`crate::layers::Dialog::returns_to`]).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReturnTo {
     /// What held focus when the dialog opened: SPEC.md, "Closing something the user opened returns focus to where it
     /// was before it opened". Every dialog but those below.
     Opener,
+    /// The control the opener names, however the dialog closes: the button that opened it (Settings' gear, Add host),
+    /// so that closing returns focus to that button on every platform. On macOS a click leaves a button unfocused, so
+    /// what held focus when the dialog opened is whatever held it before the click (the terminal, say), not the button
+    /// SPEC.md returns focus to ("Escape and either close control return focus to the gear"); the old app named the
+    /// return target explicitly for the same reason (`RETURN_FOCUS`). Naming it here, rather than focusing the button
+    /// before opening, costs no extra focus move, and works from inside another dialog, where the coordinator moves no
+    /// focus to a control on the page's behalf.
+    ///
+    /// The control only when it is drawn inside the topmost layer that holds focus once the dialog has closed, or on
+    /// the page when no such layer is left; otherwise it falls back to [`ReturnTo::Opener`]: when the opener named a
+    /// control on the page while another dialog stays open, or a control that went while the dialog was open (the gear
+    /// no longer drawn), whatever held focus before it opened is the closer match to SPEC.md's "returns focus to where
+    /// it was before it opened".
+    Control(FocusHandle),
     /// Home as it is when the dialog closes (the selected session's terminal), whatever held focus when it opened. For
     /// a dialog SPEC.md sends back to the terminal however it closes: the Rename editor opened with its shortcut, which
     /// may have been pressed while a row reached with Tab held focus ("Desktop window chrome").
@@ -1146,13 +1290,28 @@ pub(crate) fn return_to(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let home = match target {
+    // A layer closing with focus returned ends any pending move made in it, also when focus returns through recovery
+    // below, which would keep it.
+    if let Some(state) = state(window, cx) {
+        state.update(cx, |state, _| state.pending = None);
+    }
+    let named = match target {
         ReturnTo::Home if !layers::focus_layer_open(window, cx) => home(window, cx),
-        // The layer manager turns `HomeOnEscape` into one of the other two before it gets here; reaching here
-        // unturned, it was not a dismissal.
-        ReturnTo::Home | ReturnTo::Opener | ReturnTo::HomeOnEscape => None,
+        // `contains` reads the frame on screen, which still has the closed layer over the one below it. With no layer
+        // left, the control must still be drawn on the page.
+        ReturnTo::Control(control)
+            if match layers::top_container(window, cx) {
+                Some(top) => top.contains(&control, window),
+                None => root_handle(window, cx).is_some_and(|root| root.contains(&control, window)),
+            } =>
+        {
+            Some(control)
+        }
+        // The layer manager turns `HomeOnEscape` into `Home` or `Opener` before it gets here; reaching here unturned,
+        // it was not a dismissal.
+        ReturnTo::Home | ReturnTo::Control(_) | ReturnTo::Opener | ReturnTo::HomeOnEscape => None,
     };
-    match home.or_else(|| opener.and_then(WeakFocusHandle::upgrade)) {
+    match named.or_else(|| opener.and_then(WeakFocusHandle::upgrade)) {
         // If it is no longer drawn, GPUI reports the focus as lost on the next frame and [`recover`] runs then.
         Some(place) => {
             // Noted for [`press_was_taken`]: a press that closed the layer did not give focus to `place`.
@@ -1179,9 +1338,9 @@ pub(crate) fn return_to(
 fn recover(window: &mut Window, cx: &mut App) {
     if let Some(container) = layers::top_container(window, cx) {
         let target = closest_control(&container, window, cx).unwrap_or(container);
-        apply(Move::To(&target), window, cx);
+        apply(Move::Recover(&target), window, cx);
     } else if let Some(resting) = resting_place(window, cx) {
-        apply(Move::To(&resting), window, cx);
+        apply(Move::Recover(&resting), window, cx);
     }
 }
 

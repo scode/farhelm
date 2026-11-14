@@ -19,13 +19,13 @@ use gpui::{
     TestAppContext, VisualTestContext, Window, div, point, px, size,
 };
 
-use crate::components::{DialogFrame, HoverHelp, TextInput, TextInputState};
+use crate::components::{Button, DialogFrame, HoverHelp, TextInput, TextInputState};
 use crate::focus::{self, Mark, OnPress};
 use crate::layers::{self, Anchor, Dialog};
 use crate::prompt::{self, Presentation};
 use crate::test_support::{
-    anchor_element, bounds, button, center, check, click, focused, follow, handle, is_open, keys,
-    open, open_dialog, open_dialog_returning, open_menu, question, redraw, settle,
+    Panel, anchor_element, bounds, button, center, check, click, focused, follow, handle, is_open,
+    keys, open, open_dialog, open_dialog_returning, open_menu, question, redraw, settle,
 };
 
 // ---- Helpers on top of the shared harness ----------------------------------------------------------------------------
@@ -1781,8 +1781,7 @@ fn tab_in_a_dialog_whose_card_scrolls_scrolls_body_and_card_until_the_control_sh
 /// scrolling would move the very control under the pointer while the user clicks it. A focus move the app then makes
 /// onto that control, which already holds focus, does scroll it into view, in a frame of its own: GPUI draws nothing
 /// for a focus move onto the control that holds focus, so the scroll has to ask for that frame. The region is a plain
-/// page region opted in through `scroll_region`, as the sidebar's host list will be once the sidebar draws it through
-/// that.
+/// page region opted in through `scroll_region`, as the sidebar's host list is.
 #[gpui::test]
 fn a_press_leaves_a_partly_hidden_control_where_it_is_and_the_apps_focus_move_reveals_it(
     cx: &mut TestAppContext,
@@ -1892,10 +1891,15 @@ fn a_second_focus_move_before_a_frame_measures_the_scroll_the_first_made(cx: &mu
 }
 
 /// A dialog's content for the [`focus::focus_in_layer`] tests: a tall body that starts on `start`, at its top, with
-/// `target` far below the fold.
+/// `near` beside it and `target` far below the fold. `near` is drawn while `near_shown` holds and `target` while
+/// `target_shown` does; neither cell notifies, so a test changes one and then redraws, which makes that frame the
+/// first (or the last) to draw the control.
 struct LayerContent {
     start: FocusHandle,
+    near: FocusHandle,
     target: FocusHandle,
+    near_shown: Rc<Cell<bool>>,
+    target_shown: Rc<Cell<bool>>,
 }
 
 impl Render for LayerContent {
@@ -1903,10 +1907,28 @@ impl Render for LayerContent {
         tall_dialog(
             div()
                 .child(button("start", &self.start))
+                .children(self.near_shown.get().then(|| button("near", &self.near)))
                 .child(div().h(px(600.)))
-                .child(button("target", &self.target)),
+                .children(
+                    self.target_shown
+                        .get()
+                        .then(|| button("target", &self.target)),
+                ),
         )
     }
+}
+
+/// An open [`LayerContent`] dialog: its layer, its controls' handles, the page button behind it, the cells that show
+/// `near` and `target`, and the slot the page draws its button from (empty, the page draws no button).
+struct LayerDialog {
+    id: layers::LayerId,
+    start: FocusHandle,
+    near: FocusHandle,
+    target: FocusHandle,
+    page: FocusHandle,
+    near_shown: Rc<Cell<bool>>,
+    target_shown: Rc<Cell<bool>>,
+    page_slot: Rc<RefCell<Option<FocusHandle>>>,
 }
 
 /// Open a [`LayerContent`] dialog on a 400-pixel page holding a "page" button, starting on `start`, and check that
@@ -1920,6 +1942,20 @@ fn open_layer_dialog(
     FocusHandle,
     FocusHandle,
 ) {
+    let (cx, dialog) = open_layer_dialog_with(cx, true);
+    assert!(
+        bounds(cx, "target").top() >= bounds(cx, "tall-body").bottom(),
+        "the premise: the target is drawn below the body's fold"
+    );
+    (cx, dialog.id, dialog.start, dialog.target, dialog.page)
+}
+
+/// [`open_layer_dialog`] with `target` drawn only if `target_shown`; `near` is drawn. Checks that the dialog holds
+/// focus on its start and that `target` is drawn exactly when asked.
+fn open_layer_dialog_with(
+    cx: &mut TestAppContext,
+    target_shown: bool,
+) -> (&mut VisualTestContext, LayerDialog) {
     let page = Rc::new(RefCell::new(None::<FocusHandle>));
     let drawn = page.clone();
     let cx = open(cx, move |_, _| {
@@ -1928,12 +1964,17 @@ fn open_layer_dialog(
             .into_any_element()
     });
     cx.simulate_resize(size(px(720.), px(400.)));
-    let (start, target, container, on_page) = (handle(cx), handle(cx), handle(cx), handle(cx));
+    let (start, near, target, container, on_page) =
+        (handle(cx), handle(cx), handle(cx), handle(cx), handle(cx));
     page.replace(Some(on_page.clone()));
     redraw(cx);
+    let (near_shown, shown) = (Rc::new(Cell::new(true)), Rc::new(Cell::new(target_shown)));
     let content = LayerContent {
         start: start.clone(),
+        near: near.clone(),
         target: target.clone(),
+        near_shown: near_shown.clone(),
+        target_shown: shown.clone(),
     };
     let first = start.clone();
     let opened = cx.update(move |window, cx| {
@@ -1962,10 +2003,22 @@ fn open_layer_dialog(
         panic!("the dialog did not open");
     };
     assert!(
-        focused(cx, &start) && bounds(cx, "target").top() >= bounds(cx, "tall-body").bottom(),
-        "the premise: the dialog holds focus on its start, and the target is drawn below the body's fold"
+        focused(cx, &start) && cx.debug_bounds("target").is_some() == target_shown,
+        "the premise: the dialog holds focus on its start, and the target is drawn only if asked"
     );
-    (cx, id, start, target, on_page)
+    (
+        cx,
+        LayerDialog {
+            id,
+            start,
+            near,
+            target,
+            page: on_page,
+            near_shown,
+            target_shown: shown,
+            page_slot: page,
+        },
+    )
 }
 
 /// Move focus to `target` with [`focus::focus_in_layer`] for `mark`, then settle.
@@ -2071,37 +2124,31 @@ fn focus_in_layer_refuses_a_target_outside_the_topmost_dialog(cx: &mut TestAppCo
     );
 }
 
-/// A dialog's content in the shape of the launcher's Custom choice: a "custom" button whose click shows a "flags"
-/// control far below the body's fold. The click takes the mark of the user's action (`chosen`), and the render that
-/// first draws the flags queues [`focus::focus_in_layer`] for that mark through `window.defer`, which runs once that
-/// frame is drawn: the pattern `focus_in_layer`'s docs give for a target the action itself makes appear.
+/// A dialog's content in the shape of the launcher's Custom choice: an "other" button, then a "custom" button whose
+/// click shows a "flags" control far below the body's fold. The click takes the mark of the user's action (`chosen`),
+/// makes the flags appear and calls [`focus::focus_in_layer`] for them right there, in the action, as area code does:
+/// the flags are not drawn yet, and the coordinator waits for the frame that draws them. "other" is somewhere else for
+/// focus to be when the click on "custom" leaves focus where it was (macOS).
 struct CustomContent {
+    other: FocusHandle,
     custom: FocusHandle,
     flags: FocusHandle,
     chosen: Rc<Cell<Option<Mark>>>,
-    pending: Option<Mark>,
 }
 
 impl Render for CustomContent {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let shown = self.chosen.get().is_some();
-        if let Some(mark) = self.pending.take() {
-            let flags = self.flags.clone();
-            window.defer(cx, move |window, cx| {
-                focus::focus_in_layer(&flags, &mark, window, cx)
-            });
-        }
-        let (view, chosen) = (cx.entity(), self.chosen.clone());
-        let custom = button("custom", &self.custom).on_click(move |_, _, cx| {
+        let (view, chosen, flags) = (cx.entity(), self.chosen.clone(), self.flags.clone());
+        let custom = button("custom", &self.custom).on_click(move |_, window, cx| {
             let mark = Mark::take(cx);
             chosen.set(Some(mark));
-            view.update(cx, |content, cx| {
-                content.pending = Some(mark);
-                cx.notify();
-            });
+            view.update(cx, |_, cx| cx.notify());
+            focus::focus_in_layer(&flags, &mark, window, cx);
         });
         tall_dialog(
             div()
+                .child(button("other", &self.other))
                 .child(custom)
                 .child(div().h(px(600.)))
                 .children(shown.then(|| button("flags", &self.flags))),
@@ -2109,23 +2156,45 @@ impl Render for CustomContent {
     }
 }
 
+/// An open [`CustomContent`] dialog: its controls' handles and the cell that receives the click's mark.
+struct CustomDialog {
+    other: FocusHandle,
+    custom: FocusHandle,
+    flags: FocusHandle,
+    chosen: Rc<Cell<Option<Mark>>>,
+}
+
 /// Open a [`CustomContent`] dialog on a 400-pixel page, starting on "custom"; returns the flags control's handle and the
 /// cell that receives the click's mark.
 fn open_custom_dialog(
     cx: &mut TestAppContext,
 ) -> (&mut VisualTestContext, FocusHandle, Rc<Cell<Option<Mark>>>) {
+    let (cx, dialog) = open_custom_dialog_on(cx, false);
+    (cx, dialog.flags, dialog.chosen)
+}
+
+/// [`open_custom_dialog`], starting on "other" when `on_other` and on "custom" otherwise, and checking that the
+/// dialog holds focus there with the flags control not drawn.
+fn open_custom_dialog_on(
+    cx: &mut TestAppContext,
+    on_other: bool,
+) -> (&mut VisualTestContext, CustomDialog) {
     let cx = open(cx, |_, _| div().into_any_element());
     cx.simulate_resize(size(px(720.), px(400.)));
     settle(cx);
-    let (custom, flags, container) = (handle(cx), handle(cx), handle(cx));
+    let (other, custom, flags, container) = (handle(cx), handle(cx), handle(cx), handle(cx));
     let chosen = Rc::new(Cell::new(None));
     let content = CustomContent {
+        other: other.clone(),
         custom: custom.clone(),
         flags: flags.clone(),
         chosen: chosen.clone(),
-        pending: None,
     };
-    let start = custom.clone();
+    let start = if on_other {
+        other.clone()
+    } else {
+        custom.clone()
+    };
     let opened = cx.update(move |window, cx| {
         let view = cx.new(|_| content);
         let mark = Mark::take(cx);
@@ -2148,22 +2217,29 @@ fn open_custom_dialog(
         )
     });
     settle(cx);
+    let started = if on_other { &other } else { &custom };
     assert!(
-        opened.is_some() && focused(cx, &custom) && cx.debug_bounds("flags").is_none(),
-        "the premise: the dialog opened on the custom button, and the flags control is not drawn"
+        opened.is_some() && focused(cx, started) && cx.debug_bounds("flags").is_none(),
+        "the premise: the dialog opened on its start, and the flags control is not drawn"
     );
-    (cx, flags, chosen)
+    (
+        cx,
+        CustomDialog {
+            other,
+            custom,
+            flags,
+            chosen,
+        },
+    )
 }
 
 /// A user's own action that makes a new control appear and moves focus into it, as choosing Custom in the launcher
 /// moves focus into its flags field (SPEC.md: accepting Custom "moves focus to its flags editor"). The target is not
-/// drawn while the click is handled, so the owner moves focus from the frame that first draws it, and the control,
-/// below the body's fold, scrolls into view. On macOS a click does not focus the button, so no move that carries focus
-/// from the button would do.
+/// drawn while the click is handled, and the owner calls [`focus::focus_in_layer`] from the click all the same: the
+/// coordinator moves focus once the frame that draws it is on screen, and the control, below the body's fold, scrolls
+/// into view. On macOS a click does not focus the button, so no move that carries focus from the button would do.
 #[gpui::test]
-fn focus_in_layer_from_the_next_frame_moves_to_a_control_the_action_showed(
-    cx: &mut TestAppContext,
-) {
+fn focus_in_layer_from_the_action_moves_to_a_control_the_action_showed(cx: &mut TestAppContext) {
     let (cx, flags, chosen) = open_custom_dialog(cx);
     click(cx, "custom");
     assert!(
@@ -2181,5 +2257,484 @@ fn focus_in_layer_from_the_next_frame_moves_to_a_control_the_action_showed(
     assert!(
         !shows_whole(cx, "custom", "tall-body"),
         "and the body really scrolled: the clicked button left the view"
+    );
+}
+
+/// The macOS shape of the Custom choice, and of host settings' Edit: a click leaves the clicked button unfocused, so
+/// focus stays on whatever other control of the dialog held it, and the click makes a control appear that focus must
+/// move to. Nothing about the button's own focus can carry focus there; only the move the click asks for, which waits
+/// for the frame that draws its target.
+///
+/// Specified: under macOS's click rule, with focus on another control of the dialog and the flags control not drawn,
+/// a click on the custom button leaves the button unfocused, and focus then moves to the flags control the click
+/// showed, which the body scrolls into view whole.
+#[gpui::test]
+fn focus_in_layer_from_a_click_that_leaves_its_button_unfocused_moves_to_the_control_it_showed(
+    cx: &mut TestAppContext,
+) {
+    let (cx, dialog) = open_custom_dialog_on(cx, true);
+    cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
+    assert!(
+        focused(cx, &dialog.other) && !focused(cx, &dialog.custom),
+        "the premise: focus is on another control of the dialog, not the button"
+    );
+    click(cx, "custom");
+    assert!(
+        dialog.chosen.get().is_some(),
+        "the premise: the click chose Custom"
+    );
+    assert!(
+        !focused(cx, &dialog.custom),
+        "the premise: the click left the button unfocused"
+    );
+    assert!(
+        focused(cx, &dialog.flags),
+        "focus moved to the control the click showed"
+    );
+    assert!(
+        shows_whole(cx, "flags", "tall-body"),
+        "and the body scrolled the whole control into view"
+    );
+}
+
+/// A move to a control that is not drawn yet must still land once it is drawn, without its caller scheduling a frame
+/// of its own: that obligation on every caller is what made area code pick the wrong move or queue `window.defer`
+/// from its render. The coordinator waits for the first frame that draws the target inside the layer.
+///
+/// Specified: with the target not drawn, [`focus::focus_in_layer`] for a mark taken now leaves focus on the start
+/// control, and so does a frame that draws the dialog without the target; the first frame that draws the target moves
+/// focus to it and scrolls the body to show it whole.
+#[gpui::test]
+fn focus_in_layer_waits_for_the_frame_that_draws_its_target(cx: &mut TestAppContext) {
+    let (cx, dialog) = open_layer_dialog_with(cx, false);
+    let mark = cx.update(|_, cx| Mark::take(cx));
+    move_in_layer(cx, &dialog.target, mark);
+    assert!(
+        focused(cx, &dialog.start),
+        "nothing moved while the target is not drawn"
+    );
+    redraw(cx);
+    assert!(
+        focused(cx, &dialog.start),
+        "a frame that does not draw the target moved nothing"
+    );
+    dialog.target_shown.set(true);
+    redraw(cx);
+    assert!(
+        focused(cx, &dialog.target),
+        "the frame that drew the target moved focus to it"
+    );
+    assert!(
+        shows_whole(cx, "target", "tall-body"),
+        "and the body scrolled the whole control into view"
+    );
+}
+
+/// The user moving on cancels a waiting move as it cancels an immediate one (SPEC.md, "Who may move focus"): a key
+/// pressed while the target is still on its way must not be followed by focus jumping away from where the user is.
+///
+/// Specified: after [`focus::focus_in_layer`] waits for an undrawn target, a key press that leaves focus on the start
+/// control, then the frame that draws the target, leave focus on the start control and scroll nothing to the target.
+#[gpui::test]
+fn a_waiting_focus_in_layer_is_dropped_once_the_user_moved_on(cx: &mut TestAppContext) {
+    let (cx, dialog) = open_layer_dialog_with(cx, false);
+    let mark = cx.update(|_, cx| Mark::take(cx));
+    move_in_layer(cx, &dialog.target, mark);
+    keys(cx, "x");
+    assert!(
+        focused(cx, &dialog.start),
+        "the premise: the key left focus on the start control"
+    );
+    dialog.target_shown.set(true);
+    redraw(cx);
+    assert!(
+        focused(cx, &dialog.start),
+        "the target drawn after the user moved on took no focus"
+    );
+    assert!(
+        !shows_whole(cx, "target", "tall-body"),
+        "and nothing scrolled to it"
+    );
+}
+
+/// The window has one pending move, and a newer move wins over it: a result that moved focus elsewhere after the
+/// action that is still waiting must not be undone when the older target finally draws.
+///
+/// Specified: with [`focus::focus_in_layer`] waiting for an undrawn target, a second one to a drawn control moves focus
+/// there at once, and the frame that then draws the first target leaves focus on the second control.
+#[gpui::test]
+fn a_newer_focus_move_replaces_a_waiting_one(cx: &mut TestAppContext) {
+    let (cx, dialog) = open_layer_dialog_with(cx, false);
+    let mark = cx.update(|_, cx| Mark::take(cx));
+    move_in_layer(cx, &dialog.target, mark);
+    move_in_layer(cx, &dialog.near, mark);
+    assert!(
+        focused(cx, &dialog.near),
+        "the premise: the newer move, to a drawn control, moved focus at once"
+    );
+    dialog.target_shown.set(true);
+    redraw(cx);
+    assert!(
+        focused(cx, &dialog.near),
+        "the older target, drawn later, took no focus"
+    );
+}
+
+/// A waiting move belongs to the layer it was asked in, while focus stays there: once focus has left it (another
+/// dialog opened above, here a result that needs no user input), the move is stale even after focus comes back, since
+/// what the user sees has changed in between. Checking the layer only when the target draws would miss this.
+///
+/// Specified: with [`focus::focus_in_layer`] waiting for an undrawn target, another dialog opens above and closes
+/// again, returning focus to the start control; the frame that then draws the target leaves focus on the start
+/// control. No key or click happens, so only focus leaving the layer drops the move.
+#[gpui::test]
+fn a_waiting_focus_in_layer_is_dropped_once_focus_left_the_layer(cx: &mut TestAppContext) {
+    let (cx, dialog) = open_layer_dialog_with(cx, false);
+    let mark = cx.update(|_, cx| Mark::take(cx));
+    move_in_layer(cx, &dialog.target, mark);
+    let above = handle(cx);
+    let (covering, _, _) = open_dialog(cx, vec![("above", above.clone())], &above);
+    assert!(
+        focused(cx, &above),
+        "the premise: another dialog opened above and holds focus"
+    );
+    cx.update(move |window, cx| layers::close(covering, window, cx));
+    settle(cx);
+    assert!(
+        focused(cx, &dialog.start),
+        "the premise: closing it returned focus to the start control"
+    );
+    dialog.target_shown.set(true);
+    redraw(cx);
+    assert!(
+        focused(cx, &dialog.start),
+        "the target drawn after focus came back took no focus"
+    );
+}
+
+/// An action may replace the control it was pressed on with the control focus should go to, as an inline question
+/// takes the place of the button that asked it. In the frame that does that, the focused control vanishes and the
+/// coordinator recovers focus to the closest control left before the waiting move runs; that recovery is the
+/// coordinator keeping focus in place, not a newer move, and must not cancel it.
+///
+/// Specified: with focus on the near control and [`focus::focus_in_layer`] waiting for the undrawn target, a frame
+/// that stops drawing the near control and draws the target leaves focus on the target.
+#[gpui::test]
+fn a_waiting_focus_in_layer_survives_recovery_from_a_control_that_vanished(
+    cx: &mut TestAppContext,
+) {
+    let (cx, dialog) = open_layer_dialog_with(cx, false);
+    let mark = cx.update(|_, cx| Mark::take(cx));
+    move_in_layer(cx, &dialog.near, mark);
+    assert!(
+        focused(cx, &dialog.near),
+        "the premise: the near control holds focus"
+    );
+    let mark = cx.update(|_, cx| Mark::take(cx));
+    move_in_layer(cx, &dialog.target, mark);
+    dialog.near_shown.set(false);
+    dialog.target_shown.set(true);
+    redraw(cx);
+    assert!(
+        cx.debug_bounds("near").is_none(),
+        "the premise: the near control is no longer drawn"
+    );
+    assert!(
+        focused(cx, &dialog.target),
+        "focus moved to the target after the recovery from the vanished control"
+    );
+}
+
+// ---- A dialog naming its return target -------------------------------------------------------------------------------
+
+/// Open a dialog of one "named-start" button that starts there and names `control` as where closing returns focus
+/// ([`focus::ReturnTo::Control`]), for a mark taken now.
+fn open_naming(
+    control: &FocusHandle,
+    start: &FocusHandle,
+    window: &mut Window,
+    cx: &mut gpui::App,
+) -> Option<layers::LayerId> {
+    let view = cx.new(|_| Panel {
+        controls: vec![("named-start", start.clone())],
+        shown: Rc::new(Cell::new(true)),
+    });
+    let mark = Mark::take(cx);
+    layers::open_dialog(
+        Dialog {
+            view: view.into(),
+            container: cx.focus_handle(),
+            start: start.clone(),
+            subject: None,
+            main_action: None,
+            keeps_focus_on_empty_click: true,
+            returns_to: focus::ReturnTo::Control(control.clone()),
+            on_dismiss: None,
+            placement: layers::DialogPlacement::Centered,
+            dismiss_on_outside_press: false,
+        },
+        &mark,
+        window,
+        cx,
+    )
+}
+
+/// A button `id`, focusing `control`, whose click opens [`open_naming`]'s dialog naming it, starting on `start`: an
+/// opener that, as the app's openers now do, does not focus itself before opening.
+fn naming_button(id: &'static str, control: &FocusHandle, start: &FocusHandle) -> Button {
+    let (named, first) = (control.clone(), start.clone());
+    button(id, control).on_click(move |_, window, cx| {
+        open_naming(&named, &first, window, cx);
+    })
+}
+
+/// A dialog's content holding its start control and a [`naming_button`] beside it, for a dialog opened from inside a
+/// dialog.
+struct InnerOpener {
+    start: FocusHandle,
+    inner: FocusHandle,
+    inner_start: FocusHandle,
+}
+
+impl Render for InnerOpener {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .gap(px(8.))
+            .child(button("outer-start", &self.start))
+            .child(naming_button("inner", &self.inner, &self.inner_start))
+    }
+}
+
+/// On macOS a click leaves a button unfocused, so a dialog a button opens would give focus back to whatever held it
+/// before the click; SPEC.md returns it to the button ("Escape and either close control return focus to the gear"),
+/// as the old app did by naming it. Openers used to focus the button first, which cost a whole-window refresh and was
+/// refused inside another dialog, where the coordinator moves no focus on the page's behalf. The opener names the
+/// button instead.
+///
+/// Specified, under macOS's click rule: with focus on another page control, a click on a page button that opens a
+/// dialog naming it leaves focus away from the button until the dialog opens, and Escape returns focus to the button.
+/// Inside an open dialog, a click on a button that opens a second dialog naming it leaves focus on the first dialog's
+/// start, and Escape on the second returns focus to that button. A dialog that names a page control while another
+/// dialog stays open below it gives focus back to what held it when it opened, inside the dialog below.
+#[gpui::test]
+fn a_dialog_returns_focus_to_the_control_its_opener_names(cx: &mut TestAppContext) {
+    let elsewhere = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let opener = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let start = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let (drawn_elsewhere, drawn_opener, drawn_start) =
+        (elsewhere.clone(), opener.clone(), start.clone());
+    let cx = open(cx, move |_, _| {
+        div()
+            .flex()
+            .gap(px(8.))
+            .child(button("elsewhere", &drawn_elsewhere))
+            .child(naming_button("opener", &drawn_opener, &drawn_start))
+            .into_any_element()
+    });
+    cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &elsewhere),
+        "the premise: focus is on a page control away from the opener"
+    );
+    click(cx, "opener");
+    assert!(
+        focused(cx, &start) && !focused(cx, &opener),
+        "the premise: the click opened the dialog with focus on its start"
+    );
+    keys(cx, "escape");
+    assert!(
+        focused(cx, &opener),
+        "closing it returned focus to the button that opened it, which never held focus"
+    );
+
+    let (outer_start, inner, inner_start, container) =
+        (handle(cx), handle(cx), handle(cx), handle(cx));
+    let content = InnerOpener {
+        start: outer_start.clone(),
+        inner: inner.clone(),
+        inner_start: inner_start.clone(),
+    };
+    let first = outer_start.clone();
+    let outer = cx.update(move |window, cx| {
+        let view = cx.new(|_| content);
+        let mark = Mark::take(cx);
+        layers::open_dialog(
+            Dialog {
+                view: view.into(),
+                container,
+                start: first,
+                subject: None,
+                main_action: None,
+                keeps_focus_on_empty_click: true,
+                returns_to: focus::ReturnTo::Opener,
+                on_dismiss: None,
+                placement: layers::DialogPlacement::Centered,
+                dismiss_on_outside_press: false,
+            },
+            &mark,
+            window,
+            cx,
+        )
+    });
+    settle(cx);
+    assert!(
+        outer.is_some() && focused(cx, &outer_start),
+        "the premise: the outer dialog opened on its start"
+    );
+    click(cx, "inner");
+    assert!(
+        focused(cx, &inner_start),
+        "the premise: the inner button's click opened the second dialog"
+    );
+    keys(cx, "escape");
+    assert!(
+        focused(cx, &inner),
+        "closing the second dialog returned focus to the button inside the first that opened it"
+    );
+
+    let named_page = opener.clone();
+    let fallback = cx.update(move |window, cx| open_naming(&named_page, &start, window, cx));
+    settle(cx);
+    assert!(
+        fallback.is_some(),
+        "the premise: a dialog naming the page's button opened over the outer dialog"
+    );
+    keys(cx, "escape");
+    assert!(
+        focused(cx, &inner),
+        "with the outer dialog still open, focus went back to its opener there, not to the page"
+    );
+}
+
+/// A feature may open a dialog and, in the same update, move focus to a control in it other than its start: Settings
+/// opened at agent trust when the agent's read has already answered. Nothing of the dialog is drawn yet, focus
+/// included, so judging the move then would refuse it, and whether it worked would hang on where the dialog starts.
+///
+/// Specified: a dialog of two buttons opened on the first, with [`focus::focus_in_layer`] asked for the second in the
+/// same update for a mark taken there, has focus on the second once the first frame is drawn.
+#[gpui::test]
+fn focus_in_layer_asked_as_its_dialog_opens_moves_after_the_first_frame(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    let (first, second, container) = (handle(cx), handle(cx), handle(cx));
+    let (start, other) = (first.clone(), second.clone());
+    let opened = cx.update(move |window, cx| {
+        let view = cx.new(|_| Panel {
+            controls: vec![("first", start.clone()), ("second", other.clone())],
+            shown: Rc::new(Cell::new(true)),
+        });
+        let mark = Mark::take(cx);
+        let id = layers::open_dialog(
+            Dialog {
+                view: view.into(),
+                container,
+                start,
+                subject: None,
+                main_action: None,
+                keeps_focus_on_empty_click: true,
+                returns_to: focus::ReturnTo::Opener,
+                on_dismiss: None,
+                placement: layers::DialogPlacement::Centered,
+                dismiss_on_outside_press: false,
+            },
+            &mark,
+            window,
+            cx,
+        );
+        focus::focus_in_layer(&other, &mark, window, cx);
+        id
+    });
+    settle(cx);
+    assert!(opened.is_some(), "the premise: the dialog opened");
+    assert!(
+        focused(cx, &second),
+        "focus moved to the second control once the dialog was drawn"
+    );
+    assert!(!focused(cx, &first), "and left the dialog's start");
+}
+
+/// A waiting move must not land anywhere but inside its layer: if the control it waits for first appears outside the
+/// dialog (on the page behind it), moving there would pull focus out of the dialog the user is in. The immediate
+/// refusal is tested above; this is the same rule for a move kept for later.
+///
+/// Specified: with the page's button not drawn, [`focus::focus_in_layer`] for it moves nothing; the frame that then
+/// draws it on the page behind the dialog leaves focus on the dialog's start, and so does a later frame. The test does
+/// not by itself show that the move waited rather than being refused at once: a mutant that moves on the waiting
+/// path's refusal shows that it reaches that path.
+#[gpui::test]
+fn a_waiting_focus_in_layer_whose_target_draws_outside_the_layer_is_refused(
+    cx: &mut TestAppContext,
+) {
+    let (cx, dialog) = open_layer_dialog_with(cx, true);
+    let page = dialog.page_slot.take();
+    redraw(cx);
+    assert!(
+        page.is_some() && cx.debug_bounds("page").is_none(),
+        "the premise: the page's button is no longer drawn"
+    );
+    let mark = cx.update(|_, cx| Mark::take(cx));
+    move_in_layer(cx, &dialog.page, mark);
+    assert!(
+        focused(cx, &dialog.start),
+        "the premise: nothing moved while the button is not drawn"
+    );
+    dialog.page_slot.replace(page);
+    redraw(cx);
+    assert!(
+        cx.debug_bounds("page").is_some(),
+        "the premise: the button is drawn on the page again"
+    );
+    assert!(
+        focused(cx, &dialog.start),
+        "the button drawn outside the dialog took no focus"
+    );
+    redraw(cx);
+    assert!(focused(cx, &dialog.start), "nor in a later frame");
+}
+
+/// A named return target can go while its dialog is open (the gear no longer drawn): focusing it then would lose focus
+/// on the next frame and send it home, where SPEC.md returns focus "to where it was before it opened".
+///
+/// Specified: with focus on a page control, a dialog opened naming another page control, which then stops being drawn,
+/// gives focus back to the first control when Escape closes it.
+#[gpui::test]
+fn a_dialog_naming_a_control_no_longer_drawn_returns_focus_to_its_opener(cx: &mut TestAppContext) {
+    let elsewhere = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let named = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let shown = Rc::new(Cell::new(true));
+    let (drawn_elsewhere, drawn_named, drawn_shown) =
+        (elsewhere.clone(), named.clone(), shown.clone());
+    let cx = open(cx, move |_, _| {
+        div()
+            .flex()
+            .gap(px(8.))
+            .child(button("elsewhere", &drawn_elsewhere))
+            .children(drawn_shown.get().then(|| button("named", &drawn_named)))
+            .into_any_element()
+    });
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &elsewhere),
+        "the premise: focus is on the page control the dialog opens over"
+    );
+    let start = handle(cx);
+    let (target, first) = (named.clone(), start.clone());
+    let opened = cx.update(move |window, cx| open_naming(&target, &first, window, cx));
+    settle(cx);
+    assert!(
+        opened.is_some() && focused(cx, &start),
+        "the premise: the dialog opened on its start"
+    );
+    shown.set(false);
+    redraw(cx);
+    assert!(
+        cx.debug_bounds("named").is_none(),
+        "the premise: the named control is no longer drawn"
+    );
+    keys(cx, "escape");
+    assert!(
+        focused(cx, &elsewhere),
+        "closing returned focus to what held it before the dialog opened"
     );
 }
