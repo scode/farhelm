@@ -40,6 +40,7 @@ use gpui::{
 };
 
 use crate::assets::TERMINAL_FONT;
+use crate::components::ScrollbarLines;
 use crate::render_count;
 use crate::theme::{TERMINAL, TerminalColor};
 use style::{ResolvedStyle, Underline};
@@ -419,6 +420,49 @@ impl TerminalView {
         self.wheel_remainder = (next - index * cell) as f32;
         self.wheel_cell = cell_height;
         if self.viewport.scroll_to(&self.model, first + index as u64) {
+            self.update_shown();
+            cx.notify();
+        }
+    }
+
+    /// Where the view is, for the scrollbar: the screen's rows out of every line navigation can reach (the history, the
+    /// notice line if any, and the screen), with the view's top counted from the first of them. On the alternate
+    /// screen that is the screen alone, so there is nothing to scroll; nor is there behind the catch-up placeholder,
+    /// which hides the view until its replay is complete.
+    pub fn scroll_position(&self) -> ScrollbarLines {
+        if !self.visible {
+            return ScrollbarLines {
+                visible: 0,
+                total: 0,
+                top: 0,
+            };
+        }
+        let first = self.viewport.first(&self.model);
+        let history = self.viewport.bottom(&self.model).saturating_sub(first);
+        let visible = self.rows.len();
+        ScrollbarLines {
+            visible,
+            total: usize::try_from(history)
+                .unwrap_or(usize::MAX)
+                .saturating_add(visible),
+            top: usize::try_from(self.viewport.top(&self.model).saturating_sub(first))
+                .unwrap_or(usize::MAX),
+        }
+    }
+
+    /// Move the view's top to `index` lines below the first line navigation can reach ([`Self::scroll_position`]),
+    /// rounded to a line and kept in range; reaching the screen follows the bottom again. The scrollbar's move (the old
+    /// app's `scrollToIndex`), which drops any part of a line the wheel had gathered, since the view now rests where
+    /// the bar put it.
+    pub fn scroll_to_index(&mut self, index: f32, cx: &mut Context<Self>) {
+        self.wheel_remainder = 0.;
+        // `as` saturates, and a NaN becomes 0: a bar's position past either end clamps there.
+        let index = index.round().max(0.) as u64;
+        let first = self.viewport.first(&self.model);
+        if self
+            .viewport
+            .scroll_to(&self.model, first.saturating_add(index))
+        {
             self.update_shown();
             cx.notify();
         }

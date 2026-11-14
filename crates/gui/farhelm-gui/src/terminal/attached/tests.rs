@@ -18,9 +18,9 @@ use farhelm_helm_client::fake::terminal::{
 use farhelm_input_mapping::Modifiers as KeyModifiers;
 use farhelm_proto::DetachCode;
 use gpui::{
-    AppContext as _, Context, Entity, KeyBinding, KeyUpEvent, Keystroke, Modifiers, ParentElement,
-    Render, ScrollDelta, ScrollEvent, Styled, TestAppContext, VisualTestContext, Window, div,
-    point, px,
+    AppContext as _, Context, Entity, KeyBinding, KeyUpEvent, Keystroke, Modifiers, MouseButton,
+    ParentElement, Render, ScrollDelta, ScrollEvent, Styled, TestAppContext, VisualTestContext,
+    Window, div, point, px,
 };
 
 use super::*;
@@ -1284,6 +1284,91 @@ fn the_pointer_names_the_cell_drawn_under_it_on_a_lifted_screen(cx: &mut TestApp
         Some((2, lifted)),
         "a boundary belongs to the cell before it"
     );
+}
+
+// ---- The scrollbar ---------------------------------------------------------------------------------------------------
+
+/// Whether the terminal's scrollbar is shown now (the owner's rule; the component draws it only with history).
+fn scrollbar_shown(h: &mut Harness) -> bool {
+    h.read(|owner, _| owner.scrollbar_shown())
+}
+
+/// The scrollbar shows while the pointer is over the terminal and for 800 milliseconds after the last scroll or after
+/// the pointer leaves, as the old app's did; a later scroll restarts that time. Shown for good it would cover the
+/// rightmost column's edge all the time; hidden at once it would vanish under a user still reading where it was.
+#[gpui::test]
+fn the_scrollbar_shows_on_hover_and_for_a_moment_after_a_scroll(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_with_history(40);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    // The premise: the pointer is nowhere near the terminal, and nothing has scrolled.
+    h.cx.simulate_mouse_move(point(px(-10.), px(-10.)), None, Modifiers::none());
+    advance(h.cx, Duration::from_secs(1));
+    assert!(!scrollbar_shown(&mut h), "the premise: hidden");
+
+    // Scrolled by the keyboard, so the pointer stays away (a wheel event puts it over the terminal).
+    keys(h.cx, "shift-pageup");
+    assert!(scrollbar_shown(&mut h), "a scroll shows it");
+    advance(h.cx, Duration::from_millis(500));
+    keys(h.cx, "shift-pageup");
+    advance(h.cx, Duration::from_millis(500));
+    assert!(scrollbar_shown(&mut h), "a later scroll restarts the time");
+    advance(h.cx, Duration::from_millis(400));
+    assert!(
+        !scrollbar_shown(&mut h),
+        "800 ms after the last scroll it hides"
+    );
+
+    // Over the grid, where the wheel helper points too.
+    h.cx.simulate_mouse_move(point(px(200.), px(200.)), None, Modifiers::none());
+    advance(h.cx, Duration::from_secs(2));
+    assert!(
+        scrollbar_shown(&mut h),
+        "shown while the pointer is over the terminal"
+    );
+    // Typing does not count as the pointer leaving: the old app kept the bar while the pointer stayed.
+    keys(h.cx, "a");
+    advance(h.cx, Duration::from_secs(1));
+    assert!(
+        scrollbar_shown(&mut h),
+        "typing with the pointer over the terminal keeps it"
+    );
+    h.cx.simulate_mouse_move(point(px(-10.), px(-10.)), None, Modifiers::none());
+    assert!(
+        scrollbar_shown(&mut h),
+        "still shown just after the pointer leaves"
+    );
+    advance(h.cx, Duration::from_millis(900));
+    assert!(!scrollbar_shown(&mut h));
+}
+
+/// A press at the top of the terminal's scrollbar takes the view to the oldest line, a drag to its bottom brings it
+/// back to the live screen, and the program hears nothing of either: the bar is the terminal's own, as in the old
+/// app. (The press that a program with mouse reporting must not get is pinned once mouse reporting is built.)
+#[gpui::test]
+fn the_terminals_scrollbar_moves_the_view_and_sends_nothing(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_with_history(40);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let bar = test_support::bounds(h.cx, "terminal-scrollbar");
+    let top = point(bar.center().x, bar.top() + px(2.));
+    h.cx.simulate_mouse_down(top, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert!(
+        h.text().unwrap().starts_with("h0\n"),
+        "a press at the top shows the oldest line"
+    );
+    let bottom = point(bar.center().x, bar.bottom() + px(50.));
+    h.cx.simulate_mouse_move(bottom, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_up(bottom, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert!(
+        h.following(),
+        "dragged past the bottom, the view follows the screen"
+    );
+    assert_eq!(h.sent(), [], "the program hears nothing of the bar");
 }
 
 // ---- Paste ---------------------------------------------------------------------------------------------------------

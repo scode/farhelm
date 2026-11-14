@@ -14,6 +14,7 @@ use farhelm_grid_model::{ClipboardTarget, Color, GridOutput, Style, style_flags 
 use gpui::{AppContext as _, Entity, TestAppContext};
 
 use super::*;
+use crate::components::ScrollbarLines;
 use crate::render_count;
 use crate::test_support;
 use crate::theme::{self, TerminalRole};
@@ -686,6 +687,64 @@ fn scrolling_and_output_while_scrolled_back_redraw(cx: &mut TestAppContext) {
         renders(cx),
         0,
         "history the following view does not show redraws nothing"
+    );
+}
+
+/// The scrollbar's numbers count every line navigation can reach: the history, the notice line when recovery lost
+/// some, and the screen, with the view's top among them; the alternate screen and the catch-up placeholder offer
+/// nothing to scroll. A bar that counted otherwise would sit in the wrong place, or offer a scroll the view cannot make.
+#[gpui::test]
+fn the_scroll_position_counts_what_navigation_can_reach(cx: &mut TestAppContext) {
+    let placeholder = fed(ATTACH, false);
+    assert!(
+        !placeholder.visible && placeholder.model.history().len() == 3,
+        "the premise: hidden, with the fixture's history already in the model"
+    );
+    assert!(
+        !placeholder.scroll_position().scrollable(),
+        "behind the catch-up placeholder"
+    );
+
+    let terminal = attached_with_history(cx);
+    let position =
+        |cx: &mut TestAppContext| terminal.read_with(cx, |view, _| view.scroll_position());
+    // The fixture: a 4-row screen under three history lines.
+    assert_eq!(
+        position(cx),
+        ScrollbarLines {
+            visible: 4,
+            total: 7,
+            top: 3
+        }
+    );
+    let state = |alt: bool| -> GridOutput {
+        serde_json::from_value(
+            serde_json::json!({"t":"state","mouse":"off","focus":false,"alt_screen":alt,
+            "default_fg":null,"default_bg":null,"history_trimmed":true,"exit":null}),
+        )
+        .unwrap()
+    };
+    terminal.update(cx, |view, cx| {
+        let (_, applied) = view.apply([state(false)], cx);
+        applied.unwrap();
+        view.scroll_lines(-1, cx);
+    });
+    assert_eq!(
+        position(cx),
+        ScrollbarLines {
+            visible: 4,
+            total: 8,
+            top: 3
+        },
+        "the notice line counts, and the view is a line up"
+    );
+    terminal.update(cx, |view, cx| {
+        let (_, applied) = view.apply([state(true)], cx);
+        applied.unwrap();
+    });
+    assert!(
+        !position(cx).scrollable(),
+        "the alternate screen has no history"
     );
 }
 

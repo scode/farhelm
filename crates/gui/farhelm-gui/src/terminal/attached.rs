@@ -90,6 +90,7 @@ use std::future::Future;
 use std::ops::Range;
 use std::pin::Pin;
 use std::task::Poll;
+use std::time::Duration;
 
 use farhelm_grid_model::{ExitState, GridError, GridOutput};
 use farhelm_helm_client::terminal::{
@@ -107,16 +108,19 @@ use farhelm_proto::DetachCode;
 use farhelm_proto::grid::{GridInput, MouseEventKind};
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, ClipboardEntry, ClipboardItem, Context,
-    ElementInputHandler, Entity, EntityInputHandler, FocusHandle, InteractiveElement, IntoElement,
-    KeyDownEvent, NativeKeyIdentity, ParentElement, Pixels, Point, Render, ScrollDelta,
-    ScrollEvent, SharedString, Styled, Subscription, Task, UTF16Selection, WeakEntity, Window,
-    canvas, div, prelude::FluentBuilder as _, px,
+    ElementInputHandler, Entity, EntityInputHandler, FocusHandle, HoverListenerMode,
+    InteractiveElement, IntoElement, KeyDownEvent, NativeKeyIdentity, ParentElement, Pixels, Point,
+    Render, ScrollDelta, ScrollEvent, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, Task, UTF16Selection, WeakEntity, Window, canvas, div,
+    prelude::FluentBuilder as _, px,
 };
 
 use super::{CellMetrics, CursorPhase, TerminalView, style};
 use crate::actions::{self, KeyOwner};
 use crate::assets::TERMINAL_FONT;
-use crate::components::{Banner, Button, HoverHelp, Role};
+use crate::components::{
+    Banner, Button, HoverHelp, Role, SCROLLBAR_WIDTH, Scrollbar, ScrollbarEvent,
+};
 use crate::focus::{self, OnPress};
 use crate::host_text::{HostSentence, HostText};
 use crate::render_count;
@@ -132,9 +136,12 @@ pub(crate) const BATCH: usize = 8;
 /// it, at the reference commit.
 const PANE_PADDING: f32 = 8.;
 
-/// The column the old fit kept free for the scrollback bar (`SCROLLBAR_WIDTH` in grid-terminal.js). Kept although
-/// this module draws no scrollbar yet, so that the bar's arrival does not change every terminal's width.
-const SCROLLBAR_WIDTH: f32 = 14.;
+/// How long the scrollbar stays shown after a scroll once the pointer is off the terminal (`SCROLLBAR_FADE_MS` in
+/// grid-terminal.js, which faded it out over that time instead; see the scrollbar component on why there is no fade).
+const SCROLLBAR_HOLD: Duration = Duration::from_millis(800);
+
+/// The scrollbar's hover help. The old bar had none; the component layer gives every control one.
+const SCROLLBAR_HELP: &str = "Drag to scroll back through the terminal's history";
 
 /// The largest grid in either direction the format allows (`MAX_DIMENSION` in grid-terminal.js).
 const MAX_DIMENSION: f32 = 1000.;
@@ -215,6 +222,10 @@ pub struct AttachedTerminal {
     grid_origin: Option<Point<Pixels>>,
     /// The part of a line the wheel has gathered toward the program's next wheel report, per terminal.
     program_wheel: WheelAccumulator,
+    /// Whether the pointer is over the grid's area, which shows the scrollbar (when there is history to scroll).
+    pointer_over: bool,
+    /// Keeps the scrollbar shown for [`SCROLLBAR_HOLD`] after the last scroll; it clears itself when it fires.
+    scrollbar_hold: Option<ticker::Deadline>,
     retired: bool,
     /// The pane's focus: a tab stop, which a press on the pane focuses. Lives as long as the owner, so the session
     /// view can name it as home across redraws.
@@ -297,6 +308,8 @@ impl AttachedTerminal {
             room: None,
             grid_origin: None,
             program_wheel: WheelAccumulator::default(),
+            pointer_over: false,
+            scrollbar_hold: None,
             retired,
             focus: cx.focus_handle().tab_stop(true),
             text_input: {
@@ -755,9 +768,64 @@ impl AttachedTerminal {
             modifiers.shift,
             actions::THIS_PLATFORM == Platform::Mac,
         );
-        view.update(cx, |view, cx| {
-            view.scroll_pixels(pixels as f32, cell.height, cx)
-        });
+        if pixels != 0. {
+            view.update(cx, |view, cx| {
+                view.scroll_pixels(pixels as f32, cell.height, cx)
+            });
+            self.hold_scrollbar(cx);
+        }
+    }
+
+    /// Show the scrollbar for [`SCROLLBAR_HOLD`] from now, wherever the pointer is: after a scroll through the history
+    /// (by the wheel, the page keys or the scrollbar), and when the pointer leaves the grid's area (the old app's
+    /// `showScrollbarActivity`). A later call restarts the hold.
+    fn hold_scrollbar(&mut self, cx: &mut Context<Self>) {
+        let owner = cx.weak_entity();
+        self.scrollbar_hold = Some(ticker::after(SCROLLBAR_HOLD, cx, move |cx| {
+            let _ = owner.update(cx, |owner, cx| {
+                owner.scrollbar_hold = None;
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+
+    /// Whether the scrollbar is drawn (when there is history to scroll): while the pointer is over the grid's area,
+    /// and for [`SCROLLBAR_HOLD`] after a scroll or the pointer leaving, as in the old app.
+    fn scrollbar_shown(&self) -> bool {
+        self.pointer_over || self.scrollbar_hold.is_some()
+    }
+
+    /// A press or drag on the scrollbar moves the view there; letting go starts the hold, as a scroll does.
+    fn scrollbar(&mut self, event: ScrollbarEvent, cx: &mut Context<Self>) {
+        if let ScrollbarEvent::Scroll(index) = event
+            && let Some(view) = &self.committed
+        {
+            view.update(cx, |view, cx| view.scroll_to_index(index, cx));
+        }
+        self.hold_scrollbar(cx);
+    }
+
+    /// The scrollbar over the shown screen's history, in the column the fit leaves free at the grid's right edge. It is
+    /// drawn while the pointer is over the grid's area or a scroll was recent, and only when there is history to
+    /// scroll, which the component itself decides.
+    fn scrollbar_element(&self, view: &Entity<TerminalView>, cx: &Context<Self>) -> AnyElement {
+        let shown = view.read(cx);
+        let (fg, _) = style::defaults(shown.state);
+        let owner = cx.weak_entity();
+        Scrollbar::new(
+            "terminal-scrollbar",
+            "Terminal history",
+            HoverHelp::tooltip(SCROLLBAR_HELP),
+            Role::ScrollBar,
+            shown.scroll_position(),
+            fg.hsla(1.),
+        )
+        .shown(self.scrollbar_shown())
+        .on_scroll(move |event, _, cx| {
+            let _ = owner.update(cx, |owner, cx| owner.scrollbar(event, cx));
+        })
+        .into_any_element()
     }
 
     /// Shift+PageUp (`direction` -1) or Shift+PageDown (1): scroll the shown screen a page less a line, the old app's
@@ -770,6 +838,7 @@ impl AttachedTerminal {
         let page = view.read(cx).rows.len().saturating_sub(1);
         let lines = direction * i64::try_from(page).unwrap_or(i64::MAX);
         view.update(cx, |view, cx| view.scroll_lines(lines, cx));
+        self.hold_scrollbar(cx);
     }
 
     /// The user's Paste ([`actions::Paste`], from a key or a menu): send the clipboard's text to the program as one
@@ -1225,6 +1294,17 @@ impl Render for AttachedTerminal {
             .as_ref()
             .map(|view| self.screen(view, cx))
             .unwrap_or_default();
+        // In the body's padding box, as the old bar sat in its element's: over the right padding and the column the
+        // fit leaves free (`SCROLLBAR_WIDTH`), the full height of the grid's area.
+        let scrollbar = self.committed.as_ref().map(|view| {
+            div()
+                .absolute()
+                .top_0()
+                .right_0()
+                .bottom_0()
+                .w(px(SCROLLBAR_WIDTH))
+                .child(self.scrollbar_element(view, cx))
+        });
         // The grid's area is what takes focus and keys, not the whole pane: the status line above it holds a Take
         // control button, whose own Tab and Escape the terminal's key context would otherwise give to the program
         // (`actions::TERMINAL_KEYS` binds them to nothing there), leaving a focused button with no way off it.
@@ -1244,6 +1324,20 @@ impl Render for AttachedTerminal {
                 }),
             )
             .on_scroll(cx.listener(Self::wheel))
+            // Typing does not count as the pointer leaving: the old app kept the bar shown while the pointer stayed
+            // over the terminal, keys or not.
+            .hover_listener_mode(HoverListenerMode::InputModalityIndependent)
+            .on_hover(cx.listener(|owner, hovered: &bool, _, cx| {
+                if owner.pointer_over != *hovered {
+                    owner.pointer_over = *hovered;
+                    // Leaving shows the bar for the hold, as the old app's `mouseleave` did.
+                    if *hovered {
+                        cx.notify();
+                    } else {
+                        owner.hold_scrollbar(cx);
+                    }
+                }
+            }))
             .relative()
             .flex_1()
             .min_h_0()
@@ -1256,7 +1350,8 @@ impl Render for AttachedTerminal {
                     .overflow_hidden()
                     .child(room)
                     .children(screen),
-            );
+            )
+            .children(scrollbar);
         let body = focus::track(body, &self.focus, OnPress::Focus);
         // Measures the whole pane, banner included (see `banner`). The measurement is handed over after the frame:
         // a notify during paint would be lost.
