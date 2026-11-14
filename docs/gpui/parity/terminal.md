@@ -4,29 +4,29 @@ Old Playwright specs (reference commit `24bc0580`; read one with `git show 24bc0
 in the GPUI app. Port behavior from SPEC.md and these specs' acceptance cases, not one spec file at a time. SPEC.md
 sections: Terminal experience, Attachments, Session view, Keyboard focus.
 
-| Old spec                                 | Tests | Covers                                                                                               | Status         |
-| ---------------------------------------- | ----- | ---------------------------------------------------------------------------------------------------- | -------------- |
-| `grid-client/grid-attach.spec.ts`        | 36    | a terminal mounts the grid directly and keeps the catch-up, input and resize                         | not yet ported |
-| `grid-client/grid-copy.spec.ts`          | 1     | a copy across a wide character's wrap leaves out the empty edge cell, on the screen and from history | not yet ported |
-| `grid-client/grid-fit.spec.ts`           | 3     | sizing after real pane changes                                                                       | not yet ported |
-| `grid-client/grid-terminal.spec.ts`      | 41    | a recorded attach draws its text, wide boxes, styles and cursor in their cells                       | not yet ported |
-| `tests/grid-flood.spec.ts`               | 1     | a flood's scrollback arrives whole and in order, through a viewer that stops reading                 | not yet ported |
-| `tests/grid-terminal.spec.ts`            | 1     | a host terminal draws as a grid and takes typing                                                     | not yet ported |
-| `tests/terminal.spec.ts`                 | 58    | renders the session and the agent's TUI output                                                       | not yet ported |
-| `tests/terminal-attachments.spec.ts`     | 36    | a file dropped on the agent terminal uploads and inserts its host path at the cursor                 | not yet ported |
-| `tests/terminal-clipboard.spec.ts`       | 8     | an OSC 52 write from the terminal's own process reaches the system clipboard, byte for byte          | not yet ported |
-| `tests/terminal-files.spec.ts`           | 6     | changed OSC display text starts a fresh hover at the same cells                                      | not yet ported |
-| `tests/terminal-flood.spec.ts`           | 3     | a terminal socket for an unknown session reports why                                                 | not yet ported |
-| `tests/terminal-font.spec.ts`            | 3     | terminal text size ${size} keeps input focus at its limit                                            | not yet ported |
-| `tests/terminal-keys.spec.ts`            | 5     | Shift+Enter                                                                                          | not yet ported |
-| `tests/terminal-links.spec.ts`           | 15    | an OSC 8 ${kind} span ignores a selection drag and still accepts a click                             | not yet ported |
-| `tests/terminal-multihost.spec.ts`       | 55    | multi-host                                                                                           | not yet ported |
-| `tests/terminal-reconnect.spec.ts`       | 24    | socket-killed-reconnects-and-lands-at-tail                                                           | not yet ported |
-| `tests/terminal-restart.spec.ts`         | 16    | an interrupted session's view leads with the resume offer, and declining changes nothing             | not yet ported |
-| `tests/terminal-switch-geometry.spec.ts` | 1     | session switching keeps full-width text and rules still at ${font}px                                 | not yet ported |
-| `tests/terminal-tabs.spec.ts`            | 36    | a tab runs a real shell in the session's working directory, leaving the agent terminal alone         | not yet ported |
-| `tests/terminal-unicode.spec.ts`         | 2     | a narrowed text-presentation glyph owns one grid cell                                                | not yet ported |
-| `tests/mouse-modes.spec.ts`              | 3     | mouse-modes-restored-on-reattach                                                                     | not yet ported |
-| `tests/ime-composition.spec.ts`          | 8     | overlap boundary leaves the next key ordinary (${order}, ${keyCode})                                 | not yet ported |
-| `tests/header.spec.ts`                   | 12    | native tunnel preview keeps ports and actions inside a 650px pane                                    | not yet ported |
-| `tests/stop-tabs.spec.ts`                | 7     | legacy HTTP Stop refuses tabs until tab consent is explicit                                          | not yet ported |
+| Old spec                                 | Tests | Covers                                                                                               | Status                                                                              |
+| ---------------------------------------- | ----- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `grid-client/grid-attach.spec.ts`        | 36    | a terminal mounts the grid directly and keeps the catch-up, input and resize                         | not yet ported                                                                      |
+| `grid-client/grid-copy.spec.ts`          | 1     | a copy across a wide character's wrap leaves out the empty edge cell, on the screen and from history | not yet ported                                                                      |
+| `grid-client/grid-fit.spec.ts`           | 3     | sizing after real pane changes                                                                       | not yet ported                                                                      |
+| `grid-client/grid-terminal.spec.ts`      | 41    | a recorded attach draws its text, wide boxes, styles and cursor in their cells                       | not yet ported                                                                      |
+| `tests/grid-flood.spec.ts`               | 1     | a flood's scrollback arrives whole and in order, through a viewer that stops reading                 | not yet ported                                                                      |
+| `tests/grid-terminal.spec.ts`            | 1     | a host terminal draws as a grid and takes typing                                                     | replaced: scripts/gui-e2e-smoke.py `test_2_the_open_sessions_terminal_takes_typing` |
+| `tests/terminal.spec.ts`                 | 58    | renders the session and the agent's TUI output                                                       | not yet ported                                                                      |
+| `tests/terminal-attachments.spec.ts`     | 36    | a file dropped on the agent terminal uploads and inserts its host path at the cursor                 | not yet ported                                                                      |
+| `tests/terminal-clipboard.spec.ts`       | 8     | an OSC 52 write from the terminal's own process reaches the system clipboard, byte for byte          | not yet ported                                                                      |
+| `tests/terminal-files.spec.ts`           | 6     | changed OSC display text starts a fresh hover at the same cells                                      | not yet ported                                                                      |
+| `tests/terminal-flood.spec.ts`           | 3     | a terminal socket for an unknown session reports why                                                 | not yet ported                                                                      |
+| `tests/terminal-font.spec.ts`            | 3     | terminal text size ${size} keeps input focus at its limit                                            | not yet ported                                                                      |
+| `tests/terminal-keys.spec.ts`            | 5     | Shift+Enter                                                                                          | not yet ported                                                                      |
+| `tests/terminal-links.spec.ts`           | 15    | an OSC 8 ${kind} span ignores a selection drag and still accepts a click                             | not yet ported                                                                      |
+| `tests/terminal-multihost.spec.ts`       | 55    | multi-host                                                                                           | not yet ported                                                                      |
+| `tests/terminal-reconnect.spec.ts`       | 24    | socket-killed-reconnects-and-lands-at-tail                                                           | not yet ported                                                                      |
+| `tests/terminal-restart.spec.ts`         | 16    | an interrupted session's view leads with the resume offer, and declining changes nothing             | not yet ported                                                                      |
+| `tests/terminal-switch-geometry.spec.ts` | 1     | session switching keeps full-width text and rules still at ${font}px                                 | not yet ported                                                                      |
+| `tests/terminal-tabs.spec.ts`            | 36    | a tab runs a real shell in the session's working directory, leaving the agent terminal alone         | not yet ported                                                                      |
+| `tests/terminal-unicode.spec.ts`         | 2     | a narrowed text-presentation glyph owns one grid cell                                                | not yet ported                                                                      |
+| `tests/mouse-modes.spec.ts`              | 3     | mouse-modes-restored-on-reattach                                                                     | not yet ported                                                                      |
+| `tests/ime-composition.spec.ts`          | 8     | overlap boundary leaves the next key ordinary (${order}, ${keyCode})                                 | not yet ported                                                                      |
+| `tests/header.spec.ts`                   | 12    | native tunnel preview keeps ports and actions inside a 650px pane                                    | not yet ported                                                                      |
+| `tests/stop-tabs.spec.ts`                | 7     | legacy HTTP Stop refuses tabs until tab consent is explicit                                          | not yet ported                                                                      |

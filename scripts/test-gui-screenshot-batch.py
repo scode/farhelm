@@ -282,6 +282,11 @@ class SceneList(unittest.TestCase):
             "app variant needs theme light|dark": lambda s: s["app_variants"].append(
                 {"theme": "system", "size": "wide", "window": [1, 1]}),
             "missing top-level key 'app_variants'": lambda s: s.pop("app_variants"),
+            "start must be a list of strings": lambda s: s["app_scenes"][0].update(start="--sessions 0"),
+            "start may not set --appearance, --size, which the batch sets": lambda s: s["app_scenes"][0].update(
+                start=["--size=10x10", "--appear", "dark"]),
+            "app_start must be a list of strings": lambda s: s.update(app_start=["--fleet", 4]),
+            "app_start may not set --lock, which the batch sets": lambda s: s.update(app_start=["--lo", "/x"]),
         }
         for expected, breaks in cases.items():
             listed = scenes()
@@ -443,6 +448,48 @@ class Capture(unittest.TestCase):
         self.assertEqual(batch.png_size(self.out / "captures/app-main-window--dark--narrow.png"), (900, 700))
         self.assertFalse(batch.capture_failed(record))
         self.assertEqual(json.loads((self.out / "captures.json").read_text())["commit"], "test")
+
+    def test_scenes_with_their_own_start_options_get_an_app_run_of_their_own(self) -> None:
+        """A scene's steps start where the scene before it in the same run left the app, so a scene that needs another
+        fleet (an empty one, here) cannot share a run with the rest. Specified: per variant, one run per distinct set
+        of `start` options, in the order its first scene is listed, scenes in list order inside it (a later scene with
+        the first scene's options joins the first run); the options come right after `start`, ahead of the batch's
+        own; only the very first run of the batch builds; a failure names the run's options."""
+        listed = scenes()
+        first = listed["app_scenes"][0]
+        listed["app_scenes"] = [
+            first,
+            {"id": "app-empty", "title": "Empty", "reference": None, "mockup": False, "start": ["--sessions", "0"],
+             "steps": [["press", "escape"]]},
+            dict(first, id="app-second", steps=[["hover", "text:x"]]),
+        ]
+        self.make_fail("press")
+        record = self.capture(scenes=listed)
+        self.assertEqual(self.verbs("light-wide"), ["start", "wait", "screenshot", "hover", "screenshot", "stop"])
+        self.assertEqual(self.verbs("light-wide-1"), ["start", "press", "stop"])
+        starts = [call for call in self.calls() if call[1] == "start"]
+        self.assertEqual([call[0] for call in starts], ["light-wide", "light-wide-1", "dark-narrow", "dark-narrow-1"])
+        self.assertEqual(starts[1][2:5], ["--sessions", "0", "--window-size"])
+        self.assertEqual(["--no-build" in call for call in starts], [False, True, True, True])
+        self.assertEqual(record["errors"]["app-empty"][0], "light wide (--sessions 0): step failed: press escape")
+        self.assertIn("app-second", record["app"])
+        self.assertTrue((self.runs / "light-wide-1").exists(), "the failed run is kept for its logs")
+        self.assertFalse((self.runs / "light-wide").exists(), "the clean run is removed")
+
+    def test_the_lists_app_start_is_every_scenes_default(self) -> None:
+        """The scenes that share a fleet are chained (each starts where the one before it left the app), so the fleet
+        is named once, in `app_start`, rather than copied into each scene, where one edited copy would split a scene
+        off into a fresh run. Specified: a scene without `start` runs with `app_start`'s options; a scene with its own
+        `start` runs apart with those; a list without app scenes still starts each variant with `app_start`."""
+        listed = scenes()
+        listed["app_start"] = ["--fleet", "idle"]
+        first = listed["app_scenes"][0]
+        listed["app_scenes"] = [first, dict(first, id="app-empty", start=["--sessions", "0"])]
+        self.capture(scenes=listed)
+        starts = {call[0]: call[2:4] for call in self.calls() if call[1] == "start"}
+        self.assertEqual(starts["light-wide"], ["--fleet", "idle"])
+        self.assertEqual(starts["light-wide-1"], ["--sessions", "0"])
+        self.assertEqual(batch.start_groups([], ["--fleet", "idle"]), [(["--fleet", "idle"], [])])
 
     def test_a_mac_run_asks_for_the_variants_size_and_crops_nothing(self) -> None:
         """Kit draws no frame on a Mac and the monitor is the real screen, so the start carries the variant's size and

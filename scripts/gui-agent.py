@@ -5,16 +5,18 @@ NOTE: Debug builds only, and never against the live install. On Linux a run is h
 it opens a real window in the logged-in GUI session, which this script must run inside (over SSH is fine). Everything
 a run starts lives under the run directory you name (which must not exist yet), and `stop` takes all of it down again.
 
-    scripts/gui-agent.py RUN_DIR start [--sessions N] [--size WxH (Linux)] [--no-build] [--lock FILE]
-                                       [--window-size WxH] [--appearance light|dark]
+    scripts/gui-agent.py RUN_DIR start [--sessions N | --fleet KIND,...] [--size WxH (Linux)] [--no-build]
+                                       [--lock FILE] [--window-size WxH] [--appearance light|dark]
     scripts/gui-agent.py RUN_DIR snapshot -i          # any gpui-agent command: click, type, press, wait, screenshot ...
-    scripts/gui-agent.py RUN_DIR terminal-text
+    scripts/gui-agent.py RUN_DIR terminal-text [--wait TEXT [--timeout SECONDS]]
     scripts/gui-agent.py RUN_DIR stop
 
 `start` builds `farhelm-desktop` with the `agent` feature (the test-automation bridge), the `farhelm` CLI the app
 starts its supervisor from, the fake agents (`farhelm-fixtures`) and the bridge's own command line; on Linux starts a
 private headless Mutter on its own session bus; launches the app (on that Mutter, or on the Mac's GUI session) with its
-own state directory; and seeds `--sessions` sessions that run the fake agent, through the real helm API. On Linux,
+own state directory; and seeds sessions that run the fake agent, through the real helm API: `--sessions` basic ones, or
+with `--fleet` one per kind named (FLEET_KINDS), after which it waits until the supervisor has read each one as the
+status its kind names. On Linux,
 rendering is Mesa's software Vulkan driver (lavapipe), the same as the screenshot goldens; on a Mac it is Metal.
 `--lock FILE` holds an exclusive `flock` on FILE from before the build until `stop`, for a machine whose one GUI
 session several runs share (the test Mac's convention). `--window-size` and `--appearance` start the app's window at
@@ -203,18 +205,73 @@ def app_env_args(
     return args
 
 
-def seed_body(index: int, cwd: Path, fixtures: str) -> dict:
-    """A `POST /api/sessions` body for the `index`th seeded session: a command launch of the basic fake agent."""
+# What `start --fleet` can seed. `basic` is the prompt-and-echo fake agent `--sessions` seeds, the one to type into; the
+# others run the fake agent's replay script, which prints a one-line transcript and then holds the screen the
+# supervisor's classifier reads as that status (`ReplayThen` in crates/farhelm-fixtures/src/fake_agent.rs). Only those
+# four have a status to wait for: `basic` is read as running while it prints and idle a few samples after, so it never
+# settles on one the run could promise.
+FLEET_KINDS = ("basic", "running", "waiting", "idle", "exited")
+
+# The replay script's `--then` shape for each status a fleet session is seeded to reach.
+REPLAY_THEN = {"running": "spin", "waiting": "menu", "idle": "quiet", "exited": "exit"}
+
+# How long `start --fleet` waits for every seeded session to reach its status. The supervisor samples every session on
+# a two-second tick and calls one idle after three quiet samples, so a small fleet settles well within this.
+SETTLE_TIMEOUT_SECONDS = 120
+
+
+def parse_fleet(text: str) -> list[str]:
+    """`--fleet`'s comma-separated kinds, in order (one session each); a UsageError for an empty list or an unknown
+    kind."""
+    kinds = text.split(",")
+    unknown = [kind for kind in kinds if kind not in FLEET_KINDS]
+    if not text or unknown:
+        raise UsageError(f"--fleet takes a comma-separated list of {', '.join(FLEET_KINDS)}, not {text!r}")
+    return kinds
+
+
+def transcript(index: int, kind: str) -> str:
+    """What a replayed fleet session prints before it settles, so its terminal shows whose it is and has a last line
+    to wait for (`now holds its <kind> screen`, for `terminal-text --wait`).
+
+    Three short lines rather than one: lines that fit a narrow window's terminal (about 55 columns at 900 pixels) do
+    not wrap, and under an exited session's exit line the app lifts a screen that fills the pane by a row or two (`lift`
+    in the terminal's attached.rs), which hid a one-line transcript printed on the first row.
+    """
+    return f"Fixture {index}: a seeded fake agent\nIt replayed this transcript and\nnow holds its {kind} screen\n"
+
+
+def seed_body(index: int, cwd: Path, fixtures: str, kind: str = "basic", transcript: Path | None = None) -> dict:
+    """A `POST /api/sessions` body for the `index`th seeded session, titled `Fixture <index>`: a command launch of the
+    fake agent, the basic script for `basic` and the replay script holding `kind`'s screen otherwise (`transcript` is
+    then the file it prints first).
+
+    Only `waiting` declares an agent type (Claude): the generic status reading never reads a session as waiting, and
+    declaring one requires the `{farhelm_args}` placeholder (SPEC.md, "Creation"), where the supervisor adds Claude's
+    hook flags, which the fake agent ignores. Every other kind stays an undeclared command, like `basic`.
+    """
+    command = f"{shlex.quote(fixtures)} fake-agent --script basic"
+    agent = None
+    if kind != "basic":
+        command = (
+            f"{shlex.quote(fixtures)} fake-agent --script replay --dialect claude"
+            f" --transcript {shlex.quote(str(transcript))} --then {REPLAY_THEN[kind]}"
+        )
+        if kind == "waiting":
+            command += " {farhelm_args}"
+            agent = "claude"
     return {
         "cwd": str(cwd),
         "title": f"Fixture {index}",
-        "command": {
-            "command": f"{shlex.quote(fixtures)} fake-agent --script basic",
-            "yolo": False,
-            "agent": None,
-            "resume": None,
-        },
+        "command": {"command": command, "yolo": False, "agent": agent, "resume": None},
     }
+
+
+def unsettled(targets: dict[str, str], states: dict[str, str | None]) -> list[str]:
+    """The seeded sessions not yet at their target status, as `id=state` (state `missing` for a session the listing
+    does not show), from `targets` (id to the state the listing must report) and `states` (the listing's state of each
+    id)."""
+    return [f"{id}={states.get(id) or 'missing'}" for id, want in targets.items() if states.get(id) != want]
 
 
 # Process identity. Linux reads /proc; macOS has no /proc, so there the same facts come from `ps`. Both give a start
@@ -555,23 +612,62 @@ def start_mutter(
     return record
 
 
-def seed_sessions(run: Path, count: int, fixtures: str) -> list[str]:
-    """Create `count` fake-agent sessions through the embedded helm's API; return their ids."""
+def helm_request(run: Path, method: str, path: str, body: dict | None = None):
+    """One request to the app's embedded helm with the credential the agent build wrote to `helm.json`; the decoded
+    JSON reply. Waits for `helm.json` first, since the app writes it only once its helm is up."""
     wait_for(run / "helm.json", 30, "the app's helm file")
     helm = json.loads((run / "helm.json").read_text())
+    request = urllib.request.Request(
+        f"{helm['api_base']}{path}",
+        data=None if body is None else json.dumps(body).encode(),
+        headers={"Authorization": f"Bearer {helm['credential']}", "Content-Type": "application/json"},
+        method=method,
+    )
+    with urllib.request.urlopen(request, timeout=60) as response:
+        return json.loads(response.read())
+
+
+def listed_states(run: Path) -> dict[str, str | None]:
+    """Every session the helm lists, by id, with the state of its status (`running`, `waiting`, ...)."""
+    rows = helm_request(run, "GET", "/api/sessions")["sessions"]
+    return {row["id"]: (row.get("status") or {}).get("state") for row in rows}
+
+
+def seed_sessions(run: Path, kinds: list[str], fixtures: str) -> list[str]:
+    """Create one fake-agent session per entry of `kinds` (see FLEET_KINDS) through the embedded helm's API, in that
+    order; return their ids."""
     work = run / "work"
     work.mkdir(exist_ok=True)
     ids = []
-    for index in range(1, count + 1):
-        request = urllib.request.Request(
-            f"{helm['api_base']}/api/sessions",
-            data=json.dumps(seed_body(index, work, fixtures)).encode(),
-            headers={"Authorization": f"Bearer {helm['credential']}", "Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(request, timeout=60) as response:
-            ids.append(json.loads(response.read())["id"])
+    for index, kind in enumerate(kinds, start=1):
+        transcript_file = None
+        if kind != "basic":
+            transcript_file = work / f"fixture-{index}.txt"
+            transcript_file.write_text(transcript(index, kind))
+        body = seed_body(index, work, fixtures, kind, transcript_file)
+        ids.append(helm_request(run, "POST", "/api/sessions", body)["id"])
     return ids
+
+
+def wait_for_statuses(
+    read_states, targets: dict[str, str], timeout: float = SETTLE_TIMEOUT_SECONDS, interval: float = 1.0
+) -> None:
+    """Wait until `read_states()` (the listing's state by id) reports every id in `targets` at its target state, or
+    fail naming each session that is not and the state it is in.
+
+    The statuses are the supervisor's own classification of each live screen, never written in by the harness, so a
+    scene can show a waiting or idle session only after the supervisor has read it as one.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        pending = unsettled(targets, read_states())
+        if not pending:
+            return
+        if time.monotonic() > deadline:
+            raise RuntimeError(
+                f"seeded sessions did not reach their status within {timeout:.0f} s: {', '.join(pending)}"
+            )
+        time.sleep(interval)  # sleep-ok: polling the helm's listing; the harness subscribes to no status events
 
 
 def cli(run: Path, record: dict, args: list[str], capture: bool = False) -> subprocess.CompletedProcess:
@@ -584,7 +680,13 @@ def start(run: Path, args: list[str]) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(prog="gui-agent.py RUN_DIR start")
-    parser.add_argument("--sessions", type=int, default=2, help="fake-agent sessions to seed (default 2)")
+    seeding = parser.add_mutually_exclusive_group()
+    seeding.add_argument("--sessions", type=int, help="basic fake-agent sessions to seed (default 2)")
+    seeding.add_argument(
+        "--fleet",
+        type=parse_fleet,
+        help=f"seed one session per kind, in order, and wait for each one's status ({', '.join(FLEET_KINDS)})",
+    )
     parser.add_argument("--size", help="Linux only: Mutter's virtual monitor (default 1600x1200)")
     parser.add_argument("--no-build", action="store_true", help="use the binaries already in the target directory")
     parser.add_argument(
@@ -680,28 +782,61 @@ def start(run: Path, args: list[str]) -> int:
             file=sys.stderr,
         )
         return launched.returncode
-    if options.sessions:
-        ids = seed_sessions(run, options.sessions, binaries["fixtures"])
+    kinds = options.fleet or ["basic"] * (2 if options.sessions is None else options.sessions)
+    if kinds:
+        ids = seed_sessions(run, kinds, binaries["fixtures"])
         print(f"seeded {len(ids)} fake-agent sessions: {', '.join(ids)}")
+        targets = {id: kind for id, kind in zip(ids, kinds) if kind != "basic"}
+        if targets:
+            wait_for_statuses(lambda: listed_states(run), targets)
+            print(f"every seeded session reached its status: {', '.join(kinds)}")
     return 0
 
 
-def terminal_text(run: Path, record: dict) -> int:
+def terminal_text(run: Path, record: dict, args: list[str] | None = None, interval: float = 0.25) -> int:
     """Print the focused terminal's text through the app's `terminal_text` probe, which the terminal registers.
 
     The probe answers null when no terminal holds focus (a script clicked a button, say), and that is reported as such
     with a failing status rather than printed, so it cannot pass for an empty screen. Click the terminal or Tab back
     into it first.
+
+    `--wait TEXT [--timeout SECONDS]` (default 30) asks again until the focused terminal's text contains TEXT, then
+    prints it; on timeout it fails saying what the last answer was. It is the readiness check for a terminal that was
+    just opened: a click hands the terminal focus and starts its attach, and the screen it catches up to arrives after
+    the click returns, so a screenshot or a keystroke right after the click could land before it.
     """
-    result = cli(run, record, ["get", "probe", "terminal_text"], capture=True)
-    if result.returncode != 0:
-        print(f"no terminal yet (the app has no `terminal_text` probe): {result.stderr.strip()}", file=sys.stderr)
-        return 1
-    if result.stdout.strip() == "null":
-        print("no terminal holds focus", file=sys.stderr)
-        return 1
-    print(result.stdout, end="")
-    return 0
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="gui-agent.py RUN_DIR terminal-text")
+    parser.add_argument("--wait", metavar="TEXT", help="wait until the focused terminal's text contains TEXT")
+    parser.add_argument("--timeout", type=float, default=30, help="seconds --wait waits (default 30)")
+    options = parser.parse_args(args or [])
+    deadline = time.monotonic() + options.timeout
+    while True:
+        result = cli(run, record, ["get", "probe", "terminal_text"], capture=True)
+        if result.returncode != 0:
+            problem = f"no terminal yet (the app has no `terminal_text` probe): {result.stderr.strip()}"
+        elif result.stdout.strip() == "null":
+            problem = "no terminal holds focus"
+        elif options.wait is not None and options.wait not in probe_text(result.stdout):
+            problem = f"the focused terminal does not show {options.wait!r}; it shows {result.stdout.strip()}"
+        else:
+            print(result.stdout, end="")
+            return 0
+        if options.wait is None or time.monotonic() > deadline:
+            print(problem, file=sys.stderr)
+            return 1
+        time.sleep(interval)  # sleep-ok: polling the app's probe; the bridge has no wait on a probe's value
+
+
+def probe_text(stdout: str) -> str:
+    """The text a `terminal_text` probe answer carries: the bridge prints it as a JSON string, whose escapes (a quote,
+    a line break) must be undone before matching; anything that does not decode is matched as printed."""
+    try:
+        value = json.loads(stdout)
+    except ValueError:
+        return stdout
+    return value if isinstance(value, str) else stdout
 
 
 def stop(run: Path, record: dict) -> int:
@@ -761,7 +896,7 @@ def main(argv: list[str]) -> int:
         if verb == "stop":
             return stop(run, record)
         if verb == "terminal-text":
-            return terminal_text(run, record)
+            return terminal_text(run, record, rest)
         return cli(run, record, [verb, *rest]).returncode
     except UsageError as error:
         print(f"gui-agent: {error}", file=sys.stderr)
