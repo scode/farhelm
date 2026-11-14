@@ -18,6 +18,7 @@
 //! - [`session`]: the connection to the helm and the resettable UI-session owner (SPEC_impl.md, "One failure path:
 //!   the reset"); [`store`]: the one copy of what the helm pushed, which views read when they draw;
 //!   [`local_state`]: the selected session's id, the one piece of window state that survives a reset.
+//! - [`session_list`]: the sidebar's session list and the selection rules; [`session_pane`]: the pane beside it.
 //! - [`operations`]: the operation store, which holds work on a session that finishes later, above the views that
 //!   start it; [`drafts`]: editor fields that follow pushed changes until the user touches them, and their saves.
 //! - [`ticker`]: the one source of time, for animation (at most 10 ticks a second) and for one-shot deadlines.
@@ -69,6 +70,8 @@ pub mod prompt;
 pub mod render_count;
 pub mod root;
 pub mod session;
+pub mod session_list;
+pub mod session_pane;
 pub mod store;
 pub mod terminal;
 pub mod theme;

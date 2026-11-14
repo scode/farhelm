@@ -1,22 +1,27 @@
-//! The main window's root view: the ground the sidebar and the session pane will be drawn on, the connection's inert
-//! states, the notice banner, and the overlay layer.
+//! The main window's root view: the sidebar with the session list beside the session pane, the connection's inert
+//! states, the notice banners, and the overlay layer.
 //!
 //! The window is live only while the UI channel is connected. In every other state (connecting, reconnecting after a
 //! break, displaced by another window, refused, or the helm gone) it shows that state instead of anything from the
 //! helm, which is what makes it inert (SPEC.md, "Losing the connection to the helm" and "One GUI at a time"): the
-//! session that held helm state was retired, so there is nothing stale to draw or act on. The views of the end-to-end
-//! slice (the session list, its row menu, the terminal) are added inside the live ground as they are built.
+//! session that held helm state was retired, so there is nothing stale to draw or act on.
+//!
+//! The live ground is a column: the posted notices' banners across the whole window, then the sidebar and the pane
+//! side by side below them, so a banner pushes both down rather than covering the list's first row. The sidebar is the
+//! old app's column (`.app-sidebar`): its default width, one level above the ground (`--bg-1`), with a hairline against
+//! the pane.
 
 use farhelm_helm_client::ChannelState;
 use gpui::{
-    AnyElement, App, Context, IntoElement, ParentElement, Render, SharedString, Styled,
-    Subscription, Window, div,
+    AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement, Render,
+    SharedString, Styled, Subscription, Window, div,
 };
 
 use crate::components::{Banner, Button, HoverHelp, Role, Tier};
 use crate::notices::{self, Notice};
+use crate::session_list::SessionList;
 use crate::theme::metrics;
-use crate::{render_count, root, session, theme};
+use crate::{render_count, root, session, session_pane, theme};
 
 /// The window's root view.
 pub struct MainView {
@@ -27,6 +32,9 @@ pub struct MainView {
     root: root::Attachment,
     /// Redraws on a change of the connection's state and of the notice center.
     _observed: Vec<Subscription>,
+    /// The sidebar's session list, kept for the window's life: it holds only per-UI-session state, which it starts
+    /// over by itself after a reset.
+    session_list: Entity<SessionList>,
 }
 
 impl MainView {
@@ -44,6 +52,7 @@ impl MainView {
             _appearance: theme::observe_window(window),
             root: root::attach(window, cx),
             _observed: observed,
+            session_list: cx.new(SessionList::new),
         }
     }
 }
@@ -56,11 +65,29 @@ impl Render for MainView {
             .map(|connection| connection.read(cx).state().clone())
             .unwrap_or(ChannelState::Connecting);
         let body = if state == ChannelState::Connected {
+            let sidebar = div()
+                .w(metrics::SIDEBAR_WIDTH)
+                .flex_none()
+                .h_full()
+                .overflow_hidden()
+                .bg(theme::color(palette.bg_1))
+                .border_r_1()
+                .border_color(theme::color(palette.border_sidebar_edge))
+                .child(self.session_list.clone());
             div()
                 .flex()
                 .flex_col()
                 .size_full()
                 .children(notices::posted(cx).into_iter().map(banner))
+                .child(
+                    div()
+                        .flex()
+                        .flex_row()
+                        .flex_1()
+                        .min_h_0()
+                        .child(sidebar)
+                        .child(div().flex_1().min_w_0().child(session_pane::element(cx))),
+                )
                 .into_any_element()
         } else {
             inert(&state, cx)

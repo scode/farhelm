@@ -2690,12 +2690,13 @@ upgrading to this storage, state the helm cannot attribute to one host starts fr
 
 The stamp is set automatically in two moments — opening a session records its current activity as seen, and that
 session's activity advancing while it stays open re-records the new value — with whether the window has focus ignored: a
-session open in a window behind other apps is still recorded as seen the same way one in a focused window is. It can
-also be set or cleared by hand: a "Mark unread"/"Mark read" toggle, reachable from the session's row, sets or clears the
-stamp directly. A manual mark unread on the session currently open STICKS — the automatic rule does not immediately
-re-record it as seen — until the user leaves and returns to it, or new output arrives. A failed automatic mark is logged
-but silent, the same best-effort exception the list-order/last-selection preference gets (see Errors and diagnostics); a
-failed manual toggle surfaces to the row like any other operation.
+session open in a window behind other apps is still recorded as seen the same way one in a focused window is. Neither
+moment records a stale or ended session as seen. It can also be set or cleared by hand: a "Mark unread"/"Mark read"
+toggle, reachable from the session's row, sets or clears the stamp directly. A manual mark unread on the session
+currently open STICKS — the automatic rule does not immediately re-record it as seen — until the user leaves and returns
+to it, or new output arrives. A failed automatic mark is logged but silent, the same best-effort exception the
+list-order/last-selection preference gets (see Errors and diagnostics); a failed manual toggle surfaces to the row like
+any other operation.
 
 Beside the status, a session shows how long ago it was last active as a short relative age (`2m`, `3h`), with the full
 timestamp available on the row. Last active means the last time the agent was seen working, or the moment it started

@@ -38,11 +38,11 @@ use farhelm_helm_client::{
     CommandError, HelmConnection, HelmEndpoint, Method,
 };
 use farhelm_proto::ui_channel::{Availability, Collection, Reply, SessionRow};
-use gpui::{App, AppContext as _, Context, Entity, Global, Task, WeakEntity};
+use gpui::{App, AppContext as _, Context, Entity, EntityId, Global, Task, WeakEntity};
 use serde_json::Value;
 
 use crate::layers::{self, Subject};
-use crate::local_state::LocalState;
+use crate::local_state;
 use crate::notices::{self, Notice};
 use crate::operations::SessionOperations;
 use crate::store::HelmStore;
@@ -276,14 +276,47 @@ impl Subject {
 /// Drop the selected session if the new snapshot proves it gone ([`listing_proves_gone`]); a list that proves nothing
 /// keeps the selection.
 fn keep_survivors(session: &Entity<UiSession>, cx: &mut App) {
-    let Some(key) = crate::bootstrap::installed::<LocalState>(cx)
-        .and_then(|local| local.selected_session.clone())
-    else {
+    let Some(key) = local_state::selected(cx) else {
         return;
     };
     let collections = session.read(cx).store.read(cx).collections();
     if listing_proves_gone(collections, &key) {
-        cx.global_mut::<LocalState>().selected_session = None;
+        local_state::clear(cx);
+    }
+}
+
+/// State a view keeps for one UI session, started over when the session changes.
+///
+/// Views must not keep a session's handles across draws or events (see [`UiSession`]), but some keep state that only
+/// means something for the session it was made under: the session list's subscription to the current store, and what
+/// it last stamped as seen. A reset makes a new UI session, and state from the old one would act for a connection that
+/// is gone. So the view keeps that state here and reaches it only through [`PerSession::current`], which compares the
+/// current UI session's entity id with the one the state was made under and starts the state over from its default when
+/// they differ. While the window is inert there is no session, and the state is the default too.
+///
+/// The comparison happens when the view asks, not when the reset happens, so a view must reach the state only through
+/// `current`.
+#[derive(Default)]
+pub struct PerSession<T: Default> {
+    session: Option<EntityId>,
+    state: T,
+}
+
+impl<T: Default> PerSession<T> {
+    /// The state for the current UI session, started over if the session changed since the last call.
+    pub fn current(&mut self, cx: &App) -> &mut T {
+        let current = connection(cx).and_then(|connection| {
+            connection
+                .read(cx)
+                .session
+                .as_ref()
+                .map(|session| session.entity_id())
+        });
+        if current != self.session || current.is_none() {
+            self.session = current;
+            self.state = T::default();
+        }
+        &mut self.state
     }
 }
 

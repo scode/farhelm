@@ -69,7 +69,9 @@ devbuilds (`scripts/devbuild-mac.sh` builds with `--release`). Nothing else turn
 ## Things to know
 
 - The app connects to its embedded helm and shows the connection's states (connecting, another window took over with
-  Take back, the connection-lost notice), but no sessions yet: the session list lands later in the GPUI migration (M1).
+  Take back, the connection-lost notice) and the session list, where each row is a list item holding a button, both
+  named by its session's title (`click text:"Fixture 2"` opens that session). Opening a session shows no terminal yet:
+  that lands later in the GPUI migration (M1).
 - Headless Mutter reports the window as inactive forever, so agent builds pin the animation ticker's notion of an active
   window on (SPEC_impl.md, "GPUI cookbook: traps"); otherwise nothing would animate in these runs.
 - `stop` signals only processes it can tie to the run, and only while each is still the process that was recorded (its

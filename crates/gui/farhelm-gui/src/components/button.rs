@@ -19,7 +19,7 @@ use gpui::{
     prelude::FluentBuilder as _, px, svg,
 };
 
-use super::HoverHelp;
+use super::{Handler, HoverHelp};
 use crate::assets::Icon;
 use crate::focus;
 use crate::theme::{self, Palette, Token, metrics};
@@ -41,9 +41,6 @@ pub enum Tier {
     /// ring because the accent ring is not calibrated for a red background. Use it only on a red banner.
     OnBanner,
 }
-
-/// A click handler.
-type Handler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
 /// A button with a visible text label (and optionally a leading icon).
 #[derive(IntoElement)]
@@ -249,19 +246,7 @@ impl RenderOnce for Button {
             // reach the page's empty-space handler and move focus.
             button.on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
         };
-        button
-            .on_key_down(move |event, window, cx| {
-                let key = event.keystroke.key.as_str();
-                if event.is_held || event.keystroke.modifiers.modified() {
-                    return;
-                }
-                if (key == "enter" || key == "space")
-                    && let Some(handler) = &key_handler
-                {
-                    cx.stop_propagation();
-                    handler(&ClickEvent::default(), window, cx);
-                }
-            })
+        super::activate_on_enter_or_space(button, key_handler)
             .when_some(handler, |button, handler| {
                 button.on_click(move |event, window, cx| handler(event, window, cx))
             })
