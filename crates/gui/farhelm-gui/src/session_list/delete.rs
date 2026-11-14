@@ -31,6 +31,7 @@
 
 use std::f32::consts::TAU;
 
+use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::DeleteGuard;
 use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
@@ -46,7 +47,7 @@ use crate::components::{HoverHelp, Tier};
 use crate::focus::Mark;
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::Subject;
-use crate::operations::{Command, Work};
+use crate::operations::{Command, OpKey, Work};
 use crate::prompt::{self, Answer, Question};
 use crate::theme::{self, metrics};
 use crate::{local_state, session, ticker};
@@ -233,18 +234,48 @@ impl SessionList {
     }
 }
 
+/// The ordinary session Delete, `DELETE /api/sessions/{id}`, with the precondition the user's confirmation covered:
+/// `guard` is what that confirmation showed, so a session that became more alive since is refused rather than killed.
+/// Only a guard that asks for something adds its flag, as in the old app's `api::delete_url`.
+///
+/// NOTE: The helm refuses this for a session in a disposable environment, whose Delete states what happens to the
+/// environment and asks for it with a flag of its own. That refusal is correct, not a bug; the area that ports
+/// environment sessions adds their Delete.
+pub(crate) fn command(session: &str, guard: DeleteGuard) -> Result<Command, PathError> {
+    let path = ApiPath::api(&["sessions", session])?;
+    let flag = match guard {
+        DeleteGuard::NothingAlive => Some("only_if_nothing_alive"),
+        DeleteGuard::AgentEnded => Some("only_if_agent_ended"),
+        DeleteGuard::Unconditional => None,
+    };
+    let (path, shown) = match flag {
+        Some(flag) => (
+            path.with_query(&[(flag, "true")])?,
+            format!("DELETE /api/sessions/[session]?{flag}=true"),
+        ),
+        None => (path, "DELETE /api/sessions/[session]".to_owned()),
+    };
+    Ok(Command::new(
+        Work::Delete(guard),
+        Method::Delete,
+        path,
+        None,
+        shown,
+    ))
+}
+
 /// Send `key`'s Delete with `guard` through the operation store. A session that already has a request in flight sends
 /// nothing: SPEC.md lets each session exclude its own competing actions.
 fn send_delete(key: &str, guard: DeleteGuard, cx: &mut App) {
     let Some(operations) = session::current_operations(cx) else {
         return;
     };
-    let Ok(command) = Command::delete(key, guard) else {
+    let Ok(command) = command(key, guard) else {
         tracing::warn!("a session key that cannot be a path segment was not deleted");
         return;
     };
     let started = operations.update(cx, |operations, cx| {
-        operations.start(key, command, cx, |_, _| {})
+        operations.start(&OpKey::session(key), command, cx, |_, _| {})
     });
     if let Err(refused) = started {
         tracing::debug!(?refused, "a Delete was not sent");
@@ -256,18 +287,22 @@ fn send_delete(key: &str, guard: DeleteGuard, cx: &mut App) {
 /// Whether `key` has any request in flight, a Rename as much as a Delete: then its Delete is refused, and its menu
 /// draws Delete unavailable.
 pub(super) fn busy(key: &str, cx: &App) -> bool {
-    session::current_operations(cx)
-        .is_some_and(|operations| operations.read(cx).in_flight(key).is_some())
+    session::current_operations(cx).is_some_and(|operations| {
+        operations
+            .read(cx)
+            .in_flight(&OpKey::session(key))
+            .is_some()
+    })
 }
 
 /// The guard of `key`'s Delete while it is in flight, as the request carries it; `None` when no Delete is. For the
 /// row's progress, and for the open session's pane once it draws the Delete over its terminal.
 pub(crate) fn in_flight(key: &str, cx: &App) -> Option<DeleteGuard> {
     let operations = session::current_operations(cx)?;
-    match operations.read(cx).in_flight(key)? {
-        Work::Delete(guard) => Some(guard),
-        Work::Rename => None,
-    }
+    let Work::Delete(guard) = operations.read(cx).in_flight(&OpKey::session(key))? else {
+        return None;
+    };
+    Some(guard)
 }
 
 /// What a pending Delete says it is doing, from the guard it was sent with: stopping the agent, stopping only the
@@ -380,7 +415,11 @@ pub(crate) fn spinner_icon(step: u8, size: Pixels, ink: Hsla) -> Svg {
 /// row (`.session-row.selected .action-error`).
 pub(super) fn failure_line(key: &str, selected: bool, cx: &App) -> Option<Div> {
     let operations = session::current_operations(cx)?;
-    let message = operations.read(cx).failure(key)?.message.clone();
+    let message = operations
+        .read(cx)
+        .failure(&OpKey::session(key))?
+        .message
+        .clone();
     Some(failure_text(
         &message,
         refusal_ink(selected, theme::palette(cx)),
@@ -410,6 +449,28 @@ pub(super) fn failure_text(message: &HostText, ink: theme::Token) -> Div {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A Delete must ask for exactly the precondition its confirmation showed, or a session that became more alive
+    /// since would be killed instead of refused (the old app's `api::delete_url`). Specified: an unconditional Delete
+    /// carries no flag, and each guard that asks for something carries its own flag, on the session's own path.
+    #[test]
+    fn each_delete_guard_asks_for_its_own_precondition() {
+        for (guard, path) in [
+            (DeleteGuard::Unconditional, "/api/sessions/a"),
+            (
+                DeleteGuard::AgentEnded,
+                "/api/sessions/a?only_if_agent_ended=true",
+            ),
+            (
+                DeleteGuard::NothingAlive,
+                "/api/sessions/a?only_if_nothing_alive=true",
+            ),
+        ] {
+            let built = command("a", guard).unwrap();
+            assert_eq!(built.work(), Work::Delete(guard));
+            assert_eq!(built.path().as_str(), path, "{guard:?}");
+        }
+    }
 
     /// A refusal on the selected row was once drawn red on the accent fill, near unreadable; the old sheet switched it
     /// to the fill's ink (`.session-row.selected .action-error`). Specified, in both palettes: the fill's ink when

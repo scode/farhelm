@@ -2,13 +2,13 @@
 //!
 //! The fake answers commands in the order they were sent, as the helm does, so "overlapping" here means both commands
 //! are in flight at once and each settles on its own reply; which reply comes first is the order the helm admitted
-//! them. The helpers come from the UI-session owner's tests, which these build on.
+//! them. The fake-helm helpers come from the shared test harness (`test_support.rs`).
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::FakeHelm;
+use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::DeleteGuard;
 use farhelm_proto::ui_channel::{Collection, CollectionChanges, CollectionState, SessionRow};
 use gpui::{AppContext as _, Entity, TestAppContext};
@@ -18,7 +18,7 @@ use serde_json::json;
 use crate::drafts::{self, Draft};
 use crate::host_text::HostText;
 use crate::main_view::MainView;
-use crate::operations::{Command, NotStarted, Outcome, SessionOperations, Settled, Work};
+use crate::operations::{Command, NotStarted, OpKey, Operations, Outcome, Settled, Work};
 use crate::session::{self, Connection};
 use crate::test_support::{meta, session_entry, sessions, started};
 
@@ -27,17 +27,36 @@ use crate::test_support::{meta, session_entry, sessions, started};
 /// Every completion delivered, labeled by the test's name for the operation.
 type Delivered = Rc<RefCell<Vec<(&'static str, Settled)>>>;
 
-fn operations(cx: &mut TestAppContext) -> Entity<SessionOperations> {
+fn operations(cx: &mut TestAppContext) -> Entity<Operations> {
     match cx.update(|cx| session::current_operations(cx)) {
         Some(operations) => operations,
         None => panic!("the premise: a UI session is live"),
     }
 }
 
-/// Start `command` on `session`, recording its completion under `label`.
+/// Start `command` on session `session`, recording its completion under `label`.
 fn start(
-    operations: &Entity<SessionOperations>,
+    operations: &Entity<Operations>,
     (session, command): (&str, Command),
+    label: &'static str,
+    delivered: &Delivered,
+    cx: &mut TestAppContext,
+) -> Result<(), NotStarted> {
+    start_on(
+        operations,
+        &OpKey::session(session),
+        command,
+        label,
+        delivered,
+        cx,
+    )
+}
+
+/// Start `command` as work on `key`, recording its completion under `label`.
+fn start_on(
+    operations: &Entity<Operations>,
+    key: &OpKey,
+    command: Command,
     label: &'static str,
     delivered: &Delivered,
     cx: &mut TestAppContext,
@@ -45,15 +64,39 @@ fn start(
     let delivered = delivered.clone();
     cx.update(|cx| {
         operations.update(cx, |operations, cx| {
-            operations.start(session, command, cx, move |settled, _| {
+            operations.start(key, command, cx, move |settled, _| {
                 delivered.borrow_mut().push((label, settled.clone()));
             })
         })
     })
 }
 
+/// A Rename of `session` to `title`, built here with [`Command::new`] rather than by the session list's own route code
+/// (`session_list::rename::command`), so the store's tests stay the store's: a change to how the session list builds
+/// its commands cannot break them, and they do not test it.
 fn rename(session: &str, title: &str) -> Command {
-    Command::rename(session, title).unwrap()
+    let path = ApiPath::api(&["sessions", session, "rename"]).unwrap();
+    let body = Some(json!({ "title": title }));
+    Command::new(
+        Work::Rename,
+        Method::Post,
+        path,
+        body,
+        "POST /api/sessions/[session]/rename",
+    )
+}
+
+/// A Delete of `session` with `guard`, built here as [`rename`] is. The guard's query flag is the session list's
+/// route knowledge (its own tests check it); here the guard only has to travel as the command's work.
+fn delete(session: &str, guard: DeleteGuard) -> Command {
+    let path = ApiPath::api(&["sessions", session]).unwrap();
+    Command::new(
+        Work::Delete(guard),
+        Method::Delete,
+        path,
+        None,
+        "DELETE /api/sessions/[session]",
+    )
 }
 
 /// A connected app whose sessions are `keys`.
@@ -79,15 +122,9 @@ fn independent_work_on_two_sessions_keeps_its_own_completion(cx: &mut TestAppCon
     let delivered = Delivered::default();
     let renaming = ("a", rename("a", "new"));
     start(&operations, renaming, "rename a", &delivered, cx).unwrap();
-    let deleting = (
-        "b",
-        Command::delete("b", DeleteGuard::NothingAlive).unwrap(),
-    );
+    let deleting = ("b", delete("b", DeleteGuard::NothingAlive));
     start(&operations, deleting, "delete b", &delivered, cx).unwrap();
-    let again = (
-        "a",
-        Command::delete("a", DeleteGuard::Unconditional).unwrap(),
-    );
+    let again = ("a", delete("a", DeleteGuard::Unconditional));
     assert_eq!(
         start(&operations, again, "delete a", &delivered, cx),
         Err(NotStarted::Busy(Work::Rename)),
@@ -104,7 +141,7 @@ fn independent_work_on_two_sessions_keeps_its_own_completion(cx: &mut TestAppCon
         shown,
         vec![
             (Method::Post, "/api/sessions/a/rename"),
-            (Method::Delete, "/api/sessions/b?only_if_nothing_alive=true"),
+            (Method::Delete, "/api/sessions/b"),
         ],
         "both commands reached the helm, and the refused one did not"
     );
@@ -120,14 +157,18 @@ fn independent_work_on_two_sessions_keeps_its_own_completion(cx: &mut TestAppCon
     assert_eq!(*delivered.borrow(), vec![("rename a", a_settled.clone())]);
     cx.update(|cx| {
         let operations = operations.read(cx);
-        assert_eq!(operations.in_flight("a"), None, "a settled");
         assert_eq!(
-            operations.in_flight("b"),
+            operations.in_flight(&OpKey::session("a")),
+            None,
+            "a settled"
+        );
+        assert_eq!(
+            operations.in_flight(&OpKey::session("b")),
             Some(Work::Delete(DeleteGuard::NothingAlive)),
             "b is still in flight, as the Delete the command sent, guard included"
         );
         let failure = operations
-            .failure("a")
+            .failure(&OpKey::session("a"))
             .map(|failure| (failure.work, &failure.message));
         assert_eq!(
             failure,
@@ -136,7 +177,11 @@ fn independent_work_on_two_sessions_keeps_its_own_completion(cx: &mut TestAppCon
                 &HostText::from_host("titles may not be empty")
             ))
         );
-        assert_eq!(operations.failure("b"), None, "a's refusal is a's alone");
+        assert_eq!(
+            operations.failure(&OpKey::session("b")),
+            None,
+            "a's refusal is a's alone"
+        );
     });
 
     // A bare successful Delete answers `{}`: `archived` and the notice are left out when they say nothing.
@@ -150,16 +195,19 @@ fn independent_work_on_two_sessions_keeps_its_own_completion(cx: &mut TestAppCon
         *delivered.borrow(),
         vec![("rename a", a_settled), ("delete b", b_settled)]
     );
-    assert_eq!(cx.update(|cx| operations.read(cx).in_flight("b")), None);
+    assert_eq!(
+        cx.update(|cx| operations.read(cx).in_flight(&OpKey::session("b"))),
+        None
+    );
     assert!(
-        cx.update(|cx| operations.read(cx).failure("a").is_some()),
+        cx.update(|cx| operations.read(cx).failure(&OpKey::session("a")).is_some()),
         "the premise: a's failure is still on its row"
     );
 
     let retry = ("a", rename("a", "newer"));
     start(&operations, retry, "rename a again", &delivered, cx).unwrap();
     assert_eq!(
-        cx.update(|cx| operations.read(cx).failure("a").cloned()),
+        cx.update(|cx| operations.read(cx).failure(&OpKey::session("a")).cloned()),
         None,
         "starting again cleared the earlier failure"
     );
@@ -170,7 +218,7 @@ fn independent_work_on_two_sessions_keeps_its_own_completion(cx: &mut TestAppCon
     let message = cx.update(|cx| {
         operations
             .read(cx)
-            .failure("a")
+            .failure(&OpKey::session("a"))
             .map(|failure| failure.message.clone())
     });
     assert_eq!(
@@ -187,45 +235,33 @@ fn independent_work_on_two_sessions_keeps_its_own_completion(cx: &mut TestAppCon
 /// request actually carries. Were the in-flight work recorded apart from the command, a caller could start an
 /// unconditional Delete while the row claimed there was nothing alive to stop.
 ///
-/// Specification: for each guard, a started Delete is in flight as `Work::Delete` with the guard its command sent, and
-/// the command's path carries that guard's flag.
+/// Specification: for each guard, a started Delete is in flight as `Work::Delete` with the guard its command carries.
+/// (Which query flag each guard puts on the route is the session list's, and its Delete tests check that.)
 #[gpui::test]
 fn a_delete_in_flight_reports_the_guard_its_command_sent(cx: &mut TestAppContext) {
     let guards = [
-        ("a", DeleteGuard::Unconditional, "/api/sessions/a"),
-        (
-            "b",
-            DeleteGuard::AgentEnded,
-            "/api/sessions/b?only_if_agent_ended=true",
-        ),
-        (
-            "c",
-            DeleteGuard::NothingAlive,
-            "/api/sessions/c?only_if_nothing_alive=true",
-        ),
+        ("a", DeleteGuard::Unconditional),
+        ("b", DeleteGuard::AgentEnded),
+        ("c", DeleteGuard::NothingAlive),
     ];
     let (mut fake, _connection) = connected(&["a", "b", "c"], cx);
     let operations = operations(cx);
     let delivered = Delivered::default();
-    for (key, guard, _) in guards {
-        let deleting = (key, Command::delete(key, guard).unwrap());
+    for (key, guard) in guards {
+        let deleting = (key, delete(key, guard));
         start(&operations, deleting, "delete", &delivered, cx).unwrap();
     }
     cx.run_until_parked();
-    let paths: Vec<String> = fake
-        .commands()
-        .iter()
-        .map(|sent| sent.path.as_str().to_owned())
-        .collect();
-    for (key, guard, path) in guards {
+    assert_eq!(
+        fake.commands().len(),
+        3,
+        "the premise: every Delete was sent"
+    );
+    for (key, guard) in guards {
         assert_eq!(
-            cx.update(|cx| operations.read(cx).in_flight(key)),
+            cx.update(|cx| operations.read(cx).in_flight(&OpKey::session(key))),
             Some(Work::Delete(guard)),
             "{key} is in flight with its own guard"
-        );
-        assert!(
-            paths.iter().any(|sent| sent == path),
-            "{key}'s command carries its guard: {paths:?}"
         );
     }
 }
@@ -253,7 +289,7 @@ fn work_started_from_a_view_settles_after_the_view_is_gone(cx: &mut TestAppConte
     assert!(gone.upgrade().is_none(), "the premise: the view is gone");
     let operations = operations(cx);
     assert_eq!(
-        cx.update(|cx| operations.read(cx).in_flight("a")),
+        cx.update(|cx| operations.read(cx).in_flight(&OpKey::session("a"))),
         Some(Work::Rename),
         "the work outlived its view"
     );
@@ -264,9 +300,13 @@ fn work_started_from_a_view_settles_after_the_view_is_gone(cx: &mut TestAppConte
     cx.run_until_parked();
     cx.update(|cx| {
         let operations = operations.read(cx);
-        assert_eq!(operations.in_flight("a"), None, "the store settled it");
+        assert_eq!(
+            operations.in_flight(&OpKey::session("a")),
+            None,
+            "the store settled it"
+        );
         let failure = operations
-            .failure("a")
+            .failure(&OpKey::session("a"))
             .map(|failure| (failure.work, failure.message.clone()));
         assert_eq!(
             failure,
@@ -291,7 +331,7 @@ fn a_reset_drops_pending_completions_without_cancelling_the_helms_work(cx: &mut 
     fake.reply(sent[0].id, 400, Some(json!("refused")));
     cx.run_until_parked();
     assert!(
-        cx.update(|cx| first.read(cx).failure("c").is_some()),
+        cx.update(|cx| first.read(cx).failure(&OpKey::session("c")).is_some()),
         "the premise: c's refusal is on its row"
     );
     delivered.borrow_mut().clear();
@@ -304,10 +344,7 @@ fn a_reset_drops_pending_completions_without_cancelling_the_helms_work(cx: &mut 
         cx,
     )
     .unwrap();
-    let deleting = (
-        "b",
-        Command::delete("b", DeleteGuard::Unconditional).unwrap(),
-    );
+    let deleting = ("b", delete("b", DeleteGuard::Unconditional));
     start(&first, deleting, "delete b", &delivered, cx).unwrap();
     cx.run_until_parked();
     let sent = fake.commands();
@@ -334,18 +371,18 @@ fn a_reset_drops_pending_completions_without_cancelling_the_helms_work(cx: &mut 
     );
     cx.update(|cx| {
         assert_eq!(
-            first.read(cx).in_flight("b"),
+            first.read(cx).in_flight(&OpKey::session("b")),
             None,
             "the retired store holds nothing"
         );
         assert_eq!(
-            first.read(cx).failure("c"),
+            first.read(cx).failure(&OpKey::session("c")),
             None,
             "its failures went with it"
         );
-        assert_eq!(second.read(cx).in_flight("a"), None);
-        assert_eq!(second.read(cx).in_flight("b"), None);
-        assert_eq!(second.read(cx).failure("c"), None);
+        assert_eq!(second.read(cx).in_flight(&OpKey::session("a")), None);
+        assert_eq!(second.read(cx).in_flight(&OpKey::session("b")), None);
+        assert_eq!(second.read(cx).failure(&OpKey::session("c")), None);
     });
     let late = ("a", rename("a", "late"));
     assert_eq!(
@@ -411,6 +448,144 @@ fn a_completion_says_whether_the_user_moved_on_since_the_work_started(cx: &mut T
     assert_eq!(moved, vec![("typed", true), ("idle", false)]);
 }
 
+/// A save of something other than a session, as the settings and templates editors send: `PUT` on `path` with an
+/// empty body. The route does not matter to the store, only that the command names its work.
+fn save_on(path: &[&str], shown: &'static str) -> Command {
+    let path = ApiPath::api(path).unwrap();
+    Command::new(Work::Save, Method::Put, path, Some(json!({})), shown)
+}
+
+/// Settings saves the preferences and a host's settings, templates saves a template, and none of them is a session;
+/// before the store took keys of other kinds, such work could not use it, and its busy state and refusals had nowhere
+/// to live. Specified: work keyed by a host and by a template runs beside a session's, all three named by the same id
+/// string, which must not make them collide; each is busy only on its own key (a second save of the host is refused,
+/// the session is not); each refusal (the host's, then the template's) is recorded on its own key alone; and the
+/// session's work settles with its own outcome.
+#[gpui::test]
+fn work_on_a_host_and_a_template_keeps_its_own_busy_state_and_refusal(cx: &mut TestAppContext) {
+    let (mut fake, _connection) = connected(&["x"], cx);
+    let operations = operations(cx);
+    let delivered = Delivered::default();
+    let (host, template, session) = (OpKey::host("x"), OpKey::template("x"), OpKey::session("x"));
+    let host_save = || save_on(&["hosts", "x"], "PUT /api/hosts/[host]");
+    start_on(&operations, &host, host_save(), "save host", &delivered, cx).unwrap();
+    let template_save = save_on(&["templates", "x"], "PUT /api/templates/[template]");
+    start_on(
+        &operations,
+        &template,
+        template_save,
+        "save template",
+        &delivered,
+        cx,
+    )
+    .unwrap();
+    start(
+        &operations,
+        ("x", rename("x", "new")),
+        "rename session",
+        &delivered,
+        cx,
+    )
+    .unwrap();
+    assert_eq!(
+        start_on(
+            &operations,
+            &host,
+            host_save(),
+            "save host again",
+            &delivered,
+            cx
+        ),
+        Err(NotStarted::Busy(Work::Save)),
+        "one operation per key: the host's second save waits for its first"
+    );
+    cx.update(|cx| {
+        let operations = operations.read(cx);
+        assert_eq!(operations.in_flight(&host), Some(Work::Save));
+        assert_eq!(operations.in_flight(&template), Some(Work::Save));
+        assert_eq!(
+            operations.in_flight(&session),
+            Some(Work::Rename),
+            "the same id string is another key"
+        );
+    });
+    cx.run_until_parked();
+    let sent = fake.commands();
+    let paths: Vec<_> = sent.iter().map(|sent| sent.path.as_str()).collect();
+    assert_eq!(
+        paths,
+        ["/api/hosts/x", "/api/templates/x", "/api/sessions/x/rename"],
+        "the three commands reached the helm in order, and the refused one did not"
+    );
+
+    fake.reply(sent[0].id, 409, None);
+    cx.run_until_parked();
+    cx.update(|cx| {
+        let operations = operations.read(cx);
+        assert_eq!(operations.in_flight(&host), None, "the host's save settled");
+        let words = HostText::from_host("PUT /api/hosts/[host]: 409");
+        assert_eq!(
+            operations
+                .failure(&host)
+                .map(|failure| (failure.work, &failure.message)),
+            Some((Work::Save, &words)),
+            "the refusal names the route with the host's id hidden"
+        );
+        assert_eq!(
+            operations.failure(&template),
+            None,
+            "the host's refusal is the host's alone"
+        );
+        assert_eq!(operations.failure(&session), None);
+        assert_eq!(
+            operations.in_flight(&template),
+            Some(Work::Save),
+            "the template's save is still in flight"
+        );
+    });
+
+    fake.reply(sent[1].id, 422, Some(json!("a template needs an agent")));
+    fake.reply(sent[2].id, 200, None);
+    cx.run_until_parked();
+    cx.update(|cx| {
+        let operations = operations.read(cx);
+        assert_eq!(
+            operations
+                .failure(&template)
+                .map(|failure| (failure.work, &failure.message)),
+            Some((
+                Work::Save,
+                &HostText::from_host("a template needs an agent")
+            )),
+            "the template's refusal is on the template's key"
+        );
+        assert_eq!(operations.failure(&session), None, "and on no other");
+        assert!(
+            operations.failure(&host).is_some(),
+            "the host's is still the host's"
+        );
+    });
+    let outcomes: Vec<_> = delivered
+        .borrow()
+        .iter()
+        .map(|(label, settled)| (*label, settled.outcome.clone()))
+        .collect();
+    assert_eq!(
+        outcomes,
+        vec![
+            (
+                "save host",
+                Outcome::Refused(HostText::from_host("PUT /api/hosts/[host]: 409"))
+            ),
+            (
+                "save template",
+                Outcome::Refused(HostText::from_host("a template needs an agent"))
+            ),
+            ("rename session", Outcome::Done(None)),
+        ]
+    );
+}
+
 // ---- Saving drafts -------------------------------------------------------------------------------------------------
 
 /// A stand-in for the Rename editor: the session it edits, its title draft, and what its completion saw.
@@ -427,8 +602,8 @@ impl Editor {
         drafts::save(
             self,
             |editor| &mut editor.title,
-            &session,
-            |title| Command::rename(&session, title),
+            &OpKey::session(&session),
+            |title| Ok(rename(&session, title)),
             cx,
             |editor, settled, _| editor.settled.push(settled.outcome.clone()),
         )
@@ -576,4 +751,86 @@ fn a_refused_save_keeps_the_draft_and_is_not_retried(cx: &mut TestAppContext) {
         fake.commands().is_empty(),
         "the failed save was not retried"
     );
+}
+
+/// A stand-in for a template editor: one draft field, saved as work on the template it edits.
+struct TemplateEditor {
+    prompt: Draft<String>,
+    settled: Vec<Outcome>,
+}
+
+impl TemplateEditor {
+    /// The editor's Save: the prompt as the template's whole body, keyed by the template's name.
+    fn save(&mut self, cx: &mut gpui::Context<TemplateEditor>) -> Result<(), NotStarted> {
+        drafts::save(
+            self,
+            |editor| &mut editor.prompt,
+            &OpKey::template("t"),
+            |prompt| {
+                let path = ApiPath::api(&["templates", "t"])?;
+                let body = Some(json!({ "prompt": prompt }));
+                Ok(Command::new(
+                    Work::Save,
+                    Method::Put,
+                    path,
+                    body,
+                    "PUT /api/templates/[template]",
+                ))
+            },
+            cx,
+            |editor, settled, _| editor.settled.push(settled.outcome.clone()),
+        )
+    }
+}
+
+/// Drafts are not only session titles: the template and settings editors save drafts too, and `drafts::save` used to
+/// take a session id. Specified: a draft saved under a template's key goes out as its editor's command, the
+/// store shows the template's key busy (and no session's) while it is in flight, and once the helm answers the draft
+/// is settled as saved and the editor's completion runs.
+#[gpui::test]
+fn a_draft_saves_as_work_on_a_template(cx: &mut TestAppContext) {
+    let (mut fake, _connection) = connected(&["t"], cx);
+    let editor = cx.new(|_| TemplateEditor {
+        prompt: Draft::load("old".to_owned()),
+        settled: Vec::new(),
+    });
+    let took =
+        cx.update(|cx| editor.update(cx, |editor, _| editor.prompt.edit("new prompt".to_owned())));
+    assert!(took, "the premise: the field is touched");
+    cx.update(|cx| editor.update(cx, |editor, cx| editor.save(cx)))
+        .unwrap();
+    let operations = operations(cx);
+    cx.update(|cx| {
+        let operations = operations.read(cx);
+        assert_eq!(
+            operations.in_flight(&OpKey::template("t")),
+            Some(Work::Save)
+        );
+        assert_eq!(
+            operations.in_flight(&OpKey::session("t")),
+            None,
+            "no session is busy"
+        );
+        assert!(editor.read(cx).prompt.is_saving());
+    });
+    cx.run_until_parked();
+    let sent = fake.commands();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(
+        (sent[0].method, sent[0].path.as_str()),
+        (Method::Put, "/api/templates/t")
+    );
+    assert_eq!(sent[0].body, Some(json!({ "prompt": "new prompt" })));
+
+    fake.reply(sent[0].id, 200, None);
+    cx.run_until_parked();
+    cx.update(|cx| {
+        let editor = editor.read(cx);
+        assert!(
+            !editor.prompt.is_saving() && !editor.prompt.is_touched(),
+            "the save counted as saved"
+        );
+        assert_eq!(editor.settled, vec![Outcome::Done(None)]);
+        assert_eq!(operations.read(cx).in_flight(&OpKey::template("t")), None);
+    });
 }

@@ -16,7 +16,7 @@
 //!   flight; an untouched draft whose save the helm refused takes up the current title again. The current title above
 //!   the field always follows, escaped.
 //! - **Saving.** Save, or Enter in the field, sends exactly what the field holds: no trimming, no emptiness check, no
-//!   screening ([`Command::rename`]). The field keeps a pasted line feed ([`TextInputState::new_keeping_line_breaks`]),
+//!   screening ([`command`]). The field keeps a pasted line feed ([`TextInputState::new_keeping_line_breaks`]),
 //!   so a title the supervisor refuses reaches the supervisor, and its refusal is what the user reads. A refusal keeps
 //!   the draft and shows the helm's words, escaped, under the field; a success closes the editor. While a save is in
 //!   flight the field is read-only, Cancel and Close are disabled, Escape does nothing (the layer manager asks the
@@ -50,6 +50,7 @@ mod tests;
 
 use std::rc::Rc;
 
+use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
     AnyWindowHandle, App, AppContext as _, ClickEvent, Context, Entity, InteractiveElement as _,
@@ -64,7 +65,7 @@ use crate::drafts::{self, Draft};
 use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Dialog, DismissGuard, LayerId, MainAction};
-use crate::operations::{Command, Outcome};
+use crate::operations::{Command, OpKey, Outcome, Work};
 use crate::store::HelmStore;
 use crate::theme::{self, metrics};
 use crate::{local_state, session};
@@ -85,6 +86,19 @@ pub fn open(key: &str, mark: &Mark, window: &mut Window, cx: &mut App) -> Option
     open_returning(key, mark, ReturnTo::Opener, window, cx)
 }
 
+/// `POST /api/sessions/{id}/rename` with `title` exactly as given: no trimming, no emptiness check, no screening of
+/// control characters. The supervisor owns every rule about what a title may hold, and its refusal is the text the user
+/// acts on; an empty title is a legal rename. Ported from the old app's `api::rename_session`.
+pub(crate) fn command(session: &str, title: &str) -> Result<Command, PathError> {
+    Ok(Command::new(
+        Work::Rename,
+        Method::Post,
+        ApiPath::api(&["sessions", session, "rename"])?,
+        Some(serde_json::json!({ "title": title })),
+        "POST /api/sessions/[session]/rename",
+    ))
+}
+
 /// [`open`], with closing returning focus where `returns_to` says.
 fn open_returning(
     key: &str,
@@ -95,7 +109,7 @@ fn open_returning(
 ) -> Option<LayerId> {
     let store = session::current_store(cx)?;
     let operations = session::current_operations(cx)?;
-    if let Some(work) = operations.read(cx).in_flight(key) {
+    if let Some(work) = operations.read(cx).in_flight(&OpKey::session(key)) {
         tracing::debug!(?work, "rename not opened: the session has work in flight");
         return None;
     }
@@ -250,8 +264,8 @@ impl RenameEditor {
         let started = drafts::save(
             self,
             |editor| &mut editor.draft,
-            &key,
-            |title| Command::rename(&key, title),
+            &OpKey::session(&key),
+            |title| command(&key, title),
             cx,
             move |editor, settled, cx| {
                 editor.input.set_read_only(false, cx);

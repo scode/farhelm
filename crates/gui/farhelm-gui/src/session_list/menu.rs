@@ -47,6 +47,7 @@ use crate::components::{HoverHelp, IconButton, MenuItem, Role, Tier};
 use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId, Popover};
+use crate::operations::OpKey;
 use crate::store::HelmStore;
 use crate::theme::{self, metrics};
 use crate::{local_state, session};
@@ -303,8 +304,12 @@ impl Render for RowMenu {
         };
         let title = HostText::from_host(row.info.title.as_str());
         let busy = delete::busy(&self.key, cx);
-        let failure = session::current_operations(cx)
-            .and_then(|operations| operations.read(cx).failure(&self.key).cloned());
+        let failure = session::current_operations(cx).and_then(|operations| {
+            operations
+                .read(cx)
+                .failure(&OpKey::session(&self.key))
+                .cloned()
+        });
         let open = local_state::selected(cx).as_deref() == Some(self.key.as_str());
         let rename_help = if open {
             format!("Rename: give this session a new title ({RENAME_SESSION_SHORTCUT_NAME})")
