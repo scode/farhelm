@@ -15,6 +15,11 @@
 //! - **Choosing tells the helm, once.** Every accepted choice, a click or automatic, is written as the `last_selected`
 //!   preference, from which the helm also keeps its visit history. Choosing the session that is already open writes
 //!   nothing.
+//! - **Only the user's choice takes focus.** A click on a row ([`choose`]) hands the session and the click's mark to the
+//!   pane, whose terminal for that session then takes focus, also when the session was already open (SPEC.md, "Where
+//!   focus rests"). An automatic choice ([`open_automatically`]) does not: its terminal only becomes home, and takes
+//!   focus only when nothing else holds it, so a session that went away under the user never pulls focus from a
+//!   control they are using.
 //! - **Opening marks the output seen.** While a session is open, its latest activity is recorded as seen whenever the
 //!   session becomes open or its activity advances, unless it is stale (its host is not connected) or has ended (SPEC.md,
 //!   "Status", as the old app did). The memory of what was stamped is keyed on the session, its activity and its
@@ -32,8 +37,9 @@ use farhelm_helm_client::{ApiPath, Collections, Method};
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences, SessionRow};
 use gpui::App;
 
+use crate::focus::Mark;
 use crate::local_state;
-use crate::session;
+use crate::{session, session_pane};
 
 /// One listed session: the key the helm files it under, and its row.
 #[derive(Clone, Copy)]
@@ -163,9 +169,25 @@ pub(crate) fn preferences(collections: &Collections) -> Option<&Preferences> {
     collections.get::<Preferences>(PREFERENCES_KEY)
 }
 
-/// Open `key` because the user chose it (a click): select it and remember it with the helm. Choosing the open session
-/// again does nothing at all.
+/// Open `key` because the user chose it (a click): select it, remember it with the helm, and have its terminal take
+/// focus. Choosing the open session again sends nothing, but still focuses its terminal.
+///
+/// Called from the click's handler, so the mark taken here is the click's own: the focus coordinator counts a press as
+/// it goes down, before any handler runs.
 pub(crate) fn choose(key: &str, cx: &mut App) {
+    // Recorded before the selection changes, so the pane finds the choice whichever of the two it hears about first.
+    session_pane::chosen(key, Mark::take(cx), cx);
+    select(key, cx);
+}
+
+/// Open `key` because the selection rules chose it: select it and remember it with the helm, as for a click, but move
+/// no focus; its terminal becomes home. Opening the open session again does nothing at all.
+pub(crate) fn open_automatically(key: &str, cx: &mut App) {
+    select(key, cx);
+}
+
+/// Select `key` and, if that changed the selection, remember it with the helm.
+fn select(key: &str, cx: &mut App) {
     if local_state::select(key, cx) {
         remember(key, cx);
     }
