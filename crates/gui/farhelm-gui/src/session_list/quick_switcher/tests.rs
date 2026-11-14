@@ -25,8 +25,8 @@ use crate::actions::{QUICK_SWITCHER_CHORD, TERMINAL_CONTEXT};
 use crate::layers;
 use crate::local_state;
 use crate::main_view::MainView;
-use crate::session_list::tests::{Fixture, frame, listing, painted, preferences, session};
-use crate::test_support::{self, click, keys, settle, started};
+use crate::session_list::tests::{Fixture, listing, painted, preferences, session};
+use crate::test_support::{self, click, focused_id, frame, keys, settle, started};
 
 /// The switcher [`super::open`] opened last, recorded in test builds only, so a test can read its state.
 pub(super) struct Opened(pub(super) WeakEntity<QuickSwitcher>);
@@ -300,14 +300,6 @@ fn any_open(cx: &mut VisualTestContext) -> bool {
 fn field_focused(cx: &mut VisualTestContext) -> bool {
     let switcher = switcher(cx);
     cx.update(|window, cx| switcher.read(cx).input.focus_handle(cx).is_focused(window))
-}
-
-/// The id of the element holding focus in a fresh frame, if it has one.
-fn focused_id(cx: &mut VisualTestContext) -> Option<String> {
-    frame(cx)
-        .into_iter()
-        .find(|node| node.flags.focused && node.element_id.is_some())
-        .and_then(|node| node.element_id.map(|id| id.to_string()))
 }
 
 /// Whether a session terminal holds focus: the focused element's key context stack is a terminal's.
