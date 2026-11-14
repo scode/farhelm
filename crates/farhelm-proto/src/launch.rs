@@ -844,6 +844,13 @@ pub fn split_permission_flags(text: &str) -> Result<Vec<String>, String> {
     Ok(words)
 }
 
+/// Custom permission flags as their editor shows them: the literal words quoted back into one line that
+/// [`split_permission_flags`] reads as the same words. The launcher seeds its flags editor with this when it opens on a
+/// stored launch (Clone, Replace with, Restart with), so an untouched editor sends back exactly the stored words.
+pub fn join_permission_flags(words: &[String]) -> String {
+    shell_words::join(words)
+}
+
 /// Enforce the stored permission/argument relationship at every admission path.
 /// The same splitter used by editors validates a joined wire vector, preserving
 /// even quoted spaces and literal expansion syntax. Semantic flag meanings and
