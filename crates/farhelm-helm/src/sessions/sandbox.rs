@@ -411,7 +411,7 @@ pub(super) async fn delete_if_owned(
 pub(crate) async fn stop_and_suspend(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
-    axum::Json(request): axum::Json<StopRequest>,
+    axum::Json(request): axum::Json<farhelm_proto::SessionStopRequest>,
 ) -> impl IntoResponse {
     let result = crate::run_owned(async move {
         let key = resolve_session_ref(&state, &id).await?;

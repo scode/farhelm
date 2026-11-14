@@ -731,13 +731,15 @@ systemd or SSH substrate ran.
   reaches the program and comes back echoed; on two sessions of its own, the quick switcher's chord from one's focused
   terminal opens the switcher, and part of the other's title and Enter make the helm record the other as last selected
   and focus its terminal; and on another session of its own, the wheel scrolls a terminal back to lines that scrolled
-  off and a typed key returns it to the live screen. A failed run keeps its run directory under `/tmp` for its logs. An
-  interrupted one (Ctrl-C, or SIGTERM from the recorder) still stops its app run, for which the recorder's
-  `--termination-grace` leaves it time. Under 20 seconds on a build worker with the app already built (4 and 18 s
-  measured); it builds the app first unless given `--no-build`. Needs what `gui-agent.py start` needs (`mutter`,
-  `dbus-run-session` and lavapipe on Linux, or a logged-in GUI session of the same user on a Mac). CI does not run it.
-  Run it when the app's session list, row menu, Delete, Rename, quick switcher, terminal attach, paste, text input or
-  scrollback, the bridge's wiring, the app's startup or `scripts/gui-agent.py` change.
+  off and a typed key returns it to the live screen; and on sessions of its own, the menu's Stop on a session without
+  tabs reaches the helm's listing as exited, and the menu's Replace, once confirmed, lists the title under a new id and
+  not the old one. A failed run keeps its run directory under `/tmp` for its logs. An interrupted one (Ctrl-C, or
+  SIGTERM from the recorder) still stops its app run, for which the recorder's `--termination-grace` leaves it time.
+  Under 20 seconds on a build worker with the app already built (4 and 18 s measured); it builds the app first unless
+  given `--no-build`. Needs what `gui-agent.py start` needs (`mutter`, `dbus-run-session` and lavapipe on Linux, or a
+  logged-in GUI session of the same user on a Mac). CI does not run it. Run it when the app's session list, row menu,
+  Delete, Rename, Stop, Replace, quick switcher, terminal attach, paste, text input or scrollback, the bridge's wiring,
+  the app's startup or `scripts/gui-agent.py` change.
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh` — the curl-installer is POSIX
   `sh` run unread on a fresh machine (`curl | sh`), so a syntax slip or a shellcheck-catchable bug in it gets caught
   before the slower Rust-side asset-table parity test in `assets.rs` would notice. `test-install-sh.sh` is bash, not

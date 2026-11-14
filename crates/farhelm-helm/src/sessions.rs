@@ -2990,27 +2990,6 @@ pub(crate) async fn do_stop_session(
         .await
 }
 
-/// Consent from the state shown when the user requested Stop. Older callers
-/// never warned about closing tabs, so omitted tab consent refuses open
-/// tabs. Their original authority to stop the agent remains unchanged.
-#[derive(Deserialize)]
-#[serde(default)]
-pub(crate) struct StopRequest {
-    refuse_if_tabs_open: bool,
-    refuse_if_agent_running: bool,
-}
-
-impl Default for StopRequest {
-    /// HTTP omission cannot authorize the new tab-closing consequence.
-    /// This deliberately differs from the unrestricted internal wire default.
-    fn default() -> Self {
-        Self {
-            refuse_if_tabs_open: true,
-            refuse_if_agent_running: false,
-        }
-    }
-}
-
 /// `POST /api/sessions/{id}/stop` — return Stop's partial-cleanup notice,
 /// or an empty object when every terminal tab closed. An empty request body
 /// remains accepted, including with a JSON content type, for older callers. An
@@ -3023,9 +3002,9 @@ pub(crate) async fn stop_session(
     body: axum::body::Bytes,
 ) -> impl IntoResponse {
     let request = if body.is_empty() {
-        StopRequest::default()
+        farhelm_proto::SessionStopRequest::default()
     } else {
-        match serde_json::from_slice::<StopRequest>(&body) {
+        match serde_json::from_slice::<farhelm_proto::SessionStopRequest>(&body) {
             Ok(request) => request,
             Err(error) => {
                 return http_error(invalid_request(format!("invalid Stop request: {error}")));
@@ -4770,7 +4749,7 @@ pub(crate) async fn replace_session(
                 session,
                 delete_notice,
             }) => match qualify_session_info(&entry_uuid, session) {
-                Ok(session) => replace_reply(&session, delete_notice),
+                Ok(session) => replace_reply(session, delete_notice),
                 Err(error) => http_error(error),
             },
             Err(e) => http_error(e),
@@ -4779,26 +4758,18 @@ pub(crate) async fn replace_session(
     .await
 }
 
-/// The replace endpoint's success body: the new session's own JSON, plus a
-/// `delete_notice` field only when the source's Delete carried one. Kept
-/// additive so a client that reads the body as a bare session still works;
-/// the notice is the host's text, passed through verbatim like the delete
-/// endpoint's.
+/// The replace endpoint's success body ([`farhelm_proto::SessionReplaceReply`]): the new session's own JSON, plus a
+/// `delete_notice` field only when the source's Delete carried one. The notice is the host's text, passed through
+/// verbatim like the delete endpoint's.
 fn replace_reply(
-    session: &farhelm_proto::SessionInfo,
+    session: farhelm_proto::SessionInfo,
     delete_notice: Option<String>,
 ) -> axum::response::Response {
-    let mut body = match serde_json::to_value(session) {
-        Ok(body) => body,
-        Err(e) => return http_error(anyhow::Error::new(e).context("encoding the replacement")),
-    };
-    if let (Some(notice), Some(fields)) = (delete_notice, body.as_object_mut()) {
-        fields.insert(
-            "delete_notice".to_string(),
-            serde_json::Value::String(notice),
-        );
-    }
-    axum::Json(body).into_response()
+    axum::Json(farhelm_proto::SessionReplaceReply {
+        session,
+        delete_notice,
+    })
+    .into_response()
 }
 
 /// `POST /api/sessions/{id}/tabs` — open a terminal tab: a plain shell in

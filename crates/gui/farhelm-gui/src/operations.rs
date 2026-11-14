@@ -75,6 +75,13 @@ pub enum Work {
     /// settings. One kind for every editor, because the store treats them alike: none is supersedable, and each is
     /// busy only on its own key.
     Save,
+    /// The session's Stop, with the preconditions of the row it was asked from (`session_list::stop`). Not
+    /// supersedable: a second Stop of the same session waits for the first to settle.
+    Stop,
+    /// The session's plain Replace, which creates its replacement and then deletes it, with the guard of the row it
+    /// was asked from (`session_list::replace`). Not supersedable, and not a Delete for the selection rules: only an
+    /// admitted Delete holds the automatic choice back.
+    Replace,
 }
 
 /// What a piece of work acts on: the key the store files it under, one request at a time per key. Opaque, and built

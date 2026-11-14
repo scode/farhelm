@@ -28,13 +28,13 @@ use crate::{layers, session, test_support};
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
 
 /// `key` as an ended session: its agent exited.
-fn ended(key: &'static str) -> Fixture {
+pub(super) fn ended(key: &'static str) -> Fixture {
     session(key).status(json!({"state": "exited", "exit_code": 0}))
 }
 
 /// `fixture`'s entry listing `tabs` terminal tabs. The helm's pinned fixture lists one, so every test says how many
 /// it means.
-fn entry(fixture: &Fixture, tabs: usize) -> KeyedEntry {
+pub(super) fn entry(fixture: &Fixture, tabs: usize) -> KeyedEntry {
     let mut entry = fixture.entry();
     entry.value["tabs"] = Value::Array(
         (0..tabs)
@@ -46,7 +46,7 @@ fn entry(fixture: &Fixture, tabs: usize) -> KeyedEntry {
 
 /// A snapshot of `rows` (each with its tab count) in that order, with the first one open, and Skip session
 /// confirmations as `skip` says.
-fn snapshot(rows: &[(Fixture, usize)], skip: bool) -> Vec<CollectionState> {
+pub(super) fn snapshot(rows: &[(Fixture, usize)], skip: bool) -> Vec<CollectionState> {
     let order: Vec<&str> = rows.iter().map(|(fixture, _)| fixture.key).collect();
     let preferences = Preferences {
         visit_history: order.iter().take(1).map(|key| key.to_string()).collect(),
@@ -74,7 +74,7 @@ fn snapshot(rows: &[(Fixture, usize)], skip: bool) -> Vec<CollectionState> {
 }
 
 /// Push `rows` as changed, under the complete listing `order`.
-fn push(
+pub(super) fn push(
     fake: &mut FakeHelm,
     order: &[&str],
     rows: &[(Fixture, usize)],
@@ -113,17 +113,17 @@ fn paths(deletes: &[(u64, String)]) -> Vec<&str> {
 }
 
 /// Whether anything was drawn under `selector` in the last frame.
-fn drawn(cx: &mut VisualTestContext, selector: &'static str) -> bool {
+pub(super) fn drawn(cx: &mut VisualTestContext, selector: &'static str) -> bool {
     cx.debug_bounds(selector).is_some()
 }
 
 /// Whether any dialog, menu or question is open.
-fn any_layer(cx: &mut VisualTestContext) -> bool {
+pub(super) fn any_layer(cx: &mut VisualTestContext) -> bool {
     cx.update(|window, cx| layers::any_open(window, cx))
 }
 
 /// The label of the node drawn under the element id `id`.
-fn label_of(cx: &mut VisualTestContext, id: &str) -> Option<String> {
+pub(super) fn label_of(cx: &mut VisualTestContext, id: &str) -> Option<String> {
     frame(cx)
         .into_iter()
         .find(|node| node.element_id.as_deref() == Some(id))
@@ -139,7 +139,7 @@ fn choose_delete(cx: &mut VisualTestContext, button: &'static str) {
 
 /// A left click at `at`, delivered inside the caller's window update, so several can land with no frame drawn between
 /// them.
-fn click_at(at: Point<Pixels>) -> [PlatformInput; 2] {
+pub(super) fn click_at(at: Point<Pixels>) -> [PlatformInput; 2] {
     [
         PlatformInput::MouseDown(MouseDownEvent {
             button: MouseButton::Left,
@@ -163,8 +163,9 @@ fn click_at(at: Point<Pixels>) -> [PlatformInput; 2] {
 /// its first command, keeps Tab inside, and Escape gives focus back to the button that opened it. Opening a row's menu
 /// is not opening its session, which would switch what the user is looking at. Specified: clicking b's menu button
 /// opens the menu below the button with focus on its first command, Rename, its header names b and says "Codex ·
-/// Running", a is still the open session and nothing is sent; Tab moves to Delete and then wraps to Rename, staying in
-/// the menu; Escape closes the menu and focus is on b's button.
+/// Running", a is still the open session and nothing is sent; Tab moves through Replace, Stop and Delete, in the old
+/// menu's order (the separators between their groups take no focus), and then wraps to Rename, staying in the menu;
+/// Escape closes the menu and focus is on b's button.
 #[gpui::test]
 fn the_menu_opens_below_its_button_holds_focus_and_leaves_the_selection(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
@@ -187,10 +188,15 @@ fn the_menu_opens_below_its_button_holds_focus_and_leaves_the_selection(cx: &mut
     assert_eq!(selected(cx).as_deref(), Some("a"));
     assert_eq!(sent(&mut fake), []);
 
-    test_support::keys(cx, "tab");
-    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-delete"));
-    test_support::keys(cx, "tab");
-    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-rename"));
+    for next in [
+        "session-menu-replace",
+        "session-menu-stop",
+        "session-menu-delete",
+        "session-menu-rename",
+    ] {
+        test_support::keys(cx, "tab");
+        assert_eq!(focused_id(cx).as_deref(), Some(next));
+    }
     test_support::keys(cx, "escape");
     assert!(!any_layer(cx));
     assert_eq!(focused_id(cx).as_deref(), Some("session-menu-b"));
@@ -301,16 +307,22 @@ fn only_the_open_rows_rename_names_the_shortcut(cx: &mut TestAppContext) {
 /// SPEC.md, "Opening and closing": "from a row's menu, Delete then Enter deletes", and a live session's question says
 /// it kills the agent, quotes the title on a line of its own and, for a managed checkout, says what happens to it. A
 /// click on the question's empty space keeps focus on Confirm (SPEC.md gives the row Delete question that rule), so the
-/// Enter after it still answers what the user was looking at. Specified, by keys after the menu opens: Down to Delete
-/// and Enter asks with focus on Confirm and sends nothing; the question's lines are the consequence, the quoted title
-/// and the checkout line; a click on the question's empty space leaves focus on Confirm; Enter then sends the Delete
-/// with no precondition flag and closes the question.
+/// Enter after it still answers what the user was looking at. Specified, by keys after the menu opens: Up to Delete
+/// (wrapping from Rename to the last command) and Enter asks with focus on Confirm and sends nothing; the question's
+/// lines are the consequence, the quoted title and the checkout line; a click on the question's empty space leaves
+/// focus on Confirm; Enter then sends the Delete with no precondition flag and closes the question.
 #[gpui::test]
 fn delete_then_enter_asks_about_a_live_session_and_enter_deletes_it(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0)], false));
     deletes(&mut fake);
     test_support::click(cx, "session-menu-a");
-    test_support::keys(cx, "down enter");
+    test_support::keys(cx, "up");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("session-menu-delete"),
+        "the premise: Up from the first command reaches Delete"
+    );
+    test_support::keys(cx, "enter");
     assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
     let texts = painted(&frame(cx));
     for line in [

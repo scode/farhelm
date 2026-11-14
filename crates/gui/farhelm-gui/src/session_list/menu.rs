@@ -15,17 +15,22 @@
 //! Rename shortcut on the open session's row only, the one row the shortcut acts on (SPEC.md, "Desktop window
 //! chrome"). Like Delete, it is unavailable while the session has a request in flight.
 //!
-//! Choosing Delete closes the menu before the question opens beside the same button (the old app turned the menu into
-//! the question; here the two are separate layers, one after the other). While that question is open the button is
-//! inert: a click on it neither reopens the menu nor answers the question, and the question's own Cancel, Escape or a
-//! press elsewhere is the way out. A refusal from the helm shows inside the menu as well as on the row, since the open
-//! menu covers the row's own copy.
+//! Then come the lifecycle commands in the old menu's groups, each after a separator: Replace ([`super::replace`]), Stop
+//! ([`super::stop`]) and Delete ([`super::delete`]), all three in the danger red. Choosing one closes the menu before
+//! its question opens beside the same button (the old app turned the menu into the question; here the two are separate
+//! layers, one after the other), or before its request goes out when it asks nothing. While that question is open the
+//! button is inert: a click on it neither reopens the menu nor answers the question, and the question's own Cancel,
+//! Escape or a press elsewhere is the way out. While the session has any request in flight, every command here is
+//! unavailable (SPEC.md: "a pending request refuses another lifecycle action"); opening the session stays possible, and
+//! other sessions' menus are untouched. A refusal or a notice from the helm shows inside the menu as well as on the
+//! row, since the open menu covers the row's own copy ([`super::outcome`]).
 //!
-//! NOTE: Only Rename and Delete are ported. Clone, Replace, Replace with, Stop, Restart, Mark read, Pin and the
-//! environment commands come with their areas. Also not ported: the button staying visible while the
-//! row's open control has keyboard focus (the old `:focus-within`; here only the button's own focus shows it), opening
-//! the menu with the arrow keys from the closed button, and placing the menu beside the sidebar with a pointer notch
-//! (the layer manager places it below its anchor).
+//! NOTE: Clone and Replace with (the launcher's), Mark read, Pin and the environment commands come with their areas,
+//! in the old order around these, with no placeholder meanwhile; the old row menu had no Restart, which comes with the
+//! session header. Also not ported: the button staying visible while the row's open control has keyboard focus (the
+//! old `:focus-within`; here only the button's own focus shows it), opening the menu with the arrow keys from the
+//! closed button, and placing the menu beside the sidebar with a pointer notch (the layer manager places it below its
+//! anchor).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -38,14 +43,14 @@ use gpui::{
     Window, div, px,
 };
 
-use super::{SessionList, delete, status};
+use super::{SessionList, delete, outcome, replace, selection, status, stop};
 use crate::actions::RENAME_SESSION_SHORTCUT_NAME;
 use crate::assets::Icon;
 use crate::components::{HoverHelp, IconButton, MenuItem, Role, Tier};
 use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
-use crate::layers::{self, Anchor, LayerId, Popover};
-use crate::operations::OpKey;
+use crate::layers::{self, Anchor, LayerId, Popover, Subject};
+use crate::prompt::{self, Question};
 use crate::theme::{self, metrics};
 use crate::{local_state, session};
 
@@ -244,12 +249,14 @@ impl SessionList {
         let _ = super::rename::open(key, mark, window, cx);
     }
 
-    /// The menu's Delete was chosen at `mark`: close the menu, which returns focus to where it was when the menu
-    /// opened, then go on as any Delete of the row does, so the question opens from there.
-    fn delete_from_menu(
+    /// One of the menu's lifecycle commands was chosen at `mark`: close the menu, which returns focus to where it was
+    /// when the menu opened, then go on as `command` goes on for the row (its Replace, Stop or Delete), so any question
+    /// opens from there.
+    fn lifecycle_from_menu(
         &mut self,
         key: &str,
         mark: &Mark,
+        command: LifecycleCommand,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -262,8 +269,97 @@ impl SessionList {
         if let Some((menu, Opened::Menu)) = open {
             layers::close(menu, window, cx);
         }
-        self.delete(key, mark, window, cx);
+        match command {
+            LifecycleCommand::Replace => self.replace(key, mark, window, cx),
+            LifecycleCommand::Stop => self.stop(key, mark, window, cx),
+            LifecycleCommand::Delete => self.delete(key, mark, window, cx),
+        }
     }
+
+    /// Ask the question `question` builds about `key`'s row at `mark`: beside the row's menu button while the row is in
+    /// the list's view, and centered when it is not (a row scrolled away may still be drawn just past the list's edge,
+    /// and a question beside it would sit next to nothing the user can see; or the Delete shortcut over an open session
+    /// the list does not show). Either way the question closes when the session is gone, and the row's button is inert
+    /// while it is open ([`Opened::Question`]). Nothing opens when the user has moved on since `mark`. `on_confirm`
+    /// runs at most once, with the question's frozen value. A builder rather than a question, because a question cannot
+    /// be copied and the anchored attempt consumes the one it is given even when it opens nothing.
+    pub(super) fn ask_about_row<T: Clone + 'static>(
+        &mut self,
+        key: &str,
+        question: impl Fn() -> Question<T>,
+        mark: &Mark,
+        on_confirm: impl FnOnce(T, &mut Window, &mut App) + Clone + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let anchor = if self.row_in_view(key) {
+            self.current.current(cx).rows.borrow().anchor(key)
+        } else {
+            None
+        };
+        let asked = anchor.and_then(|anchor| {
+            prompt::ask_anchored(
+                question(),
+                anchor,
+                Subject::session(key, cx),
+                mark,
+                on_confirm.clone(),
+                window,
+                cx,
+            )
+        });
+        let asked = asked.or_else(|| {
+            prompt::ask(
+                question(),
+                Subject::session(key, cx),
+                mark,
+                on_confirm,
+                window,
+                cx,
+            )
+        });
+        if let Some(layer) = asked {
+            self.current
+                .current(cx)
+                .rows
+                .borrow_mut()
+                .opened(key, layer, Opened::Question);
+        }
+    }
+}
+
+/// Which of the menu's lifecycle commands was chosen.
+#[derive(Clone, Copy)]
+enum LifecycleCommand {
+    Replace,
+    Stop,
+    Delete,
+}
+
+/// A row a lifecycle action was asked for, as listed when the user asked.
+pub(super) struct Actionable {
+    /// The row as the store holds it now: what any question is drawn from and any precondition is taken from.
+    pub(super) row: SessionRow,
+    /// Whether the helm-wide **Skip session confirmations** preference is on, so the action goes ahead on the click
+    /// with the guard of what the row showed (SPEC.md, "Lifecycle operations").
+    pub(super) skips_questions: bool,
+}
+
+/// `key`'s row, for a Replace, Stop or Delete the user just asked for, or `None` when nothing may happen: the session
+/// is not listed, or it has a request in flight (SPEC.md: "a pending request refuses another lifecycle action").
+pub(super) fn actionable(key: &str, cx: &App) -> Option<Actionable> {
+    let store = session::current_store(cx)?;
+    let collections = store.read(cx).collections();
+    let row = collections.get::<SessionRow>(key).cloned()?;
+    if delete::busy(key, cx) {
+        return None;
+    }
+    let skips_questions = selection::preferences(collections)
+        .is_some_and(|preferences| preferences.skip_session_confirmations == Some(true));
+    Some(Actionable {
+        row,
+        skips_questions,
+    })
 }
 
 /// The menu's and its button's accessible name for a session titled `title` (as the host wrote it): "Session actions
@@ -315,12 +411,6 @@ impl Render for RowMenu {
         };
         let title = HostText::from_host(row.info.title.as_str());
         let busy = delete::busy(&self.key, cx);
-        let failure = session::current_operations(cx).and_then(|operations| {
-            operations
-                .read(cx)
-                .failure(&OpKey::session(&self.key))
-                .cloned()
-        });
         let open = local_state::selected(cx).as_deref() == Some(self.key.as_str());
         let rename_help = if open {
             format!("Rename: give this session a new title ({RENAME_SESSION_SHORTCUT_NAME})")
@@ -344,24 +434,50 @@ impl Render for RowMenu {
                 list.rename_from_menu(&key, &mark, window, cx)
             });
         });
-        let list = self.list.clone();
-        let key = self.key.clone();
-        let delete = MenuItem::new(
+        // The lifecycle commands: in the old menu's danger red, each in a group of its own, and unavailable while
+        // the session has a request in flight, as Rename is.
+        let lifecycle = |id: &'static str,
+                         icon: Icon,
+                         label: &'static str,
+                         help: &'static str,
+                         description: &'static str,
+                         command: LifecycleCommand| {
+            let (list, key) = (self.list.clone(), self.key.clone());
+            MenuItem::new(id, icon, label, HoverHelp::tooltip(help), Role::MenuItem)
+                .description(description)
+                .danger()
+                .disabled(busy)
+                .on_click(move |_, window, cx| {
+                    let mark = Mark::take(cx);
+                    let _ = list.update(cx, |list, cx| {
+                        list.lifecycle_from_menu(&key, &mark, command, window, cx)
+                    });
+                })
+        };
+        let replace = lifecycle(
+            "session-menu-replace",
+            Icon::Replace,
+            "Replace",
+            replace::MENU_HELP,
+            "Fresh conversation, same settings",
+            LifecycleCommand::Replace,
+        );
+        let stop = lifecycle(
+            "session-menu-stop",
+            Icon::Stop,
+            "Stop",
+            stop::MENU_HELP,
+            "Ends the agent and its processes, and closes terminal tabs",
+            LifecycleCommand::Stop,
+        );
+        let delete = lifecycle(
             "session-menu-delete",
             Icon::Trash,
             "Delete",
-            HoverHelp::tooltip("Delete: remove this session and its state"),
-            Role::MenuItem,
-        )
-        .description("Removes the session and its state")
-        .danger()
-        .disabled(busy)
-        .on_click(move |_, window, cx| {
-            let mark = Mark::take(cx);
-            let _ = list.update(cx, |list, cx| {
-                list.delete_from_menu(&key, &mark, window, cx)
-            });
-        });
+            "Delete: remove this session and its state",
+            "Removes the session and its state",
+            LifecycleCommand::Delete,
+        );
         panel
             .child(header(&self.key, row, &title, cx))
             .child(
@@ -372,15 +488,26 @@ impl Render for RowMenu {
                     .flex()
                     .flex_col()
                     .child(rename)
+                    .child(separator(cx))
+                    .child(replace)
+                    .child(separator(cx))
+                    .child(stop)
+                    .child(separator(cx))
                     .child(delete),
             )
-            // On the menu's own surface, so in the ordinary red whatever the row's fill.
-            .children(
-                failure.map(|failure| {
-                    delete::failure_text(&failure.message, theme::palette(cx).danger)
-                }),
-            )
+            .children(outcome::menu_line(&self.key, cx))
     }
+}
+
+/// A hairline between two of the menu's groups: the old `.menu-separator` inside the row menu's items, one pixel of
+/// `--border-dim` inset 10 pixels from the panel's sides with 4 pixels above and below. Drawing only: it is no command,
+/// takes no focus, and the arrow keys pass over it.
+fn separator(cx: &App) -> impl IntoElement {
+    div()
+        .h(px(1.))
+        .my(px(4.))
+        .mx(px(10.))
+        .bg(theme::color(theme::palette(cx).border_dim))
 }
 
 /// The menu's header, `.menu-header`: the session's title, then its agent and status on one line, above a hairline.

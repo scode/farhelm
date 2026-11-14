@@ -6,8 +6,9 @@ NOTE: This is a smoke test, not the end-to-end suite. It covers the first slice'
 (the session list, a row's menu, Delete, Rename, and typing into the open session's terminal), so a break in the wiring
 between the app, the helm and the supervisor shows up somewhere, plus the area steps added since (30, 31 and 33, the
 terminal's: a large paste, on a Mac only, text an input method commits, and scrollback; 32, the sidebar's quick
-switcher). The behavior itself is specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`,
-`session_pane.rs`, `terminal/attached/tests.rs`); nothing here checks layout or wording beyond the names it clicks.
+switcher; 34, the session list's Stop and Replace from a row's menu). The behavior itself is specified and tested in
+process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `terminal/attached/tests.rs`); nothing here
+checks layout or wording beyond the names it clicks.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -357,6 +358,48 @@ class Smoke(unittest.TestCase):
         self.ok("type", "--keys", "x")
         screen = self.ok("terminal-text", "--wait", "line-119")
         self.assertNotIn("line-000", screen, "typing returned to the live screen")
+
+    # ---- The session list's lifecycle step (34), on sessions of its own ---------------------------------------------
+
+    def test_34_stop_and_replace_from_the_row_menu(self) -> None:
+        """Stop and Replace are the row menu's lifecycle commands, each a request through the operation store to a
+        helm route that reaches the supervisor (Replace creates a session and deletes another). Specified, on two
+        basic fake-agent sessions this step creates under titles of its own: the menu's Stop on a session with no
+        terminal tabs asks nothing and the helm then lists that session as exited; the menu's Replace asks, and once
+        Confirm replace is clicked the helm lists a session under the same title with a new id, and no longer the old
+        one. The helm's listing is the oracle for both, since the window's rows show either outcome only indirectly
+        (a stopped row keeps its title, and a replacement has the same title as its source)."""
+        fixtures = json.loads((RUN / "run.json").read_text())["binaries"]["fixtures"]
+        tag = uuid.uuid4().hex[:8]
+        stopped, replaced = f"Lifecycle stop {tag}", f"Lifecycle replace {tag}"
+        ids = {}
+        for index, title in enumerate((stopped, replaced), start=1):
+            body = gui_agent.seed_body(index, gui_agent.SESSION_CWD, fixtures)
+            body["title"] = title
+            ids[title] = gui_agent.helm_request(RUN, "POST", "/api/sessions", body)["id"]
+        for title in (stopped, replaced):
+            self.ok("wait", "--text", title)
+        self.assertNotEqual(
+            gui_agent.listed_states(RUN).get(ids[stopped]), "exited", "premise: the session to stop is not stopped"
+        )
+
+        self.ok("click", f"text:Session actions for {stopped}")
+        self.ok("wait", "--text", MENU_DESCRIPTION)
+        self.ok("click", "text:Stop")
+        eventually(lambda: gui_agent.listed_states(RUN).get(ids[stopped]) == "exited", f"{stopped} listed as exited")
+
+        self.ok("click", f"text:Session actions for {replaced}")
+        self.ok("wait", "--text", MENU_DESCRIPTION)
+        self.ok("click", "text:Replace")
+        self.ok("wait", "--text", "Confirm replace")
+        self.ok("click", "text:Confirm replace")
+
+        def replacement() -> bool:
+            titles = listed_titles()
+            fresh = [id for id, title in titles.items() if title == replaced and id != ids[replaced]]
+            return ids[replaced] not in titles and len(fresh) == 1
+
+        eventually(replacement, f"{replaced} listed under a new id and not under its old one")
 
 
 # The receiver for the large-paste step: once the step types `copy`, it writes its payload file to the clipboard with

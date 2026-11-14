@@ -209,6 +209,41 @@
       ]
     },
     {
+      "id": "app-row-replace-confirmation",
+      "title": "Replace chosen from the idle Fixture 3's row menu (after Escape on the quick switcher): the question asked beside its actions button",
+      "reference": "row-replace-confirmation",
+      "mockup": false,
+      "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Recent sessions"
+        ],
+        [
+          "click",
+          "text:Session actions for Fixture 3"
+        ],
+        [
+          "wait",
+          "--text",
+          "Fresh conversation, same settings"
+        ],
+        [
+          "click",
+          "text:Replace"
+        ],
+        [
+          "wait",
+          "--text",
+          "Confirm replace"
+        ]
+      ]
+    },
+    {
       "id": "app-empty-fleet",
       "title": "The main window over an empty fleet",
       "reference": "empty-fleet",
@@ -508,7 +543,7 @@
     },
     {
       "id": "row-replace-confirmation",
-      "ported": false
+      "ported": true
     },
     {
       "id": "rename-dialog",

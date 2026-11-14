@@ -86,11 +86,16 @@ pub enum Icon {
     StatusUnseen,
     /// A ring: idle, with nothing new in it.
     StatusIdle,
-    /// A ring with one solid quarter: work under way that the user is waiting for (a Delete). Drawn turned a step at a
-    /// time, never still-shaped like a status mark.
+    /// A ring with one solid quarter: work under way that the user is waiting for (a Delete, a Stop, a Replace that has
+    /// waited a while). Drawn turned a step at a time, never still-shaped like a status mark.
     Spinner,
     /// A tick: the mark in a checked checkbox (drawn for this app, in the shape of the platform checkbox's tick).
     Check,
+    /// A rounded square: stop the agent (the old app's Stop glyph, on its Stop command).
+    Stop,
+    /// Two opposed arrows: start the session over under the same settings (the old app's Replace glyph). Deliberately
+    /// not a circular arrow, which reads as resuming, so Replace and a later Restart never look alike beside each other.
+    Replace,
 }
 
 impl Icon {
@@ -109,6 +114,8 @@ impl Icon {
         Icon::StatusIdle,
         Icon::Spinner,
         Icon::Check,
+        Icon::Stop,
+        Icon::Replace,
     ];
 }
 
@@ -126,6 +133,8 @@ impl Icon {
             Icon::StatusIdle => "icons/status-idle.svg",
             Icon::Spinner => "icons/spinner.svg",
             Icon::Check => "icons/check.svg",
+            Icon::Stop => "icons/stop.svg",
+            Icon::Replace => "icons/replace.svg",
         }
     }
 }
@@ -151,6 +160,8 @@ impl Assets {
             "icons/status-idle.svg" => Some(include_bytes!("../assets/icons/status-idle.svg")),
             "icons/spinner.svg" => Some(include_bytes!("../assets/icons/spinner.svg")),
             "icons/check.svg" => Some(include_bytes!("../assets/icons/check.svg")),
+            "icons/stop.svg" => Some(include_bytes!("../assets/icons/stop.svg")),
+            "icons/replace.svg" => Some(include_bytes!("../assets/icons/replace.svg")),
             _ => None,
         }
     }

@@ -31,6 +31,11 @@
 //!   automatically, and a selection proven gone is cleared rather than replaced ([`hold_for_deletes`]); the choice is
 //!   made once every Delete has settled. SPEC.md: "Automatic selection after Delete waits until every admitted Delete
 //!   has settled … and never opens a session that is still being deleted". A user's own click is not held back.
+//! - **A Replace keeps its own source open until it answers.** The helm removes a Replace's source before it replies,
+//!   and the reply is what opens the replacement in the source's place (SPEC.md: "A completed Replace opens its
+//!   replacement only if the source is still selected"), so while the open session's own Replace is in flight its
+//!   removal does not count as proof that it is gone (`SessionList::settle`). Any other Stop or Replace holds nothing
+//!   back.
 //!
 //! NOTE: Not ported yet, because nothing in the app can cause it: the old app's refusal to stamp a retired
 //! environment's session, which arrives with environment sessions.
