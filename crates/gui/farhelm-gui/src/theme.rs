@@ -105,6 +105,8 @@ pub struct Palette {
     pub warn: Token,
     /// `--warn-bright`: amber prose, which needs more lift than a label does; a question's consequence lines.
     pub warn_bright: Token,
+    /// `--warn-bg`: the filled amber band behind the truncated-list warning.
+    pub warn_bg: Token,
     /// `--danger`: the red text tone of destructive actions and waiting.
     pub danger: Token,
     /// `--danger-strong`: failure prose on ordinary surfaces.
@@ -154,6 +156,7 @@ pub const DARK: Palette = Palette {
     ok: rgb_token(0x7fcf9a),
     warn: rgb_token(0xe5bb6e),
     warn_bright: rgb_token(0xead09b),
+    warn_bg: rgb_token(0x3d3424),
     danger: rgb_token(0xee8a8a),
     danger_strong: rgb_token(0xf09595),
     danger_soft: rgb_token(0xf2c0c4),
@@ -203,6 +206,7 @@ pub const LIGHT: Palette = Palette {
     ok: rgb_token(0x276a43),
     warn: rgb_token(0x79531b),
     warn_bright: rgb_token(0x694719),
+    warn_bg: rgb_token(0xfff0d2),
     danger: rgb_token(0xa63e4d),
     danger_strong: rgb_token(0xa13443),
     danger_soft: rgb_token(0xf2c0c4),
@@ -379,6 +383,23 @@ pub mod metrics {
     pub const TOOLTIP_LINE_HEIGHT: Pixels = px(16.2);
     /// `.farhelm-tooltip`'s `-webkit-line-clamp`: longer help is cut at this many lines.
     pub const TOOLTIP_MAX_LINES: usize = 8;
+    /// `--sidebar-width`: the sidebar column's default width (the old app let the user drag it; this port does not
+    /// yet).
+    pub const SIDEBAR_WIDTH: Pixels = px(396.);
+    /// `--row-slot`: the width of a session row's status and locality columns.
+    pub const ROW_SLOT: Pixels = px(12.);
+    /// `--row-slot-gap`: the gap after each of those columns.
+    pub const ROW_SLOT_GAP: Pixels = px(6.);
+    /// `.session-row-open`'s padding: (top and bottom, left). The right edge has none.
+    pub const ROW_PAD: (Pixels, Pixels) = (px(6.), px(12.));
+    /// `.session-title`'s font size.
+    pub const TEXT_ROW_TITLE: Pixels = px(14.);
+    /// `.status-dot`: the status mark's box.
+    pub const STATUS_DOT: Pixels = px(8.);
+    /// `.session-heading`'s padding: (top and bottom, left and right).
+    pub const LIST_HEADING_PAD: (Pixels, Pixels) = (px(4.), px(8.));
+    /// `.status`'s padding (2em at its 14px): the list's own one-line states, such as "No sessions".
+    pub const LIST_STATUS_PAD: Pixels = px(28.);
 }
 
 /// The user's appearance choice. System follows the operating system live; the explicit choices ignore it.

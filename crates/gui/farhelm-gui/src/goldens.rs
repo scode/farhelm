@@ -1,7 +1,8 @@
 //! Headless screenshot goldens: one per component, per dialog frame and per overlay kind (tooltip, popover, the prompt
 //! over its veil, once more with a summary that names a host value, and the prompt anchored to a row's menu button),
 //! the keyboard focus ring, host-supplied text over its spoofing corpus, the notice banner, the terminal's styles and
-//! cursor shapes, and an attached terminal's exit line and status line, in both appearances, compared pixel for pixel.
+//! cursor shapes, an attached terminal's exit line and status line, and the session list (a fleet of every status a row
+//! draws, and an empty fleet), in both appearances, compared pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
@@ -35,6 +36,8 @@ use crate::notices::Notice;
 use crate::prompt::{self, Answer, Question};
 use crate::root;
 use crate::session;
+use crate::session_list::SessionList;
+use crate::session_list::tests::{Fixture, listing, preferences, session};
 use crate::terminal::attached::{AttachedTerminal, OpenStream, TerminalTarget};
 use crate::terminal::{CellMetrics, CursorPhase, TerminalView, TextSize};
 use crate::test_support;
@@ -72,6 +75,7 @@ struct SceneState {
     ring: FocusHandle,
     terminals: Rc<RefCell<Vec<Entity<TerminalView>>>>,
     attached: Rc<RefCell<Vec<Entity<AttachedTerminal>>>>,
+    lists: Rc<RefCell<Vec<Entity<SessionList>>>>,
     keep: Rc<RefCell<Vec<Box<dyn std::any::Any>>>>,
 }
 
@@ -764,7 +768,72 @@ fn terminals(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
         .into_any_element()
 }
 
-static SCENES: [Scene; 15] = [
+/// Connect a fake helm with the sessions `rows` in that order (and a visit history that opens the first one) and make
+/// the session list over it. The fake, the connection and the list are kept for the scene's life; the list's own
+/// commands (remembering the selection, marking it seen) go to the fake unanswered, so the pictures show the snapshot
+/// as the helm sent it.
+fn session_list_scene(state: &SceneState, rows: &[Fixture], cx: &mut App) {
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    let order: Vec<&str> = rows.iter().map(|row| row.key).collect();
+    helm.connect(vec![
+        listing(&order, rows),
+        preferences(&order[..order.len().min(1)], None),
+    ]);
+    state.lists.borrow_mut().push(cx.new(SessionList::new));
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+}
+
+/// A fleet with every mark and line a row draws differently: running (selected, so its inverse colors are pinned),
+/// waiting, idle with new output, idle with nothing new, running on a host that is not connected (the grey mark), and
+/// exited with a stop annotation on a line of its own.
+fn session_list_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    let status = |state: &str| serde_json::json!({ "state": state });
+    let row = |key, title, state| {
+        session(key)
+            .title(title)
+            .status(status(state))
+            .activity(300)
+            .seen(Some(300))
+    };
+    let rows = [
+        row("a", "Refactor the API client", "running").cwd("/home/user/src/api"),
+        row("b", "Review the install docs", "waiting").cwd("/home/user/src/docs"),
+        row("c", "Fix the flaky upload test", "idle")
+            .seen(Some(100))
+            .cwd("/srv/ci/uploads"),
+        row("d", "Update dependencies", "idle").cwd("/home/user/src/farhelm"),
+        row("f", "Benchmark on the build box", "running")
+            .stale()
+            .cwd("/home/user/bench"),
+        row("e", "Release notes for 0.40", "exited")
+            .status(serde_json::json!({ "state": "exited", "exit_code": 0 }))
+            .annotation("stopped by user")
+            .cwd("/home/user/src/farhelm"),
+    ];
+    session_list_scene(state, &rows, cx);
+}
+
+/// No sessions at all: the list says so.
+fn session_list_empty_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    session_list_scene(state, &[], cx);
+}
+
+/// The session list a scene's setup made, in a column of the sidebar's width and surface.
+fn session_lists(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    let palette = theme::palette(cx);
+    div()
+        .w(theme::metrics::SIDEBAR_WIDTH)
+        .h(px(394.))
+        .bg(theme::color(palette.bg_1))
+        .text_color(theme::color(palette.fg_0))
+        .children(state.lists.borrow().iter().cloned())
+        .into_any_element()
+}
+
+static SCENES: [Scene; 17] = [
     Scene {
         name: "buttons",
         size: (560., 64.),
@@ -855,6 +924,18 @@ static SCENES: [Scene; 15] = [
         draw: attached_terminals,
         setup: terminal_status_setup,
     },
+    Scene {
+        name: "session-list",
+        size: (420., 418.),
+        draw: session_lists,
+        setup: session_list_setup,
+    },
+    Scene {
+        name: "session-list-empty",
+        size: (420., 418.),
+        draw: session_lists,
+        setup: session_list_empty_setup,
+    },
 ];
 
 /// Draw and capture `window` until two consecutive captures match, at most [`MAX_SETTLE_FRAMES`] times.
@@ -916,6 +997,7 @@ fn component_goldens() -> anyhow::Result<()> {
                         ring: cx.focus_handle().tab_stop(true),
                         terminals: Rc::new(RefCell::new(Vec::new())),
                         attached: Rc::new(RefCell::new(Vec::new())),
+                        lists: Rc::new(RefCell::new(Vec::new())),
                         keep: Rc::new(RefCell::new(Vec::new())),
                     };
                     let scene_view = cx.new(|cx| SceneView {
