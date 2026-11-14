@@ -223,6 +223,21 @@ fn closing_a_shortcut_opened_editor_returns_focus_to_the_terminal(cx: &mut TestA
     assert!(terminal_focused(cx), "focus went to the terminal");
 }
 
+/// SPEC.md: "Close uses the same cancellation and busy-state rules as Cancel". Close goes through the layer manager's
+/// dismissal, the way Escape does, so the editor's own rule decides both; the dismissal asks the editor's hook, which
+/// reads the editor, so Close must call it from the click and not from inside an update of the editor (GPUI refuses
+/// to read an entity it is updating, with a panic). Specified: a click on the header Close closes the editor without
+/// that panic, and focus returns to the terminal, as Escape's does.
+#[gpui::test]
+fn the_header_close_closes_the_editor_like_escape(cx: &mut TestAppContext) {
+    let (_helm, cx) = open_main(cx, fleet("old"));
+    keys(cx, RENAME);
+    assert!(any_open(cx), "the premise: the editor opened");
+    test_support::click(cx, "rename-close");
+    assert!(!any_open(cx), "Close closed the editor");
+    assert!(terminal_focused(cx), "focus went to the terminal");
+}
+
 /// The shortcut acts on the open session only; with none there is nothing to rename, and it must still not reach a
 /// program or open an empty editor. Specified: over an empty fleet the shortcut opens nothing.
 #[gpui::test]

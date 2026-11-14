@@ -6,9 +6,10 @@
 //!
 //! - **Who opened what.** Opening a layer returns its [`LayerId`], and only that id closes it ([`close`]): nothing
 //!   closes a dialog, menu or confirmation it did not open. The user closes the topmost layer with Escape
-//!   ([`dismiss_top`]) or, for a popover, by clicking outside it; Escape leaves a dialog open while it says it may not
-//!   be dismissed now ([`Dialog::may_dismiss`], an editor with a save in flight). The one exception is a reset of the connection to
-//!   the helm, which closes everything ([`close_all`]).
+//!   ([`dismiss_top`]) or, for a popover, by clicking outside it. A dialog's own hook decides each dismissal
+//!   ([`Dialog::on_dismiss`]): it may keep the dialog open, as an editor with a save in flight does, or keep it open
+//!   and ask first, as an editor with an unsaved draft will. The one exception is a reset of the connection to the
+//!   helm, which closes everything ([`close_all`]) without asking.
 //! - **Things the user did not start never open a layer.** Every open takes the [`Mark`] the feature took when the user
 //!   acted, and is refused once the user has moved on since (the focus coordinator's counter). Work that finishes later
 //!   shows its result where it belongs instead.
@@ -19,7 +20,7 @@
 //!   confirmation about a session that was deleted elsewhere). Every overlay is anchored to an element: SPEC.md has no
 //!   menu opened at a pointer position.
 //! - **Three kinds of layer.** A dialog is centered over a veil (or near the window's top, for an opener that asks:
-//!   [`DialogOptions`]). A popover (a menu) is drawn below its anchor, or
+//!   [`Dialog::placement`]). A popover (a menu) is drawn below its anchor, or
 //!   beside it when the anchor asks for that ([`Anchor::beside`], the session row's menu flying out beside the
 //!   sidebar). An anchored dialog ([`open_anchored`]) is drawn like a popover but answers like a dialog: it has a
 //!   subject, a main action for Enter and its own empty-space rule. It is how the prompt asks a question beside the
@@ -107,8 +108,8 @@ struct Layer {
     opener: Option<WeakFocusHandle>,
     /// Where closing it returns focus: `opener`, unless its opener named home ([`Dialog::returns_to`]).
     returns_to: focus::ReturnTo,
-    /// Whether the user may dismiss it right now ([`Dialog::may_dismiss`]); `None` always may.
-    may_dismiss: Option<DismissGuard>,
+    /// What a dismissal of it does ([`Dialog::on_dismiss`]); `None` always closes.
+    on_dismiss: Option<DismissHook>,
     /// What Enter does while the dialog itself (not one of its controls) has focus.
     main_action: Option<MainAction>,
     /// What a press on the layer's empty space does to focus.
@@ -120,8 +121,19 @@ struct Layer {
 /// A dialog's main action, which Enter presses while the dialog itself has focus.
 pub type MainAction = Rc<dyn Fn(&mut Window, &mut App)>;
 
-/// Whether the user may dismiss a dialog right now ([`Dialog::may_dismiss`]). Asked at the moment of each dismissal.
-pub type DismissGuard = Rc<dyn Fn(&App) -> bool>;
+/// What a dialog does when the user dismisses it ([`Dialog::on_dismiss`]), asked at the moment of each dismissal. It
+/// gets the window so it can open a question over the dialog before it answers [`Dismissal::Stay`].
+pub type DismissHook = Rc<dyn Fn(&mut Window, &mut App) -> Dismissal>;
+
+/// A dialog's answer to a dismissal ([`Dialog::on_dismiss`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Dismissal {
+    /// Close the dialog, as a dismissal does without a hook.
+    Close,
+    /// Keep it open: it is busy with work it must not lose, or it has just asked the user what to do (and closes itself
+    /// later, through [`close`], if the answer says so).
+    Stay,
+}
 
 enum Kind {
     /// A dialog over its veil, sitting and answering an outside press as its opener asked.
@@ -332,17 +344,27 @@ pub struct Dialog {
     /// Where focus goes when the dialog closes with focus inside it: [`focus::ReturnTo::Opener`] (what held focus when
     /// it opened) for every dialog SPEC.md does not send elsewhere.
     pub returns_to: focus::ReturnTo,
-    /// Whether the user may dismiss the dialog right now, asked on every dismissal the layer manager performs: Escape,
-    /// wherever focus is inside the dialog, the dialog itself included, and a press outside a dialog opened with
-    /// [`DialogOptions::dismiss_on_outside_press`]. While it says no, a dismissal does nothing at all (Escape closes no
-    /// tooltip or lower layer either). For a dialog busy with work it must not lose, such as an editor
-    /// whose save is in flight: a guard in the dialog's own view would miss the case where the dialog itself holds
-    /// focus (after a click on its empty space), because the layer manager's element sits around that view.
+    /// What the dialog does when the user dismisses it, asked on every dismissal: Escape, wherever focus is inside the
+    /// dialog, the dialog itself included; a press outside a dialog opened with [`Dialog::dismiss_on_outside_press`];
+    /// and a control the dialog routes through [`dismiss`] (its header Close). [`Dismissal::Stay`] keeps it open and
+    /// the dismissal does nothing else (Escape closes no tooltip or lower layer either): for a dialog busy with work it
+    /// must not lose, such as an editor whose save is in flight, or one that asks first, such as an editor leaving an
+    /// unsaved draft (SPEC.md for the template editor: "Leaving an unsaved draft asks Keep editing, Discard, or Save"),
+    /// which opens its question from the hook and closes itself once the answer says so. The hook lives with the layer,
+    /// not in the dialog's view, because a key handler in the view would miss the case where the dialog itself holds
+    /// focus (after a click on its empty space): the layer manager's element sits around that view.
     ///
-    /// Only dismissals are guarded. A close the opener makes itself ([`close`], on a save that succeeded or on its own
-    /// Cancel), a subject going away, and a reset of the connection ([`close_all`]) close the dialog whatever this says.
-    /// `None` is always dismissible.
-    pub may_dismiss: Option<DismissGuard>,
+    /// Only dismissals ask. A close the opener makes itself ([`close`], on a save that succeeded or on an answer that
+    /// says to leave), a subject going away, and a reset of the connection ([`close_all`]) close the dialog whatever
+    /// this would say. `None` always closes.
+    pub on_dismiss: Option<DismissHook>,
+    /// Where the dialog sits: [`DialogPlacement::Centered`] for every dialog but the quick switcher.
+    pub placement: DialogPlacement,
+    /// Whether a press on the veil, outside the dialog, dismisses it: the old quick switcher closed that way; every
+    /// other dialog passes `false`, and its veil only takes the press. It goes through the same path as Escape
+    /// ([`dismiss_top`]), so [`Dialog::on_dismiss`] still decides and focus returns as Escape returns it; the veil
+    /// still takes the press, so the page behind never sees it.
+    pub dismiss_on_outside_press: bool,
 }
 
 /// A popover to open: a menu or a popup list.
@@ -379,32 +401,26 @@ pub struct AnchoredDialog {
     pub keeps_focus_on_empty_click: bool,
 }
 
-/// Where a dialog sits over its veil, and whether a press outside it dismisses it: choices its opener makes with
-/// [`open_dialog_with`]. The default is every dialog's ordinary form: centered, and an outside press does nothing but
-/// what a press on the veil always does (nothing reaches the page).
-#[derive(Clone, Copy, Default)]
-pub struct DialogOptions {
-    pub placement: DialogPlacement,
-    /// Whether a press on the veil, outside the dialog, dismisses it: the old quick switcher closed that way. It goes
-    /// through the same path as Escape ([`dismiss_top`]), so the dialog's [`Dialog::may_dismiss`] guard still decides
-    /// and focus returns as Escape returns it; the veil still takes the press, so the page behind never sees it.
-    pub dismiss_on_outside_press: bool,
+/// Where an open dialog sits and whether an outside press dismisses it, as its [`Dialog`] asked.
+#[derive(Clone, Copy)]
+struct DialogOptions {
+    placement: DialogPlacement,
+    dismiss_on_outside_press: bool,
 }
 
-/// Where a dialog sits over its veil.
-#[derive(Clone, Copy, Default)]
+/// Where a dialog sits over its veil ([`Dialog::placement`]).
+#[derive(Clone, Copy)]
 pub enum DialogPlacement {
     /// Centered in the window, as every dialog of the old app but the quick switcher.
-    #[default]
     Centered,
     /// Centered across, its top `min(12% of the window's height, 80 px)` from the window's top and its height at most
     /// 75% of the window's: the old quick switcher (`.quick-switcher-backdrop` and `.quick-switcher-dialog` in
     /// `app.css` at reference commit `24bc0580`), which a dialog that grows with its results keeps from moving. The cap
     /// holds a view that can shrink to it (`flex_1` and `min_h_0` on its root, with its own scrolling list), as the old
-    /// dialog's list scrolled inside its `max-height`; a view that cannot shrink draws past the cap, and that part counts
-    /// as outside the dialog for presses and focus. A view on [`crate::components::DialogFrame`] fits only if its root
-    /// and the frame both shrink, since the frame's own cap is taller. The old backdrop's 16-pixel side padding is the
-    /// view's to keep, by capping its own width.
+    /// dialog's list scrolled inside its `max-height`; a view that cannot shrink draws past the cap, and that part
+    /// counts as outside the dialog for presses and focus, so a top-placed view must shrink. A view on
+    /// [`crate::components::DialogFrame`] fits only if its root and the frame both shrink, since the frame's own cap is
+    /// taller. The old backdrop's 16-pixel side padding is the view's to keep, by capping its own width.
     Top,
 }
 
@@ -412,17 +428,6 @@ pub enum DialogPlacement {
 /// result belongs where the feature shows it otherwise).
 pub fn open_dialog(
     dialog: Dialog,
-    mark: &Mark,
-    window: &mut Window,
-    cx: &mut App,
-) -> Option<LayerId> {
-    open_dialog_with(dialog, DialogOptions::default(), mark, window, cx)
-}
-
-/// [`open_dialog`], placed and dismissed as `options` say.
-pub fn open_dialog_with(
-    dialog: Dialog,
-    options: DialogOptions,
     mark: &Mark,
     window: &mut Window,
     cx: &mut App,
@@ -435,10 +440,15 @@ pub fn open_dialog_with(
         main_action,
         keeps_focus_on_empty_click,
         returns_to,
-        may_dismiss,
+        on_dismiss,
+        placement,
+        dismiss_on_outside_press,
     } = dialog;
     open(
-        Kind::Dialog(options),
+        Kind::Dialog(DialogOptions {
+            placement,
+            dismiss_on_outside_press,
+        }),
         view,
         container,
         start,
@@ -446,7 +456,7 @@ pub fn open_dialog_with(
         main_action,
         empty_press(keeps_focus_on_empty_click),
         returns_to,
-        may_dismiss,
+        on_dismiss,
         mark,
         window,
         cx,
@@ -549,7 +559,7 @@ fn open(
     main_action: Option<MainAction>,
     empty_press: focus::OnPress,
     returns_to: focus::ReturnTo,
-    may_dismiss: Option<DismissGuard>,
+    on_dismiss: Option<DismissHook>,
     mark: &Mark,
     window: &mut Window,
     cx: &mut App,
@@ -579,7 +589,7 @@ fn open(
             container,
             opener,
             returns_to,
-            may_dismiss,
+            on_dismiss,
             main_action,
             empty_press,
             _watches: watches,
@@ -654,21 +664,15 @@ pub fn close_all(cx: &mut App) {
 }
 
 /// The user closes the topmost layer (Escape), or the tooltip if no layer is open. Returns whether Escape was taken, so
-/// the key can go on to whatever else wants it when nothing is open: a topmost layer that may not be dismissed now
-/// ([`Dialog::may_dismiss`]) takes it and stays open.
+/// the key can go on to whatever else wants it when nothing is open: a topmost dialog whose hook keeps it open
+/// ([`Dialog::on_dismiss`]) takes it too.
 pub fn dismiss_top(window: &mut Window, cx: &mut App) -> bool {
     let Some(stack) = stack(window, cx) else {
         return false;
     };
-    let top = stack
-        .read(cx)
-        .layers
-        .last()
-        .map(|layer| (layer.id, layer.dismissible(cx)));
-    if let Some((top, dismissible)) = top {
-        if dismissible {
-            close(top, window, cx);
-        }
+    let top = stack.read(cx).layers.last().map(|layer| layer.id);
+    if let Some(top) = top {
+        dismiss(top, window, cx);
         return true;
     }
     stack.update(cx, |stack, cx| {
@@ -679,6 +683,33 @@ pub fn dismiss_top(window: &mut Window, cx: &mut App) -> bool {
         }
         shown
     })
+}
+
+/// The user dismisses the layer `id` (a dialog's header Close, or Escape through [`dismiss_top`]): its hook decides
+/// ([`Dialog::on_dismiss`]), and it closes unless the hook keeps it open. Nothing happens if `id` is no longer open.
+///
+/// The hook runs outside the stack's own update, so it may open a question over the dialog (or close the dialog
+/// itself); its answer is acted on only if the layer is still open after it.
+///
+/// NOTE: Call it from a plain event handler, not from inside an update of the dialog's own view: a hook that reads the
+/// view (Rename's reads its draft) would find it already being updated, which GPUI refuses with a panic.
+pub fn dismiss(id: LayerId, window: &mut Window, cx: &mut App) {
+    let Some(stack) = stack(window, cx) else {
+        return;
+    };
+    let Some(hook) = stack
+        .read(cx)
+        .layers
+        .iter()
+        .find(|layer| layer.id == id)
+        .map(|layer| layer.on_dismiss.clone())
+    else {
+        return;
+    };
+    let dismissal = hook.map_or(Dismissal::Close, |hook| hook(window, cx));
+    if dismissal == Dismissal::Close && is_open(id, window, cx) {
+        close(id, window, cx);
+    }
 }
 
 /// The topmost layer in `window`, if any is open.
@@ -910,13 +941,6 @@ pub fn hide_tooltip(owner: &Entity<TooltipOwner>, window: &mut Window, cx: &mut 
     }
 }
 
-impl Layer {
-    /// Whether the user may dismiss this layer now: what its guard says, and yes without one.
-    fn dismissible(&self, cx: &App) -> bool {
-        self.may_dismiss.as_ref().is_none_or(|guard| guard(cx))
-    }
-}
-
 impl LayerStack {
     /// Take the tooltip down, and any waiting one, without the grace that lets the next one skip the delay: after
     /// Escape or a layer opening, the user has just put one away.
@@ -1001,6 +1025,7 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
                         // A column, so a view that can shrink (`flex_1` and `min_h_0`, a list that scrolls) fits the
                         // cap. A view that cannot spills past it: what it draws below the cap is outside the layer
                         // for presses and focus (an outside press there dismisses), so a top-placed view must shrink.
+                        // It is not clipped at the cap: a clip there would also cut off the card's own drop shadow.
                         veil.items_start()
                             .pt((viewport.height * 0.12).min(px(80.)))
                             .child(content.max_h(viewport.height * 0.75).flex().flex_col())

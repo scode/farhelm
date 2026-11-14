@@ -9,10 +9,22 @@
 //! per-route refusals of a target that changed since its prompt stay as they are. No generic precondition protocol is
 //! added here.
 //!
-//! The first answer wins: once Cancel or Confirm has run, the other does nothing, and Confirm runs its action at most
-//! once (a confirmation that could send a second delete after the first succeeded is a bug the prototype shipped).
-//! SPEC.md's "One GUI at a time" lets input delivered before a redraw run as delivered; whichever answer runs acts on the
-//! frozen value.
+//! The first answer wins: once one answer has run, the others do nothing, and an answer's action runs at most once (a
+//! confirmation that could send a second delete after the first succeeded is a bug the prototype shipped). SPEC.md's
+//! "One GUI at a time" lets input delivered before a redraw run as delivered; whichever answer runs acts on the frozen
+//! value.
+//!
+//! A question may carry more answers ([`Question::alternative`]), drawn in the order added between Cancel and Confirm:
+//! the template editor's "Keep editing, Discard, or Save" (SPEC.md: "in that reading order, with initial focus still on
+//! Save"), the old host setup confirmation's "Set up, don't ask again" between Cancel and Set up, and SPEC.md's YOLO
+//! confirmation, "Cancel, the guarded option when offered, the outlined permanent YOLO answer, then the filled one-time
+//! YOLO answer". They follow the same rules: each acts on the frozen value, they are among the answers the first one
+//! wins among, and focus never starts on one. Cancel and Confirm keep their places at the ends, as every question
+//! SPEC.md asks has them.
+//!
+//! NOTE: Every answer closes the question before its action runs. SPEC.md's YOLO question stays up with the reason when
+//! its "stop asking" answer fails to change the host's setting; that, and drawing a question inline in its owning
+//! surface (the YOLO question, the template editor's leave question), are not built yet.
 //!
 //! Where focus starts follows SPEC.md, "Opening and closing": on the confirming button for a question the user just
 //! asked for, on Cancel when that button is disabled, when the action is risky and cannot be undone, or when the
@@ -60,7 +72,7 @@ pub(crate) enum Presentation {
     Anchored(Anchor),
 }
 
-/// One of a question's two answers, as its button shows it.
+/// One of a question's answers, as its button shows it.
 #[derive(Clone, Debug)]
 pub struct Answer {
     /// The button's label and accessible name.
@@ -73,13 +85,16 @@ pub struct Answer {
 
 /// A question to ask, frozen at the moment it opens. `T` is what the confirming answer acts on: the targets by stable
 /// id and whatever else the action needs, as the user was shown them.
-#[derive(Clone)]
 pub struct Question<T> {
     title: SharedString,
     summary: Option<Line>,
     lines: Vec<Line>,
     confirm: Answer,
     cancel: Answer,
+    /// The extra answers between Cancel and Confirm, in reading order ([`Question::alternative`]).
+    alternatives: Vec<Answer>,
+    /// What each extra answer does, handed to the open prompt when the question opens.
+    on_alternatives: Vec<OnConfirm<T>>,
     confirm_enabled: bool,
     starts_on_cancel: bool,
     keeps_focus_on_empty_click: bool,
@@ -99,6 +114,8 @@ impl<T: Clone + 'static> Question<T> {
                 help: HoverHelp::tooltip("Close this without doing anything"),
                 tier: Tier::Neutral,
             },
+            alternatives: Vec::new(),
+            on_alternatives: Vec::new(),
             confirm_enabled: true,
             starts_on_cancel: false,
             keeps_focus_on_empty_click: false,
@@ -148,6 +165,27 @@ impl<T: Clone + 'static> Question<T> {
         self
     }
 
+    /// Cancel's button shown as `answer` instead of the default "Cancel" with generic help: the template editor's leave
+    /// question says "Keep editing", and the old Stop, Replace and Restart questions said in Cancel's help what it
+    /// keeps ("Cancel: keep the agent and terminal tabs running"). It still does what Cancel does, closing the question
+    /// and running nothing, and Escape still means it.
+    pub fn cancel_answer(mut self, answer: Answer) -> Self {
+        self.cancel = answer;
+        self
+    }
+
+    /// One more answer, `answer`, drawn between Cancel and Confirm after any added before it: `on_choose` runs at most
+    /// once, with the frozen value, if the user picks it, and like Confirm it closes the question first.
+    pub fn alternative(
+        mut self,
+        answer: Answer,
+        on_choose: impl FnOnce(T, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.alternatives.push(answer);
+        self.on_alternatives.push(Box::new(on_choose));
+        self
+    }
+
     /// The value the confirming answer acts on.
     pub fn frozen(&self) -> &T {
         &self.frozen
@@ -162,16 +200,19 @@ impl<T: Clone + 'static> Question<T> {
 /// What a confirming answer does with the frozen value.
 type OnConfirm<T> = Box<dyn FnOnce(T, &mut Window, &mut App)>;
 
-/// An open question's view: the frozen question, its answer buttons' focus handles, and the action not yet run.
+/// An open question's view: the frozen question, its answer buttons' focus handles, and the actions not yet run.
 pub struct Prompt<T: 'static> {
     question: Question<T>,
     on_confirm: Option<OnConfirm<T>>,
+    /// The extra answers' actions, taken out of the question when it opens, each until it runs.
+    on_alternatives: Vec<Option<OnConfirm<T>>>,
     layer: Option<LayerId>,
     /// Drawn beside an anchor rather than in the dialog frame.
     anchored: bool,
     answered: bool,
     confirm_focus: FocusHandle,
     cancel_focus: FocusHandle,
+    alternative_focus: Vec<FocusHandle>,
 }
 
 /// Which answer.
@@ -179,11 +220,13 @@ pub struct Prompt<T: 'static> {
 enum Which {
     Confirm,
     Cancel,
+    /// The extra answer at this index ([`Question::alternative`]).
+    Alternative(usize),
 }
 
 impl<T: Clone + 'static> Prompt<T> {
-    /// Run `which`, if no answer has run yet: close the question (returning focus to where it was), then, for Confirm,
-    /// hand the frozen value to the action.
+    /// Run `which`, if no answer has run yet: close the question (returning focus to where it was), then, for Confirm
+    /// or an extra answer, hand the frozen value to its action.
     fn answer(&mut self, which: Which, window: &mut Window, cx: &mut Context<Self>) {
         if self.answered || (which == Which::Confirm && !self.question.confirm_enabled) {
             return;
@@ -192,10 +235,13 @@ impl<T: Clone + 'static> Prompt<T> {
         if let Some(layer) = self.layer.take() {
             layers::close(layer, window, cx);
         }
-        if which == Which::Confirm
-            && let Some(on_confirm) = self.on_confirm.take()
-        {
-            on_confirm(self.question.frozen.clone(), window, cx);
+        let action = match which {
+            Which::Confirm => self.on_confirm.take(),
+            Which::Alternative(index) => self.on_alternatives.get_mut(index).and_then(Option::take),
+            Which::Cancel => None,
+        };
+        if let Some(action) = action {
+            action(self.question.frozen.clone(), window, cx);
         }
     }
 }
@@ -230,6 +276,27 @@ impl<T: Clone + 'static> Render for Prompt<T> {
         .disabled(!question.confirm_enabled)
         .focus(&self.confirm_focus)
         .on_click(answer(Which::Confirm, cx));
+        // The extra answers sit between Cancel and Confirm, in the order added, in reading order and in Tab's order.
+        let alternatives = question
+            .alternatives
+            .iter()
+            .zip(&self.alternative_focus)
+            .enumerate()
+            .map(|(index, (alternative, focus))| {
+                Button::new(
+                    SharedString::from(format!("prompt-alternative-{index}")),
+                    alternative.label.clone(),
+                    alternative.help.clone(),
+                    Role::Button,
+                )
+                .tier(alternative.tier)
+                .focus(focus)
+                .on_click(answer(Which::Alternative(index), cx))
+            });
+        let answers: Vec<Button> = std::iter::once(cancel)
+            .chain(alternatives)
+            .chain(std::iter::once(confirm))
+            .collect();
         if self.anchored {
             // `.session-row-menu-panel.menu-prompt` and `.confirm-consequence`: 8 pixels of padding, 6 between
             // lines, 12-pixel amber prose, and the answers right-aligned 8 pixels apart (`.dialog-actions`).
@@ -254,8 +321,7 @@ impl<T: Clone + 'static> Render for Prompt<T> {
                         .flex_wrap()
                         .justify_end()
                         .gap(px(8.))
-                        .child(cancel)
-                        .child(confirm),
+                        .children(answers),
                 )
                 .into_any_element();
         }
@@ -265,12 +331,7 @@ impl<T: Clone + 'static> Render for Prompt<T> {
             .gap(px(8.))
             .text_color(theme::color(palette.fg_0))
             .children(question.lines.iter().cloned().map(|line| div().child(line)));
-        let mut frame = DialogFrame::new(
-            "prompt",
-            question.title.clone(),
-            body,
-            vec![cancel, confirm],
-        );
+        let mut frame = DialogFrame::new("prompt", question.title.clone(), body, answers);
         if let Some(summary) = &question.summary {
             frame = frame.summary(summary.clone());
         }
@@ -297,6 +358,13 @@ impl<T: Clone + 'static> Asked<T> {
     pub fn cancel(&self, window: &mut Window, cx: &mut App) {
         self.prompt
             .update(cx, |prompt, cx| prompt.answer(Which::Cancel, window, cx));
+    }
+
+    /// Press the extra answer at `index`, as its button does.
+    pub fn alternative(&self, index: usize, window: &mut Window, cx: &mut App) {
+        self.prompt.update(cx, |prompt, cx| {
+            prompt.answer(Which::Alternative(index), window, cx)
+        });
     }
 }
 
@@ -348,7 +416,7 @@ pub fn ask_anchored<T: Clone + 'static>(
 
 /// [`ask`] or [`ask_anchored`], also handing back the prompt's entity for tests.
 fn ask_inner<T: Clone + 'static>(
-    question: Question<T>,
+    mut question: Question<T>,
     presentation: Presentation,
     subject: Option<Subject>,
     mark: &Mark,
@@ -358,6 +426,15 @@ fn ask_inner<T: Clone + 'static>(
 ) -> Option<(LayerId, gpui::Entity<Prompt<T>>)> {
     let confirm_focus = cx.focus_handle().tab_stop(true);
     let cancel_focus = cx.focus_handle().tab_stop(true);
+    let alternative_focus = question
+        .alternatives
+        .iter()
+        .map(|_| cx.focus_handle().tab_stop(true))
+        .collect();
+    let on_alternatives = std::mem::take(&mut question.on_alternatives)
+        .into_iter()
+        .map(Some)
+        .collect();
     let start = if question.starts_focus_on_cancel() {
         cancel_focus.clone()
     } else {
@@ -368,11 +445,13 @@ fn ask_inner<T: Clone + 'static>(
     let prompt = cx.new(|_| Prompt {
         question,
         on_confirm: Some(Box::new(on_confirm)),
+        on_alternatives,
         layer: None,
         anchored: matches!(presentation, Presentation::Anchored(_)),
         answered: false,
         confirm_focus,
         cancel_focus,
+        alternative_focus,
     });
     let weak = prompt.downgrade();
     let main_action: Option<layers::MainAction> = enabled.then(|| {
@@ -392,7 +471,9 @@ fn ask_inner<T: Clone + 'static>(
                 main_action,
                 keeps_focus_on_empty_click,
                 returns_to: ReturnTo::Opener,
-                may_dismiss: None,
+                on_dismiss: None,
+                placement: layers::DialogPlacement::Centered,
+                dismiss_on_outside_press: false,
             },
             mark,
             window,

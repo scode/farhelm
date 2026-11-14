@@ -1,5 +1,5 @@
 //! Behavior tests for the layer manager, on GPUI's simulated platform: the modal dialog (its veil, its empty-space
-//! rule, its main action and its dismissal guard), the refusal to open a layer once the user has moved on, subjects
+//! rule, its main action and its dismissal hook), the refusal to open a layer once the user has moved on, subjects
 //! and anchors, popovers and menus, and that the layer stack redraws only the root.
 //!
 //! Each test opens its window through the shared harness ([`crate::test_support::open`]: GPUI Kit's `Root` around a
@@ -18,11 +18,9 @@ use gpui::{
 };
 
 use crate::cache::{self, Cached};
-use crate::components::{Button, HoverHelp, Role};
+use crate::components::{Button, HoverHelp, Role, Tier};
 use crate::focus::{self, Mark};
-use crate::layers::{
-    self, Anchor, Dialog, DialogOptions, DialogPlacement, LayerId, Popover, Subject,
-};
+use crate::layers::{self, Anchor, Dialog, DialogPlacement, Dismissal, LayerId, Popover, Subject};
 use crate::prompt;
 use crate::render_count;
 use crate::test_support::{
@@ -103,7 +101,9 @@ fn a_dialog_without_the_rule_takes_focus_on_an_empty_space_click(cx: &mut TestAp
                 main_action: Some(Rc::new(move |_, _| record.set(record.get() + 1))),
                 keeps_focus_on_empty_click: false,
                 returns_to: focus::ReturnTo::Opener,
-                may_dismiss: None,
+                on_dismiss: None,
+                placement: layers::DialogPlacement::Centered,
+                dismiss_on_outside_press: false,
             },
             &mark,
             window,
@@ -138,12 +138,12 @@ fn a_dialog_without_the_rule_takes_focus_on_an_empty_space_click(cx: &mut TestAp
 
 /// Why this matters: an editor whose save is in flight must not be dismissed, or the draft and the helm's refusal are
 /// lost (the Rename editor: while a save is in flight, Escape does nothing). The editor's own view sees Escape only
-/// while focus is inside it, not while the dialog itself holds focus after a click on its empty space, so the guard
+/// while focus is inside it, not while the dialog itself holds focus after a click on its empty space, so the hook
 /// belongs to the layer manager, which handles Escape there.
 ///
-/// Specification: while a dialog's guard says it may not be dismissed, Escape leaves it open and focus where it was,
-/// both from a control inside it and from the dialog itself holding focus, and the layer manager reports Escape as
-/// taken, so it is not passed on; once the guard says yes, Escape closes it.
+/// Specification: while a dialog's dismissal hook answers Stay, Escape leaves it open and focus where it was, both from
+/// a control inside it and from the dialog itself holding focus, and the layer manager reports Escape as taken, so it
+/// is not passed on; once the hook answers Close, Escape closes it.
 #[gpui::test]
 fn a_dialog_that_may_not_be_dismissed_ignores_escape(cx: &mut TestAppContext) {
     let cx = open(cx, |_, _| div().into_any_element());
@@ -165,7 +165,15 @@ fn a_dialog_that_may_not_be_dismissed_ignores_escape(cx: &mut TestAppContext) {
                 main_action: None,
                 keeps_focus_on_empty_click: false,
                 returns_to: focus::ReturnTo::Opener,
-                may_dismiss: Some(Rc::new(move |_| !guard.get())),
+                on_dismiss: Some(Rc::new(move |_, _| {
+                    if guard.get() {
+                        Dismissal::Stay
+                    } else {
+                        Dismissal::Close
+                    }
+                })),
+                placement: DialogPlacement::Centered,
+                dismiss_on_outside_press: false,
             },
             &mark,
             window,
@@ -234,7 +242,9 @@ fn enter_on_the_dialog_itself_presses_its_main_action(cx: &mut TestAppContext) {
                 main_action: Some(Rc::new(move |_, _| record.set(record.get() + 1))),
                 keeps_focus_on_empty_click: true,
                 returns_to: focus::ReturnTo::Opener,
-                may_dismiss: None,
+                on_dismiss: None,
+                placement: layers::DialogPlacement::Centered,
+                dismiss_on_outside_press: false,
             },
             &mark,
             window,
@@ -282,7 +292,9 @@ fn a_layer_does_not_open_once_the_user_moved_on(cx: &mut TestAppContext) {
                 main_action: None,
                 keeps_focus_on_empty_click: true,
                 returns_to: focus::ReturnTo::Opener,
-                may_dismiss: None,
+                on_dismiss: None,
+                placement: layers::DialogPlacement::Centered,
+                dismiss_on_outside_press: false,
             },
             &mark,
             window,
@@ -322,7 +334,9 @@ fn a_dialog_closes_when_its_subject_is_gone(cx: &mut TestAppContext) {
                 main_action: None,
                 keeps_focus_on_empty_click: true,
                 returns_to: focus::ReturnTo::Opener,
-                may_dismiss: None,
+                on_dismiss: None,
+                placement: layers::DialogPlacement::Centered,
+                dismiss_on_outside_press: false,
             },
             &mark,
             window,
@@ -560,7 +574,9 @@ fn opening_and_closing_a_layer_redraws_only_the_root(cx: &mut TestAppContext) {
                 main_action: None,
                 keeps_focus_on_empty_click: true,
                 returns_to: focus::ReturnTo::Opener,
-                may_dismiss: None,
+                on_dismiss: None,
+                placement: layers::DialogPlacement::Centered,
+                dismiss_on_outside_press: false,
             },
             &mark,
             window,
@@ -622,14 +638,33 @@ struct OptionDialog<'a> {
     menu_anchor: Anchor,
 }
 
+/// Which content a test dialog draws.
+#[derive(Clone, Copy)]
+enum Tall {
+    /// One control.
+    No,
+    /// Taller than the window, but able to shrink to the room it gets ([`TallPanel`]).
+    Shrinking,
+}
+
+/// A dialog's placement and whether an outside press dismisses it ([`Dialog::placement`] and
+/// [`Dialog::dismiss_on_outside_press`]), as a test opens it.
+type Options = (DialogPlacement, bool);
+
+/// Every dialog's ordinary form: centered, and an outside press does nothing.
+const ORDINARY: Options = (DialogPlacement::Centered, false);
+
+/// The quick switcher's form: near the top, and an outside press dismisses it.
+const SWITCHER: Options = (DialogPlacement::Top, true);
+
 /// Open a dialog over a page whose opener button holds focus, with `options`, its one control `only` starting focused,
-/// and `guard` as its dismiss guard; `tall` makes its content taller than the window. The page also has a button in its
+/// and `guard` as its dismissal hook; `tall` makes its content taller than the window. The page also has a button in its
 /// bottom-left corner that counts presses (`page-corner`) and an anchor for a menu at its top left.
-fn open_dialog_with_options(
+fn open_option_dialog(
     cx: &mut TestAppContext,
-    options: DialogOptions,
-    guard: Option<layers::DismissGuard>,
-    tall: bool,
+    options: Options,
+    guard: Option<layers::DismissHook>,
+    tall: Tall,
 ) -> OptionDialog<'_> {
     let page: Rc<RefCell<Option<FocusHandle>>> = Rc::new(RefCell::new(None));
     let presses = Rc::new(Cell::new(0));
@@ -662,20 +697,21 @@ fn open_dialog_with_options(
     let (only, container) = (handle(cx), handle(cx));
     let (start, kept) = (only.clone(), container.clone());
     let opened = cx.update(move |window, cx| {
-        let view: gpui::AnyView = if tall {
-            cx.new(|_| TallPanel {
-                control: start.clone(),
-            })
-            .into()
-        } else {
-            cx.new(|_| Panel {
-                controls: vec![("only", start.clone())],
-                shown: Rc::new(Cell::new(true)),
-            })
-            .into()
+        let view: gpui::AnyView = match tall {
+            Tall::Shrinking => cx
+                .new(|_| TallPanel {
+                    control: start.clone(),
+                })
+                .into(),
+            Tall::No => cx
+                .new(|_| Panel {
+                    controls: vec![("only", start.clone())],
+                    shown: Rc::new(Cell::new(true)),
+                })
+                .into(),
         };
         let mark = Mark::take(cx);
-        layers::open_dialog_with(
+        layers::open_dialog(
             Dialog {
                 view,
                 container: kept,
@@ -684,9 +720,10 @@ fn open_dialog_with_options(
                 main_action: None,
                 keeps_focus_on_empty_click: false,
                 returns_to: focus::ReturnTo::Opener,
-                may_dismiss: guard,
+                on_dismiss: guard,
+                placement: options.0,
+                dismiss_on_outside_press: options.1,
             },
-            options,
             &mark,
             window,
             cx,
@@ -711,12 +748,6 @@ fn open_dialog_with_options(
     }
 }
 
-/// The options a quick-switcher-like dialog asks for: near the top, closing on an outside press.
-const SWITCHER: DialogOptions = DialogOptions {
-    placement: DialogPlacement::Top,
-    dismiss_on_outside_press: true,
-};
-
 /// The old quick switcher sat near the top of the window rather than centered, so it did not jump as its result list
 /// grew, and never grew past three quarters of the window (`.quick-switcher-backdrop` at the reference commit).
 /// Specified: a dialog opened with the top placement is centered across, its top `min(12% of the window height, 80 px)`
@@ -724,7 +755,7 @@ const SWITCHER: DialogOptions = DialogOptions {
 /// 75% of the window's height.
 #[gpui::test]
 fn a_dialog_placed_at_the_top_sits_near_the_top_and_is_capped(cx: &mut TestAppContext) {
-    let cx = open_dialog_with_options(cx, SWITCHER, None, true).cx;
+    let cx = open_option_dialog(cx, SWITCHER, None, Tall::Shrinking).cx;
     let viewport = cx.update(|window, _| window.viewport_size());
     let panel = bounds(cx, "panel");
     assert!(
@@ -759,7 +790,7 @@ fn a_dialog_placed_at_the_top_sits_near_the_top_and_is_capped(cx: &mut TestAppCo
 /// are equal.
 #[gpui::test]
 fn a_dialog_placed_by_default_is_centered(cx: &mut TestAppContext) {
-    let cx = open_dialog_with_options(cx, DialogOptions::default(), None, false).cx;
+    let cx = open_option_dialog(cx, ORDINARY, None, Tall::No).cx;
     let viewport = cx.update(|window, _| window.viewport_size());
     let panel = bounds(cx, "panel");
     assert_eq!(
@@ -781,7 +812,7 @@ fn a_press_outside_a_dialog_that_asks_for_it_dismisses_it(cx: &mut TestAppContex
         only,
         corner_presses,
         ..
-    } = open_dialog_with_options(cx, SWITCHER, None, false);
+    } = open_option_dialog(cx, SWITCHER, None, Tall::No);
     assert!(
         focused(cx, &only),
         "the premise: focus starts in the dialog"
@@ -815,7 +846,7 @@ fn a_press_in_a_menu_over_the_dialog_is_the_menus(cx: &mut TestAppContext) {
         dialog,
         menu_anchor,
         ..
-    } = open_dialog_with_options(cx, SWITCHER, None, false);
+    } = open_option_dialog(cx, SWITCHER, None, Tall::No);
     let item = handle(cx);
     let menu = open_menu(cx, menu_anchor, vec![("item", item)]);
     let (item_box, panel) = (bounds(cx, "item"), bounds(cx, "panel"));
@@ -836,23 +867,29 @@ fn a_press_outside_an_ordinary_dialog_leaves_it_open(cx: &mut TestAppContext) {
         dialog,
         corner_presses,
         ..
-    } = open_dialog_with_options(cx, DialogOptions::default(), None, false);
+    } = open_option_dialog(cx, ORDINARY, None, Tall::No);
     click(cx, "page-corner");
     assert!(is_open(cx, dialog), "the dialog stayed open");
     assert_eq!(corner_presses.get(), 0, "and the veil took the press");
 }
 
 /// An outside press dismisses through Escape's path, so a dialog that may not be dismissed now (an editor whose save is
-/// in flight) refuses it as it refuses Escape. Specified: with its guard saying no, an outside press leaves the dialog
-/// open and focus inside it; once the guard allows it, the next outside press closes it.
+/// in flight) refuses it as it refuses Escape. Specified: while its hook answers Stay, an outside press leaves the
+/// dialog open and focus inside it; once the hook answers Close, the next outside press closes it.
 #[gpui::test]
 fn a_guarded_dialog_refuses_an_outside_press(cx: &mut TestAppContext) {
     let busy = Rc::new(Cell::new(true));
     let held = busy.clone();
-    let guard: layers::DismissGuard = Rc::new(move |_| !held.get());
+    let guard: layers::DismissHook = Rc::new(move |_, _| {
+        if held.get() {
+            Dismissal::Stay
+        } else {
+            Dismissal::Close
+        }
+    });
     let OptionDialog {
         cx, dialog, only, ..
-    } = open_dialog_with_options(cx, SWITCHER, Some(guard), false);
+    } = open_option_dialog(cx, SWITCHER, Some(guard), Tall::No);
     click(cx, "page-corner");
     assert!(is_open(cx, dialog), "the guarded dialog stayed open");
     assert!(focused(cx, &only), "and focus stayed in it");
@@ -862,6 +899,111 @@ fn a_guarded_dialog_refuses_an_outside_press(cx: &mut TestAppContext) {
         !is_open(cx, dialog),
         "once allowed, the outside press closed it"
     );
+}
+
+/// SPEC.md asks a question when the user leaves an editor with an unsaved draft ("Leaving an unsaved draft asks Keep
+/// editing, Discard, or Save in that reading order, with initial focus still on Save"), so a dismissal must be able to
+/// keep the editor open and ask, then leave the closing to the answer. A yes-or-no guard cannot say that, and an
+/// editor asking from its own key handler would miss Escape while the dialog itself holds focus.
+///
+/// Specified, for a dialog whose hook asks a three-answer question and answers Stay: Escape, and a dismissal the way a
+/// header Close makes it ([`layers::dismiss`]), leave the dialog open under the open question; then Keep editing
+/// (Escape on the question) closes only the question and focus is back in the dialog, Discard closes both without
+/// saving and focus goes back to the page, and Save (Enter, where the question starts) saves once and closes both.
+#[gpui::test]
+fn a_dialog_can_ask_before_it_closes_and_each_answer_does_its_part(cx: &mut TestAppContext) {
+    for (answer, by_close, keystrokes, stays, saves) in [
+        ("Keep editing", false, "escape", true, 0),
+        ("Discard", false, "shift-tab enter", false, 0),
+        ("Save", false, "enter", false, 1),
+        ("Save, after Close", true, "enter", false, 1),
+    ] {
+        let saved = Rc::new(Cell::new(0));
+        let own: Rc<Cell<Option<LayerId>>> = Rc::new(Cell::new(None));
+        let asked: Rc<Cell<Option<LayerId>>> = Rc::new(Cell::new(None));
+        let (counted, closes, opened) = (saved.clone(), own.clone(), asked.clone());
+        let hook: layers::DismissHook = Rc::new(move |window, cx| {
+            let (counted, discards, saves) = (counted.clone(), closes.clone(), closes.clone());
+            let leave = prompt::Question::new(
+                "Save these changes before leaving?",
+                prompt::Answer {
+                    label: "Save".into(),
+                    help: HoverHelp::tooltip("Save the draft, then leave"),
+                    tier: Tier::Primary,
+                },
+                (),
+            )
+            .cancel_answer(prompt::Answer {
+                label: "Keep editing".into(),
+                help: HoverHelp::tooltip("Go back to the draft"),
+                tier: Tier::Neutral,
+            })
+            .alternative(
+                prompt::Answer {
+                    label: "Discard".into(),
+                    help: HoverHelp::tooltip("Leave without saving"),
+                    tier: Tier::Neutral,
+                },
+                move |(), window, cx| {
+                    if let Some(id) = discards.get() {
+                        layers::close(id, window, cx);
+                    }
+                },
+            );
+            let mark = Mark::take(cx);
+            let question = prompt::ask(
+                leave,
+                None,
+                &mark,
+                move |(), window, cx| {
+                    counted.set(counted.get() + 1);
+                    if let Some(id) = saves.get() {
+                        layers::close(id, window, cx);
+                    }
+                },
+                window,
+                cx,
+            );
+            opened.set(question);
+            Dismissal::Stay
+        });
+        let OptionDialog {
+            cx,
+            dialog,
+            opener,
+            only,
+            ..
+        } = open_option_dialog(cx, ORDINARY, Some(hook), Tall::No);
+        own.set(Some(dialog));
+        if by_close {
+            // What a dialog's header Close does: dismiss its own layer.
+            cx.update(|window, cx| layers::dismiss(dialog, window, cx));
+            cx.run_until_parked();
+            check(cx);
+        } else {
+            keys(cx, "escape");
+        }
+        assert!(
+            is_open(cx, dialog),
+            "{answer}: the dismissal left the dialog open"
+        );
+        let Some(question) = asked.get() else {
+            panic!("{answer}: the dismissal asked the question");
+        };
+        assert!(
+            is_open(cx, question) && !focused(cx, &only),
+            "{answer}: the question is open over the dialog and has focus"
+        );
+        keys(cx, keystrokes);
+        assert_eq!(saved.get(), saves, "{answer}: what was saved");
+        assert_eq!(
+            is_open(cx, dialog),
+            stays,
+            "{answer}: whether the dialog stayed"
+        );
+        let home = if stays { &only } else { &opener };
+        assert!(focused(cx, home), "{answer}: where focus went");
+    }
 }
 
 // ---- Layers: a popover placed beside its anchor ----------------------------------------------------------------------
