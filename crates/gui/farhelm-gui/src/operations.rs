@@ -36,8 +36,8 @@
 //! the generic connection-lost notice is the only report (SPEC_impl.md, "One failure path: the reset").
 //!
 //! Extension points (`docs/gpui/foundation-ownership.md`): a [`Work`] variant for new session work, with a [`Command`]
-//! constructor that keeps today's API semantics for its route. Work on something other than a session (a host, a
-//! template) needs a store of its own here, keyed by what it acts on.
+//! constructor that keeps today's API semantics for its route and records that work in the command it builds. Work on
+//! something other than a session (a host, a template) needs a store of its own here, keyed by what it acts on.
 
 use std::collections::HashMap;
 
@@ -52,17 +52,27 @@ use crate::host_text::HostText;
 
 /// The kinds of work a session can have in flight. Exhaustive on purpose: each new kind decides here whether it is
 /// supersedable, so shared code never has to guess.
+///
+/// A [`Command`] names its own work (its constructor sets it), and [`SessionOperations::start`] takes the work from the
+/// command it sends, so what [`SessionOperations::in_flight`] reports always describes the request on the wire.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Work {
     /// A title change, from the Rename editor.
     Rename,
-    /// The session's Delete, after its confirmation.
-    Delete,
+    /// The session's Delete, after its confirmation, with the precondition that confirmation covered. The guard is
+    /// what lets the row say what is happening while the Delete runs (SPEC.md, "Lifecycle operations"): an
+    /// [`DeleteGuard::Unconditional`] Delete is stopping the agent, an [`DeleteGuard::AgentEnded`] one is stopping its
+    /// terminal tabs, and a [`DeleteGuard::NothingAlive`] one has only state to remove ("deleting"). The old app chose
+    /// its in-progress label from the same status that chose the guard (`delete_guard` and `delete_progress_label` in
+    /// `status.rs` at reference commit `24bc0580`); here the row reads the guard back instead of recomputing it from a
+    /// status that may have moved since.
+    Delete(DeleteGuard),
 }
 
 /// One command to the helm, built only by the constructors below so its route keeps today's API semantics.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Command {
+    work: Work,
     method: Method,
     path: ApiPath,
     body: Option<Value>,
@@ -78,6 +88,7 @@ impl Command {
     /// the user acts on; an empty title is a legal rename. Ported from the old app's `api::rename_session`.
     pub fn rename(session: &str, title: &str) -> Result<Command, PathError> {
         Ok(Command {
+            work: Work::Rename,
             method: Method::Post,
             path: ApiPath::api(&["sessions", session, "rename"])?,
             body: Some(serde_json::json!({ "title": title })),
@@ -107,11 +118,17 @@ impl Command {
             None => (path, "DELETE /api/sessions/[session]".to_owned()),
         };
         Ok(Command {
+            work: Work::Delete(guard),
             method: Method::Delete,
             path,
             body: None,
             shown,
         })
+    }
+
+    /// The work this command does, as [`SessionOperations::in_flight`] reports it while the command runs.
+    pub fn work(&self) -> Work {
+        self.work
     }
 }
 
@@ -229,8 +246,9 @@ impl SessionOperations {
         self.failures.get(session)
     }
 
-    /// Send `command` as `work` on `session`, and call `on_settled` once the helm answers, unless a reset retires the
-    /// store first. Call it from the handler of the user's action: that is when the moved-on mark is taken.
+    /// Send `command` on `session`, as the work it names ([`Command::work`]), and call `on_settled` once the helm
+    /// answers, unless a reset retires the store first. Call it from the handler of the user's action: that is when the
+    /// moved-on mark is taken.
     ///
     /// Starting clears the session's previous failure, which is the only thing that clears it (the old app's rule:
     /// a row's error stays until the retry that supersedes it). `on_settled` runs after the store has recorded the
@@ -239,7 +257,6 @@ impl SessionOperations {
     pub fn start(
         &mut self,
         session: &str,
-        work: Work,
         command: Command,
         cx: &mut Context<SessionOperations>,
         on_settled: impl FnOnce(&Settled, &mut App) + 'static,
@@ -252,6 +269,7 @@ impl SessionOperations {
         }
         let mark = Mark::take(cx);
         let Command {
+            work,
             method,
             path,
             body,

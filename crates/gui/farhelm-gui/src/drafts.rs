@@ -41,7 +41,7 @@ use farhelm_helm_client::PathError;
 use gpui::Context;
 
 use crate::host_text::HostText;
-use crate::operations::{Command, NotStarted, Outcome, Settled, Work};
+use crate::operations::{Command, NotStarted, Outcome, Settled};
 use crate::session;
 
 /// One editable field over a pushed value: its current value, whether the user touched it, and its save's state.
@@ -125,7 +125,7 @@ impl<T: Clone + PartialEq> Draft<T> {
     }
 }
 
-/// Save one draft of `view` as `work` on `session`: send `command` built from the draft's value, then, once the helm
+/// Save one draft of `view` on `session`: send `command` built from the draft's value, then, once the helm
 /// answers, settle the draft and call `then` with the outcome.
 ///
 /// `field` reaches the draft inside the view; it is a plain function so the save can reach the same draft again when
@@ -136,7 +136,6 @@ pub fn save<V: 'static, T: Clone + PartialEq + 'static>(
     view: &mut V,
     field: fn(&mut V) -> &mut Draft<T>,
     session: &str,
-    work: Work,
     command: impl FnOnce(&T) -> Result<Command, PathError>,
     cx: &mut Context<V>,
     then: impl FnOnce(&mut V, &Settled, &mut Context<V>) + 'static,
@@ -145,7 +144,7 @@ pub fn save<V: 'static, T: Clone + PartialEq + 'static>(
     let operations = session::current_operations(cx).ok_or(NotStarted::Retired)?;
     let editor = cx.entity().downgrade();
     operations.update(cx, |operations, cx| {
-        operations.start(session, work, command, cx, move |settled, cx| {
+        operations.start(session, command, cx, move |settled, cx| {
             let _ = editor.update(cx, |view, cx| {
                 field(view).settle(&settled.outcome);
                 then(view, settled, cx);

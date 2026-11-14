@@ -18,19 +18,46 @@
 //! asked for, on Cancel when that button is disabled, when the action is risky and cannot be undone, or when the
 //! question arrived later. Escape and Cancel close it and return focus to where it was; Enter on the dialog itself
 //! presses the enabled confirming answer.
+//!
+//! A question shows in one of two ways, with every rule above the same in both. [`ask`] centers it over a veil in the
+//! dialog frame. [`ask_anchored`] draws it beside the control it is about, as the old app did for the questions a row
+//! or the session header asked: the row's Delete, Stop and Replace questions took the place of the row's menu, and the
+//! header's sat under their buttons (`list/row.rs` and the `.header-confirm` rule at reference commit `24bc0580`). An
+//! anchored question has no title line or veil: its lines in amber (`--warn-bright`), then the answers, on the
+//! floating surface menus use. Its title stays its accessible name. A press outside it closes it, which is Cancel, and
+//! it closes when its anchor is no longer drawn (the row went away), besides when its subject is gone.
+//!
+//! NOTE: The old anchored questions kept the quoted title on one line and cut it with an ellipsis. Here lines wrap, as
+//! they do in the centered form: two sessions whose titles share a long start would otherwise get questions that look
+//! the same, which is the confusion escaping host text exists to prevent. That is a recorded deviation from the old
+//! look. The old row question was also placed beside the sidebar rather than below its anchor; the layer manager's
+//! placement (below, or above when there is no room) is used until beside-the-sidebar placement is built there.
 
 use std::rc::Rc;
 
 use gpui::{
-    App, AppContext as _, Context, FocusHandle, IntoElement, ParentElement, Render, SharedString,
-    Styled, WeakEntity, Window, div, px,
+    App, AppContext as _, Context, FocusHandle, InteractiveElement as _, IntoElement,
+    ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled, WeakEntity,
+    Window, div, px,
 };
 
 use crate::components::{Button, DialogFrame, HoverHelp, Role, Tier};
 use crate::focus::Mark;
 use crate::host_text::Line;
-use crate::layers::{self, Dialog, LayerId, Subject};
-use crate::theme;
+use crate::layers::{self, Anchor, AnchoredDialog, Dialog, LayerId, Subject};
+use crate::theme::{self, metrics};
+
+/// How wide an anchored question may grow before its lines wrap: the old row menu panel's `max-width: 288px`.
+const ANCHORED_MAX_WIDTH: f32 = 288.;
+
+/// Where a question shows: centered over a veil, or beside the element it is about.
+#[derive(Clone)]
+pub(crate) enum Presentation {
+    /// In the dialog frame, centered over the window ([`ask`]).
+    Centered,
+    /// Below `Anchor`'s element, following it ([`ask_anchored`]).
+    Anchored(Anchor),
+}
 
 /// One of a question's two answers, as its button shows it.
 #[derive(Clone, Debug)]
@@ -139,6 +166,8 @@ pub struct Prompt<T: 'static> {
     question: Question<T>,
     on_confirm: Option<OnConfirm<T>>,
     layer: Option<LayerId>,
+    /// Drawn beside an anchor rather than in the dialog frame.
+    anchored: bool,
     answered: bool,
     confirm_focus: FocusHandle,
     cancel_focus: FocusHandle,
@@ -200,6 +229,35 @@ impl<T: Clone + 'static> Render for Prompt<T> {
         .disabled(!question.confirm_enabled)
         .focus(&self.confirm_focus)
         .on_click(answer(Which::Confirm, cx));
+        if self.anchored {
+            // `.session-row-menu-panel.menu-prompt` and `.confirm-consequence`: 8 pixels of padding, 6 between
+            // lines, 12-pixel amber prose, and the answers right-aligned 8 pixels apart (`.dialog-actions`).
+            let lines = question.summary.iter().chain(&question.lines).cloned();
+            return layers::surface(cx)
+                .id("prompt")
+                .debug_selector(|| "prompt".into())
+                .role(Role::Dialog)
+                .aria_label(question.title.clone())
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .p(px(8.))
+                .max_w(px(ANCHORED_MAX_WIDTH))
+                .text_size(metrics::TEXT_SM)
+                .text_color(theme::color(palette.warn_bright))
+                .children(lines.map(|line| div().child(line)))
+                .child(
+                    div()
+                        .debug_selector(|| "prompt-answers".into())
+                        .flex()
+                        .flex_wrap()
+                        .justify_end()
+                        .gap(px(8.))
+                        .child(cancel)
+                        .child(confirm),
+                )
+                .into_any_element();
+        }
         let body = div()
             .flex()
             .flex_col()
@@ -215,7 +273,7 @@ impl<T: Clone + 'static> Render for Prompt<T> {
         if let Some(summary) = &question.summary {
             frame = frame.summary(summary.clone());
         }
-        frame
+        frame.into_any_element()
     }
 }
 
@@ -251,12 +309,46 @@ pub fn ask<T: Clone + 'static>(
     window: &mut Window,
     cx: &mut App,
 ) -> Option<LayerId> {
-    ask_inner(question, subject, mark, on_confirm, window, cx).map(|(layer, _)| layer)
+    ask_inner(
+        question,
+        Presentation::Centered,
+        subject,
+        mark,
+        on_confirm,
+        window,
+        cx,
+    )
+    .map(|(layer, _)| layer)
 }
 
-/// [`ask`], also handing back the prompt's entity for tests.
+/// Ask `question` beside the element `anchor` belongs to (a row's menu button, a header button), with the same rules
+/// as [`ask`]. Nothing opens when the user has moved on since `mark` or the anchor is no longer drawn. It also closes
+/// when the anchor goes, or on a press outside it, without answering.
+pub fn ask_anchored<T: Clone + 'static>(
+    question: Question<T>,
+    anchor: Anchor,
+    subject: Option<Subject>,
+    mark: &Mark,
+    on_confirm: impl FnOnce(T, &mut Window, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
+    ask_inner(
+        question,
+        Presentation::Anchored(anchor),
+        subject,
+        mark,
+        on_confirm,
+        window,
+        cx,
+    )
+    .map(|(layer, _)| layer)
+}
+
+/// [`ask`] or [`ask_anchored`], also handing back the prompt's entity for tests.
 fn ask_inner<T: Clone + 'static>(
     question: Question<T>,
+    presentation: Presentation,
     subject: Option<Subject>,
     mark: &Mark,
     on_confirm: impl FnOnce(T, &mut Window, &mut App) + 'static,
@@ -276,6 +368,7 @@ fn ask_inner<T: Clone + 'static>(
         question,
         on_confirm: Some(Box::new(on_confirm)),
         layer: None,
+        anchored: matches!(presentation, Presentation::Anchored(_)),
         answered: false,
         confirm_focus,
         cancel_focus,
@@ -286,26 +379,46 @@ fn ask_inner<T: Clone + 'static>(
             let _ = weak.update(cx, |prompt, cx| prompt.answer(Which::Confirm, window, cx));
         }) as layers::MainAction
     });
-    let layer = layers::open_dialog(
-        Dialog {
-            view: prompt.clone().into(),
-            container: cx.focus_handle(),
-            start,
-            subject,
-            main_action,
-            keeps_focus_on_empty_click,
-        },
-        mark,
-        window,
-        cx,
-    )?;
+    let view = prompt.clone().into();
+    let container = cx.focus_handle();
+    let layer = match presentation {
+        Presentation::Centered => layers::open_dialog(
+            Dialog {
+                view,
+                container,
+                start,
+                subject,
+                main_action,
+                keeps_focus_on_empty_click,
+            },
+            mark,
+            window,
+            cx,
+        ),
+        Presentation::Anchored(anchor) => layers::open_anchored(
+            AnchoredDialog {
+                view,
+                container,
+                start,
+                anchor,
+                subject,
+                main_action,
+                keeps_focus_on_empty_click,
+            },
+            mark,
+            window,
+            cx,
+        ),
+    }?;
     prompt.update(cx, |prompt, _| prompt.layer = Some(layer));
     Some((layer, prompt))
 }
 
-/// [`ask`] for tests: also returns the open question so a test can answer it without drawing in between.
+/// [`ask`] or [`ask_anchored`] for tests, shown as `presentation`: also returns the open question so a test can answer
+/// it without drawing in between.
 #[cfg(test)]
 pub(crate) fn ask_for_test<T: Clone + 'static>(
+    presentation: Presentation,
     question: Question<T>,
     subject: Option<Subject>,
     mark: &Mark,
@@ -313,6 +426,14 @@ pub(crate) fn ask_for_test<T: Clone + 'static>(
     window: &mut Window,
     cx: &mut App,
 ) -> Option<Asked<T>> {
-    ask_inner(question, subject, mark, on_confirm, window, cx)
-        .map(|(layer, prompt)| Asked { layer, prompt })
+    ask_inner(
+        question,
+        presentation,
+        subject,
+        mark,
+        on_confirm,
+        window,
+        cx,
+    )
+    .map(|(layer, prompt)| Asked { layer, prompt })
 }

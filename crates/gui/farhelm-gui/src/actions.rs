@@ -6,10 +6,18 @@
 //! ([`TERMINAL_KEYS`]), and the list of actions a held key runs only once (`ONCE_PER_PRESS`). The features add their
 //! own actions as they are built.
 //!
-//! Every binding lives in [`CONTEXT`], the key context the root view sets on everything Farhelm draws. GPUI Kit's `Root`
-//! binds Tab and Shift+Tab in its own context, which sits above Farhelm's root, and moves focus itself when it handles
-//! them; a binding in a deeper context wins, so these bindings keep Tab with the focus coordinator. A Kit text input
-//! binds its own keys in its own, deeper context and passes on the ones it does not use (Tab and Escape included).
+//! Every binding lives in [`CONTEXT`], the key context the root view sets on everything Farhelm draws. GPUI Kit's
+//! `Root` binds Tab and Shift+Tab in its own context, which sits above Farhelm's root, and moves focus itself when it
+//! handles them; a binding in a deeper context wins, so these bindings keep Tab with the focus coordinator. A Kit text
+//! input binds its own keys in its own, deeper context ([`TEXT_INPUT_CONTEXT`]) and passes on the ones it does not use
+//! (Tab and Escape included). A key Farhelm binds in [`CONTEXT`] therefore reaches a focused text field's ancestors and
+//! runs there, unless that deeper context says otherwise: SPEC.md has the Linux Delete chord, Ctrl+Shift+Backspace,
+//! leave text editors other than the terminal alone, so [`install`] binds it to GPUI's `NoAction` in Kit's input
+//! context. A menu sets [`MENU_CONTEXT`], where Up and Down walk its items.
+//!
+//! Extension points (`docs/gpui/foundation-ownership.md`), besides an action and its binding in [`CONTEXT`]: a row in
+//! [`TERMINAL_KEYS`], an action in `ONCE_PER_PRESS`, and a chord in `TEXT_FIELD_KEYS` for an app shortcut SPEC.md says
+//! a text field keeps.
 //!
 //! ## A focused terminal
 //!
@@ -78,6 +86,28 @@ pub const THIS_PLATFORM: Platform = if cfg!(target_os = "macos") {
 /// Farhelm binding applies in a terminal too, except the keys [`TERMINAL_KEYS`] gives the terminal or its program.
 pub const TERMINAL_CONTEXT: &str = "Terminal";
 
+/// The key context GPUI Kit's text input sets on the element that holds its focus (`Input` in gpui-base, private
+/// there). Named here so Farhelm can bind keys that a text field must keep; the keymap tests check that a focused
+/// [`crate::components::TextInput`] really has it, so a Kit upgrade that renames it fails a test rather than silently
+/// handing those keys back to the app.
+pub const TEXT_INPUT_CONTEXT: &str = "Input";
+
+/// The key context a menu sets on its panel ([`crate::layers::panel`]). Up and Down are bound in it to the
+/// every-control focus moves, so they walk every item whatever the Keyboard navigation setting (SPEC.md: "Pop-up
+/// suggestion lists and menus use their own arrow keys"), and wrap at both ends, because the move stays inside the
+/// topmost layer and GPUI's tab order is a cycle. The old menus did the same (`sidebar.spec.ts` at reference commit
+/// `24bc0580`: "the actions menu walks every item and wraps at both ends").
+pub const MENU_CONTEXT: &str = "Menu";
+
+/// The chords a focused text field keeps for itself although Farhelm binds them elsewhere. [`install`] binds each to
+/// `NoAction` in [`TEXT_INPUT_CONTEXT`], which hides every binding further out for the same chord, so the key goes on
+/// to the field's own handling (here, nothing: Kit binds none of them). Bound on every platform: on macOS the Delete
+/// chord is Cmd+W and Ctrl+Shift+Backspace is not Farhelm's, so the row changes nothing there.
+const TEXT_FIELD_KEYS: &[&str] = &[
+    // SPEC.md, "Desktop window chrome": "The Linux chord leaves text editors other than the terminal alone."
+    "ctrl-shift-backspace",
+];
+
 actions!(
     farhelm,
     [
@@ -107,12 +137,19 @@ pub fn install(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("tab", FocusNext, Some(CONTEXT)),
         KeyBinding::new("shift-tab", FocusPrevious, Some(CONTEXT)),
-        // Option-Tab on macOS. Bound on every platform: where Tab already reaches every control it does the same as Tab,
-        // and on Linux the window manager usually keeps Alt-Tab for itself.
+        // Option-Tab on macOS. Bound on every platform: where Tab already reaches every control it does the same as
+        // Tab, and on Linux the window manager usually keeps Alt-Tab for itself.
         KeyBinding::new("alt-tab", FocusNextControl, Some(CONTEXT)),
         KeyBinding::new("alt-shift-tab", FocusPreviousControl, Some(CONTEXT)),
         KeyBinding::new("escape", Dismiss, Some(CONTEXT)),
+        KeyBinding::new("down", FocusNextControl, Some(MENU_CONTEXT)),
+        KeyBinding::new("up", FocusPreviousControl, Some(MENU_CONTEXT)),
     ]);
+    cx.bind_keys(
+        TEXT_FIELD_KEYS
+            .iter()
+            .map(|chord| KeyBinding::new(chord, NoAction, Some(TEXT_INPUT_CONTEXT))),
+    );
     // `NoAction` in the deeper context suppresses every binding for the same keys further out, Farhelm's and Kit's
     // alike, so the key goes on to the terminal's own listener. App shortcuts are left alone: their features bind them
     // in `CONTEXT`, and those bindings must keep working from a terminal.

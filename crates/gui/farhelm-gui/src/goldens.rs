@@ -1,8 +1,9 @@
 //! Headless screenshot goldens: one per component, per dialog frame and per overlay kind (tooltip, popover, the prompt
-//! over its veil, once more with a summary that names a host value), the keyboard focus ring, host-supplied text over
-//! its spoofing corpus, the notice banner, the terminal's styles and cursor shapes, and an attached terminal's exit line
-//! and status line, in both appearances, compared pixel for pixel. (The terminal stays dark in both appearances, so it
-//! draws identically in both pictures; only the scene's ground around it differs.)
+//! over its veil, once more with a summary that names a host value, and the prompt anchored to a row's menu button),
+//! the keyboard focus ring, host-supplied text over its spoofing corpus, the notice banner, the terminal's styles and
+//! cursor shapes, and an attached terminal's exit line and status line, in both appearances, compared pixel for pixel.
+//! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
+//! around it differs.)
 //!
 //! These are test references, not documentation media: they pin what each component draws, so a change to a token, a
 //! padding or a font shows up as a failing test with the new picture beside the old one, instead of drifting unnoticed.
@@ -147,7 +148,7 @@ fn text_input(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
         .into_any_element()
 }
 
-/// The dialog frame with a title, a summary, a short body and a pinned Cancel/Delete pair.
+/// The dialog frame with a title, a summary, the header Close, a short body and a pinned Cancel/Delete pair.
 fn dialog(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
     DialogFrame::new(
         "delete",
@@ -173,6 +174,12 @@ fn dialog(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
         ],
     )
     .summary("api-refactor, on this machine")
+    .close(
+        "Close delete",
+        HoverHelp::tooltip("Close this without deleting"),
+        false,
+        |_, _, _| {},
+    )
     .into_any_element()
 }
 
@@ -361,6 +368,57 @@ fn prompt_host_text_setup(_: &SceneState, window: &mut Window, cx: &mut App) {
     )
     .line("The session's terminal and its history are removed. The working directory stays.");
     prompt::ask(question, None, &mark, |_, _, _| {}, window, cx);
+}
+
+/// A row's menu button, as the session list will draw it at the end of a row, that the anchored question opens below.
+fn anchored_prompt(state: &SceneState, window: &mut Window, cx: &mut App) -> AnyElement {
+    let anchor = Anchor::for_element("row-menu-anchor", window, cx);
+    state.anchor.replace(Some(anchor.clone()));
+    div()
+        .w(px(300.))
+        .h(px(150.))
+        .child(
+            div()
+                .relative()
+                .w(px(26.))
+                .child(IconButton::new(
+                    "row-menu",
+                    Icon::More,
+                    "Session actions for migrate auth tokens",
+                    HoverHelp::tooltip("Session actions"),
+                    Role::Button,
+                ))
+                .child(anchor.track()),
+        )
+        .into_any_element()
+}
+
+/// The row Delete question as the old app showed it for a running session (reference `row-delete-confirmation`): the
+/// consequence, the session's title quoted, and Cancel beside "Confirm delete", asked below the row's menu button.
+fn anchored_prompt_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let Some(anchor) = state.anchor.borrow().clone() else {
+        return;
+    };
+    let mark = Mark::take(cx);
+    let title = HostText::from_host("migrate auth tokens");
+    let question = Question::new(
+        "Delete confirmation",
+        Answer {
+            label: "Confirm delete".into(),
+            help: HoverHelp::tooltip("Delete this session and its state now"),
+            tier: Tier::Danger,
+        },
+        "s1".to_string(),
+    )
+    .line("Still running \u{2014} deleting kills the agent:")
+    .line(
+        HostSentence::new("prompt-title")
+            .text("\"")
+            .host(&title)
+            .text("\""),
+    )
+    .keeps_focus_on_empty_click();
+    prompt::ask_anchored(question, anchor, None, &mark, |_, _, _| {}, window, cx);
 }
 
 /// The host-text element over the spoofing corpus, one value per line, then a sentence mixing the app's words with two
@@ -673,7 +731,7 @@ fn terminals(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
         .into_any_element()
 }
 
-static SCENES: [Scene; 13] = [
+static SCENES: [Scene; 14] = [
     Scene {
         name: "buttons",
         size: (560., 64.),
@@ -721,6 +779,12 @@ static SCENES: [Scene; 13] = [
         size: (560., 320.),
         draw: empty,
         setup: prompt_host_text_setup,
+    },
+    Scene {
+        name: "anchored-prompt",
+        size: (340., 190.),
+        draw: anchored_prompt,
+        setup: anchored_prompt_setup,
     },
     Scene {
         name: "host-text",

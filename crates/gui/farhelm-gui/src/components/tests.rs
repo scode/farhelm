@@ -5,19 +5,22 @@
 //! reachable. Each test opens its window through the shared harness ([`crate::test_support::open`]), and each step ends
 //! with its invariant checks (the focus coordinator's and the layer manager's rules).
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gpui::{
-    InteractiveElement, IntoElement, Modifiers, ParentElement, ScrollDelta, ScrollEvent, Styled,
-    TestAppContext, VisualTestContext, div, point, px, size,
+    AppContext as _, Context, FocusHandle, InteractiveElement, IntoElement, Modifiers,
+    ParentElement, Render, ScrollDelta, ScrollEvent, Styled, Subscription, TestAppContext,
+    VisualTestContext, Window, div, point, px, size,
 };
 
 use gpui::prelude::FluentBuilder as _;
 
-use super::{Button, DialogFrame, HoverHelp, Role, Tier};
+use super::{
+    Button, DialogFrame, HoverHelp, Role, TextInput, TextInputEvent, TextInputState, Tier,
+};
 use crate::layers;
-use crate::test_support::{advance, bounds, center, check, click, open, redraw};
+use crate::test_support::{advance, bounds, center, check, click, keys, open, redraw};
 
 /// A click activates an enabled button, and a disabled one ignores it: the old app's disabled buttons were inert, and a
 /// dimmed button that still acted would send a command the user was told was unavailable.
@@ -291,4 +294,190 @@ fn a_frame_too_tall_for_the_window_scrolls_as_a_whole(cx: &mut TestAppContext) {
         answer.top() >= frame.top() && answer.bottom() <= frame.bottom(),
         "scrolling the frame brought the answer into view: {answer:?} in {frame:?}"
     );
+}
+
+// ---- The text input's events and the dialog's Close ---------------------------------------------------------------
+
+/// A view that owns a text input's state, as an editor does, and records every event the input reports.
+struct Field {
+    state: TextInputState,
+    events: Rc<RefCell<Vec<TextInputEvent>>>,
+    _events: Subscription,
+}
+
+impl Field {
+    fn new(
+        events: &Rc<RefCell<Vec<TextInputEvent>>>,
+        window: &mut Window,
+        cx: &mut Context<Field>,
+    ) -> Field {
+        let state = TextInputState::new(window, cx);
+        let subscription = state.subscribe(window, cx, |field: &mut Field, event, _, _| {
+            field.events.borrow_mut().push(event)
+        });
+        Field {
+            state,
+            events: events.clone(),
+            _events: subscription,
+        }
+    }
+}
+
+impl Render for Field {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .debug_selector(|| "field-box".into())
+            .w(px(200.))
+            .child(TextInput::new(
+                "field",
+                &self.state,
+                "Title",
+                HoverHelp::tooltip("The title"),
+            ))
+    }
+}
+
+/// Why this matters: an editor keeps its draft in step with the field from the field's change events, and saves on
+/// Enter; with neither reported, the Rename editor could not mark its draft touched or submit from the keyboard
+/// (SPEC_impl.md, "Drafts"). A value the editor itself puts into the field (a rename pushed by another client) must
+/// not count as the user's edit, or following a push would mark the draft touched and stop it following.
+///
+/// Specification: each typed character reports one `Changed`; `set_text` reports nothing, also for a value holding a
+/// line break the field strips; Enter reports `Submitted` and nothing else, and leaves the text as it was (Kit's own
+/// change report for Enter, which changes nothing, is not passed on).
+#[gpui::test]
+fn a_text_input_reports_edits_and_enter_and_not_a_value_set_by_its_owner(cx: &mut TestAppContext) {
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let made: Rc<RefCell<Option<gpui::Entity<Field>>>> = Rc::new(RefCell::new(None));
+    let (recorded, kept) = (events.clone(), made.clone());
+    let cx = open(cx, move |window, cx| {
+        let field = kept
+            .borrow_mut()
+            .get_or_insert_with(|| cx.new(|cx| Field::new(&recorded, window, cx)))
+            .clone();
+        field.into_any_element()
+    });
+    click(cx, "field-box");
+    keys(cx, "a b");
+    assert_eq!(
+        *events.borrow(),
+        [TextInputEvent::Changed, TextInputEvent::Changed]
+    );
+
+    let field = made.borrow().clone().expect("the field was drawn");
+    events.borrow_mut().clear();
+    cx.update(|window, cx| {
+        let state = field.read(cx).state.clone();
+        // With a line break, which the single-line field strips: what Enter's no-op edit is compared against below
+        // must be the text the field holds, not the text it was given.
+        state.set_text("pushed\n", window, cx);
+    });
+    cx.run_until_parked();
+    check(cx);
+    assert_eq!(
+        *events.borrow(),
+        [],
+        "a value set by the owner is not an edit"
+    );
+
+    keys(cx, "enter");
+    assert_eq!(*events.borrow(), [TextInputEvent::Submitted]);
+    let text = cx.update(|_, cx| field.read(cx).state.text(cx));
+    assert_eq!(
+        text.as_ref(),
+        "pushed",
+        "Enter submitted and inserted nothing"
+    );
+}
+
+/// Why this matters: SPEC.md gives editors such as Rename "a shared title and Close header" and has Tab follow "Close,
+/// the title field, Cancel, Save". The Close must be reachable from the keyboard and come first, or a keyboard user
+/// tabbing out of the field would never reach it, and it must do what its dialog says when clicked or pressed.
+///
+/// Specification: in a frame with a Close, a field and Cancel and Save answers, Tab from nothing focused goes to Close,
+/// then the field, then Cancel, then Save, then back to Close; Enter on the focused Close and a click on it each run
+/// its handler once. A disabled Close, as Rename draws it while saving (SPEC.md: Close follows Cancel's busy rules),
+/// ignores a click.
+#[gpui::test]
+fn the_dialog_close_comes_first_in_tab_order_and_runs_its_handler(cx: &mut TestAppContext) {
+    let closed = Rc::new(Cell::new(0));
+    let busy = Rc::new(Cell::new(false));
+    let drawn_busy = busy.clone();
+    let field: Rc<RefCell<Option<TextInputState>>> = Rc::new(RefCell::new(None));
+    let handles: Rc<RefCell<Option<(FocusHandle, FocusHandle)>>> = Rc::new(RefCell::new(None));
+    let (count, kept, answers) = (closed.clone(), field.clone(), handles.clone());
+    let cx = open(cx, move |window, cx| {
+        let state = kept
+            .borrow_mut()
+            .get_or_insert_with(|| TextInputState::new(window, cx))
+            .clone();
+        let (cancel, save) = answers
+            .borrow_mut()
+            .get_or_insert_with(|| {
+                (
+                    cx.focus_handle().tab_stop(true),
+                    cx.focus_handle().tab_stop(true),
+                )
+            })
+            .clone();
+        let count = count.clone();
+        DialogFrame::new(
+            "rename",
+            "Rename session",
+            TextInput::new("title", &state, "Title", HoverHelp::tooltip("The title")),
+            vec![
+                Button::new(
+                    "cancel",
+                    "Cancel",
+                    HoverHelp::tooltip("Close"),
+                    Role::Button,
+                )
+                .tier(Tier::Neutral)
+                .focus(&cancel),
+                Button::new("save", "Save", HoverHelp::tooltip("Save"), Role::Button)
+                    .tier(Tier::Primary)
+                    .focus(&save),
+            ],
+        )
+        .close(
+            "Close rename",
+            HoverHelp::tooltip("Close rename; keep the current title"),
+            drawn_busy.get(),
+            move |_, _, _| count.set(count.get() + 1),
+        )
+        .into_any_element()
+    });
+    let (cancel, save) = handles.borrow().clone().expect("the answers were drawn");
+    let state = field.borrow().clone().expect("the field was drawn");
+    let focused = |cx: &mut VisualTestContext, handle: &FocusHandle| {
+        cx.update(|window, _| handle.is_focused(window))
+    };
+
+    keys(cx, "tab");
+    keys(cx, "enter");
+    assert_eq!(
+        closed.get(),
+        1,
+        "the first Tab reached Close, and Enter pressed it"
+    );
+    keys(cx, "tab x");
+    assert_eq!(
+        cx.update(|_, cx| state.text(cx)).as_ref(),
+        "x",
+        "the next Tab reached the field"
+    );
+    keys(cx, "tab");
+    assert!(focused(cx, &cancel), "then Cancel");
+    keys(cx, "tab");
+    assert!(focused(cx, &save), "then Save");
+    keys(cx, "tab enter");
+    assert_eq!(closed.get(), 2, "and around to Close again");
+
+    click(cx, "rename-close");
+    assert_eq!(closed.get(), 3, "a click on Close ran it");
+
+    busy.set(true);
+    redraw(cx);
+    click(cx, "rename-close");
+    assert_eq!(closed.get(), 3, "a disabled Close ignored the click");
 }

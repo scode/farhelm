@@ -13,9 +13,14 @@
 //!   shows its result where it belongs instead.
 //! - **An overlay closes when its subject is gone, not when it moves.** A popover is anchored to an element through an
 //!   [`Anchor`], state the anchor element keeps in its element state: it follows the element wherever it is drawn,
-//!   and closes when the element is no longer drawn (a deleted row's menu). A layer may also name a [`Subject`], an
-//!   entity whose release closes it (a confirmation about a session that was deleted elsewhere). Every overlay is
-//!   anchored to an element: SPEC.md has no menu opened at a pointer position.
+//!   and closes when the element is no longer drawn (a deleted row's menu). A layer may also name a [`Subject`]: an
+//!   entity whose release closes it, or a session the helm's listing proves gone (`Subject::session`, a
+//!   confirmation about a session that was deleted elsewhere). Every overlay is anchored to an element: SPEC.md has no
+//!   menu opened at a pointer position.
+//! - **Three kinds of layer.** A dialog is centered over a veil. A popover (a menu) is drawn below its anchor. An
+//!   anchored dialog ([`open_anchored`]) is drawn like a popover but answers like a dialog: it has a subject, a main
+//!   action for Enter and its own empty-space rule. It is how the prompt asks a question beside the control it is about
+//!   (a row's Delete question, opened from the row's menu, as the old app turned the menu into the question).
 //! - **A dialog is modal.** It draws a veil over the window that takes every click. A click on its empty space (label
 //!   text included: labels are no longer selectable, so the GPUI migration settled on 2026-11-13 that a click on one
 //!   counts as empty space) keeps focus on the control in use in the dialogs SPEC.md lists, and moves focus to the
@@ -52,6 +57,7 @@ use gpui::{
     Styled, Subscription, WeakEntity, WeakFocusHandle, Window, WindowId, canvas, div, point, px,
 };
 
+use crate::actions;
 use crate::focus::{self, Mark};
 use crate::theme::{self, metrics};
 use crate::ticker;
@@ -94,8 +100,8 @@ struct Layer {
     main_action: Option<MainAction>,
     /// What a press on the layer's empty space does to focus.
     empty_press: focus::OnPress,
-    /// Closes the layer when its subject or anchor is released.
-    _subject: Option<Subscription>,
+    /// Close the layer when its subject is gone or its anchor is no longer drawn.
+    _watches: Vec<Subscription>,
 }
 
 /// A dialog's main action, which Enter presses while the dialog itself has focus.
@@ -165,24 +171,42 @@ fn stack(window: &Window, cx: &App) -> Option<Entity<LayerStack>> {
 
 // ---- Subjects and anchors --------------------------------------------------------------------------------------------
 
-/// What a layer is about. When the subject's entity is released, the layer closes: SPEC.md, "Nothing closes a dialog …
-/// it did not open. Each goes away when … the thing it is about is gone".
+/// What a layer is about. When the subject is gone, the layer closes: SPEC.md, "Nothing closes a dialog … it did not
+/// open. Each goes away when … the thing it is about is gone".
 ///
-/// NOTE: The store the channel feeds (the next phase) keeps collections keyed by id with entries replaced whole, not
-/// one entity per session, so "this session is gone" will be a store fact rather than an entity's release. How a
-/// subject maps onto an id-keyed store entry is settled with the store, which is the first real consumer (the session
-/// delete confirmation).
+/// Two kinds of subject. An entity ([`Subject::of`]) is gone when it is released. Something an entity holds
+/// ([`Subject::when`]) is gone when its owner says so: a session, an entry in the store the channel feeds with no entity
+/// of its own, is gone when the helm's listing proves it (`Subject::session`, which [`crate::session`] supplies).
 pub struct Subject(Watch);
 
-/// Starts watching a subject for the layer with the given id: the subscription that closes it on release.
-type Watch = Box<dyn FnOnce(&mut Context<LayerStack>, LayerId) -> Subscription>;
+/// Starts watching a subject for the layer with the given id: the subscription that closes it once the subject is gone.
+type Watch = Box<dyn FnOnce(&mut Context<LayerStack>, AnyWindowHandle, LayerId) -> Subscription>;
 
 impl Subject {
     /// The layer is about `entity`: it closes when `entity` is released.
     pub fn of<T: 'static>(entity: &Entity<T>) -> Self {
         let entity = entity.clone();
-        Subject(Box::new(move |cx, id| {
-            cx.observe_release(&entity, move |stack, _, cx| stack.close_later(id, cx))
+        Subject(Box::new(move |cx, window, id| {
+            cx.observe_release(&entity, move |_, _, cx| close_later(window, id, cx))
+        }))
+    }
+
+    /// The layer is about something `entity` holds: it closes once `gone` says it is gone, checked when the layer
+    /// opens (a question about something already gone closes at once) and each time `entity` notifies. For things that
+    /// have no entity of their own, such as a session, which is an entry in the store the channel feeds; the owner of
+    /// that state supplies `gone` (`Subject::session` in [`crate::session`]), so the layer manager knows nothing of it.
+    ///
+    /// `gone` runs on every notification of `entity` for as long as the layer is open, so it should be cheap.
+    pub fn when<T: 'static>(entity: Entity<T>, gone: impl Fn(&T, &App) -> bool + 'static) -> Self {
+        Subject(Box::new(move |cx, window, id| {
+            if gone(entity.read(cx), cx) {
+                close_later(window, id, cx);
+            }
+            cx.observe(&entity, move |_, entity, cx| {
+                if gone(entity.read(cx), cx) {
+                    close_later(window, id, cx);
+                }
+            })
         }))
     }
 }
@@ -270,6 +294,27 @@ pub struct Popover {
     pub anchor: Anchor,
 }
 
+/// A dialog drawn beside an element instead of centered over a veil: placed and followed like a [`Popover`], closed
+/// like one when its anchor is no longer drawn or the user presses outside it, and answered like a [`Dialog`] (a
+/// subject, Enter on its container, its own empty-space rule). Tab stays inside it, as in every layer. It has no veil:
+/// the page behind stays visible, and a press on it closes the dialog unanswered, which for a question is Cancel.
+pub struct AnchoredDialog {
+    /// What it draws.
+    pub view: AnyView,
+    /// Its own focus handle, tracked on the element around `view`.
+    pub container: FocusHandle,
+    /// Where focus starts.
+    pub start: FocusHandle,
+    /// The element it is drawn below.
+    pub anchor: Anchor,
+    /// What it is about, if anything, besides its anchor: it closes when that is gone too.
+    pub subject: Option<Subject>,
+    /// As [`Dialog::main_action`].
+    pub main_action: Option<MainAction>,
+    /// As [`Dialog::keeps_focus_on_empty_click`].
+    pub keeps_focus_on_empty_click: bool,
+}
+
 /// Open `dialog` on top of everything else, unless the user has moved on since `mark` (then nothing opens, and the
 /// result belongs where the feature shows it otherwise).
 pub fn open_dialog(
@@ -286,19 +331,64 @@ pub fn open_dialog(
         main_action,
         keeps_focus_on_empty_click,
     } = dialog;
-    let empty_press = if keeps_focus_on_empty_click {
-        focus::OnPress::Keep
-    } else {
-        focus::OnPress::Focus
-    };
     open(
         Kind::Dialog,
         view,
         container,
         start,
+        subject.into_iter().collect(),
+        main_action,
+        empty_press(keeps_focus_on_empty_click),
+        mark,
+        window,
+        cx,
+    )
+}
+
+/// What a press on a dialog's empty space does to focus, by the dialog's rule.
+fn empty_press(keeps_focus_on_empty_click: bool) -> focus::OnPress {
+    if keeps_focus_on_empty_click {
+        focus::OnPress::Keep
+    } else {
+        focus::OnPress::Focus
+    }
+}
+
+/// The subject every anchored layer has: its anchor element, which closes it when no longer drawn. `None` when the
+/// anchor is already gone, and then there is nowhere to show the layer.
+fn drawn(anchor: &Anchor) -> Option<Subject> {
+    let state = anchor.state.upgrade()?;
+    Some(Subject(Box::new(move |cx, window, id| {
+        cx.observe_release(&state, move |_, _, cx| close_later(window, id, cx))
+    })))
+}
+
+/// Open `dialog` beside its anchor, on top of everything else, unless the user has moved on since `mark` or the anchor
+/// is no longer drawn.
+pub fn open_anchored(
+    dialog: AnchoredDialog,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
+    let AnchoredDialog {
+        view,
+        container,
+        start,
+        anchor,
         subject,
         main_action,
-        empty_press,
+        keeps_focus_on_empty_click,
+    } = dialog;
+    let drawn = drawn(&anchor)?;
+    open(
+        Kind::Popover(anchor.bounds),
+        view,
+        container,
+        start,
+        std::iter::once(drawn).chain(subject).collect(),
+        main_action,
+        empty_press(keeps_focus_on_empty_click),
         mark,
         window,
         cx,
@@ -318,17 +408,13 @@ pub fn open_popover(
         start,
         anchor,
     } = popover;
-    // An anchor that is already gone has nowhere to show a popover.
-    let state = anchor.state.upgrade()?;
-    let subject = Subject(Box::new(move |cx, id| {
-        cx.observe_release(&state, move |stack, _, cx| stack.close_later(id, cx))
-    }));
+    let drawn = drawn(&anchor)?;
     open(
         Kind::Popover(anchor.bounds),
         view,
         container,
         start,
-        Some(subject),
+        vec![drawn],
         None,
         // A menu's empty space (a separator, padding) keeps focus on its item.
         focus::OnPress::Keep,
@@ -340,14 +426,14 @@ pub fn open_popover(
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "the private join of the two public open functions"
+    reason = "the private join of the public open functions"
 )]
 fn open(
     kind: Kind,
     view: AnyView,
     container: FocusHandle,
     start: FocusHandle,
-    subject: Option<Subject>,
+    subjects: Vec<Subject>,
     main_action: Option<MainAction>,
     empty_press: focus::OnPress,
     mark: &Mark,
@@ -367,7 +453,11 @@ fn open(
     let id = stack.update(cx, |stack, cx| {
         let id = LayerId(stack.next_id);
         stack.next_id += 1;
-        let subject = subject.map(|subject| (subject.0)(cx, id));
+        let window = stack.window;
+        let watches = subjects
+            .into_iter()
+            .map(|subject| (subject.0)(cx, window, id))
+            .collect();
         stack.layers.push(Layer {
             id,
             kind,
@@ -376,7 +466,7 @@ fn open(
             opener,
             main_action,
             empty_press,
-            _subject: subject,
+            _watches: watches,
         });
         // A layer covers the tooltip of whatever is under it, and the next tooltip waits the full delay again.
         stack.put_tooltip_away();
@@ -387,15 +477,13 @@ fn open(
     Some(id)
 }
 
-impl LayerStack {
-    /// Close `id` from inside the stack's own update (a subject's release), once that update has returned.
-    fn close_later(&mut self, id: LayerId, cx: &mut Context<Self>) {
-        let window = self.window;
-        cx.defer(move |cx| {
-            // The window may have closed meanwhile; then there is nothing left to close.
-            let _ = window.update(cx, |_, window, cx| close(id, window, cx));
-        });
-    }
+/// Close `id` in `window` from inside the stack's own update (a subject going, an anchor's release), once that update
+/// has returned: closing updates the stack, which cannot be updated from inside itself.
+fn close_later(window: AnyWindowHandle, id: LayerId, cx: &mut App) {
+    cx.defer(move |cx| {
+        // The window may have closed meanwhile; then there is nothing left to close.
+        let _ = window.update(cx, |_, window, cx| close(id, window, cx));
+    });
 }
 
 /// Close the layer `id`, if it is still open, and anything opened on top of it. If focus was inside what closed, it
@@ -924,15 +1012,23 @@ impl Element for PlacedPopover {
     }
 }
 
-/// The popover panel the old menus drew: the floating surface, its outline and the menu shadow. Popover views wrap
-/// their content in it. The menu role goes on the menu component that the session row's menu brings, which has the
-/// element id a role needs.
+/// The popover panel the old menus drew: the floating surface with its 4-pixel padding at top and bottom, and the menu
+/// key context ([`actions::MENU_CONTEXT`]), in which Up and Down walk its items. Menu views wrap their content in it.
+/// The menu role goes on the menu component that the session row's menu brings, which has the element id a role needs.
 pub fn panel(cx: &App) -> gpui::Div {
-    let palette = theme::palette(cx);
-    div()
+    surface(cx)
+        .key_context(actions::MENU_CONTEXT)
         .flex()
         .flex_col()
         .py(px(4.))
+}
+
+/// The floating surface every anchored layer is drawn on: the old `--bg-2` fill, its outline and radius, and the menu
+/// shadow (`.session-row-menu-panel` in the old stylesheet, which both a row's menu and the question it turned into
+/// used). No layout and no key context: a menu adds those through [`panel`], an anchored question its own.
+pub fn surface(cx: &App) -> gpui::Div {
+    let palette = theme::palette(cx);
+    div()
         .bg(theme::color(palette.bg_2))
         .border_1()
         .border_color(theme::color(palette.border))
