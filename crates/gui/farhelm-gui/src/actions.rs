@@ -627,8 +627,8 @@ impl PhysicalKeyId {
     /// second-guessed: an identity that names another key is another key, even when the layout printed this one's
     /// character. The logical fallback applies only to events without any identity, and for the chords in
     /// [`PHYSICAL_KEYS`] it does not undercut that rule: on real hardware the events without an identity are
-    /// input-method commits of ASCII text and replayed keystrokes (`vendor/README.md`, "native-key"), never a Cmd or
-    /// Ctrl+Shift chord. It exists so the keys the test bridge injects, and simulated test keys, can press these
+    /// input-method commits of ASCII text and replayed keystrokes (`vendor/README.md`, "The patch layers"), never a Cmd
+    /// or Ctrl+Shift chord. It exists so the keys the test bridge injects, and simulated test keys, can press these
     /// shortcuts.
     ///
     /// NOTE: For a bare key (the quick-launch sequence's number keys, which take no modifiers) that reasoning does not
