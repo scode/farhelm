@@ -1725,13 +1725,26 @@ async fn every_pushed_collection_round_trips_through_its_proto_type() {
         .uri("/api/preferences")
         .header("host", "127.0.0.1:7433")
         .header("content-type", "application/json")
-        .body(Body::from(r#"{"compact":true,"list_sort":"title"}"#))
+        // The schema-85 fields too: they reach the GUI only through this
+        // pushed type, so their wire names and number types must survive it.
+        .body(Body::from(
+            r#"{"compact":true,"list_sort":"title","appearance":"light","sidebar_width":512,
+                "host_rail_open":true,"sound_waiting":false,"sound_approval":true,
+                "sound_turn_finished":true,"terminal_text_size":16}"#,
+        ))
         .unwrap();
     let written = harness.router().oneshot(patch).await.unwrap();
     assert_eq!(written.status(), StatusCode::NO_CONTENT);
     let preferences = served(&harness, "/api/preferences").await;
     let decoded: farhelm_proto::ui_channel::Preferences = round_trip(&preferences);
     assert_eq!(decoded.list_sort.as_deref(), Some("title"));
+    assert_eq!(decoded.appearance.as_deref(), Some("light"));
+    assert_eq!(decoded.sidebar_width, Some(512));
+    assert_eq!(decoded.host_rail_open, Some(true));
+    assert_eq!(decoded.sound_waiting, Some(false));
+    assert_eq!(decoded.sound_approval, Some(true));
+    assert_eq!(decoded.sound_turn_finished, Some(true));
+    assert_eq!(decoded.terminal_text_size, Some(16));
 
     let hosts = served(&harness, "/api/hosts").await;
     let host = &hosts["hosts"][0];

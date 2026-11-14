@@ -3296,6 +3296,14 @@ mod tests {
                  DROP TABLE tensorlake_recipes;
                  DROP TABLE credentials;
                  DROP TABLE environment_launch_history;
+                 -- Schema 85 added the settings the old app kept per device.
+                 ALTER TABLE preferences DROP COLUMN appearance;
+                 ALTER TABLE preferences DROP COLUMN sidebar_width;
+                 ALTER TABLE preferences DROP COLUMN host_rail_open;
+                 ALTER TABLE preferences DROP COLUMN sound_waiting;
+                 ALTER TABLE preferences DROP COLUMN sound_approval;
+                 ALTER TABLE preferences DROP COLUMN sound_turn_finished;
+                 ALTER TABLE preferences DROP COLUMN terminal_text_size;
                  ALTER TABLE preferences DROP COLUMN last_container_host;
                  ALTER TABLE create_history_sessions DROP COLUMN github_repo;
                  ALTER TABLE session_cache ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
