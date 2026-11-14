@@ -30,8 +30,8 @@
 //! NOTE: The old anchored questions kept the quoted title on one line and cut it with an ellipsis. Here lines wrap, as
 //! they do in the centered form: two sessions whose titles share a long start would otherwise get questions that look
 //! the same, which is the confusion escaping host text exists to prevent. That is a recorded deviation from the old
-//! look. The old row question was also placed beside the sidebar rather than below its anchor; the layer manager's
-//! placement (below, or above when there is no room) is used until beside-the-sidebar placement is built there.
+//! look. An anchored question sits where its anchor asks: below it (or above, without room), or beside it for an
+//! anchor made with [`crate::layers::Anchor::beside`], which is where the old row questions sat.
 
 use std::rc::Rc;
 
@@ -55,7 +55,8 @@ const ANCHORED_MAX_WIDTH: f32 = 288.;
 pub(crate) enum Presentation {
     /// In the dialog frame, centered over the window ([`ask`]).
     Centered,
-    /// Below `Anchor`'s element, following it ([`ask_anchored`]).
+    /// Against `Anchor`'s element, where the anchor asks (below unless it was made [`Anchor::beside`]), following it
+    /// ([`ask_anchored`]).
     Anchored(Anchor),
 }
 

@@ -586,6 +586,83 @@ fn opening_and_closing_a_layer_redraws_only_the_root(cx: &mut TestAppContext) {
     );
 }
 
+// ---- Layers: a popover placed beside its anchor ----------------------------------------------------------------------
+
+/// Open a window whose only content is an anchor element under the selector `opener`, placed by `place` (a div that
+/// positions its child), and return the anchor's handle once it has been drawn.
+fn open_placed_anchor(
+    cx: &mut TestAppContext,
+    place: fn(gpui::Div) -> gpui::Div,
+) -> (&mut VisualTestContext, Rc<RefCell<Option<Anchor>>>) {
+    let out: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));
+    let drawn = out.clone();
+    let cx = open(cx, move |window, cx| {
+        place(div().size_full().relative())
+            .child(anchor_element("opener", &drawn, window, cx))
+            .into_any_element()
+    });
+    (cx, out)
+}
+
+/// The old session row menu flew out beside the sidebar rather than below its button (`session_menu_placement_style`
+/// at the reference commit: left at the toggle's right edge plus 10, top at its top minus 4). Specified: a popover
+/// opened on [`Anchor::beside`] sits at exactly that offset from its anchor, and the overlay invariants hold.
+#[gpui::test]
+fn a_popover_beside_its_anchor_sits_right_of_it_and_a_little_above(cx: &mut TestAppContext) {
+    let (cx, out) = open_placed_anchor(cx, |place| place.pt(px(100.)).pl(px(40.)));
+    let item = handle(cx);
+    let anchor = out.borrow().clone().unwrap();
+    open_menu(cx, anchor.beside(), vec![("item", item)]);
+    let menu = cx.debug_bounds("menu").unwrap();
+    let opener = cx.debug_bounds("opener").unwrap();
+    let viewport = cx.update(|window, _| window.viewport_size());
+    assert!(
+        menu.right() < viewport.width && menu.bottom() < viewport.height,
+        "the premise: the window has room, so no clamp moved the menu ({menu:?} in {viewport:?})"
+    );
+    assert_eq!(
+        (menu.left(), menu.top()),
+        (opener.right() + px(10.), opener.top() - px(4.)),
+        "the menu starts 10 px right of its anchor and 4 px above it: {menu:?} beside {opener:?}"
+    );
+}
+
+/// Port, not redesign: like the old flyout, the beside placement never moves to the other side of its anchor when the
+/// window is too narrow; it is only shifted back inside the window, as every popover is. Specified: near the right and
+/// bottom edges the popover's right and bottom edges sit on the window's, it is not flipped to the anchor's left, and
+/// the overlay invariants still hold (checked as it opens).
+#[gpui::test]
+fn a_popover_beside_an_anchor_near_the_edges_is_kept_inside_and_never_flips(
+    cx: &mut TestAppContext,
+) {
+    let (cx, out) = open_placed_anchor(cx, |place| place.flex().justify_end().items_end());
+    // Three items, so the menu is taller than the room below its anchor's top.
+    let items = vec![
+        ("first", handle(cx)),
+        ("second", handle(cx)),
+        ("third", handle(cx)),
+    ];
+    let anchor = out.borrow().clone().unwrap();
+    open_menu(cx, anchor.beside(), items);
+    let menu = cx.debug_bounds("menu").unwrap();
+    let opener = cx.debug_bounds("opener").unwrap();
+    let viewport = cx.update(|window, _| window.viewport_size());
+    assert!(
+        opener.right() + px(10.) + menu.size.width > viewport.width
+            && opener.top() - px(4.) + menu.size.height > viewport.height,
+        "the premise: unclamped, the menu would run past the right and bottom edges ({opener:?}, {viewport:?})"
+    );
+    assert_eq!(
+        (menu.right(), menu.bottom()),
+        (viewport.width, viewport.height),
+        "the menu is shifted back inside the window: {menu:?} in {viewport:?}"
+    );
+    assert!(
+        menu.left() > opener.left() - menu.size.width,
+        "the menu was not flipped to the anchor's left: {menu:?} beside {opener:?}"
+    );
+}
+
 // ---- Layers: a session as a subject ----------------------------------------------------------------------------------
 
 /// Why this matters: a Delete question about a session must close when that session is deleted from another window or

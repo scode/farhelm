@@ -18,10 +18,12 @@
 //!   entity whose release closes it, or a session the helm's listing proves gone (`Subject::session`, a
 //!   confirmation about a session that was deleted elsewhere). Every overlay is anchored to an element: SPEC.md has no
 //!   menu opened at a pointer position.
-//! - **Three kinds of layer.** A dialog is centered over a veil. A popover (a menu) is drawn below its anchor. An
-//!   anchored dialog ([`open_anchored`]) is drawn like a popover but answers like a dialog: it has a subject, a main
-//!   action for Enter and its own empty-space rule. It is how the prompt asks a question beside the control it is about
-//!   (a row's Delete question, opened from the row's menu, as the old app turned the menu into the question).
+//! - **Three kinds of layer.** A dialog is centered over a veil. A popover (a menu) is drawn below its anchor, or
+//!   beside it when the anchor asks for that ([`Anchor::beside`], the session row's menu flying out beside the
+//!   sidebar). An anchored dialog ([`open_anchored`]) is drawn like a popover but answers like a dialog: it has a
+//!   subject, a main action for Enter and its own empty-space rule. It is how the prompt asks a question beside the
+//!   control it is about (a row's Delete question, opened from the row's menu, as the old app turned the menu into the
+//!   question).
 //! - **A dialog is modal.** It draws a veil over the window that takes every click. A click on its empty space (label
 //!   text included: labels are no longer selectable, so the GPUI migration settled on 2026-11-13 that a click on one
 //!   counts as empty space) keeps focus on the control in use in the dialogs SPEC.md lists, and moves focus to the
@@ -121,9 +123,30 @@ pub type DismissGuard = Rc<dyn Fn(&App) -> bool>;
 
 enum Kind {
     Dialog,
-    /// A popover, drawn below (or, without room, above) its anchor element and following it as it moves; the bounds
+    /// A popover, placed against its anchor element as its [`Placement`] says and following it as it moves; the bounds
     /// are where the anchor was last drawn.
-    Popover(AnchorBounds),
+    Popover(AnchorBounds, Placement),
+}
+
+/// Where a popover sits against its anchor. Each is the old app's placement for the overlays that used it, and each is
+/// kept inside the window by the same clamp.
+#[derive(Clone, Copy)]
+pub enum Placement {
+    /// Below the anchor, left edges aligned, or above it when it would run off the bottom and there is more room above:
+    /// the old menus and popup lists.
+    Below,
+    /// Beside the anchor, to its right: the left edge 10 pixels past the anchor's right edge and the top 4 pixels above
+    /// the anchor's. The old session row menu's flyout (`session_menu_placement_style` in `menu_panel.rs` at reference
+    /// commit `24bc0580`), whose toggle ends just inside the sidebar's edge, so the menu stands 8 pixels clear of the
+    /// list. Like the old one it never changes to another side when the window is narrow: the clamp only shifts it back
+    /// inside.
+    ///
+    /// NOTE: The clamp is the one every popover shares, which keeps the popover flush inside the window. The old
+    /// flyout's own clamp differed, a deviation recorded when this was ported: it kept 8 pixels from the edges, it held
+    /// a fixed 528 pixels of room below the menu's top rather than the menu's own height (so a short menu on a low row
+    /// moved up further than it does here), and it capped the menu's height and scrolled it, where this one would run
+    /// past the bottom of a window shorter than the menu (the full row menu fits in the minimum window).
+    Beside,
 }
 
 /// Where an anchor element was last drawn, written by its tracker as frames are prepared.
@@ -230,6 +253,8 @@ impl Subject {
 pub struct Anchor {
     state: WeakEntity<AnchorState>,
     bounds: AnchorBounds,
+    /// Where a layer opened on this anchor sits against it: [`Placement::Below`] unless the feature asked otherwise.
+    placement: Placement,
 }
 
 /// An anchor element's state between frames, kept in its keyed element state: GPUI releases it when the element is not
@@ -249,6 +274,17 @@ impl Anchor {
         Anchor {
             bounds: state.read(cx).bounds.clone(),
             state: state.downgrade(),
+            placement: Placement::Below,
+        }
+    }
+
+    /// This anchor, with the layer opened on it placed beside it ([`Placement::Beside`]) instead of below. The
+    /// placement travels with the anchor, so a feature asks for it where it builds the anchor and opens its popover
+    /// as any other.
+    pub fn beside(self) -> Anchor {
+        Anchor {
+            placement: Placement::Beside,
+            ..self
         }
     }
 
@@ -313,7 +349,8 @@ pub struct Popover {
     pub container: FocusHandle,
     /// Where focus starts (a menu's first item, usually).
     pub start: FocusHandle,
-    /// The element it is drawn below, following it as it moves; it closes when the element is no longer drawn.
+    /// The element it is drawn below (or beside, [`Anchor::beside`]), following it as it moves; it closes when the
+    /// element is no longer drawn.
     pub anchor: Anchor,
 }
 
@@ -328,7 +365,7 @@ pub struct AnchoredDialog {
     pub container: FocusHandle,
     /// Where focus starts.
     pub start: FocusHandle,
-    /// The element it is drawn below.
+    /// The element it is drawn below (or beside, [`Anchor::beside`]).
     pub anchor: Anchor,
     /// What it is about, if anything, besides its anchor: it closes when that is gone too.
     pub subject: Option<Subject>,
@@ -409,7 +446,7 @@ pub fn open_anchored(
     } = dialog;
     let drawn = drawn(&anchor)?;
     open(
-        Kind::Popover(anchor.bounds),
+        Kind::Popover(anchor.bounds, anchor.placement),
         view,
         container,
         start,
@@ -439,7 +476,7 @@ pub fn open_popover(
     } = popover;
     let drawn = drawn(&anchor)?;
     open(
-        Kind::Popover(anchor.bounds),
+        Kind::Popover(anchor.bounds, anchor.placement),
         view,
         container,
         start,
@@ -658,7 +695,7 @@ pub fn invariant_violation(window: &Window, cx: &App) -> Option<String> {
         .layers
         .iter()
         .find_map(|layer| match &layer.kind {
-            Kind::Popover(bounds) if bounds.get().is_none() => Some(format!(
+            Kind::Popover(bounds, _) if bounds.get().is_none() => Some(format!(
                 "popover {:?} is open but its anchor was never drawn",
                 layer.id
             )),
@@ -896,12 +933,12 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
                 .justify_center()
                 .child(content)
                 .into_any_element(),
-            Kind::Popover(anchor) => {
-                let below = anchor.clone();
+            Kind::Popover(anchor, placement) => {
+                let pressed = anchor.clone();
                 let content = content.on_mouse_down_out(move |event, window, cx| {
                     // A press on the anchor itself is left to the anchor, which toggles its popover: closing here first
                     // would let the same click reopen it.
-                    let on_anchor = below
+                    let on_anchor = pressed
                         .get()
                         .is_some_and(|bounds| bounds.contains(&event.position));
                     if !on_anchor {
@@ -910,6 +947,7 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
                 });
                 PlacedPopover {
                     anchor: anchor.clone(),
+                    placement: *placement,
                     child: content.into_any_element(),
                 }
                 .into_any_element()
@@ -971,11 +1009,20 @@ pub(crate) fn menu_shadow(palette: &theme::Palette) -> Vec<BoxShadow> {
 /// place, and nothing has to ask for a second frame.
 struct PlacedPopover {
     anchor: AnchorBounds,
+    placement: Placement,
     child: AnyElement,
 }
 
 /// The gap between an anchor and the popover below it, as the old menus had.
 const POPOVER_GAP: Pixels = px(4.);
+
+/// How far a popover placed [`Placement::Beside`] its anchor starts past the anchor's right edge: the old session
+/// flyout's `left: rect.max_x() + 10`.
+const BESIDE_GAP: Pixels = px(10.);
+
+/// How far above its anchor's top a popover placed [`Placement::Beside`] it starts: the old flyout's
+/// `top: rect.min_y() - 4`.
+const BESIDE_RISE: Pixels = px(4.);
 
 impl IntoElement for PlacedPopover {
     type Element = Self;
@@ -1023,8 +1070,11 @@ impl Element for PlacedPopover {
     ) {
         let size = window.layout_bounds(*child).size;
         let viewport = window.viewport_size();
-        let mut origin = match self.anchor.get() {
-            Some(anchor) => {
+        let mut origin = match (self.anchor.get(), self.placement) {
+            (Some(anchor), Placement::Beside) => {
+                point(anchor.right() + BESIDE_GAP, anchor.top() - BESIDE_RISE)
+            }
+            (Some(anchor), Placement::Below) => {
                 let below = anchor.bottom() + POPOVER_GAP;
                 let above = anchor.top() - POPOVER_GAP - size.height;
                 // Below unless it would run off the bottom and there is more room above.
@@ -1035,7 +1085,7 @@ impl Element for PlacedPopover {
                 };
                 point(anchor.left(), y)
             }
-            None => point(px(0.), px(0.)),
+            (None, _) => point(px(0.), px(0.)),
         };
         // Keep it inside the window: shift left when it overflows the right edge, down from the top as a last resort.
         origin.x = origin.x.min(viewport.width - size.width).max(px(0.));
