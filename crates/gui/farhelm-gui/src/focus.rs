@@ -13,7 +13,8 @@
 //!   every key press. Work that finishes later takes a [`Mark`]
 //!   when the user starts it and asks [`has_moved_on`] before it moves focus or opens anything. The layer manager refuses
 //!   to open a layer for a mark the user has moved on from, which is how "things the user did not start never open over
-//!   what they are doing" is kept.
+//!   what they are doing" is kept. The two public moves a feature makes after the user acted, [`choose_terminal`] and
+//!   [`focus_control`], take the mark of that action for the same reason.
 //! - **Home.** When nothing holds focus and no layer is open, focus goes home, which SPEC.md's "Where focus rests"
 //!   defines: the selected session's terminal, New when there are no sessions, a stopped session's card when the
 //!   selected session has stopped. The views that own those set it: [`set_home`] in general, and [`choose_terminal`]
@@ -341,6 +342,17 @@ pub fn choose_terminal(terminal: &FocusHandle, chosen: &Mark, window: &mut Windo
     }
     state.update(cx, |state, _| state.home = Some(terminal.downgrade()));
     apply(Move::To(terminal), window, cx);
+}
+
+/// Move focus to the control `target` as the result of something the user did: the host rail's All taking focus after a
+/// filter clears, the session header returning focus on Escape, a moved row's menu button. It is [`choose_terminal`]'s
+/// rule without the home change: `chosen` is the mark taken when the user acted, and once they have moved on since, or
+/// while a layer is open (focus never leaves the topmost dialog or menu for the page behind it), it does nothing.
+pub fn focus_control(target: &FocusHandle, chosen: &Mark, window: &mut Window, cx: &mut App) {
+    if state(window, cx).is_none() || has_moved_on(chosen, cx) || layers::any_open(window, cx) {
+        return;
+    }
+    apply(Move::To(target), window, cx);
 }
 
 /// Whether nothing holds focus in SPEC.md's sense: no element at all, or only the root view, which stands in for

@@ -805,6 +805,59 @@ fn a_chosen_terminal_that_arrives_after_the_user_moved_on_only_becomes_home(
     );
 }
 
+/// A control the app returns focus to after the user's own action (the host rail's All once a filter clears, the
+/// session header's Escape) must follow the same rules as choosing a session, without becoming home: it may take focus
+/// only while the user has not moved on and no layer is open, or it would pull focus from where the user went next or
+/// out from under a dialog, and a button that became home would take focus whenever nothing holds it. Specified: with
+/// a terminal as home and a row focused, moving focus to a button takes it there, and a click on empty space then sends
+/// focus home to the terminal, not to the button; with a mark taken before the user clicked the row again, it moves
+/// nothing; under an open dialog it moves nothing.
+#[gpui::test]
+fn focus_control_moves_focus_unless_the_user_moved_on_or_a_layer_is_open(cx: &mut TestAppContext) {
+    let (cx, items) = open_terminals(cx, &["row", "target"], &["terminal"]);
+    let ((row, _), (target, _), (terminal, _)) = (
+        drawn(&items, "row"),
+        drawn(&items, "target"),
+        drawn(&items, "terminal"),
+    );
+    let home = terminal.clone();
+    cx.update(move |window, cx| focus::set_home(Some(&home), window, cx));
+    let move_to = |cx: &mut VisualTestContext, mark: Mark| {
+        let target = target.clone();
+        cx.update(move |window, cx| focus::focus_control(&target, &mark, window, cx));
+        cx.run_until_parked();
+        check(cx);
+    };
+
+    click(cx, "row");
+    assert!(focused(cx, &row), "the premise: the row holds focus");
+    let now = cx.update(|_, cx| Mark::take(cx));
+    move_to(cx, now);
+    assert!(focused(cx, &target), "the move took focus to the button");
+    cx.simulate_click(point(px(600.), px(500.)), Modifiers::none());
+    check(cx);
+    assert!(
+        focused(cx, &terminal),
+        "home is still the terminal: a click on empty space sent focus there, not to the button"
+    );
+
+    let earlier = cx.update(|_, cx| Mark::take(cx));
+    click(cx, "row");
+    assert!(
+        focused(cx, &row) && cx.update(|_, cx| focus::has_moved_on(&earlier, cx)),
+        "the premise: the user clicked the row, which counts as moving on"
+    );
+    move_to(cx, earlier);
+    assert!(focused(cx, &row), "after the user moved on, nothing moved");
+
+    let inside = handle(cx);
+    open_dialog(cx, vec![("inside", inside.clone())], &inside);
+    assert!(focused(cx, &inside), "the premise: the dialog holds focus");
+    let now = cx.update(|_, cx| Mark::take(cx));
+    move_to(cx, now);
+    assert!(focused(cx, &inside), "under an open dialog, nothing moved");
+}
+
 /// Focus never leaves an open dialog for the page behind it (SPEC.md, "Opening and closing"), not even for a session
 /// the user just chose. The terminal becomes home; closing the dialog returns focus to where it was before it opened,
 /// which is why a dialog that chooses a session closes itself before choosing.
