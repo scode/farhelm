@@ -1,4 +1,5 @@
-//! Headless screenshot goldens: one per component and per dialog frame, in both appearances, compared pixel for pixel.
+//! Headless screenshot goldens: one per component, per dialog frame and per overlay kind (tooltip, popover, the prompt
+//! over its veil) and the keyboard focus ring, in both appearances, compared pixel for pixel.
 //!
 //! These are test references, not documentation media: they pin what each component draws, so a change to a token, a
 //! padding or a font shows up as a failing test with the new picture beside the old one, instead of drifting unnoticed.
@@ -11,8 +12,8 @@
 use std::path::Path;
 
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement, Render, Styled,
-    Subscription, Window, WindowAppearance, div, point, px, size,
+    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, IntoElement, ParentElement,
+    Render, Styled, Window, WindowAppearance, div, point, px, size,
 };
 use gpui_component::Root;
 
@@ -20,7 +21,12 @@ use crate::assets::Icon;
 use crate::components::{
     Button, DialogFrame, HoverHelp, IconButton, Role, TextInput, TextInputState, Tier,
 };
-use crate::layers::{self, TooltipOwner};
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use crate::focus::{self, Mark};
+use crate::layers::{self, Anchor, Popover, TooltipOwner};
+use crate::prompt::{self, Answer, Question};
 use crate::test_support;
 use crate::theme::{self, Preference};
 
@@ -37,24 +43,29 @@ struct Scene {
     setup: fn(&SceneState, &mut Window, &mut App),
 }
 
-/// State a scene keeps across frames: a text input's editable state, and the owner token a tooltip scene shows its
-/// tooltip for (it must stay alive, or the layer manager takes the tooltip down).
+/// State a scene keeps across frames: a text input's editable state, the owner token a tooltip scene shows its tooltip
+/// for (it must stay alive, or the layer manager takes the tooltip down), the anchor a popover scene opens its menu
+/// below (recorded when the scene draws), and the focus handle the focus-ring scene's button takes.
+#[derive(Clone)]
 struct SceneState {
     input: TextInputState,
     tooltip_owner: Entity<TooltipOwner>,
+    anchor: Rc<RefCell<Option<Anchor>>>,
+    ring: FocusHandle,
 }
 
 /// The view a scene is drawn in: the window's ground, then the scene, centered, with the layer manager's overlay.
 struct SceneView {
     scene: &'static Scene,
     state: SceneState,
-    _layers: Option<Subscription>,
+    _layers: layers::Attachment,
+    focus: focus::Attachment,
 }
 
 impl Render for SceneView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::palette(cx);
-        div()
+        focus::root(div(), &self.focus)
             .size_full()
             .flex()
             .items_center()
@@ -170,16 +181,137 @@ fn tooltip(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
 }
 
 /// Show a long tooltip as if the pointer had come to rest over the button.
-fn tooltip_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+fn tooltip_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     layers::show_tooltip_at(
         &state.tooltip_owner,
         RESTART_HELP.into(),
         point(px(40.), px(30.)),
+        window,
         cx,
     );
 }
 
-static SCENES: [Scene; 4] = [
+/// A neutral button and its ring, as a keyboard user sees the button after tabbing to it.
+fn focus_ring(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    div()
+        .flex()
+        .gap(px(12.))
+        .child(
+            Button::new(
+                "cancel",
+                "Cancel",
+                HoverHelp::tooltip("Close"),
+                Role::Button,
+            )
+            .tier(Tier::Neutral)
+            .focus(&state.ring),
+        )
+        .child(
+            Button::new("other", "Save", HoverHelp::tooltip("Save"), Role::Button)
+                .tier(Tier::Primary),
+        )
+        .into_any_element()
+}
+
+/// Press Tab as the keyboard would, so the first button takes focus with the keyboard as the last input.
+fn focus_ring_setup(_: &SceneState, window: &mut Window, cx: &mut App) {
+    window.activate_window();
+    window.dispatch_event(
+        gpui::PlatformInput::KeyDown(gpui::KeyDownEvent {
+            native_key: None,
+            keystroke: gpui::Keystroke {
+                key: "tab".into(),
+                ..Default::default()
+            },
+            is_held: false,
+            prefer_character_input: false,
+        }),
+        cx,
+    );
+}
+
+/// A ghost button that a menu opens below.
+fn popover(state: &SceneState, window: &mut Window, cx: &mut App) -> AnyElement {
+    let anchor = Anchor::for_element("menu-anchor", window, cx);
+    state.anchor.replace(Some(anchor.clone()));
+    div()
+        .w(px(300.))
+        .h(px(160.))
+        .child(
+            div()
+                .relative()
+                .w(px(90.))
+                .child(Button::new(
+                    "actions",
+                    "Actions",
+                    HoverHelp::tooltip("More actions"),
+                    Role::Button,
+                ))
+                .child(anchor.track()),
+        )
+        .into_any_element()
+}
+
+/// The popover's content: a menu panel with three items.
+struct MenuScene;
+
+impl Render for MenuScene {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let item = |id: &'static str, label: &'static str| {
+            Button::new(id, label, HoverHelp::tooltip(label), Role::MenuItem)
+        };
+        layers::panel(cx)
+            .w(px(180.))
+            .child(item("rename", "Rename…"))
+            .child(item("restart", "Restart"))
+            .child(item("delete", "Delete…"))
+    }
+}
+
+/// Open the menu below the anchor the scene drew.
+fn popover_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let Some(anchor) = state.anchor.borrow().clone() else {
+        return;
+    };
+    let view = cx.new(|_| MenuScene);
+    let mark = Mark::take(cx);
+    let container = cx.focus_handle();
+    layers::open_popover(
+        Popover {
+            view: view.into(),
+            container: container.clone(),
+            start: container,
+            anchor,
+        },
+        &mark,
+        window,
+        cx,
+    );
+}
+
+/// Nothing on the page: the prompt scene draws everything through the layer manager.
+fn empty(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    div().into_any_element()
+}
+
+/// A delete confirmation, asked through the prompt over its veil.
+fn prompt_setup(_: &SceneState, window: &mut Window, cx: &mut App) {
+    let mark = Mark::take(cx);
+    let question = Question::new(
+        "Delete session?",
+        Answer {
+            label: "Delete".into(),
+            help: HoverHelp::tooltip("Delete the session"),
+            tier: Tier::Danger,
+        },
+        "api-refactor".to_string(),
+    )
+    .summary("api-refactor, on this machine")
+    .line("The session's terminal and its history are removed. The working directory stays.");
+    prompt::ask(question, None, &mark, |_, _, _| {}, window, cx);
+}
+
+static SCENES: [Scene; 7] = [
     Scene {
         name: "buttons",
         size: (560., 64.),
@@ -203,6 +335,24 @@ static SCENES: [Scene; 4] = [
         size: (400., 140.),
         draw: tooltip,
         setup: tooltip_setup,
+    },
+    Scene {
+        name: "focus-ring",
+        size: (260., 64.),
+        draw: focus_ring,
+        setup: focus_ring_setup,
+    },
+    Scene {
+        name: "popover",
+        size: (340., 200.),
+        draw: popover,
+        setup: popover_setup,
+    },
+    Scene {
+        name: "prompt",
+        size: (560., 320.),
+        draw: empty,
+        setup: prompt_setup,
     },
 ];
 
@@ -257,25 +407,25 @@ fn component_goldens() -> anyhow::Result<()> {
                     let state = SceneState {
                         input: TextInputState::new(window, cx),
                         tooltip_owner: cx.new(|_| TooltipOwner),
+                        anchor: Rc::new(RefCell::new(None)),
+                        ring: cx.focus_handle().tab_stop(true),
                     };
                     let scene_view = cx.new(|cx| SceneView {
                         scene,
                         state,
-                        _layers: layers::observe(cx),
+                        _layers: layers::attach(window, cx),
+                        focus: focus::attach(window, cx),
                     });
                     view = Some(scene_view.clone());
                     cx.new(|cx| Root::new(scene_view, window, cx))
                 })?;
             let view =
                 view.ok_or_else(|| anyhow::anyhow!("{name}: the scene view was not built"))?;
+            // One frame first, so what the scene draws (an anchor's bounds, a focusable button) exists for its setup.
+            cx.update_window(window.into(), |_, window, cx| window.draw(cx).clear(cx))?;
             cx.update_window(window.into(), |_, window, cx| {
-                let state = &view.read(cx).state;
-                // Cheap clones: an input handle and an entity handle.
-                let (input, owner) = (state.input.clone(), state.tooltip_owner.clone());
-                let staged = SceneState {
-                    input,
-                    tooltip_owner: owner,
-                };
+                // Cheap clones: handles and shared cells.
+                let staged = view.read(cx).state.clone();
                 (scene.setup)(&staged, window, cx);
             })?;
             let screenshot = settle(&mut cx, window.into(), &name)?;

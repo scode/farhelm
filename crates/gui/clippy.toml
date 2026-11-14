@@ -3,7 +3,8 @@
 # Clippy reads the nearest clippy.toml above the crate being linted, so this file covers every crate under crates/gui/
 # and nothing else: the helm, the supervisor and the command line legitimately spawn threads, sleep and read clocks.
 # Each entry names the one owner allowed to make the call; that owner carries a single `#[allow]` (or
-# `#[expect]`) with the reason, and every such exception is counted in the foundation ownership table.
+# `#[expect]`) with the reason, and every such exception is counted in the foundation ownership table
+# (docs/gpui/foundation-ownership.md).
 #
 # `scripts/check-gui-lints.py` proves that every entry below still fires: it lints `crates/gui/lint-demo`, which
 # commits one violation per entry, and fails when a violation goes unreported (a renamed GPUI or Kit path stops
@@ -29,6 +30,11 @@ disallowed-methods = [
   { path = "gpui::FocusHandle::focus", reason = "only the focus coordinator moves focus" },
   { path = "gpui::Context::focus_view", reason = "only the focus coordinator moves focus" },
   { path = "gpui::Context::focus_self", reason = "only the focus coordinator moves focus" },
+  # GPUI focuses any element tracking a focus handle when it is pressed, a focus move no ban above can see.
+  { path = "gpui::InteractiveElement::track_focus", reason = "track focus through focus::track, which applies the coordinator's press rule" },
+  # `tab_index` and a stateful element's `focusable` also make GPUI create a focus handle and focus it on a press.
+  { path = "gpui::InteractiveElement::tab_index", reason = "make an element a tab stop through focus::track, which applies the coordinator's press rule" },
+  { path = "gpui::StatefulInteractiveElement::focusable", reason = "make an element focusable through focus::track, which applies the coordinator's press rule" },
 
   # Overlays: only the layer manager draws on top of the window, so it alone knows the stacking and what covers a
   # terminal link's disclosure.

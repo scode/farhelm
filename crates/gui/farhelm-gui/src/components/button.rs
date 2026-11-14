@@ -1,23 +1,26 @@
 //! Buttons, drawn as the old stylesheet's `.btn` tiers: ghost (the default), neutral, primary and danger.
 //!
-//! A button activates on click. It is not focusable yet, deliberately: in GPUI an element that tracks a focus handle
-//! takes focus on every mouse-down, a focus move the lint on GPUI's focus calls cannot see, and whether a click focuses
-//! a button at all is a platform rule the focus coordinator owns (SPEC.md, "Keyboard focus"; on macOS Tab follows the
-//! system's Keyboard navigation setting, on Linux it always stops: maintainer decision D-2). The coordinator adds the
-//! focus handle, Enter and Space activation, the Tab stop and the focus ring (the old `.btn:focus-visible`, which also
-//! took the hover fill, with an `--on-fill` outline inset on the filled tiers).
+//! A button activates on click, and on Enter or Space while it has keyboard focus (a held key does not repeat it:
+//! SPEC.md, "Repeated or composing Enter cannot answer the new question"). Focus is the focus coordinator's: an enabled
+//! button is a tab stop tracked through [`focus::track`], which applies the coordinator's click rule (on Linux a click
+//! focuses it, on macOS it does not, as in WebKit there; maintainer decision D-2) in place of GPUI's own focus-on-press.
+//! A disabled button is not a tab stop and takes no focus on a click (SPEC.md: Tab stays within a dialog's "visible,
+//! enabled controls"). The
+//! focus ring is the old `:focus-visible` ring (a 2-pixel accent outline one pixel outside the button, shown only after
+//! keyboard input) together with the hover fill, which the old sheet also gave a focused button so a ghost button's box
+//! is visible to a keyboard user.
 
 use std::rc::Rc;
 
 use gpui::{
-    App, ClickEvent, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce, Role,
-    SharedString, StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder as _, px,
-    svg,
+    App, ClickEvent, ElementId, FocusHandle, InteractiveElement, IntoElement, MouseButton,
+    ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Window, div,
+    prelude::FluentBuilder as _, px, svg,
 };
 
 use super::HoverHelp;
 use crate::assets::Icon;
-use crate::layers::{self, TooltipOwner};
+use crate::focus;
 use crate::theme::{self, Palette, Token, metrics};
 
 /// The old stylesheet's button tiers.
@@ -49,6 +52,7 @@ pub struct Button {
     show_label: bool,
     disabled: bool,
     on_click: Option<Handler>,
+    focus: Option<FocusHandle>,
 }
 
 impl Button {
@@ -72,6 +76,7 @@ impl Button {
             show_label: true,
             disabled: false,
             on_click: None,
+            focus: None,
         }
     }
 
@@ -99,6 +104,13 @@ impl Button {
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.on_click = Some(Rc::new(handler));
+        self
+    }
+
+    /// Use `handle` as the button's focus handle, so whoever owns it can make the button where focus starts (the prompt
+    /// does, for its answers). Without it the button keeps its own handle in its element state.
+    pub fn focus(mut self, handle: &FocusHandle) -> Self {
+        self.focus = Some(handle.clone());
         self
     }
 
@@ -140,23 +152,26 @@ impl RenderOnce for Button {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let palette = theme::palette(cx);
         let (fill, hover_fill, edge, text) = self.colors(palette);
-        let owner = TooltipOwner::for_control(
-            ElementId::Name(format!("{}-tooltip-owner", self.id).into()),
-            window,
-            cx,
-        );
+        let focus = self.focus.clone().unwrap_or_else(|| {
+            focus::control_handle(
+                ElementId::Name(format!("{}-focus", self.id).into()),
+                window,
+                cx,
+            )
+        });
+        let ring = focus::shows_ring(&focus, window);
         let (pad_y, pad_x) = metrics::BUTTON_PAD;
         let enabled = !self.disabled;
         let handler = self.on_click.clone().filter(|_| enabled);
-        let tooltip = self.help.text().clone();
+        let key_handler = handler.clone();
 
         let mut button = div()
             .id(ElementId::Name(self.id.clone()))
+            .relative()
             // Tests find a control by its id; this records nothing outside test builds.
             .debug_selector(|| self.id.to_string())
             .role(self.role)
             .aria_label(self.label.clone())
-            .aria_description(self.help.text().clone())
             .flex()
             .items_center()
             .justify_center()
@@ -171,6 +186,24 @@ impl RenderOnce for Button {
             // A transparent edge where a tier has none keeps every tier the same size.
             .border_color(theme::color(edge.unwrap_or(theme::TRANSPARENT)));
         button = button.when_some(fill, |button, fill| button.bg(theme::color(fill)));
+        if ring && enabled {
+            button = button.bg(theme::color(hover_fill));
+        }
+        if ring {
+            // The old `outline: 2px solid var(--accent); outline-offset: 1px`, drawn as a ring element because GPUI has
+            // no outline: two pixels wide, one pixel clear of the button's edge.
+            button = button.child(
+                div()
+                    .absolute()
+                    .top(px(-3.))
+                    .left(px(-3.))
+                    .right(px(-3.))
+                    .bottom(px(-3.))
+                    .border_2()
+                    .border_color(theme::color(palette.accent))
+                    .rounded(metrics::RADIUS_SM + px(3.)),
+            );
+        }
         if enabled {
             button = button
                 .cursor_pointer()
@@ -189,12 +222,25 @@ impl RenderOnce for Button {
         if self.show_label {
             button = button.child(self.label);
         }
+        let button = super::with_hover_help(button, &self.id, &self.help, true, window, cx);
+        let button = if enabled {
+            focus::track(button, &focus, focus::OnPress::Control)
+        } else {
+            // Not tracked, so neither Tab nor a click can focus it; the press is still this control's, so it does not
+            // reach the page's empty-space handler and move focus.
+            button.on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
+        };
         button
-            .on_hover(move |hovered, window, cx| {
-                if *hovered {
-                    layers::show_tooltip(&owner, tooltip.clone(), window, cx);
-                } else {
-                    layers::hide_tooltip(&owner, cx);
+            .on_key_down(move |event, window, cx| {
+                let key = event.keystroke.key.as_str();
+                if event.is_held || event.keystroke.modifiers.modified() {
+                    return;
+                }
+                if (key == "enter" || key == "space")
+                    && let Some(handler) = &key_handler
+                {
+                    cx.stop_propagation();
+                    handler(&ClickEvent::default(), window, cx);
                 }
             })
             .when_some(handler, |button, handler| {
@@ -235,6 +281,11 @@ impl IconButton {
     /// See [`Button::on_click`].
     pub fn on_click(self, handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> Self {
         IconButton(self.0.on_click(handler))
+    }
+
+    /// See [`Button::focus`].
+    pub fn focus(self, handle: &FocusHandle) -> Self {
+        IconButton(self.0.focus(handle))
     }
 }
 

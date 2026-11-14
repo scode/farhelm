@@ -2,27 +2,28 @@
 //!
 //! These cover what a component promises beyond its looks (the goldens pin those): activation, the disabled state,
 //! hover help reaching the layer manager and leaving with its control, and the dialog frame keeping its answers
-//! reachable. Each step ends with the harness's invariant hook, empty until the focus coordinator fills it.
+//! reachable. Each step ends with the harness's invariant hook (the focus coordinator's and the layer manager's rules).
 
 use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, Bounds, Context, InteractiveElement, IntoElement, Modifiers, ParentElement,
-    Pixels, Point, Render, ScrollDelta, ScrollEvent, Styled, Subscription, TestAppContext,
-    VisualTestContext, Window, div, point, px, size,
+    Pixels, Point, Render, ScrollDelta, ScrollEvent, Styled, TestAppContext, VisualTestContext,
+    Window, div, point, px, size,
 };
 
 use gpui::prelude::FluentBuilder as _;
 
 use super::{Button, DialogFrame, HoverHelp, Role, Tier};
-use crate::{layers, test_support};
+use crate::{focus, layers, test_support};
 
 /// Draws whatever the test gives it, centered, with the layer manager's overlay on top as the main view does, and
 /// redraws when the overlay changes, as the main view does.
 struct Harness {
     draw: Box<Draw>,
-    _layers: Option<Subscription>,
+    _layers: layers::Attachment,
+    focus: focus::Attachment,
 }
 
 /// What a test draws in its window.
@@ -30,7 +31,7 @@ type Draw = dyn Fn(&mut Window, &mut App) -> AnyElement;
 
 impl Render for Harness {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
+        focus::root(div(), &self.focus)
             .size_full()
             .flex()
             .items_center()
@@ -46,9 +47,10 @@ fn open(
     draw: impl Fn(&mut Window, &mut App) -> AnyElement + 'static,
 ) -> &mut VisualTestContext {
     test_support::install(cx);
-    let (_, cx) = cx.add_window_view(|_, cx| Harness {
+    let (_, cx) = cx.add_window_view(|window, cx| Harness {
         draw: Box::new(draw),
-        _layers: layers::observe(cx),
+        _layers: layers::attach(window, cx),
+        focus: focus::attach(window, cx),
     });
     cx.run_until_parked();
     cx
@@ -112,7 +114,7 @@ fn a_click_activates_an_enabled_button_and_not_a_disabled_one(cx: &mut TestAppCo
 
 /// The text of the tooltip showing now, if any.
 fn tooltip(cx: &mut VisualTestContext) -> Option<gpui::SharedString> {
-    cx.update(|_, cx| layers::shown_tooltip(cx))
+    cx.update(|window, cx| layers::shown_tooltip(window, cx))
         .map(|shown| shown.text)
 }
 

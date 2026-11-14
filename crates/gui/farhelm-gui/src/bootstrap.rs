@@ -6,9 +6,9 @@
 //! it, an agent build starts the test-automation bridge (so a run whose window fails to open can still be inspected),
 //! and the host's quit wiring is installed (so a quit requested while the window is still opening is not lost). Then
 //! [`install`]: Kit's own init first (it installs its theme and the text input's actions), then the bundled fonts, then
-//! Farhelm's theme, which re-projects Kit's theme from Farhelm's tokens, then the layer manager's slot and, in test
-//! builds, the render counter. Only then does a window open. Farhelm's keymap joins this sequence, after Kit's, with the
-//! actions and keymap owner.
+//! Farhelm's theme, which re-projects Kit's theme from Farhelm's tokens, then Farhelm's key bindings (after Kit's, so a
+//! deeper Farhelm context wins where both bind a key), the focus coordinator's and the layer manager's registries and,
+//! in test builds, the render counter. Only then does a window open.
 //!
 //! Nothing here may panic: on macOS this runs inside an AppKit callback, where a panic aborts the process. Failures are
 //! returned, and [`run`] hands them to the host's [`Host::on_startup_failure`], which owns how the process reports them.
@@ -23,10 +23,10 @@ use gpui::{
 use gpui_component::Root;
 
 use crate::assets::{self, Assets};
-use crate::layers;
 use crate::main_view::MainView;
 use crate::render_count;
 use crate::theme::{self, Preference};
+use crate::{actions, focus, layers};
 
 /// The smallest window the app supports, in logical pixels.
 ///
@@ -53,6 +53,8 @@ pub fn install(cx: &mut App) -> anyhow::Result<()> {
     // The persisted choice comes from the local preference store once it exists; until then every launch starts at
     // System, the old app's default.
     theme::install(Preference::System, cx.window_appearance(), cx);
+    actions::install(cx);
+    focus::install(cx);
     layers::install(cx);
     render_count::install(cx);
     Ok(())
