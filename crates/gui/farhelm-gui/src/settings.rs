@@ -238,6 +238,13 @@ pub fn open_at_agent_trust(
     Some(layer)
 }
 
+/// `PUT /api/preferences` turning "Set up new hosts without asking" on, exactly as its switch here saves it: for the
+/// host setup confirmation's permanent answer, which sets the same preference.
+pub(crate) fn skip_host_setup_command()
+-> Result<crate::operations::Command, farhelm_helm_client::PathError> {
+    Choice::SkipHostSetupConfirmation.command(true)
+}
+
 /// The helm's preference row, if it pushed one.
 fn preferences(collections: &farhelm_helm_client::Collections) -> Option<&Preferences> {
     collections.get::<Preferences>(PREFERENCES_KEY)

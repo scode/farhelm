@@ -100,6 +100,10 @@ pub enum Work {
     /// answers and otherwise returns the helm's setup plan or why setup is manual. Not supersedable: a second Add while
     /// one probe is out waits for it, so the helm never holds two competing one-use plans for one dialog.
     Probe,
+    /// A new host's setup (`POST /api/hosts/provision`), confirming the plan a probe returned, under the probe's
+    /// host-add key. Accepted (202) once the helm has registered the host and started the run, whose progress the helm
+    /// pushes. Not supersedable: the plan is one-use.
+    Setup,
 }
 
 /// What a piece of work acts on: the key the store files it under, one request at a time per key. Opaque, and built

@@ -28,19 +28,15 @@
 //! - **The outcomes.** A running supervisor is registered as it is (`discovered`) and the dialog closes. Why setup is
 //!   manual (`manual`), the helm's refusal (a duplicate or taken alias, an unusable destination, the 504 that says the
 //!   check carries on), and a reply that cannot be read all show in the dialog's error line, both fields kept for
-//!   correction. A destination with no supervisor (`provisionable`) is where the setup confirmation will open; see the
-//!   NOTE below.
+//!   correction. A destination with no supervisor (`provisionable`) goes on to setup; [`super::setup`]'s module docs
+//!   say how, and when a refused setup reopens the dialog ([`reopen`]).
 //!
 //! An outcome shows in the dialog whether or not the user moved on since Add: drawing a line inside the dialog that is
 //! already open moves no focus and opens nothing, which is all SPEC.md's "Keyboard focus" rule withholds from a late
 //! result. `discovered` closes the dialog either way, since the dialog is its own subject (the rule
 //! [`crate::operations::Settled::user_moved_on`] documents for Rename's success), and the layer manager returns focus
-//! only if it is still inside. If the user closed the dialog before the reply, the reply reaches nobody.
-//!
-//! NOTE: Interim, until the setup confirmation is ported. A `provisionable` reply says in the error line that this
-//! build cannot set up a host yet, and the helm's plan is dropped with the reply: nothing outside this completion holds
-//! it. The setup confirmation, opened only through the moved-on mark the operation store took at Add, replaces that
-//! line.
+//! only if it is still inside. If the user closed the dialog before the reply, the reply reaches nobody. The setup
+//! confirmation is the one outcome that would open something; [`super::setup`] says how the same rule applies to it.
 //!
 //! NOTE: Interim, until the launcher starts its launches in the operation store (under `OpKey::new_launch()`, as a
 //! launch kind of work): Add is not refused while a launch is in flight, as the old app refused it. Each side is to
@@ -58,7 +54,7 @@ use std::rc::Rc;
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
-use farhelm_proto::provisioning::ProbeReply;
+use farhelm_proto::provisioning::{PlanSteps, ProbeReply};
 use farhelm_proto::ui_channel::HostView;
 use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, ClickEvent, Context, FocusHandle,
@@ -68,6 +64,7 @@ use serde::Deserialize as _;
 use serde::de::IgnoredAny;
 use serde_json::{Value, json};
 
+use super::setup;
 use crate::components::{Button, DialogFrame, HoverHelp, Role, TextInput, TextInputState, Tier};
 use crate::drafts::DraftInput;
 use crate::focus::{self, Mark, ReturnTo};
@@ -115,13 +112,40 @@ pub fn open(
     window: &mut Window,
     cx: &mut App,
 ) -> Option<LayerId> {
+    let layer = reopen(opener, mark, None, window, cx)?;
+    // A new add: what the Hosts panel's line says about an earlier one goes, as the old panel's error did.
+    setup::forget_panel_lines(cx);
+    Some(layer)
+}
+
+/// What a reopened dialog starts from: the fields as they were sent and why the setup the user confirmed was refused
+/// ([`reopen`]).
+pub(crate) struct Seed {
+    pub(crate) destination: String,
+    pub(crate) alias: String,
+    pub(crate) problem: HostSentence,
+}
+
+/// [`open`], with the fields and the error line taken from `seed` when there is one: how a setup the helm refused
+/// opens the dialog again, as the old app did ("a refused ADD attempt reopens the form"), with the destination and
+/// alias as they were sent and the helm's reason in the error line, but not the plan, which the helm consumed; Add
+/// probes again. The setup's completion calls it only while the user has not moved on since the action that sent the
+/// plan, through that action's mark ([`setup::Offer::mark`]). Focus returns to `opener`, the control that opened the
+/// first dialog. Unlike [`open`], it leaves the Hosts panel's line alone: a reopen continues the same add.
+pub(crate) fn reopen(
+    opener: &FocusHandle,
+    mark: &Mark,
+    seed: Option<Seed>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
     // An inert window has no hosts to check against and nothing to probe through.
     session::current_store(cx)?;
     if focus::has_moved_on(mark, cx) {
         return None;
     }
     focus::focus_control(opener, mark, window, cx);
-    let dialog = cx.new(|cx| AddHostDialog::new(window, cx));
+    let dialog = cx.new(|cx| AddHostDialog::new(opener.clone(), seed, window, cx));
     let start = dialog.read(cx).destination.input().focus_handle(cx);
     let weak = dialog.downgrade();
     // Enter on the dialog itself (after a click on its empty space) is Add, the dialog's one main action.
@@ -201,36 +225,56 @@ fn refused_before_contact<'a>(
     )
 }
 
-/// The dialog's error line, empty: what every outcome it shows starts from.
-fn error_line() -> HostSentence {
+/// The dialog's error line, empty: what every outcome it shows starts from, a reopened dialog's included.
+pub(crate) fn error_line() -> HostSentence {
     HostSentence::new("add-host-error")
 }
 
-/// What the dialog shows for a probe's reply: `None` when the host was registered (the dialog closes instead), else
-/// the line to show. The probe never answers 202, but an accepted reply is read the same way as a done one, by its
+/// What a probe's reply means for the dialog.
+enum Reply {
+    /// The helm registered an answering supervisor: the dialog closes.
+    Added,
+    /// The line to show in the dialog: why setup is manual, a refusal, a reply that cannot be read.
+    Show(HostSentence),
+    /// No supervisor answered, and the helm offers this plan to set one up ([`setup`]).
+    Setup {
+        probe_id: String,
+        confirmation: String,
+        steps: PlanSteps,
+    },
+}
+
+/// Read a probe's reply. The probe never answers 202, but an accepted reply is read the same way as a done one, by its
 /// body.
-fn outcome_line(outcome: &Outcome) -> Option<HostSentence> {
+fn read_reply(outcome: &Outcome) -> Reply {
     let body = match outcome {
-        Outcome::Refused(words) => return Some(error_line().host(words)),
+        Outcome::Refused(words) => return Reply::Show(error_line().host(words)),
         Outcome::Done(body) | Outcome::Accepted(body) => body.as_ref().unwrap_or(&Value::Null),
     };
-    // The plan is the helm's own and never read here (`ProbeReply`'s docs); ignoring it also drops it with the reply.
+    // The plan is the helm's own and never read here (`ProbeReply`'s docs): the setup confirmation shows the steps and
+    // confirms by the probe's id, and the helm acts only on the plan it kept under that id.
     match ProbeReply::<IgnoredAny>::deserialize(body) {
-        Ok(ProbeReply::Discovered { .. }) => None,
+        Ok(ProbeReply::Discovered { .. }) => Reply::Added,
         Ok(ProbeReply::Manual { reason }) => {
-            Some(error_line().host(&HostText::from_host(reason.as_str())))
+            Reply::Show(error_line().host(&HostText::from_host(reason.as_str())))
         }
-        Ok(ProbeReply::Provisionable { .. }) => Some(error_line().text(
-            "Farhelm is not running on this host, and this version of the app cannot set it up yet; nothing was \
-             added",
-        )),
+        Ok(ProbeReply::Provisionable {
+            probe_id,
+            confirmation,
+            steps,
+            ..
+        }) => Reply::Setup {
+            probe_id,
+            confirmation,
+            steps: *steps,
+        },
         // The old app's words for the same impossible reply to an SSH probe.
         Ok(ProbeReply::TensorlakeProvisionable { .. }) => {
-            Some(error_line().text("The helm returned a Tensorlake plan for an SSH host"))
+            Reply::Show(error_line().text("The helm returned a Tensorlake plan for an SSH host"))
         }
         // The decoder's words quote the reply (an unknown variant's name, a string it did not expect), so they are host
         // text.
-        Err(error) => Some(
+        Err(error) => Reply::Show(
             error_line()
                 .text("The helm accepted the host probe, but its reply could not be read: ")
                 .host(&HostText::from_host(error.to_string())),
@@ -243,6 +287,12 @@ pub(crate) struct AddHostDialog {
     /// The operation store's key for this opening's probe, and later its setup: fresh per opening, so a probe still out
     /// from an earlier opening never makes this one busy.
     key: OpKey,
+    /// The control that opened the dialog, which gets focus back when it closes, also from the setup confirmation that
+    /// takes its place, and when a refused setup reopens it.
+    opener: FocusHandle,
+    /// The mark taken at the last Add (at the opening until then): the setup confirmation opens only through it, so it
+    /// never opens once the user has moved on since pressing Add ([`super::setup`]'s module docs).
+    probe_mark: Mark,
     /// The SSH destination, exactly as typed.
     destination: DraftInput,
     /// The optional alias, as typed; blank means none.
@@ -254,21 +304,31 @@ pub(crate) struct AddHostDialog {
 }
 
 impl AddHostDialog {
-    /// An empty dialog. The drafts follow nothing: there is no pushed value behind a new host's fields.
-    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let destination = TextInputState::new(window, cx);
+    /// A dialog opened by `opener`, empty or as `seed` says. The drafts follow nothing: there is no pushed value behind
+    /// a new host's fields.
+    fn new(
+        opener: FocusHandle,
+        seed: Option<Seed>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let (destination, alias, problem) = match seed {
+            Some(seed) => (seed.destination, seed.alias, Some(seed.problem)),
+            None => (String::new(), String::new(), None),
+        };
+        let destination_field = TextInputState::new(window, cx);
         let destination = DraftInput::new(
-            "",
-            destination,
+            &destination,
+            destination_field,
             |dialog: &mut Self| &mut dialog.destination,
             Self::add,
             window,
             cx,
         );
-        let alias = TextInputState::new(window, cx);
+        let alias_field = TextInputState::new(window, cx);
         let alias = DraftInput::new(
-            "",
-            alias,
+            &alias,
+            alias_field,
             |dialog: &mut Self| &mut dialog.alias,
             Self::add,
             window,
@@ -276,9 +336,11 @@ impl AddHostDialog {
         );
         AddHostDialog {
             key: OpKey::new_host_add(),
+            opener,
+            probe_mark: Mark::take(cx),
             destination,
             alias,
-            problem: None,
+            problem,
             layer: None,
         }
     }
@@ -321,6 +383,8 @@ impl AddHostDialog {
         };
         let handle = window.window_handle();
         let dialog = cx.weak_entity();
+        // The same moment the operation store takes its own mark, which `Settled::user_moved_on` reports against.
+        self.probe_mark = Mark::take(cx);
         let started = operations.update(cx, |operations, cx| {
             operations.start(&self.key, command, cx, move |settled, cx| {
                 let _ = dialog.update(cx, |dialog, cx| dialog.settled(settled, handle, cx));
@@ -336,12 +400,40 @@ impl AddHostDialog {
         }
     }
 
-    /// The probe settled: free the fields, then close the dialog for a registered host or show what the helm said.
+    /// The probe settled: free the fields, then close the dialog for a registered host, show what the helm said, or
+    /// go on to setup in one of the three ways [`super::setup`]'s module docs describe.
     fn settled(&mut self, settled: &Settled, window: AnyWindowHandle, cx: &mut Context<Self>) {
         self.set_read_only(false, cx);
-        match outcome_line(&settled.outcome) {
-            None => self.close_later(window, cx),
-            Some(line) => self.problem = Some(line),
+        match read_reply(&settled.outcome) {
+            Reply::Added => self.close_later(None, window, cx),
+            Reply::Show(line) => self.problem = Some(line),
+            Reply::Setup {
+                probe_id,
+                confirmation,
+                steps,
+            } => {
+                let mark = self.probe_mark;
+                let offer = setup::Offer {
+                    key: self.key.clone(),
+                    probe_id,
+                    confirmation,
+                    steps,
+                    destination: self.destination.draft().value().clone(),
+                    alias: self.alias.draft().value().clone(),
+                    opener: self.opener.clone(),
+                    // The setup's own action replaces it when the user answers the confirmation; without asking, the
+                    // plan goes out on the strength of the Add, so a refusal is judged against that.
+                    mark,
+                };
+                if !setup::asks_first(cx) {
+                    setup::submit(offer, window, cx);
+                    self.close_later(None, window, cx);
+                } else if focus::has_moved_on(&mark, cx) {
+                    self.problem = Some(error_line().text(setup::MOVED_ON));
+                } else {
+                    self.close_later(Some(offer), window, cx);
+                }
+            }
         }
         cx.notify();
     }
@@ -360,13 +452,25 @@ impl AddHostDialog {
     }
 
     /// Close the dialog from the probe's completion, which has no window at hand: once the completion has returned, in
-    /// `window` if it is still open.
-    fn close_later(&mut self, window: AnyWindowHandle, cx: &mut Context<Self>) {
+    /// `window` if it is still open. With `confirm`, then ask the setup confirmation for it in the dialog's place,
+    /// through its mark. Closed first: closing a layer also closes everything opened above it, and focus goes back to
+    /// the opener before the question records where to return it.
+    fn close_later(
+        &mut self,
+        confirm: Option<setup::Offer>,
+        window: AnyWindowHandle,
+        cx: &mut Context<Self>,
+    ) {
         let Some(layer) = self.layer.take() else {
             return;
         };
         cx.defer(move |cx| {
-            let _ = window.update(cx, |_, window, cx| layers::close(layer, window, cx));
+            let _ = window.update(cx, |_, window, cx| {
+                layers::close(layer, window, cx);
+                if let Some(offer) = confirm {
+                    setup::confirm(offer, window, cx);
+                }
+            });
         });
     }
 }
