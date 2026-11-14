@@ -842,15 +842,21 @@ fn a_draft_saves_as_work_on_a_template(cx: &mut TestAppContext) {
 // ---- A text field bound to a draft ---------------------------------------------------------------------------------
 
 /// A stand-in editor with one text field bound to a draft, drawn in a window so the field is real: what a settings or
-/// template field will be. Enter in the field saves it as work on a template.
+/// template field will be. Its field is whichever kind `make` builds; Enter in a field that submits saves it as work
+/// on a template.
 struct FieldEditor {
     prompt: DraftInput,
     settled: Vec<Outcome>,
 }
 
 impl FieldEditor {
-    fn new(value: &str, window: &mut Window, cx: &mut gpui::Context<Self>) -> Self {
-        let input = TextInputState::new(window, cx);
+    fn new(
+        value: &str,
+        make: MakeInput,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> Self {
+        let input = make(window, cx);
         let prompt = DraftInput::new(
             value,
             input,
@@ -903,17 +909,27 @@ impl Render for FieldEditor {
     }
 }
 
-/// A connected app with a window holding a [`FieldEditor`] over `value`, its field focused.
+/// How a test makes its editor's field: a one-line field ([`TextInputState::new`]) or a growing box.
+type MakeInput = fn(&mut Window, &mut gpui::App) -> TextInputState;
+
+/// A growing box four rows tall, as the old template prompt started.
+fn growing_box(window: &mut Window, cx: &mut gpui::App) -> TextInputState {
+    TextInputState::new_growing(4, window, cx)
+}
+
+/// A connected app with a window holding a [`FieldEditor`] over `value` in a field `make` builds, its field focused.
 fn open_field<'a>(
     value: &str,
+    make: MakeInput,
     cx: &'a mut TestAppContext,
 ) -> (FakeHelm, Entity<FieldEditor>, &'a mut VisualTestContext) {
     let (mut fake, _connection) = started(cx);
     fake.connect(vec![sessions(&[])]);
     cx.run_until_parked();
     let value = value.to_owned();
-    let (editor, cx) =
-        test_support::open_view(cx, move |window, cx| FieldEditor::new(&value, window, cx));
+    let (editor, cx) = test_support::open_view(cx, move |window, cx| {
+        FieldEditor::new(&value, make, window, cx)
+    });
     test_support::click(cx, "field-box");
     (fake, editor, cx)
 }
@@ -938,7 +954,7 @@ fn push(editor: &Entity<FieldEditor>, value: &str, cx: &mut VisualTestContext) {
 /// changes neither.
 #[gpui::test]
 fn a_bound_field_follows_pushes_until_the_user_types(cx: &mut TestAppContext) {
-    let (_fake, editor, cx) = open_field("old", cx);
+    let (_fake, editor, cx) = open_field("old", TextInputState::new, cx);
     push(&editor, "pushed", cx);
     assert_eq!(
         shown(&editor, cx),
@@ -971,7 +987,7 @@ fn a_bound_field_follows_pushes_until_the_user_types(cx: &mut TestAppContext) {
 /// to the end) and from a field left read-only (the letter refused).
 #[gpui::test]
 fn a_bound_field_is_read_only_and_shows_no_push_while_saving(cx: &mut TestAppContext) {
-    let (mut fake, editor, cx) = open_field("old", cx);
+    let (mut fake, editor, cx) = open_field("old", TextInputState::new, cx);
     keys(cx, "end x home enter");
     test_support::settle(cx);
     let sent = fake.commands();
@@ -1007,7 +1023,7 @@ fn a_bound_field_is_read_only_and_shows_no_push_while_saving(cx: &mut TestAppCon
 /// the user's text.
 #[gpui::test]
 fn after_a_refused_save_only_an_untouched_field_takes_up_the_last_push(cx: &mut TestAppContext) {
-    let (mut fake, editor, cx) = open_field("old", cx);
+    let (mut fake, editor, cx) = open_field("old", TextInputState::new, cx);
     keys(cx, "enter");
     test_support::settle(cx);
     let sent = fake.commands();
@@ -1043,5 +1059,40 @@ fn after_a_refused_save_only_an_untouched_field_takes_up_the_last_push(cx: &mut 
         refusal,
         Some(HostText::from_host("changed meanwhile")),
         "and holds the refusal to show"
+    );
+}
+
+/// The draft-bound field must work over both kinds of field the editors to come will use: one-line fields and the
+/// growing box. Specified, over a growing box: an untouched box follows a push; typing a line break mirrors the
+/// two-line text into the draft and saves nothing (Enter, which saves a one-line field, is a line break here); a push
+/// after that leaves the typed text alone.
+#[gpui::test]
+fn a_bound_growing_box_mirrors_line_breaks_and_follows_pushes_until_touched(
+    cx: &mut TestAppContext,
+) {
+    let (mut fake, editor, cx) = open_field("old", growing_box, cx);
+    push(&editor, "first line", cx);
+    assert_eq!(
+        shown(&editor, cx),
+        "first line",
+        "the untouched box followed the push"
+    );
+    keys(cx, "end enter x");
+    test_support::settle(cx);
+    assert_eq!(
+        shown(&editor, cx),
+        "first line\nx",
+        "Enter typed a line break"
+    );
+    assert_eq!(
+        cx.update(|_, cx| editor.read(cx).prompt.draft().value().clone()),
+        "first line\nx"
+    );
+    assert!(fake.commands().is_empty(), "Enter saved nothing");
+    push(&editor, "pushed meanwhile", cx);
+    assert_eq!(
+        shown(&editor, cx),
+        "first line\nx",
+        "the push left the typed text alone"
     );
 }

@@ -1,16 +1,16 @@
-//! The text input, over GPUI Kit's single-line `Input` or, for a field that must keep pasted line breaks, Kit's
-//! multi-line `Textarea` held to one row.
+//! The text input, over GPUI Kit's single-line `Input`; for a field that must keep pasted line breaks, Kit's
+//! multi-line `Textarea` held to one row; and for multi-line text, Kit's `Textarea` growing with its text up to a cap.
 //!
 //! Kit supplies the hard part (editing, selection, undo, input methods), which is why SPEC_impl.md keeps Kit for text
 //! inputs. Two things are Farhelm's: the label and hover help every control must have, and Kit's built-in right-click
 //! menu, which is turned off because the old app's release builds had no right-click menu on text (browser-behavior
-//! inventory, entry B1). The only ways to get an input's state are [`TextInputState::new`] and
-//! [`TextInputState::new_keeping_line_breaks`], so no input can skip that.
+//! inventory, entry B1). The only ways to get an input's state are [`TextInputState::new`],
+//! [`TextInputState::new_keeping_line_breaks`] and [`TextInputState::new_growing`], so no input can skip that.
 //!
 //! An editor learns what happens in the field through [`TextInputState::subscribe`]: every edit the user makes
 //! ([`TextInputEvent::Changed`], which a draft mirrors) and Enter ([`TextInputEvent::Submitted`], which saves). Kit's
-//! own event type stays behind this module, so the rest of the app never matches on Kit's variants. Both kinds of field
-//! report the same events and are drawn by the same [`TextInput`].
+//! own event type stays behind this module, so the rest of the app never matches on Kit's variants. Every kind of field
+//! reports edits the same way and is drawn by the same [`TextInput`]; only the growing box reports no Enter.
 //!
 //! ## Line breaks
 //!
@@ -30,6 +30,21 @@
 //! `set_text`, an input method's committed text) keeps any it holds. Like the old field, it then shows one line of the
 //! value at a time, with the others out of view. The old stylesheet chose that on purpose ("a horizontal scroll for
 //! the pasted case rather than a growing box"), so this field does not grow either.
+//!
+//! ## The growing box
+//!
+//! [`TextInputState::new_growing`] is the multi-line field: a launch's first message, a template's prompt, a recipe or
+//! a credential. The old app's were `<textarea>`s with a drag-to-resize corner, which is not rebuilt (decided by the
+//! maintainer on 2026-11-13); instead the box grows with its text, from the rows its caller starts it at to
+//! [`GROWING_MAX_ROWS`], and then scrolls. Lines wrap softly at the box's width. Enter and Shift+Enter type a line
+//! break; it reports no [`TextInputEvent::Submitted`], so an editor saves it with its Save. Tab moves focus, as it did
+//! out of the old textarea; a tab character pasted or set into the value stays in it, as do line breaks (SPEC.md for
+//! the template prompt: "Newline and tab remain editable").
+//!
+//! NOTE: A tab character advances to the next stop two spaces apart, Kit's default, where the old textarea used the
+//! browser's default of eight (the old stylesheet set no `tab-size`). Kit offers a tab size only for its fixed-height
+//! and code-editor layouts, not for a box that grows, so this is a recorded deviation rather than something this field
+//! corrects. A tab just short of a stop draws almost no gap, which is why the golden scene leaves tabs out.
 //!
 //! NOTE: A lone `\r` is kept but is not a line break in Kit's layout; it draws as whatever the font has for it. A
 //! pasted `\r\n` breaks the line at its `\n` and keeps the `\r` at the end of the first line.
@@ -69,6 +84,7 @@ pub enum TextInputEvent {
     /// Enter never edits it.
     Changed,
     /// The user pressed Enter in the field (with or without Shift or the platform modifier): the editor's main action.
+    /// Never reported by a growing box ([`TextInputState::new_growing`]), where Enter types a line break.
     Submitted,
 }
 
@@ -79,7 +95,14 @@ enum Field {
     Line(Entity<InputState>),
     /// Kit's multi-line text area behaving as a single line, which keeps them (see the module docs, "Line breaks").
     Row(Entity<TextareaState>),
+    /// Kit's multi-line text area growing with its text up to a cap (see the module docs, "The growing box").
+    Area(Entity<TextareaState>),
 }
+
+/// How tall a growing box ([`TextInputState::new_growing`]) gets before it scrolls, in rows of text. The old boxes had
+/// no cap (their resize corner let the user drag them taller); twelve rows keeps a long prompt readable inside a dialog
+/// whose body scrolls anyway.
+pub(crate) const GROWING_MAX_ROWS: usize = 12;
 
 /// The editable state behind a [`TextInput`]: the text, the selection and the undo history, owned by the view that
 /// shows the input for as long as it shows it.
@@ -120,6 +143,24 @@ impl TextInputState {
         )
     }
 
+    /// A new, empty multi-line box `rows` rows tall that grows with its text to [`GROWING_MAX_ROWS`] and then scrolls,
+    /// wrapping lines at its width (the module docs, "The growing box"). `rows` is where the old app's `<textarea>`
+    /// started (a launch's first message 3, a template's prompt 4, a credential 8); a `rows` above the cap is held to
+    /// it. Enter types a line break rather than submitting.
+    pub fn new_growing(rows: usize, window: &mut Window, cx: &mut App) -> Self {
+        let rows = rows.clamp(1, GROWING_MAX_ROWS);
+        let area = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .auto_grow(rows, GROWING_MAX_ROWS)
+                .context_menu(false)
+        });
+        TextInputState(
+            Field::Area(area),
+            Rc::new(RefCell::new(SharedString::default())),
+            Rc::new(Cell::new(false)),
+        )
+    }
+
     /// The field's focus handle, for a dialog whose focus starts in the field (the Rename editor's title field:
     /// SPEC.md, "initial focus remains on the title field"), handed to the layer manager as the dialog's start. Kit
     /// tracks the field's focus itself, so this is the handle the field takes focus through; moving focus to it stays
@@ -127,7 +168,7 @@ impl TextInputState {
     pub fn focus_handle(&self, cx: &App) -> FocusHandle {
         match &self.0 {
             Field::Line(input) => input.read(cx).focus_handle(cx),
-            Field::Row(area) => area.read(cx).focus_handle(cx),
+            Field::Row(area) | Field::Area(area) => area.read(cx).focus_handle(cx),
         }
     }
 
@@ -143,7 +184,9 @@ impl TextInputState {
         self.2.set(read_only);
         match &self.0 {
             Field::Line(input) => input.update(cx, |state, cx| state.set_readonly(read_only, cx)),
-            Field::Row(area) => area.update(cx, |state, cx| state.set_readonly(read_only, cx)),
+            Field::Row(area) | Field::Area(area) => {
+                area.update(cx, |state, cx| state.set_readonly(read_only, cx))
+            }
         }
     }
 
@@ -151,7 +194,7 @@ impl TextInputState {
     pub fn text(&self, cx: &App) -> SharedString {
         match &self.0 {
             Field::Line(input) => input.read(cx).value(),
-            Field::Row(area) => area.read(cx).value(),
+            Field::Row(area) | Field::Area(area) => area.read(cx).value(),
         }
     }
 
@@ -164,7 +207,9 @@ impl TextInputState {
         let text: SharedString = text.into();
         match &self.0 {
             Field::Line(input) => input.update(cx, |state, cx| state.set_value(text, window, cx)),
-            Field::Row(area) => area.update(cx, |state, cx| state.set_value(text, window, cx)),
+            Field::Row(area) | Field::Area(area) => {
+                area.update(cx, |state, cx| state.set_value(text, window, cx))
+            }
         }
         self.1.replace(self.text(cx));
     }
@@ -181,6 +226,12 @@ impl TextInputState {
         on_event: impl Fn(&mut V, TextInputEvent, &mut Window, &mut Context<V>) + 'static,
     ) -> Subscription {
         let last = self.1.clone();
+        // Kit emits its Enter event in a growing box too, after typing the line break; there it is an edit, not a
+        // submission. Exhaustive, so a new kind decides whether Enter submits it.
+        let submits = match self.0 {
+            Field::Line(_) | Field::Row(_) => true,
+            Field::Area(_) => false,
+        };
         // Kit's two states are different types emitting the same event, so each arm reads its own text and hands the
         // rest to this.
         let report = move |view: &mut V,
@@ -196,7 +247,8 @@ impl TextInputState {
                     last.replace(text);
                     TextInputEvent::Changed
                 }
-                InputEvent::PressEnter { .. } => TextInputEvent::Submitted,
+                InputEvent::PressEnter { .. } if submits => TextInputEvent::Submitted,
+                InputEvent::PressEnter { .. } => return,
                 InputEvent::Focus | InputEvent::Blur => return,
             };
             on_event(view, event, window, cx);
@@ -209,7 +261,7 @@ impl TextInputState {
                     report(view, event, input.read(cx).value(), window, cx)
                 },
             ),
-            Field::Row(area) => cx.subscribe_in(
+            Field::Row(area) | Field::Area(area) => cx.subscribe_in(
                 area,
                 window,
                 move |view, area, event: &InputEvent, window, cx| {
@@ -220,9 +272,10 @@ impl TextInputState {
     }
 }
 
-/// A labeled text input, of either kind its state was made as. Its accessible role is the one Kit gives its field, so
-/// the constructor takes no role: the single-line input is a text input, and the field that keeps line breaks is a
-/// multi-line text input, as the old Rename field's `<textarea>` was, although Enter submits it.
+/// A labeled text input, of whichever kind its state was made as. Its accessible role is the one Kit gives its field,
+/// so the constructor takes no role: the single-line input is a text input, and the field that keeps line breaks is a
+/// multi-line text input, as the old Rename field's `<textarea>` was (although Enter submits it), and so is the growing
+/// box.
 ///
 /// NOTE: Kit's `Input` takes an accessible name but no accessible description, so the hover help reaches assistive
 /// technology only as the tooltip, unlike a button's. That is a gap in Kit, recorded rather than worked around.
@@ -306,6 +359,19 @@ impl RenderOnce for TextInput {
                         .text_size(metrics::TEXT_MD)
                         .line_height(metrics::RENAME_LINE_HEIGHT),
                 ),
+            // The old multi-line boxes' look (`.templates-field textarea`: the well, the small radius, 13-pixel text at
+            // a line height of 1.45); Kit sizes the box from its rows and that line height. Each old box had its own
+            // padding and minimum height (the launcher's first message: 8 by 12 pixels, at least 80 high); this kind
+            // has one look, and a consumer that needs its box's own adds a builder for it.
+            Field::Area(area) => wrapper.child(
+                Textarea::new(&area)
+                    .readonly(self.state.2.get())
+                    .aria_label(self.label)
+                    .bg(theme::color(palette.well))
+                    .rounded(metrics::RADIUS_SM)
+                    .text_size(metrics::TEXT_MD)
+                    .line_height(metrics::GROWING_LINE_HEIGHT),
+            ),
         }
     }
 }

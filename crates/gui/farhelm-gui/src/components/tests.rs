@@ -354,7 +354,8 @@ fn a_frame_too_tall_for_the_window_scrolls_as_a_whole(cx: &mut TestAppContext) {
 
 // ---- The text input's events and the dialog's Close ---------------------------------------------------------------
 
-/// How a test makes a field's state: [`TextInputState::new`] or [`TextInputState::new_keeping_line_breaks`].
+/// How a test makes a field's state: [`TextInputState::new`], [`TextInputState::new_keeping_line_breaks`] or a growing
+/// box ([`TextInputState::new_growing`]).
 type MakeState = fn(&mut Window, &mut gpui::App) -> TextInputState;
 
 /// A view that owns a text input's state, as an editor does, and records every event the input reports. It is drawn
@@ -462,6 +463,75 @@ fn a_text_input_reports_edits_and_enter_and_not_a_value_set_by_its_owner(cx: &mu
         "pushed",
         "Enter submitted and inserted nothing"
     );
+}
+
+/// A growing box three rows tall, for the tests below.
+fn growing_box(window: &mut Window, cx: &mut gpui::App) -> TextInputState {
+    TextInputState::new_growing(3, window, cx)
+}
+
+/// The growing box holds multi-line text (a launch's first message, a template's prompt), so Enter must type a line
+/// break rather than submit, as the old `<textarea>` did, and a tab in the value must stay in it (SPEC.md: "Newline and
+/// tab remain editable"); Tab itself moves focus on, as it did out of the old textarea, or a keyboard user could not
+/// leave the box. Specified: typing a letter, Enter and a letter gives a two-line value reported as three edits and no
+/// submission; a value set with a tab keeps it, and Tab then leaves it unchanged and moves focus to the next field.
+#[gpui::test]
+fn a_growing_box_takes_line_breaks_keeps_tabs_and_lets_tab_move_on(cx: &mut TestAppContext) {
+    let (cx, fields) = open_fields(cx, &[("box", growing_box), ("next", TextInputState::new)]);
+    let (grown, next) = (&fields[0], &fields[1]);
+    click(cx, "box");
+    keys(cx, "a enter b");
+    assert_eq!(
+        take(cx, grown),
+        ("a\nb".into(), vec![TextInputEvent::Changed; 3]),
+        "Enter typed a line break, reported as an edit and never as a submission"
+    );
+    cx.update(|window, cx| {
+        let state = grown.read(cx).state.clone();
+        state.set_text("one\ttwo", window, cx);
+    });
+    cx.run_until_parked();
+    keys(cx, "tab x");
+    assert_eq!(
+        take(cx, grown).0,
+        "one\ttwo",
+        "the tab stayed in the value, and Tab typed nothing into it"
+    );
+    assert_eq!(take(cx, next).0, "x", "Tab moved focus to the next field");
+}
+
+/// SPEC.md's multi-line boxes have no resize corner any more (decided by the maintainer on 2026-11-13): they grow with
+/// their text up to a cap and then scroll, so a long prompt neither hides behind a fixed box nor pushes a dialog's
+/// answers off the window. Specified: the box starts at its rows; five lines make it taller; it is still growing one
+/// line short of the cap and stops at the cap's twelve lines, and thirty lines leave it at that height. (Line breaks
+/// set the rows here, not wrapping, so the test context's stand-in text system measures the same as the real one; the
+/// golden shows real wrapping.)
+#[gpui::test]
+fn a_growing_box_grows_with_its_lines_up_to_its_cap(cx: &mut TestAppContext) {
+    let (cx, fields) = open_fields(cx, &[("box", growing_box)]);
+    let grown = fields[0].clone();
+    let mut height_with = |lines: usize| {
+        let text: Vec<String> = (1..=lines).map(|n| format!("line {n}")).collect();
+        cx.update(|window, cx| {
+            let state = grown.read(cx).state.clone();
+            state.set_text(text.join("\n"), window, cx);
+        });
+        redraw(cx);
+        bounds(cx, "box").size.height
+    };
+    let max = super::text_input::GROWING_MAX_ROWS;
+    let (one, three, five) = (height_with(1), height_with(3), height_with(5));
+    let (below, cap, past) = (height_with(max - 1), height_with(max), height_with(30));
+    assert_eq!(one, three, "the box starts at its three rows");
+    assert!(
+        five > three,
+        "five lines made it taller: {three:?} then {five:?}"
+    );
+    assert!(
+        cap > below,
+        "it grew up to the cap's {max} lines: {below:?} then {cap:?}"
+    );
+    assert_eq!(past, cap, "past the cap it stays as tall as at the cap");
 }
 
 /// Why this matters: SPEC.md gives editors such as Rename "a shared title and Close header" and has Tab follow "Close,
