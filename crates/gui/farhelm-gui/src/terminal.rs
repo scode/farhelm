@@ -12,9 +12,8 @@
 //! the port review kept: one custom element with no per-cell layout nodes, a shaped-row cache that survives scrolling,
 //! printable ASCII shaped as one batch and split at its known one-byte cell boundaries, every other run kept whole so
 //! combining marks and emoji sequences stay together, and ink clipped to the cell box the wire assigns so a fallback
-//! glyph never moves later columns. The view also scrolls through the history and draws the local selection; the
-//! gestures that make a selection are its owner's ([`attached`]). Links are not here yet; they come with the terminal
-//! area's later work.
+//! glyph never moves later columns. The view also scrolls through the history, draws the local selection and underlines
+//! the link the pointer rests on; the gestures behind them are its owner's ([`attached`]).
 //!
 //! [`attached`] holds the owner that connects a view to a terminal stream: when to attach, which view receives a
 //! replay, and what the pane says while the stream is not live.
@@ -32,7 +31,7 @@ use std::sync::Arc;
 
 use farhelm_grid_model::{
     ApplyEffects, Cursor, CursorShape, Damage, GridError, GridModel, GridOutput, GridRow, Position,
-    Selection, SelectionMode, TerminalState, ViewRow, Viewport, display_text,
+    Selection, SelectionMode, TerminalLink, TerminalState, ViewRow, Viewport, display_text,
 };
 use farhelm_input_mapping::Platform;
 use farhelm_input_mapping::cursor::move_to_cell;
@@ -289,6 +288,14 @@ pub struct TerminalView {
     /// the alternate screen switching) and by the owner when the user sends the program input; trimmed as the oldest
     /// history it covers is dropped.
     selection: Option<Selection>,
+    /// The view cell the pointer rests on, for links, as (column, row) of what is shown: its owner sets it as the
+    /// pointer moves over the screen, `None` off it. A view cell, not a line, because the text under a still pointer
+    /// changes when the view scrolls or output moves the screen.
+    hover: Option<(u16, u16)>,
+    /// The link under [`Self::hover`], found again whenever what the view shows changes (output, a scroll, following
+    /// the screen again, a reset), so a hover never outlives the text it read: a redraw that changes, moves or removes
+    /// the link drops it, and one that brings a link under a still pointer shows it.
+    hovered_link: Option<TerminalLink>,
     cols: u16,
     cursor: Option<Cursor>,
     visible: bool,
@@ -310,6 +317,8 @@ impl TerminalView {
             wheel_remainder: 0.,
             wheel_cell: 0.,
             selection: None,
+            hover: None,
+            hovered_link: None,
             cols: 0,
             cursor: None,
             visible: false,
@@ -499,9 +508,15 @@ impl TerminalView {
             self.selection
                 .and_then(|selection| selection.trim_before(self.oldest_line()))
         };
+        let hovered = self.hovered_link.clone();
         let changed = self.update_grid(damage);
         self.update_shown();
-        if changed || reset || scrolled_change || self.selection != selection {
+        if changed
+            || reset
+            || scrolled_change
+            || self.selection != selection
+            || self.hovered_link != hovered
+        {
             cx.notify();
         }
     }
@@ -531,6 +546,71 @@ impl TerminalView {
             ViewRow::Notice => Some(self.oldest_line()),
             ViewRow::Line(number) => Some(number),
         }
+    }
+
+    // ---- Links -------------------------------------------------------------------------------------------------------
+
+    /// Whether view row `row` shows the notice line, which is not text and holds no link.
+    pub fn row_is_notice(&self, row: u16) -> bool {
+        matches!(self.shown.get(usize::from(row)), Some(ShownRow::Notice))
+    }
+
+    /// The link the pointer rests on, if any: a program's hyperlink (OSC 8) of any scheme, or a web address printed as
+    /// text, as the grid model finds them.
+    pub fn hovered_link(&self) -> Option<&TerminalLink> {
+        self.hovered_link.as_ref()
+    }
+
+    /// The link at `position` in the current text, whatever the pointer rests on: a click's release checks it is
+    /// still the link its press was on.
+    pub fn link_at(&self, position: Position) -> Option<TerminalLink> {
+        self.model.link_at(position)
+    }
+
+    /// The pointer now rests on view cell `cell`, (column, row) of what is shown (`None`: off the screen); redraws
+    /// when the link under it changed. A move within the same cell looks nothing up again: what the view shows has
+    /// not changed, or the view would have looked it up already.
+    pub fn set_hover(&mut self, cell: Option<(u16, u16)>, cx: &mut Context<Self>) {
+        if self.hover == cell {
+            return;
+        }
+        self.hover = cell;
+        let link = self.link_under_hover();
+        if link != self.hovered_link {
+            self.hovered_link = link;
+            cx.notify();
+        }
+    }
+
+    /// The link the grid model finds under [`Self::hover`] in what the view shows now; none on the notice line.
+    fn link_under_hover(&self) -> Option<TerminalLink> {
+        let (col, row) = self.hover?;
+        if self.row_is_notice(row) {
+            return None;
+        }
+        self.model.link_at(Position {
+            line: self.line_at_row(row)?,
+            col,
+        })
+    }
+
+    /// The hovered link's covered columns on each view row it reaches, for the element's underline.
+    fn underlined_rows(&self) -> Vec<(usize, Range<u16>)> {
+        let Some(link) = &self.hovered_link else {
+            return Vec::new();
+        };
+        (0..self.shown.len())
+            .filter(|&row| matches!(self.shown[row], ShownRow::Line(_)))
+            .filter_map(|row| {
+                let line = self.line_at_row(u16::try_from(row).ok()?)?;
+                let covered = link
+                    .ranges
+                    .iter()
+                    .map(|range| range.columns(line, self.cols))
+                    .find(|columns| !columns.is_empty())?;
+                Some((row, covered))
+            })
+            .collect()
     }
 
     /// The local selection, if any.
@@ -619,9 +699,16 @@ impl TerminalView {
             .collect()
     }
 
-    /// Rebuild what the element draws from the screen cache, the model's history and the viewport. A history line
-    /// keeps its shaped glyphs while it stays shown and unchanged.
+    /// Rebuild what the element draws from the screen cache, the model's history and the viewport, and find the link
+    /// under the resting pointer again in what is now shown. Every change to what the view shows comes through here
+    /// (output, a scroll, following the screen, a reset); each caller notifies when anything changed.
     fn update_shown(&mut self) {
+        self.update_shown_rows();
+        self.hovered_link = self.link_under_hover();
+    }
+
+    /// Rebuild the shown rows. A history line keeps its shaped glyphs while it stays shown and unchanged.
+    fn update_shown_rows(&mut self) {
         if self.viewport.is_following() {
             self.shown = self.rows.iter().cloned().map(ShownRow::Line).collect();
             self.history_rows.clear();
@@ -746,6 +833,7 @@ impl Render for TerminalView {
             rows: self.shown.clone(),
             cursor_row: self.cursor_row(),
             selected: self.selected_rows(),
+            underlined: self.underlined_rows(),
             cols: self.cols,
             cursor: self.cursor,
             visible: self.visible,
@@ -765,6 +853,8 @@ struct TerminalElement {
     cursor_row: Option<usize>,
     /// The local selection's columns on each row it covers.
     selected: Vec<(usize, Range<u16>)>,
+    /// The hovered link's columns on each row it reaches.
+    underlined: Vec<(usize, Range<u16>)>,
     cols: u16,
     cursor: Option<Cursor>,
     visible: bool,
@@ -964,6 +1054,7 @@ impl Element for TerminalElement {
                 return;
             }
             self.paint_rows(bounds, window, cx);
+            self.paint_link_underline(bounds, window);
             self.paint_selection(bounds, window);
             self.paint_cursor(bounds, window, cx);
         });
@@ -971,6 +1062,24 @@ impl Element for TerminalElement {
 }
 
 impl TerminalElement {
+    /// Underline the hovered link's cells: a one-pixel line along the bottom of each covered cell, in the terminal's
+    /// default foreground, as the old app's link layer drew it (`border-bottom: 1px solid currentColor`).
+    fn paint_link_underline(&self, bounds: Bounds<Pixels>, window: &mut Window) {
+        let (fg, _) = style::defaults(self.state);
+        for (row, columns) in &self.underlined {
+            let origin = bounds.origin
+                + point(
+                    px(f32::from(columns.start) * self.cell.width),
+                    px((*row as f32 + 1.) * self.cell.height - 1.),
+                );
+            let width = f32::from(columns.end - columns.start) * self.cell.width;
+            window.paint_quad(fill(
+                Bounds::new(origin, size(px(width), px(1.))),
+                fg.hsla(1.),
+            ));
+        }
+    }
+
     /// Paint the local selection over the text: one box per row, from its first selected column to its last, in the
     /// old app's `SELECTION_COLOR`, white at 30% (the terminal palette's foreground token is that white), drawn over
     /// the glyphs as the old selection layer was.
