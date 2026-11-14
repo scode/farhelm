@@ -3,8 +3,9 @@
 //! the keyboard focus ring, host-supplied text over its spoofing corpus, the notice banner, the terminal's styles and
 //! cursor shapes, an attached terminal's exit line and status line, the scrim a pending Delete puts over the open
 //! session's terminal, the session list (a fleet of every status a row draws, an empty fleet, a row's open menu, a
-//! row's Delete question, and a pending and a refused Delete), the Rename editor, and the select closed and open, in both
-//! appearances, compared pixel for pixel.
+//! row's Delete question, and a pending and a refused Delete), the Rename editor, the select closed and open, and the
+//! YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer, in both appearances, compared
+//! pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
@@ -156,9 +157,10 @@ fn switches(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
         .into_any_element()
 }
 
-/// Every button tier, a disabled main action and an icon button, in a first row; in a second, the host rail's entries
-/// (All pressed, a host's mark not pressed, on the rail's ground), the filter chip with a mark, a name and its ✕, and
-/// the link tier.
+/// Every button tier but the outlined danger one, a disabled main action and an icon button, in a first row; in a
+/// second, the host rail's entries (All pressed, a host's mark not pressed, on the rail's ground), the filter chip with
+/// a mark, a name and its ✕, and the link tier. The outlined danger tier is pinned at rest by `inline-prompt`; its
+/// unavailable and busy looks are not pinned yet.
 fn buttons(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
     let help = || HoverHelp::tooltip("Golden scene control");
     let palette = theme::palette(cx);
@@ -758,6 +760,88 @@ fn anchored_prompt_setup(state: &SceneState, window: &mut Window, cx: &mut App) 
     )
     .keeps_focus_on_empty_click();
     prompt::ask_anchored(question, anchor, None, &mark, |_, _, _| {}, window, cx);
+}
+
+/// A stand-in for the session launcher's body, on the dialog's surface, drawing the inline question its setup asked
+/// (kept in the scene state's `keep`).
+fn inline_prompt(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    let palette = theme::palette(cx);
+    let question = state
+        .keep
+        .borrow()
+        .iter()
+        .find_map(|kept| kept.downcast_ref::<prompt::Inline<String>>())
+        .cloned();
+    div()
+        .w(px(960.))
+        .p(px(20.))
+        .bg(theme::color(palette.bg_2))
+        .children(question)
+        .into_any_element()
+}
+
+/// SPEC.md's YOLO confirmation as the old launcher drew it (reference `launcher-yolo-confirmation`): the loud block,
+/// its heading, what YOLO means for the host, why this launch is one and that nothing started, then Cancel, the guarded
+/// option, the outlined permanent answer and the filled one-time answer, focus on Cancel.
+fn inline_prompt_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let mark = Mark::take(cx);
+    let host = HostText::from_host("Local (this machine)");
+    let answer = |label: &'static str, help: &'static str, tier: Tier| Answer {
+        label: label.into(),
+        help: HoverHelp::tooltip(help),
+        tier,
+    };
+    let question = Question::new(
+        "Confirm YOLO launch",
+        answer(
+            "Start YOLO session anyway",
+            "Start the session in YOLO mode, where the agent acts without asking",
+            Tier::Danger,
+        ),
+        "launch".to_string(),
+    )
+    .summary(
+        HostSentence::new("yolo-consequence")
+            .text(
+                "YOLO means the agent bypasses its safety checks: no person, classifier, AI reviewer or sandbox stops \
+                 its actions on ",
+            )
+            .host(&host)
+            .text(" without asking you."),
+    )
+    .line(
+        "This launch uses YOLO permissions. Another permission mode would keep the agent's safety checks instead.",
+    )
+    .line(
+        HostSentence::new("yolo-asks")
+            .host(&host)
+            .text(" asks before every YOLO launch. Nothing has been started."),
+    )
+    .cancel_answer(answer(
+        "Cancel",
+        "Cancel: go back without starting anything",
+        Tier::Neutral,
+    ))
+    .alternative(
+        answer(
+            "Start guarded session instead",
+            "Start this session in guarded mode instead",
+            Tier::Primary,
+        ),
+        |_, _, _| {},
+    )
+    .fallible_alternative(
+        answer(
+            "Start, and don't ask again on this host",
+            "Start it, and start YOLO sessions on this host without asking from now on",
+            Tier::DangerOutline,
+        ),
+        |_, attempt, _, cx| attempt.succeeded(cx),
+    )
+    .starts_on_cancel()
+    .loud();
+    let inline = prompt::ask_inline(question, &mark, |_, _, _| {}, window, cx);
+    state.keep.borrow_mut().push(Box::new(inline));
 }
 
 /// The host-text element over the spoofing corpus, one value per line, then a sentence mixing the app's words with two
@@ -1435,6 +1519,12 @@ static SCENES: &[Scene] = &[
         size: (340., 190.),
         draw: anchored_prompt,
         setup: anchored_prompt_setup,
+    },
+    Scene {
+        name: "inline-prompt",
+        size: (1000., 300.),
+        draw: inline_prompt,
+        setup: inline_prompt_setup,
     },
     Scene {
         name: "host-text",
