@@ -430,6 +430,11 @@
       "reference": "host-remove-confirmation"
     },
     {
+      "golden": "prompt-body",
+      "title": "A question with a feature-drawn body, header tile and footer note, at the host setup confirmation's width",
+      "reference": "host-add-setup-plan"
+    },
+    {
       "golden": "anchored-prompt",
       "title": "A confirmation from the prompt foundation, anchored to a row's menu button",
       "reference": "row-delete-confirmation"

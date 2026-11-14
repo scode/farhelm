@@ -16,8 +16,9 @@
 //!
 //! The old host dialogs and Settings framed their header further (`.host-dialog-framed` and `.host-settings-header` in
 //! the old stylesheet): an icon tile left of the title ([`DialogFrame::tile`]), a note at the footer's left beside the
-//! answers ([`DialogFrame::note`]), and Settings alone a size of its own that does not follow its content
-//! ([`DialogFrame::width`], [`DialogFrame::fixed_height`]), so switching sections never moves the frame or its Close.
+//! answers ([`DialogFrame::note`]), and a width of their own ([`DialogFrame::width`]): Settings, and the host setup
+//! confirmation asked through the prompt. Settings alone also keeps a fixed height that does not follow its content
+//! ([`DialogFrame::fixed_height`]), so switching sections never moves the frame or its Close.
 //!
 //! NOTE: The old Close changed only its color on hover; here it is a ghost icon button, which gets the ghost tier's
 //! hover fill. The old one was a 20-pixel "×" character; here it is the close icon at the icon buttons' size.
@@ -227,7 +228,8 @@ impl RenderOnce for DialogFrame {
             .border_color(theme::color(palette.border_dim));
         let footer = match self.note {
             // `.host-settings-footer`: the note and the answers at either end, 12 pixels apart at least, the answers
-            // wrapping below the note when the row is too narrow for both.
+            // wrapping below the note when the row is too narrow for both. Wrapped, they stay right-aligned on their
+            // own line (the auto left margin), as the old host setup confirmation's did under its long note.
             Some(note) => footer
                 .justify_between()
                 .gap(px(12.))
@@ -240,6 +242,7 @@ impl RenderOnce for DialogFrame {
                 )
                 .child(
                     div()
+                        .ml_auto()
                         .flex()
                         .flex_wrap()
                         .justify_end()

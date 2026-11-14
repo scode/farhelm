@@ -1,7 +1,8 @@
 //! Behavior tests for the prompt, on GPUI's simulated platform: that a confirmation acts only on what it showed, where
 //! a question starts and how it is answered, cancelled and closed, how its summary draws a host value, the anchored
 //! question asked beside its control, the inline question drawn inside its owner's dialog (SPEC.md's YOLO
-//! confirmation in the launcher), and the answer whose action can fail, which keeps its question up with the reason.
+//! confirmation in the launcher), the answer whose action can fail, which keeps its question up with the reason, and a
+//! body the feature draws (the host setup confirmation's plan) with the dialog frame's tile, note and width.
 //!
 //! Each test opens its window through the shared harness ([`crate::test_support::open`]: GPUI Kit's `Root` around a
 //! root view wired as the app's), drives it through simulated keys and clicks, so key bindings resolve as they do in
@@ -18,7 +19,7 @@ use gpui::{
     px,
 };
 
-use crate::components::{HoverHelp, Role, Tier};
+use crate::components::{Button, HoverHelp, Role, Tier};
 use crate::focus::{self, Mark, OnPress};
 use crate::host_text::{HostSentence, HostText};
 use crate::layers::{self, Anchor, Dialog, LayerId, Subject};
@@ -1221,7 +1222,8 @@ fn settle_attempt(cx: &mut VisualTestContext, attempts: &Attempts, reason: Optio
     settle(cx);
 }
 
-/// Every line of text painted inside the inline question in a fresh frame.
+/// Every line of text painted inside the question in a fresh frame, in any presentation (each draws its root under the
+/// element id `prompt`).
 fn painted_in_question(cx: &mut VisualTestContext) -> Vec<String> {
     let nodes = frame(cx);
     let inside = |mut index: usize| loop {
@@ -1576,4 +1578,163 @@ fn a_question_with_an_answer_that_can_fail_opens_only_inline(cx: &mut TestAppCon
         settle(cx);
         assert!(asked.is_none(), "{kind}: it did not open");
     }
+}
+
+// ---- A body the feature draws ----------------------------------------------------------------------------------------
+
+/// What a test body's builder was handed, one entry per call.
+type Built = Rc<RefCell<Vec<String>>>;
+
+/// A body a feature draws, standing in for the host setup confirmation's plan: a Copy plan button, which is not an
+/// answer, counting its presses in `copied`.
+struct PlanBody {
+    copy: FocusHandle,
+    copied: Rc<Cell<usize>>,
+}
+
+impl Render for PlanBody {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let copied = self.copied.clone();
+        div().w(px(100.)).child(
+            Button::new(
+                "copy-plan",
+                "Copy plan",
+                HoverHelp::tooltip("Copy the complete host plan"),
+                Role::Button,
+            )
+            .focus(&self.copy)
+            .on_click(move |_, _, _| copied.set(copied.get() + 1)),
+        )
+    }
+}
+
+/// Why this matters: the setup confirmation's body is the helm's plan, and Set up runs the plan the question froze, so
+/// the body must be built from the frozen value, once, before the user sees it. Its Copy plan is a control of its own.
+/// SPEC.md keeps Tab inside a dialog's controls, so Copy plan must be reachable there, in reading order (the body comes
+/// before the answers); and it must stay a control, not an answer: a press on it that closed the question, or ran
+/// Confirm through the dialog's Enter rule, would set up a host when the user only copied the plan.
+///
+/// Specified, for a centered question with a body holding Copy plan: the body's builder runs once, as the question is
+/// asked and before anything is drawn, handed the frozen value, and not again over every redraw that follows. Copy plan
+/// is drawn below the question's line and above the answers; focus starts on Confirm, as it does without a body; Tab
+/// from there reaches Copy plan, then Cancel and Confirm. Enter, Space and a click on Copy plan each press it, and
+/// leave the question open with no answer run. A click on Confirm then confirms once, on the frozen value, and closes
+/// the question.
+///
+/// Inside the dialog's trap Tab's order is a cycle, and a cycle looks the same whichever stop it starts from: a body
+/// drawn after the answers would give the very same sequence. So where the body sits is pinned by where it is drawn,
+/// and Tab by its step from Confirm round to Copy plan and on to Cancel.
+#[gpui::test]
+fn a_body_is_built_once_and_its_control_sits_between_text_and_answers(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    let (built, copied): (Built, Rc<Cell<usize>>) = Default::default();
+    let ran: Ran = Default::default();
+    let (record, counter, confirmed) = (built.clone(), copied.clone(), ran.clone());
+    let question = question("alpha").body(move |frozen: &String, _, cx| {
+        record.borrow_mut().push(frozen.clone());
+        cx.new(|cx| PlanBody {
+            copy: cx.focus_handle().tab_stop(true),
+            copied: counter,
+        })
+    });
+    let asked = cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        let asked = prompt::ask_for_test(
+            Presentation::Centered,
+            question,
+            None,
+            &mark,
+            move |frozen, _, _| confirmed.borrow_mut().push(format!("confirmed {frozen}")),
+            window,
+            cx,
+        );
+        assert_eq!(
+            *built.borrow(),
+            ["alpha"],
+            "the body was built as the question was asked, from the frozen value"
+        );
+        asked
+    });
+    settle(cx);
+    let asked = asked.expect("the question opened");
+    let line = frame(cx)
+        .iter()
+        .flat_map(|node| node.texts.iter())
+        .find(|text| text.text.as_ref() == "Its history is removed.")
+        .map(|text| text.bounds)
+        .expect("the question's line was painted");
+    let (copy, answers) = (bounds(cx, "copy-plan"), bounds(cx, "prompt-answers"));
+    assert!(
+        line.bottom() <= copy.top() && copy.bottom() <= answers.top(),
+        "Copy plan is drawn between the line and the answers: line {line:?}, Copy plan {copy:?}, answers {answers:?}"
+    );
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("prompt-confirm"),
+        "focus starts on Confirm, as without a body"
+    );
+    for expected in ["copy-plan", "prompt-cancel", "prompt-confirm", "copy-plan"] {
+        keys(cx, "tab");
+        assert_eq!(
+            focused_id(cx).as_deref(),
+            Some(expected),
+            "Tab reaches the body's control, then the answers"
+        );
+    }
+    keys(cx, "enter");
+    keys(cx, "space");
+    click(cx, "copy-plan");
+    assert_eq!(
+        copied.get(),
+        3,
+        "Enter, Space and a click each pressed Copy plan"
+    );
+    assert!(is_open(cx, asked.layer), "the question stayed open");
+    assert!(ran.borrow().is_empty(), "no answer ran: {:?}", ran.borrow());
+
+    click(cx, "prompt-confirm");
+    assert_eq!(*ran.borrow(), ["confirmed alpha"], "Confirm ran once");
+    assert!(!is_open(cx, asked.layer), "Confirm closed the question");
+    assert_eq!(
+        *built.borrow(),
+        ["alpha"],
+        "the body was built once, however often it was drawn"
+    );
+}
+
+/// Why this matters: the host confirmations frame their question as the old host dialogs did, at their own width, with
+/// the host's mark in a tile and a note saying how to undo "don't ask again". A builder that took them and did not hand
+/// them to the dialog frame would drop that note, the one place the user learns how to undo a permanent answer. Where
+/// the frame lays them out is the frame's, pinned by the `prompt-body` golden.
+///
+/// Specified, for a centered question built with a tile, a note and a width of 560 pixels: the dialog is 560 pixels
+/// wide, the tile is drawn inside it, and the note is painted.
+#[gpui::test]
+fn a_questions_tile_note_and_width_reach_its_dialog_frame(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    let note = "Undo it with the gear";
+    let question = question("alpha")
+        .tile(|_, _| div().debug_selector(|| "host-tile".into()).size(px(24.)))
+        .note(note)
+        .width(px(560.));
+    let (asked, nodes) = ask_and_record(cx, question);
+    let dialog = bounds(cx, "prompt");
+    assert_eq!(
+        dialog.size.width,
+        px(560.),
+        "the dialog takes the question's width"
+    );
+    assert!(
+        dialog.contains(&bounds(cx, "host-tile").center()),
+        "the tile is drawn inside the dialog"
+    );
+    assert!(
+        nodes
+            .iter()
+            .flat_map(|node| node.texts.iter())
+            .any(|text| text.text.as_ref() == note),
+        "the note is painted"
+    );
+    cx.update(|window, cx| asked.cancel(window, cx));
+    settle(cx);
 }

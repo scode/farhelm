@@ -1,5 +1,6 @@
 //! Headless screenshot goldens: one per component, per dialog frame and per overlay kind (tooltip, popover, the prompt
-//! over its veil, once more with a summary that names a host value, and the prompt anchored to a row's menu button),
+//! over its veil, once more with a summary that names a host value, once more with a feature-drawn body, a header tile
+//! and a footer note, and the prompt anchored to a row's menu button),
 //! the keyboard focus ring, host-supplied text over its spoofing corpus, the notice banner, the terminal's styles and
 //! cursor shapes, an attached terminal's exit line and status line, the scrim a pending Delete puts over the open
 //! session's terminal, the session list (a fleet of every status a row draws, an empty fleet, a row's open menu, a
@@ -794,6 +795,106 @@ fn prompt_host_text_setup(_: &SceneState, window: &mut Window, cx: &mut App) {
             .text(", on this machine"),
     )
     .line("The session's terminal and its history are removed. The working directory stays.");
+    prompt::ask(question, None, &mark, |_, _, _| {}, window, cx);
+}
+
+/// A placeholder body for a question: a lead sentence naming a host, with Copy plan beside it, then three plain lines,
+/// on the old plan's well. It pins where the prompt puts a feature's body and that a control in it is drawn, not any
+/// feature's look: the host setup plan's numbered steps belong to the settings and hosts area.
+struct PlaceholderBody {
+    copy: FocusHandle,
+}
+
+impl Render for PlaceholderBody {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let palette = theme::palette(cx);
+        let lead = HostSentence::new("body-lead")
+            .text("Farhelm will set up ")
+            .host(&HostText::from_host("dev@new-box"))
+            .text(":");
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .py(px(7.))
+            .px(px(9.))
+            .bg(theme::color(palette.well))
+            .border_1()
+            .border_color(theme::color(palette.border_dim))
+            .rounded(theme::metrics::RADIUS_SM)
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .gap(px(12.))
+                    .child(div().flex_1().min_w_0().child(lead))
+                    .child(
+                        Button::new(
+                            "copy-plan",
+                            "Copy plan",
+                            HoverHelp::tooltip("Copy the complete host plan"),
+                            Role::Button,
+                        )
+                        .tier(Tier::Neutral)
+                        .focus(&self.copy),
+                    ),
+            )
+            .child("1. Create directories")
+            .child("2. Install the farhelm binary")
+            .child("3. Enable and start the supervisor")
+    }
+}
+
+/// A question with a feature-drawn body, a header tile and a footer note, at the host setup confirmation's width
+/// (the frame compared with reference `host-add-setup-plan`): the cloud mark in the tile, a placeholder body, the
+/// "don't ask again" note wrapping above the answers, which stay right-aligned, then Cancel, the permanent answer and
+/// Set up, focus on Set up.
+fn prompt_body_setup(_: &SceneState, window: &mut Window, cx: &mut App) {
+    let mark = Mark::take(cx);
+    let answer = |label: &'static str, help: &'static str, tier: Tier| Answer {
+        label: label.into(),
+        help: HoverHelp::tooltip(help),
+        tier,
+    };
+    let question = Question::new(
+        "Set up host",
+        answer(
+            "Set up",
+            "Set up: set up this host as the plan above describes",
+            Tier::Primary,
+        ),
+        "dev@new-box".to_string(),
+    )
+    .summary("Farhelm is not running there yet")
+    .cancel_answer(answer(
+        "Cancel",
+        "Cancel: change nothing on this host",
+        Tier::Neutral,
+    ))
+    .alternative(
+        answer(
+            "Set up, don't ask again",
+            "Set up this host, and set up new hosts from now on without asking",
+            Tier::Neutral,
+        ),
+        |_, _, _| {},
+    )
+    .body(|_, _, cx| {
+        cx.new(|cx| PlaceholderBody {
+            copy: cx.focus_handle().tab_stop(true),
+        })
+    })
+    .tile(|_, cx| {
+        host_mark(
+            HostIcon::Cloud,
+            HostColor::Default,
+            px(24.),
+            theme::palette(cx),
+        )
+    })
+    .note("Undo \"don't ask again\" with the gear at the foot of the navigation rail")
+    .width(px(560.));
     prompt::ask(question, None, &mark, |_, _, _| {}, window, cx);
 }
 
@@ -1725,6 +1826,12 @@ static SCENES: &[Scene] = &[
         size: (560., 320.),
         draw: empty,
         setup: prompt_host_text_setup,
+    },
+    Scene {
+        name: "prompt-body",
+        size: (640., 440.),
+        draw: empty,
+        setup: prompt_body_setup,
     },
     Scene {
         name: "anchored-prompt",
