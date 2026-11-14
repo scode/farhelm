@@ -495,6 +495,16 @@
       "golden": "host-filter-empty",
       "title": "The session list with a host chosen over its empty listing: the pressed avatar, the chip and the sentence naming the host, with Show all hosts",
       "reference": "session-list-filter-empty"
+    },
+    {
+      "golden": "select",
+      "title": "The select, chosen, with a placeholder, and chosen but unavailable",
+      "reference": null
+    },
+    {
+      "golden": "select-open",
+      "title": "A select's list open under its control, at its width, the chosen option ticked and focused",
+      "reference": null
     }
   ],
   "reference_scenes": [

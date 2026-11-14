@@ -15,14 +15,14 @@
 //! those came from, unchanged. `THIRD_PARTY_NOTICES.md` has their provenance and licenses ("Inter interface font",
 //! "JetBrains Mono terminal font").
 //!
-//! The Close and Delete icons are the old app's own action glyphs, copied from its icon module at the reference commit
-//! (14-unit box, 1.2 stroke, round caps and joins). The More icon is a new drawing: the old app wrote the "⋯" character
-//! in text. The four status shapes are the old stylesheet's `.status-dot` shapes (an 8-pixel box: a filled circle, a
-//! triangle cut with `clip-path`, a diamond, and a ring with a 1.5-pixel border), drawn as SVG because GPUI has no
-//! clip path; the view tints them with the status color, as the old dot took `currentColor`. The Spinner is the old
-//! stylesheet's `.delete-spinner`, a 12-pixel ring whose top quarter is solid and the rest 30% of the same color (its
-//! border in `color-mix(in srgb, var(--accent) 30%, transparent)` with `border-top-color: var(--accent)`); the 30% is
-//! the SVG's stroke opacity, so the view still tints it with one color.
+//! The Close, Delete and ChevronDown icons are the old app's own action glyphs, copied from its icon module at the
+//! reference commit (14-unit box, 1.2 stroke, round caps and joins). The More icon is a new drawing: the old app wrote
+//! the "⋯" character in text. The four status shapes are the old stylesheet's `.status-dot` shapes (an 8-pixel box: a
+//! filled circle, a triangle cut with `clip-path`, a diamond, and a ring with a 1.5-pixel border), drawn as SVG because
+//! GPUI has no clip path; the view tints them with the status color, as the old dot took `currentColor`. The Spinner is
+//! the old stylesheet's `.delete-spinner`, a 12-pixel ring whose top quarter is solid and the rest 30% of the same
+//! color (its border in `color-mix(in srgb, var(--accent) 30%, transparent)` with `border-top-color: var(--accent)`);
+//! the 30% is the SVG's stroke opacity, so the view still tints it with one color.
 //!
 //! The sixteen host marks (`Host*`, the shapes a user picks for a host: cloud, house, flask and so on) are the old
 //! app's `HostMark` drawings, copied from its icon module at the reference commit into one file each: Farhelm's own
@@ -120,6 +120,9 @@ pub enum Icon {
     HostCastle,
     /// The laptop, the local host's default (drawn in red).
     HostLaptop,
+    /// A downward chevron: the closed select's sign that it opens a list (the old app's ChevronDown glyph, which its
+    /// split buttons and sort menu drew; the native select it stands in for drew the platform's own chevron).
+    ChevronDown,
 }
 
 impl Icon {
@@ -156,6 +159,7 @@ impl Icon {
         Icon::HostFactory,
         Icon::HostCastle,
         Icon::HostLaptop,
+        Icon::ChevronDown,
     ];
 }
 
@@ -191,6 +195,7 @@ impl Icon {
             Icon::HostFactory => "icons/host-factory.svg",
             Icon::HostCastle => "icons/host-castle.svg",
             Icon::HostLaptop => "icons/host-laptop.svg",
+            Icon::ChevronDown => "icons/chevron-down.svg",
         }
     }
 }
@@ -234,6 +239,7 @@ impl Assets {
             "icons/host-factory.svg" => Some(include_bytes!("../assets/icons/host-factory.svg")),
             "icons/host-castle.svg" => Some(include_bytes!("../assets/icons/host-castle.svg")),
             "icons/host-laptop.svg" => Some(include_bytes!("../assets/icons/host-laptop.svg")),
+            "icons/chevron-down.svg" => Some(include_bytes!("../assets/icons/chevron-down.svg")),
             _ => None,
         }
     }

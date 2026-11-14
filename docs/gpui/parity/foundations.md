@@ -15,6 +15,17 @@ terminal, row menu, Delete question, rename dialog, empty fleet) beside the foun
 the Delete question and the rename dialog are ported, and the rest wait for the parts of their pictures that no area has
 built yet. `scripts/gui-e2e-smoke.py` drives the same slice end to end through the bridge.
 
+The old app's selects had no spec of their own; the shared select (`crates/gui/farhelm-gui/src/components/select.rs`,
+tested in `components/tests.rs` and pinned by the `select` and `select-open` goldens) replaces the native `<select>`
+with two recorded deviations. The native pop-up was the platform's own menu, which on macOS opened over the control with
+the chosen option on top of it; the GPUI select draws its list as an anchored menu of the layer manager, below the
+control (above it when there is no room below). And the native menu was at least as wide as its control and grew to its
+longest option, where the GPUI list is exactly the control's width and cuts a longer option with an ellipsis (the
+migration's orchestrator chose "exactly" for the launcher's floating lists on 2026-11-14). Smaller differences that
+follow from drawing a menu: the arrow keys wrap from the last option to the first, as in every menu here; a placeholder
+("Choose a recipe") shows in the closed control only, not also as a disabled first entry of the list; and typing a
+letter does not jump to an option.
+
 | Old spec                                       | Tests | Covers                                                                              | Status                                                                                                                                                                                                                        |
 | ---------------------------------------------- | ----- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `tests/buttons.spec.ts`                        | 5     | unavailable filled actions stay quiet and compact questions keep answer order       | partly: screenshot goldens `buttons--{light,dark}`                                                                                                                                                                            |

@@ -246,6 +246,13 @@ pub struct WindowFocus {
     /// The [`scroll_region`]s around the element being prepared, innermost last. Filled and emptied within each region's
     /// own prepaint, so it is empty between frames; a control recorded while it is not empty sits in its last entry.
     regions_open: Vec<ScrollHandle>,
+    /// Where a closing layer last returned focus ([`return_to`]), and the user's input as of that return: a press that
+    /// closed a menu on its way to a dialog's empty space moved focus to the menu's opener, and [`press_was_taken`]
+    /// must not read that move as the press giving focus to a control. Compared by mark, so it speaks for the press (or
+    /// key) that made the return: any later input that counts as the user moving on leaves it stale. One that does not
+    /// count (a double click's second press) still matches it, and [`press_was_taken`] then falls through to its rule
+    /// about a press on the focused control, which decides as it would have without the note.
+    returned: Option<(Mark, WeakFocusHandle)>,
 }
 
 /// One recorded control: its handle, where it was last drawn, its kind, and the scroll regions around it then.
@@ -313,6 +320,7 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
         controls: Vec::new(),
         prune_at: 64,
         last_focused: None,
+        returned: None,
         regions_open: Vec::new(),
     });
     let id = window.window_handle().window_id();
@@ -963,9 +971,11 @@ fn pressed(handle: &FocusHandle, window: &mut Window, cx: &mut App) {
 /// Inside, because focus can also move elsewhere during the same press: GPUI runs every capture listener before any
 /// bubble listener, and an open menu's or anchored question's press-outside close is a capture listener, which returns
 /// focus to the menu's opener before the pressed element sees the press. A click into the terminal while a menu is
-/// open must still focus the terminal. The one case that reads as taken although nothing was clicked into: a press on
-/// a dialog's empty space while a menu inside the dialog is open closes the menu, focus returns to the menu's opener
-/// inside the dialog, and the dialog leaves it there.
+/// open must still focus the terminal. For the same reason a move that a closing layer made during this very press
+/// (focus going back to the menu's opener, [`return_to`]) is not the press being taken: a press on a dialog's empty
+/// space while a select's list inside the dialog is open closes the list and returns focus to the select, and the
+/// dialog must still take focus as it does from any press on its empty space. Before that exception the dialog left
+/// focus on the select, a press on empty space that acted as a press on the control.
 ///
 /// Decided by what focus did rather than by whether the press was marked: GPUI's mark, a prevented default, is also
 /// what [`track`] sets on every control to keep GPUI from focusing it, including a macOS button that a press leaves
@@ -986,10 +996,21 @@ fn press_was_taken(
         return false;
     }
     let now = window.focused(cx);
-    if now.as_ref() != before {
+    let state = state(window, cx);
+    // Focus a closing layer handed back during this press is where the press found it, not where the press put it.
+    let handed_back = state.as_ref().is_some_and(|state| {
+        state
+            .read(cx)
+            .returned
+            .as_ref()
+            .is_some_and(|(mark, place)| {
+                *mark == Mark::take(cx) && place.upgrade().as_ref() == now.as_ref()
+            })
+    });
+    if now.as_ref() != before && !handed_back {
         return true;
     }
-    let (Some(now), Some(state)) = (now, state(window, cx)) else {
+    let (Some(now), Some(state)) = (now, state) else {
         return false;
     };
     let click_focuses = click_focuses_controls(cx);
@@ -1061,7 +1082,16 @@ pub(crate) fn return_to(
     };
     match home.or_else(|| opener.and_then(WeakFocusHandle::upgrade)) {
         // If it is no longer drawn, GPUI reports the focus as lost on the next frame and [`recover`] runs then.
-        Some(place) => apply(Move::To(&place), window, cx),
+        Some(place) => {
+            // Noted for [`press_was_taken`]: a press that closed the layer did not give focus to `place`.
+            if let Some(state) = state(window, cx) {
+                let mark = Mark::take(cx);
+                state.update(cx, |state, _| {
+                    state.returned = Some((mark, place.downgrade()));
+                });
+            }
+            apply(Move::To(&place), window, cx);
+        }
         None => recover(window, cx),
     }
     reveal_focused(window, cx);
