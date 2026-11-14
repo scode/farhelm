@@ -20,6 +20,13 @@
 //! - **[`Role::Group`] behaves as the old buttons with `aria-pressed`.** Each available option is a tab stop of its
 //!   own, Enter or Space chooses it, the arrows do nothing, and options report the button role with their pressed state
 //!   (toggled, to assistive technology).
+//! - **[`Role::GenericContainer`] is the same pressed buttons with no group around them.** The launcher's harness row
+//!   was a plain `div` of `aria-pressed` buttons: no `role="group"`, no accessible name, only a visible "Harness" word
+//!   beside it that nothing tied to the buttons. Its keys were the button group's (each a tab stop, Enter applies the
+//!   choice and launches, Space and a click choose), so this role keeps that keyboard and differs only in what
+//!   assistive technology sees: nothing at all for the container, which takes no role, name or description, as the
+//!   old `div` had none (GPUI's accessibility tree drops generic containers, so the role is never set). The label then
+//!   names the control only in code; the help still shows on hover between the options.
 //!
 //! Enter follows the old launcher's `enter_choice`, through [`RadioGroup::on_enter`]. Without it, Enter on a button
 //! option chooses it, and Enter on a radio goes on to whatever holds the group, as a native radio's did. With it (the
@@ -38,20 +45,46 @@
 //! drawing the stored value again. A radio group reports a choice only when the option was not already chosen, as a
 //! native radio's change event did; a button group reports every press, as the old buttons' click handlers did.
 //!
-//! Not built yet, for when a consumer needs them: the terminal link choice's second line of description, the
-//! launcher's glyphs in segments and its red unchosen YOLO segment, and the status filter's smaller segments.
+//! Three looks, one per old stylesheet rule, picked by the owner and independent of the role's keyboard (except that
+//! plain radio circles promise the radio keyboard, so [`RadioGroup::radios`] demands it):
+//!
+//! - **Segments** (the default): `.segmented-control`, the options side by side in one rounded well, the chosen one in
+//!   the accent fill.
+//! - **Plain radios** ([`RadioGroup::radios`]): the launcher's YOLO fieldset, a circle before each option's words.
+//! - **Chips** ([`RadioGroup::chips`]): the launcher's harness row (`.launch-composer-options`), separate bordered
+//!   buttons on the well color, wrapping with an 8-pixel gap, and no well around them.
+//!
+//! An option can carry more than its words, each ported from one old use:
+//!
+//! - **A glyph** ([`RadioOption::icon`], [`RadioOption::icon_only`]): the launcher's destination type drew a folder or
+//!   a branch before "Folder" and "Managed checkout". The glyph says nothing to assistive technology; the option's
+//!   label stays its accessible name, with or without words beside the glyph.
+//! - **Danger ink** ([`RadioOption::danger`]): the launcher's YOLO permission segment kept its words red while not
+//!   chosen (`.launch-composer-segment-danger`), and took the chosen segment's inverse ink once chosen, because red on
+//!   the accent fill cannot carry the warning. Segments and chips draw it; plain radios ignore it, because the only old
+//!   plain radios (the launcher's "Runs in YOLO mode" fieldset) drew "Yes (YOLO)" in the form's ordinary label ink, so
+//!   the YOLO fieldset's port can mark the option without turning words red that the old app never did.
+//! - **A description line** ([`RadioOption::description`]): Settings' terminal link choices showed what each choice
+//!   does under its label (`.terminal-link-description`). The visible line is the option's accessible description,
+//!   as the old input's `aria-describedby` pointed at it, so a screen reader reads what a sighted user sees under the
+//!   label; the option's hover help is then the tooltip alone, so the two are not both announced when they repeat each
+//!   other, as the old choices' did. A group with any described option stacks its options, one per line, as the old
+//!   `.terminal-link-choices` did, since a description beside another option's would not fit.
+//!
+//! Not built yet, for when a consumer needs them: the status filter's smaller segments.
 
 use std::rc::Rc;
 
 use gpui::{
     App, ElementId, FocusHandle, FontWeight, InteractiveElement, IntoElement, KeyDownEvent,
     MouseButton, ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled,
-    Toggled, Window, div, prelude::FluentBuilder as _, px,
+    Toggled, Window, div, prelude::FluentBuilder as _, px, svg,
 };
 
 use super::HoverHelp;
+use crate::assets::Icon;
 use crate::focus;
-use crate::theme::{self, Palette, metrics};
+use crate::theme::{self, Palette, Token, metrics};
 
 /// The plain radio's circle, as large as the checkbox's box so the launcher's native controls match, and the dot a
 /// chosen one holds.
@@ -62,6 +95,29 @@ const DOT: f32 = 6.;
 const SEGMENT_MIN_HEIGHT: f32 = 30.;
 const SEGMENT_PAD: (f32, f32) = (4., 10.);
 const SEGMENT_LINE_HEIGHT: f32 = 18.2;
+
+/// The harness row's chip as the launcher drew it. The base `.launch-composer-options > button` rule says 38 pixels
+/// high, 14-pixel side padding and 14-pixel semibold words, but the launcher form's own override
+/// (`.create-session-form .launch-composer-harness-choice .launch-composer-options > button`) made every chip anyone
+/// saw 36 pixels high with 12-pixel side padding and 13-pixel regular words; the override is what is ported. The
+/// 1.5-pixel edge and the 8-pixel gap between chips are the base rule's.
+const CHIP_MIN_HEIGHT: f32 = 36.;
+const CHIP_PAD_X: f32 = 12.;
+const CHIP_EDGE: f32 = 1.5;
+const CHIP_GAP: f32 = 8.;
+
+/// The destination type's glyphs (`.destination-folder-glyph`, `.managed-checkout-glyph`) and their gap to the words
+/// (`.segmented-control > button`'s `gap: 6px`).
+const GLYPH: f32 = 12.;
+const GLYPH_GAP: f32 = 6.;
+
+/// A plain radio's gap between its circle and its words (`.create-session-form .launch-command-yolo > label`'s
+/// `gap: 6px`). Equal to [`GLYPH_GAP`] by coincidence; the two come from different old rules.
+const RADIO_GAP: f32 = 6.;
+
+/// `.terminal-link-description`: 12-pixel words at the segment's `line-height: 1.4`, 3 pixels under the label.
+const DESCRIPTION_LINE_HEIGHT: f32 = 16.8;
+const DESCRIPTION_GAP: f32 = 3.;
 
 /// What a choice does with the chosen option's value.
 type OnChange<V> = Rc<dyn Fn(&V, &mut Window, &mut App)>;
@@ -76,6 +132,16 @@ pub struct RadioOption<V> {
     help: HoverHelp,
     value: V,
     disabled: bool,
+    glyph: Option<Glyph>,
+    danger: bool,
+    description: Option<SharedString>,
+}
+
+/// An option's glyph, and whether its words are drawn beside it or only stand behind it as its accessible name.
+#[derive(Clone, Copy)]
+struct Glyph {
+    icon: Icon,
+    words: bool,
 }
 
 impl<V> RadioOption<V> {
@@ -87,13 +153,46 @@ impl<V> RadioOption<V> {
             help,
             value,
             disabled: false,
+            glyph: None,
+            danger: false,
+            description: None,
         }
     }
 
-    /// An unavailable option: drawn dimmed (a segment whole, a plain radio's circle only, as a native radio's words
-    /// stayed as they were), not focusable, and skipped by Tab and the arrows; a click does nothing.
+    /// An unavailable option: drawn dimmed (a segment or chip whole, a plain radio's circle only, as a native radio's
+    /// words stayed as they were), not focusable, and skipped by Tab and the arrows; a click does nothing.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    /// Draw `icon` before the option's words, in the words' ink (the destination type's folder and branch). The label
+    /// stays the accessible name.
+    pub fn icon(mut self, icon: Icon) -> Self {
+        self.glyph = Some(Glyph { icon, words: true });
+        self
+    }
+
+    /// Draw `icon` alone, without the words. The label is still the accessible name, since a glyph says nothing to a
+    /// screen reader, and the hover help is what a sighted user has to tell such options apart, so it should name the
+    /// choice.
+    pub fn icon_only(mut self, icon: Icon) -> Self {
+        self.glyph = Some(Glyph { icon, words: false });
+        self
+    }
+
+    /// A choice that warrants a warning (the launcher's YOLO permission mode): in segments and chips, its words and
+    /// glyph in the danger ink wherever they are not on the chosen option's accent fill. Plain radios ignore it, as the
+    /// old YOLO fieldset's radio was not red. See the module docs.
+    pub fn danger(mut self) -> Self {
+        self.danger = true;
+        self
+    }
+
+    /// A line under the label saying what the choice does (Settings' terminal link choices). It is the option's
+    /// accessible description, and its presence stacks the group's options; see the module docs for both.
+    pub fn description(mut self, description: impl Into<SharedString>) -> Self {
+        self.description = Some(description.into());
         self
     }
 }
@@ -108,19 +207,32 @@ pub struct RadioGroup<V: Clone + PartialEq + 'static> {
     chosen: Option<V>,
     options: Vec<RadioOption<V>>,
     disabled: bool,
-    radios: bool,
+    look: Look,
     on_change: Option<OnChange<V>>,
     on_enter: Option<OnEnter>,
+}
+
+/// How a group draws its options; one at a time, so a single field rather than a flag per look. See the module docs.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Look {
+    Segments,
+    Radios,
+    Chips,
 }
 
 impl<V: Clone + PartialEq + 'static> RadioGroup<V> {
     /// A group labelled `label` (its accessible name; any visible legend is its owner's to draw) with hover help
     /// `help` (its accessible description, and shown when the pointer reaches the group's gaps or edge from outside
-    /// it). `id` must be stable and unique among its siblings; each option
-    /// is drawn under `<id>-<its label>`, which is how tests and the test bridge find it. `role` picks the keyboard:
-    /// [`Role::RadioGroup`] for native radios, [`Role::Group`] for the old segmented buttons (the module docs). Any
-    /// other role is a mistake, caught in debug builds. Drawn as the segmented well unless [`RadioGroup::radios`] asks
-    /// for plain radios.
+    /// it). `id` must be stable and unique among its siblings; each option is drawn under `<id>-<its label>`, which is
+    /// how tests and the test bridge find it. `role` picks the keyboard: [`Role::RadioGroup`] for native radios,
+    /// [`Role::Group`] for the old segmented buttons, and [`Role::GenericContainer`] for those buttons with no group
+    /// around them (the module docs). Any other role is a mistake, caught in debug builds. Drawn as the segmented well
+    /// unless [`RadioGroup::radios`] or [`RadioGroup::chips`] asks for another look.
+    ///
+    /// A generic container has no accessibility node, so its `label` reaches no reader and its `help` is no accessible
+    /// description; the help still shows on hover between the options. It takes both anyway because every control's
+    /// constructor requires a label and hover help (SPEC_impl.md, "The component layer and theme"), and a
+    /// [`Role::Group`] port of the same row, should one be wanted, needs them.
     pub fn new(
         id: impl Into<SharedString>,
         label: impl Into<SharedString>,
@@ -128,8 +240,12 @@ impl<V: Clone + PartialEq + 'static> RadioGroup<V> {
         role: Role,
     ) -> Self {
         debug_assert!(
-            matches!(role, Role::RadioGroup | Role::Group),
-            "a radio group's role picks its keyboard, so it must be a radio group or a group, not {role:?}"
+            matches!(
+                role,
+                Role::RadioGroup | Role::Group | Role::GenericContainer
+            ),
+            "a radio group's role picks its keyboard, so it must be a radio group, a group or a generic container, \
+             not {role:?}"
         );
         RadioGroup {
             id: id.into(),
@@ -139,7 +255,7 @@ impl<V: Clone + PartialEq + 'static> RadioGroup<V> {
             chosen: None,
             options: Vec::new(),
             disabled: false,
-            radios: false,
+            look: Look::Segments,
             on_change: None,
             on_enter: None,
         }
@@ -174,7 +290,15 @@ impl<V: Clone + PartialEq + 'static> RadioGroup<V> {
             Role::RadioGroup,
             "plain radios behave as radios: give the group Role::RadioGroup"
         );
-        self.radios = true;
+        self.look = Look::Radios;
+        self
+    }
+
+    /// Draw the options as the launcher's harness row drew its buttons: separate bordered chips that hug their words
+    /// and wrap, with no well around them (module docs). The look says nothing about the keyboard; the harness row
+    /// pairs it with [`Role::GenericContainer`], as its old buttons sat in no group.
+    pub fn chips(mut self) -> Self {
+        self.look = Look::Chips;
         self
     }
 
@@ -341,29 +465,42 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
         } else {
             Role::Button
         };
+        // Described options stack, one per line across the group's width (`.terminal-link-choices`); otherwise the
+        // options sit in a row that wraps.
+        let stacked = self
+            .options
+            .iter()
+            .any(|option| option.description.is_some());
         let mut options = Vec::with_capacity(self.options.len());
         for (index, option) in self.options.iter().enumerate() {
-            let look = Look {
+            let state = OptionState {
                 chosen: chosen == Some(index),
                 enabled: enabled[index],
                 ring: focus::shows_ring(&handles[index], window),
+                stacked,
             };
-            let element = if self.radios {
-                look.radio(&ids[index], &option.label, palette)
-            } else {
-                look.segment(&ids[index], &option.label, palette)
+            let element = match self.look {
+                Look::Segments => state.segment(&ids[index], option, palette),
+                Look::Radios => state.radio(&ids[index], option, palette),
+                Look::Chips => state.chip(&ids[index], option, palette),
             };
             let element = element
                 .role(option_role)
                 .aria_label(option.label.clone())
-                .aria_toggled(if look.chosen {
+                .aria_toggled(if state.chosen {
                     Toggled::True
                 } else {
                     Toggled::False
+                })
+                .when_some(option.description.clone(), |element, description| {
+                    element.aria_description(description)
                 });
+            // A described option's visible line is its accessible description (module docs), so its help is the
+            // tooltip alone; any other option's help is its description too, as every control's is.
+            let describe = option.description.is_none();
             let element =
-                super::with_hover_help(element, &ids[index], &option.help, true, window, cx);
-            if !look.enabled {
+                super::with_hover_help(element, &ids[index], &option.help, describe, window, cx);
+            if !state.enabled {
                 // Not tracked, so neither Tab nor a click can focus it; the press is still this control's, so it does
                 // not reach the page's empty-space handler and move focus.
                 options.push(
@@ -382,32 +519,44 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
                 Rc::new(move |_, window, cx| on_click.choose(index, window, cx));
             options.push(super::activate_on_click(element, Some(on_click)).into_any_element());
         }
+        // A generic container is the old harness row's plain `div`: no role, no name, no description (module docs).
+        // GPUI refuses the generic role itself, since the accessibility tree filters it out, so it is left unset.
+        let named = self.role != Role::GenericContainer;
         let group = div()
             .id(ElementId::Name(self.id.clone()))
             // Tests find a control by its id; this records nothing outside test builds.
             .debug_selector(|| self.id.to_string())
-            .role(self.role)
-            .aria_label(self.label.clone())
-            // The group's help is its accessible description, as every control's is (`HoverHelp`). Its hover listener
-            // cannot go on this element (see the surface below), so the text is read here directly rather than through
-            // `with_hover_help`, which would add that listener; this module sits inside the one that keeps the text
-            // private, and the surface still wires the help through the shared rule.
-            .aria_description(self.help.0.clone())
+            .when(named, |group| {
+                group
+                    .role(self.role)
+                    .aria_label(self.label.clone())
+                    // The group's help is its accessible description, as every control's is (`HoverHelp`). Its hover
+                    // listener cannot go on this element (see the surface below), so the text is read here directly
+                    // rather than through `with_hover_help`, which would add that listener; this module sits inside
+                    // the one that keeps the text private, and the surface still wires the help through the shared
+                    // rule.
+                    .aria_description(self.help.0.clone())
+            })
             .relative()
             .flex()
-            .flex_wrap()
-            .items_center();
-        let group = if self.radios {
-            group.gap_x(px(16.)).gap_y(px(8.))
-        } else {
+            .map(|group| {
+                if stacked {
+                    group.flex_col().items_stretch()
+                } else {
+                    group.flex_wrap().items_center()
+                }
+            });
+        let group = match self.look {
+            Look::Radios => group.gap_x(px(16.)).gap_y(px(8.)),
+            Look::Chips => group.gap(px(CHIP_GAP)),
             // `.segmented-control`: the options in a well with a 2-pixel gap and padding inside a dim edge.
-            group
+            Look::Segments => group
                 .gap(px(2.))
                 .p(px(2.))
                 .border_1()
                 .border_color(theme::color(palette.border_dim))
                 .rounded(metrics::RADIUS_MD)
-                .bg(theme::color(palette.well))
+                .bg(theme::color(palette.well)),
         };
         // The group's own hover help is wired to a surface laid over the whole group, after the options, because GPUI
         // tells hover listeners about a pointer move from the last drawn to the first: drawn last, this surface hears
@@ -427,40 +576,59 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
     }
 }
 
-/// How one option is drawn: whether it is chosen, available, and showing the keyboard focus ring.
+/// How one option is drawn: whether it is chosen, available, showing the keyboard focus ring, and in a group that
+/// stacks its options (so its contents start at the left edge rather than centered).
 #[derive(Clone, Copy)]
-struct Look {
+struct OptionState {
     chosen: bool,
     enabled: bool,
     ring: bool,
+    stacked: bool,
 }
 
-impl Look {
+impl OptionState {
+    /// The ink of an option's words and glyph in a look that fills the chosen option with the accent: the inverse ink
+    /// on the fill, the danger ink for an unchosen danger option, and `ink` otherwise.
+    fn filled_ink<V>(self, option: &RadioOption<V>, ink: Token, palette: &Palette) -> Token {
+        if self.chosen {
+            palette.on_fill
+        } else if option.danger {
+            palette.danger
+        } else {
+            ink
+        }
+    }
+
+    /// The description line's ink in a look that fills the chosen option: `--on-accent-dim` on the fill (the old
+    /// `.segment-radio > input:checked + span .terminal-link-description`), the secondary ink elsewhere.
+    fn filled_description_ink(self, palette: &Palette) -> Token {
+        if self.chosen {
+            palette.on_accent_dim
+        } else {
+            palette.fg_1
+        }
+    }
+
     /// One segment of `.segmented-control`: transparent with the control hover fill, or the accent fill with the
     /// inverse ink and semibold words when chosen, one step up the accent family under the pointer so hovering the
     /// choice does not hide it. Its focus ring is inset (the old `outline-offset: -3px`), in the inverse ink on the
     /// chosen segment, so it stays visible inside the rounded well.
-    fn segment(
+    fn segment<V>(
         self,
         id: &SharedString,
-        label: &SharedString,
+        option: &RadioOption<V>,
         palette: &Palette,
     ) -> gpui::Stateful<gpui::Div> {
-        let (fill, hover, ink, ring) = if self.chosen {
+        let (fill, hover, ring) = if self.chosen {
             (
                 palette.accent_fill,
                 palette.accent_fill_hover,
                 palette.on_fill,
-                palette.on_fill,
             )
         } else {
-            (
-                theme::TRANSPARENT,
-                palette.control_hover,
-                palette.fg_0,
-                palette.accent,
-            )
+            (theme::TRANSPARENT, palette.control_hover, palette.accent)
         };
+        let ink = self.filled_ink(option, palette.fg_0, palette);
         div()
             .id(ElementId::Name(id.clone()))
             .debug_selector(|| id.to_string())
@@ -469,7 +637,15 @@ impl Look {
             .flex_grow(1.)
             .flex_shrink_0()
             .items_center()
-            .justify_center()
+            // `.terminal-link-choices > .segment-radio > span` lines a stacked option's words up at its left edge.
+            .map(|segment| {
+                if self.stacked {
+                    segment.justify_start()
+                } else {
+                    segment.justify_center()
+                }
+            })
+            .gap(px(GLYPH_GAP))
             .min_h(px(SEGMENT_MIN_HEIGHT))
             .py(px(SEGMENT_PAD.0))
             .px(px(SEGMENT_PAD.1))
@@ -487,7 +663,7 @@ impl Look {
                     .hover(move |style| style.bg(theme::color(hover)))
             })
             .when(!self.enabled, |segment| segment.opacity(0.5))
-            .child(label.clone())
+            .children(contents(option, ink, self.filled_description_ink(palette)))
             .when(self.ring, |segment| {
                 segment.child(
                     div()
@@ -503,14 +679,80 @@ impl Look {
             })
     }
 
-    /// One plain radio, as the launcher's YOLO fieldset drew it: the platform's circle tinted with the accent (the old
-    /// page's `accent-color`), filled with a dot in the inverse ink when chosen, then the words in the form's 12-pixel
-    /// secondary ink (`.create-session-form label`). The words are part of the control, as the old `<label>` around the
-    /// input made them, so a click on them chooses too. Its focus ring sits around the circle, as the old outline did.
-    fn radio(
+    /// One chip of the launcher's harness row (`.launch-composer-options > button`, at the launcher form's size; see
+    /// [`CHIP_MIN_HEIGHT`]): the well color inside a 1.5-pixel edge, or the accent fill with the inverse ink when
+    /// chosen, the words regular weight either way. The old chips had no hover fill, no pointer cursor (no rule set
+    /// one, unlike the segments' `cursor: pointer`) and no disabled look of their own (the stylesheet's colors overrode
+    /// the browser's disabled ink); this one keeps the first two and dims an unavailable chip as every other look does,
+    /// so an unavailable choice never looks available. Its focus ring is the page's
+    /// (2 pixels, 1 pixel clear of the edge, in the accent) and, on the chosen chip, the inverse ink inset 3 pixels
+    /// (the old `.launch-composer-options > button.selected:focus-visible`).
+    fn chip<V>(
         self,
         id: &SharedString,
-        label: &SharedString,
+        option: &RadioOption<V>,
+        palette: &Palette,
+    ) -> gpui::Stateful<gpui::Div> {
+        let fill = if self.chosen {
+            palette.accent_fill
+        } else {
+            palette.well
+        };
+        let ink = self.filled_ink(option, palette.fg_0, palette);
+        // Absolute children are placed inside the edge, so the old ring's offsets, which are measured from the edge's
+        // outer side, are moved out by its width.
+        let (ring, inset, radius) = if self.chosen {
+            (palette.on_fill, 1. - CHIP_EDGE, metrics::RADIUS_SM - px(1.))
+        } else {
+            (
+                palette.accent,
+                -(CHIP_EDGE + 3.),
+                metrics::RADIUS_SM + px(3.),
+            )
+        };
+        div()
+            .id(ElementId::Name(id.clone()))
+            .debug_selector(|| id.to_string())
+            .relative()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(px(GLYPH_GAP))
+            .min_h(px(CHIP_MIN_HEIGHT))
+            .px(px(CHIP_PAD_X))
+            .border(px(CHIP_EDGE))
+            .border_color(theme::color(palette.border))
+            .rounded(metrics::RADIUS_SM)
+            .bg(theme::color(fill))
+            .text_size(metrics::TEXT_MD)
+            .line_height(px(SEGMENT_LINE_HEIGHT))
+            .text_color(theme::color(ink))
+            .when(!self.enabled, |chip| chip.opacity(0.5))
+            .children(contents(option, ink, self.filled_description_ink(palette)))
+            .when(self.ring, |chip| {
+                chip.child(
+                    div()
+                        .absolute()
+                        .top(px(inset))
+                        .left(px(inset))
+                        .right(px(inset))
+                        .bottom(px(inset))
+                        .border_2()
+                        .border_color(theme::color(ring))
+                        .rounded(radius),
+                )
+            })
+    }
+
+    /// One plain radio, as the launcher's YOLO fieldset drew it: the platform's circle tinted with the accent (the old
+    /// page's `accent-color`), filled with a dot in the inverse ink when chosen, then the words in the form's 12-pixel
+    /// secondary ink (`.create-session-form label`), a danger option's too, as the old YOLO radio's were. The words are
+    /// part of the control, as the old `<label>` around the input made them, so a click on them chooses too. Its focus
+    /// ring sits around the circle, as the old outline did.
+    fn radio<V>(
+        self,
+        id: &SharedString,
+        option: &RadioOption<V>,
         palette: &Palette,
     ) -> gpui::Stateful<gpui::Div> {
         let (fill, edge) = if self.chosen {
@@ -518,6 +760,7 @@ impl Look {
         } else {
             (palette.well, palette.border)
         };
+        let ink = palette.fg_1;
         let circle = div()
             .relative()
             .flex_none()
@@ -557,11 +800,58 @@ impl Look {
             .debug_selector(|| id.to_string())
             .flex()
             .items_center()
-            .gap(px(6.))
+            .gap(px(RADIO_GAP))
             .text_size(metrics::TEXT_SM)
-            .text_color(theme::color(palette.fg_1))
+            .text_color(theme::color(ink))
             .when(self.enabled, |radio| radio.cursor_pointer())
             .child(circle)
-            .child(label.clone())
+            .children(contents(option, ink, palette.fg_1))
     }
+}
+
+/// What an option shows after any circle: its glyph, then its words, then its description line under them. A plain
+/// option's label is a direct text child, as it was before glyphs and descriptions existed, so those options draw
+/// exactly as they did. The glyph takes `ink`, the words' ink; the description takes `description_ink` at its own
+/// regular weight, so a chosen segment's semibold stays on the label.
+fn contents<V>(
+    option: &RadioOption<V>,
+    ink: Token,
+    description_ink: Token,
+) -> Vec<gpui::AnyElement> {
+    let mut children = Vec::with_capacity(2);
+    let words = option.glyph.is_none_or(|glyph| glyph.words);
+    if let Some(glyph) = option.glyph {
+        children.push(
+            svg()
+                .path(glyph.icon.path())
+                .size(px(GLYPH))
+                .flex_none()
+                .text_color(theme::color(ink))
+                .into_any_element(),
+        );
+    }
+    match &option.description {
+        None if words => children.push(option.label.clone().into_any_element()),
+        None => {}
+        Some(description) => children.push(
+            div()
+                .flex()
+                .flex_col()
+                .items_start()
+                .flex_1()
+                .min_w_0()
+                .gap(px(DESCRIPTION_GAP))
+                .when(words, |column| column.child(option.label.clone()))
+                .child(
+                    div()
+                        .text_size(metrics::TEXT_SM)
+                        .line_height(px(DESCRIPTION_LINE_HEIGHT))
+                        .font_weight(FontWeight::NORMAL)
+                        .text_color(theme::color(description_ink))
+                        .child(description.clone()),
+                )
+                .into_any_element(),
+        ),
+    }
+    children
 }
