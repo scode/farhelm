@@ -3,8 +3,9 @@
 //! SPEC_impl.md, "Actions and keymap": buttons, menu items and keys dispatch the same action, and every action is
 //! declared here, so a key and the control it stands for can never drift apart. This file holds the actions the focus
 //! coordinator and the layer manager need, the session shortcuts' actions, the terminal's key table
-//! ([`TERMINAL_KEYS`]), the shortcuts matched by the physical key ([`PHYSICAL_KEYS`]), and the list of actions a held
-//! key runs only once (`ONCE_PER_PRESS`). The features add their own actions as they are built.
+//! ([`TERMINAL_KEYS`]), the shortcuts matched by the physical key ([`PHYSICAL_KEYS`]), the list of actions a held key
+//! runs only once (`ONCE_PER_PRESS`), and the one slot through which a feature can take every key for a while
+//! ([`arm_key_capture`]). The features add their own actions as they are built.
 //!
 //! Every binding lives in [`CONTEXT`], the key context the root view sets on everything Farhelm draws. GPUI Kit's
 //! `Root` binds Tab and Shift+Tab in its own context, which sits above Farhelm's root, and moves focus itself when it
@@ -17,8 +18,9 @@
 //!
 //! Extension points (`docs/gpui/foundation-ownership.md`), besides an action and its binding in [`CONTEXT`]: a row in
 //! [`TERMINAL_KEYS`] (with its action, once the terminal command it names has one), a row in [`PHYSICAL_KEYS`] for a
-//! shortcut SPEC.md matches by key position, an action in `ONCE_PER_PRESS`, and a chord in `TEXT_FIELD_KEYS` for an app
-//! shortcut SPEC.md says a text field keeps.
+//! shortcut SPEC.md matches by key position, an action in `ONCE_PER_PRESS`, a chord in `TEXT_FIELD_KEYS` for an app
+//! shortcut SPEC.md says a text field keeps, and arming the key capture slot ([`arm_key_capture`]) for a mode SPEC.md
+//! says takes every key without taking focus.
 //!
 //! ## A focused terminal
 //!
@@ -41,6 +43,30 @@
 //! The terminal itself asks [`terminal_key_owner`] about each key that reaches it, rather than deciding again which
 //! keys are Farhelm's: an app shortcut whose feature has no binding yet still reaches the terminal's listener, and must
 //! not be sent to the program either.
+//!
+//! ## Taking every key for a while: the key capture slot
+//!
+//! SPEC.md's quick-launch sequence takes every key while it is armed, without taking focus: "While armed, typed
+//! characters never reach the terminal's program", Escape cancels it rather than closing a layer, and a key that is not
+//! part of the sequence cancels it and still reaches its normal target. Focus cannot move to a capturing element, so
+//! the keystroke interceptor, which sees each key-down before bindings, the physical-key rows and the focused element,
+//! is the place for it. It holds one app-wide slot ([`arm_key_capture`]): while the slot is armed, every key-down in
+//! every window goes to its handler first, held repeats included (the event's `is_held` says which), and the handler
+//! answers [`Captured::Consumed`], which stops the key there, or [`Captured::Cancel`], which disarms the slot and lets
+//! the key go on through the rest of the interceptor and GPUI's dispatch as if nothing had been armed. Modifiers
+//! pressed on their own never reach the handler: GPUI reports them as modifier changes, which carry no key-down.
+//!
+//! The holder disarms the slot itself ([`disarm_key_capture`]) when the mode ends for its own reasons. A reset of the
+//! connection to the helm disarms it too, and that is the one disarm the holder hears about, through the callback it
+//! armed with, because nothing else tells it the mode is over.
+//!
+//! NOTE: The slot sees key-downs only, and some text reaches the focused element's input handler without one: on macOS,
+//! a key the input method takes while it composes (marked text, a CJK input source, a dead key's accent) arrives as
+//! committed text, never as a key-down, and on Wayland a text-input commit of several characters and a dead key
+//! followed by a key it does not compose with are inserted directly. So with the slot armed, a Japanese input source or
+//! a French `^` still puts text into a focused terminal's program or a text field. The slot cannot stop it; the text
+//! receiver is the place to refuse it, by dropping committed and marked text while [`key_capture_armed`] says so. For
+//! a terminal that is its input handler, and for a text field its own input handling. Neither does that yet.
 //!
 //! ## Shortcuts that act once per press
 //!
@@ -305,8 +331,12 @@ pub fn install(cx: &mut App) {
     });
 }
 
-/// The keystroke interceptor, which sees every key before GPUI matches a binding for it: it runs the shortcuts
-/// [`PHYSICAL_KEYS`] matches by position, and stops a held repeat of a key that would run a `ONCE_PER_PRESS` action.
+/// The keystroke interceptor, which sees every key before GPUI matches a binding for it: it hands the key to an armed
+/// key capture first, runs the shortcuts [`PHYSICAL_KEYS`] matches by position, and stops a held repeat of a key that
+/// would run a `ONCE_PER_PRESS` action.
+///
+/// The capture goes first so that it sees the number-key chords and Escape before their rows and bindings take them; a
+/// key it cancels on is judged by the rest as it would be with nothing armed (a held repeat stays a repeat).
 ///
 /// It does not check GPUI's character-input preference, under which bindings would not run at all: on macOS and
 /// Wayland only GPUI's replay of a held-back chord key asks for it, and a replay never reaches an interceptor. Were a
@@ -315,13 +345,174 @@ fn intercept(event: &KeystrokeEvent, window: &mut Window, cx: &mut App) {
     let Some(down) = &event.key_down else {
         return;
     };
-    if let Some(row) = physical_on(THIS_PLATFORM, down) {
+    if captured(down, window, cx) {
+        cx.stop_propagation();
+    } else if let Some(row) = physical_on(THIS_PLATFORM, down) {
         if !(down.is_held && once_per_press(row.action)) {
             window.dispatch_action(row.action.boxed_clone(), cx);
         }
         cx.stop_propagation();
     } else if down.is_held && runs_once_per_press(&down.keystroke, &event.context_stack, cx) {
         cx.stop_propagation();
+    }
+}
+
+// ---- The key capture slot --------------------------------------------------------------------------------------------
+
+/// What a key capture's handler does with a key-down it was handed ([`arm_key_capture`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Captured {
+    /// The handler took the key, and it goes no further: no physical-key row, binding, focused element, terminal
+    /// program or text input sees it. The slot stays armed.
+    Consumed,
+    /// The capture is over and the key is not its: the slot disarms, and the key goes on as though nothing had been
+    /// armed, to its row, its binding or the focused element. SPEC.md's non-sequence keys, which cancel the sequence
+    /// and still reach their normal target.
+    Cancel,
+}
+
+/// A capture's key handler: handed each key-down, with the window it was typed in.
+type CaptureKey = Box<dyn FnMut(&KeyDownEvent, &mut Window, &mut App) -> Captured>;
+
+/// What a capture runs when a reset of the connection disarms it.
+type CaptureReset = Box<dyn FnOnce(&mut App)>;
+
+/// The one app-wide key capture slot. A global rather than a field of the interceptor because arming happens from
+/// anywhere in the app (an action handler), and the interceptor closure cannot be reached from there.
+#[derive(Default)]
+enum KeyCapture {
+    #[default]
+    Idle,
+    Armed {
+        on_key: CaptureKey,
+        on_reset: CaptureReset,
+    },
+    /// The handler is running. It is out of the slot while it runs, so it can be handed the app it lives in, and so
+    /// may disarm the slot or open and close layers itself (arming is refused until it returns). `on_reset` is `None`
+    /// once something disarmed the slot meanwhile, in which case the handler is dropped instead of put back when it
+    /// returns.
+    Running { on_reset: Option<CaptureReset> },
+}
+
+impl Global for KeyCapture {}
+
+/// Arm the app's one key capture slot: until it is disarmed, every key-down in every window goes to `on_key` before
+/// anything else sees it, a focused terminal's program and the dismiss binding on Escape included (the module docs'
+/// "Taking every key for a while"). The arming key's own held repeats arrive there too, since the handler decides
+/// what a repeat does. `on_reset` runs once if a reset of the connection to the helm disarms the slot; it does not run
+/// on [`disarm_key_capture`] or on a [`Captured::Cancel`], which the holder already knows about.
+///
+/// Returns false, dropping both closures, when the slot is already armed or its handler is running: a second mode
+/// that took the keys from the first would leave the first showing as armed with nothing feeding it, so the holder
+/// that armed it disarms it before anyone else can arm. A handler that disarms the slot and wants a new capture arms
+/// it after it returns.
+#[must_use = "arming is refused while the slot is armed"]
+pub fn arm_key_capture(
+    on_key: impl FnMut(&KeyDownEvent, &mut Window, &mut App) -> Captured + 'static,
+    on_reset: impl FnOnce(&mut App) + 'static,
+    cx: &mut App,
+) -> bool {
+    let slot = cx.default_global::<KeyCapture>();
+    if !matches!(slot, KeyCapture::Idle) {
+        return false;
+    }
+    *slot = KeyCapture::Armed {
+        on_key: Box::new(on_key),
+        on_reset: Box::new(on_reset),
+    };
+    true
+}
+
+/// Disarm the key capture slot, from its holder or its own handler; keys go their normal way from the next one on.
+/// Returns whether the slot was armed. Runs no callback. Called from inside the handler, it leaves the key being
+/// handled to the handler's answer: a handler that ends the mode on a key it keeps (Enter, say) disarms and answers
+/// [`Captured::Consumed`].
+pub fn disarm_key_capture(cx: &mut App) -> bool {
+    let slot = cx.default_global::<KeyCapture>();
+    match slot {
+        KeyCapture::Idle => false,
+        KeyCapture::Armed { .. } => {
+            *slot = KeyCapture::Idle;
+            true
+        }
+        KeyCapture::Running { on_reset } => on_reset.take().is_some(),
+    }
+}
+
+/// Whether the key capture slot is armed (a running handler that has not disarmed it counts). For a text receiver
+/// deciding whether to drop input-method text (the module docs' NOTE), not for drawing: the slot notifies no view when
+/// it changes, so a holder keeps its own mode state.
+pub fn key_capture_armed(cx: &App) -> bool {
+    matches!(
+        cx.try_global::<KeyCapture>(),
+        Some(KeyCapture::Armed { .. } | KeyCapture::Running { on_reset: Some(_) })
+    )
+}
+
+/// Disarm the key capture slot for a reset of the connection to the helm, and tell its holder through its `on_reset`.
+/// The UI-session owner calls this as the window goes inert, beside the layer manager's `close_all`. SPEC.md, "Losing
+/// the connection to the helm": apart from the selected session, the window and settings, "Everything else starts
+/// over: open dialogs and menus, unsaved edits and half-typed launcher drafts included", and a half-typed sequence is
+/// one of those; a capture that outlived the reset would also go on eating keys after its holder's mode had ended.
+pub(crate) fn reset_key_capture(cx: &mut App) {
+    let slot = cx.default_global::<KeyCapture>();
+    let on_reset = match std::mem::take(slot) {
+        KeyCapture::Idle => None,
+        KeyCapture::Armed { on_reset, .. } => Some(on_reset),
+        KeyCapture::Running { on_reset } => {
+            // The handler is still out of the slot; it returns to find the capture over.
+            *slot = KeyCapture::Running { on_reset: None };
+            on_reset
+        }
+    };
+    // Run after the slot is clear, so the callback may arm a new capture, unless a handler is running: the `Running`
+    // branch above is defensive, since a reset arrives from the channel's feed, never from inside a key handler.
+    if let Some(on_reset) = on_reset {
+        on_reset(cx);
+    }
+}
+
+/// Hand `down` to the armed capture, if there is one, and say whether it consumed the key. A [`Captured::Cancel`]
+/// leaves the key propagating, whatever the handler's own dispatching did to GPUI's propagation flag, so the rest of
+/// the interceptor and GPUI see it as they would with nothing armed.
+fn captured(down: &KeyDownEvent, window: &mut Window, cx: &mut App) -> bool {
+    // Read first: reaching the slot mutably queues a global-observer effect, which every key would pay for.
+    if !matches!(
+        cx.try_global::<KeyCapture>(),
+        Some(KeyCapture::Armed { .. })
+    ) {
+        return false;
+    }
+    let slot = cx.default_global::<KeyCapture>();
+    let mut on_key = match std::mem::take(slot) {
+        KeyCapture::Armed { on_key, on_reset } => {
+            *slot = KeyCapture::Running {
+                on_reset: Some(on_reset),
+            };
+            on_key
+        }
+        other => {
+            *slot = other;
+            return false;
+        }
+    };
+    let answer = on_key(down, window, cx);
+    let slot = cx.default_global::<KeyCapture>();
+    // Arming is refused while the handler runs, so the slot is still `Running` here, and left `Idle` by this take. It
+    // is put back only if neither the answer nor a disarm from inside the handler ended the capture.
+    let still_armed = match std::mem::take(slot) {
+        KeyCapture::Running { on_reset } => on_reset,
+        _ => None,
+    };
+    if let (Some(on_reset), Captured::Consumed) = (still_armed, answer) {
+        *slot = KeyCapture::Armed { on_key, on_reset };
+    }
+    match answer {
+        Captured::Consumed => true,
+        Captured::Cancel => {
+            cx.propagate();
+            false
+        }
     }
 }
 

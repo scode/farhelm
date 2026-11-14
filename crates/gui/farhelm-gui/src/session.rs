@@ -10,10 +10,10 @@
 //! (`Reconnecting`, `Displaced`, `CannotConnect` or `HelmEnded`), and the connection retires the current UI session
 //! before anything else happens. Retiring drops the session's store and cancels every task the session owns, its
 //! operation store's included ([`crate::operations`]), down to the task waiting on a completion that was already on its
-//! way, so that completion is never delivered. Then every window's dialogs and menus close, through the layer manager.
-//! Only then does the channel fail the commands it lost, so those failures land on nobody. When the channel is back,
-//! its snapshot builds a brand-new session, and the connection posts the generic connection-lost notice. Nothing in
-//! between tracks what became of an individual action.
+//! way, so that completion is never delivered. Then every window's dialogs and menus close, through the layer manager,
+//! and a capture of every key ends (`actions::reset_key_capture`). Only then does the channel fail the commands it
+//! lost, so those failures land on nobody. When the channel is back, its snapshot builds a brand-new session, and the
+//! connection posts the generic connection-lost notice. Nothing in between tracks what became of an individual action.
 //!
 //! Terminal streams are not on the UI channel (SPEC_impl.md, "Bulk data stays separate"), but they are opened through
 //! the UI session all the same ([`UiSession::terminal_opener`]), so that a terminal view made for a session that a
@@ -49,6 +49,7 @@ use gpui::{
 };
 use serde_json::Value;
 
+use crate::actions;
 use crate::layers::{self, Subject};
 use crate::local_state;
 use crate::notices::{self, Notice};
@@ -202,6 +203,9 @@ fn receive(connection: &WeakEntity<Connection>, event: ChannelEvent, cx: &mut Ap
                 // ground they are anchored to, but a dialog closes only when its opener or its subject says so, and
                 // its veil would cover Take back or Retry on the inert window.
                 layers::close_all(cx);
+                // SPEC.md: "Everything else starts over", half-typed launcher drafts included, and so does a mode
+                // that takes every key (the quick-launch sequence), which would otherwise go on eating keys.
+                actions::reset_key_capture(cx);
             }
             if recovered {
                 notices::post(Notice::ConnectionLost, cx);

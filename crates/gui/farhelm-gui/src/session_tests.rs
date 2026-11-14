@@ -1,7 +1,7 @@
 //! Tests of the connection and UI-session owner, and of what its reset does to the window: the replies and failures it
 //! keeps from the new session, the notice it posts, the dialogs it closes, the terminal streams it refuses to open for a
-//! retired session, and the selected session that survives it; and of following the current UI session from a view
-//! across resets (`session::observe_current`).
+//! retired session, the key capture it disarms, and the selected session that survives it; and of following the
+//! current UI session from a view across resets (`session::observe_current`).
 //!
 //! The helm is the helm client's fake: in process, ordered like the real channel, and moved only by the test, which is
 //! what GPUI's deterministic scheduler needs. Each test stages exactly the feed it is about (a reply queued before a
@@ -26,6 +26,7 @@ use gpui::{
 };
 use gpui_component::Root;
 
+use crate::actions;
 use crate::components::{Button, HoverHelp, Role};
 use crate::focus::{Mark, ReturnTo};
 use crate::layers::{self, Dialog};
@@ -422,6 +423,37 @@ fn a_reset_closes_open_dialogs_so_take_back_stays_reachable(cx: &mut TestAppCont
         vec![FakeDecision::TakeBack],
         "the click on Take back reached the helm"
     );
+}
+
+/// SPEC.md, "Losing the connection to the helm": "Everything else starts over: open dialogs and menus, unsaved edits
+/// and half-typed launcher drafts included." A half-typed quick-launch sequence, armed through the actions module's
+/// key capture slot, is one of those; a capture that outlived the break would go on eating every key typed afterwards,
+/// and its holder would never learn the mode ended. Specified: a capture armed when the window is displaced is disarmed
+/// by the reset, and its holder's reset callback runs exactly once.
+#[gpui::test]
+fn a_reset_disarms_a_key_capture_and_tells_its_holder(cx: &mut TestAppContext) {
+    let (mut fake, connection) = started(cx);
+    fake.connect(vec![sessions(&["a"])]);
+    cx.run_until_parked();
+    let resets = Rc::new(Cell::new(0));
+    let told = resets.clone();
+    let armed = cx.update(|cx| {
+        actions::arm_key_capture(
+            |_, _, _| actions::Captured::Consumed,
+            move |_| told.set(told.get() + 1),
+            cx,
+        )
+    });
+    assert!(armed, "the premise: the slot armed");
+
+    fake.displace();
+    cx.run_until_parked();
+    assert_eq!(state(&connection, cx), ChannelState::Displaced);
+    assert!(
+        !cx.update(|cx| actions::key_capture_armed(cx)),
+        "the reset disarmed the capture"
+    );
+    assert_eq!(resets.get(), 1, "and told its holder once");
 }
 
 /// SPEC.md: a refused credential shows "cannot connect" with Retry rather than a reconnect loop.
