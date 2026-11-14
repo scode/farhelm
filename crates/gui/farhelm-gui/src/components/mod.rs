@@ -27,6 +27,7 @@ mod radio_group;
 mod scrollbar;
 mod select;
 mod status_mark;
+mod tab_strip;
 mod text_input;
 
 #[cfg(test)]
@@ -47,6 +48,7 @@ pub use radio_group::{RadioGroup, RadioOption};
 pub use scrollbar::{SCROLLBAR_WIDTH, Scrollbar, ScrollbarEvent, ScrollbarLines};
 pub use select::{Select, SelectOption};
 pub use status_mark::StatusMark;
+pub use tab_strip::{TabOption, TabStrip};
 pub use text_input::{TextInput, TextInputEvent, TextInputState, Vertical};
 
 use std::rc::Rc;
@@ -259,13 +261,6 @@ pub(crate) fn enter_choice(
 /// )
 /// .on_key_down(move |event, window, cx| tab_strip_arrows(event, window, cx));
 /// ```
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the launcher's tab strip is its first caller; until it is built only the tests call it"
-    )
-)]
 pub(crate) fn on_enter_choice<E: InteractiveElement>(
     element: E,
     apply: impl Fn(&mut Window, &mut App) + 'static,
