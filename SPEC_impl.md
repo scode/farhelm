@@ -547,6 +547,18 @@ answer follows the same rules: it acts on the frozen value, the first answer pre
 never starts on one. Cancel may be relabelled ("Keep editing") or given its own hover help without changing what it
 does.
 
+A centered question that needs more than lines of text (the host setup confirmation's numbered plan with its Copy plan
+button, the host remove confirmation's explanation) carries a body the feature draws. The body is a view built once, as
+the question is asked, from the frozen value, rather than something drawn afresh each frame from whatever is current, so
+what it shows is frozen with the rest of the question; its own controls also keep their state (a focus handle) across
+frames that way. The prompt still owns the answers. A control in the body is not an answer: it never closes the question
+and is not among the answers the first one wins among, and it sits in Tab's order between the question's text and its
+answers, while focus still starts where the rules above put it. The prompt cannot see inside the body, so the feature
+draws host values there through the host-text element as it would anywhere else. A centered question also takes the host
+dialogs' header tile, footer note and width, passed through to the dialog frame. The anchored and inline questions take
+none of the four: no question asked those ways needs them, the anchored look would restyle a body, and an inline
+question returns focus itself only from its answers.
+
 A question is centered over a veil, anchored beside the control it is about, or drawn inline inside the surface that
 owns it (the launcher's YOLO question in its body, the template editor's leave question at its foot), with the same
 rules in all three. An inline question is not a layer: its owner decides where it is drawn, and the prompt decides how
@@ -564,7 +576,9 @@ which nothing can veto.
 
 Enforced by the prompt being the only type that renders answer buttons for a question, and by a generic test, for every
 prompt kind, that changes the confirmation's subject after it opens, then sends its answers (Cancel, Confirm and an
-extra answer) with no draw between them, and checks that any command sent names the frozen targets and preconditions.
+extra answer) with no draw between them, and checks that any command sent names the frozen targets and preconditions. A
+body's tests check that it is built once, as its question opens, from the frozen value; what a feature's body view reads
+while it draws is the feature's to keep frozen.
 
 ### Work that finishes later: the operation stores
 
