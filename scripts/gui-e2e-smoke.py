@@ -416,14 +416,21 @@ class Smoke(unittest.TestCase):
         that host) and this step's session is still listed; a click on the chip takes the chip away, the count line
         back to the plain count, and focus to the rail's All. The step leaves All chosen, as it found it, so no other
         step sees a narrowed list."""
+        # The premise first, before this step changes anything. With another host registered, the first host listed
+        # need not be the local one this step clicks, and if that host carried sessions, "N of N" would no longer hold;
+        # a step that left a host behind fails here, naming what the helm lists, rather than later on a count.
+        hosts = gui_agent.helm_request(RUN, "GET", "/api/hosts")["hosts"]
+        self.assertEqual(
+            [host["kind"] for host in hosts],
+            ["local"],
+            f"premise: the local host is the helm's only host (did an earlier step leave one?); the helm lists {hosts}",
+        )
         title = f"Rail {uuid.uuid4().hex[:8]}"
         fixtures = json.loads((RUN / "run.json").read_text())["binaries"]["fixtures"]
         body = gui_agent.seed_body(0, gui_agent.SESSION_CWD, fixtures)
         body["title"] = title
         gui_agent.helm_request(RUN, "POST", "/api/sessions", body)
         self.ok("wait", "--text", title)
-        hosts = gui_agent.helm_request(RUN, "GET", "/api/hosts")["hosts"]
-        self.assertEqual([host["kind"] for host in hosts], ["local"], "premise: the local host is the helm's only host")
         self.assertNotIn(LOCAL_CHIP, self.ok("snapshot"), "premise: All is chosen")
         total = len(listed_titles())
         self.ok("click", f"id:host-rail-host-{hosts[0]['id']}")
