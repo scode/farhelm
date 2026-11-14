@@ -18,7 +18,8 @@
 //!   entity whose release closes it, or a session the helm's listing proves gone (`Subject::session`, a
 //!   confirmation about a session that was deleted elsewhere). Every overlay is anchored to an element: SPEC.md has no
 //!   menu opened at a pointer position.
-//! - **Three kinds of layer.** A dialog is centered over a veil. A popover (a menu) is drawn below its anchor, or
+//! - **Three kinds of layer.** A dialog is centered over a veil (or near the window's top, for an opener that asks:
+//!   [`DialogOptions`]). A popover (a menu) is drawn below its anchor, or
 //!   beside it when the anchor asks for that ([`Anchor::beside`], the session row's menu flying out beside the
 //!   sidebar). An anchored dialog ([`open_anchored`]) is drawn like a popover but answers like a dialog: it has a
 //!   subject, a main action for Enter and its own empty-space rule. It is how the prompt asks a question beside the
@@ -60,7 +61,8 @@ use gpui::{
     AnyElement, AnyView, AnyWindowHandle, App, AppContext as _, Bounds, BoxShadow, Context,
     Element, ElementId, Entity, EntityId, FocusHandle, Global, GlobalElementId, InspectorElementId,
     InteractiveElement, IntoElement, LayoutId, ParentElement, Pixels, Point, SharedString, Style,
-    Styled, Subscription, WeakEntity, WeakFocusHandle, Window, WindowId, canvas, div, point, px,
+    Styled, Subscription, WeakEntity, WeakFocusHandle, Window, WindowId, canvas, div, point,
+    prelude::FluentBuilder as _, px,
 };
 
 use crate::actions;
@@ -122,7 +124,8 @@ pub type MainAction = Rc<dyn Fn(&mut Window, &mut App)>;
 pub type DismissGuard = Rc<dyn Fn(&App) -> bool>;
 
 enum Kind {
-    Dialog,
+    /// A dialog over its veil, sitting and answering an outside press as its opener asked.
+    Dialog(DialogOptions),
     /// A popover, placed against its anchor element as its [`Placement`] says and following it as it moves; the bounds
     /// are where the anchor was last drawn.
     Popover(AnchorBounds, Placement),
@@ -330,8 +333,9 @@ pub struct Dialog {
     /// it opened) for every dialog SPEC.md does not send elsewhere.
     pub returns_to: focus::ReturnTo,
     /// Whether the user may dismiss the dialog right now, asked on every dismissal the layer manager performs: Escape,
-    /// wherever focus is inside the dialog, the dialog itself included. While it says no, Escape does nothing at all
-    /// (it closes no tooltip or lower layer either). For a dialog busy with work it must not lose, such as an editor
+    /// wherever focus is inside the dialog, the dialog itself included, and a press outside a dialog opened with
+    /// [`DialogOptions::dismiss_on_outside_press`]. While it says no, a dismissal does nothing at all (Escape closes no
+    /// tooltip or lower layer either). For a dialog busy with work it must not lose, such as an editor
     /// whose save is in flight: a guard in the dialog's own view would miss the case where the dialog itself holds
     /// focus (after a click on its empty space), because the layer manager's element sits around that view.
     ///
@@ -375,10 +379,50 @@ pub struct AnchoredDialog {
     pub keeps_focus_on_empty_click: bool,
 }
 
+/// Where a dialog sits over its veil, and whether a press outside it dismisses it: choices its opener makes with
+/// [`open_dialog_with`]. The default is every dialog's ordinary form: centered, and an outside press does nothing but
+/// what a press on the veil always does (nothing reaches the page).
+#[derive(Clone, Copy, Default)]
+pub struct DialogOptions {
+    pub placement: DialogPlacement,
+    /// Whether a press on the veil, outside the dialog, dismisses it: the old quick switcher closed that way. It goes
+    /// through the same path as Escape ([`dismiss_top`]), so the dialog's [`Dialog::may_dismiss`] guard still decides
+    /// and focus returns as Escape returns it; the veil still takes the press, so the page behind never sees it.
+    pub dismiss_on_outside_press: bool,
+}
+
+/// Where a dialog sits over its veil.
+#[derive(Clone, Copy, Default)]
+pub enum DialogPlacement {
+    /// Centered in the window, as every dialog of the old app but the quick switcher.
+    #[default]
+    Centered,
+    /// Centered across, its top `min(12% of the window's height, 80 px)` from the window's top and its height at most
+    /// 75% of the window's: the old quick switcher (`.quick-switcher-backdrop` and `.quick-switcher-dialog` in
+    /// `app.css` at reference commit `24bc0580`), which a dialog that grows with its results keeps from moving. The cap
+    /// holds a view that can shrink to it (`flex_1` and `min_h_0` on its root, with its own scrolling list), as the old
+    /// dialog's list scrolled inside its `max-height`; a view that cannot shrink draws past the cap, and that part counts
+    /// as outside the dialog for presses and focus. A view on [`crate::components::DialogFrame`] fits only if its root
+    /// and the frame both shrink, since the frame's own cap is taller. The old backdrop's 16-pixel side padding is the
+    /// view's to keep, by capping its own width.
+    Top,
+}
+
 /// Open `dialog` on top of everything else, unless the user has moved on since `mark` (then nothing opens, and the
 /// result belongs where the feature shows it otherwise).
 pub fn open_dialog(
     dialog: Dialog,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
+    open_dialog_with(dialog, DialogOptions::default(), mark, window, cx)
+}
+
+/// [`open_dialog`], placed and dismissed as `options` say.
+pub fn open_dialog_with(
+    dialog: Dialog,
+    options: DialogOptions,
     mark: &Mark,
     window: &mut Window,
     cx: &mut App,
@@ -394,7 +438,7 @@ pub fn open_dialog(
         may_dismiss,
     } = dialog;
     open(
-        Kind::Dialog,
+        Kind::Dialog(options),
         view,
         container,
         start,
@@ -637,6 +681,15 @@ pub fn dismiss_top(window: &mut Window, cx: &mut App) -> bool {
     })
 }
 
+/// The topmost layer in `window`, if any is open.
+fn top_layer(window: &Window, cx: &App) -> Option<LayerId> {
+    stack(window, cx)?
+        .read(cx)
+        .layers
+        .last()
+        .map(|layer| layer.id)
+}
+
 /// Whether the layer `id` is still open.
 pub fn is_open(id: LayerId, window: &Window, cx: &App) -> bool {
     stack(window, cx).is_some_and(|stack| stack.read(cx).layers.iter().any(|layer| layer.id == id))
@@ -667,7 +720,7 @@ pub fn focus_is_where_dialogs_allow(window: &Window, cx: &App) -> bool {
     let Some(top_dialog) = stack
         .layers
         .iter()
-        .rposition(|layer| matches!(layer.kind, Kind::Dialog))
+        .rposition(|layer| matches!(layer.kind, Kind::Dialog(_)))
     else {
         return true;
     };
@@ -921,18 +974,40 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
             })
             .child(layer.view.clone());
         let element = match &layer.kind {
-            Kind::Dialog => div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .size_full()
-                .occlude()
-                .bg(theme::color(palette.scrim_dialog))
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(content)
-                .into_any_element(),
+            Kind::Dialog(options) => {
+                let content = content.when(options.dismiss_on_outside_press, |content| {
+                    content.on_mouse_down_out(move |_, window, cx| {
+                        // Only while this dialog is the top layer: a press inside a menu (or another dialog) opened over
+                        // it is outside this dialog too, and belongs to that layer. GPUI runs these handlers from the
+                        // bottom layer up, so this one sees such a layer still open and leaves the press to it.
+                        if top_layer(window, cx) == Some(id) {
+                            dismiss_top(window, cx);
+                        }
+                    })
+                });
+                let veil = div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                    .occlude()
+                    .bg(theme::color(palette.scrim_dialog))
+                    .flex()
+                    .justify_center();
+                match options.placement {
+                    DialogPlacement::Centered => veil.items_center().child(content),
+                    DialogPlacement::Top => {
+                        let viewport = window.viewport_size();
+                        // A column, so a view that can shrink (`flex_1` and `min_h_0`, a list that scrolls) fits the
+                        // cap. A view that cannot spills past it: what it draws below the cap is outside the layer
+                        // for presses and focus (an outside press there dismisses), so a top-placed view must shrink.
+                        veil.items_start()
+                            .pt((viewport.height * 0.12).min(px(80.)))
+                            .child(content.max_h(viewport.height * 0.75).flex().flex_col())
+                    }
+                }
+                .into_any_element()
+            }
             Kind::Popover(anchor, placement) => {
                 let pressed = anchor.clone();
                 let content = content.on_mouse_down_out(move |event, window, cx| {
