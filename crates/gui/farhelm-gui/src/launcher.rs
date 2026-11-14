@@ -5,6 +5,7 @@
 //! Built in pieces. So far:
 //!
 //! - [`draft`]: what the launcher holds, and every edit to it, with no GPUI types.
+//! - `model`: the model field's rules (which catalog rows it lists, what Enter in it means), with no GPUI types.
 //! - [`request`]: whether a draft can launch, the one reason it cannot, and the request body it sends.
 //! - [`view`]: the launcher's dialog, drawing a draft and turning the user's input into its edits.
 //! - `words`: the launcher's names for agent choices and its permission help, ported from the old launcher.
@@ -26,12 +27,15 @@
 //!   showing the launcher goes through the same check and body.
 
 pub mod draft;
+mod model;
 pub mod request;
 pub mod view;
 mod words;
 
 #[cfg(test)]
 mod draft_tests;
+#[cfg(test)]
+mod model_tests;
 #[cfg(test)]
 mod request_tests;
 #[cfg(test)]

@@ -21,13 +21,13 @@
 //!   after a failed read. Hosts, sessions and the remembered permission are read from the store while drawing, and the
 //!   remembered wrapper prefixes when an agent type is chosen.
 //!
-//! NOTE: Not built yet, each with the piece that brings it: the host picker and the model field (its list on the
-//! non-focusing popover), with the host's phase in the footer; the Command tab's declared agent type; sending the
-//! launch (until then a press of a complete draft does nothing); the composer search; recent setups, Browse and the
-//! folder check, with its warning on the folder field; managed checkouts, with their folder and name placeholders; the
-//! escaped read-only display of a prompt, wrapper prefix or Custom flags holding invisible characters, with its Clear
-//! wrapper prefix; and keyboard scrolling of an overflowing notice (the old region took focus once it overflowed;
-//! today's refusals are one or two lines).
+//! NOTE: Not built yet, each with the piece that brings it: the host picker (its list on the non-focusing popover),
+//! with the host's phase in the footer; the Command tab's declared agent type; sending the launch (until then a press
+//! of a complete draft does nothing); the composer search; recent setups, Browse and the folder check, with its warning
+//! on the folder field; managed checkouts, with their folder and name placeholders; the escaped display of a prompt,
+//! wrapper prefix, Custom flags or seeded model holding invisible characters, with its Clear wrapper prefix; and
+//! keyboard scrolling of an overflowing notice (the old region took focus once it overflowed; today's refusals are one
+//! or two lines). The model field is `model_field`.
 
 use std::rc::Rc;
 
@@ -58,6 +58,7 @@ use crate::theme::{self, metrics};
 use crate::{operations, session};
 
 mod choices;
+mod model_field;
 
 /// `.launch-composer-backdrop .create-session-form`: `width: min(960px, 100%)`.
 const WIDTH: f32 = 960.;
@@ -159,6 +160,10 @@ pub(crate) struct Launcher {
     pub(super) prompt: TextInputState,
     /// The Custom permission flags, as typed.
     pub(super) flags: TextInputState,
+    /// The model field's text: the chosen model while closed, what is typed while its list is open.
+    pub(super) model_input: TextInputState,
+    /// The model field's list and what the user is doing in it.
+    model_field: model_field::ModelField,
     command: TextInputState,
     resume: TextInputState,
     /// Cancel's focus handle, where Restart with starts.
@@ -214,7 +219,40 @@ impl Launcher {
         let flags = field(&draft.agent.permission_flags, window, cx);
         let command = field(&draft.command.command, window, cx);
         let resume = field(&draft.command.resume, window, cx);
-        let fields =
+        // The model field is not a plain text edit: what is typed filters its list, and Enter, focus and blur drive it
+        // (`model_field`), so it has its own subscriptions.
+        let model_input = field(
+            draft
+                .agent
+                .model
+                .as_deref()
+                .unwrap_or(model_field::HARNESS_DEFAULT),
+            window,
+            cx,
+        );
+        let model_handle = model_input.focus_handle(cx);
+        let model_events = model_input.subscribe(
+            window,
+            cx,
+            |launcher: &mut Self, event, window, cx| match event {
+                TextInputEvent::Changed => launcher.model_typed(window, cx),
+                TextInputEvent::Submitted => launcher.model_enter(window, cx),
+            },
+        );
+        // GPUI runs focus listeners inside the frame's focus phase, where a redraw request is dropped (`focus.rs` works
+        // around the same trap for its own listener), so opening and closing the list there would show only on some
+        // later frame. Each is deferred to just after, where it redraws at once.
+        let model_focus = cx.on_focus(&model_handle, window, |_, window, cx| {
+            cx.defer_in(window, |launcher, window, cx| {
+                launcher.model_focused(window, cx)
+            });
+        });
+        let model_blur = cx.on_blur(&model_handle, window, |_, window, cx| {
+            cx.defer_in(window, |launcher, window, cx| {
+                launcher.model_blurred(window, cx)
+            });
+        });
+        let mut fields: Vec<Subscription> =
             [
                 (&folder, Input::Folder),
                 (&name, Input::Name),
@@ -238,6 +276,7 @@ impl Launcher {
                 })
             })
             .collect();
+        fields.extend([model_events, model_focus, model_blur]);
         Launcher {
             draft,
             store: store.clone(),
@@ -251,6 +290,8 @@ impl Launcher {
             wrapper,
             prompt,
             flags,
+            model_input,
+            model_field: model_field::ModelField::default(),
             command,
             resume,
             cancel_focus: cx.focus_handle(),
@@ -305,6 +346,13 @@ impl Launcher {
                 state.set_text(value, window, cx);
             }
         }
+        // The model field shows the chosen model only while its list is closed; open, it holds what is being typed.
+        if !self.model_list_open(window, cx) {
+            let shown = self.model_display();
+            if self.model_input.text(cx).as_ref() != shown {
+                self.model_input.set_text(shown, window, cx);
+            }
+        }
     }
 
     /// The hosts as the store holds them, the catalog as read, for the draft's launch check.
@@ -331,8 +379,18 @@ impl Launcher {
     }
 
     /// Why the draft cannot launch now, if it cannot.
+    ///
+    /// Restart with also refuses while the model field holds a model not yet applied (typed into its open list, or
+    /// said under it as not applicable), after the host's own reasons and before the draft's others, as the old
+    /// launcher did: restarting then would quietly keep the session's old model while the field shows another.
     fn refusal(&self, cx: &App) -> Option<String> {
         let hosts = self.hosts(cx);
+        if matches!(self.draft.mode, Mode::RestartWith(_)) && self.model_pending(cx) {
+            return self
+                .draft
+                .host_refusal(&hosts)
+                .or_else(|| Some("Choose a model before restarting".to_owned()));
+        }
         let target = Target {
             hosts: &hosts,
             catalog: self.catalog.as_deref(),
@@ -686,16 +744,24 @@ impl Launcher {
     /// failed catalog read said under the harness row), the conversation selector and the initial prompt once an agent
     /// that offers them is chosen (the prompt not in Restart with, which holds it), the Custom flags while Custom is
     /// chosen, the wrapper prefix, what the last choice changed, and a note for an agent type that lacks something.
-    fn agent_fields(&self, palette: &theme::Palette, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    fn agent_fields(
+        &self,
+        model: Option<Vec<AnyElement>>,
+        palette: &theme::Palette,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
         let mut fields = Vec::new();
         let harness = self.draft.agent.harness;
         let mut choices = self.choice_rows(palette, cx);
+        // Under the harness row, where the old launcher had the catalog's failure and then the model, or first when
+        // Restart with holds the agent type and draws no harness row.
+        let at = usize::from(!self.draft.holds(Field::AgentType));
+        let mut after_harness = Vec::new();
         if let Some(error) = &self.catalog_error {
-            // Under the harness row, where the old launcher said it, or first when Restart with holds the agent type
-            // and draws no harness row.
-            let at = usize::from(!self.draft.holds(Field::AgentType));
-            choices.insert(at, self.catalog_error_line(error, palette, cx));
+            after_harness.push(self.catalog_error_line(error, palette, cx));
         }
+        after_harness.extend(model.into_iter().flatten());
+        choices.splice(at..at, after_harness);
         fields.extend(choices);
         if let Some(harness) = harness.filter(|harness| harness.offers_named_conversation()) {
             let required = matches!(&self.draft.mode, Mode::RestartWith(restart) if restart.conversation_required);
@@ -1091,7 +1157,10 @@ impl Render for Launcher {
             })
         });
         let fields = match self.draft.tab {
-            Tab::Agent => self.agent_fields(palette, cx),
+            Tab::Agent => {
+                let model = self.model_row(palette, window, cx);
+                self.agent_fields(model, palette, cx)
+            }
             Tab::Command => self.command_fields(palette, cx),
         };
         let choices = div()
