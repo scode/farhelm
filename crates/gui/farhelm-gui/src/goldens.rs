@@ -1,8 +1,8 @@
 //! Headless screenshot goldens: one per component, per dialog frame and per overlay kind (tooltip, popover, the prompt
 //! over its veil, once more with a summary that names a host value), the keyboard focus ring, host-supplied text over
-//! its spoofing corpus, the notice banner, and the terminal's styles and cursor shapes, in both appearances, compared
-//! pixel for pixel. (The terminal stays dark in both appearances, so it draws identically in both pictures; only the
-//! scene's ground around it differs.)
+//! its spoofing corpus, the notice banner, the terminal's styles and cursor shapes, and an attached terminal's exit line
+//! and status line, in both appearances, compared pixel for pixel. (The terminal stays dark in both appearances, so it
+//! draws identically in both pictures; only the scene's ground around it differs.)
 //!
 //! These are test references, not documentation media: they pin what each component draws, so a change to a token, a
 //! padding or a font shows up as a failing test with the new picture beside the old one, instead of drifting unnoticed.
@@ -32,10 +32,15 @@ use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, Popover, TooltipOwner};
 use crate::notices::Notice;
 use crate::prompt::{self, Answer, Question};
+use crate::session;
+use crate::terminal::attached::{AttachedTerminal, OpenStream, TerminalTarget};
 use crate::terminal::{CellMetrics, CursorPhase, TerminalView, TextSize};
 use crate::test_support;
 use crate::theme::{self, Preference};
 use farhelm_grid_model::GridOutput;
+use farhelm_helm_client::fake::FakeHelm;
+use farhelm_helm_client::fake::terminal::FakeTerminal;
+use farhelm_helm_client::terminal::AttachmentLease;
 
 /// How many frames a scene may take to settle before the test gives up: icons decode on the background executor, so
 /// the first frame can lack them. Two consecutive identical captures is the readiness signal; a scene that never
@@ -54,7 +59,8 @@ struct Scene {
 /// for (it must stay alive, or the layer manager takes the tooltip down), the anchor a popover scene opens its menu
 /// below (recorded when the scene draws), the focus handle the focus-ring scene's button takes, and the terminal views
 /// a terminal scene's setup makes (they need the real text system to measure their cells, so they are built after the
-/// window exists).
+/// window exists), the attached terminals a scene shows, and whatever those must keep alive (the fake helm and terminal
+/// streams behind them, and the subscription that makes them).
 #[derive(Clone)]
 struct SceneState {
     input: TextInputState,
@@ -62,6 +68,8 @@ struct SceneState {
     anchor: Rc<RefCell<Option<Anchor>>>,
     ring: FocusHandle,
     terminals: Rc<RefCell<Vec<Entity<TerminalView>>>>,
+    attached: Rc<RefCell<Vec<Entity<AttachedTerminal>>>>,
+    keep: Rc<RefCell<Vec<Box<dyn std::any::Any>>>>,
 }
 
 /// The view a scene is drawn in: the window's ground, then the scene, centered, with the layer manager's overlay.
@@ -243,10 +251,10 @@ fn focus_ring_setup(_: &SceneState, window: &mut Window, cx: &mut App) {
 /// The connection-lost notice as the main view draws it, full width, with its Dismiss button focused from the keyboard
 /// (the scene's setup is the focus-ring scene's Tab), so the golden pins the banner's red band and the white ring its
 /// button wears there instead of the accent ring.
-fn notice_banner(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+fn notice_banner(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
     div()
         .w_full()
-        .child(crate::main_view::banner(Notice::ConnectionLost, cx))
+        .child(crate::main_view::banner(Notice::ConnectionLost))
         .into_any_element()
 }
 
@@ -555,6 +563,107 @@ fn terminal_cursors_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     }
 }
 
+/// Two attached terminals whose view another client took over, each showing the red status line with the helm's
+/// reason and Take control above its kept screen (the old terminal's `.banner` with `.banner-reclaim`). The first one's
+/// program exited, so it also has the old app's exit line (`.grid-terminal-exit`) below its last row, in the terminal's
+/// reversed defaults; the second's program still runs. In both the program's last lines sit at the bottom of its screen,
+/// where a shell leaves them, and the status line takes room the fit leaves to the grid, so the screen is lifted by
+/// whole rows: its top rows go out of view and the last ones stay.
+///
+/// The owners need a UI session, so the setup connects a fake helm and makes them once its snapshot arrives; each
+/// owner's opener plays its whole stream at once (attach, a replay at the fitted size, its end, the takeover), and the
+/// settle loop draws until the picture stops changing.
+fn terminal_status_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    helm.connect(Vec::new());
+    // The subscription is kept in `keep` too, so the closure holds it only weakly: a strong handle would be a cycle that
+    // outlives the app and fails its leak check.
+    let (attached, keep) = (state.attached.clone(), Rc::downgrade(&state.keep));
+    let made = cx.observe(&connection, move |connection, cx| {
+        let Some(session) = connection.read(cx).session().cloned() else {
+            return;
+        };
+        if !attached.borrow().is_empty() {
+            return;
+        }
+        let Some(keep) = keep.upgrade() else {
+            return;
+        };
+        for exit in [Some(2), None] {
+            let target = TerminalTarget {
+                session: "golden".into(),
+                tab: None,
+                lease: AttachmentLease::new(),
+            };
+            let metrics = CellMetrics::measure(TextSize::DEFAULT, cx).unwrap();
+            let open = taken_over_stream(exit, keep.clone());
+            let owner = cx.new(|cx| AttachedTerminal::new(&session, target, metrics, open, cx));
+            attached.borrow_mut().push(owner);
+        }
+    });
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(made));
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+}
+
+/// An opener whose fake stream replays a short session at the bottom of the fitted screen, with the program exited
+/// with status `exit` if given, and is then taken over by another client. The fake is kept in `keep`.
+fn taken_over_stream(
+    exit: Option<i32>,
+    keep: Rc<RefCell<Vec<Box<dyn std::any::Any>>>>,
+) -> OpenStream {
+    Box::new(move |attach| {
+        let (mut fake, handle, events) = FakeTerminal::open(&attach);
+        let asked = fake.attach();
+        let last = asked.rows.saturating_sub(1);
+        let (ending, cursor_x) = match exit {
+            Some(_) => ("$ exit", 6),
+            None => ("$ ", 2),
+        };
+        let screen = serde_json::json!([
+            screen_row(last - 2, vec![run(0, 6, "$ make", 0, -1, -1)]),
+            screen_row(last - 1, vec![run(0, 17, "error: tests fail", 0, 1, -1)]),
+            screen_row(last, vec![run(0, ending.len() as u16, ending, 0, -1, -1)]),
+        ]);
+        let cursor =
+            serde_json::json!({"x":cursor_x,"y":last,"visible":true,"shape":"block","blink":false});
+        let mut output = grid_output(asked.cols, asked.rows, screen, cursor);
+        if let Some(code) = exit {
+            let exited = serde_json::json!({"t":"state","mouse":"off","focus":false,"alt_screen":false,
+                "default_fg":null,"default_bg":null,"history_trimmed":false,"exit":{"code":code}});
+            output.push(serde_json::from_value(exited).unwrap());
+        }
+        for message in output {
+            fake.output(message);
+        }
+        fake.replay_complete();
+        fake.detach(
+            Some(farhelm_proto::DetachCode::TakenOver),
+            farhelm_proto::ATTACH_REFUSED_TAKEN_OVER,
+        );
+        keep.borrow_mut().push(Box::new(fake));
+        (handle, events)
+    })
+}
+
+/// The attached terminals a scene made, one above the other, each in a pane of a fixed size.
+fn attached_terminals(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(12.))
+        .children(
+            state
+                .attached
+                .borrow()
+                .iter()
+                .map(|owner| div().w(px(420.)).h(px(150.)).child(owner.clone())),
+        )
+        .into_any_element()
+}
+
 /// The terminals a terminal scene's setup made, in a row.
 fn terminals(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
     div()
@@ -564,7 +673,7 @@ fn terminals(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
         .into_any_element()
 }
 
-static SCENES: [Scene; 12] = [
+static SCENES: [Scene; 13] = [
     Scene {
         name: "buttons",
         size: (560., 64.),
@@ -637,6 +746,12 @@ static SCENES: [Scene; 12] = [
         draw: terminals,
         setup: terminal_cursors_setup,
     },
+    Scene {
+        name: "terminal-status",
+        size: (444., 336.),
+        draw: attached_terminals,
+        setup: terminal_status_setup,
+    },
 ];
 
 /// Draw and capture `window` until two consecutive captures match, at most [`MAX_SETTLE_FRAMES`] times.
@@ -693,6 +808,8 @@ fn component_goldens() -> anyhow::Result<()> {
                         anchor: Rc::new(RefCell::new(None)),
                         ring: cx.focus_handle().tab_stop(true),
                         terminals: Rc::new(RefCell::new(Vec::new())),
+                        attached: Rc::new(RefCell::new(Vec::new())),
+                        keep: Rc::new(RefCell::new(Vec::new())),
                     };
                     let scene_view = cx.new(|cx| SceneView {
                         scene,

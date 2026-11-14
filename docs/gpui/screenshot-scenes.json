@@ -80,6 +80,11 @@
       "golden": "terminal-cursors",
       "title": "Terminal cursor shapes",
       "reference": null
+    },
+    {
+      "golden": "terminal-status",
+      "title": "An attached terminal's exit line and its detached status line",
+      "reference": "terminal-detached-banner"
     }
   ],
   "reference_scenes": [
