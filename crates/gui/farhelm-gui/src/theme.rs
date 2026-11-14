@@ -6,7 +6,13 @@
 //! [`palette`] for the tokens while they draw, and turn them into GPUI colors at the last moment through [`color`],
 //! which sits under the crate's one exemption from the raw-color bans in `crates/gui/clippy.toml`. A [`Token`] can only
 //! be made inside this module, so `color` cannot be handed a literal from anywhere else: the palette tables below are
-//! the only place a color value is written down.
+//! the only place the GUI's own colors are written down.
+//!
+//! The terminal is the one place colors come from outside the tables: a program can name any truecolor, and the
+//! 256-color index's cube and gray ramp are computed rather than listed. The migration's orchestrator decided on
+//! 2026-11-13 that the terminal's palette lives inside the theme under its exemption, with no second one. Those wire
+//! values become GPUI colors here too, through [`TerminalColor::hsla`] under the same exemption, so no view builds a
+//! color either way.
 //!
 //! Appearance follows SPEC.md: the user chooses System, Dark or Light, and System follows the operating system live.
 //! A change goes through [`set_preference`] or [`follow_system`], which re-project GPUI Kit's theme from the same
@@ -16,7 +22,7 @@
 
 use std::rc::Rc;
 
-use gpui::{App, Global, Pixels, Subscription, Window, WindowAppearance, px};
+use gpui::{App, Global, Hsla, Pixels, Subscription, Window, WindowAppearance, px};
 use gpui_component::{Theme, ThemeConfig, ThemeMode};
 
 /// A color from the theme's tables. The constructors are private, so every color the GUI draws with is one of the
@@ -214,6 +220,117 @@ pub const LIGHT: Palette = Palette {
     ],
 };
 
+/// The terminal's colors: Ghostty's default theme, which the old app's terminal used (`terminal-theme.js` at the
+/// reference commit, itself read from Ghostty's `Config.zig` and `color.zig`).
+///
+/// The terminal surface stays dark in both appearances, as in the old app, so this is one palette, not a pair. A
+/// program can still name any color: the 256-color index, truecolor and the OSC 10/11 defaults all resolve through
+/// [`terminal_color`], which is the one place those wire values become GPUI colors, under this module's exemption.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TerminalPalette {
+    /// `foreground`: the default text color.
+    pub foreground: Token,
+    /// `background`: the default cell and pane ground.
+    pub background: Token,
+    /// `cursor`: the cursor fill and outline.
+    pub cursor: Token,
+    /// `cursorAccent`: the glyph under a filled block cursor.
+    pub cursor_accent: Token,
+    /// The sixteen ANSI colors, `black` through `brightWhite`, in index order.
+    pub ansi: [Token; 16],
+}
+
+/// Ghostty's default terminal theme, as the old app's `terminal-theme.js` held it.
+pub const TERMINAL: TerminalPalette = TerminalPalette {
+    foreground: rgb_token(0xffffff),
+    background: rgb_token(0x282c34),
+    cursor: rgb_token(0xffffff),
+    cursor_accent: rgb_token(0x282c34),
+    ansi: [
+        rgb_token(0x1d1f21),
+        rgb_token(0xcc6666),
+        rgb_token(0xb5bd68),
+        rgb_token(0xf0c674),
+        rgb_token(0x81a2be),
+        rgb_token(0xb294bb),
+        rgb_token(0x8abeb7),
+        rgb_token(0xc5c8c6),
+        rgb_token(0x666666),
+        rgb_token(0xd54e53),
+        rgb_token(0xb9ca4a),
+        rgb_token(0xe7c547),
+        rgb_token(0x7aa6da),
+        rgb_token(0xc397d8),
+        rgb_token(0x70c0b1),
+        rgb_token(0xeaeaea),
+    ],
+};
+
+/// What a terminal cell color resolves against: the role's default when the program named none, and whether bold
+/// promotes the eight base ANSI colors to their bright variants (the old app's `grid-style.js` rule).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TerminalRole {
+    /// The color used for [`farhelm_grid_model::Color::Default`].
+    pub default: TerminalColor,
+    /// Bold text promotes ANSI 0-7 to 8-15.
+    pub bright: bool,
+}
+
+/// A resolved terminal color: an RGB value from the palette or the program, kept as plain data so styles can be
+/// compared and cached; [`TerminalColor::hsla`] turns it into a GPUI color when the terminal paints.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TerminalColor(u32);
+
+impl TerminalColor {
+    /// A palette token's color. Terminal tokens are opaque; an alpha token is never a terminal role.
+    pub fn of(token: Token) -> Self {
+        Self(token.value)
+    }
+
+    /// The color as GPUI paints it, with `alpha` (the terminal's dim attribute draws at half alpha).
+    pub fn hsla(self, alpha: f32) -> Hsla {
+        raw::rgb_value(self.0).alpha(alpha)
+    }
+}
+
+/// Resolve a wire color for one role: the role's default, a palette index (0-15 from [`TERMINAL`], 16-231 the xterm
+/// color cube, 232-255 the gray ramp) or a program's truecolor.
+pub fn terminal_color(color: farhelm_grid_model::Color, role: TerminalRole) -> TerminalColor {
+    use farhelm_grid_model::Color;
+    match color {
+        Color::Default => role.default,
+        Color::Palette(index) => {
+            let index = if role.bright && index < 8 {
+                index + 8
+            } else {
+                index
+            };
+            TerminalColor(terminal_index(index))
+        }
+        Color::Rgb { r, g, b } => {
+            TerminalColor(u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b))
+        }
+    }
+}
+
+/// One of the 256 xterm indices as `0xRRGGBB`, without consulting the host's theme.
+fn terminal_index(index: u8) -> u32 {
+    match index {
+        0..=15 => TERMINAL.ansi[usize::from(index)].value,
+        16..=231 => {
+            let i = index - 16;
+            let levels = [0u32, 95, 135, 175, 215, 255];
+            levels[usize::from(i / 36)] << 16
+                | levels[usize::from(i / 6 % 6)] << 8
+                | levels[usize::from(i % 6)]
+        }
+        _ => {
+            let v = 8 + u32::from(index - 232) * 10;
+            v << 16 | v << 8 | v
+        }
+    }
+}
+
 /// Sizes the slice's surfaces use, copied from the old stylesheet. Shared by both appearances.
 pub mod metrics {
     use super::{Pixels, px};
@@ -401,8 +518,10 @@ fn kit_config(palette: &Palette) -> ThemeConfig {
 pub use raw::color;
 
 /// The crate's one exemption from the raw-color bans: everything that draws turns a [`Token`] into a GPUI color through
-/// [`color`], and only this module can make a token, so a color that is not in the palette tables cannot reach the
-/// screen without a second exemption that review would see.
+/// [`color`], and only this module can make a token. The terminal's resolved colors take the other way through here,
+/// `rgb_value`, which is how a program's truecolor and the 256-color cube reach the screen (the orchestrator's
+/// decision of 2026-11-13 in the module doc). Any other color that is not in the palette tables would need a second
+/// exemption that review would see.
 #[allow(
     clippy::disallowed_methods,
     reason = "the theme module is the one place raw colors are built"
@@ -419,6 +538,12 @@ mod raw {
         } else {
             gpui::rgb(token.value).into()
         }
+    }
+
+    /// An opaque `0xRRGGBB` as a GPUI color, for the terminal colors [`super::TerminalColor`] resolved inside this
+    /// module (a palette token or a program's own color, which no token can name).
+    pub(super) fn rgb_value(value: u32) -> Hsla {
+        gpui::rgb(value).into()
     }
 }
 
