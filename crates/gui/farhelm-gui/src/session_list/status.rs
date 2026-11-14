@@ -9,16 +9,21 @@
 //! visible instead (an exit code, a stop annotation, a launch failure's detail are facts a mark cannot carry), on a line
 //! of their own under the title. `Unknown` is plumbing, not a status, and draws nothing at all.
 //!
-//! NOTE: The running mark does not pulse yet; the pulse needs the ticker's animation phase, which comes later in the
-//! migration. A row on a host that is not connected already draws its mark grey, as the still dot SPEC.md asks for.
+//! The running mark pulses ([`pulses`]): its opacity steps down to a shallow minimum and back every two seconds
+//! ([`pulse_opacity`]), at the ticker's shared pulse phase, so every running dot in the list steps together. The pulse
+//! is a claim about the present, so a running session on a host that is not connected draws a grey, still mark, as
+//! SPEC.md asks.
 
 use farhelm_proto::SessionStatus;
 use farhelm_proto::ui_channel::SessionRow;
-use gpui::{IntoElement, ParentElement, SharedString, Styled, div, px, svg};
+use gpui::{
+    IntoElement, ParentElement, SharedString, Styled, div, prelude::FluentBuilder as _, px, svg,
+};
 
 use crate::assets::Icon;
 use crate::host_text::{HostSentence, HostText, Line};
 use crate::theme::{Palette, Token, metrics};
+use crate::ticker;
 
 /// What a row shows for its status.
 #[derive(Clone)]
@@ -99,14 +104,53 @@ impl Live {
         }
     }
 
-    /// The mark, in [`Live::mark_color`].
-    pub(crate) fn mark(self, palette: &Palette, selected: bool, stale: bool) -> impl IntoElement {
+    /// Whether this mark pulses on a row that is `stale` or not: only a running mark does, and only on a connected
+    /// host. This is the one statement of that rule; [`pulses`] and [`Live::mark_opacity`] both ask here. The old
+    /// sheet's `.session-row.stale` rule gives the reason: staleness is exactly the state in which nobody can claim
+    /// something is happening right now, and motion reads as evidence, so a stale row's last-known running stands
+    /// still.
+    pub(crate) fn pulses(self, stale: bool) -> bool {
+        self == Live::Running && !stale
+    }
+
+    /// The mark's opacity at pulse step `step` ([`ticker::Pulsing::step`]): [`pulse_opacity`] at the palette's
+    /// minimum for an ordinary row (`--status-pulse-min`) or the shallower one for the selected row
+    /// (`--selected-status-pulse-min`), when the mark pulses ([`Live::pulses`]); full opacity for every other mark,
+    /// whatever the step.
+    pub(crate) fn mark_opacity(
+        self,
+        palette: &Palette,
+        selected: bool,
+        stale: bool,
+        step: u64,
+    ) -> f32 {
+        if !self.pulses(stale) {
+            return 1.;
+        }
+        let min = if selected {
+            palette.selected_status_pulse_min
+        } else {
+            palette.status_pulse_min
+        };
+        pulse_opacity(step, min)
+    }
+
+    /// The mark, in [`Live::mark_color`] and at [`Live::mark_opacity`].
+    pub(crate) fn mark(
+        self,
+        palette: &Palette,
+        selected: bool,
+        stale: bool,
+        step: u64,
+    ) -> impl IntoElement {
         let color = self.mark_color(palette, selected, stale);
+        let opacity = self.mark_opacity(palette, selected, stale, step);
         svg()
             .path(self.icon().path())
             .size(metrics::STATUS_DOT)
             .flex_none()
             .text_color(crate::theme::color(color))
+            .when(opacity < 1., |mark| mark.opacity(opacity))
     }
 }
 
@@ -145,6 +189,42 @@ impl Badge {
     }
 }
 
+/// Whether `row`'s mark pulses ([`Live::pulses`]): a running session on a connected host.
+pub(crate) fn pulses(row: &SessionRow) -> bool {
+    live(row).is_some_and(|live| live.pulses(row.stale))
+}
+
+/// The live mark `row` draws, or `None` for a status that draws no mark (an ended one, or one nobody classified).
+fn live(row: &SessionRow) -> Option<Live> {
+    match &row.info.status {
+        SessionStatus::Running => Some(Live::Running),
+        SessionStatus::Waiting => Some(Live::Waiting),
+        SessionStatus::Idle if unseen(row) => Some(Live::IdleUnseen),
+        SessionStatus::Idle => Some(Live::Idle),
+        SessionStatus::Unknown
+        | SessionStatus::Exited { .. }
+        | SessionStatus::Interrupted
+        | SessionStatus::Error { .. } => None,
+    }
+}
+
+/// The running mark's opacity at pulse step `step` (`0..ticker::PULSE_STEPS`), dipping to `min_percent` at its
+/// dimmest. The old `farhelm-status-pulse` keyframes fall linearly from 1 to the minimum and climb back, and `steps(4)`
+/// holds each quarter of each half at the value where it starts, so the steps read full, three quarters of the way,
+/// half way, a quarter of the way, the minimum, and back up: with a 60% minimum, 1.0, 0.9, 0.8, 0.7, 0.6, 0.7, 0.8,
+/// 0.9.
+pub(crate) fn pulse_opacity(step: u64, min_percent: u8) -> f32 {
+    let half = ticker::PULSE_STEPS / 2;
+    let step = step % ticker::PULSE_STEPS;
+    let depth = if step <= half {
+        step
+    } else {
+        ticker::PULSE_STEPS - step
+    };
+    let dip = 1. - f32::from(min_percent) / 100.;
+    1. - dip * depth as f32 / half as f32
+}
+
 /// Whether the session has output nobody has looked at: its latest activity is newer than the stamp the helm recorded
 /// the last time a client had it open, or nothing is recorded at all (never opened, or marked unread). SPEC.md,
 /// "Status".
@@ -155,13 +235,11 @@ pub(crate) fn unseen(row: &SessionRow) -> bool {
 
 /// What `row`'s status shows. `id` names the ended line's sentence, which needs an element id when it quotes the host.
 pub(crate) fn badge(row: &SessionRow, id: SharedString) -> Option<Badge> {
-    let live = |live| Some(Badge::Live(live));
     match &row.info.status {
         SessionStatus::Unknown => None,
-        SessionStatus::Running => live(Live::Running),
-        SessionStatus::Waiting => live(Live::Waiting),
-        SessionStatus::Idle if unseen(row) => live(Live::IdleUnseen),
-        SessionStatus::Idle => live(Live::Idle),
+        SessionStatus::Running | SessionStatus::Waiting | SessionStatus::Idle => {
+            live(row).map(Badge::Live)
+        }
         SessionStatus::Exited { exit_code } => {
             let mut words = "Exited".to_owned();
             if let Some(code) = exit_code {
