@@ -113,6 +113,11 @@
       "reference": "terminal-detached-banner"
     },
     {
+      "golden": "terminal-delete-scrim",
+      "title": "The scrim over the open session's terminal while its Delete stops the agent",
+      "reference": null
+    },
+    {
       "golden": "session-list",
       "title": "The session list: every status a row draws, with the open session selected",
       "reference": "main-running-session"

@@ -128,6 +128,10 @@ pub struct Palette {
     /// `--selected-status-pulse-min`, in percent: the same on the solid selection, where a deeper dip loses the
     /// mark's contrast against the fill.
     pub selected_status_pulse_min: u8,
+    /// `--scrim`, as `0xRRGGBBAA`: the veil over a terminal that a Delete is taking away. Black in both appearances,
+    /// because it lies over the terminal's own dark ground and must be darker than it; a lighter veil would lift the
+    /// terminal rather than dim it.
+    pub scrim: Token,
     /// `--scrim-dialog`, as `0xRRGGBBAA`: the veil behind a modal dialog.
     pub scrim_dialog: Token,
     /// `--shadow-menu`'s color, as `0xRRGGBBAA`: under menus and tooltips.
@@ -173,6 +177,8 @@ pub const DARK: Palette = Palette {
     on_accent_dim: rgb_token(0xf4f6ff),
     status_pulse_min: 60,
     selected_status_pulse_min: 85,
+    // rgba(0, 0, 0, 0.82)
+    scrim: rgba_token(0x000000d1),
     // rgb(8 11 17 / 62%)
     scrim_dialog: rgba_token(0x080b119e),
     // rgba(0, 0, 0, 0.35)
@@ -225,6 +231,8 @@ pub const LIGHT: Palette = Palette {
     on_accent_dim: rgb_token(0xf4f6ff),
     status_pulse_min: 73,
     selected_status_pulse_min: 85,
+    // rgba(0, 0, 0, 0.82)
+    scrim: rgba_token(0x000000d1),
     // rgb(27 33 48 / 30%)
     scrim_dialog: rgba_token(0x1b21304d),
     // rgba(27, 33, 48, 0.15)
