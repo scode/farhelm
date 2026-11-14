@@ -181,7 +181,8 @@ pub struct DraftInput {
 
 impl DraftInput {
     /// A field showing `value` (the raw value from the store) over a draft of it, untouched. `field` reaches this
-    /// within the editor `V`; `on_submit` runs when the user presses Enter in the field (an editor's Save, usually).
+    /// within the editor `V`; `on_submit` runs when the user presses Enter in the field (an editor's Save, usually),
+    /// which never happens in a growing box, where Enter types a line break.
     pub fn new<V: 'static>(
         value: &str,
         input: TextInputState,
