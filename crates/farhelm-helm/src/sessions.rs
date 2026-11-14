@@ -215,13 +215,25 @@ struct GithubRepositoriesBody {
 /// user to fix something that is not broken; every other failure keeps the
 /// Git and checkout-root hint. Only the kind of a supervisor's reply is
 /// read, never its text, so a supervisor that lies about being busy can
-/// only choose between two helm-written sentences.
+/// only choose between two helm-written sentences. A scan the helm stopped
+/// waiting for ([`within_host_read_bound`]) says so instead, since neither of
+/// those sentences describes a host that did not answer.
 fn repository_discovery_failure(error: &anyhow::Error) -> String {
-    let busy = crate::find_cause::<SupervisorError>(error).is_some_and(|e| {
+    let cause = crate::find_cause::<SupervisorError>(error);
+    let busy = cause.is_some_and(|e| {
         e.origin() == crate::client::ErrorOrigin::SupervisorReply
             && e.kind() == ErrorKind::Unavailable
     });
-    if busy {
+    let timed_out = cause.is_some_and(|e| {
+        e.origin() == crate::client::ErrorOrigin::Helm && e.kind() == ErrorKind::Timeout
+    });
+    if timed_out {
+        format!(
+            "the host did not answer the repository search within {} seconds; recent repositories \
+             are still available",
+            HOST_REPLY_BOUND.as_secs()
+        )
+    } else if busy {
         farhelm_proto::HOST_BUSY_REFUSAL.to_string()
     } else {
         "repository discovery is unavailable on this host; verify Git and the configured checkout root"
@@ -302,20 +314,21 @@ pub(crate) async fn github_repositories(
         Err(error) => return http_error(error),
     };
     let result = if let Some(client) = status.client.filter(|_| config.root.is_some()) {
-        client
-            .github_repo_search(
-                farhelm_proto::ClaimContext {
-                    host: claim.host.to_string(),
-                    incarnation: claim.incarnation,
-                },
-                &req.query,
-                config.root,
-            )
-            .await
-            // A remote diagnostic may contain arbitrary config text or URLs.
-            // Keep discovery's public response limited to identities and a
-            // bounded actionable status, including when the scan itself fails.
-            .map_err(|error| repository_discovery_failure(&error))
+        // A scan that outlasts the bound is one more incomplete observation:
+        // the recents below still list, and a typed pair stays selectable.
+        within_host_read_bound(client.github_repo_search(
+            farhelm_proto::ClaimContext {
+                host: claim.host.to_string(),
+                incarnation: claim.incarnation,
+            },
+            &req.query,
+            config.root,
+        ))
+        .await
+        // A remote diagnostic may contain arbitrary config text or URLs.
+        // Keep discovery's public response limited to identities and a
+        // bounded actionable status, including when the scan itself fails.
+        .map_err(|error| repository_discovery_failure(&error))
     } else if config.root.is_none() {
         Err("no checkout folder is configured; set one in this host's settings or a default in Settings → Checkouts".to_string())
     } else {
@@ -386,7 +399,10 @@ pub(crate) async fn github_checkout_preview(
     if let Err(error) = crate::precondition::incarnation_holds(&claim, req.expected_incarnation) {
         return http_error(error);
     }
-    match preview_github_checkout(&state, &claim, &client, req.repo, req.title).await {
+    // Bounded here, on the route, rather than inside the shared preview: agent
+    // approvals and sandbox creates call it too and keep their own waits.
+    let preview = preview_github_checkout(&state, &claim, &client, req.repo, req.title);
+    match within_host_read_bound(preview).await {
         Ok(preview) => axum::Json(preview).into_response(),
         Err(error) => http_error(error),
     }
@@ -511,7 +527,7 @@ pub(crate) async fn browse_directory(
         return http_error(error);
     }
     if req.membership_only {
-        return match client.managed_checkout_for_cwd(&req.cwd).await {
+        return match within_host_read_bound(client.managed_checkout_for_cwd(&req.cwd)).await {
             Ok((cwd, _managed)) => axum::Json(BrowseDirectoryBody {
                 cwd,
                 parent: None,
@@ -522,7 +538,7 @@ pub(crate) async fn browse_directory(
             Err(error) => http_error(error),
         };
     }
-    match client.browse_directory(&req.cwd).await {
+    match within_host_read_bound(client.browse_directory(&req.cwd)).await {
         Ok((cwd, parent, children, truncated, _managed_checkout)) => {
             if let Some(identity) = claim.identity.as_deref()
                 && let Err(error) = state
@@ -1748,14 +1764,27 @@ async fn forget_session(state: &AppState, claim: &manager::SessionClaim, session
 /// The guard protects the chosen TARGET: a retarget or adoption between
 /// rendering and submit would otherwise launch the right bundle on the wrong
 /// installation. See [`crate::precondition`].
+///
+/// ## The reply is bounded, the create is not
+///
+/// The wait for the host runs under [`HOST_REPLY_BOUND`], as Rename, Delete,
+/// Stop, Restart and Replace do, so the GUI's ordered channel never holds a
+/// later click behind a host that does not answer (SPEC_impl.md, "The UI
+/// channel"). Past the bound the reply says the host timed out while the
+/// create carries on in its own task; if it succeeds, the pushed session list
+/// shows the new session. A fresh GitHub checkout's clone runs in the new
+/// session's terminal after the create, so it is not part of this wait.
 pub(crate) async fn create_session(
     State(state): State<Arc<AppState>>,
     axum::Json(req): axum::Json<CreateReq>,
 ) -> impl IntoResponse {
-    match create_session_request(&state, req, None).await {
-        Ok((claim, session)) => session_reply(&claim.entry_uuid, session),
-        Err(error) => http_error(error),
-    }
+    within_host_reply_bound(async move {
+        match create_session_request(&state, req, None).await {
+            Ok((claim, session)) => session_reply(&claim.entry_uuid, session),
+            Err(error) => http_error(error),
+        }
+    })
+    .await
 }
 
 /// Create the first session on the resource this launch just registered.
@@ -3552,9 +3581,10 @@ pub(crate) async fn rename_session(
 
 /// How long the GUI's ordinary DELETE, rename, Stop, Restart and Replace of a
 /// session wait for the host before answering that it did not answer in time.
-/// The host management routes that can wait as long use the same bound: a
-/// host probe, an Update's plan, and a destination or alias change (see
-/// [`within_host_reply_bound_saying`]).
+/// A create waits the same, and so do the launcher's host reads (see
+/// [`within_host_read_bound`]). The host management routes that can wait as
+/// long use the same bound: a host probe, an Update's plan, and a destination
+/// or alias change (see [`within_host_reply_bound_saying`]).
 ///
 /// The UI channel admits one command at a time, so this is also the longest
 /// any later click can wait behind a slow host; it has to stay short. Twenty
@@ -3562,9 +3592,10 @@ pub(crate) async fn rename_session(
 /// even over SSH (a Restart or Replace launches an agent and a Replace then
 /// deletes the source, which normally ends well inside it), and still well
 /// under the GUI's own watchdog, which treats a command left unanswered for
-/// longer as a broken channel and resets the window. The host request itself
-/// is not cancelled: it carries on, and the pushed session list shows its
-/// outcome when it lands.
+/// longer as a broken channel and resets the window. For the changes (every
+/// route but the reads), the host request itself is not cancelled: it carries
+/// on, and the pushed session list shows its outcome when it lands. A read is
+/// dropped at the bound, since nothing is left to finish.
 ///
 /// What a caller must not assume from the timeout reply: that the work
 /// finished, failed, or did not start. The next command the channel admits
@@ -3577,8 +3608,9 @@ pub(crate) async fn rename_session(
 ///
 /// Only the HTTP routes are bounded. Every other caller of the shared work
 /// (`do_delete_session`, `do_rename_session`, `do_stop_session`,
-/// `do_replace_session` and the restart's), such as the supervisor relay
-/// agents use, keeps its own waiting behavior unchanged.
+/// `do_replace_session`, the restart's, `create_session_request` and
+/// `preview_github_checkout`), such as the supervisor relay agents use or an
+/// environment's first session, keeps its own waiting behavior unchanged.
 pub(crate) const HOST_REPLY_BOUND: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// Run `work` to completion, but answer once [`HOST_REPLY_BOUND`] passes.
@@ -3662,6 +3694,32 @@ async fn log_late_failure(task: tokio::task::JoinHandle<axum::response::Response
         reply = %text,
         "a request the helm had already answered as still running ended without success"
     );
+}
+
+/// Bound a read's wait on its host by [`HOST_REPLY_BOUND`], failing with a
+/// timeout (a 504 through [`http_error`]) once it passes.
+///
+/// The read counterpart of [`within_host_reply_bound`], for the launcher's
+/// host lookups (browse and the folder check, the checkout preview, the
+/// repository scan). A read leaves nothing to finish, so it is dropped rather
+/// than moved to a task of its own: the routes that use this sit in the
+/// router's cancellable group, where dropping the handler is already the
+/// contract. Bounding it keeps a host that never answers from holding every
+/// later command on the GUI's ordered channel behind it (SPEC_impl.md, "The UI
+/// channel").
+pub(crate) async fn within_host_read_bound<T>(
+    read: impl std::future::Future<Output = anyhow::Result<T>>,
+) -> anyhow::Result<T> {
+    match tokio::time::timeout(HOST_REPLY_BOUND, read).await {
+        Ok(result) => result,
+        Err(_elapsed) => Err(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::Timeout,
+            format!(
+                "the host did not answer within {} seconds",
+                HOST_REPLY_BOUND.as_secs()
+            ),
+        ))),
+    }
 }
 
 /// The query string of `DELETE /api/sessions/{id}`.
