@@ -12,6 +12,7 @@
 //! only where SPEC_impl.md allows it: its `Root` around the window (the bootstrap and the screenshot goldens) and the
 //! projection of Farhelm's tokens onto Kit's theme (the theme module), which Kit's input reads.
 
+mod banner;
 mod button;
 mod dialog;
 mod text_input;
@@ -19,6 +20,7 @@ mod text_input;
 #[cfg(test)]
 mod tests;
 
+pub use banner::Banner;
 pub use button::{Button, IconButton, Tier};
 pub use dialog::DialogFrame;
 pub use gpui::Role;
