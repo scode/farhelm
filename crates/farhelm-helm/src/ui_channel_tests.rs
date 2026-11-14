@@ -785,12 +785,13 @@ async fn the_reply_bound_answers_a_slow_host_with_a_timeout_and_keeps_the_work()
     finished.await.expect("the work runs to completion");
 }
 
-/// The bound is on the real routes, not only on the helper: a rename and an
-/// ordinary Delete against a host that never answers (the scripted fixture
-/// host answers neither) reply 504 once `HOST_REPLY_BOUND` passes. Removing
-/// the bound from either route makes this hang until nextest's timeout.
+/// The bound is on the real routes, not only on the helper: a rename, an
+/// ordinary Delete, a Stop, a Restart and a Replace against a host that never
+/// answers (the scripted fixture host answers none of them) reply 504 once
+/// `HOST_REPLY_BOUND` passes. Removing the bound from any of these routes
+/// makes this hang until nextest's timeout.
 #[farhelm_testtrace::test(start_paused = true)]
-async fn rename_and_delete_answer_504_when_the_host_never_answers() {
+async fn lifecycle_routes_answer_504_when_the_host_never_answers() {
     let harness = rest_harness::helm_listing(vec![rest_harness::session("s1", 100)]).await;
     let full = harness.local_session_ref("s1");
     let rename = http(
@@ -809,6 +810,20 @@ async fn rename_and_delete_answer_504_when_the_host_never_answers() {
         .unwrap();
     let delete = harness.router().oneshot(request).await.unwrap().status();
     assert_eq!(delete, StatusCode::GATEWAY_TIMEOUT);
+    for (action, body) in [
+        ("stop", serde_json::json!({})),
+        ("restart", serde_json::json!({ "stop_if_running": false })),
+        ("replace", serde_json::json!({})),
+    ] {
+        let status = http(
+            &harness,
+            "POST",
+            &format!("/api/sessions/{full}/{action}"),
+            body,
+        )
+        .await;
+        assert_eq!(status, StatusCode::GATEWAY_TIMEOUT, "{action}");
+    }
 }
 
 // ---------------------------------------------------------------------------

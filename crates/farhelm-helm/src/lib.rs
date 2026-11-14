@@ -999,8 +999,11 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::post(ssh_help::commands)
                 .layer(axum::extract::DefaultBodyLimit::max(8 * 1024)),
         )
-        // Stop and tabs issue one host request with no local follow-through;
-        // #1404 deliberately retained their cancellable request lifetime.
+        // Tabs issue one host request with no local follow-through; #1404
+        // deliberately retained their cancellable request lifetime. Stop sits
+        // here too, but its handler owns its work: it runs under the host
+        // reply bound (`sessions::within_host_reply_bound`), whose task
+        // finishes the Stop whether or not the caller still waits.
         .route(
             "/api/sessions/{id}/stop",
             axum::routing::post(sessions::stop_session),

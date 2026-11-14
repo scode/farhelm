@@ -31,9 +31,9 @@ supervisor's connection ends.
 For authenticated helm HTTP routes, ownership is the router's default for methods other than GET and HEAD. It begins
 after authentication and before typed request parsing, so a valid request can finish parsing and take effect after its
 caller disconnects. Invalid requests still receive their existing rejection responses. Routes whose cancellation is
-intentional live outside that layer: read-only POSTs, Stop and tab operations, transfers, and handlers with narrower
-admission or owned-work boundaries documented at their registrations. GET, its implicit HEAD companion and WebSocket
-upgrades keep their existing lifetimes. Desktop preflight and the standalone token exchange remain outside ownership.
+intentional live outside that layer: read-only POSTs, tab operations, transfers, and handlers with narrower admission or
+owned-work boundaries documented at their registrations. GET, its implicit HEAD companion and WebSocket upgrades keep
+their existing lifetimes. Desktop preflight and the standalone token exchange remain outside ownership.
 
 Ordinary HTTP handlers rely on that router boundary rather than spawning an additional whole-handler task. Narrower
 operations still own their work where they have non-HTTP callers or a different contract: template persistence and its
@@ -231,10 +231,10 @@ Owner: the UI channel, one WebSocket per UI. It carries everything except bulk d
 
 The channel is the WebSocket `GET /api/ui` (`farhelm_proto::ui_channel::UI_CHANNEL_PATH`), and its wire types live in
 `farhelm_proto::ui_channel`. The session-list query is the channel-local command `PUT /ui/session-query`, which the
-channel handles itself and never routes. Rename and the ordinary session delete bound their host wait at 20 seconds
-(`HOST_REPLY_BOUND` in the helm's sessions module) and then reply that the host timed out while the work continues; the
-GUI's watchdog therefore waits longer than that. Environment and sandbox deletes are not bounded yet and take the
-accepted form when the work that ports them needs it.
+channel handles itself and never routes. Rename, the ordinary session delete, Stop, Restart and Replace bound their host
+wait at 20 seconds (`HOST_REPLY_BOUND` in the helm's sessions module) and then reply that the host timed out while the
+work continues; the GUI's watchdog therefore waits longer than that. Environment and sandbox deletes are not bounded yet
+and take the accepted form when the work that ports them needs it.
 
 The helm runs each command through its existing HTTP router in process, so a command gets the same handlers, validation
 and authentication middleware as an HTTP request. There is no second, typed command API. A route that genuinely cannot
