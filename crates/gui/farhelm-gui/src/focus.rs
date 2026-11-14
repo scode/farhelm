@@ -14,7 +14,8 @@
 //!   when the user starts it and asks [`has_moved_on`] before it moves focus or opens anything. The layer manager refuses
 //!   to open a layer for a mark the user has moved on from, which is how "things the user did not start never open over
 //!   what they are doing" is kept. The two public moves a feature makes after the user acted, [`choose_terminal`] and
-//!   [`focus_control`], take the mark of that action for the same reason.
+//!   [`focus_control`], take the mark of that action for the same reason. A third, [`move_within_control`], needs none:
+//!   it carries focus inside the control whose key is being handled (a radio group's arrows).
 //! - **Home.** When nothing holds focus and no layer that holds focus is open, focus goes home, which SPEC.md's "Where focus rests"
 //!   defines: the selected session's terminal, New when there are no sessions, a stopped session's card when the
 //!   selected session has stopped. The views that own those set it: [`set_home`] in general, and [`choose_terminal`]
@@ -359,6 +360,24 @@ pub fn focus_control(target: &FocusHandle, chosen: &Mark, window: &mut Window, c
         return;
     }
     apply(Move::To(target), window, cx);
+}
+
+/// Carry focus from `from` to `to`, two parts of one control, because the key being handled on `from` moved the
+/// control's own position there: the arrows in a radio group move the choice and focus together, as native radios do.
+///
+/// It moves nothing unless `from` holds focus, so it only ever carries focus along inside the control the user is
+/// typing into and never takes it from anywhere else; it needs no [`Mark`], being the direct answer to the key being
+/// handled. Unlike [`focus_control`], it works inside a dialog, where such controls live. The caller must draw `to`
+/// inside the same control as `from`, which keeps the move inside the topmost layer.
+pub fn move_within_control(
+    from: &FocusHandle,
+    to: &FocusHandle,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if from.is_focused(window) {
+        apply(Move::To(to), window, cx);
+    }
 }
 
 /// Whether nothing holds focus in SPEC.md's sense: no element at all, or only the root view, which stands in for
