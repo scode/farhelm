@@ -6,9 +6,10 @@ NOTE: This is a smoke test, not the end-to-end suite. It covers the first slice'
 (the session list, a row's menu, Delete, Rename, and typing into the open session's terminal), so a break in the wiring
 between the app, the helm and the supervisor shows up somewhere, plus the area steps added since (30, 31 and 33, the
 terminal's: a large paste, on a Mac only, text an input method commits, and scrollback; 32, the sidebar's quick
-switcher; 34, the session list's Stop and Replace from a row's menu; 35, the sidebar's host rail). The behavior itself
-is specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`,
-`terminal/attached/tests.rs`); nothing here checks layout or wording beyond the names it clicks.
+switcher; 34, the session list's Stop and Replace from a row's menu; 35, the sidebar's host rail; 40, the
+settings-and-hosts area's scripted host setup). The behavior itself is specified and tested in process
+(`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `terminal/attached/tests.rs`); nothing here checks
+layout or wording beyond the names it clicks.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -434,6 +435,44 @@ class Smoke(unittest.TestCase):
         self.ok("wait", "--gone", f"{total} of {total}")
         self.assertRegex(self.ok("snapshot", "-i"), r'button "All hosts" \[focused\]', "focus is on All")
 
+    # ---- The settings-and-hosts area's scripted host setup (40), on a host of its own --------------------------------
+
+    def test_40_the_scripted_backend_sets_up_a_fake_ssh_host(self) -> None:
+        """Every host flow the settings-and-hosts area ports (Add host, setup and its failures, Update) is driven end to
+        end against fake SSH hosts that the helm's scripted provisioning backend simulates (`start --scripted-hosts`),
+        because nothing else can make a host fail at a chosen step or race on cue. This step proves the seam in the real
+        app before any of those screens exist: through the helm's own API, probing a destination nobody has added
+        offers a setup plan, confirming it starts a run that the scripted backend carries to completion, and the
+        backend's event log shows the helm used it rather than real ssh. Specified: the probe's result is
+        `provisionable`, the confirmation is accepted for a new host entry the helm lists under that destination, and
+        that host's run completes, having run a setup step (not just the probe) through the backend. The fake host it
+        adds stays registered (shown unreachable, since the helm dials it over real ssh), so a step that needs the local
+        host to be the only one, as 35 does, runs before this one."""
+        destination = f"scripted-{uuid.uuid4().hex[:8]}.example"
+        probe = gui_agent.helm_request(
+            RUN, "POST", "/api/hosts/probe", {"target": {"kind": "ssh", "destination": destination}, "new_entry": {}}
+        )
+        self.assertEqual(probe["result"], "provisionable", probe)
+        accepted = gui_agent.helm_request(RUN, "POST", "/api/hosts/provision", {"probe_id": probe["probe_id"]})
+        host, run_id = accepted["host_id"], accepted["run_id"]
+        hosts = gui_agent.helm_request(RUN, "GET", "/api/hosts")["hosts"]
+        listed = {row["id"]: row.get("destination") for row in hosts}
+        self.assertEqual(listed.get(host), destination, "the confirmation registered a new entry for the destination")
+
+        def settled() -> dict | None:
+            """This run's progress once it has finished, either way. "completed" alone is also what the helm reports
+            for a host with no run at all, so the run id is matched too."""
+            view = gui_agent.helm_request(RUN, "GET", f"/api/hosts/{host}/provisioning")
+            if view.get("run_id") == run_id and view.get("status") in ("completed", "failed"):
+                return view
+            return None
+
+        view = eventually(settled, f"the scripted setup of {destination} finishing")
+        self.assertEqual(view["status"], "completed", f"the setup failed: {view.get('message')}")
+        log = (gui_agent.scripted_hosts_dir(RUN) / "events.jsonl").read_text()
+        events = [json.loads(line) for line in log.splitlines()]
+        steps = {event["event"] for event in events if event["target"] == f"ssh:{destination}"}
+        self.assertIn("install-farhelm", steps, "the helm ran the setup's steps through the scripted backend")
 
 # The receiver for the large-paste step: once the step types `copy`, it writes its payload file to the clipboard with
 # OSC 52, turns bracketed paste on and reads raw input until a paste's end marker, then reports how many bytes arrived
@@ -491,7 +530,10 @@ def main(argv: list[str]) -> int:
     passed = False
     stopped = False
     try:
-        start = ["start", "--sessions", "3", *(["--no-build"] if options.no_build else [])]
+        # `--scripted-hosts` fakes every command the helm runs on a host (setup, Update and uninstall on SSH hosts)
+        # for step 40 and the host steps after it. The session
+        # steps never ask the helm to run one, and sessions themselves reach the supervisor as usual.
+        start = ["start", "--sessions", "3", "--scripted-hosts", *(["--no-build"] if options.no_build else [])]
         # No timeout: `start` may build, and is interrupted only by the caller.
         started = subprocess.run([sys.executable, str(AGENT), str(RUN), *start]).returncode == 0
         if started:

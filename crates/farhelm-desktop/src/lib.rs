@@ -1068,6 +1068,13 @@ impl SpawnInputs<'_> {
             // in a session would silently push this launch's payloads,
             // possibly long after the app that set it has quit.
             .env_remove("FARHELM_HELM_PAYLOAD_DIR")
+            // The scripted provisioning backend's switch, which an agent
+            // build's test runs pass (`scripts/gui-agent.py start
+            // --scripted-hosts`), is this app's embedded helm's alone for the
+            // same reason: inherited, it would reach every session shell, where
+            // a debug helm started on this same state directory would fake its
+            // hosts too (one with any other state directory refuses to start).
+            .env_remove("FARHELM_E2E_PROVISIONING_BACKEND_DIR")
             // The reopen marker is for this one reopened app alone (design,
             // section 1: at most once). Inherited, it would reach every
             // session, where a Farhelm started from one would take it as its

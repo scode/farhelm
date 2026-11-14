@@ -151,6 +151,42 @@ class EnvironmentTest(unittest.TestCase):
         self.assertEqual(pairs["FARHELM_DESKTOP_AGENT_HELM_FILE"], "/tmp/run/helm.json")
         self.assertNotIn("FARHELM_DESKTOP_AGENT_WINDOW_SIZE", pairs)
         self.assertNotIn("FARHELM_DESKTOP_AGENT_APPEARANCE", pairs)
+        self.assertNotIn(gui_agent.SCRIPTED_HOSTS_ENV, pairs)
+
+    def test_scripted_hosts_reach_the_helm_from_inside_its_state(self):
+        """`--scripted-hosts` is how end-to-end steps add, set up, update and fail fake SSH hosts through the real helm.
+        The helm accepts the backend only from a private directory inside its own state directory holding its exact
+        marker, so the run's directory must be there, carry that marker and an empty config (every host absent), and
+        its path must reach the app under the variable the helm reads; without the option the variable stays unset, so
+        an ordinary run sets hosts up for real."""
+        with tempfile.TemporaryDirectory() as tmp:
+            run = pathlib.Path(tmp) / "run"
+            run.mkdir()
+            directory = gui_agent.prepare_scripted_hosts(run)
+            self.assertEqual(directory, run / "state" / "scripted-hosts")
+            self.assertEqual((directory / "ENABLED").read_text(), "farhelm-e2e-provisioning-v1\n")
+            self.assertEqual(json.loads((directory / "config.json").read_text()), {})
+            for private in (run / "state", directory):
+                self.assertEqual(private.stat().st_mode & 0o777, 0o700, private)
+            args = gui_agent.app_env_args(run, {"farhelm": "/t/f"}, scripted_hosts=directory)
+            pairs = dict(arg.split("=", 1) for arg in args[1::2])
+            self.assertEqual(pairs[gui_agent.SCRIPTED_HOSTS_ENV], str(directory))
+            self.assertEqual(gui_agent.SCRIPTED_HOSTS_ENV, "FARHELM_E2E_PROVISIONING_BACKEND_DIR")
+
+    def test_scripting_hosts_replaces_the_config_whole(self):
+        """The helm rereads the fake hosts' config at every step, so a config written in place could be read half
+        written and fail a step on its own. Specified: `script_hosts` leaves exactly the new config at `config.json`,
+        through a rename (the file's inode changes, so it was never rewritten in place), and leaves no staging file."""
+        with tempfile.TemporaryDirectory() as tmp:
+            run = pathlib.Path(tmp) / "run"
+            run.mkdir()
+            directory = gui_agent.prepare_scripted_hosts(run)
+            before = (directory / "config.json").stat().st_ino
+            config = {"targets": {"ssh:failing.example": {"fail_action": "install-farhelm"}}}
+            gui_agent.script_hosts(run, config)
+            self.assertEqual(json.loads((directory / "config.json").read_text()), config)
+            self.assertNotEqual((directory / "config.json").stat().st_ino, before)
+            self.assertEqual(sorted(path.name for path in directory.iterdir()), ["ENABLED", "config.json"])
 
     def test_window_size_and_appearance_reach_the_app(self):
         """A screenshot batch labels each capture with the theme and size it asked for, so `--window-size` and

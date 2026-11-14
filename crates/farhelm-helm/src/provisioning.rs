@@ -24,9 +24,10 @@ mod agent_endpoints;
 pub mod assets;
 mod backend;
 pub(crate) mod credential_delivery;
-/// A filesystem-controlled provisioning backend for unit tests. The removed
-/// browser suite also enabled it at runtime through an environment variable.
-#[cfg(test)]
+/// A filesystem-controlled provisioning backend for unit tests, which debug
+/// builds also select at startup for the GPUI app's end-to-end runs (see
+/// `ProductionProvisioning::new`). Release builds do not contain it at all.
+#[cfg(any(test, debug_assertions))]
 mod e2e;
 mod http;
 mod installation;

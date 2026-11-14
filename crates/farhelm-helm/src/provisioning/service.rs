@@ -405,29 +405,84 @@ pub(crate) struct ProductionProvisioning {
     pub(crate) delivery: Arc<CredentialDelivery>,
 }
 
+/// The provisioning backend, preparation backend and payload source a helm
+/// sets hosts up with, as [`ProductionProvisioning::new`] selects them.
+type Transport = (
+    Arc<dyn ProvisioningBackend>,
+    Arc<dyn ProvisioningBackend>,
+    Arc<dyn PayloadSource>,
+);
+
+/// The scripted backend, when this debug build was started with
+/// [`E2E_BACKEND_ENV`] naming a marked directory inside its state directory.
+///
+/// That is how the GPUI app's end-to-end steps add, set up, update and fail
+/// fake SSH hosts through the helm's real routes, plans, registration and
+/// progress (`scripts/gui-agent.py start --scripted-hosts` prepares the
+/// directory). It stands in for every command the helm runs on a host (setup,
+/// Update and uninstall, and on environment hosts credential delivery and
+/// preparation); connecting to a host's supervisor stays real ssh. The old browser
+/// suite switched it on the same way in any build. Now only builds with debug
+/// assertions read the variable, the condition that also keeps the
+/// test-automation bridge out of release builds and devbuilds, so an installed
+/// app neither consults it nor contains the backend. Unit tests never read it
+/// either: they build the backend they want directly, and reading the process
+/// environment would let a stray variable change them. A directory that fails
+/// the backend's own containment and marker checks stops the helm from
+/// starting rather than falling back to real ssh.
+#[cfg(all(debug_assertions, not(test)))]
+fn scripted_backend(state_dir: &Path) -> anyhow::Result<Option<Transport>> {
+    use super::e2e::{E2E_BACKEND_ENV, E2ePayloads, E2eProvisioningBackend};
+    let Some(root) = std::env::var_os(E2E_BACKEND_ENV).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    let root = PathBuf::from(root);
+    let backend: Arc<dyn ProvisioningBackend> =
+        Arc::new(E2eProvisioningBackend::new(root.clone(), state_dir)?);
+    tracing::warn!(
+        directory = %root.display(),
+        "the scripted provisioning backend is enabled: host setup and update actions are simulated"
+    );
+    Ok(Some((
+        Arc::clone(&backend),
+        backend,
+        Arc::new(E2ePayloads(root.join("ENABLED"))),
+    )))
+}
+
+/// Release builds and unit tests never select the scripted backend here; see
+/// the debug build's version of this function.
+#[cfg(any(test, not(debug_assertions)))]
+fn scripted_backend(_state_dir: &Path) -> anyhow::Result<Option<Transport>> {
+    Ok(None)
+}
+
 impl ProductionProvisioning {
     /// Select the ordinary transport and payload source once.
     /// Release payload policy follows the binary build, independently of the
     /// UI serving mode, just as it did in the former service constructor.
+    /// A debug build may select the scripted backend instead (see
+    /// [`scripted_backend`]).
     pub(crate) fn new(
         store: HelmStore,
         state_dir: &Path,
         selection: PayloadSelection,
         release_build: bool,
     ) -> anyhow::Result<Self> {
-        let (backend, preparation_backend, payloads): (
-            Arc<dyn ProvisioningBackend>,
-            Arc<dyn ProvisioningBackend>,
-            Arc<dyn PayloadSource>,
-        ) = {
-            // Resolve a relative payload selection against the same cwd as
-            // the former service constructor, preserving its alias guard.
-            let cwd = std::env::current_dir().context("reading the current working directory")?;
-            (
-                Arc::new(SystemBackend::new(state_dir.to_path_buf())),
-                Arc::new(SystemBackend::one_shot(state_dir.to_path_buf())),
-                production_payloads(selection, state_dir, release_build, &cwd)?,
-            )
+        let (backend, preparation_backend, payloads): Transport = match scripted_backend(state_dir)?
+        {
+            Some(scripted) => scripted,
+            None => {
+                // Resolve a relative payload selection against the same cwd as
+                // the former service constructor, preserving its alias guard.
+                let cwd =
+                    std::env::current_dir().context("reading the current working directory")?;
+                (
+                    Arc::new(SystemBackend::new(state_dir.to_path_buf())),
+                    Arc::new(SystemBackend::one_shot(state_dir.to_path_buf())),
+                    production_payloads(selection, state_dir, release_build, &cwd)?,
+                )
+            }
         };
         let places = crate::environment::podman_probe::PodmanPlaces::new(state_dir);
         let delivery = CredentialDelivery::with_places(store, Arc::clone(&backend), places);
