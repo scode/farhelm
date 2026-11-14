@@ -8,8 +8,9 @@
 //!
 //! Among the controls, GPUI Kit is used only for the text input (Kit's `Input`, or its `Textarea` held to one row for a
 //! field that must keep pasted line breaks, both with the right-click menu turned off as in the old app's release
-//! builds). Buttons and the dialog frame are plain GPUI, which matches the old stylesheet's
-//! control tiers exactly and keeps Kit's own focus and overlay machinery out of them. Outside this module Kit appears
+//! builds). Buttons, the select and the dialog frame are plain GPUI, which matches the old stylesheet's
+//! control tiers exactly and keeps Kit's own focus and overlay machinery out of them (Kit's `Select` draws its own
+//! dropdown, which only the layer manager may). Outside this module Kit appears
 //! only where SPEC_impl.md allows it: its `Root` around the window (the bootstrap and the screenshot goldens) and the
 //! projection of Farhelm's tokens onto Kit's theme (the theme module), which Kit's input reads.
 
@@ -22,6 +23,7 @@ mod menu_item;
 mod option_row;
 mod radio_group;
 mod scrollbar;
+mod select;
 mod status_mark;
 mod text_input;
 
@@ -39,6 +41,7 @@ pub use menu_item::MenuItem;
 pub use option_row::OptionRow;
 pub use radio_group::{RadioGroup, RadioOption};
 pub use scrollbar::{SCROLLBAR_WIDTH, Scrollbar, ScrollbarEvent, ScrollbarLines};
+pub use select::{Select, SelectOption};
 pub use status_mark::StatusMark;
 pub use text_input::{TextInput, TextInputEvent, TextInputState, Vertical};
 

@@ -3,8 +3,8 @@
 //! the keyboard focus ring, host-supplied text over its spoofing corpus, the notice banner, the terminal's styles and
 //! cursor shapes, an attached terminal's exit line and status line, the scrim a pending Delete puts over the open
 //! session's terminal, the session list (a fleet of every status a row draws, an empty fleet, a row's open menu, a
-//! row's Delete question, and a pending and a refused Delete), and the Rename editor, in both appearances, compared
-//! pixel for pixel.
+//! row's Delete question, and a pending and a refused Delete), the Rename editor, and the select closed and open, in both
+//! appearances, compared pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
@@ -33,6 +33,7 @@ use crate::components::{
     Button, Checkbox, DialogFrame, HoverHelp, IconButton, Role, TextInput, TextInputState, Tier,
 };
 use crate::components::{RadioGroup, RadioOption};
+use crate::components::{Select, SelectOption};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -585,6 +586,79 @@ fn popover_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
         },
         &mark,
         window,
+        cx,
+    );
+}
+
+/// The launcher's Agent type choices, as a select's options: None, then two harnesses, then one that cannot be chosen,
+/// whose reason runs past a narrow list.
+fn agent_options() -> Vec<SelectOption> {
+    let help = || HoverHelp::tooltip("Golden scene option");
+    vec![
+        SelectOption::new("none", "None", help()),
+        SelectOption::new("claude", "Claude", help()),
+        SelectOption::new("codex", "Codex", help()),
+        SelectOption::new("cursor", "Cursor", help()).unavailable("Not installed on this host"),
+    ]
+}
+
+/// The closed select three ways, each 160 pixels wide: an option chosen, nothing chosen with a placeholder, and
+/// unavailable with an option chosen (`.launch-composer-effort-select` and the native select's chevron).
+fn selects(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    let select = |id: &'static str| {
+        Select::new(
+            id,
+            "Agent type",
+            HoverHelp::tooltip("Golden scene control"),
+            Role::ComboBox,
+        )
+        .options(agent_options())
+    };
+    let boxed = |select: Select| div().w(px(160.)).child(select);
+    div()
+        .flex()
+        .gap(px(16.))
+        .items_center()
+        .child(boxed(select("chosen").chosen("codex")))
+        .child(boxed(select("placeholder").placeholder("Choose a host")))
+        .child(boxed(select("off").chosen("codex").disabled(true)))
+        .into_any_element()
+}
+
+/// A select 200 pixels wide whose list the setup opens from the keyboard, with room below for the list: the anchored
+/// menu standing in for the native pop-up, at the control's width, Codex chosen and focused with the keyboard ring, and
+/// the unavailable option's reason cut at the list's edge.
+fn select_open(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    div()
+        .w(px(200.))
+        .h(px(200.))
+        .child(
+            Select::new(
+                "agent",
+                "Agent type",
+                HoverHelp::tooltip("Golden scene control"),
+                Role::ComboBox,
+            )
+            .options(agent_options())
+            .chosen("codex")
+            .focus(&state.ring),
+        )
+        .into_any_element()
+}
+
+/// Tab to the select (the focus-ring scene's setup), then Space, which opens its list.
+fn select_open_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    focus_ring_setup(state, window, cx);
+    window.dispatch_event(
+        gpui::PlatformInput::KeyDown(gpui::KeyDownEvent {
+            native_key: None,
+            keystroke: gpui::Keystroke {
+                key: "space".into(),
+                ..Default::default()
+            },
+            is_held: false,
+            prefer_character_input: false,
+        }),
         cx,
     );
 }
@@ -1439,6 +1513,18 @@ static SCENES: &[Scene] = &[
         size: (420., 418.),
         draw: session_lists_then,
         setup: host_filter_empty_setup,
+    },
+    Scene {
+        name: "select",
+        size: (560., 64.),
+        draw: selects,
+        setup: no_setup,
+    },
+    Scene {
+        name: "select-open",
+        size: (260., 240.),
+        draw: select_open,
+        setup: select_open_setup,
     },
 ];
 

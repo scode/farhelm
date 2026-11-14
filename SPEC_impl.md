@@ -452,12 +452,15 @@ pressed (the terminal, a dialog's empty space) takes it only from a press that d
 hands the press to the controls under the pointer first: a click into a dialog's text field is the field's, not a click
 on the dialog's empty space. What tells them apart is where focus went, not a prevented default (GPUI's usual signal),
 because the coordinator prevents the default on every control to keep GPUI from focusing it, including a macOS button
-that a click leaves unfocused. Which controls Tab reaches follows the platform (settled for the GPUI migration on
-2026-11-13): on macOS the system's Keyboard navigation setting, which the desktop binary reads and the coordinator asks
-on every Tab and Shift+Tab press, so a change applies at once (off, the default: Tab reaches text fields and pop-ups
-only and Option-Tab reaches every control; on: Tab reaches every control); on Linux, every control. Key presses count
-toward "the user moved on" where GPUI shows every keystroke before any binding runs: a key a binding handles (Farhelm's
-Tab and Escape, GPUI Kit's editing keys in a text input) never reaches an ordinary key listener.
+that a click leaves unfocused. A move a closing layer makes during the same press (focus going back to a menu's opener
+when the press closed the menu) does not count as the press being taken, so a click on a dialog's empty space focuses
+the dialog whether or not a select's list inside it was open. Which controls Tab reaches follows the platform (settled
+for the GPUI migration on 2026-11-13): on macOS the system's Keyboard navigation setting, which the desktop binary reads
+and the coordinator asks on every Tab and Shift+Tab press, so a change applies at once (off, the default: Tab reaches
+text fields and pop-ups only and Option-Tab reaches every control; on: Tab reaches every control); on Linux, every
+control. Key presses count toward "the user moved on" where GPUI shows every keystroke before any binding runs: a key a
+binding handles (Farhelm's Tab and Escape, GPUI Kit's editing keys in a text input) never reaches an ordinary key
+listener.
 
 A focus move made by the keyboard or by the app, never by a pointer press or hover itself, scrolls every scrolling
 container around the focused control that opted in (`focus::scroll_region`, as the dialog frame's body and card do),
