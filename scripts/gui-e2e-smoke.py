@@ -4,9 +4,10 @@ driven through the test-automation bridge (`scripts/gui-agent.py`, `docs/gui-age
 
 NOTE: This is a smoke test, not the end-to-end suite. It covers the first slice's path through the app once each
 (the session list, a row's menu, Delete, Rename, and typing into the open session's terminal), so a break in the wiring
-between the app, the helm and the supervisor shows up somewhere. The behavior itself is specified and tested in
-process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`); nothing here checks layout or wording beyond
-the names it clicks.
+between the app, the helm and the supervisor shows up somewhere, plus the area steps added since (from 30, the
+terminal's: a large paste, on a Mac only). The behavior itself is specified and tested in process
+(`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `terminal/attached/tests.rs`); nothing here checks
+layout or wording beyond the names it clicks.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -39,6 +40,7 @@ session of the same user. Run it through `scripts/record-test-run.py` (`.agents/
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import re
 import shutil
@@ -191,6 +193,93 @@ class Smoke(unittest.TestCase):
         self.ok("wait", "--gone", "Rename session")
         eventually(lambda: listed_titles().get(ids[0]) == title, "the helm listing Fixture 1 under its new title")
         self.ok("wait", "--text", title)
+
+    # ---- The terminal area's steps (30 onward), on sessions of their own ----------------------------------------------
+
+    # NOTE: Wayland lets a client own the clipboard only while one of its windows has keyboard or pointer focus, from a
+    # press serial the compositor gave it. Headless Mutter never focuses the app's window that way (the bridge injects
+    # input inside the app), so GPUI drops the program's clipboard write and there is nothing to paste. The step runs
+    # where the app can own the clipboard, which is a Mac; on Linux the in-process tests cover paste
+    # (`crates/gui/farhelm-gui/src/terminal/attached/tests.rs`).
+    @unittest.skipUnless(
+        sys.platform == "darwin", "headless Mutter gives the app no clipboard ownership (see the NOTE above)"
+    )
+    def test_30_a_large_paste_arrives_whole_inside_its_brackets(self) -> None:
+        """Paste is the user's way to hand a program a block of text, and it crosses every layer: the system
+        clipboard, the app's paste action, the helm client's input group, the helm's relay and the supervisor's
+        bracketed-paste encoding and sanitizing. The old app's large-paste test (`terminal-flood.spec.ts` at the
+        reference commit) is the case: over a megabyte must arrive whole, which a single input message cannot carry.
+        Specified: a receiver of this step's own puts more than 1 MiB on the clipboard itself (an OSC 52 write, so no
+        clipboard tool is needed on the machine), with an end-of-paste marker in the middle; the platform's paste chord
+        then delivers exactly that text, less the marker, between one pair of bracketed-paste markers. The receiver's
+        own byte count and digest are the oracle, because a lost, repeated or reordered part, or a marker that ended
+        the paste early, changes them."""
+        work = RUN.parent / "paste"
+        work.mkdir()
+        # A 23-letter cycle, which no 32 KiB part boundary lines up with, so every part's text differs from its
+        # neighbours'.
+        size = 1024 * 1024 + 1
+        text = ("abcdefghijklmnopqrstuvw" * (size // 23 + 1))[:size]
+        (work / "payload").write_bytes((text[: size // 2] + "\x1b[201~" + text[size // 2 :]).encode())
+        want = text.encode()
+        (work / "receiver.py").write_text(PASTE_RECEIVER)
+        title = f"Paste receiver {uuid.uuid4().hex[:8]}"
+        command = f"python3 {work / 'receiver.py'} {work / 'payload'}"
+        gui_agent.helm_request(
+            RUN,
+            "POST",
+            "/api/sessions",
+            {"cwd": str(work), "title": title, "command": {"command": command, "yolo": False}},
+        )
+        self.ok("wait", "--text", title)
+        self.ok("click", f"text:{title}")
+        self.ok("terminal-text", "--wait", "PASTE-RECEIVER-READY")
+        self.ok("type", "--keys", "copy")
+        self.ok("press", "enter")
+        self.ok("terminal-text", "--wait", "PASTE-RECEIVER-COPIED")
+        # The premise: the program's clipboard write reached the system clipboard. Without this check a write the app
+        # dropped shows up only as a paste that never arrives, which reads like a paste bug.
+        copied = subprocess.run(["pbpaste"], capture_output=True, timeout=STEP_TIMEOUT_SECONDS).stdout
+        self.assertEqual(
+            hashlib.sha256(copied).hexdigest(),
+            hashlib.sha256((work / "payload").read_bytes()).hexdigest(),
+            "premise: the clipboard holds the receiver's payload",
+        )
+        self.ok("press", "cmd-v")
+        screen = self.ok("terminal-text", "--wait", "PASTE-SHA")
+        self.assertIn(f"PASTE-GOT {len(want)}", screen)
+        self.assertIn(f"PASTE-SHA {hashlib.sha256(want).hexdigest()[:32]}", screen)
+
+
+# The receiver for the large-paste step: once the step types `copy`, it writes its payload file to the clipboard with
+# OSC 52, turns bracketed paste on and reads raw input until a paste's end marker, then reports how many bytes arrived
+# between the markers and the first half of their SHA-256 on two short lines (short, so neither wraps in a narrow
+# window's terminal: a wrapped line breaks the text the step looks for). Raw mode keeps the terminal from echoing a
+# megabyte.
+PASTE_RECEIVER = r"""import base64, hashlib, os, sys, termios, tty
+payload = open(sys.argv[1], "rb").read()
+print("PASTE-RECEIVER-READY", flush=True)
+sys.stdin.readline()
+saved = termios.tcgetattr(0)
+tty.setraw(0)
+os.write(1, b"\x1b]52;c;" + base64.b64encode(payload) + b"\x07\x1b[?2004hPASTE-RECEIVER-COPIED\r\n")
+data = bytearray()
+start = end = -1
+while end < 0:
+    chunk = os.read(0, 65536)
+    if not chunk:
+        break
+    data += chunk
+    start = data.find(b"\x1b[200~")
+    if start >= 0:
+        end = data.find(b"\x1b[201~", start + 6)
+inside = bytes(data[start + 6 : end]) if start >= 0 and end >= 0 else b""
+termios.tcsetattr(0, termios.TCSADRAIN, saved)
+os.write(1, b"\x1b[?2004l")
+print("PASTE-GOT %d" % len(inside))
+print("PASTE-SHA %s" % hashlib.sha256(inside).hexdigest()[:32], flush=True)
+sys.stdin.read()
+"""
 
 
 def main(argv: list[str]) -> int:
