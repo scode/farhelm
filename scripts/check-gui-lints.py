@@ -12,6 +12,12 @@ that gap from both ends:
 - Every entry in the clippy.toml must have an expect line, so a new ban without a demonstration fails too. The demo
   crate depends on everything a ban names (tokio included, which no GUI crate uses), so every ban can be demonstrated.
 
+It also holds the bans' exceptions to their owners. A `#[allow(clippy::disallowed_*)]` (or `expect`) switches a ban
+off for one item, and the foundation ownership table (`docs/gpui/foundation-ownership.md`, the lint exceptions column)
+lists the few items that may carry one: the owners of what the bans protect. The check fails on such an attribute
+anywhere else in `crates/gui/` (the demo crate aside), so a new exception is a change to this list, which review sees,
+rather than a line that slips into a file the ownership check only reports.
+
 The crate is a non-default workspace member, so it shares Cargo.lock and the vendored GPUI patches, and its violations
 compile only with the feature; ordinary builds see an empty crate. Run from anywhere. `scripts/test-check-gui-lints.py`
 covers the parsing with fixtures and runs no cargo.
@@ -31,6 +37,21 @@ DEMO = REPO / "crates/gui/lint-demo"
 DEMO_PACKAGE = "farhelm-gui-lint-demo"
 
 FUNCTION = re.compile(r"^\s*fn\s+(\w+)")
+
+# The items that may switch a ban off, as (file under crates/gui, item name): the owners in the ownership table's lint
+# exceptions column. Adding one is a foundation change.
+EXCEPTION_OWNERS = {
+    ("farhelm-gui/src/cache.rs", "element"),
+    ("farhelm-gui/src/focus.rs", "apply"),
+    ("farhelm-gui/src/focus.rs", "track_raw"),
+    ("farhelm-gui/src/layers.rs", "overlay"),
+    ("farhelm-gui/src/theme.rs", "raw"),
+    ("farhelm-gui/src/ticker.rs", "timer"),
+}
+# A lint attribute that would switch a `disallowed_*` ban off: the lint by name, or a group holding it (clippy's
+# `style`, `all`), or every warning.
+SWITCHES_A_BAN = re.compile(r"clippy\s*::\s*(disallowed_\w+|style|all)\b|\bwarnings\b")
+ITEM = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:fn|mod|impl|struct|enum|const|static|trait|type)\b\s*(\w*)")
 EXPECT = re.compile(r"^\s*// expect: (\w+)(?: (\S+))?\s*$")
 
 
@@ -58,6 +79,61 @@ def banned_paths(config: dict) -> set[str]:
         for key in ("disallowed-methods", "disallowed-types")
         for entry in config.get(key, [])
     }
+
+
+def ban_exceptions(source: str) -> list[tuple[int, str | None]]:
+    """(1-based line, item name or None) for each attribute in `source` that allows or expects a `disallowed_*` lint.
+
+    An attribute is read from its `#[` or `#![` line to the line where its brackets close. The item it switches off is
+    the next item line after it (attributes and comments between are skipped); an inner attribute (`#![...]`), or one on
+    a statement rather than an item, has no item name, and so is never an owner's.
+    """
+    lines = source.splitlines()
+    found = []
+    index = 0
+    while index < len(lines):
+        stripped = re.sub(r"^#\s*(!?)\s*\[", r"#\1[", lines[index].lstrip())
+        if not (stripped.startswith("#[") or stripped.startswith("#![")):
+            index += 1
+            continue
+        start, depth, text = index, 0, ""
+        while index < len(lines):
+            text += lines[index] + "\n"
+            depth += lines[index].count("[") - lines[index].count("]")
+            index += 1
+            if depth <= 0:
+                break
+        if not re.search(r"\b(allow|expect)\s*\(", text) or not SWITCHES_A_BAN.search(text):
+            continue
+        item = None
+        if not stripped.startswith("#!["):
+            follow = index
+            while follow < len(lines) and re.match(r"\s*(#|//|$)", lines[follow]):
+                follow += 1
+            if follow < len(lines) and (match := ITEM.match(lines[follow])):
+                item = match.group(1) or None
+        found.append((start + 1, item))
+    return found
+
+
+def stray_exceptions(files: list[tuple[str, str]]) -> list[str]:
+    """Problems for each ban exception in `files` ((path under crates/gui, source)) that no owner holds, and for each
+    owner that does not hold exactly one: an owner's name matched a second time (a method or nested function of that
+    name in the same file) is not the owner, and an owner matched never is a stale entry in the list."""
+    problems = []
+    held: dict[tuple[str, str | None], int] = {}
+    for path, source in files:
+        for line, item in ban_exceptions(source):
+            held[(path, item)] = held.get((path, item), 0) + 1
+            if (path, item) not in EXCEPTION_OWNERS:
+                problems.append(
+                    f"{path}:{line}: a lint ban is switched off outside its owners "
+                    "(docs/gpui/foundation-ownership.md, lint exceptions)"
+                )
+    for owner in sorted(EXCEPTION_OWNERS):
+        if held.get(owner, 0) != 1:
+            problems.append(f"{owner[0]}: owner {owner[1]} holds {held.get(owner, 0)} ban exceptions, not exactly one")
+    return problems
 
 
 def diagnostics(messages: list[dict]) -> list[tuple[str, int, str]]:
@@ -131,10 +207,20 @@ def run() -> int:
         text=True,
     )
     messages = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
+    # The exception scan needs no build, so it runs and reports even when the demo crate does not compile.
+    gui = REPO / "crates/gui"
+    sources = [
+        (path.relative_to(gui).as_posix(), path.read_text())
+        for path in sorted(gui.rglob("*.rs"))
+        if DEMO not in path.parents
+    ]
+    strays = stray_exceptions(sources)
     if failure := cargo_failure(result.returncode, messages, result.stderr):
+        for problem in strays:
+            print(f"check-gui-lints: {problem}", file=sys.stderr)
         sys.stderr.write(f"check-gui-lints: {failure}")
         return 1
-    problems = unmet(expected, diagnostics(messages)) + uncovered(banned_paths(config), expected)
+    problems = unmet(expected, diagnostics(messages)) + uncovered(banned_paths(config), expected) + strays
     for problem in problems:
         print(f"check-gui-lints: {problem}", file=sys.stderr)
     print(f"check-gui-lints: {len(expected)} demonstrations, {len(problems)} problems")
