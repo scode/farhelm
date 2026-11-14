@@ -38,12 +38,13 @@
 //! repeat. An editor that saves through the operation store is refused while its save is in flight, which covers the
 //! Rename editor; SPEC.md's "Repeated or composing Enter cannot answer" a question is the prompt's, not this field's.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gpui::{
-    App, AppContext as _, Context, ElementId, Entity, Focusable as _, InteractiveElement,
-    IntoElement, ParentElement, RenderOnce, SharedString, Styled, Subscription, Window, div,
+    App, AppContext as _, Context, ElementId, Entity, FocusHandle, Focusable as _,
+    InteractiveElement, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Subscription,
+    Window, div,
 };
 use gpui_component::input::{Enter, Input, InputEvent, InputState, Textarea, TextareaState};
 
@@ -84,9 +85,9 @@ enum Field {
 /// shows the input for as long as it shows it.
 ///
 /// Clones share the state, and with it the text as last reported or set, which [`TextInputEvent::Changed`] is judged
-/// against.
+/// against, and whether the field is read-only ([`TextInputState::set_read_only`]).
 #[derive(Clone)]
-pub struct TextInputState(Field, Rc<RefCell<SharedString>>);
+pub struct TextInputState(Field, Rc<RefCell<SharedString>>, Rc<Cell<bool>>);
 
 impl TextInputState {
     /// A new, empty single-line input state with Kit's right-click menu turned off. Line breaks inserted in any way
@@ -95,6 +96,7 @@ impl TextInputState {
         TextInputState(
             Field::Line(cx.new(|cx| InputState::new(window, cx).context_menu(false))),
             Rc::new(RefCell::new(SharedString::default())),
+            Rc::new(Cell::new(false)),
         )
     }
 
@@ -114,7 +116,35 @@ impl TextInputState {
         TextInputState(
             Field::Row(area),
             Rc::new(RefCell::new(SharedString::default())),
+            Rc::new(Cell::new(false)),
         )
+    }
+
+    /// The field's focus handle, for a dialog whose focus starts in the field (the Rename editor's title field:
+    /// SPEC.md, "initial focus remains on the title field"), handed to the layer manager as the dialog's start. Kit
+    /// tracks the field's focus itself, so this is the handle the field takes focus through; moving focus to it stays
+    /// the focus coordinator's business, as for every handle.
+    pub fn focus_handle(&self, cx: &App) -> FocusHandle {
+        match &self.0 {
+            Field::Line(input) => input.read(cx).focus_handle(cx),
+            Field::Row(area) => area.read(cx).focus_handle(cx),
+        }
+    }
+
+    /// Make the field read-only, or editable again. A read-only field keeps its look, focus, caret, selection and copy,
+    /// and refuses only the user's edits; [`Self::set_text`] still replaces its text. For an editor whose value is
+    /// being saved (the Rename editor holds its field read-only for the save's round trip, as the old app's field was
+    /// `readonly`), so the text on screen stays the text sent without the caret or the undo history being disturbed.
+    ///
+    /// The flag lives here as well as in Kit's state because Kit's element puts its own `readonly` setting into the
+    /// state every time it is drawn: set only on the state, it lasted until the next frame. [`TextInput`] draws the
+    /// element with this flag; setting the state too covers keys that arrive before that frame.
+    pub fn set_read_only(&self, read_only: bool, cx: &mut App) {
+        self.2.set(read_only);
+        match &self.0 {
+            Field::Line(input) => input.update(cx, |state, cx| state.set_readonly(read_only, cx)),
+            Field::Row(area) => area.update(cx, |state, cx| state.set_readonly(read_only, cx)),
+        }
     }
 
     /// The current text.
@@ -228,10 +258,7 @@ impl RenderOnce for TextInput {
         let wrapper = div().id(ElementId::Name(self.id.clone())).w_full();
         // Kit tracks the input's focus itself; the coordinator only records where it is drawn, so a field can take over
         // focus when the control beside it disappears.
-        let handle = match &self.state.0 {
-            Field::Line(input) => input.read(cx).focus_handle(cx),
-            Field::Row(area) => area.read(cx).focus_handle(cx),
-        };
+        let handle = self.state.focus_handle(cx);
         let wrapper = crate::focus::record_position(wrapper, &handle);
         let wrapper = super::with_hover_help(wrapper, &self.id, &self.help, false, window, cx);
         // Kit fills a dark-mode input with its border color at 30%, not the old stylesheet's recessed `--well`, and
@@ -242,6 +269,7 @@ impl RenderOnce for TextInput {
         match self.state.0 {
             Field::Line(input) => wrapper.child(
                 Input::new(&input)
+                    .readonly(self.state.2.get())
                     .aria_label(self.label)
                     .bg(theme::color(palette.well))
                     .rounded(metrics::RADIUS_SM)
@@ -271,6 +299,7 @@ impl RenderOnce for TextInput {
                 })
                 .child(
                     Textarea::new(&area)
+                        .readonly(self.state.2.get())
                         .aria_label(self.label)
                         .bg(theme::color(palette.well))
                         .rounded(metrics::RADIUS_SM)

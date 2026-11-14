@@ -107,6 +107,26 @@ pub(crate) const DELETE_SESSION_CHORD: &str = if cfg!(target_os = "macos") {
     "ctrl-shift-backspace"
 };
 
+/// The Rename shortcut's chords (SPEC.md, "Desktop window chrome"): Cmd+L on a Mac, Ctrl+Shift+L on Linux. Spelled
+/// once here, for its binding, its row in [`TERMINAL_KEYS`] and the tests.
+const RENAME_SESSION_MAC: &str = "cmd-l";
+const RENAME_SESSION_LINUX: &str = "ctrl-shift-l";
+
+/// The Rename shortcut's chord on this platform.
+pub(crate) const RENAME_SESSION_CHORD: &str = if cfg!(target_os = "macos") {
+    RENAME_SESSION_MAC
+} else {
+    RENAME_SESSION_LINUX
+};
+
+/// The Rename shortcut as hover help names it on this platform, in the old app's spelling (`SESSION_RENAME_SHORTCUT`
+/// at reference commit `24bc0580`).
+pub(crate) const RENAME_SESSION_SHORTCUT_NAME: &str = if cfg!(target_os = "macos") {
+    "⌘L"
+} else {
+    "Ctrl+Shift+L"
+};
+
 /// The chords a focused text field keeps for itself although Farhelm binds them elsewhere. [`install`] binds each to
 /// `NoAction` in [`TEXT_INPUT_CONTEXT`], which hides every binding further out for the same chord, so the key goes on
 /// to the field's own handling (here, nothing: Kit binds none of them). Bound on every platform: on macOS the Delete
@@ -156,6 +176,9 @@ pub fn install(cx: &mut App) {
         // terminal because its `TERMINAL_KEYS` row is an app shortcut, and a text field keeps the Linux chord
         // (`TEXT_FIELD_KEYS`).
         KeyBinding::new(DELETE_SESSION_CHORD, DeleteSession, Some(CONTEXT)),
+        // SPEC.md, "Desktop window chrome". The main view hands it to the session list's Rename editor for the open
+        // session; it works from a focused terminal because its `TERMINAL_KEYS` row is an app shortcut.
+        KeyBinding::new(RENAME_SESSION_CHORD, RenameSession, Some(CONTEXT)),
     ]);
     cx.bind_keys(
         TEXT_FIELD_KEYS
@@ -303,7 +326,11 @@ pub const TERMINAL_KEYS: &[TerminalKey] = &[
         what: "open New",
     },
     app("cmd-w", "ctrl-shift-backspace", "delete the open session"),
-    app("cmd-l", "ctrl-shift-l", "rename the open session"),
+    app(
+        RENAME_SESSION_MAC,
+        RENAME_SESSION_LINUX,
+        "rename the open session",
+    ),
     // The terminal's own commands.
     both(
         "shift-pageup",

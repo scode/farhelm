@@ -10,15 +10,19 @@
 //! commands, in a [`Role::Menu`] of their own, so the header is not read out as one of them. Up and Down walk the
 //! commands (the layer manager's menu context), and the pointer moves the same highlight.
 //!
+//! Rename comes first, as in the old app. Choosing it closes the menu, which leaves focus on the menu's button, and
+//! opens the Rename editor ([`super::rename`]), which returns focus there when it closes. Its hover help names the
+//! Rename shortcut on the open session's row only, the one row the shortcut acts on (SPEC.md, "Desktop window
+//! chrome"). Like Delete, it is unavailable while the session has a request in flight.
+//!
 //! Choosing Delete closes the menu before the question opens beside the same button (the old app turned the menu into
 //! the question; here the two are separate layers, one after the other). While that question is open the button is
 //! inert: a click on it neither reopens the menu nor answers the question, and the question's own Cancel, Escape or a
 //! press elsewhere is the way out. A refusal from the helm shows inside the menu as well as on the row, since the open
 //! menu covers the row's own copy.
 //!
-//! NOTE: Only Delete is ported. SPEC.md's Rename comes next, as the first command (the slice's Rename piece adds it,
-//! with the pencil icon and its shortcut in its tooltip); Clone, Replace, Replace with, Stop, Restart, Mark read,
-//! Pin and the environment commands come with their areas. Also not ported: the button staying visible while the
+//! NOTE: Only Rename and Delete are ported. Clone, Replace, Replace with, Stop, Restart, Mark read, Pin and the
+//! environment commands come with their areas. Also not ported: the button staying visible while the
 //! row's open control has keyboard focus (the old `:focus-within`; here only the button's own focus shows it), opening
 //! the menu with the arrow keys from the closed button, placing the menu beside the sidebar with a pointer notch (the
 //! layer manager places it below its anchor), and centering the Delete shortcut's question when the selected row is
@@ -37,6 +41,7 @@ use gpui::{
 };
 
 use super::{SessionList, delete, selection, status};
+use crate::actions::RENAME_SESSION_SHORTCUT_NAME;
 use crate::assets::Icon;
 use crate::components::{HoverHelp, IconButton, MenuItem, Role, Tier};
 use crate::focus::{self, Mark};
@@ -187,18 +192,19 @@ impl SessionList {
             return;
         };
         let mark = Mark::take(cx);
-        let delete_focus = cx.focus_handle().tab_stop(true);
+        let rename_focus = cx.focus_handle().tab_stop(true);
         let list = cx.weak_entity();
         let view = cx.new(|_| RowMenu {
             key: key.to_owned(),
             list,
-            delete_focus: delete_focus.clone(),
+            rename_focus: rename_focus.clone(),
         });
         let opened = layers::open_popover(
             Popover {
                 view: view.into(),
                 container: cx.focus_handle(),
-                start: delete_focus,
+                // The first command, as the old menu started.
+                start: rename_focus,
                 anchor,
             },
             &mark,
@@ -211,6 +217,23 @@ impl SessionList {
                 .rows
                 .opened(key, menu, Opened::Menu);
         }
+    }
+
+    /// The menu's Rename was chosen at `mark`: close the menu, which returns focus to its button, then open the Rename
+    /// editor, which returns focus there when it closes.
+    fn rename_from_menu(
+        &mut self,
+        key: &str,
+        mark: &Mark,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some((menu, Opened::Menu)) =
+            self.current.current(cx).rows.still_open(key, window, cx)
+        {
+            layers::close(menu, window, cx);
+        }
+        let _ = super::rename::open(key, mark, window, cx);
     }
 
     /// The menu's Delete was chosen at `mark`: close the menu, which returns focus to where it was when the menu
@@ -260,8 +283,8 @@ fn clamp_name(name: &str) -> String {
 pub(super) struct RowMenu {
     key: String,
     list: WeakEntity<SessionList>,
-    /// The Delete command's focus handle, where the menu starts.
-    delete_focus: FocusHandle,
+    /// The Rename command's focus handle, where the menu starts.
+    rename_focus: FocusHandle,
 }
 
 impl Render for RowMenu {
@@ -282,6 +305,29 @@ impl Render for RowMenu {
         let busy = delete::busy(&self.key, cx);
         let failure = session::current_operations(cx)
             .and_then(|operations| operations.read(cx).failure(&self.key).cloned());
+        let open = local_state::selected(cx).as_deref() == Some(self.key.as_str());
+        let rename_help = if open {
+            format!("Rename: give this session a new title ({RENAME_SESSION_SHORTCUT_NAME})")
+        } else {
+            "Rename: give this session a new title".to_owned()
+        };
+        let (list, key) = (self.list.clone(), self.key.clone());
+        let rename = MenuItem::new(
+            "session-menu-rename",
+            Icon::Edit,
+            "Rename",
+            HoverHelp::tooltip(rename_help),
+            Role::MenuItem,
+        )
+        .description("Give this session a new title")
+        .disabled(busy)
+        .focus(&self.rename_focus)
+        .on_click(move |_, window, cx| {
+            let mark = Mark::take(cx);
+            let _ = list.update(cx, |list, cx| {
+                list.rename_from_menu(&key, &mark, window, cx)
+            });
+        });
         let list = self.list.clone();
         let key = self.key.clone();
         let delete = MenuItem::new(
@@ -294,7 +340,6 @@ impl Render for RowMenu {
         .description("Removes the session and its state")
         .danger()
         .disabled(busy)
-        .focus(&self.delete_focus)
         .on_click(move |_, window, cx| {
             let mark = Mark::take(cx);
             let _ = list.update(cx, |list, cx| {
@@ -310,6 +355,7 @@ impl Render for RowMenu {
                     .aria_label(actions_label(&row.info.title))
                     .flex()
                     .flex_col()
+                    .child(rename)
                     .child(delete),
             )
             // On the menu's own surface, so in the ordinary red whatever the row's fill.

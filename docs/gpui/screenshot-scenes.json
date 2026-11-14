@@ -141,6 +141,11 @@
       "golden": "session-list-deleting",
       "title": "The session list with one Delete pending and one refused",
       "reference": null
+    },
+    {
+      "golden": "rename-dialog",
+      "title": "The Rename editor as it opens: the current title, the field holding it with focus, Cancel and Save",
+      "reference": "rename-dialog"
     }
   ],
   "reference_scenes": [
