@@ -30,7 +30,7 @@ pub mod draft;
 mod model;
 pub mod request;
 pub mod view;
-mod words;
+pub(crate) mod words;
 
 #[cfg(test)]
 mod draft_tests;

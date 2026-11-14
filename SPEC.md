@@ -1168,26 +1168,27 @@ agent choice is independent of that destination:
   Escape returns to the launcher. Successful saving closes the launcher and opens the new template in the Templates
   editor; errors preserve the launcher draft. Replace with does not offer this action. Templates are created, edited,
   duplicated, and deleted in the Templates dialog beside New. A list of names and summaries sits beside the selected
-  template's editor; at phone width, opening a template shows the editor with a back link. The editor shows only fields
-  the template sets, with labeled controls and explicit add/remove actions. The session-name label row offers "base name
-  | fixed name" with help explaining numbering and conflicts. Adding the name starts on base; removing it removes its
-  kind. Duplicate and delete undo retain the kind, and saving a base name leaves no unsaved changes. Its "switches
-  launcher to" choice is agent, command, or don't switch; don't switch offers only host, destination and session name.
-  Agent and command choices store their matching launch kind, so applying the template switches tabs. Existing kindless
-  templates keep applying as stored; opening one infers its switch in an unsaved draft, and saving stores that switch.
-  Choices follow the agent type when one is set, while model text may be arbitrary and other fields need no agent type.
-  The initial prompt uses a multiline box that grows with its text up to a cap and then scrolls, offered on the agent
-  tab when the template's agent supports it or no agent is set. It explains that the message is sent on every launch
-  from the template and can be edited in the launcher first; the list summary mentions it. Newline and tab remain
-  editable. Invisible formatting is shown escaped and read-only, retaining its raw value through unrelated saves;
-  removing and adding the field replaces it. Incompatible fields stay visible and prevent saving until corrected or
-  removed. Saving is explicit; Save is greyed out and does nothing while there are no unsaved changes, and keeps
-  keyboard focus after saving. Leaving an unsaved draft asks Keep editing, Discard, or Save in that reading order, with
-  initial focus still on Save. Its shared header supplies Close; the complete editor keeps scrolling within the dialog,
-  including its editor-local action footer. Template names are unique. Creating a template or renaming one refuses any
-  whitespace in its name, including Unicode whitespace; existing names with whitespace remain usable, can keep their
-  name when other fields are saved, and retain delete undo. The agent's template create command follows the same
-  new-name rule. Duplicate opens an unsaved copy named `<name>-copy`, then `<name>-copy-2` and so on until free,
+  template's editor (the old browser app's phone-width layout, list or editor with a back link, has no place in the
+  desktop app, whose window is never that narrow; decided by the migration's orchestrator on 2026-11-14). The editor
+  shows only fields the template sets, with labeled controls and explicit add/remove actions. The session-name label row
+  offers "base name | fixed name" with help explaining numbering and conflicts. Adding the name starts on base; removing
+  it removes its kind. Duplicate and delete undo retain the kind, and saving a base name leaves no unsaved changes. Its
+  "switches launcher to" choice is agent, command, or don't switch; don't switch offers only host, destination and
+  session name. Agent and command choices store their matching launch kind, so applying the template switches tabs.
+  Existing kindless templates keep applying as stored; opening one infers its switch in an unsaved draft, and saving
+  stores that switch. Choices follow the agent type when one is set, while model text may be arbitrary and other fields
+  need no agent type. The initial prompt uses a multiline box that grows with its text up to a cap and then scrolls,
+  offered on the agent tab when the template's agent supports it or no agent is set. It explains that the message is
+  sent on every launch from the template and can be edited in the launcher first; the list summary mentions it. Newline
+  and tab remain editable. Invisible formatting is shown escaped and read-only, retaining its raw value through
+  unrelated saves; removing and adding the field replaces it. Incompatible fields stay visible and prevent saving until
+  corrected or removed. Saving is explicit; Save is greyed out and does nothing while there are no unsaved changes, and
+  keeps keyboard focus after saving. Leaving an unsaved draft asks Keep editing, Discard, or Save in that reading order,
+  with initial focus still on Save. Its shared header supplies Close; the complete editor keeps scrolling within the
+  dialog, including its editor-local action footer. Template names are unique. Creating a template or renaming one
+  refuses any whitespace in its name, including Unicode whitespace; existing names with whitespace remain usable, can
+  keep their name when other fields are saved, and retain delete undo. The agent's template create command follows the
+  same new-name rule. Duplicate opens an unsaved copy named `<name>-copy`, then `<name>-copy-2` and so on until free,
   replacing whitespace in the source name with `-` in that suggestion. A workspace-trust field in an older template
   remains readable but is ignored when applied and omitted on every save, including duplicate and delete undo. Delete
   takes effect immediately and offers undo inside the dialog for about ten seconds; undo refuses if its old name has

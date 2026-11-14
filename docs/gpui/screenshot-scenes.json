@@ -642,6 +642,11 @@
       "reference": null
     },
     {
+      "golden": "templates-dialog",
+      "title": "The Templates dialog's list: summaries, the ⚡ template with its chord line, a bound number key (no editor yet)",
+      "reference": "templates-dialog"
+    },
+    {
       "golden": "settings-sessions",
       "title": "Settings as the gear opens it, at Sessions (only Sessions, Appearance, Hosts, Terminal and Agent trust are listed so far)",
       "reference": "settings-sessions"
