@@ -209,6 +209,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   whichever was done, and whether the license check should catch GPL-family files bundled inside a crate whose declared
   license is permissive.
 
+- **Cut the new desktop app's idle CPU with a large running fleet.** With the session list now drawing only the rows on
+  screen, idle CPU no longer depends on how many sessions are listed, and typing stays at about 30 ms at any fleet size.
+  But it still grows with how many sessions are running: on the test Mac, 1.6% with 5 sessions, 3.3-3.5% with 179 of 200
+  running and 5.3-5.4% with 449 of 500 running, against the old app's 1.6% idle. Most of it remains when the window is
+  in the background, so it comes from applying the helm's updates for running sessions, not from drawing. Asked for on
+  2026-11-14; first measure the old app with 200 running sessions for a fair comparison, then profile what each update
+  costs in the app.
+
 ### Tensorlake
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
