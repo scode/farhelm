@@ -34,7 +34,10 @@ use farhelm_grid_model::{
     ApplyEffects, Cursor, CursorShape, Damage, GridError, GridModel, GridOutput, GridRow, Position,
     Selection, SelectionMode, TerminalState, ViewRow, Viewport, display_text,
 };
+use farhelm_input_mapping::Platform;
+use farhelm_input_mapping::cursor::move_to_cell;
 use farhelm_input_mapping::pointer::Geometry;
+use farhelm_proto::grid::GridInput;
 use gpui::{
     App, Bounds, ContentMask, Context, Element, ElementId, FontFeatures, GlobalElementId,
     InspectorElementId, IntoElement, LayoutId, PathBuilder, Pixels, Render, ShapedLine, Size,
@@ -575,6 +578,19 @@ impl TerminalView {
             .model
             .selection_text(selection.start, selection.end, selection.mode);
         (!text.is_empty()).then_some(text)
+    }
+
+    /// The arrow keys that move the program's cursor from where it is to screen cell (`x`, `y`) on `platform`, in
+    /// order (an Alt-click; the input mapping's port of xterm.js's MoveToCell). Empty when the cursor is already there
+    /// or the screen has no cursor yet.
+    pub fn cursor_moves_to(&self, x: u16, y: u16, platform: Platform) -> Vec<GridInput> {
+        let mut moves = move_to_cell(&self.model, x, y, platform);
+        let mut keys = Vec::with_capacity(moves.len());
+        while let Some(key) = moves.peek() {
+            keys.push(key);
+            moves.advance();
+        }
+        keys
     }
 
     /// The word around `position` (double click), as the grid model finds it.
