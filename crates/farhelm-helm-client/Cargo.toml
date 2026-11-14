@@ -18,7 +18,6 @@ dist = false
 [dependencies]
 farhelm-proto.workspace = true
 futures-util = { workspace = true, features = ["sink", "std"] }
-percent-encoding.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

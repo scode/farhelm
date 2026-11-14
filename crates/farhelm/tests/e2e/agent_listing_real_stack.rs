@@ -62,7 +62,7 @@ pub(crate) fn bare_session_id(reference: &str) -> String {
 /// Hold one authenticated GUI channel for as long as the guard lives.
 ///
 /// Hand-rolled down to the upgrade request because no WebSocket client is a
-/// dependency of this workspace and these tests need little from one: that
+/// dependency of this test crate and these tests need little from one: that
 /// the upgrade SUCCEEDS, and that the channel stays up. The UI channel holds
 /// the helm's seat, which is what establishes the approval-window premise (a
 /// card needs a connected GUI); routing does not depend on any GUI channel.
@@ -70,10 +70,11 @@ pub(crate) fn bare_session_id(reference: &str) -> String {
 /// because a WebSocket handshake from a browser could not set headers, and
 /// the helm authenticates every UI socket that way (`farhelm-helm`'s `auth`).
 ///
-/// The helm drops a channel that answers none of its keepalive Pings within
-/// about a minute, which would give the seat up mid-test, so the guard's task
-/// reads the channel and answers every Ping with a Pong. Everything else the
-/// helm sends (snapshots, changes) is read and ignored.
+/// The helm closes a UI channel that sends nothing for about a minute (a real
+/// GUI heartbeats every 5 seconds), which would give the seat up mid-test, so
+/// the guard's task sends a heartbeat every few seconds and reads and discards
+/// everything the helm sends (snapshots, changes, pongs), so that the helm's
+/// writes never stall on a full socket.
 async fn hold_gui_socket(helm: &HelmProcess, secret: &str, path: &str) -> GuiSocket {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -110,7 +111,7 @@ async fn hold_gui_socket(helm: &HelmProcess, secret: &str, path: &str) -> GuiSoc
         response.starts_with("HTTP/1.1 101"),
         "the GUI upgrade for {path} was refused: {response}"
     );
-    GuiSocket(tokio::spawn(answer_pings(stream)))
+    GuiSocket(tokio::spawn(heartbeat(stream)))
 }
 
 /// A held GUI channel; dropping it closes the channel and gives the seat up.
@@ -122,56 +123,47 @@ impl Drop for GuiSocket {
     }
 }
 
-/// Read server frames until the helm closes the channel, answering each Ping
-/// with a Pong that carries the same payload.
-///
-/// Server frames are never masked; client frames must be, and an all-zero
-/// mask is a valid one that leaves the payload as it is. A Ping's payload is
-/// at most 125 bytes by the protocol, so a Pong always fits the short form.
-async fn answer_pings(mut stream: tokio::net::TcpStream) {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+/// How often the held channel sends a heartbeat: well inside the helm's
+/// one-minute silence close, like a real GUI's 5 seconds.
+const GUI_HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(5);
 
-    loop {
-        let mut header = [0u8; 2];
-        if stream.read_exact(&mut header).await.is_err() {
-            return;
-        }
-        let opcode = header[0] & 0x0f;
-        let len = match header[1] & 0x7f {
-            126 => {
-                let mut extended = [0u8; 2];
-                if stream.read_exact(&mut extended).await.is_err() {
-                    return;
-                }
-                u64::from(u16::from_be_bytes(extended))
+/// Keep a held GUI channel alive until the helm closes it: send a heartbeat
+/// (`{"type":"ping"}`, answered by a pong nobody reads) every
+/// [`GUI_HEARTBEAT`], and drain whatever the helm sends.
+async fn heartbeat(stream: tokio::net::TcpStream) {
+    use tokio::io::AsyncWriteExt;
+
+    let (mut read, mut write) = stream.into_split();
+    let drain = async move {
+        let _ = tokio::io::copy(&mut read, &mut tokio::io::sink()).await;
+    };
+    let beat = async move {
+        for n in 0u64.. {
+            let ping = format!(r#"{{"type":"ping","n":{n}}}"#);
+            if write.write_all(&client_text_frame(&ping)).await.is_err() {
+                return;
             }
-            127 => {
-                let mut extended = [0u8; 8];
-                if stream.read_exact(&mut extended).await.is_err() {
-                    return;
-                }
-                u64::from_be_bytes(extended)
-            }
-            short => u64::from(short),
-        };
-        let mut payload = vec![0u8; usize::try_from(len).expect("a frame fits in memory")];
-        if stream.read_exact(&mut payload).await.is_err() {
-            return;
+            // sleep-ok: the held channel's heartbeat interval, standing in for a real GUI's.
+            tokio::time::sleep(GUI_HEARTBEAT).await;
         }
-        match opcode {
-            // Ping: answer at once.
-            0x9 => {
-                let mut pong = vec![0x8a, 0x80 | payload.len() as u8, 0, 0, 0, 0];
-                pong.extend_from_slice(&payload);
-                if stream.write_all(&pong).await.is_err() {
-                    return;
-                }
-            }
-            // Close: the channel is over.
-            0x8 => return,
-            _ => {}
-        }
+    };
+    tokio::select! {
+        () = drain => {}
+        () = beat => {}
     }
+}
+
+/// One WebSocket text frame as a client must send it: masked, here with an
+/// all-zero mask, which is valid and leaves the payload as it is. Heartbeats
+/// are short, so the one-byte length form always fits.
+fn client_text_frame(text: &str) -> Vec<u8> {
+    let len = u8::try_from(text.len())
+        .ok()
+        .filter(|len| *len < 126)
+        .expect("a heartbeat fits the short frame form");
+    let mut frame = vec![0x81, 0x80 | len, 0, 0, 0, 0];
+    frame.extend_from_slice(text.as_bytes());
+    frame
 }
 
 /// Read one session's credential out of the supervisor's own store.
