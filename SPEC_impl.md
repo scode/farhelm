@@ -569,8 +569,19 @@ prefix, because GPUI holds the first key of a chord back until the next key show
 after a second only when that key alone is bound too, or when it types text into an element that accepts text input;
 otherwise it waits with no time limit, which includes typing into a terminal that has no text input handler.
 
-Enforced by a test that walks the keymap and fails on a chord prefix in any context containing a terminal, and by a test
-that every pass-through key reaches the terminal with the app's bindings loaded.
+The shortcuts SPEC.md says ignore repeat list their actions in one place. GPUI runs a binding's action on every
+auto-repeat of a held key, so a keystroke interceptor drops a held repeat before any binding matches it whenever the
+binding GPUI would try first, where focus is, runs a listed action. The repeat then neither runs the action again nor
+reaches anything behind the binding, a focused terminal's program included. The interceptor goes by that binding's
+action rather than by the chord, so where a deeper binding takes the same chord (a text field's, say), its repeats keep
+coming. A listed action's handler must take every key that reaches it, even when it does nothing. Composition is not
+covered: GPUI's key events do not say whether an input method is composing, so refusing a shortcut typed mid-composition
+falls to the element that owns the input handler.
+
+Enforced by a test that walks the keymap and fails on a chord prefix in any context containing a terminal, by a test
+that every pass-through key reaches the terminal with the app's bindings loaded, and by tests that a held listed
+shortcut runs once, from a focused terminal too and without reaching it, and again on a fresh press, while an unlisted
+key and a deeper binding of a listed chord keep every repeat.
 
 ### Animation time: the ticker
 

@@ -2,8 +2,9 @@
 //!
 //! SPEC_impl.md, "Actions and keymap": buttons, menu items and keys dispatch the same action, and every action is
 //! declared here, so a key and the control it stands for can never drift apart. This file holds the actions the focus
-//! coordinator and the layer manager need, and the terminal's key table ([`TERMINAL_KEYS`]). The features add their own
-//! actions as they are built.
+//! coordinator and the layer manager need, the session shortcuts' actions, the terminal's key table
+//! ([`TERMINAL_KEYS`]), and the list of actions a held key runs only once (`ONCE_PER_PRESS`). The features add their
+//! own actions as they are built.
 //!
 //! Every binding lives in [`CONTEXT`], the key context the root view sets on everything Farhelm draws. GPUI Kit's `Root`
 //! binds Tab and Shift+Tab in its own context, which sits above Farhelm's root, and moves focus itself when it handles
@@ -31,9 +32,37 @@
 //! The terminal itself asks [`terminal_key_owner`] about each key that reaches it, rather than deciding again which
 //! keys are Farhelm's: an app shortcut whose feature has no binding yet still reaches the terminal's listener, and must
 //! not be sent to the program either.
+//!
+//! ## Shortcuts that act once per press
+//!
+//! GPUI runs a key binding's action on every auto-repeat of a held key: binding matching reads only the keystroke, and
+//! a repeat's keystroke is the same as the press's. SPEC.md says some shortcuts "ignore repeat" (session Delete and
+//! Rename among them), so `ONCE_PER_PRESS` lists their actions, and a keystroke interceptor that [`install`] sets up
+//! stops a held repeat before GPUI matches it whenever the binding GPUI would try first for that key is one of them.
+//! The repeat then neither runs the action again nor reaches anything behind the binding: not the focused element's
+//! key listeners, not a focused terminal and so not its program, and not the platform's text input. (GPUI still offers
+//! an intercepted key to the first key listener on the focus path, in the capture phase; nothing Farhelm draws listens
+//! there.)
+//!
+//! The guard asks what the key would run, not which chord it is, because a chord means different things in different
+//! places: SPEC.md has the Linux Delete chord, Ctrl+Shift+Backspace, leave text editors other than the terminal alone,
+//! so where a text field's own binding wins, holding that chord keeps repeating as the field wants. A key that is not
+//! bound to a listed action keeps every repeat, which a terminal's program needs for held arrows and letters.
+//!
+//! The guard relies on the platform marking repeats, which macOS and Wayland both do. (GPUI's X11 backend does not, but
+//! Farhelm builds GPUI without X11.)
+//!
+//! NOTE: The guard does not cover SPEC.md's "ignore composition". IME composition is invisible here: GPUI's key-down
+//! event has no composing flag and an interceptor cannot reach the focused input handler. On macOS GPUI offers a key to
+//! the input method first while it composes, and a key the input method hands back is dispatched like any other, so a
+//! listed shortcut typed mid-composition still runs. The element that owns the input handler knows it is composing and
+//! is the place to refuse it; for a terminal, that comes with the terminal's input method work.
 
 use farhelm_input_mapping::Platform;
-use gpui::{App, KeyBinding, KeyDownEvent, KeybindingKeystroke, Keystroke, NoAction, actions};
+use gpui::{
+    Action, App, Global, KeyBinding, KeyContext, KeyDownEvent, KeybindingKeystroke, Keystroke,
+    KeystrokeEvent, NoAction, Subscription, Window, actions,
+};
 
 /// The key context the root view sets, and the one every Farhelm binding is declared in.
 pub const CONTEXT: &str = "Farhelm";
@@ -64,6 +93,12 @@ actions!(
         FocusPreviousControl,
         /// Close the topmost layer (a dialog, a menu or a tooltip), returning focus to where it was before it opened.
         Dismiss,
+        /// Delete the open session through its header Delete action, with that action's confirmation and busy rules
+        /// (SPEC.md: Cmd+W on a Mac, Ctrl+Shift+Backspace on Linux). Runs once per press (`ONCE_PER_PRESS`).
+        DeleteSession,
+        /// Open Rename for the open session (SPEC.md: Cmd+L on a Mac, Ctrl+Shift+L on Linux). Runs once per press
+        /// (`ONCE_PER_PRESS`).
+        RenameSession,
     ]
 );
 
@@ -94,6 +129,62 @@ pub fn install(cx: &mut App) {
             .filter_map(|key| key.chord(THIS_PLATFORM))
             .map(|chord| KeyBinding::new(chord, NoAction, Some(TERMINAL_CONTEXT))),
     );
+    let interceptor = cx.intercept_keystrokes(hold_back_repeat);
+    cx.set_global(RepeatGuard {
+        _interceptor: interceptor,
+    });
+}
+
+// ---- Shortcuts that act once per press -------------------------------------------------------------------------------
+
+/// The actions a held key runs once, on the press, and not again on each auto-repeat: the ones behind SPEC.md's
+/// shortcuts that "ignore repeat". A shortcut opts in by having its action listed here; its binding stays where every
+/// binding is, in [`install`]. The module docs say what the guard covers and what it cannot.
+///
+/// A listed action's handler must take every key that reaches it, even when it does nothing (Delete with no session
+/// open). The guard judges a repeat by the first binding GPUI tries for the key; a handler that declined would send
+/// the press on to the next binding or to the key listeners, and its repeats would not follow it there.
+const ONCE_PER_PRESS: &[&dyn Action] = &[&DeleteSession, &RenameSession];
+
+/// Keeps the repeat guard's keystroke interceptor subscribed for the app's lifetime.
+struct RepeatGuard {
+    _interceptor: Subscription,
+}
+
+impl Global for RepeatGuard {}
+
+/// The repeat guard: stop a held repeat of a key that would run a [`ONCE_PER_PRESS`] action, before GPUI matches any
+/// binding for it.
+///
+/// It does not check GPUI's character-input preference, under which bindings would not run at all: on macOS and
+/// Wayland only GPUI's replay of a held-back chord key asks for it, and a replay never reaches an interceptor. Were a
+/// platform to ask for it, dropping a listed shortcut's repeat would still be what SPEC.md wants.
+fn hold_back_repeat(event: &KeystrokeEvent, _: &mut Window, cx: &mut App) {
+    let Some(down) = &event.key_down else {
+        return;
+    };
+    if down.is_held && runs_once_per_press(&down.keystroke, &event.context_stack, cx) {
+        cx.stop_propagation();
+    }
+}
+
+/// Whether `keystroke`, typed where the focused element's context stack is `context_stack`, would run a
+/// [`ONCE_PER_PRESS`] action: whether the binding GPUI tries first for it is bound to one. A deeper context's binding
+/// for the same chord wins, as it does in GPUI's dispatch, and a `NoAction` row hides the bindings it suppresses.
+///
+/// Matches the key alone, as GPUI does when no chord is pending. The listed shortcuts are single keys bound in
+/// [`CONTEXT`], which holds no chord prefix (SPEC_impl.md forbids one in any context that contains a terminal), so
+/// there the press settles any pending chord before its repeats arrive. A deeper context that started a chord with one
+/// of them would have its repeats judged as if the chord were not there.
+fn runs_once_per_press(keystroke: &Keystroke, context_stack: &[KeyContext], cx: &App) -> bool {
+    let keymap = cx.key_bindings();
+    let keymap = keymap.borrow();
+    let (bindings, _) = keymap.bindings_for_input(std::slice::from_ref(keystroke), context_stack);
+    bindings.first().is_some_and(|binding| {
+        ONCE_PER_PRESS
+            .iter()
+            .any(|listed| listed.partial_eq(binding.action()))
+    })
 }
 
 // ---- The terminal's key table ----------------------------------------------------------------------------------------
@@ -260,8 +351,9 @@ const fn mac_only(chord: &'static str, owner: KeyOwner, what: &'static str) -> T
 /// Who the key pressed in `event`, in a focused terminal on this platform, belongs to. The terminal calls this for every
 /// key that reaches its listener: a [`KeyOwner::App`] key is not sent to the program (the terminal hands it to
 /// `farhelm-input-mapping` as an app shortcut), and any other key goes on to the terminal's own input mapping. While a
-/// shortcut has no binding, the input mapping also keeps its held repeats from the program; once it is bound, the
-/// binding sees every repeat and this is never asked.
+/// shortcut has no binding, the input mapping also keeps its held repeats from the program. Once it is bound, the
+/// binding takes the key and this is never asked; a held repeat then runs the binding again, unless its action is in
+/// `ONCE_PER_PRESS`, whose guard stops the repeat before the binding or the terminal sees it.
 ///
 /// A key a binding handled never reaches the terminal, so this answers only for the keys that do. It matches the way
 /// GPUI matches a binding ([`Keystroke::should_match`]), so a key counts as a chord here exactly when a binding for
