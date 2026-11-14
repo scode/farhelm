@@ -416,6 +416,13 @@ whole grid, which the wrapper's comparison of computed inputs cannot express. Th
 (`crates/gui/farhelm-gui/src/terminal.rs`) owns its grid model, is never cached, and notifies itself through the methods
 that change what it shows; render-count tests pin that shown output redraws it and output it does not show does not.
 
+The session list builds only the rows in view and a few beyond its edges (GPUI's variable-height `list`), because an
+uncached view re-renders on every window redraw and the running pulse and the terminal's cursor blink redraw the window
+several times a second: built whole, 200 rows idled at about 12% of a core on the test Mac (2026-11-14), against about
+2% for five. SPEC.md's "served and rendered WHOLE" rules out paging, cursors and incremental listing, and none of that
+changes: the helm serves the whole capped fleet, the store holds all of it, and every row is reachable by scrolling.
+What does change is that assistive technology and the test bridge see only the rows drawn.
+
 Enforced by tests that count redraws per view (an app-level render counter compiled into test builds; no GPUI patch), by
 a test for each store that a change through its public methods redraws the views that read it, by clippy
 `disallowed-methods` on GPUI's view caching (`Entity::cached` and `AnyView::cached`) everywhere in the GUI crates except

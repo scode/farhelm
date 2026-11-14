@@ -173,9 +173,10 @@ impl SessionList {
     }
 
     /// The user asked to delete `key` (its row's Delete, or the shortcut), at `mark`: delete it at once when nothing
-    /// shows alive or confirmations are skipped, and otherwise ask, beside the row's menu button while the row is drawn
-    /// and centered when it is not. Nothing happens for a session that is not listed, or that has any request in
-    /// flight. Visible to the crate for the screenshot goldens, which ask the question without a click.
+    /// shows alive or confirmations are skipped, and otherwise ask, beside the row's menu button while the row is in
+    /// the list's view and centered when it is not (scrolled away, or not listed). Nothing happens for a session that
+    /// is not listed, or that has any request in flight. Visible to the crate for the screenshot goldens, which ask the
+    /// question without a click.
     pub(crate) fn delete(
         &mut self,
         key: &str,
@@ -203,7 +204,13 @@ impl SessionList {
         let on_confirm = |frozen: Frozen, _: &mut Window, cx: &mut App| {
             send_delete(&frozen.key, frozen.guard, cx);
         };
-        let anchor = self.current.current(cx).rows.anchor(key);
+        // Beside the row's menu button only while the row is in the list's view: a row scrolled away may still be
+        // drawn just past the list's edge, and a question beside it would sit next to nothing the user can see.
+        let anchor = if self.row_in_view(key) {
+            self.current.current(cx).rows.borrow().anchor(key)
+        } else {
+            None
+        };
         let asked = anchor.and_then(|anchor| {
             prompt::ask_anchored(
                 question(key, &row, guard),
@@ -229,6 +236,7 @@ impl SessionList {
             self.current
                 .current(cx)
                 .rows
+                .borrow_mut()
                 .opened(key, layer, Opened::Question);
         }
     }
