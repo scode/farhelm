@@ -19,6 +19,12 @@
 //! draws after the pane ([`Sidebar::grip`]). The pane keeps its floor ([`sidebar::MAIN_PANE_MIN_WIDTH`]); in a window
 //! too narrow for both, the row scrolls sideways rather than crushing the pane, as the old `.app-shell` did. Only a
 //! sideways wheel scrolls it, so a wheel over the list or the terminal scrolls only those.
+//!
+//! The main view also keeps the theme following the helm's stored appearance, beside the operating system's: it holds
+//! the subscription for the window's life, and the Settings area decides what a change does
+//! ([`settings::follow_stored_appearance`]). Together they give SPEC.md's rule ("System follows each device's current
+//! appearance ... an explicit choice overrides it"); the theme module decides how a choice and the system resolve to
+//! a palette.
 
 use farhelm_helm_client::ChannelState;
 use gpui::{
@@ -35,12 +41,16 @@ use crate::session_list::{self, SessionList};
 use crate::session_pane::{SessionPane, header};
 use crate::sidebar::{self, Sidebar};
 use crate::theme::metrics;
-use crate::{layers, render_count, root, session, theme};
+use crate::{layers, render_count, root, session, settings, theme};
 
 /// The window's root view.
 pub struct MainView {
     /// Keeps the theme following the operating system's appearance for this window's lifetime.
     _appearance: Subscription,
+    /// Keeps the theme following the helm's stored appearance for this window's lifetime: at the first snapshot, on
+    /// every change of the store (a no-op unless the choice changed), and again after a reset
+    /// ([`settings::follow_stored_appearance`]).
+    _appearance_choice: session::ObservingCurrent,
     /// This window's layer stack (which redraws this view, and so the overlay it draws, when an overlay changes), its
     /// focus state and the coordinator's focus recovery.
     root: root::Attachment,
@@ -60,8 +70,8 @@ pub struct MainView {
 }
 
 impl MainView {
-    /// The main view, following the operating system's appearance, the layer manager, the connection and the notice
-    /// center while it lives.
+    /// The main view, following the operating system's appearance, the layer manager, the connection, the notice
+    /// center and the helm's stored appearance while it lives.
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut observed = Vec::new();
         if let Some(connection) = session::connection(cx) {
@@ -73,6 +83,9 @@ impl MainView {
         let session_list = cx.new(SessionList::new);
         MainView {
             _appearance: theme::observe_window(window),
+            _appearance_choice: session::observe_current(cx, |_, cx| {
+                settings::follow_stored_appearance(cx)
+            }),
             root: root::attach(window, cx),
             _observed: observed,
             sidebar: cx.new(|cx| Sidebar::new(session_list.clone(), cx)),

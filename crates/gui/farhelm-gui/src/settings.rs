@@ -20,19 +20,22 @@
 //!   the footer's Close all close it, and focus goes back to the gear. Closing discards what the dialog holds; a save
 //!   already sent goes on, since it is the operation store's work, not the dialog's (the helm's reply then settles
 //!   nothing on screen, and the store already shows the result).
-//! - **Saving a choice.** Every switch here, and Terminal's link choice, saves one field of the helm's preference row at
-//!   once, with [`crate::drafts::save`] under [`OpKey::preferences`]. While the save is in flight the control shows the
-//!   value being saved (its draft); otherwise it shows what the helm stores, so a refused save shows the stored value
-//!   again, with the failure line under the control until its next save starts (SPEC.md: "A failed save restores the
-//!   last known value and shows an adjacent error"). Nothing is optimistic, queued, retried or read back.
+//! - **Saving a choice.** Every switch here, Appearance's choice and Terminal's link choice save one field of the
+//!   helm's preference row at once, with [`crate::drafts::save`] under [`OpKey::preferences`]. While the save is in
+//!   flight the control shows the value being saved (its draft); otherwise it shows what the helm stores, so a refused
+//!   save shows the stored value again, with the failure line under the control until its next save starts (SPEC.md:
+//!   "A failed save restores the last known value and shows an adjacent error"). Nothing is optimistic, queued,
+//!   retried or read back.
 //!
 //! NOTE: Quick flips do not follow the old app's "newest-choice" rule. Its preference queue coalesced a field's clicks,
 //! sent only the newest, and reported a failure only for the newest click. Here the operation store admits one request
-//! on the preference row's key at a time, so a click on any switch while a preference save is in flight is refused and
-//! changes nothing: the switch goes on showing the value in flight, and the next click after the reply acts. The helm
-//! is embedded and answers a preference write in milliseconds, so the window in which a click is dropped this way is
-//! that short. The migration's orchestrator accepted this on 2026-11-14, to be revisited only if a user meets it;
-//! closing it would take a key per field or a queue, both changes to the operation store, not here.
+//! on the preference row's key at a time, so a click on any switch or radio option while a preference save is in flight
+//! is refused and changes nothing: the control goes on showing the value in flight, and the next click after the reply
+//! acts. On the radios (Appearance, Terminal's link choice) an arrow press moves focus before it reports the choice, so
+//! a dropped arrow press still moves focus while the choice stays where it was. The helm is embedded and answers a
+//! preference write in milliseconds, so the window in which a click is dropped this way is that short. The migration's
+//! orchestrator accepted this on 2026-11-14, to be revisited only if a user meets it; closing it would take a key per
+//! field or a queue, both changes to the operation store, not here.
 //!
 //! NOTE: Not ported yet, each recorded in `docs/gpui/parity/settings-and-hosts.md`. The one-pane layout at 620 pixels
 //! wide and below ("‹ Settings" back to the list) is not built, since the window's minimum width is above it. A
@@ -41,6 +44,7 @@
 //! control. The section list is not pinned while a long section scrolls (the old `position: sticky`); no section here
 //! is long enough to scroll at the minimum window size.
 
+mod appearance;
 mod choices;
 mod terminal;
 #[cfg(test)]
@@ -60,10 +64,15 @@ use crate::focus::{self, Mark, ReturnTo};
 use crate::layers::{self, Dialog, LayerId};
 use crate::operations::OpKey;
 use crate::session;
-use crate::theme;
+use crate::theme::{self, Preference};
 
 use choices::{Choice, Switch};
 use terminal::LinkClick;
+
+/// Hands the helm's stored appearance to the theme, for the main view's subscription to the current UI session. It
+/// lives with the section that saves the choice, so the start hook's rule and the reading of the row's word are area
+/// code, not shared wiring.
+pub(crate) use appearance::follow_stored as follow_stored_appearance;
 
 /// `.app-settings-dialog[aria-label="Settings"]`'s width.
 const WIDTH: f32 = 760.;
@@ -115,9 +124,9 @@ pub fn open(
     open_at(Section::Sessions, opener, mark, window, cx)
 }
 
-/// [`open`], at `section` with focus on its first control (on the dialog itself at Terminal, [`Section::first`]).
-/// The entry points that open elsewhere (Agent trust at an agent's switch, for a trust hint) call this, or a form of it
-/// that takes the control to focus; the screenshot goldens call it for each section they picture.
+/// [`open`], at `section` with focus on its first control (on the dialog itself at Appearance and Terminal,
+/// [`Section::first`]). The entry points that open elsewhere (Agent trust at an agent's switch, for a trust hint) call
+/// this, or a form of it that takes the control to focus; the screenshot goldens call it for each section they picture.
 pub(crate) fn open_at(
     section: Section,
     opener: &FocusHandle,
@@ -176,6 +185,7 @@ fn preferences(collections: &farhelm_helm_client::Collections) -> Option<&Prefer
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Section {
     Sessions,
+    Appearance,
     Hosts,
     Terminal,
 }
@@ -184,12 +194,18 @@ impl Section {
     /// The sections this build has, in SPEC.md's order ("Sessions, Appearance, Hosts, Recipes, Tensorlake,
     /// Containers, Credentials, Terminal, Checkouts, Agent trust and Notifications, followed by App"). The others join
     /// with their own changes.
-    const ALL: &[Section] = &[Section::Sessions, Section::Hosts, Section::Terminal];
+    const ALL: &[Section] = &[
+        Section::Sessions,
+        Section::Appearance,
+        Section::Hosts,
+        Section::Terminal,
+    ];
 
     /// The section's stable key, which its button's element id is built from.
     fn key(self) -> &'static str {
         match self {
             Section::Sessions => "sessions",
+            Section::Appearance => "appearance",
             Section::Hosts => "hosts",
             Section::Terminal => "terminal",
         }
@@ -199,6 +215,7 @@ impl Section {
     fn label(self) -> &'static str {
         match self {
             Section::Sessions => "Sessions",
+            Section::Appearance => "Appearance",
             Section::Hosts => "Hosts",
             Section::Terminal => "Terminal",
         }
@@ -208,18 +225,20 @@ impl Section {
     fn icon(self) -> Icon {
         match self {
             Section::Sessions => Icon::Sessions,
+            Section::Appearance => Icon::Appearance,
             Section::Hosts => Icon::Hosts,
             Section::Terminal => Icon::Terminal,
         }
     }
 
-    /// The control focus starts on when Settings opens at this section: its first switch. `None` for Terminal, whose
-    /// first control is the link choice's radio group: its options' focus handles live in the component's own element
+    /// The control focus starts on when Settings opens at this section: its first switch. `None` for Appearance and
+    /// Terminal, whose first control is a radio group: its options' focus handles live in the component's own element
     /// state, out of the dialog's reach, so opening there focuses the dialog itself (see [`open_at`]). Nothing in the
-    /// app opens Settings at Terminal; only its golden does.
+    /// app opens Settings at either; only their goldens do.
     fn first(self) -> Option<Choice> {
         match self {
             Section::Sessions => Some(Choice::SkipSessionConfirmations),
+            Section::Appearance => None,
             Section::Hosts => Some(Choice::AutoUpdateRemoteHosts),
             Section::Terminal => None,
         }
@@ -232,6 +251,9 @@ pub(crate) struct SettingsDialog {
     shown: Section,
     /// One per [`Choice`], in [`Choice::ALL`]'s order, whichever section draws it.
     switches: Vec<Switch>,
+    /// Appearance's radio group: like a switch's draft, it holds the value being saved and the last refusal, and its
+    /// loaded value never reaches the screen ([`appearance::section`]).
+    appearance: Draft<Preference>,
     /// Terminal's link choice: like a switch's draft, it holds the value being saved and the last refusal, and its
     /// loaded value never reaches the screen ([`terminal::links`]).
     link_click: Draft<LinkClick>,
@@ -255,6 +277,7 @@ impl SettingsDialog {
         SettingsDialog {
             shown,
             switches,
+            appearance: Draft::load(Preference::System),
             link_click: Draft::load(LinkClick::Intercept),
             layer: None,
         }
@@ -299,6 +322,26 @@ impl SettingsDialog {
         );
         if let Err(not_started) = started {
             tracing::debug!(?choice, ?not_started, "preference switch not saved");
+        }
+    }
+
+    /// The user chose `preference` in Appearance: save it as the preference row's `appearance` field, as
+    /// [`SettingsDialog::toggle`] saves a switch, with the same refusal while any preference save is in flight. The
+    /// palette changes only once the helm stores the choice and pushes it, like every other client's.
+    fn choose_appearance(&mut self, preference: Preference, cx: &mut Context<Self>) {
+        if !self.appearance.edit(preference) {
+            return;
+        }
+        let started = drafts::save(
+            self,
+            |dialog: &mut SettingsDialog| &mut dialog.appearance,
+            &OpKey::preferences(),
+            |preference| appearance::command(*preference),
+            cx,
+            |_, _, _| {},
+        );
+        if let Err(not_started) = started {
+            tracing::debug!(?preference, ?not_started, "appearance not saved");
         }
     }
 
@@ -353,6 +396,22 @@ impl SettingsDialog {
                 self.switch(Choice::NameSessionsOnQuickLaunch, preferences, cx),
                 self.switch(Choice::ColorTerminalFrames, preferences, cx),
             ],
+            Section::Appearance => {
+                let weak = cx.weak_entity();
+                vec![
+                    appearance::section(
+                        &self.appearance,
+                        preferences,
+                        move |&preference, _, cx| {
+                            let _ = weak.update(cx, |dialog, cx| {
+                                dialog.choose_appearance(preference, cx);
+                            });
+                        },
+                        cx,
+                    )
+                    .into_any_element(),
+                ]
+            }
             Section::Hosts => vec![
                 self.switch(Choice::AutoUpdateRemoteHosts, preferences, cx),
                 choices::help(
