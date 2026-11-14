@@ -18,7 +18,8 @@ use std::time::Duration;
 
 use gpui::{
     App, AsyncWindowContext, BackgroundExecutor, Context, Entity, FocusHandle, Focusable,
-    InteractiveElement, IntoElement, ParentElement, Styled, Task, TaskExt, Window, div,
+    InteractiveElement, IntoElement, ParentElement, StatefulInteractiveElement, Styled, Task,
+    TaskExt, Window, div,
 };
 use gpui_component::button::{Button, Toggle};
 use gpui_component::menu::{ContextMenuExt, DropdownMenu};
@@ -54,6 +55,21 @@ fn window_disable_focus(window: &mut Window, cx: &mut App) {
 fn handle_focus(handle: &FocusHandle, window: &mut Window, cx: &mut App) {
     // expect: disallowed_methods gpui::FocusHandle::focus
     handle.focus(window, cx);
+}
+
+fn track_focus(handle: &FocusHandle) -> impl IntoElement {
+    // expect: disallowed_methods gpui::InteractiveElement::track_focus
+    div().track_focus(handle)
+}
+
+fn tab_index() -> impl IntoElement {
+    // expect: disallowed_methods gpui::InteractiveElement::tab_index
+    div().tab_index(0)
+}
+
+fn focusable() -> impl IntoElement {
+    // expect: disallowed_methods gpui::StatefulInteractiveElement::focusable
+    div().id("loose").focusable()
 }
 
 fn context_focus_view<T: 'static, W: Focusable>(

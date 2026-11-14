@@ -24,7 +24,9 @@ pub use dialog::DialogFrame;
 pub use gpui::Role;
 pub use text_input::{TextInput, TextInputState};
 
-use gpui::SharedString;
+use gpui::{App, ElementId, SharedString, StatefulInteractiveElement, Window};
+
+use crate::layers::{self, TooltipOwner};
 
 /// What a control says when the user hovers it or asks assistive technology about it.
 ///
@@ -40,9 +42,39 @@ impl HoverHelp {
     pub fn tooltip(text: impl Into<SharedString>) -> Self {
         HoverHelp(text.into())
     }
+}
 
-    /// The text, for the tooltip and the accessible description.
-    pub fn text(&self) -> &SharedString {
-        &self.0
-    }
+/// Give `element`, the control drawn under `id`, its hover help: the tooltip the layer manager shows while the pointer
+/// is over it, owned by this control so it closes when the control is gone, and the help as the control's accessible
+/// description where the element can carry one.
+///
+/// Every control wires its help through here, and nothing else can: the help's text is private to this module, so a
+/// control that skipped this would never read its own help, and the unused field fails the build (`-D warnings`). That
+/// is what keeps a future control from silently dropping its tooltip.
+pub(crate) fn with_hover_help<E: StatefulInteractiveElement>(
+    element: E,
+    id: &SharedString,
+    help: &HoverHelp,
+    describe: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> E {
+    let owner = TooltipOwner::for_control(
+        ElementId::Name(format!("{id}-tooltip-owner").into()),
+        window,
+        cx,
+    );
+    let text = help.0.clone();
+    let element = if describe {
+        element.aria_description(text.clone())
+    } else {
+        element
+    };
+    element.on_hover(move |hovered, window, cx| {
+        if *hovered {
+            layers::show_tooltip(&owner, text.clone(), window, cx);
+        } else {
+            layers::hide_tooltip(&owner, window, cx);
+        }
+    })
 }
