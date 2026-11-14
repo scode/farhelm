@@ -3552,6 +3552,9 @@ pub(crate) async fn rename_session(
 
 /// How long the GUI's ordinary DELETE, rename, Stop, Restart and Replace of a
 /// session wait for the host before answering that it did not answer in time.
+/// The host management routes that can wait as long use the same bound: a
+/// host probe, an Update's plan, and a destination or alias change (see
+/// [`within_host_reply_bound_saying`]).
 ///
 /// The UI channel admits one command at a time, so this is also the longest
 /// any later click can wait behind a slow host; it has to stay short. Twenty
@@ -3587,20 +3590,78 @@ pub(crate) const HOST_REPLY_BOUND: std::time::Duration = std::time::Duration::fr
 pub(crate) async fn within_host_reply_bound(
     work: impl std::future::Future<Output = axum::response::Response> + Send + 'static,
 ) -> axum::response::Response {
-    let task = tokio::spawn(work);
-    match tokio::time::timeout(HOST_REPLY_BOUND, task).await {
+    within_host_reply_bound_saying(
+        work,
+        format!(
+            "the host did not answer within {} seconds; the request is still being carried \
+             out, and the session list will show its result",
+            HOST_REPLY_BOUND.as_secs()
+        ),
+    )
+    .await
+}
+
+/// [`within_host_reply_bound`] for work whose late result does not show in the
+/// session list, so the timeout reply has to say where it does show instead.
+///
+/// The host management routes the GUI sends (a host probe, an Update's plan, a
+/// destination or alias change waiting for a setup or Update to finish) can
+/// wait on a host for longer than the UI channel tolerates, and each one's
+/// eventual outcome shows in a different place: the hosts list, or nowhere,
+/// when the user simply has to try again. `timed_out` is the whole message the
+/// 504 carries, and it is the caller's because only the caller knows which.
+///
+/// A failure the work produces after the 504 went out reaches nobody, so it is
+/// logged with its status and the start of its text; the caller's pushed state
+/// (the session or hosts list) shows whatever actually happened.
+pub(crate) async fn within_host_reply_bound_saying(
+    work: impl std::future::Future<Output = axum::response::Response> + Send + 'static,
+    timed_out: String,
+) -> axum::response::Response {
+    let mut task = tokio::spawn(work);
+    match tokio::time::timeout(HOST_REPLY_BOUND, &mut task).await {
         Ok(Ok(response)) => response,
         Ok(Err(join)) if join.is_panic() => std::panic::resume_unwind(join.into_panic()),
         Ok(Err(join)) => http_error(anyhow::anyhow!("the request's task was cancelled: {join}")),
-        Err(_elapsed) => http_error(anyhow::Error::new(SupervisorError::helm(
-            ErrorKind::Timeout,
-            format!(
-                "the host did not answer within {} seconds; the request is still being carried \
-                 out, and the session list will show its result",
-                HOST_REPLY_BOUND.as_secs()
-            ),
-        ))),
+        Err(_elapsed) => {
+            tokio::spawn(log_late_failure(task));
+            http_error(anyhow::Error::new(SupervisorError::helm(
+                ErrorKind::Timeout,
+                timed_out,
+            )))
+        }
     }
+}
+
+/// Wait for work whose caller was already told it is still running, and log
+/// its reply if that reply is not a success: nobody else will ever see it.
+async fn log_late_failure(task: tokio::task::JoinHandle<axum::response::Response>) {
+    /// How much of a late failure's text the log keeps: enough for the
+    /// helm's own sentence, without logging an arbitrarily large body.
+    const SHOWN: usize = 400;
+    let response = match task.await {
+        Ok(response) => response,
+        Err(join) => {
+            tracing::warn!(%join, "a request the helm had already answered as still running ended abnormally");
+            return;
+        }
+    };
+    let status = response.status();
+    if status.is_success() {
+        return;
+    }
+    let text = match axum::body::to_bytes(response.into_body(), 64 * 1024).await {
+        Ok(bytes) => String::from_utf8_lossy(&bytes)
+            .chars()
+            .take(SHOWN)
+            .collect::<String>(),
+        Err(error) => format!("(its text could not be read: {error})"),
+    };
+    tracing::warn!(
+        %status,
+        reply = %text,
+        "a request the helm had already answered as still running ended without success"
+    );
 }
 
 /// The query string of `DELETE /api/sessions/{id}`.

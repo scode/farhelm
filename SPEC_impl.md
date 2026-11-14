@@ -233,8 +233,14 @@ The channel is the WebSocket `GET /api/ui` (`farhelm_proto::ui_channel::UI_CHANN
 `farhelm_proto::ui_channel`. The session-list query is the channel-local command `PUT /ui/session-query`, which the
 channel handles itself and never routes. Rename, the ordinary session delete, Stop, Restart and Replace bound their host
 wait at 20 seconds (`HOST_REPLY_BOUND` in the helm's sessions module) and then reply that the host timed out while the
-work continues; the GUI's watchdog therefore waits longer than that. Environment and sandbox deletes are not bounded yet
-and take the accepted form when the work that ports them needs it.
+work continues; the GUI's watchdog therefore waits longer than that. Host management's routes that can wait as long
+answer within the same bound, each saying where its late outcome shows: a host probe (a supervisor that answers late is
+still registered, so it appears in the pushed hosts list; otherwise the user probes again), an Update's plan (nothing
+changed, so the user asks again), and a destination or alias change, which waits for any setup or update running on that
+host (SPEC.md, "Waiting between operations on one host") and lands when the run ends; those two first refuse at once
+what the registry already refuses, so the reply that they are still waiting is not given for a change that cannot land
+as things stand. Environment and sandbox deletes, Suspend, Resume and the uninstall plan are not bounded yet and are
+bounded, or take the accepted form, when the work that ports them needs it.
 
 The helm runs each command through its existing HTTP router in process, so a command gets the same handlers, validation
 and authentication middleware as an HTTP request. There is no second, typed command API. A route that genuinely cannot
