@@ -168,14 +168,14 @@ fn a_rows_menu_button_keeps_focus_when_its_row_scrolls_out_of_view(cx: &mut Test
     assert_eq!(focused_id(cx).as_deref(), Some("session-menu-s000"));
 }
 
-/// SPEC.md asks the Delete shortcut's question beside the open session's row, and a question beside a row nobody can
-/// see points at nothing. The list builds the rows just below its view to measure them without painting them, so such a
-/// row's anchor is recorded, still holding where the row was last painted; the question is asked beside the row only
-/// while the row is in the list's view, and centered otherwise. Specified: with the list scrolled so the open session
-/// is the last row painted, then scrolled back up by one row so that row sits just below the view and is no longer
-/// painted, the shortcut asks a question whose center is the window's horizontal center.
+/// SPEC.md has the Delete shortcut invoke the open session's header Delete, so its question hangs under the header's
+/// button wherever the open session's row is in the list; a question beside a row nobody can see would point at
+/// nothing. The list builds the rows just below its view to measure them without painting them, so such a row's anchor
+/// is still recorded, which is the trap. Specified: with the list scrolled so the open session is the last row painted,
+/// then scrolled back up by one row so that row sits just below the view and is no longer painted, the shortcut asks a
+/// question below the header's Delete.
 #[gpui::test]
-fn the_delete_shortcut_asks_about_an_open_row_out_of_view_in_the_windows_center(
+fn the_delete_shortcut_asks_under_the_headers_delete_with_the_open_row_out_of_view(
     cx: &mut TestAppContext,
 ) {
     let rows = fleet(200);
@@ -202,10 +202,10 @@ fn the_delete_shortcut_asks_about_an_open_row_out_of_view_in_the_windows_center(
     );
     test_support::keys(cx, DELETE_SESSION_CHORD);
     let question = test_support::bounds(cx, "prompt");
-    let width = cx.update(|window, _| window.viewport_size().width);
+    let button = test_support::bounds(cx, "session-header-delete");
     assert!(
-        (question.center().x - width / 2.).abs() < px(2.),
-        "centered: {question:?} in a window {width:?} wide"
+        question.top() >= button.bottom(),
+        "asked below the header's Delete: {question:?}, the button {button:?}"
     );
 }
 

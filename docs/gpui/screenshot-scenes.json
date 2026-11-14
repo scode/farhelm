@@ -138,7 +138,7 @@
         ],
         [
           "click",
-          "text:Delete"
+          "id:session-menu-delete"
         ],
         [
           "wait",
@@ -168,7 +168,7 @@
         ],
         [
           "click",
-          "text:Rename"
+          "id:session-menu-rename"
         ],
         [
           "wait",
@@ -234,7 +234,7 @@
         ],
         [
           "click",
-          "text:Replace"
+          "id:session-menu-replace"
         ],
         [
           "wait",
@@ -340,6 +340,58 @@
         [
           "hover",
           "text:Recently active"
+        ]
+      ]
+    },
+    {
+      "id": "app-header-replace-question",
+      "title": "Replace asked from the open session's header (the exited Fixture 4): the question hung under the Replace button",
+      "reference": "header-replace-question",
+      "mockup": false,
+      "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Confirm replace"
+        ],
+        [
+          "click",
+          "id:session-header-replace"
+        ],
+        [
+          "wait",
+          "--text",
+          "Confirm replace"
+        ]
+      ]
+    },
+    {
+      "id": "app-header-delete-question",
+      "title": "Delete asked from the open session's header (the exited Fixture 4, which the row would delete unasked): the question hung under the Delete button",
+      "reference": "header-delete-question",
+      "mockup": false,
+      "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Confirm replace"
+        ],
+        [
+          "click",
+          "id:session-header-delete"
+        ],
+        [
+          "wait",
+          "--text",
+          "Confirm delete"
         ]
       ]
     },
@@ -778,11 +830,11 @@
     },
     {
       "id": "header-replace-question",
-      "ported": false
+      "ported": true
     },
     {
       "id": "header-delete-question",
-      "ported": false
+      "ported": true
     },
     {
       "id": "header-restart-menu-resumable",

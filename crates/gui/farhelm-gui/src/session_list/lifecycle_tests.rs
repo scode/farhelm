@@ -83,12 +83,18 @@ fn stop(key: &str, refuse_if_tabs_open: bool, refuse_if_agent_running: bool) -> 
     )
 }
 
-/// A plain Replace of `key` with these flags of its source's Delete guard, as the window sends it: nothing else, no
-/// retry key and no YOLO consent.
-fn replace(key: &str, only_if_nothing_alive: bool, only_if_agent_ended: bool) -> (String, Value) {
+/// A plain Replace of `key` with these flags of its source's Delete guard, as the window sends it: the shared client
+/// body with nothing else set, so no Replace with, no YOLO consent and no retry key (the body has no field for one).
+pub(crate) fn replace(
+    key: &str,
+    only_if_nothing_alive: bool,
+    only_if_agent_ended: bool,
+) -> (String, Value) {
     (
         format!("/api/sessions/{key}/replace"),
         json!({
+            "confirm_yolo": false,
+            "with": null,
             "only_if_nothing_alive": only_if_nothing_alive,
             "only_if_agent_ended": only_if_agent_ended,
         }),

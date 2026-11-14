@@ -29,17 +29,18 @@
 //! other sessions' menus are untouched. A refusal or a notice from the helm shows inside the menu as well as on the
 //! row, since the open menu covers the row's own copy ([`super::outcome`]).
 //!
-//! NOTE: Clone and Replace with (the launcher's), Pin and the environment commands come with their areas,
-//! in the old order around these, with no placeholder meanwhile; the old row menu had no Restart, which comes with the
-//! session header. Also not ported: the button staying visible while the row's open control has keyboard focus (the
-//! old `:focus-within`; here only the button's own focus shows it), opening the menu with the arrow keys from the
-//! closed button, and placing the menu beside the sidebar with a pointer notch (the layer manager places it below its
-//! anchor).
+//! NOTE: Clone and Replace with (the launcher's), Pin and the environment commands come with their areas, in the old
+//! order around these, with no placeholder meanwhile; the old row menu had no Restart, which the open session's header
+//! offers instead (`session_pane/header.rs`). Also not ported: the button staying visible while the row's open control
+//! has keyboard focus (the old `:focus-within`; here only the button's own focus shows it), opening the menu with the
+//! arrow keys from the closed button, and placing the menu beside the sidebar with a pointer notch (the layer manager
+//! places it below its anchor).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use farhelm_helm_client::Collections;
 use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
     AnyElement, App, AppContext as _, Context, FocusHandle, InteractiveElement, IntoElement,
@@ -293,8 +294,7 @@ impl SessionList {
 
     /// Ask the question `question` builds about `key`'s row at `mark`: beside the row's menu button while the row is in
     /// the list's view, and centered when it is not (a row scrolled away may still be drawn just past the list's edge,
-    /// and a question beside it would sit next to nothing the user can see; or the Delete shortcut over an open session
-    /// the list does not show). Either way the question closes when the session is gone, and the row's button is inert
+    /// and a question beside it would sit next to nothing the user can see). Either way the question closes when the session is gone, and the row's button is inert
     /// while it is open ([`Opened::Question`]). Nothing opens when the user has moved on since `mark`. `on_confirm`
     /// runs at most once, with the question's frozen value. A builder rather than a question, because a question cannot
     /// be copied and the anchored attempt consumes the one it is given even when it opens nothing.
@@ -352,29 +352,35 @@ enum LifecycleCommand {
 }
 
 /// A row a lifecycle action was asked for, as listed when the user asked.
-pub(super) struct Actionable {
+pub(crate) struct Actionable {
     /// The row as the store holds it now: what any question is drawn from and any precondition is taken from.
-    pub(super) row: SessionRow,
+    pub(crate) row: SessionRow,
     /// Whether the helm-wide **Skip session confirmations** preference is on, so the action goes ahead on the click
     /// with the guard of what the row showed (SPEC.md, "Lifecycle operations").
-    pub(super) skips_questions: bool,
+    pub(crate) skips_questions: bool,
 }
 
-/// `key`'s row, for a Replace, Stop or Delete the user just asked for, or `None` when nothing may happen: the session
-/// is not listed, or it has a request in flight (SPEC.md: "a pending request refuses another lifecycle action").
-pub(super) fn actionable(key: &str, cx: &App) -> Option<Actionable> {
+/// `key`'s row, for a lifecycle action the user just asked for (from the row's menu, or the open session's header), or
+/// `None` when nothing may happen: the session is not listed, or it has a request in flight (SPEC.md: "a pending
+/// request refuses another lifecycle action").
+pub(crate) fn actionable(key: &str, cx: &App) -> Option<Actionable> {
     let store = session::current_store(cx)?;
     let collections = store.read(cx).collections();
     let row = collections.get::<SessionRow>(key).cloned()?;
     if delete::busy(key, cx) {
         return None;
     }
-    let skips_questions = selection::preferences(collections)
-        .is_some_and(|preferences| preferences.skip_session_confirmations == Some(true));
     Some(Actionable {
         row,
-        skips_questions,
+        skips_questions: skips_questions(collections),
     })
+}
+
+/// Whether the helm-wide **Skip session confirmations** preference is on in `collections`: the lifecycle actions then go
+/// ahead on the click, and the open session's header drops "after you confirm" from its Delete's help.
+pub(crate) fn skips_questions(collections: &Collections) -> bool {
+    selection::preferences(collections)
+        .is_some_and(|preferences| preferences.skip_session_confirmations == Some(true))
 }
 
 /// The menu's and its button's accessible name for a session titled `title` (as the host wrote it): "Session actions

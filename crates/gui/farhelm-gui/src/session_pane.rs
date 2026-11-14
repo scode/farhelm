@@ -1,8 +1,11 @@
-//! The main pane beside the session list: the selected session's live terminal, or what the window says with no session
-//! open.
+//! The main pane beside the session list: the selected session's top row and live terminal, or what the window says
+//! with no session open.
 //!
 //! SPEC.md, "Session view": "Opening a session shows the agent's real TUI, live". The pane owns one
-//! [`AttachedTerminal`], for the selected session's agent terminal, and nothing else that belongs to a session.
+//! [`AttachedTerminal`], for the selected session's agent terminal, and draws the session's top row above it
+//! ([`header`]: the lifecycle actions, and the left region the terminal area's tabs will take), with the lines a long
+//! Restart or Replace and a refusal add between the two. The row keeps nothing that belongs to a session either: it
+//! reads the store and the operation store while it draws.
 //!
 //! - **One terminal, remade on every change of selection.** Choosing another session drops the terminal (which ends
 //!   its stream) and makes a new one with a fresh attachment lease. This is the old app's keyed remount (its
@@ -19,8 +22,9 @@
 //!   opened at startup, and the next session after the open one went away, from another window or an agent included.
 //!   When the user chooses a session ([`chosen`]), its terminal also takes focus, from whatever holds it, through
 //!   [`focus::choose_terminal`] with the mark of the click that chose it.
-//! - **A Delete of the open session.** From the moment its request is sent until the helm answers, a scrim over the
-//!   terminal says what the row says (stopping the agent, stopping its terminal tabs, or deleting), and the terminal's
+//! - **A Delete of the open session.** From the moment its request is sent until the helm answers, the top row shows
+//!   what the row says in place of its actions ([`header`]), a scrim over the terminal says it again (stopping the
+//!   agent, stopping its terminal tabs, or deleting), and the terminal's
 //!   own notices are held back ([`AttachedTerminal::hold_notices`]): the Delete kills the agent and detaches the
 //!   viewer, so the exit line ("Process ended by signal 15") and the status line ("Session unavailable —
 //!   reconnecting") would otherwise read as failures while the Delete is going as asked. SPEC.md, "Lifecycle
@@ -48,12 +52,15 @@
 //! none ([`crate::session_list::empty_fleet`]); before the session list has been read it says "Loading sessions…"; and
 //! when there are sessions it is blank, because the session list is about to open one.
 //!
-//! NOTE: Not ported yet: the session header, terminal tabs, the text size control (the terminal is drawn at the old
-//! default size), and the card a session without terminal contents shows instead. With no header, the header half of
-//! SPEC.md's Delete sentence ("the open session's header shows the same in place of its actions", and comes back with
-//! the refusal) does not apply yet; the header brings it. With no tabs, the scrim covers the agent terminal only, where
-//! the old one covered every pane.
+//! NOTE: Not ported yet: terminal tabs and the tunnel pill (the top row's left region is empty until the terminal area
+//! brings them), the text size control (the terminal is drawn at the old default size), the details bar below the
+//! terminal, and the card a session without terminal contents shows instead. With no tabs, the scrim covers the agent
+//! terminal only, where the old one covered every pane.
 
+pub(crate) mod header;
+
+#[cfg(test)]
+mod header_tests;
 #[cfg(test)]
 mod tests;
 
@@ -117,10 +124,13 @@ pub struct SessionPane {
     mounted: PerSession<Option<Mounted>>,
     /// The serial of the last choice acted on ([`Chosen`]).
     handled: u64,
-    /// The scrim's spinner, held exactly while the scrim shows in an active window, and worked out at the top of each
-    /// frame as the session list works out its own: everything that decides it (the operation store, the selection,
-    /// the window's activation) redraws the window when it changes.
+    /// The pane's spinner, held exactly while the scrim, the Stop button's "Stopping…" or a long Restart's or Replace's
+    /// line shows in an active window, and worked out at the top of each frame as the session list works out its own:
+    /// everything that decides it (the operation store, the shared clocks, the selection, the window's activation)
+    /// redraws the window when it changes.
     spinner: Option<delete::Spinner>,
+    /// Where the top row's buttons were last drawn, and the question it opened ([`header::Header`]).
+    header: header::Header,
     /// Act on a change of the selection, of the user's choice and of the connection.
     _observing: Vec<Subscription>,
 }
@@ -187,6 +197,7 @@ impl SessionPane {
             mounted: PerSession::default(),
             handled: cx.try_global::<Chosen>().map_or(0, |chosen| chosen.serial),
             spinner: None,
+            header: header::Header::default(),
             _observing: observing,
         }
     }
@@ -210,6 +221,14 @@ impl SessionPane {
             cx.notify();
         }
         self.act_on_choice(window, cx);
+    }
+
+    /// The key of the session whose terminal the pane shows, under the current UI session.
+    fn open_key(&mut self, cx: &App) -> Option<String> {
+        self.mounted
+            .current(cx)
+            .as_ref()
+            .map(|mounted| mounted.key.clone())
     }
 
     /// Focus the terminal of the session the user last chose, once per choice, if it is the one mounted. A choice of
@@ -250,16 +269,31 @@ impl Render for SessionPane {
             return empty(cx);
         };
         let deleting = delete::in_flight(&key, cx);
-        let spins = deleting.is_some() && ticker::is_active(window, cx);
+        let spins =
+            (deleting.is_some() || Self::header_spins(&key, cx)) && ticker::is_active(window, cx);
         if spins != self.spinner.is_some() {
             self.spinner = spins.then(|| delete::Spinner::start(window, cx));
         }
         let step = self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx));
+        let header = self.header_row(&key, step, window, cx);
+        let lines = self.header_lines(&key, step, cx);
+        // The top row, then the lines a long Restart or Replace and a refusal add, then the terminal, which takes the
+        // rest of the height (SPEC.md: "The terminal loses no height in the steady state"; the lines show only while
+        // there is something to say).
         div()
-            .relative()
+            .flex()
+            .flex_col()
             .size_full()
-            .child(terminal)
-            .children(deleting.map(|guard| delete_scrim(guard, step, cx)))
+            .child(header)
+            .children(lines)
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(terminal)
+                    .children(deleting.map(|guard| delete_scrim(guard, step, cx))),
+            )
             .into_any_element()
     }
 }

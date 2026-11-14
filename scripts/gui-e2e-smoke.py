@@ -7,10 +7,12 @@ NOTE: This is a smoke test, not the end-to-end suite. It covers the first slice'
 between the app, the helm and the supervisor shows up somewhere, plus the area steps added since (30, 31 and 33, the
 terminal's: a large paste, on a Mac only, text an input method commits, and scrollback; 32, the sidebar's quick
 switcher; 34, the session list's Stop and Replace from a row's menu; 35, the sidebar's host rail; 36, the row menu's
-Mark read and Mark unread; 37, the sidebar's resize divider; 40, the settings-and-hosts area's scripted host
-setup). The behavior itself is specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`,
-`session_pane.rs`, `terminal/attached/tests.rs`); nothing here checks layout or wording beyond the names it
-clicks.
+Mark read and Mark unread; 37, the sidebar's resize divider; 38, Restart from the open session's header; 40, the
+settings-and-hosts area's scripted host setup). The behavior itself is specified and tested in process
+(`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`); nothing
+here checks layout or wording beyond the names it clicks. A menu's commands are clicked by their ids
+(`id:session-menu-delete`), not their labels: the open session's header has buttons with the same names (Stop, Replace,
+Delete), and a `text:` target picks the first match in drawing order, which is the header's.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -47,6 +49,7 @@ import hashlib
 import importlib.util
 import json
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -203,7 +206,7 @@ class Smoke(unittest.TestCase):
         self.assertEqual(len(ids), 1, "premise: the helm lists Fixture 3 once")
         self.ok("click", "text:Session actions for Fixture 3")
         self.ok("wait", "--text", MENU_DESCRIPTION)
-        self.ok("click", "text:Delete")
+        self.ok("click", "id:session-menu-delete")
         self.ok("wait", "--text", "Confirm delete")
         self.ok("click", "text:Confirm delete")
         eventually(lambda: ids[0] not in listed_titles(), "Fixture 3 leaving the helm's listing")
@@ -217,7 +220,7 @@ class Smoke(unittest.TestCase):
         self.assertEqual(len(ids), 1, "premise: the helm lists Fixture 1 once")
         self.ok("click", "text:Session actions for Fixture 1")
         self.ok("wait", "--text", MENU_DESCRIPTION)
-        self.ok("click", "text:Rename")
+        self.ok("click", "id:session-menu-rename")
         self.ok("wait", "--text", "Rename session")
         title = f"Renamed {uuid.uuid4().hex[:8]}"
         self.ok("fill", "text:New session title", title)
@@ -400,12 +403,12 @@ class Smoke(unittest.TestCase):
 
         self.ok("click", f"text:Session actions for {stopped}")
         self.ok("wait", "--text", MENU_DESCRIPTION)
-        self.ok("click", "text:Stop")
+        self.ok("click", "id:session-menu-stop")
         eventually(lambda: gui_agent.listed_states(RUN).get(ids[stopped]) == "exited", f"{stopped} listed as exited")
 
         self.ok("click", f"text:Session actions for {replaced}")
         self.ok("wait", "--text", MENU_DESCRIPTION)
-        self.ok("click", "text:Replace")
+        self.ok("click", "id:session-menu-replace")
         self.ok("wait", "--text", "Confirm replace")
         self.ok("click", "text:Confirm replace")
 
@@ -514,6 +517,71 @@ class Smoke(unittest.TestCase):
         self.ok("press", "left")
         eventually(lambda: sidebar_width() == start, f"the helm storing the width {start} again")
 
+    # ---- The session view's header (38), on a session of its own ---------------------------------------------------
+
+    def test_38_restart_from_the_header_resumes_the_session(self) -> None:
+        """Restart is the open session's header action that only the header offers, and the one request whose route
+        relaunches an agent in a new terminal. It is offered only for a session whose conversation Farhelm captured, so
+        this step's session is a command launch declaring Muse (whose capture needs no record on disk) running the fake
+        agent's hook-reporting script, which reports a conversation through the genuine hook the supervisor injected
+        when the step types `report <id>` into it. Specified, on that session under a title of its own: once the helm
+        lists it as resumable and then idle or waiting, a click on the header's Restart (answering its question if the
+        window's row still read the agent working) relaunches it, the helm lists it live again, and its terminal shows
+        the fake agent's `MUSE-RESUMED:<id>` marker, which only a resumed launch prints. The marker is the oracle that a
+        restart happened at all, since the session's status reads live before and after."""
+        record = json.loads((RUN / "run.json").read_text())
+        fixtures = record["binaries"]["fixtures"]
+        stamp = uuid.uuid4().hex[:8]
+        home = RUN.parent / "muse-home"
+        home.mkdir()
+        invocation = (
+            f"{shlex.quote(fixtures)} fake-agent --script muse-hook-report --record-home {shlex.quote(str(home))}"
+        )
+        title = f"Header restart {stamp}"
+        body = {
+            "cwd": str(gui_agent.SESSION_CWD),
+            "title": title,
+            "command": {
+                "command": f"{invocation} {{farhelm_args}}",
+                "yolo": False,
+                "agent": "muse",
+                "resume": f"{invocation} resume {{conversation}} {{farhelm_args}}",
+            },
+        }
+        session = gui_agent.helm_request(RUN, "POST", "/api/sessions", body)["id"]
+        self.ok("wait", "--text", title)
+        self.ok("click", f"text:{title}")
+        self.ok("terminal-text", "--wait", "FAKE-AGENT READY")
+        conversation = f"smoke-{stamp}"
+        self.ok("type", "--keys", f"report {conversation}")
+        self.ok("press", "enter")
+
+        def listed() -> dict:
+            rows = gui_agent.helm_request(RUN, "GET", "/api/sessions")["sessions"]
+            return next((row for row in rows if row["id"] == session), {})
+
+        eventually(lambda: listed().get("restart_offer") == "resume", f"{title} listed as resumable")
+        # Restart asks only while the agent reads working, and the window decides that from its own pushed row at the
+        # click, not from anything this step read. The fake agent reads working while it prints and idle once it stops,
+        # so the step waits for the helm to list it idle or waiting first. The window's row follows that by a push, so
+        # the click can still meet a question from the row before it; the step then waits for whichever the window
+        # shows, the question (answered) or the resumed launch's marker, rather than guessing from a read.
+        quiet = {"idle", "waiting"}
+        eventually(lambda: (listed().get("status") or {}).get("state") in quiet, f"{title} listed idle or waiting")
+        self.ok("click", "id:session-header-restart")
+        marker = f"MUSE-RESUMED:{conversation}"
+
+        def outcome() -> str | None:
+            if marker in agent("terminal-text").stdout:
+                return "resumed"
+            return "asked" if "Confirm restart" in self.ok("snapshot") else None
+
+        if eventually(outcome, "the restart's question or its resumed launch") == "asked":
+            self.ok("click", "text:Confirm restart")
+        self.ok("terminal-text", "--wait", marker)
+        live = {"running", "waiting", "idle"}
+        eventually(lambda: (listed().get("status") or {}).get("state") in live, f"{title} listed live again")
+
     # ---- The settings-and-hosts area's scripted host setup (40), on a host of its own --------------------------------
 
     def test_40_the_scripted_backend_sets_up_a_fake_ssh_host(self) -> None:
@@ -552,6 +620,7 @@ class Smoke(unittest.TestCase):
         events = [json.loads(line) for line in log.splitlines()]
         steps = {event["event"] for event in events if event["target"] == f"ssh:{destination}"}
         self.assertIn("install-farhelm", steps, "the helm ran the setup's steps through the scripted backend")
+
 
 # The receiver for the large-paste step: once the step types `copy`, it writes its payload file to the clipboard with
 # OSC 52, turns bracketed paste on and reads raw input until a paste's end marker, then reports how many bytes arrived

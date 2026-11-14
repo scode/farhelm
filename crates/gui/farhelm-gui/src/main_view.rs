@@ -7,10 +7,11 @@
 //! session that held helm state was retired, so there is nothing stale to draw or act on.
 //!
 //! The open session's Delete and Rename shortcuts ([`DeleteSession`], [`RenameSession`]) and the quick switcher's
-//! ([`QuickSwitcher`]) are handled on the window's ground, so they reach the session list from wherever focus is on
-//! the page (a row, the terminal), and the list decides what they do. From inside a dialog or menu they reach these
-//! handlers too, because `root::wrap` draws the overlay inside the ground, and each refuses while a layer is open
-//! (`layers::any_open`), which is SPEC.md's "A visible modal keeps keyboard ownership".
+//! ([`QuickSwitcher`]) are handled on the window's ground, so they reach the session pane's header (Delete) and the
+//! session list (Rename, the switcher) from wherever focus is on the page (a row, the terminal), and those decide what
+//! they do. From inside a dialog or menu they reach these handlers too, because `root::wrap` draws the overlay inside
+//! the ground, and each refuses while a layer is open (`layers::any_open`), which is SPEC.md's "A visible modal keeps
+//! keyboard ownership".
 //!
 //! The live ground is a column: the posted notices' banners across the whole window, then the sidebar and the pane
 //! side by side below them, so a banner pushes both down rather than covering the list's first row. The sidebar
@@ -28,12 +29,13 @@ use gpui::{
 
 use crate::actions::{DeleteSession, QuickSwitcher, RenameSession};
 use crate::components::{Banner, Button, HoverHelp, Role, Tier};
+use crate::focus::Mark;
 use crate::notices::{self, Notice};
 use crate::session_list::{self, SessionList};
-use crate::session_pane::SessionPane;
+use crate::session_pane::{SessionPane, header};
 use crate::sidebar::{self, Sidebar};
 use crate::theme::metrics;
-use crate::{render_count, root, session, theme};
+use crate::{layers, render_count, root, session, theme};
 
 /// The window's root view.
 pub struct MainView {
@@ -44,8 +46,11 @@ pub struct MainView {
     root: root::Attachment,
     /// Redraws on a change of the connection's state and of the notice center.
     _observed: Vec<Subscription>,
-    /// The sidebar's session list, kept for the window's life: it holds only per-UI-session state, which it starts
-    /// over by itself after a reset.
+    /// The sidebar's session list, which the sidebar keeps for the window's life (it holds only per-UI-session state,
+    /// which it starts over by itself after a reset). A handle is kept here for tests alone, which ask the list for a
+    /// row's action the way its menu does: since the Delete shortcut went to the session pane's header, nothing else
+    /// in this view reaches the list.
+    #[cfg(test)]
     session_list: Entity<SessionList>,
     /// The sidebar around the list, kept for the window's life like the list.
     sidebar: Entity<Sidebar>,
@@ -71,6 +76,7 @@ impl MainView {
             root: root::attach(window, cx),
             _observed: observed,
             sidebar: cx.new(|cx| Sidebar::new(session_list.clone(), cx)),
+            #[cfg(test)]
             session_list,
             session_pane: cx.new(|cx| SessionPane::new(window, cx)),
         }
@@ -132,10 +138,17 @@ impl Render for MainView {
             inert(&state, cx)
         };
         let ground = div()
-            // Taken whatever the list does with it, as a once-per-press shortcut's handler must be (`actions.rs`).
+            // The open session's header Delete, with its ordinary question (SPEC.md, "Desktop window chrome"), unless a
+            // dialog, menu or question keeps the keyboard. Taken whatever the header does with it, as a once-per-press
+            // shortcut's handler must be (`actions.rs`).
             .on_action(cx.listener(|main, _: &DeleteSession, window, cx| {
-                main.session_list
-                    .update(cx, |list, cx| list.delete_selected(window, cx));
+                if layers::any_open(window, cx) {
+                    return;
+                }
+                let mark = Mark::take(cx);
+                main.session_pane.update(cx, |pane, cx| {
+                    pane.header_action(header::Action::Delete, &mark, window, cx)
+                });
             }))
             // Taken whatever the editor does with it, as a once-per-press shortcut's handler must be (`actions.rs`).
             .on_action(|_: &RenameSession, window, cx| {

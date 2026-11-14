@@ -128,6 +128,14 @@ pub(crate) const DELETE_SESSION_CHORD: &str = if cfg!(target_os = "macos") {
     "ctrl-shift-backspace"
 };
 
+/// The Delete shortcut as hover help names it on this platform, in the old app's spelling (`SESSION_DELETE_SHORTCUT` at
+/// reference commit `24bc0580`): the session header's Delete names it.
+pub(crate) const DELETE_SESSION_SHORTCUT_NAME: &str = if cfg!(target_os = "macos") {
+    "⌘W"
+} else {
+    "Ctrl+Shift+Backspace"
+};
+
 /// The Rename shortcut's chords (SPEC.md, "Desktop window chrome"): Cmd+L on a Mac, Ctrl+Shift+L on Linux. Spelled
 /// once here, for its binding, its row in [`TERMINAL_KEYS`] and the tests.
 const RENAME_SESSION_MAC: &str = "cmd-l";

@@ -555,9 +555,9 @@ impl Fleet<'_> {
 /// terminal says it again", as an expected wait. Without it a user watching the terminal sees nothing happen for the
 /// seconds an agent takes to stop. The scrim must not take the terminal's keys or presses: the old overlay took no
 /// pointer events, and focus belongs where the user left it. Specified: once a's Delete is confirmed, the scrim is
-/// drawn and "Stopping agent…" is painted twice (row and scrim); a's terminal holds focus and a typed letter reaches
-/// its program; after focus moves to b's menu button, a click on the scrim focuses a's terminal; once the helm
-/// refuses, the scrim is gone.
+/// drawn and "Stopping agent…" is painted three times (the row, the header in place of its actions, and the scrim); a's
+/// terminal holds focus and a typed letter reaches its program; after focus moves to b's menu button, a click on the
+/// scrim focuses a's terminal; once the helm refuses, the scrim is gone.
 #[gpui::test]
 fn a_pending_delete_puts_a_scrim_over_the_terminal_until_the_helm_answers(cx: &mut TestAppContext) {
     let mut fleet = open_main(cx, a_and_b());
@@ -566,7 +566,11 @@ fn a_pending_delete_puts_a_scrim_over_the_terminal_until_the_helm_answers(cx: &m
 
     let id = fleet.delete_open_session();
     assert!(fleet.drawn("terminal-delete-scrim"));
-    assert_eq!(fleet.painted_count(STOPPING), 2, "the row and the scrim");
+    assert_eq!(
+        fleet.painted_count(STOPPING),
+        3,
+        "the row, the header and the scrim"
+    );
     assert!(fleet.terminal_focused());
     keys(fleet.cx, "x");
     assert_eq!(fleet.input(0), [letter("x", 88)], "keys still reach a");
@@ -617,7 +621,8 @@ fn the_terminal_holds_back_what_the_delete_does_to_it(cx: &mut TestAppContext) {
 /// needs to see that the agent is gone and the terminal is not live. Specified: with a's Delete in flight and the
 /// agent killed and detached as above, a refusal takes the scrim away and the held exit line appears in the frame the
 /// app draws on its own (checked before any frame the test forces, so a terminal that missed the release would fail),
-/// with the screen lifted for it; the row shows the helm's words and "Session unavailable — reconnecting" is painted.
+/// with the screen lifted for it; the row and the header show the helm's words and "Session unavailable —
+/// reconnecting" is painted.
 #[gpui::test]
 fn a_refused_delete_shows_the_notices_it_held(cx: &mut TestAppContext) {
     let mut fleet = open_main(cx, a_and_b());
@@ -638,7 +643,11 @@ fn a_refused_delete_shows_the_notices_it_held(cx: &mut TestAppContext) {
         fleet.lift().is_some_and(|lift| lift > 0.),
         "the exit line takes its row"
     );
-    assert_eq!(fleet.painted_count("the session's tabs did not close"), 1);
+    assert_eq!(
+        fleet.painted_count("the session's tabs did not close"),
+        2,
+        "the row and the header"
+    );
     assert_eq!(fleet.painted_count(RECONNECTING), 1);
 }
 
