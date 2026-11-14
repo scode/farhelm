@@ -5,9 +5,9 @@ driven through the test-automation bridge (`scripts/gui-agent.py`, `docs/gui-age
 NOTE: This is a smoke test, not the end-to-end suite. It covers the first slice's path through the app once each
 (the session list, a row's menu, Delete, Rename, and typing into the open session's terminal), so a break in the wiring
 between the app, the helm and the supervisor shows up somewhere, plus the area steps added since (from 30, the
-terminal's: a large paste, on a Mac only). The behavior itself is specified and tested in process
-(`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `terminal/attached/tests.rs`); nothing here checks
-layout or wording beyond the names it clicks.
+terminal's: a large paste, on a Mac only, and text an input method commits). The behavior itself is specified and
+tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `terminal/attached/tests.rs`);
+nothing here checks layout or wording beyond the names it clicks.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import importlib.util
+import json
 import re
 import shutil
 import signal
@@ -249,6 +250,29 @@ class Smoke(unittest.TestCase):
         screen = self.ok("terminal-text", "--wait", "PASTE-SHA")
         self.assertIn(f"PASTE-GOT {len(want)}", screen)
         self.assertIn(f"PASTE-SHA {hashlib.sha256(want).hexdigest()[:32]}", screen)
+
+    def test_31_text_an_input_method_commits_reaches_the_program(self) -> None:
+        """Text an input method commits (a Mac dead key's `é`, a Linux input method's string) goes to the platform's
+        text input, not to a key listener, and reaches the program only through the terminal's input handler; before
+        the terminal had one, such text was dropped. The bridge's `type` hands its text to the focused element's input
+        handler the way an input method commits, so it exercises exactly that path, once the snapshot shows the
+        focused terminal as a text input. Specified: in a session of this step's own running the prompt-and-echo fake
+        agent, a non-ASCII string typed that way, then Enter, comes back as the agent's `echo:` of it."""
+        record = json.loads((RUN / "run.json").read_text())
+        title = f"Input method receiver {uuid.uuid4().hex[:8]}"
+        body = gui_agent.seed_body(0, gui_agent.SESSION_CWD, record["binaries"]["fixtures"])
+        body["title"] = title
+        gui_agent.helm_request(RUN, "POST", "/api/sessions", body)
+        self.ok("wait", "--text", title)
+        self.ok("click", f"text:{title}")
+        self.ok("terminal-text", "--wait", "FAKE-AGENT READY")
+        # The premise: the focused terminal is a text input the bridge can commit to. Without an input handler the
+        # bridge falls back to one keystroke per character, which the terminal's key listener would type as well, so
+        # the echo alone would not show the input method path.
+        self.assertRegex(self.ok("snapshot", "-i"), r"textbox .*ctx=Terminal \[focused\]")
+        self.ok("type", "id:terminal-grid", "日本語 é")
+        self.ok("press", "enter")
+        self.ok("terminal-text", "--wait", "echo:日本語 é")
 
 
 # The receiver for the large-paste step: once the step types `copy`, it writes its payload file to the clipboard with

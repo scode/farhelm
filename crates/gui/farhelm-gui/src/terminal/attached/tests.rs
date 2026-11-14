@@ -1276,6 +1276,243 @@ fn only_the_clipboards_text_is_pasted(cx: &mut TestAppContext) {
     );
 }
 
+// ---- Text input and focus reports ----------------------------------------------------------------------------------
+
+/// Run `f` on the terminal's input handler as GPUI runs it, with the window: how a test plays the platform's text
+/// input (an input method's commit or composition, a Mac dead key's accent), which the test platform has no keystroke
+/// for. It goes through the handler entity the terminal hands GPUI, so these tests cover that too.
+fn text_input<R>(
+    h: &mut Harness<'_>,
+    f: impl FnOnce(&mut TerminalInputHandler, &mut Window, &mut Context<TerminalInputHandler>) -> R,
+) -> R {
+    let owner = h.owner.clone();
+    let result = h.cx.update(|window, cx| {
+        let handler = owner.read(cx).text_input.clone();
+        handler.update(cx, |handler, cx| f(handler, window, cx))
+    });
+    settle(h.cx);
+    result
+}
+
+/// A live state message: the program asks for focus reports (mode 1004) or stops asking.
+fn focus_mode(on: bool) -> GridOutput {
+    serde_json::from_value(
+        serde_json::json!({"t":"state","mouse":"off","focus":on,"alt_screen":false,
+        "default_fg":null,"default_bg":null,"history_trimmed":false,"exit":null}),
+    )
+    .unwrap()
+}
+
+fn focus_input(focused: bool) -> GridInput {
+    GridInput::Focus { focused }
+}
+
+/// Text an input method commits reaches the program once, as typed text. Before the terminal had an input handler,
+/// GPUI had nowhere to put such text on Linux (IBus, XIM), so it was dropped; SPEC.md's IME decision keeps this to
+/// what GPUI gives, which is exactly the committed string. Nothing goes out while the terminal is not live.
+#[gpui::test]
+fn text_an_input_method_commits_reaches_the_program(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    text_input(&mut h, |handler, window, cx| {
+        handler.replace_text_in_range(None, "日本語", window, cx)
+    });
+    assert_eq!(h.sent(), [(text("日本語"), true)]);
+
+    h.fake().drop_link();
+    settle(h.cx);
+    assert!(
+        !h.read(|owner, _| owner.is_live()),
+        "the premise: reconnecting"
+    );
+    text_input(&mut h, |handler, window, cx| {
+        handler.replace_text_in_range(None, "後", window, cx)
+    });
+    assert_eq!(h.sent(), [], "nothing while not live");
+}
+
+/// While an input method composes, nothing reaches the program: the composition is reported as marked text and not
+/// drawn, and only its commit goes out, as text. After it, Enter is the program's key again. This is also the Mac
+/// dead key's path: the accent is marked text until the letter commits the composed character, where the terminal
+/// used to send the spacing accent and then a plain letter. (On macOS, keys typed during a composition go to the input
+/// method before any key listener; elsewhere they reach the listener, which leaves them to text input, as the key
+/// routing's table test pins for a composing Enter.)
+#[gpui::test]
+fn a_composition_reaches_the_program_only_when_it_commits(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    text_input(&mut h, |handler, window, cx| {
+        handler.replace_and_mark_text_in_range(None, "´", None, window, cx)
+    });
+    let marked = text_input(&mut h, |handler, window, cx| {
+        handler.marked_text_range(window, cx)
+    });
+    assert_eq!(marked, Some(0..1), "the composition is marked");
+    assert_eq!(h.sent(), [], "a composition sends nothing");
+    text_input(&mut h, |handler, window, cx| {
+        handler.replace_text_in_range(None, "é", window, cx)
+    });
+    let marked = text_input(&mut h, |handler, window, cx| {
+        handler.marked_text_range(window, cx)
+    });
+    assert_eq!(marked, None, "the commit ends the composition");
+    keys(h.cx, "enter");
+    assert_eq!(h.sent(), [(text("é"), true), (key("Enter", 13), true)]);
+}
+
+/// A Linux dead key is composed by the platform: the dead key itself types nothing, and the composed key arrives with
+/// the composed character as its text, which goes to the program through the input handler. That ends the dead-key
+/// sequence: left pending, the mapping held back the next key that sends a sequence, so Enter after a composed `é`
+/// sent nothing and only a second Enter went through.
+#[gpui::test]
+fn a_dead_key_composes_with_the_next_key(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    // Sent as a raw event: GPUI's simulated keystrokes (`keys`) give every key its own name as typed text, and a dead
+    // key types nothing on a real platform. The composed key after it does type its character, as `keys` sends it.
+    h.cx.simulate_event(KeyDownEvent {
+        native_key: None,
+        keystroke: Keystroke {
+            modifiers: Modifiers::none(),
+            key: "dead_acute".into(),
+            key_char: None,
+        },
+        is_held: false,
+        prefer_character_input: false,
+    });
+    settle(h.cx);
+    assert_eq!(h.sent(), [], "the dead key types nothing");
+    keys(h.cx, "é enter");
+    assert_eq!(h.sent(), [(text("é"), true), (key("Enter", 13), true)]);
+}
+
+/// A program that asked for focus reports (mode 1004) is told when its terminal gains and loses focus, including when
+/// the window does (switching to another app, as a browser's blur did in the old app), and only on a change. A program
+/// that did not ask hears nothing.
+///
+/// NOTE: The test platform draws every changed window as each step settles, so the window's activation reaches the
+/// report through a redraw here. What matters on a Mac, where a hidden window draws nothing, is not what this
+/// exercises: the terminal's activation observer (a check on the test Mac, posting real app switches and minimizing
+/// the window, covers it), and the reports sent without a frame when a program starts asking or a reconnect goes live
+/// (read by review only).
+#[gpui::test]
+fn a_program_asking_for_focus_reports_hears_focus_change(cx: &mut TestAppContext) {
+    let mut h = harness_with(cx, true);
+    h.attach_showing("screen");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    assert_eq!(h.sent(), [], "not asking yet");
+    h.fake().output(focus_mode(true));
+    settle(h.cx);
+    assert_eq!(
+        h.sent(),
+        [(focus_input(true), true)],
+        "starting to ask hears the current state"
+    );
+    h.fake().output(focus_mode(true));
+    settle(h.cx);
+    assert_eq!(h.sent(), [], "asking again repeats nothing");
+
+    h.cx.deactivate_window();
+    settle(h.cx);
+    assert_eq!(
+        h.sent(),
+        [(focus_input(false), true)],
+        "the window went inactive"
+    );
+    h.cx.update(|window, _| window.activate_window());
+    settle(h.cx);
+    assert_eq!(h.sent(), [(focus_input(true), true)], "and active again");
+
+    let (second, _) = h.second.clone().unwrap();
+    h.choose(&second);
+    assert_eq!(
+        h.sent(),
+        [(focus_input(false), true)],
+        "focus moved to another terminal"
+    );
+    h.choose(&owner);
+    assert_eq!(h.sent(), [(focus_input(true), true)]);
+
+    h.fake().output(focus_mode(false));
+    settle(h.cx);
+    h.choose(&second);
+    assert_eq!(h.sent(), [], "a program that stopped asking hears nothing");
+}
+
+/// A program that starts asking for focus reports hears the current state at once, without waiting for a frame: on a
+/// Mac a hidden window draws none, and a program that turned reports on while the user was in another app would
+/// otherwise hear nothing until the window came back, and then only that it is focused. Specified: with the window
+/// inactive, the report is recorded within the very update that delivered the program's request, before any draw (the
+/// test platform draws only once an update's effects are flushed).
+#[gpui::test]
+fn a_program_that_starts_asking_hears_at_once_without_a_frame(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    h.cx.deactivate_window();
+    settle(h.cx);
+    assert_eq!(h.sent(), [], "the premise: not asking yet");
+    let reported = h.cx.update(|_, cx| {
+        owner.update(cx, |owner, cx| {
+            owner.deliver(vec![TerminalEvent::Output(focus_mode(true))], cx);
+            owner.reported_focus
+        })
+    });
+    assert_eq!(reported, Some(false), "reported before any frame");
+    settle(h.cx);
+    assert_eq!(h.sent(), [(focus_input(false), true)], "and sent once");
+}
+
+/// Each attachment's program hears the current focus state once it is live and asking, as the old app's grid, built
+/// afresh for every attach, reported it: the program behind a reconnect cannot know what the last attachment said.
+/// The realistic case is a program that turned reports on long ago, so its replay already says it is asking, and the
+/// reconnect, replay and going live all land before the terminal draws again: the state the terminal last reported
+/// (focused) is the state it would report now, and only forgetting it per attachment sends the report.
+#[gpui::test]
+fn a_new_attachment_hears_the_focus_state_again(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    h.fake().output(focus_mode(true));
+    settle(h.cx);
+    assert_eq!(h.sent(), [(focus_input(true), true)]);
+
+    // No settle until the new attachment is live: nothing draws in between. The premise is checked below: the whole
+    // reconnect arrives in one delivery turn, so no frame could have cleared the last report on the way.
+    let turns = h.read(|owner, _| owner.turns);
+    h.fake().drop_link();
+    let asked = h.fake().attach();
+    for message in screen(asked.cols, asked.rows, "again", serde_json::Value::Null) {
+        h.fake().output(message);
+    }
+    h.fake().output(focus_mode(true));
+    h.fake().replay_complete();
+    settle(h.cx);
+    assert!(
+        h.read(|owner, _| owner.is_live()) && h.focused(&owner),
+        "the premise: live again, still focused"
+    );
+    assert_eq!(
+        h.read(|owner, _| owner.turns),
+        turns + 1,
+        "the premise: one delivery turn"
+    );
+    assert_eq!(
+        h.sent(),
+        [(focus_input(true), true)],
+        "the new attachment hears it once"
+    );
+}
+
 /// The cursor blinks on the ticker, half a second shown and half hidden (the old cursor's blink), only while the
 /// terminal has focus in an active window: unfocused, or with the window inactive, it is drawn outlined and nothing
 /// ticks, so an idle window does not redraw twice a second for a cursor nobody is typing at.
@@ -1392,11 +1629,15 @@ fn the_keymap_and_the_input_mapping_agree_on_terminal_keys() {
                 row.owner,
                 "{chord}"
             );
-            let sent = program_input(&event(chord, false), platform, &mut Composition::default());
+            let pressed = event(chord, false);
+            let delivers = delivers(
+                &program_input(&pressed, platform, &mut Composition::default()),
+                &pressed,
+            );
             match row.owner {
-                KeyOwner::Program if sent.is_empty() => silent.push((platform, chord)),
+                KeyOwner::Program if !delivers => silent.push((platform, chord)),
                 KeyOwner::Program => {}
-                KeyOwner::Terminal => assert_eq!(sent, [], "{platform:?} {chord}"),
+                KeyOwner::Terminal => assert!(!delivers, "{platform:?} {chord}"),
                 KeyOwner::App => {
                     for held in [false, true] {
                         let keystroke = keystroke(chord);
@@ -1481,10 +1722,21 @@ fn the_keymap_and_the_input_mapping_agree_on_terminal_keys() {
     );
 }
 
-/// The key rules as a table, so that each rule is pinned apart from the window: which keys go out as keys, which as
-/// the text they type, and which send nothing at all.
+/// Whether a key on `route` reaches the program at all: a key sent as one, or a key left to text input that types
+/// something (the platform commits its text through the input handler). A key left to text input that types nothing,
+/// such as Ctrl+Shift+I, reaches nothing.
+fn delivers(route: &KeyRoute, event: &KeyDownEvent) -> bool {
+    match route {
+        KeyRoute::Send(_) => true,
+        KeyRoute::TextInput => event.keystroke.key_char.is_some(),
+        KeyRoute::Nothing => false,
+    }
+}
+
+/// The key rules as a table, so that each rule is pinned apart from the window: which keys go out as keys, which are
+/// left to the platform's text input (whose committed text the input handler sends), and which reach nothing.
 #[test]
-fn program_input_sends_keys_text_or_nothing() {
+fn program_input_routes_keys_to_the_program_or_text_input() {
     let event = |chord: &'static str| KeyDownEvent {
         native_key: None,
         keystroke: keystroke(chord),
@@ -1494,67 +1746,49 @@ fn program_input_sends_keys_text_or_nothing() {
     let on = |chord: &'static str| {
         program_input(&event(chord), Platform::Linux, &mut Composition::default())
     };
-    let mods = |mods: u8, kc: u32, key: &str| GridInput::Key {
-        key: key.into(),
-        code: String::new(),
-        kc,
-        mods,
-        mac: false,
+    let mods = |mods: u8, kc: u32, key: &str| {
+        KeyRoute::Send(GridInput::Key {
+            key: key.into(),
+            code: String::new(),
+            kc,
+            mods,
+            mac: false,
+        })
     };
-    assert_eq!(on("a"), [mods(0, 65, "a")]);
-    assert_eq!(on("ctrl-c"), [mods(4, 67, "c")]);
-    assert_eq!(on("escape"), [mods(0, 27, "Escape")]);
-    assert_eq!(on("shift-a"), [text("A")]);
-    assert_eq!(on("space"), [text(" ")]);
-    // A key the mapping leaves to text input that types no text, and a function-modified key, send nothing.
-    assert_eq!(on("ctrl-shift-i"), []);
-    assert_eq!(on("fn-a"), []);
-    // A key with text the platform typed, unknown to the mapping's US inference, goes as that text.
+    assert_eq!(on("a"), mods(0, 65, "a"));
+    assert_eq!(on("ctrl-c"), mods(4, 67, "c"));
+    assert_eq!(on("escape"), mods(0, 27, "Escape"));
+    assert_eq!(
+        on("shift-enter"),
+        mods(1, 13, "Enter"),
+        "one key, one write"
+    );
+    assert_eq!(on("shift-a"), KeyRoute::TextInput);
+    assert_eq!(on("space"), KeyRoute::TextInput);
+    assert_eq!(on("fn-a"), KeyRoute::Nothing, "a function-modified key");
+    // A key with text the platform typed, unknown to the mapping's US inference, is text input's.
     let mut accented = event("é");
     accented.keystroke.key_char = Some("é".into());
     assert_eq!(
         program_input(&accented, Platform::Linux, &mut Composition::default()),
-        [text("é")]
+        KeyRoute::TextInput
     );
     // A Mac Option character that is not a dead key is text, as in the old app: Option-S types ß on a US layout.
     let mut option = event("alt-s");
     option.keystroke.key_char = Some("ß".into());
     assert_eq!(
         program_input(&option, Platform::Mac, &mut Composition::default()),
-        [text("ß")]
+        KeyRoute::TextInput
     );
-}
-
-/// A Linux dead key is composed by the platform: the dead key arrives with no text, then the composed key with the
-/// composed character. Sending that character ends the dead-key sequence, as an input method's commit would. Left
-/// pending, the mapping held back the next key that sends a sequence, so Enter after a composed `é` sent nothing and
-/// only a second Enter went through.
-#[test]
-fn a_composed_character_ends_its_dead_key_sequence() {
-    let mut composition = Composition::default();
-    let mut on = |key: &str, key_char: Option<&str>| {
-        let event = KeyDownEvent {
-            native_key: None,
-            keystroke: Keystroke {
-                modifiers: Modifiers::none(),
-                key: key.into(),
-                key_char: key_char.map(Into::into),
-            },
-            is_held: false,
-            prefer_character_input: false,
-        };
-        program_input(&event, Platform::Linux, &mut composition)
+    // While an input method composes, even Enter is its, not the program's: it commits the composition.
+    let mut composing = Composition {
+        marked: true,
+        dead_pending: false,
     };
-    assert_eq!(on("dead_acute", None), []);
-    assert_eq!(on("eacute", Some("é")), [text("é")]);
-    let enter = GridInput::Key {
-        key: "Enter".into(),
-        code: String::new(),
-        kc: 13,
-        mods: 0,
-        mac: false,
-    };
-    assert_eq!(on("enter", None), [enter]);
+    assert_eq!(
+        program_input(&event("enter"), Platform::Linux, &mut composing),
+        KeyRoute::TextInput
+    );
 }
 
 fn first_line(text: &str) -> &str {
