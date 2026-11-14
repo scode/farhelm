@@ -306,6 +306,53 @@
           "No sessions"
         ]
       ]
+    },
+    {
+      "id": "app-terminal-scrollback",
+      "title": "A terminal scrolled back through its history with the wheel, its scrollbar shown while the pointer is over it",
+      "reference": null,
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "1"
+      ],
+      "steps": [
+        [
+          "click",
+          "text:Fixture 1"
+        ],
+        [
+          "terminal-text",
+          "--wait",
+          "FAKE-AGENT READY"
+        ],
+        [
+          "type",
+          "--keys",
+          "spam 200"
+        ],
+        [
+          "press",
+          "enter"
+        ],
+        [
+          "terminal-text",
+          "--wait",
+          "spam-line-200"
+        ],
+        [
+          "scroll",
+          "up",
+          "800",
+          "--on",
+          "id:terminal-grid"
+        ],
+        [
+          "terminal-text",
+          "--wait",
+          "spam-line-100"
+        ]
+      ]
     }
   ],
   "foundation_goldens": [
