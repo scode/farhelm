@@ -1,0 +1,371 @@
+{
+  "reference_commit": "24bc058066fd57848e788b465719b0e6da2f98f7",
+  "app_variants": [
+    { "theme": "light", "size": "wide", "window": [1600, 1000] },
+    { "theme": "light", "size": "narrow", "window": [900, 700] },
+    { "theme": "dark", "size": "wide", "window": [1600, 1000] },
+    { "theme": "dark", "size": "narrow", "window": [900, 700] }
+  ],
+  "app_scenes": [
+    {
+      "id": "app-main-window",
+      "title": "The GPUI app's main window as it opens (no views drawn yet: only the window's ground)",
+      "reference": null,
+      "mockup": false,
+      "steps": [
+        [
+          "wait",
+          "--idle"
+        ]
+      ]
+    }
+  ],
+  "foundation_goldens": [
+    {
+      "golden": "buttons",
+      "title": "Buttons in every tier",
+      "reference": null
+    },
+    {
+      "golden": "dialog",
+      "title": "The dialog frame",
+      "reference": "rename-dialog"
+    },
+    {
+      "golden": "prompt",
+      "title": "A confirmation from the prompt foundation",
+      "reference": "row-delete-confirmation"
+    },
+    {
+      "golden": "popover",
+      "title": "A menu popover",
+      "reference": "session-row-menu"
+    },
+    {
+      "golden": "tooltip",
+      "title": "A tooltip",
+      "reference": "tooltip-button"
+    },
+    {
+      "golden": "text-input",
+      "title": "A text input",
+      "reference": null
+    },
+    {
+      "golden": "focus-ring",
+      "title": "The keyboard focus ring",
+      "reference": null
+    },
+    {
+      "golden": "host-text",
+      "title": "Host-supplied text, escaped",
+      "reference": null
+    }
+  ],
+  "reference_scenes": [
+    {
+      "id": "main-running-session",
+      "ported": false
+    },
+    {
+      "id": "selected-waiting-session",
+      "ported": false
+    },
+    {
+      "id": "selected-idle-session",
+      "ported": false
+    },
+    {
+      "id": "selected-ended-session",
+      "ported": false
+    },
+    {
+      "id": "session-list-filter-waiting",
+      "ported": false
+    },
+    {
+      "id": "session-list-filter-empty",
+      "ported": false
+    },
+    {
+      "id": "host-rail-host-selected",
+      "ported": false
+    },
+    {
+      "id": "session-list-compact",
+      "ported": false
+    },
+    {
+      "id": "empty-fleet",
+      "ported": false
+    },
+    {
+      "id": "hosts-panel",
+      "ported": false
+    },
+    {
+      "id": "hosts-panel-details",
+      "ported": false
+    },
+    {
+      "id": "launcher-agent",
+      "ported": false
+    },
+    {
+      "id": "launcher-codex-choices",
+      "ported": false
+    },
+    {
+      "id": "launcher-scrolled-end",
+      "ported": false
+    },
+    {
+      "id": "launcher-command",
+      "ported": false
+    },
+    {
+      "id": "launcher-yolo-confirmation",
+      "ported": false
+    },
+    {
+      "id": "settings-sessions",
+      "ported": false
+    },
+    {
+      "id": "settings-appearance",
+      "ported": false
+    },
+    {
+      "id": "settings-hosts",
+      "ported": false
+    },
+    {
+      "id": "settings-recipes",
+      "ported": false
+    },
+    {
+      "id": "settings-containers",
+      "ported": false
+    },
+    {
+      "id": "settings-tensorlake",
+      "ported": false
+    },
+    {
+      "id": "settings-credentials",
+      "ported": false
+    },
+    {
+      "id": "settings-terminal",
+      "ported": false
+    },
+    {
+      "id": "settings-checkouts",
+      "ported": false
+    },
+    {
+      "id": "settings-agent-trust",
+      "ported": false
+    },
+    {
+      "id": "settings-notifications",
+      "ported": false
+    },
+    {
+      "id": "settings-app",
+      "ported": false
+    },
+    {
+      "id": "templates-dialog",
+      "ported": false
+    },
+    {
+      "id": "template-editor",
+      "ported": false
+    },
+    {
+      "id": "template-number-menu",
+      "ported": false
+    },
+    {
+      "id": "template-leave-question",
+      "ported": false
+    },
+    {
+      "id": "quick-switcher",
+      "ported": false
+    },
+    {
+      "id": "template-launcher",
+      "ported": false
+    },
+    {
+      "id": "checkout-trash-dialog",
+      "ported": false
+    },
+    {
+      "id": "welcome-dialog",
+      "ported": false
+    },
+    {
+      "id": "feedback-dialog",
+      "ported": false
+    },
+    {
+      "id": "row-delete-confirmation",
+      "ported": false
+    },
+    {
+      "id": "row-replace-confirmation",
+      "ported": false
+    },
+    {
+      "id": "rename-dialog",
+      "ported": false
+    },
+    {
+      "id": "header-replace-question",
+      "ported": false
+    },
+    {
+      "id": "header-delete-question",
+      "ported": false
+    },
+    {
+      "id": "header-restart-menu-resumable",
+      "ported": false
+    },
+    {
+      "id": "session-shell-tab",
+      "ported": false
+    },
+    {
+      "id": "header-stop-question",
+      "ported": false
+    },
+    {
+      "id": "tab-close-question",
+      "ported": false
+    },
+    {
+      "id": "header-restart-question",
+      "ported": false
+    },
+    {
+      "id": "approval-card",
+      "ported": false
+    },
+    {
+      "id": "host-menu",
+      "ported": false
+    },
+    {
+      "id": "rail-host-context-menu",
+      "ported": false
+    },
+    {
+      "id": "host-settings-dialog",
+      "ported": false
+    },
+    {
+      "id": "host-settings-dialog-end",
+      "ported": false
+    },
+    {
+      "id": "host-remove-confirmation",
+      "ported": false
+    },
+    {
+      "id": "host-add-dialog",
+      "ported": false
+    },
+    {
+      "id": "host-add-setup-plan",
+      "ported": false
+    },
+    {
+      "id": "host-uninstall-refusal",
+      "ported": false
+    },
+    {
+      "id": "host-setup-running",
+      "ported": false
+    },
+    {
+      "id": "host-setup-running-hosts-panel",
+      "ported": false
+    },
+    {
+      "id": "host-setup-failed",
+      "ported": false
+    },
+    {
+      "id": "host-setup-failed-hosts-panel",
+      "ported": false
+    },
+    {
+      "id": "notices-empty",
+      "ported": false
+    },
+    {
+      "id": "notices-alerting",
+      "ported": false
+    },
+    {
+      "id": "build-skew-banner",
+      "ported": false
+    },
+    {
+      "id": "session-unavailable",
+      "ported": false
+    },
+    {
+      "id": "hosts-panel-host-unreachable",
+      "ported": false
+    },
+    {
+      "id": "terminal-detached-banner",
+      "ported": false
+    },
+    {
+      "id": "session-row-menu",
+      "ported": false
+    },
+    {
+      "id": "sort-menu",
+      "ported": false
+    },
+    {
+      "id": "help-menu",
+      "ported": false
+    },
+    {
+      "id": "header-restart-menu",
+      "ported": false
+    },
+    {
+      "id": "header-replace-menu",
+      "ported": false
+    },
+    {
+      "id": "native-app-menu",
+      "ported": false
+    },
+    {
+      "id": "tooltip-button",
+      "ported": false
+    },
+    {
+      "id": "tooltip-session-summary",
+      "ported": false
+    },
+    {
+      "id": "tooltip-last-activity",
+      "ported": false
+    },
+    {
+      "id": "macos-window-chrome",
+      "ported": false
+    }
+  ]
+}
