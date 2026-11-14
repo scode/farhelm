@@ -54,13 +54,14 @@ const NOTICES_MAX_SHARE: f32 = 0.24;
 /// `.launch-composer-footer-summary`: a footer lead's basis (`flex: 1 1 220px`) before the row wraps the answers.
 const FOOTER_LEAD_BASIS: f32 = 220.;
 
-/// A dialog's frame. The title is the accessible name, and is always the app's own words; the summary may name a host
-/// value through a [`Line`], which then is a labelled node of its own inside the dialog. The answers are drawn
-/// right-aligned in the order given, the old footer's order (Cancel first, the main action last).
+/// A dialog's frame. The title is the accessible name. The title and the summary are each a [`Line`]: the app's own
+/// words, or a [`HostSentence`](crate::host_text::HostSentence) when they name a host value, which then is a labelled
+/// node of its own inside the dialog. The answers are drawn right-aligned in the order given, the old footer's order
+/// (Cancel first, the main action last).
 #[derive(IntoElement)]
 pub struct DialogFrame {
     id: SharedString,
-    title: SharedString,
+    title: Line,
     summary: Option<Line>,
     body: AnyElement,
     answers: Vec<Button>,
@@ -75,9 +76,14 @@ pub struct DialogFrame {
 
 impl DialogFrame {
     /// A frame titled `title` around `body`, with `answers` pinned at the bottom.
+    ///
+    /// `title` is app wording as a string, or a [`HostSentence`](crate::host_text::HostSentence) when it names a host
+    /// value (the host setup confirmation's "Set up host · <name>"). A sentence is drawn through the host-text element,
+    /// and the dialog's accessible name is its [`Line::accessible_text`], the host value escaped as on screen, so a
+    /// title never hands a screen reader the host's raw characters.
     pub fn new(
         id: impl Into<SharedString>,
-        title: impl Into<SharedString>,
+        title: impl Into<Line>,
         body: impl IntoElement,
         answers: Vec<Button>,
     ) -> Self {
@@ -178,6 +184,7 @@ impl DialogFrame {
 impl RenderOnce for DialogFrame {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let palette = theme::palette(cx);
+        let name = self.title.accessible_text();
         let (pad_y, pad_x) = metrics::DIALOG_PAD;
         let (foot_y, foot_x) = metrics::DIALOG_FOOTER_PAD;
         let max_height = window.viewport_size().height - metrics::DIALOG_VERTICAL_MARGIN * 2.;
@@ -187,7 +194,7 @@ impl RenderOnce for DialogFrame {
                 .text_size(metrics::TEXT_TITLE)
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme::color(palette.fg_0))
-                .child(self.title.clone()),
+                .child(self.title),
         );
         if let Some(summary) = self.summary {
             heading = heading.child(
@@ -328,7 +335,7 @@ impl RenderOnce for DialogFrame {
             .id(ElementId::Name(self.id.clone()))
             .debug_selector(|| self.id.to_string())
             .role(Role::Dialog)
-            .aria_label(self.title)
+            .aria_label(name)
             .flex()
             .flex_col()
             .w(self.width.unwrap_or(metrics::DIALOG_WIDTH))

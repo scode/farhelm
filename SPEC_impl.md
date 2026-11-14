@@ -657,6 +657,10 @@ Hover help may name a host value (the agent mark's, the permission shield's) onl
 it through the escaping element, and the control's accessible description is the sentence's accessible text, the same
 words with each host value escaped.
 
+A dialog's title, which is also its accessible name, may likewise name a host value only as a host sentence (the host
+setup confirmation's "Set up host · <name>"): the title draws it through the escaping element, and the dialog's
+accessible name is the sentence's accessible text.
+
 Enforced by the type: host text has no other conversion to a string, and the component layer accepts it only through the
 escaping element. A corpus of spoofing strings is pushed through the host-text element and the views that render it in
 the slice.
