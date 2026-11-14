@@ -85,12 +85,20 @@ pub const PORTED_CODE_NOTICES: &str = concat!(
 #[cfg(test)]
 mod actions_tests;
 #[cfg(test)]
-mod foundation_tests;
+mod focus_tests;
 #[cfg(test)]
 mod goldens;
 #[cfg(test)]
+mod layers_tests;
+#[cfg(test)]
 mod operations_tests;
+#[cfg(test)]
+mod prompt_tests;
 #[cfg(test)]
 mod session_tests;
 #[cfg(test)]
+mod store_tests;
+#[cfg(test)]
 pub mod test_support;
+#[cfg(test)]
+mod ticker_tests;

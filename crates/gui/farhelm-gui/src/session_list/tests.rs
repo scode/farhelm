@@ -26,7 +26,7 @@ use super::{CountLine, SessionList, count_line, empty_fleet};
 use crate::host_text::tests::SPOOFING_CORPUS;
 use crate::main_view::MainView;
 use crate::notices::{self, Notice};
-use crate::session_tests::{meta, session_entry, started};
+use crate::test_support::{meta, session_entry, started};
 use crate::{local_state, render_count, session_pane, test_support, theme, ticker};
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
