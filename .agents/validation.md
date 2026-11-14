@@ -644,9 +644,12 @@ systemd or SSH substrate ran.
   user text cannot close, and that no response or log line carries the token, the inbox's name, the message or the
   contact. Configuration and the GitHub client are injected; nothing touches the network or `process.env`. Run it when
   the handler or its tests change; CI's website job runs it beside the website build.
-- `cargo clippy -p farhelm-desktop --all-targets -- -D warnings` — the desktop app sits outside `default-members`
-  (unlike the GPUI GUI crates, which are default members), so the default-member clippy run never lints it. On Linux it
-  needs the GLib development package (`libglib2.0-dev`) for GIO. CI's `desktop` job runs exactly this.
+- `cargo clippy -p farhelm-desktop --all-targets -- -D warnings` and
+  `cargo clippy -p farhelm-desktop --all-targets --features agent -- -D warnings` — the desktop app sits outside
+  `default-members` (unlike the GPUI GUI crates, which are default members), so the default-member clippy run never
+  lints it; the second run lints it with the test-automation bridge compiled in (`docs/gui-agent.md`). It runs the GPUI
+  app, so on Linux it needs GPUI's build packages (named under the workspace nextest run) and the GLib development
+  package (`libglib2.0-dev`) for GIO. CI's `desktop` job runs exactly these.
 - `python3 scripts/record-test-run.py --runner nextest --kind development --selection 'desktop app' --concurrency '4 nextest slots; retries 0' -- cargo nextest run -p farhelm-desktop`
   — the desktop app's process (`crates/farhelm-desktop/`): the bootstrap's supervisor discovery, record and replacement
   decisions, the pre-window refusal surface and its native helper commands, the host listing it reads at startup, the
@@ -672,6 +675,14 @@ systemd or SSH substrate ran.
   After an intended visual change, `--update` rewrites the references; look at each changed PNG before keeping it. A
   failure leaves the new captures in `gui-goldens/` beside the test binary. Run it when anything under
   `crates/gui/farhelm-gui/` that draws, its fonts, or GPUI or GPUI Kit change; CI does not run it yet.
+- `python3 -B scripts/test-gui-agent.py` — the headless harness that drives the GPUI app (`scripts/gui-agent.py`,
+  `docs/gui-agent.md`): the run directory's checks (absolute, and shallow enough for the bridge socket's path limit),
+  the app's environment (nothing of the caller's display, bus, bridge or `FARHELM_*` variables; the run's own
+  compositor, state directory and supervisor program; lavapipe), the seeding request, and that a recorded pid whose
+  start time no longer matches is never signalled. Seconds; starts and builds nothing. The harness itself is a tool, not
+  a gate: an end-to-end run (`start`, then `stop`) needs `mutter`, `dbus-run-session` and lavapipe, and builds the app.
+  Run the tests when the script changes, and an end-to-end run when the script, the bridge's wiring in `farhelm-gui` or
+  `farhelm-desktop`, or the app's startup changes.
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh` — the curl-installer is POSIX
   `sh` run unread on a fresh machine (`curl | sh`), so a syntax slip or a shellcheck-catchable bug in it gets caught
   before the slower Rust-side asset-table parity test in `assets.rs` would notice. `test-install-sh.sh` is bash, not

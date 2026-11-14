@@ -11,10 +11,18 @@ description = "The GPUI desktop GUI: views and the app-wide foundations they bui
 [package.metadata.dist]
 dist = false
 
+[features]
+# The test-automation bridge (`gpui-agent`), which lets an agent drive the running app through an unauthenticated
+# socket. Never in a shipped build or a devbuild: any process running as the same user could click Allow on its own
+# approval card. `src/lib.rs` refuses to compile it into an optimized build, which is what releases and devbuilds are.
+# It turns on GPUI's test support because the bridge's screenshots render through GPUI's test-only capture.
+agent = ["dep:gpui-agent", "gpui/test-support", "gpui_platform/test-support"]
+
 # GPUI and GPUI Kit at their exact pins (root Cargo.toml), routed through the vendored, patched GPUI trees.
 [dependencies]
 anyhow.workspace = true
 gpui.workspace = true
+gpui-agent = { workspace = true, optional = true }
 gpui-base.workspace = true
 gpui-component.workspace = true
 gpui_platform.workspace = true

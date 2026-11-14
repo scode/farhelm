@@ -10,7 +10,7 @@
 //! This crate is the only place the GUI and the helm meet (SPEC_impl.md, "GUI architecture"): GUI crates never depend
 //! on the helm, and reach it through its API with the credential [`DesktopBootstrap`] holds. The bootstrap, the
 //! startup refusal surface and the updater moved here unchanged from the old Dioxus UI crate when that UI was deleted
-//! (GPUI migration, F1). Until the GPUI app is wired in, the binary runs the bootstrap without a window ([`run`]).
+//! (GPUI migration, F1). [`run`] starts them and then hands the main thread to the GPUI app (`farhelm-gui`).
 //!
 //! This file holds the bootstrap of the helm and supervisor and the pre-window refusal path. The rest is split by
 //! concern: `window_state` keeps the saved window frame's format and restore rules, `state` owns the app's private state
@@ -35,6 +35,8 @@ use farhelm_supervisor::managed_supervisor::{
 };
 use farhelm_supervisor::service::STATE_DIR_CLAIM_WAIT;
 
+#[cfg(feature = "agent")]
+mod agent;
 pub mod bundle;
 mod local_host;
 pub mod state;
@@ -85,37 +87,83 @@ fn open_saved_file(path: &Path) -> Result<(), String> {
         .map_err(|error| format!("could not ask the default app to open the file: {error}"))
 }
 
-/// Run the desktop app until it is told to stop.
+/// Run the desktop app until it quits.
 ///
-/// The GPUI app that will replace the old Dioxus window is still being built, so for now this starts the same embedded
-/// helm and local supervisor the window would sit on, logs that there is no window yet, and waits for SIGINT or SIGTERM
-/// before shutting the helm down. The local supervisor keeps running, as it does after an ordinary quit. A bootstrap
-/// failure goes through [`refuse_and_exit`], the same pre-window refusal path the window used: there is no window in
-/// which to show an error, and a launcher launch still needs its native surface.
+/// Starts the embedded helm and the local supervisor, then hands the main thread to the GPUI app, which owns it until
+/// the app quits (GPUI's event loop has to run there, on macOS because AppKit requires it). The window is the GPUI
+/// app's empty first screen until the foundations it draws with are built; nothing feeds it data yet.
+///
+/// A bootstrap failure, and a window that fails to open, go through [`refuse_and_exit`], the pre-window refusal path:
+/// there is no window in which to show an error, and a launcher launch still needs its native surface. SIGTERM and Ctrl+C quit the app the ordinary
+/// way. Quitting asks the embedded helm to stop; the local supervisor keeps running, as it always has after a quit. On
+/// Linux this function then waits for the helm to finish stopping. On macOS quitting ends the process from inside
+/// GPUI's event loop, so the helm gets only GPUI's quit deadline to stop and this function never returns.
 pub fn run() -> anyhow::Result<()> {
     init_tracing();
-    let desktop = match DesktopBootstrap::start() {
+    let mut desktop = match DesktopBootstrap::start() {
         Ok(desktop) => desktop,
         Err(error) => refuse_and_exit(&format!("farhelm-desktop: {error:#}")),
     };
-    tracing::info!(
-        helm = desktop.api_base(),
-        "the desktop GUI is being rebuilt; running the embedded helm and local supervisor without a window"
-    );
-    let runtime = tokio::runtime::Runtime::new().context("starting the desktop wait runtime")?;
-    runtime.block_on(async {
-        let mut terminate =
-            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                .context("installing the SIGTERM handler")?;
-        tokio::select! {
-            result = tokio::signal::ctrl_c() => result.context("waiting for SIGINT")?,
-            _ = terminate.recv() => {}
-        }
-        anyhow::Ok(())
-    })?;
-    // Dropping the bootstrap stops the embedded helm and joins it.
+    #[cfg(feature = "agent")]
+    agent::publish_helm(&desktop)?;
+    let quit_requested = quit_on_signal()?;
+    let helm_shutdown = desktop.shutdown_requester();
+    farhelm_gui::bootstrap::run(farhelm_gui::bootstrap::Host {
+        quit_requested: Box::pin(async move {
+            // A sender dropped without sending means the signal thread failed, not that anyone asked to quit, so the
+            // app keeps running and only its user can quit it.
+            if quit_requested.await.is_err() {
+                std::future::pending::<()>().await;
+            }
+        }),
+        on_quit: Box::new(move || helm_shutdown.request()),
+        // Exits the process: no window opened, so the refusal is the only way the user hears why (a machine with no
+        // usable graphics driver is the realistic case). The helm dies with the process, as on any other refusal.
+        on_startup_failure: Box::new(|error| {
+            refuse_and_exit(&format!(
+                "farhelm-desktop: the window could not open: {error}"
+            ))
+        }),
+    });
+    // Linux only: GPUI's event loop has returned. Dropping the bootstrap waits for the helm the quit asked to stop.
+    tracing::info!("the app quit; waiting for the embedded helm to stop");
     drop(desktop);
+    tracing::info!("the embedded helm stopped");
     Ok(())
+}
+
+/// Turn SIGTERM and SIGINT into one quit request for the GPUI app.
+///
+/// The handlers are installed before this returns, so a signal that arrives while the window is still opening is not
+/// lost. They are installed for the life of the process: after the first signal, further ones are swallowed rather
+/// than killing the app halfway through its quit (a caller that needs it gone sooner sends SIGKILL).
+fn quit_on_signal() -> anyhow::Result<tokio::sync::oneshot::Receiver<()>> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("starting the signal runtime")?;
+    let (mut terminate, mut interrupt) = runtime.block_on(async {
+        use tokio::signal::unix::{SignalKind, signal};
+        anyhow::Ok((
+            signal(SignalKind::terminate()).context("installing the SIGTERM handler")?,
+            signal(SignalKind::interrupt()).context("installing the SIGINT handler")?,
+        ))
+    })?;
+    let (quit, requested) = tokio::sync::oneshot::channel();
+    std::thread::Builder::new()
+        .name("quit-signals".into())
+        .spawn(move || {
+            let name = runtime.block_on(async {
+                tokio::select! {
+                    _ = terminate.recv() => "SIGTERM",
+                    _ = interrupt.recv() => "SIGINT",
+                }
+            });
+            tracing::info!(signal = name, "quitting on a signal");
+            let _ = quit.send(());
+        })
+        .context("starting the signal thread")?;
+    Ok(requested)
 }
 
 /// Install this process's `tracing` subscriber.
@@ -421,6 +469,44 @@ impl DesktopBootstrap {
     pub fn state_dir(&self) -> &Path {
         &self.state_dir
     }
+
+    /// A handle that asks the embedded helm to stop without waiting for it, for the GUI's quit handler, which runs
+    /// under GPUI's 200 ms quit deadline. Dropping the bootstrap afterwards still waits for the helm to finish. Only the
+    /// first requester can stop the helm; a later one does nothing.
+    pub fn shutdown_requester(&mut self) -> HelmShutdown {
+        HelmShutdown {
+            shutdown: self.helm_shutdown.take(),
+            expected: Arc::clone(&self.expected_helm_shutdown),
+        }
+    }
+}
+
+/// Asks the embedded helm to stop; see [`DesktopBootstrap::shutdown_requester`].
+///
+/// Dropping it without [`Self::request`] also marks the helm's stop as expected: the dropped sender stops the helm, and
+/// that must not read as the helm dying. GPUI can drop its quit handlers uncalled (when the app is torn down while the
+/// quit callback cannot borrow it), and the helm's monitor would otherwise show a false "stopped unexpectedly" refusal.
+pub struct HelmShutdown {
+    shutdown: Option<tokio::sync::oneshot::Sender<()>>,
+    expected: Arc<AtomicBool>,
+}
+
+impl HelmShutdown {
+    /// Ask the helm to stop. Marks the stop as expected first, so the helm's monitor does not report it as the helm
+    /// dying.
+    pub fn request(mut self) {
+        self.expected.store(true, Ordering::Release);
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+    }
+}
+
+impl Drop for HelmShutdown {
+    fn drop(&mut self) {
+        // Before the sender drops (fields drop after this body), so the monitor sees the flag first.
+        self.expected.store(true, Ordering::Release);
+    }
 }
 
 /// Marks the embedded helm's shutdown as expected when dropped, unless
@@ -444,9 +530,10 @@ impl Drop for ExpectHelmShutdownUnlessDisarmed {
     }
 }
 
-/// Stops the embedded helm. The supervisor is left running: it outlives the
-/// app by design, as it does on a normal quit (which skips this `Drop`
-/// altogether; tao's `run` ends in `process::exit`).
+/// Stops the embedded helm and waits for it. The supervisor is left running:
+/// it outlives the app by design. On Linux a quit reaches this `Drop` after
+/// GPUI's event loop returns ([`run`]); on macOS GPUI ends the process from
+/// inside its event loop first, so this never runs on a quit there.
 impl Drop for DesktopBootstrap {
     fn drop(&mut self) {
         self.expected_helm_shutdown.store(true, Ordering::Release);
@@ -2463,6 +2550,46 @@ mod tests {
             "{error:#}"
         );
         end(child);
+    }
+
+    /// A helm stop requester dropped without `request` still marks the stop
+    /// as expected, before its sender closes; `request` marks it and sends.
+    ///
+    /// Why: GPUI can drop its quit handlers uncalled, and the dropped sender
+    /// stops the helm. Without the flag the helm's monitor would show the
+    /// "embedded helm stopped unexpectedly" refusal on an ordinary quit.
+    /// Spec: after either path the flag is set and the helm's receiver sees
+    /// its stop (a closed channel for the drop, a value for `request`).
+    #[farhelm_testtrace::test]
+    fn a_dropped_helm_stop_requester_still_expects_the_stop() {
+        let expected = Arc::new(AtomicBool::new(false));
+        let (sender, mut receiver) = tokio::sync::oneshot::channel();
+        drop(HelmShutdown {
+            shutdown: Some(sender),
+            expected: Arc::clone(&expected),
+        });
+        assert!(
+            expected.load(Ordering::Acquire),
+            "a dropped requester expects the stop"
+        );
+        assert_eq!(
+            receiver.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Closed),
+            "the dropped sender stops the helm"
+        );
+
+        let expected = Arc::new(AtomicBool::new(false));
+        let (sender, mut receiver) = tokio::sync::oneshot::channel();
+        HelmShutdown {
+            shutdown: Some(sender),
+            expected: Arc::clone(&expected),
+        }
+        .request();
+        assert!(
+            expected.load(Ordering::Acquire),
+            "a requested stop is expected"
+        );
+        assert_eq!(receiver.try_recv(), Ok(()), "request sends the stop");
     }
 
     /// The startup guard marks the embedded helm's shutdown as expected when

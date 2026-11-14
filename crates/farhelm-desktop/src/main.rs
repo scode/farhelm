@@ -5,8 +5,8 @@
 //! `~/Applications/Farhelm.app` for launcher identity (SPEC_impl.md, "Native app packaging"); the sibling contract is
 //! the same in both places.
 //!
-//! Everything this binary does lives in the library half ([`farhelm_desktop::run`]) so the GPUI app can be wired in
-//! there. Until it is, the binary runs without a window.
+//! Everything this binary does lives in the library half ([`farhelm_desktop::run`]): it starts the embedded helm and the
+//! local supervisor, then runs the GPUI app.
 
 fn main() -> anyhow::Result<()> {
     farhelm_desktop::run()

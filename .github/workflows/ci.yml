@@ -307,12 +307,16 @@ jobs:
           rustflags: ""
           build-warnings: ""
       # On Linux the app opens saved downloads through GIO, whose -sys
-      # crates resolve GLib through pkg-config at build-script time.
+      # crates resolve GLib through pkg-config at build-script time. It also
+      # runs the GPUI app, which needs the same packages as the clippy job.
       - name: Install desktop system deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y libglib2.0-dev
+          sudo apt-get install -y libglib2.0-dev pkg-config libfontconfig-dev libxkbcommon-dev
       - run: cargo clippy -p farhelm-desktop --all-targets -- -D warnings
+      # The test-automation bridge (docs/gui-agent.md) is compiled only into
+      # debug development builds, so the line above never lints it.
+      - run: cargo clippy -p farhelm-desktop --all-targets --features agent -- -D warnings
 
   # scripts/install.sh is the one file a fresh machine runs unread and
   # unreviewed (`curl | sh`), so a syntax slip or a shellcheck-catchable
