@@ -2,7 +2,8 @@
 //! over its veil, once more with a summary that names a host value, and the prompt anchored to a row's menu button),
 //! the keyboard focus ring, host-supplied text over its spoofing corpus, the notice banner, the terminal's styles and
 //! cursor shapes, an attached terminal's exit line and status line, and the session list (a fleet of every status a row
-//! draws, and an empty fleet), in both appearances, compared pixel for pixel.
+//! draws, an empty fleet, a row's open menu, a row's Delete question, and a pending and a refused Delete), in both
+//! appearances, compared pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
@@ -22,6 +23,10 @@ use gpui::{
 };
 use gpui_component::Root;
 
+use std::cell::Cell;
+
+use farhelm_proto::DeleteGuard;
+
 use crate::assets::Icon;
 use crate::components::{
     Button, DialogFrame, HoverHelp, IconButton, Role, TextInput, TextInputState, Tier,
@@ -33,6 +38,7 @@ use crate::focus::Mark;
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, Popover, TooltipOwner};
 use crate::notices::Notice;
+use crate::operations::Command;
 use crate::prompt::{self, Answer, Question};
 use crate::root;
 use crate::session;
@@ -42,6 +48,7 @@ use crate::terminal::attached::{AttachedTerminal, OpenStream, TerminalTarget};
 use crate::terminal::{CellMetrics, CursorPhase, TerminalView, TextSize};
 use crate::test_support;
 use crate::theme::{self, Preference};
+use crate::ticker;
 use farhelm_grid_model::GridOutput;
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::fake::terminal::FakeTerminal;
@@ -65,7 +72,8 @@ struct Scene {
 /// the anchor a popover scene opens its menu below (recorded when the scene draws), the focus handle the focus-ring
 /// scene's button takes, and the terminal views a terminal scene's setup makes (they need the real text system to measure their cells, so they are built after the
 /// window exists), the attached terminals a scene shows, and whatever those must keep alive (the fake helm and terminal
-/// streams behind them, and the subscription that makes them).
+/// streams behind them, and the subscription that makes them), and what a session list scene does once its list has
+/// drawn ([`AfterDrawn`]).
 #[derive(Clone)]
 struct SceneState {
     input: TextInputState,
@@ -77,6 +85,7 @@ struct SceneState {
     attached: Rc<RefCell<Vec<Entity<AttachedTerminal>>>>,
     lists: Rc<RefCell<Vec<Entity<SessionList>>>>,
     keep: Rc<RefCell<Vec<Box<dyn std::any::Any>>>>,
+    after: Rc<Cell<Option<AfterDrawn>>>,
 }
 
 /// The view a scene is drawn in: the window's ground, then the scene, centered, with the layer manager's overlay.
@@ -790,6 +799,12 @@ fn session_list_scene(state: &SceneState, rows: &[Fixture], cx: &mut App) {
 /// waiting, idle with new output, idle with nothing new, running on a host that is not connected (the grey mark), and
 /// exited with a stop annotation on a line of its own.
 fn session_list_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    session_list_scene(state, &fleet(), cx);
+}
+
+/// The fleet of [`session_list_setup`], which the row menu and Delete scenes draw too. Each row lists the helm
+/// fixture's one terminal tab and managed checkout.
+fn fleet() -> [Fixture; 6] {
     let status = |state: &str| serde_json::json!({ "state": state });
     let row = |key, title, state| {
         session(key)
@@ -798,7 +813,7 @@ fn session_list_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
             .activity(300)
             .seen(Some(300))
     };
-    let rows = [
+    [
         row("a", "Refactor the API client", "running").cwd("/home/user/src/api"),
         row("b", "Review the install docs", "waiting").cwd("/home/user/src/docs"),
         row("c", "Fix the flaky upload test", "idle")
@@ -812,8 +827,97 @@ fn session_list_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
             .status(serde_json::json!({ "state": "exited", "exit_code": 0 }))
             .annotation("stopped by user")
             .cwd("/home/user/src/farhelm"),
-    ];
-    session_list_scene(state, &rows, cx);
+    ]
+}
+
+/// What a session list scene does once its list has drawn a frame: open a menu or ask a question, which need the
+/// anchors that frame recorded, or start work. Taken by the first frame that finds it, which runs it once that frame
+/// is done.
+type AfterDrawn = fn(&Entity<SessionList>, &SceneState, &mut Window, &mut App);
+
+/// Make the fleet's list, and run `after` on it once it has drawn.
+fn session_list_then(state: &SceneState, after: AfterDrawn, cx: &mut App) {
+    session_list_scene(state, &fleet(), cx);
+    state.after.set(Some(after));
+}
+
+/// [`session_lists`], and the scene's [`AfterDrawn`] once the list has rows to anchor to.
+fn session_lists_then(state: &SceneState, window: &mut Window, cx: &mut App) -> AnyElement {
+    let list = state.lists.borrow().first().cloned();
+    if let (Some(list), Some(after)) = (list, state.after.take()) {
+        let staged = state.clone();
+        window.defer(cx, move |window, cx| after(&list, &staged, window, cx));
+    }
+    session_lists(state, window, cx)
+}
+
+/// The waiting row's actions menu, open below its button with Delete highlighted (reference `session-row-menu`).
+fn session_row_menu_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    session_list_then(
+        state,
+        |list, _, window, cx| list.update(cx, |list, cx| list.toggle_menu("b", window, cx)),
+        cx,
+    );
+}
+
+/// The waiting row's Delete question, asked from its row as the menu's Delete asks it (reference
+/// `row-delete-confirmation`): its tab, its running agent, its quoted title and its managed checkout. The
+/// `anchored-prompt` golden pins the prompt's own look with made-up wording; this one pins the row's wording and where
+/// it sits over the list.
+fn row_delete_confirmation_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    session_list_then(
+        state,
+        |list, _, window, cx| {
+            let mark = Mark::take(cx);
+            list.update(cx, |list, cx| list.delete("b", &mark, window, cx));
+        },
+        cx,
+    );
+}
+
+/// A pending Delete on the selected row (its spinner and "Stopping agent…" in place of the title, in the fill's ink)
+/// and a refused one on the idle row with new output (the helm's words under the row, in red). Motion is reduced, so
+/// the spinner holds its first step and the picture can settle. The refusal is answered before the pending Delete is
+/// sent, because the fake answers in order.
+fn session_list_deleting_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    ticker::set_reduced_motion(true, cx);
+    session_list_then(
+        state,
+        |_, state, _, cx| {
+            let Some(operations) = session::current_operations(cx) else {
+                return;
+            };
+            let start = |key: &str, guard, cx: &mut App| {
+                if let Ok(command) = Command::delete(key, guard) {
+                    let _ = operations.update(cx, |operations, cx| {
+                        operations.start(key, command, cx, |_, _| {})
+                    });
+                }
+            };
+            start("c", DeleteGuard::Unconditional, cx);
+            let mut keep = state.keep.borrow_mut();
+            if let Some(helm) = keep
+                .iter_mut()
+                .find_map(|kept| kept.downcast_mut::<FakeHelm>())
+            {
+                for command in helm.commands() {
+                    let refused = command.path == "/api/sessions/c";
+                    let (status, body) = if refused {
+                        (
+                            409,
+                            Some(serde_json::json!("the session's host is not connected")),
+                        )
+                    } else {
+                        (200, None)
+                    };
+                    helm.reply(command.id, status, body);
+                }
+            }
+            drop(keep);
+            start("a", DeleteGuard::Unconditional, cx);
+        },
+        cx,
+    );
 }
 
 /// No sessions at all: the list says so.
@@ -833,7 +937,7 @@ fn session_lists(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement
         .into_any_element()
 }
 
-static SCENES: [Scene; 17] = [
+static SCENES: [Scene; 20] = [
     Scene {
         name: "buttons",
         size: (560., 64.),
@@ -936,6 +1040,24 @@ static SCENES: [Scene; 17] = [
         draw: session_lists,
         setup: session_list_empty_setup,
     },
+    Scene {
+        name: "session-row-menu",
+        size: (420., 418.),
+        draw: session_lists_then,
+        setup: session_row_menu_setup,
+    },
+    Scene {
+        name: "row-delete-confirmation",
+        size: (420., 418.),
+        draw: session_lists_then,
+        setup: row_delete_confirmation_setup,
+    },
+    Scene {
+        name: "session-list-deleting",
+        size: (420., 418.),
+        draw: session_lists_then,
+        setup: session_list_deleting_setup,
+    },
 ];
 
 /// Draw and capture `window` until two consecutive captures match, at most [`MAX_SETTLE_FRAMES`] times.
@@ -999,6 +1121,7 @@ fn component_goldens() -> anyhow::Result<()> {
                         attached: Rc::new(RefCell::new(Vec::new())),
                         lists: Rc::new(RefCell::new(Vec::new())),
                         keep: Rc::new(RefCell::new(Vec::new())),
+                        after: Rc::new(Cell::new(None)),
                     };
                     let scene_view = cx.new(|cx| SceneView {
                         scene,

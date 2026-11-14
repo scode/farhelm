@@ -96,7 +96,7 @@ impl Fixture {
         self
     }
 
-    fn entry(&self) -> KeyedEntry {
+    pub(super) fn entry(&self) -> KeyedEntry {
         let mut entry = session_entry(self.key);
         let value = &mut entry.value;
         value["id"] = json!(self.key);
@@ -143,7 +143,7 @@ pub(crate) fn preferences(history: &[&str], last: Option<&str>) -> CollectionSta
 }
 
 /// A change replacing the sessions collection's metadata with `meta` and upserting `rows`.
-fn change(meta: CollectionMeta, rows: &[Fixture], remove: &[&str]) -> CollectionChanges {
+pub(super) fn change(meta: CollectionMeta, rows: &[Fixture], remove: &[&str]) -> CollectionChanges {
     CollectionChanges {
         collection: Collection::Sessions,
         meta,
@@ -153,7 +153,7 @@ fn change(meta: CollectionMeta, rows: &[Fixture], remove: &[&str]) -> Collection
 }
 
 /// `listing(order, rows)`'s metadata alone.
-fn listing_meta(order: &[&str], total: u64, truncated: bool) -> CollectionMeta {
+pub(super) fn listing_meta(order: &[&str], total: u64, truncated: bool) -> CollectionMeta {
     let mut meta = meta(order);
     meta.counts = Some(ListCounts {
         total,
@@ -175,7 +175,7 @@ fn collections(snapshot: Vec<CollectionState>) -> Collections {
 }
 
 /// The real main view over the fake helm, connected with `snapshot`, in an active window, checked once settled.
-fn open_main(
+pub(super) fn open_main(
     cx: &mut TestAppContext,
     snapshot: Vec<CollectionState>,
 ) -> (FakeHelm, &mut VisualTestContext) {
@@ -193,7 +193,7 @@ fn open_main(
 }
 
 /// The commands the window sent since the last call, as (path, body).
-fn sent(fake: &mut FakeHelm) -> Vec<(String, Value)> {
+pub(super) fn sent(fake: &mut FakeHelm) -> Vec<(String, Value)> {
     fake.commands()
         .into_iter()
         .map(|command| (command.path, command.body.unwrap_or_default()))
@@ -211,12 +211,12 @@ fn seen(key: &str, activity: i64) -> (String, Value) {
     )
 }
 
-fn selected(cx: &mut VisualTestContext) -> Option<String> {
+pub(super) fn selected(cx: &mut VisualTestContext) -> Option<String> {
     cx.update(|_, cx| local_state::selected(cx))
 }
 
 /// One frame's driver record: every element drawn, with its accessible name and the text it painted.
-fn frame(cx: &mut VisualTestContext) -> Vec<DriverNode> {
+pub(super) fn frame(cx: &mut VisualTestContext) -> Vec<DriverNode> {
     cx.update(|window, _| window.set_driver_enabled(true));
     test_support::redraw(cx);
     cx.update(|window, _| window.driver_nodes().to_vec())
@@ -237,7 +237,7 @@ fn row_order(nodes: &[DriverNode]) -> Vec<String> {
 }
 
 /// Every line of text the frame painted.
-fn painted(nodes: &[DriverNode]) -> Vec<String> {
+pub(super) fn painted(nodes: &[DriverNode]) -> Vec<String> {
     nodes
         .iter()
         .flat_map(|node| node.texts.iter().map(|text| text.text.to_string()))

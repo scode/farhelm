@@ -6,6 +6,10 @@
 //! helm, which is what makes it inert (SPEC.md, "Losing the connection to the helm" and "One GUI at a time"): the
 //! session that held helm state was retired, so there is nothing stale to draw or act on.
 //!
+//! The open session's Delete shortcut ([`DeleteSession`]) is handled on the window's outermost element, so it
+//! reaches the session list from wherever focus is (a row, the terminal, nothing at all), and the list decides what it
+//! does.
+//!
 //! The live ground is a column: the posted notices' banners across the whole window, then the sidebar and the pane
 //! side by side below them, so a banner pushes both down rather than covering the list's first row. The sidebar is the
 //! old app's column (`.app-sidebar`): its default width, one level above the ground (`--bg-1`), with a hairline against
@@ -13,10 +17,11 @@
 
 use farhelm_helm_client::ChannelState;
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement, Render,
-    SharedString, Styled, Subscription, Window, div,
+    AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
+    ParentElement, Render, SharedString, Styled, Subscription, Window, div,
 };
 
+use crate::actions::DeleteSession;
 use crate::components::{Banner, Button, HoverHelp, Role, Tier};
 use crate::notices::{self, Notice};
 use crate::session_list::SessionList;
@@ -112,6 +117,11 @@ impl Render for MainView {
             inert(&state, cx)
         };
         let ground = div()
+            // Taken whatever the list does with it, as a once-per-press shortcut's handler must be (`actions.rs`).
+            .on_action(cx.listener(|main, _: &DeleteSession, window, cx| {
+                main.session_list
+                    .update(cx, |list, cx| list.delete_selected(window, cx));
+            }))
             .size_full()
             .bg(theme::color(palette.bg_0))
             .text_color(theme::color(palette.fg_0))

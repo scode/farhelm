@@ -121,6 +121,21 @@
       "golden": "session-list-empty",
       "title": "The session list over an empty fleet",
       "reference": "empty-fleet"
+    },
+    {
+      "golden": "session-row-menu",
+      "title": "A session row's actions menu, open below its button",
+      "reference": "session-row-menu"
+    },
+    {
+      "golden": "row-delete-confirmation",
+      "title": "A session row's Delete question, asked from the row",
+      "reference": "row-delete-confirmation"
+    },
+    {
+      "golden": "session-list-deleting",
+      "title": "The session list with one Delete pending and one refused",
+      "reference": null
     }
   ],
   "reference_scenes": [

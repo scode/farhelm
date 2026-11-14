@@ -19,7 +19,10 @@
 //! (14-unit box, 1.2 stroke, round caps and joins). The More icon is a new drawing: the old app wrote the "⋯" character
 //! in text. The four status shapes are the old stylesheet's `.status-dot` shapes (an 8-pixel box: a filled circle, a
 //! triangle cut with `clip-path`, a diamond, and a ring with a 1.5-pixel border), drawn as SVG because GPUI has no
-//! clip path; the view tints them with the status color, as the old dot took `currentColor`.
+//! clip path; the view tints them with the status color, as the old dot took `currentColor`. The Spinner is the old
+//! stylesheet's `.delete-spinner`, a 12-pixel ring whose top quarter is solid and the rest 30% of the same color (its
+//! border in `color-mix(in srgb, var(--accent) 30%, transparent)` with `border-top-color: var(--accent)`); the 30% is
+//! the SVG's stroke opacity, so the view still tints it with one color.
 
 use std::borrow::Cow;
 
@@ -81,11 +84,14 @@ pub enum Icon {
     StatusUnseen,
     /// A ring: idle, with nothing new in it.
     StatusIdle,
+    /// A ring with one solid quarter: work under way that the user is waiting for (a Delete). Drawn turned a step at a
+    /// time, never still-shaped like a status mark.
+    Spinner,
 }
 
 impl Icon {
     /// Every icon, for the asset listing and the test that each one is bundled.
-    pub const ALL: [Icon; 7] = [
+    pub const ALL: [Icon; 8] = [
         Icon::Close,
         Icon::More,
         Icon::Trash,
@@ -93,6 +99,7 @@ impl Icon {
         Icon::StatusWaiting,
         Icon::StatusUnseen,
         Icon::StatusIdle,
+        Icon::Spinner,
     ];
 }
 
@@ -107,6 +114,7 @@ impl Icon {
             Icon::StatusWaiting => "icons/status-waiting.svg",
             Icon::StatusUnseen => "icons/status-unseen.svg",
             Icon::StatusIdle => "icons/status-idle.svg",
+            Icon::Spinner => "icons/spinner.svg",
         }
     }
 }
@@ -129,6 +137,7 @@ impl Assets {
             }
             "icons/status-unseen.svg" => Some(include_bytes!("../assets/icons/status-unseen.svg")),
             "icons/status-idle.svg" => Some(include_bytes!("../assets/icons/status-idle.svg")),
+            "icons/spinner.svg" => Some(include_bytes!("../assets/icons/spinner.svg")),
             _ => None,
         }
     }

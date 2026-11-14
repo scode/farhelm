@@ -11,6 +11,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::fake::terminal::{FakePhase, FakeTerminal, FakeTerminalRequest};
 use farhelm_helm_client::terminal::TerminalAttach;
@@ -23,7 +24,7 @@ use gpui::{
 };
 
 use super::SessionPane;
-use crate::actions::THIS_PLATFORM;
+use crate::actions::{DELETE_SESSION_CHORD, THIS_PLATFORM};
 use crate::components::{HoverHelp, TextInput, TextInputState};
 use crate::main_view::MainView;
 use crate::session::Connection;
@@ -404,6 +405,46 @@ fn a_removal_pushed_from_elsewhere_selects_the_next_session_whose_terminal_takes
     fleet.go_live(1);
     keys(fleet.cx, "y");
     assert_eq!(fleet.input(1), [letter("y", 89)]);
+}
+
+// ---- The Delete shortcut ------------------------------------------------------------------------------------------
+
+/// SPEC.md, "Desktop window chrome": the session shortcuts "work from terminal focus without sending their chord to the
+/// program", and Delete keeps its ordinary confirmation there. The terminal is where focus usually is, so this is the
+/// shortcut's common case; the key table names the chord an app shortcut, which is what lets the binding take it before
+/// the terminal does. Specified: with a's terminal live and focused, the chord asks the Delete question and the program
+/// receives nothing; Enter confirms, which sends a's Delete, and focus goes back to a's terminal.
+#[gpui::test]
+fn the_delete_shortcut_from_a_focused_terminal_asks_and_never_reaches_the_program(
+    cx: &mut TestAppContext,
+) {
+    let mut fleet = open_main(cx, a_and_b());
+    fleet.go_live(0);
+    assert!(
+        fleet.terminal_focused(),
+        "the premise: a's terminal has focus"
+    );
+    fleet.helm.commands();
+
+    keys(fleet.cx, DELETE_SESSION_CHORD);
+    assert!(
+        fleet.cx.debug_bounds("prompt").is_some(),
+        "the question opened"
+    );
+    assert_eq!(fleet.input(0), [], "the chord never reached the program");
+
+    keys(fleet.cx, "enter");
+    assert!(
+        fleet
+            .helm
+            .commands()
+            .iter()
+            .any(|command| command.method == Method::Delete && command.path == "/api/sessions/a")
+    );
+    assert!(
+        fleet.terminal_focused(),
+        "closing the question gave focus back"
+    );
 }
 
 // ---- Resets --------------------------------------------------------------------------------------------------------

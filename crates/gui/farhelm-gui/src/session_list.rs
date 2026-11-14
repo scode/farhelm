@@ -27,12 +27,23 @@
 //! redraws a notified view's whole window, re-rendering every uncached view in it and dirtying the notified view's
 //! ancestors, so per-row views would not have limited what a step redraws, only multiplied the notifications.
 //!
+//! Each row has an actions menu ([`menu`]) whose one command so far is Delete ([`delete`]), which the Delete shortcut
+//! also reaches for the open session ([`SessionList::delete_selected`]). While any Delete is in flight, the selection
+//! rules hold back their automatic choice, so a list that loses its open session to that Delete opens the next one only
+//! once every Delete has settled. A pending Delete's spinner turns from one handle the list holds, the way the pulse
+//! does ([`delete::Spinner`]).
+//!
 //! NOTE: Not ported yet, each with the area that brings it: the order menu (the title is the stored order's name, not a
-//! control), filters and their counts, compact rows, marking, pins, the row menu, and the host rail.
+//! control), filters and their counts, compact rows, marking, pins, the row menu's other commands, and the host rail.
 
+mod delete;
+mod menu;
 mod row;
 mod selection;
 mod status;
+
+#[cfg(test)]
+mod menu_tests;
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -46,6 +57,7 @@ use gpui::{
 
 use crate::host_text::{HostSentence, HostText};
 use crate::local_state::{self, LocalState};
+use crate::operations;
 use crate::render_count;
 use crate::session::{self, PerSession};
 use crate::theme::{self, metrics};
@@ -66,6 +78,9 @@ pub struct SessionList {
     /// is: everything that decides it (the store, the connection, the window's activation) redraws the list when it
     /// changes, so working it out there cannot miss a change.
     pulse: Option<ticker::Pulsing>,
+    /// The pending Deletes' spinner, held exactly while the window is active and some listed row has a Delete in
+    /// flight, and worked out at the top of each frame like `pulse`.
+    spinner: Option<delete::Spinner>,
 }
 
 /// What the list keeps for one UI session.
@@ -77,6 +92,11 @@ struct Current {
     /// What the open session's automatic seen mark last acted on: after a reset it starts over, so the open session is
     /// marked again if it is unseen.
     stamped: Stamped,
+    /// Settles whenever the session's operation store changes, so the selection held back for a Delete moves on once
+    /// the Delete settles. Made and dropped like `store`.
+    operations: Option<Subscription>,
+    /// The rows' menu buttons and the layers they opened.
+    rows: menu::RowLayers,
 }
 
 impl SessionList {
@@ -93,6 +113,7 @@ impl SessionList {
             current: PerSession::default(),
             _observing: observing,
             pulse: None,
+            spinner: None,
         };
         list.settle(cx);
         list
@@ -101,6 +122,11 @@ impl SessionList {
     /// Apply the selection rules to the state as it is now: select (and remember) or clear, and send the open
     /// session's seen mark when one is due. Nothing happens while the window is inert.
     fn settle(&mut self, cx: &mut Context<Self>) {
+        let deleting = session::current_operations(cx).is_some_and(|operations| {
+            operations
+                .read(cx)
+                .any_in_flight(|work| matches!(work, operations::Work::Delete(_)))
+        });
         let current = self.current.current(cx);
         let Some(store) = session::current_store(cx) else {
             return;
@@ -108,17 +134,25 @@ impl SessionList {
         if current.store.is_none() {
             current.store = Some(cx.observe(&store, |list, _, cx| list.settle(cx)));
         }
+        if current.operations.is_none()
+            && let Some(operations) = session::current_operations(cx)
+        {
+            current.operations = Some(cx.observe(&operations, |list, _, cx| list.settle(cx)));
+        }
         let collections = store.read(cx).collections();
         let listed = selection::listed(collections);
         let selected = local_state::selected(cx);
         let gone = selected
             .as_deref()
             .is_some_and(|key| session::listing_proves_gone(collections, key));
-        let change = selection::settle(
-            selected.as_deref(),
-            &listed,
-            gone,
-            selection::preferences(collections),
+        let change = selection::hold_for_deletes(
+            selection::settle(
+                selected.as_deref(),
+                &listed,
+                gone,
+                selection::preferences(collections),
+            ),
+            deleting,
         );
         // The seen mark is for whichever session is open once the change is made.
         let open = match &change {
@@ -159,6 +193,7 @@ impl Render for SessionList {
             .min_h_0();
         let Some(store) = session::current_store(cx) else {
             self.pulse = None;
+            self.spinner = None;
             return list;
         };
         let pulses = ticker::is_active(window, cx)
@@ -168,7 +203,18 @@ impl Render for SessionList {
         if pulses != self.pulse.is_some() {
             self.pulse = pulses.then(|| ticker::pulse(window, cx));
         }
-        let pulse_step = self.pulse.as_ref().map_or(0, |pulse| pulse.step(cx));
+        let deleting = ticker::is_active(window, cx)
+            && selection::listed(store.read(cx).collections())
+                .iter()
+                .any(|session| delete::in_flight(session.key, cx).is_some());
+        if deleting != self.spinner.is_some() {
+            self.spinner = deleting.then(|| delete::Spinner::start(window, cx));
+        }
+        let steps = row::Steps {
+            pulse: self.pulse.as_ref().map_or(0, |pulse| pulse.step(cx)),
+            delete: self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx)),
+        };
+        let mut menus = self.menu_buttons(&store, window, cx);
         let collections = store.read(cx).collections();
         let listed = selection::listed(collections);
         let Some(meta) = collections.meta(Collection::Sessions) else {
@@ -233,11 +279,15 @@ impl Render for SessionList {
                 .overflow_y_scroll()
                 .children(listed.iter().map(|session| {
                     let key = session.key.to_owned();
+                    let menu = menus
+                        .remove(session.key)
+                        .unwrap_or_else(|| div().into_any_element());
                     row::row(
                         *session,
                         collections,
                         selected.as_deref() == Some(session.key),
-                        pulse_step,
+                        steps,
+                        menu,
                         move |_, cx| selection::choose(&key, cx),
                         cx,
                     )
