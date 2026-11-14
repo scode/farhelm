@@ -103,6 +103,8 @@ same pin CI and release builds use; no second clippy run on floating stable is n
 - `dist generate --check`
 - `python3 scripts/install-pinned-cargo-deny.py`, then `<printed directory>/cargo-deny --locked check licenses sources`
   (the dependency license and source policy in `deny.toml`)
+- `python3 -B scripts/dependency-notices.py --check` and `python3 -B scripts/test-dependency-notices.py` (the generated
+  dependency license notices are current)
 - `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test`
 - `python3 releasing/finalize-release-notes.py --self-test`
 - `python3 releasing/notes-review-page.py --self-test` (legacy standalone page; includes link attribute escaping and
@@ -123,7 +125,8 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   checks, including the snapshot listing and archive configuration preserving the scoped Podman payload setup while
   removing the local fixture build). Run the harness only on the maintainer's request, per `.agents/tensorlake.md`.
 - `python3 scripts/test-record-test-run.py` and `python3 scripts/test-test-run-traces.py`
-- `python3 -B scripts/test-install-pinned-nextest.py` and `python3 -B scripts/test-install-pinned-cargo-deny.py`
+- `python3 -B scripts/test-install-pinned-nextest.py`, `python3 -B scripts/test-install-pinned-cargo-deny.py` and
+  `python3 -B scripts/test-install-pinned-cargo-about.py`
 - The vendored terminal crates' three recorded test commands from `.agents/validation.md` (`vendor/vte`,
   `vendor/alacritty_terminal`, and both together in `vendor/pair-tests`), which the sweep's workspace batteries never
   reach

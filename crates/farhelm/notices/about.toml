@@ -1,0 +1,103 @@
+# cargo-about's configuration for the dependency notices `farhelm licenses` prints. `scripts/dependency-notices.py`
+# runs cargo-about with it once per shipped binary and renders `dependencies.txt` beside this file; read that script's
+# docstring before changing anything here.
+
+# The licenses cargo-about may render. Kept equal to `deny.toml`'s `[licenses] allow` list, which is the policy: a crate
+# under any other license fails cargo-deny first, so this list only has to cover what that policy admits. The order is
+# not cosmetic: it is cargo-about's preference when a crate offers a choice (`MIT OR Apache-2.0`), so it decides which
+# license such a crate is reported under. Reordering it changes the output for every dual-licensed crate.
+accepted = [
+  "0BSD",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "BSL-1.0",
+  "CC0-1.0",
+  "CDLA-Permissive-2.0",
+  "ISC",
+  "MIT",
+  "MPL-2.0",
+  "NCSA",
+  "Unicode-3.0",
+  "Zlib",
+]
+
+# Dev-dependencies never reach a shipped binary. Build dependencies stay in: build scripts and proc macros generate
+# code that ends up in the binary.
+ignore-dev-dependencies = true
+ignore-build-dependencies = false
+
+# Every target a Farhelm release builds (`targets` in `dist-workspace.toml`), so a dependency compiled for only one
+# platform still has its notice in the shared file.
+targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl"]
+
+# Crates that ship their license file but which cargo-about does not match to the license on its own, so it would print
+# the SPDX template (`<year> <owner>`) instead of the crate's copyright lines. Each entry points cargo-about at the file
+# the published package contains, with the file's sha256. When a new version changes the file, cargo-about only warns
+# and falls back to the SPDX template; `scripts/dependency-notices.py`'s placeholder guard is what then fails generation
+# until the entry is checked again. Crates whose package has no such file, or whose notice spans several files, are in
+# `upstream.toml` instead.
+
+# The crate's LICENSE carries the Apache-2.0 text and the ISC notice ("Copyright Amazon.com, Inc. or its affiliates").
+[aws-lc-rs.clarify]
+license = "ISC AND (Apache-2.0 OR ISC)"
+
+[[aws-lc-rs.clarify.files]]
+path = "LICENSE"
+license = "ISC"
+checksum = "b50b376e7d24a0598488b730c3034ffcd0b58dd36c0913a24b9903a3cfd04bf7"
+
+# The C library rustls links into every farhelm. Its 316-line LICENSE carries the Apache-2.0 text and the ISC, BSD and
+# other notices of AWS-LC, BoringSSL and the projects it took code from; fiat-crypto's MIT notice is in its own file.
+# The expression is the crate's own, unchanged.
+[aws-lc-sys.clarify]
+license = "ISC AND (Apache-2.0 OR ISC) AND Apache-2.0 AND MIT AND BSD-3-Clause AND (Apache-2.0 OR ISC OR MIT) AND (Apache-2.0 OR ISC OR MIT-0)"
+
+[[aws-lc-sys.clarify.files]]
+path = "LICENSE"
+license = "Apache-2.0"
+checksum = "728536b4160e051f86d7c9c388f704866b3d512cd7df97ac3516c65279523c4e"
+
+[[aws-lc-sys.clarify.files]]
+path = "LICENSE"
+license = "ISC"
+checksum = "728536b4160e051f86d7c9c388f704866b3d512cd7df97ac3516c65279523c4e"
+
+[[aws-lc-sys.clarify.files]]
+path = "LICENSE"
+license = "BSD-3-Clause"
+checksum = "728536b4160e051f86d7c9c388f704866b3d512cd7df97ac3516c65279523c4e"
+
+[[aws-lc-sys.clarify.files]]
+path = "aws-lc/third_party/fiat/LICENSE"
+license = "MIT"
+checksum = "43e358d7b6eb109d0f51f7b3a090fd82607965767c25fadee39e922475de2061"
+
+[exr.clarify]
+license = "BSD-3-Clause"
+
+[[exr.clarify.files]]
+path = "LICENSE.md"
+license = "BSD-3-Clause"
+checksum = "97e4d3aa7a9e8ac31979c16ca8bb2b628a9cb72c3362185ad2bf4ad77f43551f"
+
+# The MIT notice with its copyright lines (Jorge Aparicio, musl and the math library's authors) follows the Apache text
+# in the same file.
+[libm.clarify]
+license = "MIT"
+
+[[libm.clarify.files]]
+path = "LICENSE.txt"
+license = "MIT"
+checksum = "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7"
+
+[minisign-verify.clarify]
+license = "MIT"
+
+[[minisign-verify.clarify.files]]
+path = "LICENSE"
+license = "MIT"
+checksum = "42c8695fbc468866d9756be99af0ba4e37d733f8daa3c8827c8d80b8bec1b2f9"
+
+# cfg_aliases ships its notice in two files (LICENSE and NOTICES.md); `upstream.toml` gives both.

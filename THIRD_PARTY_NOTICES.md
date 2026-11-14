@@ -1,5 +1,10 @@
 # Third-party notices
 
+This file covers code Farhelm ported or derived from other projects. The license notices of the third-party crates
+compiled into the shipped binaries are generated into
+[`crates/farhelm/notices/dependencies.txt`](crates/farhelm/notices/dependencies.txt), which `farhelm licenses` prints
+after these and `farhelm-desktop --licenses` prints too.
+
 ## Unicode properties for emoji selectors
 
 The literal variation-base exceptions, formatting ranges and Hangul attachment properties in

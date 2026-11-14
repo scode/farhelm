@@ -764,12 +764,32 @@ systemd or SSH substrate ran.
   the directory on PATH. Seconds plus `cargo metadata`'s first download of the crates, nothing compiled. Run it when a
   manifest, `Cargo.lock` or `deny.toml` changes. The advisories and bans checks are deliberately not part of it
   (`deny.toml`'s header says why), so do not run a bare `cargo deny check` as this gate.
-- `python3 -B scripts/test-install-pinned-nextest.py` and `python3 -B scripts/test-install-pinned-cargo-deny.py` — the
-  installers that put the pinned nextest and cargo-deny binaries in place for the release build jobs, CI's `deny` job
-  and local runs, and the checksum verification and atomic publication they share (`scripts/pinned_tool.py`): archive
-  and executable digests, archive shape (a sole executable, or for cargo-deny an executable at a named path among plain
-  files), cache reuse, curl's size limit, each tool's platform mapping. Run them when an installer, the shared module or
-  a pins file changes; seconds, no network.
+- `python3 -B scripts/dependency-notices.py --check` and `python3 -B scripts/test-dependency-notices.py` — the
+  dependency license notices `farhelm licenses` prints (`crates/farhelm/notices/dependencies.txt`, decision D-18) still
+  match the locked graph: the pinned cargo-about (installed by `scripts/install-pinned-cargo-about.py`) runs offline for
+  `farhelm` and `farhelm-desktop` over every release target, and any difference from the committed file fails, naming
+  `python3 scripts/dependency-notices.py` as the regenerate command. It also fails when an MIT, BSD, ISC, Zlib or NCSA
+  text has no real copyright line (cargo-about silently prints the SPDX template, `<year> <copyright holders>`, when it
+  cannot match a crate's own file; `about.toml`'s `clarify` entries and `upstream.toml`'s checked-in upstream texts
+  cover those crates, and `upstream.toml` acknowledges the few whose upstream publishes no copyright line; its
+  `[[extra]]` entries add notices for code a crate compiles in under a license it does not declare, such as FreeType's
+  FTL credit in `freetype-sys`), and when an `upstream.toml` entry no longer matches the graph. The self-test covers the
+  merge, filter, render, check and copyright-guard logic offline, and that `about.toml`'s targets and the script's
+  binaries match `dist-workspace.toml`. About 45 seconds and three minutes of CPU per run (measured 2026-11-13 on an
+  8-core worker: one cargo-about run per binary, each capped at four threads through `RAYON_NUM_THREADS`), plus one
+  `cargo fetch --locked`, nothing compiled. CI's `deny` job runs both, ungated, whenever CI runs. Locally and in a
+  landing step, run the check gated,
+  `python3 -B scripts/dependency-notices.py --check --only-if-inputs-changed-since origin/main`, which skips cargo-about
+  unless `Cargo.lock`, a `Cargo.toml`, `dist-workspace.toml`, `deny.toml` or a file under `crates/farhelm/notices/`
+  changed; and on a machine shared with other agents, run generation and the full check on a separate build worker where
+  one is available, not alongside their builds.
+- `python3 -B scripts/test-install-pinned-nextest.py`, `python3 -B scripts/test-install-pinned-cargo-deny.py` and
+  `python3 -B scripts/test-install-pinned-cargo-about.py` — the installers that put the pinned nextest, cargo-deny and
+  cargo-about binaries in place for the release build jobs, CI's `deny` job and local runs, and the checksum
+  verification and atomic publication they share (`scripts/pinned_tool.py`): archive and executable digests, archive
+  shape (a sole executable, or for cargo-deny an executable at a named path among plain files), cache reuse, curl's size
+  limit, each tool's platform mapping. Run them when an installer, the shared module or a pins file changes; seconds, no
+  network.
 - `scripts/publish-docs-shots.sh --self-test` — the docs screenshot publisher's whole validation: against a bare
   repository standing in for GitHub, it checks that refused publishes push nothing, that only `refs/docs-assets/keep` is
   ever created (never a branch), that a snapshot holds exactly the shots the docs pages reference, that partial,

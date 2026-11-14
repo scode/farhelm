@@ -88,6 +88,43 @@ fn open_saved_file(path: &Path) -> Result<(), String> {
         .map_err(|error| format!("could not ask the default app to open the file: {error}"))
 }
 
+/// The license notices of every third-party crate compiled into Farhelm's shipped binaries, generated from `Cargo.lock`
+/// by `scripts/dependency-notices.py` and kept current by its `--check` in the ordinary checks (decision D-18: every
+/// shipped binary carries them). `farhelm` embeds the same file; one file covers both binaries, so each over-covers
+/// rather than under-covers.
+const DEPENDENCY_NOTICES: &str = include_str!("../../farhelm/notices/dependencies.txt");
+
+/// The Unicode License V3 notice for the Unicode-derived property tables in the vendored terminal emulator
+/// (`vendor/alacritty_terminal`, see `THIRD_PARTY_NOTICES.md`). This binary links that emulator through the supervisor
+/// it embeds, just as `farhelm` does, so it carries the same notice `farhelm licenses` prints. The vendored tree changes
+/// only through its patch files, so the notice is embedded by its users rather than beside the tables.
+const UNICODE_NOTICE: &str = include_str!("../../../vendor/UNICODE-LICENSE.txt");
+
+/// The SIL Open Font License text of the Inter font files the GUI crate embeds in this binary (`farhelm-gui`'s
+/// `assets`), which the license requires to travel with the fonts.
+const INTER_FONT_NOTICE: &str = include_str!("../../gui/farhelm-gui/assets/fonts/OFL-Inter.txt");
+
+/// What `farhelm-desktop --licenses` prints: every notice that must travel with this binary. That is the notices of the
+/// code Farhelm ported from other projects that this binary links (the xterm.js-derived input encoding and the
+/// emulator's Unicode tables, both reached through the embedded supervisor), its crates.io and vendored dependencies'
+/// notices, and the license of the fonts it embeds. Code ported later and linked into this binary (the GUI's terminal
+/// ports, for instance) adds its notice here in the change that first links it (SPEC_impl.md, "Dependencies and
+/// licenses").
+///
+/// `--licenses` is the interim surface decision D-22 allowed until the app's "Open-Source Notices" window (D-25)
+/// exists; that window shows the same text and replaces this flag as the user-facing surface.
+pub fn licenses_text() -> String {
+    format!(
+        "{}\n{UNICODE_NOTICE}\n{DEPENDENCY_NOTICES}\n{RULE}\nInter font (SIL Open Font License 1.1)\n\n{INTER_FONT_NOTICE}",
+        farhelm_supervisor::grid_input::PORTED_CODE_NOTICES,
+    )
+}
+
+/// The separator `scripts/dependency-notices.py` puts between notice sections, reused so the font's section reads like
+/// the others.
+const RULE: &str =
+    "================================================================================";
+
 /// Run the desktop app until it quits.
 ///
 /// Starts the embedded helm and the local supervisor, then hands the main thread to the GPUI app, which owns it until
@@ -1428,6 +1465,51 @@ mod tests {
     use std::io::Read as _;
     use std::net::TcpListener;
     use std::time::Instant;
+
+    /// The desktop binary ships on its own (its archive holds no `farhelm`), so it must carry the dependency notices
+    /// itself (decision D-18); losing them would ship crates without their required attribution.
+    ///
+    /// Spec: `licenses_text` holds the embedded supervisor's ported-code notices (xterm.js and the Unicode License), the
+    /// generated notices' header, a dependency only the desktop app links (taffy, through GPUI) with its own copyright
+    /// line, and no SPDX template placeholder.
+    #[farhelm_testtrace::test]
+    fn the_desktop_binary_carries_the_dependency_notices() {
+        let text = licenses_text();
+        assert!(
+            text.contains(
+                "Copyright (c) 2017-2019, The xterm.js authors (https://github.com/xtermjs/xterm.js)"
+            ),
+            "the xterm.js notice for the supervisor's ported input encoding is missing"
+        );
+        assert!(
+            text.contains("UNICODE LICENSE V3"),
+            "the Unicode License notice for the emulator's tables is missing"
+        );
+        assert!(
+            text.contains("SIL OPEN FONT LICENSE") && text.contains("Inter font"),
+            "the embedded Inter font's license is missing"
+        );
+        assert!(
+            text.contains(
+                "Third-party license notices for Farhelm's farhelm and farhelm-desktop binaries"
+            ),
+            "the dependency notices are missing"
+        );
+        assert!(
+            text.contains(" taffy 0."),
+            "a desktop-only dependency (taffy) is not named"
+        );
+        assert!(
+            text.contains("Copyright (c) 2018 Visly Inc."),
+            "taffy's own copyright line is missing"
+        );
+        // Not a bare `<year>`: FreeType's license, shipped as its own notice, quotes a credit line with that
+        // placeholder for users to fill in. The template's holder placeholder is what never belongs in the output.
+        assert!(
+            !text.contains("<copyright holders>") && !text.contains("<owner>"),
+            "an SPDX template placeholder reached the notices"
+        );
+    }
 
     const PROXY_CHILD_ENV: &str = "FARHELM_DESKTOP_PROXY_TEST_CHILD";
     const PROXY_TARGET_ENV: &str = "FARHELM_DESKTOP_PROXY_TEST_TARGET";
