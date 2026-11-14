@@ -18,6 +18,20 @@
 //! Still to come, each under its own module: the store fed by the UI channel, the focus coordinator, the rest of the
 //! layer manager, the prompt, the operation stores, drafts, host-supplied text, actions and keys, the ticker and the
 //! notice center.
+//!
+//! The `agent` feature adds the test-automation bridge (`gpui-agent`), which `scripts/gui-agent.py` drives; see
+//! `docs/gui-agent.md`.
+
+// The bridge's socket is unauthenticated, and on a Mac the local agent sessions run as the same user, so a build that
+// contains it lets any of them click Allow on its own approval card (SPEC_impl.md, "How the rules are enforced"). Shipped
+// builds and devbuilds are optimized builds (`--release`, or the `dist` profile that inherits from it), so refusing the
+// feature wherever debug assertions are off keeps it out of both without having to name each profile. A debug build
+// that turns debug assertions off by hand is refused too, which costs nothing: the bridge is only for development runs.
+#[cfg(all(feature = "agent", not(debug_assertions)))]
+compile_error!(
+    "the `agent` feature (the test-automation bridge) is for debug builds only; it must never reach a release or \
+     devbuild, whose optimized profiles turn debug assertions off"
+);
 
 pub mod assets;
 pub mod bootstrap;
