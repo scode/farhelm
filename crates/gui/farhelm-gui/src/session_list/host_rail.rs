@@ -61,13 +61,12 @@
 pub(crate) mod tests;
 
 use farhelm_helm_client::{ApiPath, Collections, CommandError, Method};
-use farhelm_proto::host_appearance::{HostColor, HostIcon};
 use farhelm_proto::ui_channel::{
     Availability, Collection, CollectionMeta, HostView, Reply, SessionQuery,
 };
 use gpui::{
     AnyElement, App, Context, FocusHandle, InteractiveElement, IntoElement, ParentElement, Pixels,
-    SharedString, StatefulInteractiveElement, Styled, Svg, WeakEntity, Window, div, px, svg,
+    SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window, div, px, svg,
 };
 
 use super::SessionList;
@@ -76,9 +75,10 @@ use crate::assets::Icon;
 use crate::components::{Button, HoverHelp, IconButton, Role, StatusMark, Tier};
 use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
+use crate::hosts::identity::{display_name, host_mark};
 use crate::session;
 use crate::settings;
-use crate::theme::{self, Palette, Token, metrics};
+use crate::theme::{self, Palette, metrics};
 
 /// `--host-rail-width` while the rail is collapsed, its only state so far: the rail's whole width, its right edge
 /// included. The sidebar's width holds it, so the session list beside it is this much narrower.
@@ -135,11 +135,6 @@ const EMPTY_LINE: f32 = 20.;
 
 /// `.filter-empty-actions`'s gaps, vertical then horizontal, between the links that clear a filter.
 const EMPTY_ACTIONS_GAP: (f32, f32) = (8., 12.);
-
-/// The name the registry gives the local host when the user gave it no alias. Only this exact name is shown as
-/// "Local (this machine)": an alias stays the user's word, and a remote host that happens to carry this name is not
-/// the local one.
-const LOCAL_NAME: &str = "this machine";
 
 /// What the rail's choice is in one UI session: the host the user chose and the host of the query the helm last
 /// accepted, which differ while a query is in flight, and the helm's words for a refused one.
@@ -313,55 +308,7 @@ fn answer(result: Result<Reply, CommandError>) -> Option<Result<(), HostText>> {
     )))
 }
 
-// ---- Host marks and names ------------------------------------------------------------------------------------------
-
-/// A host's mark: its chosen shape `icon` at `size`, tinted with its chosen `color` (the ordinary foreground for the
-/// default color). Decorative: what it stands for is in the accessible name of the control it sits in. The rows and
-/// the quick switcher will draw a host's mark through this too.
-pub(crate) fn host_mark(icon: HostIcon, color: HostColor, size: Pixels, palette: &Palette) -> Svg {
-    svg()
-        .path(glyph(icon).path())
-        .size(size)
-        .flex_none()
-        .text_color(theme::color(tint(color, palette)))
-}
-
-/// The drawing of each host shape.
-fn glyph(icon: HostIcon) -> Icon {
-    match icon {
-        HostIcon::Cloud => Icon::HostCloud,
-        HostIcon::House => Icon::HostHouse,
-        HostIcon::Flask => Icon::HostFlask,
-        HostIcon::Database => Icon::HostDatabase,
-        HostIcon::Chip => Icon::HostChip,
-        HostIcon::Rocket => Icon::HostRocket,
-        HostIcon::Gear => Icon::HostGear,
-        HostIcon::Gem => Icon::HostGem,
-        HostIcon::Hexagon => Icon::HostHexagon,
-        HostIcon::Triangle => Icon::HostTriangle,
-        HostIcon::Ring => Icon::HostRing,
-        HostIcon::Square => Icon::HostSquare,
-        HostIcon::Bug => Icon::HostBug,
-        HostIcon::Factory => Icon::HostFactory,
-        HostIcon::Castle => Icon::HostCastle,
-        HostIcon::Laptop => Icon::HostLaptop,
-    }
-}
-
-/// The token a host color tints with: the palette's `host` entry at the color's place in `HostColor::ALL` less one
-/// (`--host-icon-<color>`), and the ordinary foreground for the default color, as the old mark's inline style did.
-fn tint(color: HostColor, palette: &Palette) -> Token {
-    match color {
-        HostColor::Default => palette.fg_0,
-        HostColor::Lavender => palette.host[0],
-        HostColor::Orchid => palette.host[1],
-        HostColor::Teal => palette.host[2],
-        HostColor::Steel => palette.host[3],
-        HostColor::Sand => palette.host[4],
-        HostColor::Copper => palette.host[5],
-        HostColor::Red => palette.host[6],
-    }
-}
+// ---- Host names ----------------------------------------------------------------------------------------------------
 
 /// The host's identity as the rail's avatar and the chip name it (the old `rail_identity`), escaped as the screen shows
 /// host text, for an accessible name and a tooltip: its display name ("Local (this machine)" for the local host under
@@ -384,18 +331,6 @@ fn identity(host: &HostView) -> SharedString {
         None => sentence,
     }
     .accessible_name()
-}
-
-/// A registered host's full display name, the one rule the rail's identity and the Hosts panel's rows share: the
-/// registry's name for it (its alias, else its destination), or "Local (this machine)" for the local host under the
-/// registry's own name. An alias stays the user's word, even on the local host. Host text; the app's own words for the
-/// local host travel the same way, and escaping them changes nothing.
-pub(crate) fn display_name(host: &HostView) -> HostText {
-    if host.is_local() && host.name == LOCAL_NAME {
-        HostText::from_host("Local (this machine)")
-    } else {
-        HostText::from_host(host.name.as_str())
-    }
 }
 
 /// How a chosen host the registry no longer lists is named everywhere it shows.

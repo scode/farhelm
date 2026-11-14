@@ -7,7 +7,7 @@
 use farhelm_proto::tensorlake::LifecycleDirection;
 use farhelm_proto::ui_channel::{ConnectionStage, HostStateView, RefreshView};
 
-use super::{Kind, Tone, detail_lines, hover, tone, utc_stamp, words};
+use super::{Kind, Tone, detail_lines, hover, tone, words};
 use crate::host_text::HostText;
 use crate::hosts::tests::{connected, connecting, host, local_down, skew};
 
@@ -455,12 +455,10 @@ fn the_destination_shows_only_behind_an_alias() {
 }
 
 /// Why this matters: the environment phases' details carry the time something was asked or noticed, as an unambiguous
-/// UTC stamp, since the GUI carries no time zone database. Specified: the stamp's format at a known instant, before the
-/// epoch, and in a suspended host's detail.
+/// UTC stamp, since the GUI carries no time zone database. Specified: a suspended host's detail carries the stamp of
+/// the moment the helm noticed the suspension (the stamp's own format is pinned in `hosts/identity/tests.rs`).
 #[test]
 fn environment_times_read_as_utc_stamps() {
-    assert_eq!(utc_stamp(1_700_000_000), "2023-11-14 22:13:20 UTC");
-    assert_eq!(utc_stamp(-1), "1969-12-31 23:59:59 UTC");
     assert_eq!(
         lines_of(HostStateView::Suspended {
             observed_at: 1_700_000_000_000,
