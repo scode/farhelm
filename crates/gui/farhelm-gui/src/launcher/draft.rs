@@ -34,7 +34,7 @@
 //! bodies.
 
 use farhelm_proto::launcher::{
-    LaunchCatalogModel, compatible_efforts, reconcile_harness_selection,
+    LaunchCatalogModel, TemplateNameKind, compatible_efforts, reconcile_harness_selection,
 };
 use farhelm_proto::{
     CommandLaunch, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, SessionInfo,
@@ -244,6 +244,12 @@ pub struct LaunchDraft {
     pub host: Option<i64>,
     pub folder: Draft<String>,
     pub name: Draft<String>,
+    /// How a launch template set the session name: a base name a managed checkout numbers when taken, or a fixed one
+    /// that keeps its spelling (SPEC.md, "Launch templates"). `None` for a name the user typed, or no name at all. Only
+    /// template application sets it ([`Self::set_template_name_kind`]), and [`Self::edit_name`] clears it, because
+    /// typing a name makes it the user's exact name. It is the draft's own record of where the name came from, so
+    /// Save as template and the managed-checkout name pill read it here rather than in a parallel record.
+    pub name_kind: Option<TemplateNameKind>,
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -272,6 +278,7 @@ impl LaunchDraft {
             host,
             folder: Draft::load(folder),
             name: Draft::load(String::new()),
+            name_kind: None,
         }
     }
 
@@ -345,6 +352,7 @@ impl LaunchDraft {
             host,
             folder: Draft::load(session.cwd.clone()),
             name: Draft::load(session.title.clone()),
+            name_kind: None,
         }
     }
 
@@ -727,8 +735,25 @@ impl LaunchDraft {
         let _ = self.folder.edit(text);
     }
 
+    /// The session name, typed or accepted from `name:`. It becomes the user's exact name: a template's name kind no
+    /// longer applies (SPEC.md: "Typing in Name or accepting `name:` makes it the user's exact name, removes the pill
+    /// and disables numbering").
     pub fn edit_name(&mut self, text: String) {
         let _ = self.name.edit(text);
+        self.name_kind = None;
+    }
+
+    /// Record that a launch template set the session name, and with which kind. Called by template application
+    /// right after it puts the template's name in through [`Self::edit_name`]; there is no hand edit that sets a
+    /// kind, so this is one of the few things template application sets directly (SPEC_impl.md, "Launch templates").
+    pub fn set_template_name_kind(&mut self, kind: TemplateNameKind) {
+        self.name_kind = Some(kind);
+    }
+
+    /// Drop a retired container choice, as a template's explicit `container: null` asks. No hand edit removes one (the
+    /// launcher has no container control any more), so template application calls this directly.
+    pub fn clear_retired_container(&mut self) {
+        self.agent.container = None;
     }
 }
 
