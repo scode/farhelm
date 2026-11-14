@@ -244,6 +244,53 @@
       ]
     },
     {
+      "id": "app-host-rail-host-selected",
+      "title": "The local host chosen on the host rail (after Escape on the Replace question): its avatar pressed, the chip naming it under the list's heading, and the count narrowed to 4 of 4",
+      "reference": "host-rail-host-selected",
+      "mockup": false,
+      "steps": [
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Confirm replace"
+        ],
+        [
+          "click",
+          "text:Local (this machine)"
+        ],
+        [
+          "wait",
+          "--text",
+          "4 of 4"
+        ],
+        [
+          "hover",
+          "text:Recently active"
+        ]
+      ]
+    },
+    {
+      "id": "app-host-filter-chip-help",
+      "title": "The host chip's hover help: the chosen host's identity",
+      "reference": "host-rail-host-selected",
+      "mockup": false,
+      "steps": [
+        [
+          "hover",
+          "id:host-filter-chip"
+        ],
+        [
+          "wait",
+          "--text",
+          "Local (this machine)"
+        ]
+      ]
+    },
+    {
       "id": "app-empty-fleet",
       "title": "The main window over an empty fleet",
       "reference": "empty-fleet",
@@ -386,6 +433,11 @@
       "golden": "rename-dialog",
       "title": "The Rename editor as it opens: the current title, the field holding it with focus, Cancel and Save",
       "reference": "rename-dialog"
+    },
+    {
+      "golden": "host-filter-empty",
+      "title": "The session list with a host chosen over its empty listing: the pressed avatar, the chip and the sentence naming the host, with Show all hosts",
+      "reference": "session-list-filter-empty"
     }
   ],
   "reference_scenes": [

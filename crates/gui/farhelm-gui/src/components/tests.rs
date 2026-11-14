@@ -1177,3 +1177,124 @@ fn a_checkbox_reports_its_role_and_whether_it_is_checked(cx: &mut TestAppContext
         }
     }
 }
+
+/// A button that is one of a set of choices (the host rail's entries) must tell assistive technology which choice is
+/// in force, as the old `aria-pressed` did, and a button showing content in place of its words (a host's mark) must
+/// still be named by its label, since a mark says nothing to a screen reader. Specified: a pressed button reports the
+/// toggled state on, one not pressed reports it off, and a plain button reports none; the pressed one, given content,
+/// is named by its label and paints its content's text, never the label's.
+#[gpui::test]
+fn a_pressed_button_reports_its_state_and_content_keeps_the_label_as_its_name(
+    cx: &mut TestAppContext,
+) {
+    let cx = open(cx, |_, _| {
+        div()
+            .flex()
+            .gap(px(8.))
+            .child(
+                Button::new(
+                    "on",
+                    "All hosts",
+                    HoverHelp::tooltip("Show every host"),
+                    Role::Button,
+                )
+                .tier(Tier::Rail)
+                .pressed(true)
+                .content(div().child("All")),
+            )
+            .child(
+                Button::new(
+                    "off",
+                    "Local",
+                    HoverHelp::tooltip("Show one host"),
+                    Role::Button,
+                )
+                .tier(Tier::Rail)
+                .pressed(false),
+            )
+            .child(Button::new(
+                "plain",
+                "Save",
+                HoverHelp::tooltip("Save it"),
+                Role::Button,
+            ))
+            .into_any_element()
+    });
+    let nodes = frame(cx);
+    let find = |id: &str| {
+        nodes
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+            .unwrap_or_else(|| panic!("{id} was drawn"))
+    };
+    assert_eq!(find("on").toggled, Some(gpui::Toggled::True));
+    assert_eq!(find("off").toggled, Some(gpui::Toggled::False));
+    assert_eq!(find("plain").toggled, None);
+    assert_eq!(find("on").label.as_deref(), Some("All hosts"));
+    let painted: Vec<String> = nodes
+        .iter()
+        .flat_map(|node| node.texts.iter().map(|text| text.text.to_string()))
+        .collect();
+    assert!(painted.iter().any(|text| text == "All"), "{painted:?}");
+    assert!(
+        !painted.iter().any(|text| text == "All hosts"),
+        "{painted:?}"
+    );
+}
+
+/// A status mark is information, not a control: the old app's `role="status"` span with its label and tooltip. A user
+/// who sees only its symbol needs its words on hover, a screen reader needs them as its name, and a keyboard user must
+/// not stop on it. Specified: a status mark showing "?" is drawn with the status role and its label as its name, paints
+/// "?", takes no focus from Tab (which goes on to the button after it) and has no click handler, and resting the
+/// pointer on it shows its hover help.
+#[gpui::test]
+fn a_status_mark_is_named_and_helps_on_hover_but_is_no_tab_stop(cx: &mut TestAppContext) {
+    let after = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let focus = after.clone();
+    let cx = open(cx, move |_, _| {
+        div()
+            .flex()
+            .gap(px(8.))
+            .child(super::StatusMark::new(
+                "unloaded",
+                "The list could not be loaded",
+                HoverHelp::tooltip("The list could not be loaded"),
+                Role::Status,
+                "?",
+            ))
+            .child(
+                Button::new(
+                    "after",
+                    "After",
+                    HoverHelp::tooltip("A test control"),
+                    Role::Button,
+                )
+                .focus(&focus),
+            )
+            .into_any_element()
+    });
+    keys(cx, "tab");
+    assert!(
+        cx.update(|window, _| after.is_focused(window)),
+        "Tab went past the mark to the button"
+    );
+    let nodes = frame(cx);
+    let mark = nodes
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some("unloaded"))
+        .expect("the mark was drawn");
+    assert_eq!(mark.role, Some(Role::Status));
+    assert_eq!(mark.label.as_deref(), Some("The list could not be loaded"));
+    assert!(!mark.flags.focusable && !mark.flags.click, "not a control");
+    assert!(
+        nodes
+            .iter()
+            .any(|node| node.texts.iter().any(|text| text.text.as_ref() == "?")),
+        "it paints its text"
+    );
+
+    let at = center(cx, "unloaded");
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    wait_hover_delay(cx);
+    assert_eq!(tooltip(cx).as_deref(), Some("The list could not be loaded"));
+}

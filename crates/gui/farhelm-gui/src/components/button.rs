@@ -1,5 +1,10 @@
 //! Buttons, drawn as the old stylesheet's `.btn` tiers: ghost (the default), neutral, primary and danger, plus the
-//! compact control that sits on the red banner and the ⋯ that opens a list row's menu.
+//! compact control that sits on the red banner, the ⋯ that opens a list row's menu, the host rail's square entries, the
+//! removable filter chip, and the button that reads as a link.
+//!
+//! A button shows its label's text, or other content in its place ([`Button::content`]: a host's mark, a mark beside a
+//! host's name); the label is its accessible name either way. A button that is one of a set of choices says whether
+//! it is the one in force ([`Button::pressed`]), as the rail's entries do.
 //!
 //! A button that opens something (a menu, a question) can say so with [`Button::expanded`]: assistive technology hears
 //! whether what it opens is open, and while it is the button wears the old pressed look, the accent fill with the
@@ -21,9 +26,9 @@
 use std::rc::Rc;
 
 use gpui::{
-    App, ClickEvent, ElementId, FocusHandle, InteractiveElement, IntoElement, MouseButton,
-    ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled, Window, div,
-    prelude::FluentBuilder as _, px, svg,
+    AnyElement, App, ClickEvent, ElementId, FocusHandle, InteractiveElement, IntoElement,
+    MouseButton, ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement, Styled,
+    Toggled, Window, div, prelude::FluentBuilder as _, px, svg,
 };
 
 use super::{Handler, HoverHelp};
@@ -52,12 +57,27 @@ pub enum Tier {
     /// row's solid accent fill, where it draws in the inverse ink with an accent-family hover and an inverse focus ring
     /// (`.session-row.selected .session-row-menu` and `.session-row.selected :focus-visible`).
     RowMenu { on_fill: bool },
+    /// `.host-rail .btn`: an entry of the host rail, a 40-pixel square with no padding around what it shows (a word
+    /// or a host's mark, through [`Button::content`]), quiet ink, and the raised `--bg-2` under the pointer. Its chosen
+    /// entry is drawn through [`Button::pressed`].
+    Rail,
+    /// `.btn.btn-neutral.host-filter-chip`: the neutral tier in a chip's tighter box (`padding: 4px 6px`) that may
+    /// shrink to its row, so the host name inside it can be cut short. Its content lays out its own parts and does the
+    /// cutting.
+    Chip,
+    /// `.inline-link`: a button that reads as a link in running text: the link color, underlined, with no fill, edge
+    /// or padding. The focus ring is every control's.
+    Link,
 }
 
 /// The [`Tier::RowMenu`] box's height: 14-pixel text at `line-height: 1.4`.
 const ROW_MENU_HEIGHT: f32 = 19.6;
 /// The [`Tier::RowMenu`] box's horizontal padding.
 const ROW_MENU_PAD_X: f32 = 5.;
+/// The [`Tier::Rail`] box's side (`.host-rail .btn`'s `width` and `height`).
+const RAIL_SIZE: f32 = 40.;
+/// The [`Tier::Chip`] box's padding, vertical then horizontal.
+const CHIP_PAD: (f32, f32) = (4., 6.);
 
 /// A button with a visible text label (and optionally a leading icon).
 #[derive(IntoElement)]
@@ -74,6 +94,10 @@ pub struct Button {
     busy: bool,
     /// Whether what the button opens is open; `None` for a button that opens nothing.
     expanded: Option<bool>,
+    /// Whether the button's choice is the one in force; `None` for a button that is not a choice.
+    pressed: Option<bool>,
+    /// What the button shows in place of its label's text, when it shows more than words.
+    content: Option<AnyElement>,
     on_click: Option<Handler>,
     focus: Option<FocusHandle>,
 }
@@ -100,6 +124,8 @@ impl Button {
             disabled: false,
             busy: false,
             expanded: None,
+            pressed: None,
+            content: None,
             on_click: None,
             focus: None,
         }
@@ -142,6 +168,24 @@ impl Button {
         self
     }
 
+    /// The button is one of a set of choices (the host rail's entries), and `pressed` says whether it is the one in
+    /// force now: `aria-pressed`, which assistive technology hears as a toggle's state, and while pressed the old
+    /// `[aria-pressed="true"]` look, the accent fill with the inverse ink and an inverse focus ring drawn inside the
+    /// edge. A pressed button keeps that fill under the pointer and the keyboard ring (one step up the accent family),
+    /// where the old sheet's later `.btn` hover and focus fills replaced it and left white ink on a light fill.
+    pub fn pressed(mut self, pressed: bool) -> Self {
+        self.pressed = Some(pressed);
+        self
+    }
+
+    /// Show `content` in place of the label's text (a host's mark, or a mark beside a host's name), centered in the
+    /// button's box. The label stays the button's accessible name, so content that a screen reader should not read
+    /// twice needs no hiding; content holding host text draws it through the host-text element, as everywhere.
+    pub fn content(mut self, content: impl IntoElement) -> Self {
+        self.content = Some(content.into_any_element());
+        self
+    }
+
     /// What activating the button does.
     pub fn on_click(
         mut self,
@@ -168,6 +212,14 @@ impl Button {
                 palette.on_fill,
             );
         }
+        if self.pressed == Some(true) {
+            return (
+                Some(palette.accent_fill),
+                palette.accent_fill_hover,
+                None,
+                palette.on_fill,
+            );
+        }
         let retired = (
             Some(palette.bg_2),
             palette.bg_2,
@@ -187,12 +239,14 @@ impl Button {
                 Some(palette.danger_soft),
                 palette.on_fill,
             ),
-            Tier::Neutral => (
+            Tier::Neutral | Tier::Chip => (
                 Some(palette.bg_2),
                 palette.control_hover,
                 Some(palette.border),
                 palette.fg_0,
             ),
+            Tier::Rail => (None, palette.bg_2, None, palette.fg_1),
+            Tier::Link => (None, theme::TRANSPARENT, None, palette.link),
             Tier::Primary if self.disabled || self.busy => retired,
             Tier::Danger if self.disabled || self.busy => retired,
             Tier::Primary => (
@@ -227,21 +281,29 @@ impl RenderOnce for Button {
         let (pad_y, pad_x) = match self.tier {
             Tier::OnBanner => metrics::BANNER_BUTTON_PAD,
             Tier::RowMenu { .. } => (px(0.), px(ROW_MENU_PAD_X)),
+            Tier::Rail | Tier::Link => (px(0.), px(0.)),
+            Tier::Chip => (px(CHIP_PAD.0), px(CHIP_PAD.1)),
             Tier::Ghost | Tier::Neutral | Tier::Primary | Tier::Danger => metrics::BUTTON_PAD,
         };
+        let pressed = self.pressed == Some(true);
         let ring_color = match self.tier {
+            _ if pressed => palette.on_fill,
             Tier::OnBanner | Tier::RowMenu { on_fill: true } => palette.on_fill,
             Tier::Ghost
             | Tier::Neutral
             | Tier::Primary
             | Tier::Danger
+            | Tier::Rail
+            | Tier::Chip
+            | Tier::Link
             | Tier::RowMenu { on_fill: false } => palette.accent,
         };
         // An icon-only button is otherwise as high as its icon plus its padding and square; the row menu's box is the
-        // old toggle's, set by its text line and its own side padding.
+        // old toggle's, set by its text line and its own side padding; a rail entry is a fixed square.
         let (pad_x, height) = match self.tier {
             Tier::RowMenu { .. } => (pad_x, Some(px(ROW_MENU_HEIGHT))),
-            _ if self.show_label => (pad_x, None),
+            Tier::Rail => (pad_x, Some(px(RAIL_SIZE))),
+            _ if self.show_label || self.content.is_some() => (pad_x, None),
             _ => (pad_y, None),
         };
         let enabled = !self.disabled;
@@ -271,11 +333,29 @@ impl RenderOnce for Button {
             .py(pad_y)
             .px(pad_x)
             .when_some(height, |button, height| button.h(height))
+            .when(self.tier == Tier::Rail, |button| {
+                button.w(px(RAIL_SIZE)).flex_none()
+            })
+            // A chip yields its width to the row it sits in (`min-width: 0; max-width: 100%`), and its content cuts
+            // the host's name short.
+            .when(self.tier == Tier::Chip, |button| {
+                button.min_w_0().max_w_full()
+            })
             .when_some(self.expanded, |button, expanded| {
                 button.aria_expanded(expanded)
             })
+            .when_some(self.pressed, |button, pressed| {
+                button.aria_toggled(if pressed {
+                    Toggled::True
+                } else {
+                    Toggled::False
+                })
+            })
             .rounded(metrics::RADIUS_SM)
-            .border_1()
+            // `.inline-link` has no edge at all (`border: 0`), so it sits on the text line like the words around it;
+            // every other tier keeps the 1-pixel edge.
+            .when(self.tier != Tier::Link, |button| button.border_1())
+            .when(self.tier == Tier::Link, |button| button.underline())
             .text_size(metrics::TEXT_SM)
             .line_height(px(17.))
             .text_color(theme::color(text))
@@ -285,7 +365,21 @@ impl RenderOnce for Button {
         if ring && enabled {
             button = button.bg(theme::color(hover_fill));
         }
-        if ring {
+        if ring && pressed {
+            // A pressed button's ring is the inverse ink inside its edge (`outline-color: var(--on-fill);
+            // outline-offset: -4px`), as the old rail drew it: the accent ring would not read against the accent fill.
+            button = button.child(
+                div()
+                    .absolute()
+                    .top(px(2.))
+                    .left(px(2.))
+                    .right(px(2.))
+                    .bottom(px(2.))
+                    .border_2()
+                    .border_color(theme::color(ring_color))
+                    .rounded(px(1.)),
+            );
+        } else if ring {
             // The old `outline: 2px solid var(--accent); outline-offset: 1px`, drawn as a ring element because GPUI has
             // no outline: two pixels wide, one pixel clear of the button's edge.
             button = button.child(
@@ -307,7 +401,13 @@ impl RenderOnce for Button {
         } else if !enabled
             && matches!(
                 self.tier,
-                Tier::Ghost | Tier::Neutral | Tier::OnBanner | Tier::RowMenu { .. }
+                Tier::Ghost
+                    | Tier::Neutral
+                    | Tier::OnBanner
+                    | Tier::RowMenu { .. }
+                    | Tier::Rail
+                    | Tier::Chip
+                    | Tier::Link
             )
         {
             button = button.opacity(0.5);
@@ -320,7 +420,9 @@ impl RenderOnce for Button {
                     .text_color(theme::color(text)),
             );
         }
-        if self.show_label {
+        if let Some(content) = self.content {
+            button = button.child(content);
+        } else if self.show_label {
             button = button.child(self.label);
         }
         let button = super::with_hover_help(button, &self.id, &self.help, true, window, cx);

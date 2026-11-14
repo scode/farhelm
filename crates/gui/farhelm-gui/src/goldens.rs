@@ -44,6 +44,8 @@ use crate::prompt::{self, Answer, Question};
 use crate::root;
 use crate::session;
 use crate::session_list::SessionList;
+use crate::session_list::host_rail::host_mark;
+use crate::session_list::host_rail::tests::{hosts, local, remote};
 use crate::session_list::tests::{Fixture, listing, preferences, session};
 use crate::terminal::attached::{AttachedTerminal, OpenStream, TerminalTarget};
 use crate::terminal::{CellMetrics, CursorPhase, TerminalView, TextSize};
@@ -54,6 +56,10 @@ use farhelm_grid_model::GridOutput;
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::fake::terminal::FakeTerminal;
 use farhelm_helm_client::terminal::AttachmentLease;
+use farhelm_proto::host_appearance::{HostColor, HostIcon};
+use farhelm_proto::ui_channel::{
+    Availability, Collection, CollectionChanges, CollectionMeta, ListCounts,
+};
 
 /// How many frames a scene may take to settle before the test gives up: icons decode on the background executor, so
 /// the first frame can lack them. Two consecutive identical captures is the readiness signal; a scene that never
@@ -148,10 +154,63 @@ fn switches(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
         .into_any_element()
 }
 
-/// Every button tier, a disabled main action and an icon button, in one row.
-fn buttons(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+/// Every button tier, a disabled main action and an icon button, in a first row; in a second, the host rail's entries
+/// (All pressed, a host's mark not pressed, on the rail's ground), the filter chip with a mark, a name and its ✕, and
+/// the link tier.
+fn buttons(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
     let help = || HoverHelp::tooltip("Golden scene control");
-    div()
+    let palette = theme::palette(cx);
+    let rail = div()
+        .flex()
+        .gap(px(8.))
+        .p(px(7.))
+        .bg(theme::color(palette.bg_1))
+        .child(
+            Button::new("rail-all", "All hosts", help(), Role::Button)
+                .tier(Tier::Rail)
+                .pressed(true)
+                .content(div().child("All")),
+        )
+        .child(
+            Button::new("rail-host", "build-box", help(), Role::Button)
+                .tier(Tier::Rail)
+                .pressed(false)
+                .content(host_mark(
+                    HostIcon::Database,
+                    HostColor::Teal,
+                    px(24.),
+                    palette,
+                )),
+        );
+    let chip = Button::new(
+        "chip",
+        "Filtered to host build-box; remove filter",
+        help(),
+        Role::Button,
+    )
+    .tier(Tier::Chip)
+    .content(
+        div()
+            .flex()
+            .items_center()
+            .gap(px(5.))
+            .child(host_mark(
+                HostIcon::Laptop,
+                HostColor::Red,
+                px(14.),
+                palette,
+            ))
+            .child("build-box")
+            .child("✕"),
+    );
+    let second = div()
+        .flex()
+        .gap(px(8.))
+        .items_center()
+        .child(rail)
+        .child(chip)
+        .child(Button::new("link", "Show all hosts", help(), Role::Button).tier(Tier::Link));
+    let first = div()
         .flex()
         .gap(px(8.))
         .items_center()
@@ -174,7 +233,13 @@ fn buttons(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
             "More actions",
             help(),
             Role::Button,
-        ))
+        ));
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(8.))
+        .child(first)
+        .child(second)
         .into_any_element()
 }
 
@@ -887,9 +952,10 @@ fn terminals(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
 }
 
 /// Connect a fake helm with the sessions `rows` in that order (and a visit history that opens the first one) and make
-/// the session list over it. The fake, the connection and the list are kept for the scene's life; the list's own
-/// commands (remembering the selection, marking it seen) go to the fake unanswered, so the pictures show the snapshot
-/// as the helm sent it.
+/// the session list over it, with a registry of the local host and the remote one the rows run on, so the host rail
+/// beside the list draws All and two avatars. The fake, the connection and the list are kept for the scene's life; the
+/// list's own commands (remembering the selection, marking it seen) go to the fake unanswered, so the pictures show the
+/// snapshot as the helm sent it.
 fn session_list_scene(state: &SceneState, rows: &[Fixture], cx: &mut App) {
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
@@ -897,6 +963,7 @@ fn session_list_scene(state: &SceneState, rows: &[Fixture], cx: &mut App) {
     helm.connect(vec![
         listing(&order, rows),
         preferences(&order[..order.len().min(1)], None),
+        hosts(&[local(), remote(2, "deploy@buildbox.example.invalid")]),
     ]);
     state.lists.borrow_mut().push(cx.new(SessionList::new));
     let mut keep = state.keep.borrow_mut();
@@ -1030,6 +1097,45 @@ fn session_list_deleting_setup(state: &SceneState, _: &mut Window, cx: &mut App)
     );
 }
 
+/// A host chosen over an empty listing (reference `session-list-filter-empty`): the rail with `buildbox` pressed, its
+/// chip under the heading, and the sentence naming it with "Show all hosts" under it. The fleet's rows go: the fake
+/// pushes the host query's empty listing (0 of 6) and then accepts the query, answering the list's other commands
+/// before it in order, as the helm does.
+fn host_filter_empty_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    session_list_then(
+        state,
+        |list, state, _, cx| {
+            list.update(cx, |list, cx| list.choose_host(Some(2), cx));
+            let mut keep = state.keep.borrow_mut();
+            let Some(helm) = keep
+                .iter_mut()
+                .find_map(|kept| kept.downcast_mut::<FakeHelm>())
+            else {
+                return;
+            };
+            let gone: Vec<String> = fleet().iter().map(|row| row.key.to_owned()).collect();
+            helm.push(CollectionChanges {
+                collection: Collection::Sessions,
+                meta: CollectionMeta {
+                    availability: Availability::Available,
+                    order: Vec::new(),
+                    counts: Some(ListCounts {
+                        total: 6,
+                        matching: Some(0),
+                        truncated: false,
+                    }),
+                },
+                upsert: Vec::new(),
+                remove: gone,
+            });
+            for command in helm.commands() {
+                helm.reply(command.id, 204, None);
+            }
+        },
+        cx,
+    );
+}
+
 /// No sessions at all: the list says so.
 fn session_list_empty_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     session_list_scene(state, &[], cx);
@@ -1084,7 +1190,7 @@ fn session_lists(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement
 static SCENES: &[Scene] = &[
     Scene {
         name: "buttons",
-        size: (560., 64.),
+        size: (560., 124.),
         draw: buttons,
         setup: no_setup,
     },
@@ -1231,6 +1337,12 @@ static SCENES: &[Scene] = &[
         size: (560., 320.),
         draw: empty,
         setup: rename_dialog_setup,
+    },
+    Scene {
+        name: "host-filter-empty",
+        size: (420., 418.),
+        draw: session_lists_then,
+        setup: host_filter_empty_setup,
     },
 ];
 

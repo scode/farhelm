@@ -121,6 +121,9 @@ pub struct Palette {
     pub info: Token,
     /// `--on-accent-dim`: secondary text on a selection fill.
     pub on_accent_dim: Token,
+    /// `--link`: a link and a button drawn as one (`.inline-link`), underlined as well, because this blue alone does
+    /// not stand out enough from the grey prose around it.
+    pub link: Token,
     /// `--status-pulse-min`, in percent: the running pulse's dimmest opacity on an ordinary row. Shallow, never off, so
     /// it reads as a heartbeat rather than a blink; the light appearance's is higher because its dark green fades into
     /// a light hover sooner.
@@ -175,6 +178,7 @@ pub const DARK: Palette = Palette {
     danger_fill_hover: rgb_token(0x983644),
     info: rgb_token(0x8ea2f5),
     on_accent_dim: rgb_token(0xf4f6ff),
+    link: rgb_token(0x9cb7ff),
     status_pulse_min: 60,
     selected_status_pulse_min: 85,
     // rgba(0, 0, 0, 0.82)
@@ -229,6 +233,7 @@ pub const LIGHT: Palette = Palette {
     danger_fill_hover: rgb_token(0x983644),
     info: rgb_token(0x445acf),
     on_accent_dim: rgb_token(0xf4f6ff),
+    link: rgb_token(0x3158bd),
     status_pulse_min: 73,
     selected_status_pulse_min: 85,
     // rgba(0, 0, 0, 0.82)
@@ -408,7 +413,7 @@ pub mod metrics {
     /// `.farhelm-tooltip`'s `-webkit-line-clamp`: longer help is cut at this many lines.
     pub const TOOLTIP_MAX_LINES: usize = 8;
     /// `--sidebar-width`: the sidebar column's default width (the old app let the user drag it; this port does not
-    /// yet).
+    /// yet). It holds the 56-pixel host rail as well as the session list beside it, as the old width did.
     pub const SIDEBAR_WIDTH: Pixels = px(396.);
     /// `--row-slot`: the width of a session row's status and locality columns.
     pub const ROW_SLOT: Pixels = px(12.);

@@ -23,6 +23,11 @@
 //! stylesheet's `.delete-spinner`, a 12-pixel ring whose top quarter is solid and the rest 30% of the same color (its
 //! border in `color-mix(in srgb, var(--accent) 30%, transparent)` with `border-top-color: var(--accent)`); the 30% is
 //! the SVG's stroke opacity, so the view still tints it with one color.
+//!
+//! The sixteen host marks (`Host*`, the shapes a user picks for a host: cloud, house, flask and so on) are the old
+//! app's `HostMark` drawings, copied from its icon module at the reference commit into one file each: Farhelm's own
+//! set, in a 16-unit box with a 1.3 stroke and round caps and joins, unfilled, in the current color, so the view tints
+//! each one with the host's chosen color.
 
 use std::borrow::Cow;
 
@@ -96,6 +101,25 @@ pub enum Icon {
     /// Two opposed arrows: start the session over under the same settings (the old app's Replace glyph). Deliberately
     /// not a circular arrow, which reads as resuming, so Replace and a later Restart never look alike beside each other.
     Replace,
+    /// The first of the host marks, one per `HostIcon` a user can choose for a host
+    /// (`farhelm_proto::host_appearance`), in that enum's order. The cloud is a remote host's default.
+    HostCloud,
+    HostHouse,
+    HostFlask,
+    HostDatabase,
+    HostChip,
+    HostRocket,
+    HostGear,
+    HostGem,
+    HostHexagon,
+    HostTriangle,
+    HostRing,
+    HostSquare,
+    HostBug,
+    HostFactory,
+    HostCastle,
+    /// The laptop, the local host's default (drawn in red).
+    HostLaptop,
 }
 
 impl Icon {
@@ -116,6 +140,22 @@ impl Icon {
         Icon::Check,
         Icon::Stop,
         Icon::Replace,
+        Icon::HostCloud,
+        Icon::HostHouse,
+        Icon::HostFlask,
+        Icon::HostDatabase,
+        Icon::HostChip,
+        Icon::HostRocket,
+        Icon::HostGear,
+        Icon::HostGem,
+        Icon::HostHexagon,
+        Icon::HostTriangle,
+        Icon::HostRing,
+        Icon::HostSquare,
+        Icon::HostBug,
+        Icon::HostFactory,
+        Icon::HostCastle,
+        Icon::HostLaptop,
     ];
 }
 
@@ -135,6 +175,22 @@ impl Icon {
             Icon::Check => "icons/check.svg",
             Icon::Stop => "icons/stop.svg",
             Icon::Replace => "icons/replace.svg",
+            Icon::HostCloud => "icons/host-cloud.svg",
+            Icon::HostHouse => "icons/host-house.svg",
+            Icon::HostFlask => "icons/host-flask.svg",
+            Icon::HostDatabase => "icons/host-database.svg",
+            Icon::HostChip => "icons/host-chip.svg",
+            Icon::HostRocket => "icons/host-rocket.svg",
+            Icon::HostGear => "icons/host-gear.svg",
+            Icon::HostGem => "icons/host-gem.svg",
+            Icon::HostHexagon => "icons/host-hexagon.svg",
+            Icon::HostTriangle => "icons/host-triangle.svg",
+            Icon::HostRing => "icons/host-ring.svg",
+            Icon::HostSquare => "icons/host-square.svg",
+            Icon::HostBug => "icons/host-bug.svg",
+            Icon::HostFactory => "icons/host-factory.svg",
+            Icon::HostCastle => "icons/host-castle.svg",
+            Icon::HostLaptop => "icons/host-laptop.svg",
         }
     }
 }
@@ -162,6 +218,22 @@ impl Assets {
             "icons/check.svg" => Some(include_bytes!("../assets/icons/check.svg")),
             "icons/stop.svg" => Some(include_bytes!("../assets/icons/stop.svg")),
             "icons/replace.svg" => Some(include_bytes!("../assets/icons/replace.svg")),
+            "icons/host-cloud.svg" => Some(include_bytes!("../assets/icons/host-cloud.svg")),
+            "icons/host-house.svg" => Some(include_bytes!("../assets/icons/host-house.svg")),
+            "icons/host-flask.svg" => Some(include_bytes!("../assets/icons/host-flask.svg")),
+            "icons/host-database.svg" => Some(include_bytes!("../assets/icons/host-database.svg")),
+            "icons/host-chip.svg" => Some(include_bytes!("../assets/icons/host-chip.svg")),
+            "icons/host-rocket.svg" => Some(include_bytes!("../assets/icons/host-rocket.svg")),
+            "icons/host-gear.svg" => Some(include_bytes!("../assets/icons/host-gear.svg")),
+            "icons/host-gem.svg" => Some(include_bytes!("../assets/icons/host-gem.svg")),
+            "icons/host-hexagon.svg" => Some(include_bytes!("../assets/icons/host-hexagon.svg")),
+            "icons/host-triangle.svg" => Some(include_bytes!("../assets/icons/host-triangle.svg")),
+            "icons/host-ring.svg" => Some(include_bytes!("../assets/icons/host-ring.svg")),
+            "icons/host-square.svg" => Some(include_bytes!("../assets/icons/host-square.svg")),
+            "icons/host-bug.svg" => Some(include_bytes!("../assets/icons/host-bug.svg")),
+            "icons/host-factory.svg" => Some(include_bytes!("../assets/icons/host-factory.svg")),
+            "icons/host-castle.svg" => Some(include_bytes!("../assets/icons/host-castle.svg")),
+            "icons/host-laptop.svg" => Some(include_bytes!("../assets/icons/host-laptop.svg")),
             _ => None,
         }
     }

@@ -248,26 +248,19 @@ enum Read {
 }
 
 impl Read {
-    /// What the reply to the read says. A refusal's words are the helm's (a plain string, or the JSON it sent), or the
-    /// status when it sent none, as the operation store words a refusal.
-    // Copied from `Outcome::from_reply` rather than shared, because `operations.rs` is append-only for areas.
+    /// What the reply to the read says. A refusal's words are the helm's, or the status when it sent none
+    /// ([`super::refusal_words`]).
     fn from_reply(result: Result<Reply, CommandError>) -> Read {
         let reply = match result {
             Ok(reply) => reply,
             Err(error) => return Read::Failed(HostText::from_host(error.to_string())),
         };
         if !(200..300).contains(&reply.status) {
-            let words = match reply.body {
-                Some(serde_json::Value::String(text)) => text.trim().to_owned(),
-                Some(other) => other.to_string(),
-                None => String::new(),
-            };
-            let words = if words.is_empty() {
-                format!("GET /api/sessions: {}", reply.status)
-            } else {
-                words
-            };
-            return Read::Failed(HostText::from_host(words));
+            return Read::Failed(super::refusal_words(
+                reply.status,
+                reply.body,
+                "GET /api/sessions",
+            ));
         }
         match reply.body.map(serde_json::from_value::<SessionList>) {
             Some(Ok(list)) => Read::Loaded(list),

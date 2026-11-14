@@ -75,10 +75,17 @@
 //! The quick switcher ([`quick_switcher`]) belongs to the list too: a dialog, opened with its shortcut, that searches
 //! a listing of its own and opens the session the user picks through the same selection rules as a click on a row.
 //!
+//! The host rail ([`host_rail`]) is drawn by the list, at the sidebar's left edge with the list's own column beside
+//! it, because choosing a host is the list's query: the rail sets the UI channel's session query, the list's state
+//! keeps the choice per UI session, and the list's column shows the chosen host's chip under its heading and, for a
+//! host with no sessions, an empty state that names it.
+//!
 //! NOTE: Not ported yet, each with the area that brings it: the order menu (the title is the stored order's name, not a
-//! control), filters and their counts, compact rows, marking, pins, the row menu's other commands, and the host rail.
+//! control), the status segments, compact rows, marking, pins, the row menu's other commands, and the rail's host
+//! status, foot, Add host and expansion.
 
 pub(crate) mod delete;
+pub(crate) mod host_rail;
 mod menu;
 pub(crate) mod outcome;
 pub(crate) mod quick_switcher;
@@ -167,6 +174,9 @@ pub struct SessionList {
     /// NOTE: Weak on purpose. A strong handle here would keep whatever held focus alive after it went away (a terminal
     /// dropped by a reset, say), and the window would go on reporting it as focused, so focus would never go home.
     focus_seen: Option<WeakFocusHandle>,
+    /// The host rail's All button's focus handle, a tab stop: kept here rather than in the button's element state so
+    /// that removing the host filter from the chip or the empty state can move focus to All ([`host_rail`]).
+    all_focus: FocusHandle,
 }
 
 /// What the list keeps for one UI session.
@@ -183,6 +193,9 @@ struct Current {
     operations: Option<Subscription>,
     /// The rows' menu buttons and the layers they opened, shared with the item callback that draws the rows.
     rows: menu::SharedRows,
+    /// The host rail's choice and the helm's answers to it. Per UI session because the helm's channel keeps the query
+    /// per channel: a new channel starts unfiltered, and so does this.
+    hosts: host_rail::Choice,
 }
 
 impl SessionList {
@@ -205,6 +218,7 @@ impl SessionList {
             row_focus: HashMap::new(),
             hinted_width: None,
             focus_seen: None,
+            all_focus: cx.focus_handle().tab_stop(true),
         };
         list.settle(cx);
         list
@@ -408,11 +422,15 @@ impl Render for SessionList {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         render_count::record("session-list", cx);
 
+        // The sidebar's body: the host rail, then the list's own column in the width the rail leaves.
+        let body_row = div().flex().flex_row().size_full();
         let list = div()
             .id("session-list")
             .role(Role::List)
             .aria_label("Sessions")
-            .size_full()
+            .flex_1()
+            .min_w_0()
+            .h_full()
             .flex()
             .flex_col()
             .min_h_0();
@@ -422,7 +440,7 @@ impl Render for SessionList {
             if !self.entries.is_empty() {
                 self.sync_rows(Some(Vec::new()), window, cx);
             }
-            return list;
+            return body_row.child(list);
         };
         // One pass over the listing for what the frame needs from all of it: the keys, and whether any row pulses or
         // shows a spinner (a pending Delete or Stop, or a Replace that has waited long enough to say so). Everything
@@ -465,12 +483,21 @@ impl Render for SessionList {
         }
         let shared = self.current.current(cx).rows.clone();
         shared.borrow_mut().start_frame();
+        let choice = self.current.current(cx).hosts.clone();
+        let weak = cx.weak_entity();
         let collections = store.read(cx).collections();
+        let palette = theme::palette(cx);
+        let body_row = body_row.child(host_rail::rail(
+            collections,
+            choice.chosen(),
+            &weak,
+            &self.all_focus,
+            palette,
+        ));
         let Some(meta) = collections.meta(Collection::Sessions) else {
-            return list.child(status_line("Loading sessions…"));
+            return body_row.child(list.child(status_line("Loading sessions…")));
         };
         let selected = local_state::selected(cx);
-        let palette = theme::palette(cx);
 
         let count = count_line(meta, self.entries.len());
         let heading = div()
@@ -504,27 +531,30 @@ impl Render for SessionList {
         let unavailable = match &meta.availability {
             Availability::Available => None,
             // The helm's own description, which may quote what a host answered: host text.
-            Availability::Unavailable { error } => Some(
-                div()
-                    .py(px(4.))
-                    .px(px(10.))
-                    .text_size(metrics::TEXT_SM)
-                    .text_color(theme::color(palette.danger))
-                    .child(
-                        HostSentence::new("session-list-error")
-                            .text("Failed to load sessions: ")
-                            .host(&HostText::from_host(error.as_str())),
-                    ),
-            ),
+            Availability::Unavailable { error } => Some(failure_line(
+                HostSentence::new("session-list-error")
+                    .text("Failed to load sessions: ")
+                    .host(&HostText::from_host(error.as_str())),
+                palette,
+            )),
         };
+        let chip = choice
+            .chosen()
+            .map(|host| host_rail::chip_row(collections, host, &weak, palette));
+        let refused = choice
+            .refusal()
+            .map(|words| failure_line(host_rail::refusal_sentence(words), palette));
 
-        let body: AnyElement = if empty_fleet(collections) {
+        let empty_host = host_rail::empty_host(meta, self.entries.len(), choice.answered());
+        let body: AnyElement = if let Some(host) = empty_host {
+            host_rail::empty_state(collections, host, &weak, palette).into_any_element()
+        } else if empty_fleet(collections) {
             status_line("No sessions").into_any_element()
         } else {
             // What the item callback needs, by value: it runs while the list lays out, after this render returns, and
             // builds only the rows it draws.
             let entries = self.entries.clone();
-            let weak = cx.weak_entity();
+            let weak = weak.clone();
             div()
                 .id("session-rows")
                 // Tests scroll the list over this; it records nothing outside test builds.
@@ -543,10 +573,14 @@ impl Render for SessionList {
                 )
                 .into_any_element()
         };
-        list.child(heading)
-            .children(truncated)
-            .children(unavailable)
-            .child(body)
+        body_row.child(
+            list.child(heading)
+                .children(chip)
+                .children(refused)
+                .children(truncated)
+                .children(unavailable)
+                .child(body),
+        )
     }
 }
 
@@ -656,6 +690,37 @@ fn status_line(text: &'static str) -> impl IntoElement {
         .p(metrics::LIST_STATUS_PAD)
         .text_size(metrics::TEXT_ROW_TITLE)
         .child(text)
+}
+
+/// The words of a refusal the helm sent with `status` and `body` to the command named `shown` (its method and route,
+/// as `GET /api/sessions`): the helm's own words (a plain string, trimmed, or the JSON it sent), or, when it sent none,
+/// the command and its status, as the operation store words a refusal. Host text, since the helm's words may quote a
+/// host. Shared by the list's own commands that do not go through the operation store (the quick switcher's read, the
+/// host rail's query).
+// The operation store's `Outcome::from_reply` holds the same rule; it is not shared with it because `operations.rs` is
+// append-only for areas (docs/gpui/foundation-ownership.md).
+pub(crate) fn refusal_words(status: u16, body: Option<serde_json::Value>, shown: &str) -> HostText {
+    let words = match body {
+        Some(serde_json::Value::String(text)) => text.trim().to_owned(),
+        Some(other) => other.to_string(),
+        None => String::new(),
+    };
+    if words.is_empty() {
+        HostText::from_host(format!("{shown}: {status}"))
+    } else {
+        HostText::from_host(words)
+    }
+}
+
+/// A failure line across the list's column: 12-pixel red words (a read that failed, a query the helm refused), which
+/// may quote a host and so arrive as a host sentence.
+fn failure_line(sentence: HostSentence, palette: &theme::Palette) -> impl IntoElement {
+    div()
+        .py(px(4.))
+        .px(px(10.))
+        .text_size(metrics::TEXT_SM)
+        .text_color(theme::color(palette.danger))
+        .child(sentence)
 }
 
 /// A full-width band of 12-pixel text, as the old `.banner` lines in the sidebar.

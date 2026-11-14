@@ -20,6 +20,7 @@ mod dialog;
 mod list_row;
 mod menu_item;
 mod option_row;
+mod status_mark;
 mod text_input;
 
 #[cfg(test)]
@@ -34,6 +35,7 @@ pub use gpui::Role;
 pub use list_row::ListRow;
 pub use menu_item::MenuItem;
 pub use option_row::OptionRow;
+pub use status_mark::StatusMark;
 pub use text_input::{TextInput, TextInputEvent, TextInputState, Vertical};
 
 use std::rc::Rc;
