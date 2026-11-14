@@ -29,14 +29,15 @@ for the attention list. The other ten, the attention list itself and its Always 
 | `tests/host-checkout-folder.spec.ts` | 1     | host checkout folder saves, inherits, clears and reaches launch preview          | not yet ported                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `tests/provisioning.spec.ts`         | 73    | rail ${action} modal stays visible over Sessions and returns to its avatar       | partly (the Hosts panel's rows and the derivation of a host's menu): crates/gui/farhelm-gui/src/hosts/offers/tests.rs `the_local_hosts_update_is_greyed_and_points_at_the_installer` ("the local row's update is greyed out, points at the installer"; sending nothing waits for the menu), `work_in_flight_withdraws_update_and_rerun_and_holds_settings_and_remove` ("Update planning keeps only its own Settings unavailable"), `a_running_run_holds_the_host_until_it_ends` ("accepted ADD ... while running": no Update or Re-run and Settings unavailable during the run, Update after it), `a_too_new_host_is_not_offered_update`, `a_suspended_host_is_not_offered_update_or_rerun`, `a_failed_run_is_offered_again_as_what_it_was`, `a_failed_update_on_the_local_host_is_offered_again_greyed`, `the_local_host_without_a_supervisor_offers_no_install`, `each_kind_decides_its_own_offers`; crates/gui/farhelm-gui/src/hosts/tests.rs `details_open_and_close_every_row` and `a_failed_run_opens_only_its_own_row` ("global details alone control disclosure", without the update progress), `the_local_host_without_a_supervisor_opens_its_row_to_say_what_to_do` ("local setup answers an absent supervisor", without the probe and its handoff, which are not ported), `a_refusal_shows_under_its_row_and_opens_it`; crates/gui/farhelm-gui/src/hosts/phase/tests.rs (phase words, Too new hover, details); and Add host's dialog and probe (below). Waiting: the host menu, setup and its confirmation, progress, Update and Update all, Remove, host settings and the rail's entry points |
 | `tests/ssh-help.spec.ts`             | 4     | ssh help displays and copies both registered-host commands                       | not yet ported                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `tests/workspace-trust.spec.ts`      | 3     | managed-checkout trust switches persist independently of Claude's legacy route   | not yet ported                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `tests/workspace-trust.spec.ts`      | 3     | managed-checkout trust switches persist independently of Claude's legacy route   | partly (below)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `tests/appearance.spec.ts`           | 4     | ${initial.name} before application mount                                         | partly (below)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 ## `tests/settings.spec.ts`, partly
 
-The dialog's shell and its Sessions, Hosts and Terminal sections are ported; the cases about the other sections
-(Appearance, Checkouts, Agent trust, Notifications, and Recipes, Tensorlake, Containers, Credentials and App) wait for
-them.
+The dialog's shell and its Sessions, Appearance, Hosts, Terminal and Agent trust sections are ported; the cases about
+the other sections (Checkouts, Notifications, and Recipes, Tensorlake, Containers, Credentials and App) wait for them.
+Appearance's own cases are in `tests/appearance.spec.ts`, below. Agent trust's are split between
+`tests/workspace-trust.spec.ts` (below) and this spec, whose hint-switch cases are mapped in the Agent trust bullet.
 
 NOTE: Terminal shows only the link choice for now. Its **File types to open with Cmd-click** field governs opening
 downloaded files and comes with file downloads, later in the migration. Its tunnel consent switch waits for the tunnel
@@ -50,9 +51,11 @@ NOTE: Nothing in the new app follows the link choice yet: the GPUI terminal read
 The new app's terminals follow them only once the terminal area's link and tunnel pieces land; until then the helm alone
 acts on them (it closes the open tunnels when consent is turned off).
 
-The app opens Settings from the gear on the host rail's foot, which calls `settings::open` with itself as the opener;
-the gear's own tests, and the end-to-end smoke step that clicks it, are in the sidebar's parity file
-(`docs/gpui/parity/sidebar-and-session-view.md`, the `tests/filters.spec.ts` row).
+The app opens Settings from the gear on the host rail's foot, which calls `settings::open` with itself as the opener and
+opens it at Sessions; the gear's own tests, and the end-to-end smoke step that clicks it, are in the sidebar's parity
+file (`docs/gpui/parity/sidebar-and-session-view.md`, the `tests/filters.spec.ts` row). The one entry point still to
+come is the trust hint band, the session view's, which calls the Agent trust entry point
+(`settings::open_at_agent_trust`); until it is built, only tests open Settings at Agent trust that way.
 
 Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs` unless named otherwise:
 
@@ -79,8 +82,16 @@ Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs` unless named 
   `a_refused_link_choice_shows_the_stored_choice_and_a_failure_line`,
   `an_unset_or_unknown_link_choice_reads_as_intercept`. The arrows, Space and the description lines as accessible
   descriptions are the radio group's own, which its tests in `components/tests.rs` cover.
-- The look: the goldens `settings-sessions`, `settings-appearance`, `settings-hosts` and `settings-terminal`
-  (`crates/gui/farhelm-gui/src/goldens.rs`).
+- Agent trust's hint switches ("settings reports and reverts a refused ${choice.field} save" for
+  `claude_trust_hint_dismissed` and `codex_trust_hint_dismissed`): they save and refuse as every preference switch does,
+  in `a_refused_save_restores_the_stored_value_and_shows_the_error_beside_the_switch`, and
+  `the_hint_switches_are_the_shared_dismissals_inverted` pins their field and inversion. Superseded, since a hint switch
+  reads the pushed preference row and not the trust read (Deviations, "The hint switches can be used before the trust
+  read answers"): "settings keeps the pending ${hint.name} hint choice clickable through a held read", "settings repairs
+  a ${hint.name} trust read crossing a successful hint save", and "settings reverts a pending ${hint.name} hint save
+  after reopening before refusal", with and without an unreadable corrective read.
+- The look: the goldens `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-terminal` and
+  `settings-agent-trust` (`crates/gui/farhelm-gui/src/goldens.rs`).
 
 Not ported here, and why: the persistence across a second client and reload belongs to the helm's preference route and
 the UI channel's pushes, which their own tests cover; "settings gap keeps focus ..." is the layer manager's empty-space
@@ -88,7 +99,7 @@ rule (`keeps_focus_on_empty_click` is on for Settings), with no Settings-specifi
 it does not apply, since GPUI labels are not selectable; "settings reverses a permanent removal answer without
 reloading" needs the host removal question, which comes with the port of Remove host; the narrow list path is not built
 (Deviations); "settings ignores a superseded link-choice failure" has no newer choice to supersede, since a second click
-while a preference save is in flight is refused (Deviations).
+while any Settings save is in flight is refused (Deviations).
 
 ## `tests/provisioning.spec.ts`, Add host's dialog and probe
 
@@ -158,6 +169,32 @@ Superseded: the four "... before application mount" cases. They held the browser
 script in the page's head colored the canvas before the app existed. This app has no page, head or renderer module to
 hold; what the window draws before the first snapshot is a deviation, below.
 
+## `tests/workspace-trust.spec.ts`, partly
+
+Its Settings case ("managed-checkout trust switches persist independently of Claude's legacy route") is ported, with the
+Settings half of `tests/claude-trust.spec.ts` (whose row is in `launcher.md`: the hint band is the session view's): the
+switch the band's "Settings and caveats" opens, and the hint switch that reverses its Don't show again. Replacing tests,
+in `crates/gui/farhelm-gui/src/settings/tests.rs`:
+
+- The read when the section opens, and no toggle over a choice not known:
+  `agent_trust_reads_each_agent_once_when_shown_and_waits_for_the_answer`,
+  `a_failed_trust_read_leaves_the_switch_unavailable_with_its_reason`,
+  `a_trust_read_reaches_only_the_opening_it_was_sent_for`.
+- Saves through each agent's own route, and a refusal with the helm's reason:
+  `a_trust_switch_saves_through_its_route_and_a_refusal_restores_it`. Persistence across a reload is the helm's routes'
+  own, which their tests cover; the old case's write through Claude's legacy route is the helm's too.
+- The hint switches as the shared dismissals: `the_hint_switches_are_the_shared_dismissals_inverted`, and
+  `name_sessions_on_quick_launch_reads_as_on_when_the_helm_stored_no_choice` for unset, `false` and `true`.
+- The entry point a trust hint calls (`settings::open_at_agent_trust`):
+  `the_trust_hint_entry_point_focuses_its_agents_switch_once_known`,
+  `a_trust_read_that_answers_after_the_user_moved_on_moves_no_focus` and
+  `a_click_that_leaves_focus_on_the_dialog_still_stops_the_trust_handover`.
+- The look: the golden `settings-agent-trust`.
+
+Not ported here: the two hint-band cases ("... trust hint stays scoped to its managed agent terminal and own dismissal",
+"Pi and command launches do not borrow a workspace trust hint") and the rest of `claude-trust.spec.ts` belong to the
+band, which the session view draws.
+
 ## Deviations
 
 Where the port does not match the old app, and why. Each stays until the work named in it lands.
@@ -178,6 +215,30 @@ Where the port does not match the old app, and why. Each stays until the work na
   2026-11-14, with no device-local cache of the choice.
 - **The Appearance help is reworded.** The old line said "for this device"; this one says the choice applies to the helm
   and that other open clients pick it up right away, and that System follows each device's own appearance.
+- **A trust hint's way into Settings focuses the agent's switch, later, and does not scroll it into view.** The old
+  entry point focused the agent's whole block (`#checkout-<agent>-trust`, which took focus with `tabindex=-1`) at once,
+  and both old specs assert that. Here the dialog opens with focus on itself and hands focus to the agent's switch once
+  the section's read of that agent has answered, since an unavailable switch cannot hold focus; it hands nothing over if
+  the user has moved on by then. That is closer to SPEC.md's "open agent trust at the relevant switch", but SPEC.md also
+  says the hint scrolls "its block into view", and nothing scrolls: Muse's and Pi's switches lie below the fold at the
+  dialog's full height, and Codex's too when the window caps the dialog's height (in a window shorter than about 730
+  pixels; the window's minimum height is 560). Only Claude's switch is always visible. The handover borrows a focus move
+  that does not reveal its target; it waits for the focus coordinator's move inside a dialog (`focus::focus_in_layer`)
+  to accept a target that is not drawn yet, which will scroll the switch into view (the switch, not the whole block: for
+  Muse and Pi the help under the switch, and Muse's hint switch, can stay below the fold). Until then, for any agent but
+  Claude the focused control can be a trust switch the user cannot see (Muse's and Pi's always, Codex's in a short
+  window), and Space toggles it, so a user who presses Space to scroll turns that agent's trust on unseen. The hint
+  band, when it is built, should not open Settings this way for an agent whose switch lies below the fold before the
+  reveal lands, or should accept that risk knowingly.
+- **The hint switches can be used before the trust read answers, and when it fails.** The old ones were unavailable
+  until the read came back. Here whether a hint was dismissed comes from the pushed preference row, not from the trust
+  read, so a hint switch shows the stored dismissal from the start and saves like any preference switch.
+- **A trust switch's save is refused while another Settings save is in flight**, like a preference switch's (below). The
+  operation store admits one request per key, and helm configuration (where trust lives) has no key of its own, so trust
+  saves go under the preference row's key. This area accepted that on 2026-11-14, under its goal's instruction not to
+  request a key for helm configuration before it is needed: the embedded helm answers these saves in milliseconds, so
+  they rarely meet. The old trust switches each had their own request and were unavailable only while their own save
+  ran.
 - **Terminal has no tunnel consent switch yet.** It waits for the terminal area's consent question (see the NOTE under
   `tests/settings.spec.ts` above).
 - **No one-pane layout at 620 pixels and below.** The old dialog showed either the section list or the section below

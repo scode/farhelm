@@ -43,7 +43,7 @@
 //! The Terminal section glyph is the old app's too (`ActionGlyph::Terminal`), in the same 14-unit action box and stroke.
 //!
 //! So is the Appearance section glyph (`ActionGlyph::Appearance`), in the same box and stroke; its filled half has no
-//! stroke, as the old one's did not.
+//! stroke, as the old one's did not. So is the Agent trust section glyph (`ActionGlyph::AgentTrust`).
 
 use std::borrow::Cow;
 
@@ -157,6 +157,8 @@ pub enum Icon {
     /// Two curved arrows chasing each other round: restart the agent and resume its conversation (the old app's Restart
     /// glyph, on the session header's Restart).
     Restart,
+    /// A shield with a tick: the Settings dialog's Agent trust section (the old app's Agent trust glyph).
+    AgentTrust,
 }
 
 impl Icon {
@@ -202,6 +204,7 @@ impl Icon {
         Icon::Appearance,
         Icon::Terminal,
         Icon::Restart,
+        Icon::AgentTrust,
     ];
 }
 
@@ -246,6 +249,7 @@ impl Icon {
             Icon::Appearance => "icons/appearance.svg",
             Icon::Terminal => "icons/terminal.svg",
             Icon::Restart => "icons/restart.svg",
+            Icon::AgentTrust => "icons/agent-trust.svg",
         }
     }
 }
@@ -304,6 +308,7 @@ impl Assets {
             "icons/hosts.svg" => Some(include_bytes!("../assets/icons/hosts.svg")),
             "icons/appearance.svg" => Some(include_bytes!("../assets/icons/appearance.svg")),
             "icons/terminal.svg" => Some(include_bytes!("../assets/icons/terminal.svg")),
+            "icons/agent-trust.svg" => Some(include_bytes!("../assets/icons/agent-trust.svg")),
             WORDMARK_DARK => Some(include_bytes!(
                 "../../../../packaging/farhelm-desktop/wordmark-dark.svg"
             )),
