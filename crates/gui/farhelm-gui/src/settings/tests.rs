@@ -13,7 +13,7 @@ use farhelm_proto::ui_channel::{
 };
 use gpui::{
     Context, FocusHandle, IntoElement, ParentElement as _, Render, Styled as _, TestAppContext,
-    Toggled, VisualTestContext, Window, div, px, size,
+    Toggled, VisualTestContext, Window, WindowAppearance, div, px, size,
 };
 use serde_json::{Value, json};
 
@@ -21,11 +21,12 @@ use super::Section;
 use super::choices::Choice;
 use crate::components::{Button, HoverHelp, Role};
 use crate::focus::{self, Mark};
+use crate::main_view::MainView;
 use crate::operations::{OpKey, Work};
 use crate::test_support::{
     self, bounds, click, focused, focused_id, frame, keys, meta, settle, started,
 };
-use crate::{layers, root, session};
+use crate::{layers, root, session, theme};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
@@ -71,6 +72,7 @@ fn section_button(section: Section) -> &'static str {
     match section {
         Section::Sessions => "settings-section-sessions",
         Section::Hosts => "settings-section-hosts",
+        Section::Appearance => "settings-section-appearance",
         Section::Terminal => "settings-section-terminal",
     }
 }
@@ -207,11 +209,11 @@ fn the_gear_opens_settings_at_sessions_with_focus_on_its_first_switch(cx: &mut T
     );
 }
 
-/// SPEC.md lists every section, but this build has only Sessions, Hosts and Terminal; listing a section with nothing
-/// behind it would offer a button that shows an empty pane. The list follows SPEC.md's order ("Sessions, Appearance,
-/// Hosts, Recipes, Tensorlake, Containers, Credentials, Terminal, ..."), and the button of the shown section is the
-/// pressed one. Specified: the section list holds exactly the Sessions, Hosts and Terminal buttons, in that order,
-/// Sessions pressed and the others not.
+/// SPEC.md lists every section, but this build has only Sessions, Appearance, Hosts and Terminal; listing a section
+/// with nothing behind it would offer a button that shows an empty pane. The list follows SPEC.md's order ("Sessions,
+/// Appearance, Hosts, Recipes, Tensorlake, Containers, Credentials, Terminal, ..."), and the button of the shown
+/// section is the pressed one. Specified: the section list holds exactly the Sessions, Appearance, Hosts and Terminal
+/// buttons, in that order, Sessions pressed and the others not.
 #[gpui::test]
 fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
     let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
@@ -236,6 +238,7 @@ fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
         listed,
         [
             ("Sessions".to_string(), Some(Toggled::True)),
+            ("Appearance".to_string(), Some(Toggled::False)),
             ("Hosts".to_string(), Some(Toggled::False)),
             ("Terminal".to_string(), Some(Toggled::False)),
         ]
@@ -843,4 +846,269 @@ fn an_unset_or_unknown_link_choice_reads_as_intercept() {
     assert_eq!(stored(Some(&link_row("hover"))), LinkClick::Intercept);
     assert_eq!(stored(Some(&link_row("both"))), LinkClick::Both);
     assert_eq!(stored(Some(&link_row("program"))), LinkClick::Program);
+}
+
+// ---- Appearance ----------------------------------------------------------------------------------------------------
+
+/// The Appearance option that shows as chosen (`System`, `Dark` or `Light`), or `None` when none does or the section
+/// is not drawn.
+fn appearance_chosen(cx: &mut VisualTestContext) -> Option<&'static str> {
+    let nodes = frame(cx);
+    ["System", "Dark", "Light"].into_iter().find(|label| {
+        let id = format!("{}-{label}", super::appearance::ID);
+        nodes.iter().any(|node| {
+            node.element_id.as_deref() == Some(id.as_str()) && node.toggled == Some(Toggled::True)
+        })
+    })
+}
+
+/// The preference row storing `word` as its appearance.
+fn appearance_row(word: &str) -> Preferences {
+    Preferences {
+        appearance: Some(word.to_owned()),
+        ..Preferences::default()
+    }
+}
+
+/// Appearance is a helm preference now (the maintainer's decision of 2026-11-13), saved like every Settings choice:
+/// one field of the shared row, so a stale copy of another field is never written back, and nothing applied before the
+/// helm holds it. Specified: with no appearance stored, Appearance shows System chosen; a click on Dark sends
+/// `PUT /api/preferences` with only `{"appearance": "dark"}` under the preference row's key, and Dark shows while the
+/// save is in flight; once the helm pushes the row and answers, Dark shows from the store and the key is free; a click
+/// on System then sends the word `system`, not a cleared field.
+#[gpui::test]
+fn an_appearance_choice_saves_only_its_preference_field(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    open_settings(cx);
+    click(cx, "settings-section-appearance");
+    assert_eq!(heading(cx).as_deref(), Some("Appearance"));
+    assert_eq!(
+        appearance_chosen(cx),
+        Some("System"),
+        "unset reads as System"
+    );
+
+    click(cx, "settings-appearance-Dark");
+    let (id, body) = one_save(&mut helm);
+    assert_eq!(
+        body,
+        json!({ "appearance": "dark" }),
+        "only its field is sent"
+    );
+    assert_eq!(preference_work(cx), Some(Work::Save));
+    assert_eq!(
+        appearance_chosen(cx),
+        Some("Dark"),
+        "the pending value shows while the save is in flight"
+    );
+
+    push(&mut helm, &appearance_row("dark"), cx);
+    helm.reply(id, 204, None);
+    settle(cx);
+    assert_eq!(preference_work(cx), None, "the key is free again");
+    assert_eq!(
+        appearance_chosen(cx),
+        Some("Dark"),
+        "the stored value shows"
+    );
+
+    click(cx, "settings-appearance-System");
+    let (_, body) = one_save(&mut helm);
+    assert_eq!(body, json!({ "appearance": "system" }));
+}
+
+/// SPEC.md: "A failed save restores the last known value and shows an adjacent error", and with no optimistic copy a
+/// refused choice never took effect, so showing it chosen would claim a palette the helm does not hold. Dark is stored
+/// so the stored value differs from the default and from the dialog's own seed. Specified: with Dark stored, Settings
+/// opens Appearance showing Dark; a click on Light shows Light while the save is in flight; the helm's refusal brings
+/// Dark back with the failure line, an alert, drawn below the group; the next save that starts takes the line away.
+#[gpui::test]
+fn a_refused_appearance_save_shows_the_stored_choice_and_a_failure_line(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &appearance_row("dark"));
+    open_settings(cx);
+    click(cx, "settings-section-appearance");
+    assert_eq!(
+        appearance_chosen(cx),
+        Some("Dark"),
+        "the premise: the stored Dark shows"
+    );
+    click(cx, "settings-appearance-Light");
+    let (id, _) = one_save(&mut helm);
+    assert_eq!(
+        appearance_chosen(cx),
+        Some("Light"),
+        "the premise: the pending value shows"
+    );
+
+    helm.reply(id, 503, Some(json!("fixture preference save refused")));
+    settle(cx);
+    assert_eq!(
+        appearance_chosen(cx),
+        Some("Dark"),
+        "the stored value is back"
+    );
+    let failure = frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(super::appearance::ERROR_ID))
+        .map(|node| (node.role, node.label.map(|label| label.to_string())));
+    assert_eq!(
+        failure,
+        Some((
+            Some(Role::Alert),
+            Some("Could not save the color theme. Try again.".to_string())
+        ))
+    );
+    assert!(
+        bounds(cx, super::appearance::ERROR_ID).top() >= bounds(cx, super::appearance::ID).bottom(),
+        "the failure line is below the group"
+    );
+
+    click(cx, "settings-appearance-System");
+    let _ = one_save(&mut helm);
+    assert!(
+        !drawn(cx, super::appearance::ERROR_ID),
+        "a new save took the failure line away"
+    );
+}
+
+/// Another client's choice (or one made through the helm's API) reaches the open window as it happens, as every shared
+/// preference does, and the group reads it from the store rather than a copy taken at opening. A copy would only show
+/// on a push that comes with no save of the dialog's own. Specified: with Appearance open showing System, the helm
+/// pushing `light` with nothing sent shows Light, and pushing an empty row shows System again.
+#[gpui::test]
+fn an_open_appearance_section_follows_a_choice_made_elsewhere(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    open_settings(cx);
+    click(cx, "settings-section-appearance");
+    assert_eq!(appearance_chosen(cx), Some("System"), "the premise");
+    push(&mut helm, &appearance_row("light"), cx);
+    assert_eq!(appearance_chosen(cx), Some("Light"));
+    assert_eq!(sent(&mut helm), [], "the dialog sent nothing of its own");
+    push(&mut helm, &Preferences::default(), cx);
+    assert_eq!(appearance_chosen(cx), Some("System"));
+}
+
+/// SPEC.md: System is the default, and the helm reads a word it does not know back as unset; the window must agree, or
+/// a row written by a newer build would leave this one showing no choice at all. Specified: no row, an unset field and
+/// an unknown word read as System; `dark` and `light` read as Dark and Light.
+#[test]
+fn an_unset_or_unknown_appearance_reads_as_system() {
+    use crate::theme::Preference;
+    let stored = super::appearance::stored;
+    assert_eq!(stored(None), Preference::System, "no row");
+    assert_eq!(
+        stored(Some(&Preferences::default())),
+        Preference::System,
+        "unset"
+    );
+    assert_eq!(
+        stored(Some(&appearance_row("sepia"))),
+        Preference::System,
+        "unknown"
+    );
+    assert_eq!(stored(Some(&appearance_row("dark"))), Preference::Dark);
+    assert_eq!(stored(Some(&appearance_row("light"))), Preference::Light);
+}
+
+// ---- The stored appearance on the window ---------------------------------------------------------------------------
+
+/// The main window over the fake helm, before any snapshot: the window the app opens while it connects. The test
+/// platform reports a light operating system.
+fn open_main(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext) {
+    let (helm, _connection) = started(cx);
+    let (_, window) = test_support::open_view(cx, MainView::new);
+    (helm, window)
+}
+
+/// Whether the window paints with the dark palette now.
+fn dark(cx: &mut VisualTestContext) -> bool {
+    cx.update(|_, cx| theme::palette(cx).dark)
+}
+
+/// SPEC.md: the choice is a helm preference "and a change reaches every open client live". The main view's
+/// subscription hands the stored row to the theme; a palette that followed only this window's own saves would leave
+/// other clients, the first snapshot and a reconnect's new snapshot unpainted. It also records what the window shows
+/// before the first snapshot, which is a deviation from the old app (the parity file): the connecting screen is in the
+/// operating system's palette. Specified: on a light system, the connecting window's palette is light; the first
+/// snapshot storing Dark turns it dark; a push storing Light, with nothing sent, turns it light; a push storing nothing
+/// (System) after a stored Dark leaves the system's light; after a reset the inert window keeps the palette in use
+/// (Dark), and the reconnect's snapshot storing Light turns it light.
+#[gpui::test]
+fn the_stored_appearance_paints_the_window_from_the_first_snapshot_on(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_main(cx);
+    assert!(
+        !dark(cx),
+        "before the snapshot the palette is the system's light"
+    );
+    helm.connect(vec![preferences_state(&appearance_row("dark"))]);
+    settle(cx);
+    assert!(dark(cx), "the first snapshot's Dark applies");
+    push(&mut helm, &appearance_row("light"), cx);
+    assert!(!dark(cx), "a pushed Light applies");
+    push(&mut helm, &appearance_row("dark"), cx);
+    assert!(dark(cx), "the premise: a pushed Dark applies");
+    push(&mut helm, &Preferences::default(), cx);
+    assert!(!dark(cx), "unset is System, which follows the light system");
+    assert_eq!(sent(&mut helm), [], "applying a choice saves nothing");
+
+    // A reset retires the UI session and its store; the reconnect's snapshot is a new store, which the subscription
+    // must pick up by itself.
+    push(&mut helm, &appearance_row("dark"), cx);
+    assert!(dark(cx), "the premise: Dark is in use before the reset");
+    helm.break_channel();
+    settle(cx);
+    assert!(
+        cx.update(|_, cx| session::current_store(cx).is_none()),
+        "the premise: the reset left the window inert"
+    );
+    assert!(dark(cx), "the inert window keeps the palette in use");
+    helm.connect(vec![preferences_state(&appearance_row("light"))]);
+    settle(cx);
+    assert!(!dark(cx), "the reconnect's snapshot applies");
+}
+
+/// SPEC.md: "System follows each device's current appearance, including changes while Farhelm stays open; an explicit
+/// choice overrides it." Specified: with System stored, the operating system turning dark turns the window dark and
+/// turning light again turns it light; with Light stored, the system turning dark leaves the window light.
+#[gpui::test]
+fn system_follows_the_operating_system_and_an_explicit_choice_does_not(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_main(cx);
+    helm.connect(vec![preferences_state(&Preferences::default())]);
+    settle(cx);
+    cx.update(|_, cx| theme::follow_system(WindowAppearance::Dark, cx));
+    assert!(dark(cx), "System follows the system to dark");
+    cx.update(|_, cx| theme::follow_system(WindowAppearance::Light, cx));
+    assert!(!dark(cx), "and back to light");
+    push(&mut helm, &appearance_row("light"), cx);
+    cx.update(|_, cx| theme::follow_system(WindowAppearance::Dark, cx));
+    assert!(!dark(cx), "an explicit Light ignores the system");
+}
+
+/// The agent build's `--appearance` start hook is a test hook for screenshot batches: a batch's dark captures must be
+/// dark whatever the helm stores, so the stored choice must not replace it. Specified: with the hook forcing Dark, a
+/// snapshot storing Light and a later push storing System leave the window dark.
+///
+/// The app is set up by hand rather than through [`open_main`]: in an agent build, [`crate::bootstrap::install`]
+/// replaces the overrides with the ones read from the environment, which would drop the test's own. This installs the
+/// overrides and then runs what a launch runs after reading them ([`crate::bootstrap::install_app_state`]), as the
+/// start hook's own test does, so it holds whatever features the crate is built with.
+#[gpui::test]
+fn the_agent_builds_start_hook_wins_over_the_stored_appearance(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        cx.set_global(crate::agent_startup::Overrides {
+            window_size: None,
+            preference: Some(theme::Preference::Dark),
+        });
+        crate::bootstrap::install_app_state(cx).unwrap();
+    });
+    let (mut helm, handle, events) = FakeHelm::new();
+    let _connection = cx.update(|cx| session::start(handle, events, None, cx));
+    cx.run_until_parked();
+    let (_, cx) = test_support::open_view(cx, MainView::new);
+    assert!(dark(cx), "the premise: the hook started the app dark");
+    helm.connect(vec![preferences_state(&appearance_row("light"))]);
+    settle(cx);
+    assert!(dark(cx), "the snapshot's Light did not replace the hook");
+    push(&mut helm, &Preferences::default(), cx);
+    assert!(dark(cx));
 }
