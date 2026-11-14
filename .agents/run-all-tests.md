@@ -129,6 +129,8 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   reach
 - The vendored GPUI core's recorded native-key test from `.agents/validation.md` (`vendor/gpui-pre`), which the
   workspace batteries never reach either
+- The GPUI app's screenshot goldens from `.agents/validation.md` (`scripts/check-gui-goldens.py`), ignored in the
+  workspace batteries because they need the software renderer the script selects
 - The terminal emulator's ignored tests from `.agents/validation.md`, in release: the snapshot spike's full round-trip
   configuration, the review's short scripts and hostile blobs, and the per-terminal memory measurement (on Linux), whose
   assertions fail when an emulator exceeds the crate's stated budget; the workspace batteries skip ignored tests

@@ -9,6 +9,13 @@ The literal variation-base exceptions, formatting ranges and Hangul attachment p
 [Unicode License V3](https://www.unicode.org/license.txt) copyright and permission notice is reproduced in
 [`vendor/UNICODE-LICENSE.txt`](vendor/UNICODE-LICENSE.txt). No Ghostty implementation is copied.
 
+## Inter interface font
+
+The Inter regular and semibold TrueType files in `crates/gui/farhelm-gui/assets/fonts/`, which the GPUI desktop app
+bundles, are decompressed byte for byte (`woff2_decompress`) from the website's vendored Inter WOFF2 files in
+`website/public/fonts/`. Copyright 2016 The Inter Project Authors ([`rsms/inter`](https://github.com/rsms/inter)). They
+are licensed under the SIL Open Font License, Version 1.1; the complete notice is `OFL-Inter.txt` beside them.
+
 ## Code ported from xterm.js
 
 The supervisor's grid input encoder is a Farhelm port of code from `@xterm/xterm` 6.0.0. The port keeps behavior that
