@@ -186,6 +186,21 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   directory). Asked for on 2026-11-08, when agent commands from sessions that were not on screen turned out to fail
   because the supervisor's routing was built on the assumption that several helms might share one supervisor.
 
+- **Look into the GPUI frame-source patch further.** The new desktop app carries a patch to its vendored GPUI that keeps
+  GPUI's older macOS frame source (`CVDisplayLink`) on macOS 14 and later, instead of the `CAMetalDisplayLink` GPUI uses
+  there by default. Without it, a key press took about 55 ms to reach the screen on the test Mac VM, against about 35 ms
+  in the old app and about 30 ms with the patch, because the newer source presents a frame about three refreshes after
+  it was drawn. The patch costs idle CPU (about 0.4% instead of 0.1%) and gives up macOS choosing the frame rate
+  (ProMotion displays, low-power mode). Kept on 2026-11-13; look into whether Apple or GPUI may eventually drop the
+  older path, whether the newer source can be made as fast (setting its frame latency to 1 made no difference on the
+  VM), and how it behaves on real hardware with a ProMotion display.
+
+- **Revisit drawing inactive windows at full frame rate.** The new desktop app draws a window at full rate even when
+  another app is in front, matching the old app, instead of GPUI's default cap of 30 frames a second. That keeps output
+  scrolling smoothly in a window you are watching but not using, at the cost of more drawing (and battery) while output
+  scrolls in a background window, which is common while agents work. Decided on 2026-11-13 to match today; revisit the
+  tradeoff.
+
 ### Tensorlake
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
