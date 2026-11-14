@@ -18,6 +18,8 @@
 //! - [`session`]: the connection to the helm and the resettable UI-session owner (SPEC_impl.md, "One failure path:
 //!   the reset"); [`store`]: the one copy of what the helm pushed, which views read when they draw;
 //!   [`local_state`]: the selected session's id, the one piece of window state that survives a reset.
+//! - [`operations`]: the operation store, which holds work on a session that finishes later, above the views that
+//!   start it; [`drafts`]: editor fields that follow pushed changes until the user touches them, and their saves.
 //! - [`ticker`]: the one source of time, for animation (at most 10 ticks a second) and for one-shot deadlines.
 //! - [`notices`]: the notice center, the one place that decides what notice shows.
 //! - [`cache`]: the one way to cache a view.
@@ -27,7 +29,7 @@
 //! - [`terminal`]: a session terminal's renderer, an uncached view that owns its grid model.
 //! - [`marks`]: the agent harnesses' marks as plain geometry, kept from the old Dioxus UI.
 //!
-//! Still to come, each under its own module: the operation stores, drafts and the rest of actions and keys.
+//! Still to come, each under its own module: the rest of actions and keys.
 //!
 //! The `agent` feature adds the test-automation bridge (`gpui-agent`), which `scripts/gui-agent.py` drives; see
 //! `docs/gui-agent.md`. It also makes the app read `agent_startup`'s startup overrides (window size, appearance) from
@@ -54,6 +56,7 @@ pub mod assets;
 pub mod bootstrap;
 pub mod cache;
 pub mod components;
+pub mod drafts;
 pub mod focus;
 pub mod host_text;
 pub mod layers;
@@ -61,6 +64,7 @@ pub mod local_state;
 pub mod main_view;
 pub mod marks;
 pub mod notices;
+pub mod operations;
 pub mod prompt;
 pub mod render_count;
 pub mod root;
@@ -91,6 +95,8 @@ mod actions_tests;
 mod foundation_tests;
 #[cfg(test)]
 mod goldens;
+#[cfg(test)]
+mod operations_tests;
 #[cfg(test)]
 mod session_tests;
 #[cfg(test)]
