@@ -3401,6 +3401,8 @@ The native desktop remembers its last ordinary window rectangle and whether it w
 launch it restores that rectangle only when it fits on a currently connected display; otherwise it opens at a safe size
 centered on a current display. On Wayland, which does not expose reliable global window positions, Farhelm keeps a
 usable saved size and the maximized state while leaving placement to the compositor. Native fullscreen is not persisted.
+The window cannot be made smaller than 720 by 560 logical pixels, the smallest size at which the session sidebar at its
+default width and the main pane still fit side by side.
 
 ## Durability and resume
 

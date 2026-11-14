@@ -11,13 +11,26 @@ description = "The GPUI desktop GUI: views and the app-wide foundations they bui
 [package.metadata.dist]
 dist = false
 
-# GPUI and GPUI Kit at their exact pins (root Cargo.toml). Nothing uses them yet: depending on them here is what makes
-# Cargo.lock record the pinned versions and route gpui-pre through the vendored, patched trees.
+# GPUI and GPUI Kit at their exact pins (root Cargo.toml), routed through the vendored, patched GPUI trees.
 [dependencies]
+anyhow.workspace = true
 gpui.workspace = true
 gpui-base.workspace = true
 gpui-component.workspace = true
 gpui_platform.workspace = true
+# Kit's theme is configured from JSON (`ThemeConfig`); the theme module projects Farhelm's tokens onto it.
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+# `leak-detection` is what makes GPUI's leak checks check anything: without it they are no-ops (SPEC_impl.md, "GPUI
+# cookbook: traps"). `test-support` brings the test contexts and the headless capture.
+gpui = { workspace = true, features = ["test-support", "leak-detection"] }
+gpui_platform = { workspace = true, features = ["test-support"] }
+# The real text system and headless renderer for layout-dependent tests and screenshot goldens: GPUI's test context
+# fakes text (every character the same width), which proves nothing about layout.
+gpui_wgpu = { package = "gpui-pre-wgpu", version = "=0.3.12" }
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 # A panic inside an AppKit callback aborts the app, and nearly all GUI code runs inside one, so the GUI crates never
 # unwrap or expect outside tests (crates/gui/clippy.toml lets tests). SPEC_impl.md, "Startup and quit: the bootstrap".

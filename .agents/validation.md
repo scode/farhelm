@@ -664,6 +664,14 @@ systemd or SSH substrate ran.
   through normal or build dependencies, when one other than the GPUI app crates the script names reaches GPUI or GPUI
   Kit, or when a GUI crate's manifest does not deny clippy's `unwrap_used` and `expect_used`. Seconds, nothing compiled.
   Run it when a manifest under `crates/gui/` or `Cargo.lock` changes. CI's `deny` job runs both.
+- `python3 scripts/record-test-run.py --kind development --selection 'GPUI app goldens' --concurrency 'libtest default threads' -- python3 scripts/check-gui-goldens.py`
+  — the GPUI app's screenshot goldens (`crates/gui/farhelm-gui/src/goldens.rs`): every component, the dialog frame and
+  the layer manager's tooltip, light and dark, compared pixel for pixel with the PNGs under
+  `crates/gui/farhelm-gui/tests/goldens/<os>/`. The test is ignored in workspace runs because it needs the software
+  renderer, which the script selects (Mesa's lavapipe on Linux: the `mesa-vulkan-drivers` and `libegl-mesa0` packages).
+  After an intended visual change, `--update` rewrites the references; look at each changed PNG before keeping it. A
+  failure leaves the new captures in `gui-goldens/` beside the test binary. Run it when anything under
+  `crates/gui/farhelm-gui/` that draws, its fonts, or GPUI or GPUI Kit change; CI does not run it yet.
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh` — the curl-installer is POSIX
   `sh` run unread on a fresh machine (`curl | sh`), so a syntax slip or a shellcheck-catchable bug in it gets caught
   before the slower Rust-side asset-table parity test in `assets.rs` would notice. `test-install-sh.sh` is bash, not
