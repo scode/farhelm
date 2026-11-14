@@ -562,7 +562,53 @@ pub struct Preferences {
     /// file downloads and program-initiated URL forwarding are independent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub terminal_link_click: Option<String>,
+    // The seven fields below hold the settings the old app kept per device.
+    // The maintainer decided on 2026-11-13 that they become shared helm
+    // preferences with the new desktop app, starting unset: nothing is
+    // carried over from the old app's per-device storage.
+    /// The window's appearance word: `system`, `dark` or `light`, the old
+    /// app's words. Unset (and any word the helm does not know, which it
+    /// reads back as unset) means `system`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub appearance: Option<String>,
+    /// The sidebar's resize width in whole logical pixels, within
+    /// [`SIDEBAR_WIDTH_RANGE`] (SPEC.md, "Session list"): the width with the
+    /// 56px collapsed rail included, which keeps its meaning whether or not
+    /// the rail is expanded (expanding adds 164px on screen, not here). Unset
+    /// means the 396px default; the helm reads a stored value outside the
+    /// range back as unset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sidebar_width: Option<u32>,
+    /// Whether the host rail is expanded. Unset means collapsed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_rail_open: Option<bool>,
+    /// The waiting sound switch (SPEC.md, "Status"). Unset means on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sound_waiting: Option<bool>,
+    /// The approval-request sound switch. Unset means on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sound_approval: Option<bool>,
+    /// The turn-finished sound switch. Unset means off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sound_turn_finished: Option<bool>,
+    /// Terminal text size in points, within [`TERMINAL_TEXT_SIZE_RANGE`].
+    /// Unset means 14; the helm reads a
+    /// stored value outside the range back as unset.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_text_size: Option<u32>,
 }
+
+/// The widths [`Preferences::sidebar_width`] may hold, in logical pixels
+/// (SPEC.md, "Session list": the drag range of the sidebar's right edge).
+/// The helm refuses a write outside it rather than clamping, so a client bug
+/// shows up as a refused save instead of a silently different width.
+pub const SIDEBAR_WIDTH_RANGE: std::ops::RangeInclusive<u32> = 296..=656;
+
+/// The sizes [`Preferences::terminal_text_size`] may hold, in points: the
+/// existing steps, every whole point size from 9 to 28 (SPEC_impl.md, "GPUI
+/// cookbook: traps", the glyph atlas; SPEC.md says only "a fixed range").
+/// Refused outside, like [`SIDEBAR_WIDTH_RANGE`].
+pub const TERMINAL_TEXT_SIZE_RANGE: std::ops::RangeInclusive<u32> = 9..=28;
 
 // Host entries.
 

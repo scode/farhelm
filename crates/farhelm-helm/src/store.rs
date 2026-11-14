@@ -335,7 +335,7 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 84;
+pub(crate) const SCHEMA_VERSION: i64 = 85;
 
 mod environment_history;
 mod podman;
@@ -382,6 +382,41 @@ const TENSORLAKE_HOST_COLUMNS: [(&str, &str); 5] = [
     ("tensorlake_recipe", "tensorlake_recipe TEXT"),
     ("tensorlake_resources", "tensorlake_resources TEXT"),
     ("tensorlake_suspended_at", "tensorlake_suspended_at INTEGER"),
+];
+
+/// Schema 85's columns on `preferences`, in the order the migration appends
+/// them, each with the exact definition text the fresh-create DDL in
+/// [`apply_schema`] repeats (`a_migrated_database_matches_a_freshly_created_one`
+/// holds the two to the same text).
+///
+/// They hold the settings the old app kept per device, which the maintainer
+/// decided on 2026-11-13 become shared helm preferences, starting unset on
+/// every helm: nothing is carried over from the old per-device storage.
+/// Every column is nullable and NULL means "unset, the client's default
+/// applies" (the field docs on [`Preferences`] name each default). Only the
+/// booleans carry a CHECK. The word and the two ranges are validated by the
+/// route and filtered on read instead, like `terminal_link_click`, so that a
+/// later build can change a range without rebuilding the table.
+const FORMER_DEVICE_SETTING_COLUMNS: [(&str, &str); 7] = [
+    ("appearance", "appearance TEXT"),
+    ("sidebar_width", "sidebar_width INTEGER"),
+    (
+        "host_rail_open",
+        "host_rail_open INTEGER CHECK (host_rail_open IN (0, 1))",
+    ),
+    (
+        "sound_waiting",
+        "sound_waiting INTEGER CHECK (sound_waiting IN (0, 1))",
+    ),
+    (
+        "sound_approval",
+        "sound_approval INTEGER CHECK (sound_approval IN (0, 1))",
+    ),
+    (
+        "sound_turn_finished",
+        "sound_turn_finished INTEGER CHECK (sound_turn_finished IN (0, 1))",
+    ),
+    ("terminal_text_size", "terminal_text_size INTEGER"),
 ];
 
 /// Shared visits are bounded independently of fleet size. Stale references
@@ -1572,6 +1607,66 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub terminal_link_click: Option<Option<String>>,
+    /// One of the old app's appearance words; the route refuses any other.
+    /// Null restores following the system.
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub appearance: Option<Option<String>>,
+    /// Logical pixels inside [`farhelm_proto::ui_channel::SIDEBAR_WIDTH_RANGE`];
+    /// the route refuses a width outside it rather than clamping. A negative
+    /// or fractional number fails to decode, like a mistyped boolean.
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub sidebar_width: Option<Option<u32>>,
+    /// Null restores the collapsed default; omission preserves another client's choice.
+    #[serde(
+        default,
+        deserialize_with = "double_option_bool",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub host_rail_open: Option<Option<bool>>,
+    /// Null restores the on default.
+    #[serde(
+        default,
+        deserialize_with = "double_option_bool",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub sound_waiting: Option<Option<bool>>,
+    /// Null restores the on default.
+    #[serde(
+        default,
+        deserialize_with = "double_option_bool",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub sound_approval: Option<Option<bool>>,
+    /// Null restores the off default.
+    #[serde(
+        default,
+        deserialize_with = "double_option_bool",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub sound_turn_finished: Option<Option<bool>>,
+    /// Points inside [`farhelm_proto::ui_channel::TERMINAL_TEXT_SIZE_RANGE`],
+    /// refused outside it like [`PreferencePatch::sidebar_width`].
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub terminal_text_size: Option<Option<u32>>,
+}
+
+/// The appearance words the old app stored, which the new app keeps.
+/// Unknown persisted words read as unset (following the system); unknown
+/// writes are refused by the route, as for [`is_known_terminal_link_click_word`].
+pub(crate) fn is_known_appearance_word(word: &str) -> bool {
+    matches!(word, "system" | "dark" | "light")
 }
 
 /// The client and terminal asset share this closed gesture vocabulary.
@@ -2550,6 +2645,10 @@ pub struct HelmStore {
 ///   foreign key retaining the ordinary host that owns the container storage.
 /// - 84: bounded reusable environment intent independent of disposable host
 ///   lifetime, admitted by the existing successful-create transaction.
+/// - 85: seven nullable preference columns for the settings the old app kept
+///   per device (appearance, sidebar width, host rail, the three status
+///   sounds, terminal text size; [`FORMER_DEVICE_SETTING_COLUMNS`]), unset on
+///   every upgraded helm so each client default applies.
 fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -2783,7 +2882,18 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
                  open_extensions TEXT,
                  visit_history TEXT NOT NULL DEFAULT '[]',
                  auto_update_remote_hosts INTEGER CHECK (auto_update_remote_hosts IN (0, 1)),
-                 last_container_host INTEGER
+                 last_container_host INTEGER,
+                 -- Schema 85: the settings the old app kept per device (see
+                 -- FORMER_DEVICE_SETTING_COLUMNS for why only the booleans
+                 -- are checked). After `last_container_host`, where the
+                 -- migration's ADD COLUMNs land them.
+                 appearance TEXT,
+                 sidebar_width INTEGER,
+                 host_rail_open INTEGER CHECK (host_rail_open IN (0, 1)),
+                 sound_waiting INTEGER CHECK (sound_waiting IN (0, 1)),
+                 sound_approval INTEGER CHECK (sound_approval IN (0, 1)),
+                 sound_turn_finished INTEGER CHECK (sound_turn_finished IN (0, 1)),
+                 terminal_text_size INTEGER
              ) STRICT;
              -- Successful structured creates are reusable only for the
              -- installation that actually accepted them. The stored
@@ -2880,7 +2990,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 84;",
+              PRAGMA user_version = 85;",
             announcement_schema = crate::announcements::SCHEMA,
             notice_schema = crate::notices::SCHEMA,
         ))
@@ -4684,6 +4794,29 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         tx.execute_batch("PRAGMA user_version = 84;")?;
         version = 84;
     }
+    if version == 84 {
+        // Plain ADD COLUMNs that leave every existing preference as it was.
+        // The new columns start NULL: the old app's per-device values are
+        // deliberately not carried over. Each column is checked separately
+        // so a version-only rewound fixture that already has some of them
+        // keeps its stored values and gains only the rest.
+        for (name, definition) in FORMER_DEVICE_SETTING_COLUMNS {
+            let present: bool = tx
+                .query_row(
+                    "SELECT count(*) != 0 FROM pragma_table_info('preferences') WHERE name = ?1",
+                    [name],
+                    |row| row.get(0),
+                )
+                .with_context(|| format!("checking for preferences.{name}"))?;
+            if !present {
+                tx.execute_batch(&format!("ALTER TABLE preferences ADD COLUMN {definition};"))
+                    .with_context(|| format!("adding preferences.{name}"))?;
+            }
+        }
+        tx.execute_batch("PRAGMA user_version = 85;")
+            .context("migrating helm.db to schema version 85")?;
+        version = 85;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -5502,12 +5635,31 @@ impl HelmStore {
         self.conn.call("preference read task panicked", move |conn: &mut Connection| -> anyhow::Result<Preferences> {
             conn
                 .query_row(
-                    "SELECT list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, remembered_wrapper_prefixes, open_extensions, visit_history, auto_update_remote_hosts, last_container_host \
+                    "SELECT list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, remembered_wrapper_prefixes, open_extensions, visit_history, auto_update_remote_hosts, last_container_host, \
+                            appearance, sidebar_width, host_rail_open, sound_waiting, sound_approval, sound_turn_finished, terminal_text_size \
                      FROM preferences WHERE singleton = 1",
                     [],
                     |row| {
                         let remembered_permissions: Option<String> = row.get(3)?;
+                        // Read as i64 so a value no u32 can hold reads as
+                        // unset instead of failing the whole row; like an
+                        // unknown appearance word, anything outside the range
+                        // the route admits is "nothing chosen".
+                        let in_range = |index: usize, range: std::ops::RangeInclusive<u32>| -> rusqlite::Result<Option<u32>> {
+                            Ok(row
+                                .get::<_, Option<i64>>(index)?
+                                .and_then(|value| u32::try_from(value).ok())
+                                .filter(|value| range.contains(value)))
+                        };
                         Ok(Preferences {
+                            appearance: row.get::<_, Option<String>>(24)?
+                                .filter(|word| is_known_appearance_word(word)),
+                            sidebar_width: in_range(25, farhelm_proto::ui_channel::SIDEBAR_WIDTH_RANGE)?,
+                            host_rail_open: row.get(26)?,
+                            sound_waiting: row.get(27)?,
+                            sound_approval: row.get(28)?,
+                            sound_turn_finished: row.get(29)?,
+                            terminal_text_size: in_range(30, farhelm_proto::ui_channel::TERMINAL_TEXT_SIZE_RANGE)?,
                             last_container_host: row.get(23)?,
                             auto_update_remote_hosts: row.get(22)?,
                             codex_trust_hint_dismissed: row.get(4)?,
@@ -5644,11 +5796,26 @@ impl HelmStore {
             let pi_trust_hint = patch.pi_trust_hint_dismissed.flatten();
             let skip_host_remove_confirmation = patch.skip_host_remove_confirmation.flatten();
             let skip_host_setup_confirmation = patch.skip_host_setup_confirmation.flatten();
+            let appearance_present = patch.appearance.is_some();
+            let appearance = patch.appearance.flatten();
+            let sidebar_width_present = patch.sidebar_width.is_some();
+            let sidebar_width = patch.sidebar_width.flatten();
+            let host_rail_open_present = patch.host_rail_open.is_some();
+            let host_rail_open = patch.host_rail_open.flatten();
+            let sound_waiting_present = patch.sound_waiting.is_some();
+            let sound_waiting = patch.sound_waiting.flatten();
+            let sound_approval_present = patch.sound_approval.is_some();
+            let sound_approval = patch.sound_approval.flatten();
+            let sound_turn_finished_present = patch.sound_turn_finished.is_some();
+            let sound_turn_finished = patch.sound_turn_finished.flatten();
+            let terminal_text_size_present = patch.terminal_text_size.is_some();
+            let terminal_text_size = patch.terminal_text_size.flatten();
             tx
                 .execute(
                     "INSERT INTO preferences \
-                         (singleton, list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, open_extensions, visit_history, auto_update_remote_hosts) \
-                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27, ?29, ?31, ?33, ?35, ?37, ?39, ?41, ?42) \
+                         (singleton, list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, open_extensions, visit_history, auto_update_remote_hosts, \
+                          appearance, sidebar_width, host_rail_open, sound_waiting, sound_approval, sound_turn_finished, terminal_text_size) \
+                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27, ?29, ?31, ?33, ?35, ?37, ?39, ?41, ?42, ?44, ?46, ?48, ?50, ?52, ?54, ?56) \
                      ON CONFLICT (singleton) DO UPDATE SET \
                          list_sort = CASE WHEN ?10 THEN excluded.list_sort ELSE list_sort END, \
                          last_selected = CASE WHEN ?11 THEN excluded.last_selected \
@@ -5676,7 +5843,14 @@ impl HelmStore {
                          pi_trust_hint_dismissed = CASE WHEN ?36 THEN excluded.pi_trust_hint_dismissed ELSE pi_trust_hint_dismissed END, \
                          color_terminal_frames = CASE WHEN ?38 THEN excluded.color_terminal_frames ELSE color_terminal_frames END, \
                          open_extensions = CASE WHEN ?40 THEN excluded.open_extensions ELSE open_extensions END, \
-                         auto_update_remote_hosts = CASE WHEN ?43 THEN excluded.auto_update_remote_hosts ELSE auto_update_remote_hosts END",
+                         auto_update_remote_hosts = CASE WHEN ?43 THEN excluded.auto_update_remote_hosts ELSE auto_update_remote_hosts END, \
+                         appearance = CASE WHEN ?45 THEN excluded.appearance ELSE appearance END, \
+                         sidebar_width = CASE WHEN ?47 THEN excluded.sidebar_width ELSE sidebar_width END, \
+                         host_rail_open = CASE WHEN ?49 THEN excluded.host_rail_open ELSE host_rail_open END, \
+                         sound_waiting = CASE WHEN ?51 THEN excluded.sound_waiting ELSE sound_waiting END, \
+                         sound_approval = CASE WHEN ?53 THEN excluded.sound_approval ELSE sound_approval END, \
+                         sound_turn_finished = CASE WHEN ?55 THEN excluded.sound_turn_finished ELSE sound_turn_finished END, \
+                         terminal_text_size = CASE WHEN ?57 THEN excluded.terminal_text_size ELSE terminal_text_size END",
                     rusqlite::params![
                         sort,
                         selected,
@@ -5720,7 +5894,21 @@ impl HelmStore {
                         open_extensions_present,
                         history,
                         auto_update_remote_hosts,
-                        auto_update_remote_hosts_present
+                        auto_update_remote_hosts_present,
+                        appearance,
+                        appearance_present,
+                        sidebar_width,
+                        sidebar_width_present,
+                        host_rail_open,
+                        host_rail_open_present,
+                        sound_waiting,
+                        sound_waiting_present,
+                        sound_approval,
+                        sound_approval_present,
+                        sound_turn_finished,
+                        sound_turn_finished_present,
+                        terminal_text_size,
+                        terminal_text_size_present
                     ],
                 )
                 .context("writing the client preference")?;
@@ -9971,6 +10159,7 @@ mod tests {
         let before_folders = store.folder_history(host, "identity-a").await.unwrap();
         {
             let conn = store.conn.lock();
+            rewind_former_device_setting_columns(&conn);
             conn.execute_batch("DROP TABLE environment_launch_history; ALTER TABLE preferences DROP COLUMN last_container_host; PRAGMA user_version = 83;")
                 .unwrap();
             assert!(
@@ -9997,6 +10186,206 @@ mod tests {
             schema_objects(&migrated.conn.lock()),
             schema_objects(&fresh.conn.lock())
         );
+    }
+
+    /// Schema 84 is what the stable release of the time (v0.39.0) created
+    /// when schema 85 was added, so this is the upgrade every installation of
+    /// that release takes. It must keep
+    /// every preference the user already chose and add the settings the old
+    /// app kept per device as unset, since the maintainer decided on
+    /// 2026-11-13 that nothing is carried over from that storage.
+    ///
+    /// Specifically: a schema-84 database (a fresh one without the seven
+    /// schema-85 columns, stamped 84) holding many existing preferences
+    /// migrates to [`SCHEMA_VERSION`] with every one of them read back
+    /// unchanged, the seven new columns NULL in the row itself, and a table
+    /// matching a fresh database's. Rewinding only the version marker keeps
+    /// already-stored values, and a fixture missing only some of the columns
+    /// gains just those, still matching a fresh table.
+    #[farhelm_testtrace::test]
+    async fn schema_85_adds_unset_former_device_settings_and_keeps_every_preference() {
+        let (dir, store) = fresh_store().await;
+        let path = dir.path().join("helm.db");
+        store
+            .update_preferences(
+                serde_json::from_value(serde_json::json!({
+                    "list_sort": "title",
+                    "last_selected": "0f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:kept",
+                    "compact": true,
+                    "skip_session_confirmations": true,
+                    "skip_host_remove_confirmation": false,
+                    "terminal_link_click": "program",
+                    "welcome_seen": true,
+                    "tunnel_consent": true,
+                    "auto_update_remote_hosts": true,
+                    "color_terminal_frames": true,
+                    "name_session_on_quick_launch": false,
+                    "open_extensions": "md",
+                    "quick_launch_template": "review",
+                    "template_shortcuts": {"1": "review"},
+                    "feedback_contact": "someone@example.com",
+                }))
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        let before = store.preferences().await.unwrap();
+        assert_eq!(
+            before.skip_session_confirmations,
+            Some(true),
+            "fixture premise: the row holds the existing preferences"
+        );
+        let fresh_schema = schema_objects(&store.conn.lock());
+        drop(store);
+
+        let new_columns_present = |conn: &Connection| -> i64 {
+            conn.query_row(
+                "SELECT count(*) FROM pragma_table_info('preferences') WHERE name IN \
+                 ('appearance', 'sidebar_width', 'host_rail_open', 'sound_waiting', \
+                  'sound_approval', 'sound_turn_finished', 'terminal_text_size')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        {
+            let conn = Connection::open(&path).unwrap();
+            rewind_former_device_setting_columns(&conn);
+            conn.execute_batch("PRAGMA user_version = 84;").unwrap();
+            assert_eq!(
+                new_columns_present(&conn),
+                0,
+                "premise: schema 84 has none of the new columns"
+            );
+        }
+
+        let migrated = HelmStore::open(&path).await.unwrap();
+        assert_eq!(migrated.schema_version, SCHEMA_VERSION);
+        assert_eq!(SCHEMA_VERSION, 85);
+        assert_eq!(
+            migrated.preferences().await.unwrap(),
+            before,
+            "every stored preference survives and the new fields read as unset"
+        );
+        {
+            let conn = migrated.conn.lock();
+            assert_eq!(new_columns_present(&conn), 7);
+            let all_null: bool = conn
+                .query_row(
+                    "SELECT appearance IS NULL AND sidebar_width IS NULL AND host_rail_open IS NULL \
+                     AND sound_waiting IS NULL AND sound_approval IS NULL \
+                     AND sound_turn_finished IS NULL AND terminal_text_size IS NULL \
+                     FROM preferences WHERE singleton = 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(all_null, "nothing is invented for the new columns");
+            assert_eq!(schema_objects(&conn), fresh_schema);
+        }
+
+        // Version-only rewind: every column is already there with a value.
+        let chosen = serde_json::json!({
+            "appearance": "light",
+            "sidebar_width": 500,
+            "host_rail_open": true,
+            "sound_waiting": false,
+            "sound_approval": false,
+            "sound_turn_finished": true,
+            "terminal_text_size": 20,
+        });
+        migrated
+            .update_preferences(serde_json::from_value(chosen).unwrap())
+            .await
+            .unwrap();
+        let chosen_row = migrated.preferences().await.unwrap();
+        drop(migrated);
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch("PRAGMA user_version = 84;")
+            .unwrap();
+        let reopened = HelmStore::open(&path).await.unwrap();
+        assert_eq!(reopened.schema_version, SCHEMA_VERSION);
+        assert_eq!(
+            reopened.preferences().await.unwrap(),
+            chosen_row,
+            "a rerun of the step keeps values already stored in its columns"
+        );
+        drop(reopened);
+
+        // Partial rewind: only the trailing three columns are missing.
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "ALTER TABLE preferences DROP COLUMN sound_approval;
+                 ALTER TABLE preferences DROP COLUMN sound_turn_finished;
+                 ALTER TABLE preferences DROP COLUMN terminal_text_size;
+                 PRAGMA user_version = 84;",
+            )
+            .unwrap();
+            assert_eq!(
+                new_columns_present(&conn),
+                4,
+                "premise: some new columns present"
+            );
+        }
+        let partial = HelmStore::open(&path).await.unwrap();
+        assert_eq!(
+            partial.preferences().await.unwrap(),
+            Preferences {
+                sound_approval: None,
+                sound_turn_finished: None,
+                terminal_text_size: None,
+                ..chosen_row
+            },
+            "present columns keep their values; re-added ones start unset"
+        );
+        assert_eq!(schema_objects(&partial.conn.lock()), fresh_schema);
+    }
+
+    /// The route refuses unknown appearance words and out-of-range sizes, but
+    /// the row outlives the build that validated it, and the columns carry no
+    /// CHECK for them. A stored value no client of this build could have been
+    /// allowed to write must reach clients as unset (their default), not as
+    /// a value they would have to second-guess, and must not fail the read.
+    ///
+    /// Planted directly in SQL: an unknown word, a width and a size on each
+    /// side of their ranges and one beyond `u32`, each reading back as unset
+    /// while the bounds themselves read back as stored.
+    #[farhelm_testtrace::test]
+    async fn stored_former_device_settings_outside_the_route_read_as_unset() {
+        let (_dir, store) = fresh_store().await;
+        let plant = |appearance: &str, width: i64, size: i64| {
+            store
+                .conn
+                .lock()
+                .execute(
+                    "INSERT INTO preferences (singleton, appearance, sidebar_width, terminal_text_size) \
+                     VALUES (1, ?1, ?2, ?3) ON CONFLICT (singleton) DO UPDATE SET \
+                     appearance = excluded.appearance, sidebar_width = excluded.sidebar_width, \
+                     terminal_text_size = excluded.terminal_text_size",
+                    rusqlite::params![appearance, width, size],
+                )
+                .unwrap();
+        };
+        for (word, width, size) in [
+            ("sepia", 295, 8),
+            ("Dark", 657, 29),
+            ("", -1, i64::from(u32::MAX) + 1),
+        ] {
+            plant(word, width, size);
+            let read = store.preferences().await.unwrap();
+            assert_eq!(read.appearance, None, "{word:?}");
+            assert_eq!(read.sidebar_width, None, "{width}");
+            assert_eq!(read.terminal_text_size, None, "{size}");
+        }
+        for (word, width, size) in [("system", 296, 9), ("dark", 656, 28)] {
+            plant(word, width, size);
+            let read = store.preferences().await.unwrap();
+            assert_eq!(read.appearance.as_deref(), Some(word));
+            assert_eq!(read.sidebar_width, u32::try_from(width).ok());
+            assert_eq!(read.terminal_text_size, u32::try_from(size).ok());
+        }
     }
 
     /// A raw command has a real accepted place but no structured setup.
@@ -10279,6 +10668,7 @@ mod tests {
         {
             let conn = store.conn.lock();
             rewind_environment_host_columns(&conn);
+            rewind_former_device_setting_columns(&conn);
             conn.execute_batch("ALTER TABLE preferences DROP COLUMN last_container_host;")
                 .expect("rewind the environment preference before older columns");
             // Restore the historical cache column as well: the upgrade must
@@ -13005,6 +13395,13 @@ mod tests {
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
                 last_container_host: None,
+                appearance: None,
+                sidebar_width: None,
+                host_rail_open: None,
+                sound_waiting: None,
+                sound_approval: None,
+                sound_turn_finished: None,
+                terminal_text_size: None,
             },
             "a selection write must not discard the sort written before it"
         );
@@ -13042,6 +13439,13 @@ mod tests {
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
                 last_container_host: None,
+                appearance: None,
+                sidebar_width: None,
+                host_rail_open: None,
+                sound_waiting: None,
+                sound_approval: None,
+                sound_turn_finished: None,
+                terminal_text_size: None,
             },
             "a later sort replaces the earlier one, and an empty patch is a no-op"
         );
@@ -13078,6 +13482,13 @@ mod tests {
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
                 last_container_host: None,
+                appearance: None,
+                sidebar_width: None,
+                host_rail_open: None,
+                sound_waiting: None,
+                sound_approval: None,
+                sound_turn_finished: None,
+                terminal_text_size: None,
             },
             "an explicit null clears selection and its visits without changing settings"
         );
@@ -13163,6 +13574,13 @@ mod tests {
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
                 last_container_host: None,
+                appearance: None,
+                sidebar_width: None,
+                host_rail_open: None,
+                sound_waiting: None,
+                sound_approval: None,
+                sound_turn_finished: None,
+                terminal_text_size: None,
             },
             "null clears exactly the permissions memory and disturbs nothing else"
         );
@@ -13978,6 +14396,7 @@ mod tests {
         drop(store);
         let conn = Connection::open(&path).unwrap();
         let fresh_schema = schema_objects(&conn);
+        rewind_former_device_setting_columns(&conn);
         conn.execute_batch(
             "ALTER TABLE preferences DROP COLUMN last_container_host;
              ALTER TABLE preferences DROP COLUMN visit_history;
@@ -15427,6 +15846,28 @@ mod tests {
         );
     }
 
+    /// Historical fixtures must remove schema 85's preference columns before
+    /// rewinding any older preference column, for the same reason as
+    /// [`rewind_environment_host_columns`]: left in place, they would sit in
+    /// front of the older columns the ladder appends again, and the migrated
+    /// table would no longer match a fresh one.
+    fn rewind_former_device_setting_columns(conn: &Connection) {
+        for (name, _) in FORMER_DEVICE_SETTING_COLUMNS {
+            conn.execute_batch(&format!("ALTER TABLE preferences DROP COLUMN {name};"))
+                .unwrap_or_else(|error| panic!("rewind preferences.{name}: {error}"));
+        }
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM pragma_table_info('preferences') WHERE name = 'appearance'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+            0,
+            "premise: this historical schema has no schema-85 preference columns",
+        );
+    }
+
     /// The migration's DATA half: a version-1 database may already hold two
     /// rows claiming ONE identity, because nothing stopped it. Version 2's
     /// index cannot simply be created over that, and which row keeps the
@@ -16636,6 +17077,7 @@ mod tests {
         {
             let conn = Connection::open(&path).expect("reopen raw schema-22 fixture");
             rewind_environment_host_columns(&conn);
+            rewind_former_device_setting_columns(&conn);
             conn.execute_batch("ALTER TABLE preferences DROP COLUMN last_container_host;")
                 .expect("rewind the environment preference before older columns");
             // Schema 36 drops the profile tables, so a file claiming a
@@ -16916,6 +17358,13 @@ mod tests {
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
                 last_container_host: None,
+                appearance: None,
+                sidebar_width: None,
+                host_rail_open: None,
+                sound_waiting: None,
+                sound_approval: None,
+                sound_turn_finished: None,
+                terminal_text_size: None,
             },
             "compact defaults absent, sort survives, and an unowned legacy selection clears"
         );
@@ -17001,6 +17450,13 @@ mod tests {
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
                 last_container_host: None,
+                appearance: None,
+                sidebar_width: None,
+                host_rail_open: None,
+                sound_waiting: None,
+                sound_approval: None,
+                sound_turn_finished: None,
+                terminal_text_size: None,
             },
             "permissions defaults absent, other choices survive, and an unowned selection clears"
         );

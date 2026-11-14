@@ -4024,6 +4024,16 @@ than every entry; a running `0.0.0-unreleased` build enqueues none. Only the pro
 release-notes destinations: stable entries link to their version's notes, and prereleases omit the link because curated
 notes need not exist. Queue storage, routes and consumers carry display-ready content and know nothing about releases.
 
+Helm schema 85 adds seven nullable preference columns for the settings the old app kept per device: `appearance`
+(`system`, `dark` or `light`), `sidebar_width` (the sidebar's resize width in whole logical pixels, 296 to 656, the
+collapsed rail included and independent of rail expansion), the booleans `host_rail_open`, `sound_waiting`,
+`sound_approval` and `sound_turn_finished`, and `terminal_text_size` (points, 9 to 28). The maintainer decided on
+2026-11-13 that these become ordinary shared preferences with the new desktop app and start at their defaults: migration
+leaves every column unset and copies nothing from the old app's per-device storage. Unset means System appearance, a
+396px sidebar, a collapsed rail, the waiting and approval sounds on with turn finished off, and 14pt terminal text. The
+route refuses an unknown appearance word and a width or size outside its range rather than clamping; only the booleans
+carry a CHECK, and a stored word or number the route would refuse reads back as unset. Older helms refuse this schema.
+
 ### Composer history
 
 `POST /api/browse-directory` accepts a default-false `membership_only` flag. When set, the helm uses the existing
