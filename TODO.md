@@ -217,6 +217,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   2026-11-14; first measure the old app with 200 running sessions for a fair comparison, then profile what each update
   costs in the app.
 
+- **Fix "answer trust dialog" for Claude Code.** fix "answer trust dialog" feature for claude code. confirmed to not
+  work in 0.39.0 for a plain folder. might just be that we only enabled the behavior for managed checkouts. either way
+  it's infuriatingly annoying. let's also test out codex while we're at it.
+
 ### Tensorlake
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's

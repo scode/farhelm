@@ -37,6 +37,13 @@ that already landed is a new PR of its own. The only validation is `dprint check
 the `scode-commit-msg-reviewer` cold read, even where standing instructions say to always use it: for a one-line TODO
 capture it is not worth the wait.
 
+Capturing is verbatim by default: write the issue down in the maintainer's own words and add nothing else. No up-front
+investigation, no reproduction attempt, no reading the code to check or refine the claim, and no findings appended after
+it. A pasted screenshot is the one thing to interpret, because it has to become words. Investigate, reproduce or
+interpret the issue first only when the same request asks for it; the job of a capture is to get the item onto main
+before it is forgotten, and the diagnosis belongs to whatever work later addresses it. The file's own shape is the only
+other addition: the bold handle at the start of the line, and the wrapping.
+
 Before adding or revising an entry, and before answering any question about what TODO.md currently holds (a "tldr todo"
 included), fetch and rebase the working copy onto the latest main per jjstack: `jj git fetch`, then rebase the
 working-copy change onto `main@origin`. Other sessions land TODO.md changes throughout the day, so a checkout that was
