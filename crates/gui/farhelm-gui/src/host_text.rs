@@ -30,13 +30,13 @@
 //! Extension points (docs/gpui/foundation-ownership.md): a view that shows a new host-supplied field wraps it with
 //! [`HostText::from_host`] where it reads the field and draws it with [`element`] (or [`marked`], for a value with some
 //! characters marked) or a [`HostSentence`]; a component that takes host text takes `&HostText` and draws it the same
-//! way, or, for wording that is usually the app's own but may name a host value (a dialog's summary, a prompt's lines),
-//! takes a [`Line`]. A sentence's technical host values go in with [`HostSentence::mono`] rather than by restyling a
-//! part from outside, so the escaping and isolation stay this module's. A control's hover help that names a host value
-//! is a [`HostSentence`] handed to `HoverHelp::sentence`: the tooltip draws it through this module's element, and the
-//! control's accessible description is the sentence's [`HostSentence::accessible_name`]. Identity labels the user
-//! compares (installation ids, which SPEC.md also wants with their spaces visible) are not built yet; they arrive with
-//! the first view that shows one, as a second presentation here.
+//! way, or, for wording that is usually the app's own but may name a host value (a dialog's title and summary, a
+//! prompt's lines), takes a [`Line`]. A sentence's technical host values go in with [`HostSentence::mono`] rather than
+//! by restyling a part from outside, so the escaping and isolation stay this module's. A control's hover help that
+//! names a host value is a [`HostSentence`] handed to `HoverHelp::sentence`: the tooltip draws it through this module's
+//! element, and the control's accessible description is the sentence's [`HostSentence::accessible_name`]. Identity
+//! labels the user compares (installation ids, which SPEC.md also wants with their spaces visible) are not built yet;
+//! they arrive with the first view that shows one, as a second presentation here.
 
 use std::fmt;
 use std::ops::Range;
@@ -283,16 +283,20 @@ impl RenderOnce for HostSentence {
 
 /// One line of wording a component shows: the app's own words, or a [`HostSentence`] that names a host value.
 ///
-/// Components whose text is usually the app's own but sometimes names something a host wrote (a dialog's summary, a
-/// prompt's lines: "Delete «api-refactor» on «build-box»?") take a `Line`, so a caller never has to turn a host value
-/// into a string to fit a string parameter. Without it, the only way in would be formatting [`HostText::raw`] into a
-/// label, which is exactly the unescaped, unisolated path SPEC_impl.md, "Host-supplied text", rules out. Plain strings
-/// convert through `From`, so app wording reads as it always did (`.summary("On this machine")`).
+/// Components whose text is usually the app's own but sometimes names something a host wrote (a dialog's title and
+/// summary, a prompt's lines: "Delete «api-refactor» on «build-box»?") take a `Line`, so a caller never has to turn a
+/// host value into a string to fit a string parameter. Without it, the only way in would be formatting
+/// [`HostText::raw`] into a label, which is exactly the unescaped, unisolated path SPEC_impl.md, "Host-supplied text",
+/// rules out. Plain strings convert through `From`, so app wording reads as it always did (`.summary("On this
+/// machine")`).
 ///
 /// An app line draws exactly as a string child would. A sentence draws through [`HostSentence`]'s own element: one
-/// labelled node, under the id the caller gave it, named with its host parts escaped. Titles and button labels stay
-/// plain strings, for the app's own words only: a host value goes in the summary or a line, never in a dialog's
-/// accessible name. That is a convention, not something the type enforces, since a title still takes any string.
+/// labelled node, under the id the caller gave it, named with its host parts escaped. A dialog titled with a sentence
+/// ("Set up host · «build-box»") takes the sentence's accessible name as its own, so the host value reaches the
+/// accessible name escaped too. Button labels stay plain strings, for the app's own words only. That is a convention,
+/// not something the type enforces, since a label still takes any string; and a title still takes a `String` too, so
+/// formatting [`HostText::raw`] into one would reach the screen and the accessible name unescaped: name a host value in
+/// a title only through a sentence.
 ///
 /// Hover help is a `Line` too: a control's help that names a host value ("Claude Code on «build-box»") is built with
 /// [`HoverHelp::sentence`](crate::components::HoverHelp::sentence), and the layer manager draws the tooltip from the
