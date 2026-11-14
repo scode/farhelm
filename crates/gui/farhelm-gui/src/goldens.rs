@@ -496,7 +496,7 @@ fn popover_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
         Popover {
             view: view.into(),
             container: container.clone(),
-            start: container,
+            start: Some(container),
             anchor,
         },
         &mark,

@@ -212,7 +212,7 @@ impl SessionList {
                 view: view.into(),
                 container: cx.focus_handle(),
                 // The first command, as the old menu started.
-                start: rename_focus,
+                start: Some(rename_focus),
                 anchor,
             },
             &mark,
