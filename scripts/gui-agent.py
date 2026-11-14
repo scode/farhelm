@@ -687,10 +687,18 @@ def start(run: Path, args: list[str]) -> int:
 
 
 def terminal_text(run: Path, record: dict) -> int:
-    """Print the focused terminal's text through the app's `terminal_text` probe, which the terminal registers."""
+    """Print the focused terminal's text through the app's `terminal_text` probe, which the terminal registers.
+
+    The probe answers null when no terminal holds focus (a script clicked a button, say), and that is reported as such
+    with a failing status rather than printed, so it cannot pass for an empty screen. Click the terminal or Tab back
+    into it first.
+    """
     result = cli(run, record, ["get", "probe", "terminal_text"], capture=True)
     if result.returncode != 0:
         print(f"no terminal yet (the app has no `terminal_text` probe): {result.stderr.strip()}", file=sys.stderr)
+        return 1
+    if result.stdout.strip() == "null":
+        print("no terminal holds focus", file=sys.stderr)
         return 1
     print(result.stdout, end="")
     return 0

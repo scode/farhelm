@@ -23,7 +23,8 @@ end-to-end GUI tests are built on.
 Every verb other than `start`, `stop` and `terminal-text` goes to the vendored `gpui-agent` command line unchanged, so
 its README (`vendor/gpui-agent/README.md`, "Commands") is the full list. `gpui-agent skills get core`, run the same way,
 prints its usage guide. `terminal-text` prints the focused terminal's text once the GPUI app has a terminal; until then
-it says there is none.
+it says there is none, and while no terminal holds focus (after a click on a button, say) it fails saying so rather than
+guessing which terminal was meant: click the terminal or Tab back into it first.
 
 `start` takes `--sessions N` (fake-agent sessions to seed, default 2, 0 for none), `--size WxH` (Linux only: Mutter's
 virtual monitor, default 1600x1200; refused on a Mac, which uses its real screen), `--no-build` (reuse the binaries

@@ -157,7 +157,7 @@ async fn reconnects_never_displace_and_a_takeover_stops_the_stream() {
         replay(&mut first.socket).await;
         assert_eq!(
             next_event(&mut events).await,
-            TerminalEvent::State(StreamState::Attached)
+            TerminalEvent::State(StreamState::Attached(Attachment(1)))
         );
         assert_eq!(
             next_event(&mut events).await,
@@ -166,9 +166,12 @@ async fn reconnects_never_displace_and_a_takeover_stops_the_stream() {
         assert_eq!(next_event(&mut events).await, TerminalEvent::ReplayComplete);
 
         // Input and resizes reach the helm once attached.
-        handle.input(GridInput::Text {
-            data: "ls\r".into(),
-        });
+        handle.input(
+            Attachment(1),
+            vec![GridInput::Text {
+                data: "ls\r".into(),
+            }],
+        );
         handle.resize(100, 30);
         let Some(Ok(Message::Binary(bytes))) = first.socket.next().await else {
             panic!("no input frame")
@@ -205,7 +208,7 @@ async fn reconnects_never_displace_and_a_takeover_stops_the_stream() {
         replay(&mut second.socket).await;
         assert_eq!(
             next_event(&mut events).await,
-            TerminalEvent::State(StreamState::Attached)
+            TerminalEvent::State(StreamState::Attached(Attachment(2)))
         );
         assert_eq!(
             next_event(&mut events).await,
@@ -488,9 +491,13 @@ async fn input_before_the_attachment_is_live_is_dropped() {
             panic!("no ping frame")
         };
         assert_eq!(ping.as_str(), r#"{"type":"ping"}"#);
-        handle.input(GridInput::Text {
-            data: "early".into(),
-        });
+        // Stamped for the attachment this socket will carry, so only its timing can keep it out.
+        handle.input(
+            Attachment(1),
+            vec![GridInput::Text {
+                data: "early".into(),
+            }],
+        );
         // Requests are handled in order, so seeing the resize proves the early input was already handled.
         handle.resize(81, 24);
         let Some(Ok(Message::Text(resize))) = socket.socket.next().await else {
@@ -500,9 +507,12 @@ async fn input_before_the_attachment_is_live_is_dropped() {
 
         replay(&mut socket.socket).await;
         until_event(&mut events, TerminalEvent::ReplayComplete).await;
-        handle.input(GridInput::Text {
-            data: "late".into(),
-        });
+        handle.input(
+            Attachment(1),
+            vec![GridInput::Text {
+                data: "late".into(),
+            }],
+        );
         let Some(Ok(Message::Binary(bytes))) = socket.socket.next().await else {
             panic!("no input frame")
         };
@@ -512,6 +522,48 @@ async fn input_before_the_attachment_is_live_is_dropped() {
                 data: "late".into()
             }
         );
+    })
+    .await
+    .expect("the stream test finished in time");
+}
+
+/// Input typed for an attachment that was lost must never reach the next one: the stream may read it only after the
+/// new attachment's first output, when it is live again, and without the stamp it would write keystrokes typed at one
+/// screen into another. A group stamped for the live attachment arrives whole and in order, one message per part; one
+/// stamped for the old attachment arrives not at all.
+#[tokio::test]
+async fn input_reaches_only_the_attachment_it_was_stamped_for() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let (handle, mut events, mut accepted, first) = attached(ChannelConfig {
+            reconnect_initial: Duration::from_millis(10),
+            reconnect_max: Duration::from_millis(10),
+            ..ChannelConfig::default()
+        })
+        .await;
+        drop(first);
+        let mut second = accepted.recv().await.unwrap();
+        replay(&mut second.socket).await;
+        until_event(
+            &mut events,
+            TerminalEvent::State(StreamState::Attached(Attachment(2))),
+        )
+        .await;
+        until_event(&mut events, TerminalEvent::ReplayComplete).await;
+        let text = |data: &str| GridInput::Text { data: data.into() };
+        handle.input(Attachment(1), vec![text("stale"), text("stale too")]);
+        handle.input(Attachment(2), vec![text("one"), text("two")]);
+        // Requests are handled in order, so the resize after them shows whether the stale group was written.
+        handle.resize(81, 24);
+        let mut frames = Vec::new();
+        loop {
+            match second.socket.next().await {
+                Some(Ok(Message::Binary(bytes))) => frames.push(GridInput::decode(&bytes).unwrap()),
+                Some(Ok(Message::Text(text))) if text.contains("resize") => break,
+                Some(Ok(_)) => {}
+                other => panic!("the socket ended before the resize: {other:?}"),
+            }
+        }
+        assert_eq!(frames, [text("one"), text("two")]);
     })
     .await
     .expect("the stream test finished in time");

@@ -197,9 +197,9 @@ pub enum KeyOwner {
     /// binds it in [`CONTEXT`]; until that feature exists the key reaches the terminal, which must still not send it.
     App,
     /// The terminal's own command, such as scrolling a page: it never reaches the program, and nothing outside the
-    /// terminal takes it. Until the terminal binds an action for one, the key reaches the terminal's listener, where
-    /// `farhelm-input-mapping` still classifies paging and select all (its own copy of that rule goes when the
-    /// keymap takes it over).
+    /// terminal takes it. Until the terminal binds an action for one, the key reaches the terminal's listener, which
+    /// drops it. (`farhelm-input-mapping` still classifies paging and select all as well; its own copy of that rule
+    /// goes when the keymap takes it over, and a test compares the two meanwhile.)
     Terminal,
     /// The program in the terminal. Every key not in [`TERMINAL_KEYS`] is the program's; the table lists the ones that
     /// some binding outside the terminal would otherwise take.
@@ -349,10 +349,9 @@ const fn mac_only(chord: &'static str, owner: KeyOwner, what: &'static str) -> T
 }
 
 /// Who the key pressed in `event`, in a focused terminal on this platform, belongs to. The terminal calls this for every
-/// key that reaches its listener: a [`KeyOwner::App`] key is not sent to the program (the terminal hands it to
-/// `farhelm-input-mapping` as an app shortcut), and any other key goes on to the terminal's own input mapping. While a
-/// shortcut has no binding, the input mapping also keeps its held repeats from the program. Once it is bound, the
-/// binding takes the key and this is never asked; a held repeat then runs the binding again, unless its action is in
+/// key that reaches its listener: it drops a [`KeyOwner::App`] or [`KeyOwner::Terminal`] key, press and held repeats
+/// alike, and hands a [`KeyOwner::Program`] key to its input mapping. Once an app shortcut is bound, the binding takes
+/// the key and this is never asked; a held repeat then runs the binding again, unless its action is in
 /// `ONCE_PER_PRESS`, whose guard stops the repeat before the binding or the terminal sees it.
 ///
 /// A key a binding handled never reaches the terminal, so this answers only for the keys that do. It matches the way

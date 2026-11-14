@@ -27,6 +27,12 @@
 //! A [`StreamState::Attached`] event precedes each attachment's first output, and the caller must reset its grid
 //! model there: the replay rebuilds it from nothing.
 //!
+//! Input is stamped with the [`Attachment`] that event named, and a group of inputs travels as one request
+//! ([`TerminalHandle::input`]). The stream writes a group only to the attachment it was stamped for and drops it whole
+//! otherwise. Without the stamp, input the caller sent for an attachment that had just been lost could still be
+//! written to the next one, if the stream read it after that attachment's first output: keystrokes typed at one
+//! screen would land in a replay of another.
+//!
 //! The event queue to the caller is bounded. When the caller falls behind, the stream stops reading its socket, and
 //! the supervisor's flow control sees a slow viewer (eventually a `stalled` detach) instead of this process buffering
 //! output without limit. While the stream waits on the caller its own watchdog is paused, because the delay is ours,
@@ -86,11 +92,18 @@ pub struct TerminalAttach {
     pub rows: u16,
 }
 
+/// One attachment of a stream, as its [`StreamState::Attached`] announced it: the stamp input carries so that it
+/// reaches only the attachment it was typed for. Stamps count up from 1 per stream, in the order the attachments
+/// began, so one stream never hands out the same stamp twice. A stamp means nothing to another stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Attachment(pub(crate) u64);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StreamState {
     Attaching,
-    /// A new attachment began; reset the grid model, a full replay follows.
-    Attached,
+    /// A new attachment began; reset the grid model, a full replay follows. Input for it is stamped with this
+    /// [`Attachment`].
+    Attached(Attachment),
     /// The stream dropped and is coming back by itself.
     Reconnecting,
     /// Stopped by a `taken_over`, `tab_closed` or `stalled` detach notice. Waits for
@@ -117,8 +130,15 @@ pub enum TerminalEvent {
 }
 
 pub(crate) enum Request {
-    Input(GridInput),
-    Resize { cols: u16, rows: u16 },
+    /// A group of inputs typed for one attachment, admitted or dropped as a whole.
+    Input {
+        attachment: Attachment,
+        group: Vec<GridInput>,
+    },
+    Resize {
+        cols: u16,
+        rows: u16,
+    },
     TakeControl,
     ReconnectNow,
     Close,
@@ -131,10 +151,17 @@ pub struct TerminalHandle {
 }
 
 impl TerminalHandle {
-    /// Send input. Input while the stream is not attached is dropped, not replayed later: keystrokes typed into a
-    /// dead terminal must not land in whatever it reconnects to.
-    pub fn input(&self, input: GridInput) {
-        let _ = self.requests.send(Request::Input(input));
+    /// Send `group`, typed for `attachment`, as one request: its parts go out in order, one message each, and only
+    /// while that attachment is the stream's live one. Otherwise the whole group is dropped, not replayed later:
+    /// keystrokes typed into a dead terminal must not land in whatever it reconnects to. So is a group with a part
+    /// that does not encode, so that no group arrives with a gap in it.
+    ///
+    /// NOTE: Admission is all or nothing; delivery is not. A socket that fails partway through a group's writes
+    /// loses the rest of it, as it would lose any write, and nothing of it is resent on the next attachment.
+    pub fn input(&self, attachment: Attachment, group: Vec<GridInput>) {
+        if !group.is_empty() {
+            let _ = self.requests.send(Request::Input { attachment, group });
+        }
     }
 
     /// Fit the terminal to a new size; also the size every later attach asks for. Sent at once while a socket is
@@ -192,6 +219,7 @@ pub fn open_terminal(
         requests,
         events: events_tx,
         reconnecting_shown: false,
+        attachments: 0,
     };
     tokio::spawn(stream.run());
     (handle, events)
@@ -297,6 +325,8 @@ struct Stream {
     /// Whether `Reconnecting` is the state the caller last saw, so an outage is announced once however many attempts
     /// it takes. Cleared by every other state.
     reconnecting_shown: bool,
+    /// How many attachments have begun: the newest one's stamp, 0 before the first.
+    attachments: u64,
 }
 
 impl Stream {
@@ -414,7 +444,7 @@ impl Stream {
                     None | Some(Request::Close) => return None,
                     // The query in flight already asked for the old size, so this one is sent once the socket opens.
                     Some(Request::Resize { cols, rows }) => (self.attach.cols, self.attach.rows) = (cols, rows),
-                    Some(Request::Input(_) | Request::TakeControl | Request::ReconnectNow) => {}
+                    Some(Request::Input { .. } | Request::TakeControl | Request::ReconnectNow) => {}
                 },
             }
         }
@@ -492,7 +522,7 @@ impl Stream {
                 frame = stream.next(), if !waiting_on_caller => match frame {
                     Some(Ok(Message::Binary(bytes))) => match GridOutput::decode(&bytes) {
                         Ok(output) => {
-                            Self::mark_attached(&mut attached, &mut pending, &mut self.reconnecting_shown);
+                            Self::mark_attached(&mut attached, &mut pending, &mut self.reconnecting_shown, &mut self.attachments);
                             pending.push_back(TerminalEvent::Output(output));
                         }
                         Err(error) => {
@@ -507,7 +537,7 @@ impl Stream {
                             ping_sent = None;
                         }
                         Ok(TerminalServerMessage::ReplayComplete) => {
-                            Self::mark_attached(&mut attached, &mut pending, &mut self.reconnecting_shown);
+                            Self::mark_attached(&mut attached, &mut pending, &mut self.reconnecting_shown, &mut self.attachments);
                             pending.push_back(TerminalEvent::ReplayComplete);
                         }
                         Ok(TerminalServerMessage::Detached { reason, code }) if detach_stops(code) => {
@@ -523,24 +553,37 @@ impl Stream {
                     Some(Err(_)) | None => break Ended::Dropped { attached, skip_wait: answered },
                 },
                 request = self.requests.recv() => {
-                    let message = match request {
+                    let messages = match request {
                         None | Some(Request::Close) => break Ended::Closed,
                         Some(Request::TakeControl | Request::ReconnectNow) => continue,
-                        Some(Request::Input(input)) => match input.encode() {
-                            Ok(bytes) if attached => Message::binary(bytes),
-                            Ok(_) => continue,
-                            Err(error) => {
-                                tracing::warn!(%error, "dropping terminal input that does not encode");
+                        // Only the attachment this socket carries now, and only once it is live: input for an earlier
+                        // one, or typed before this one began, is not this attachment's.
+                        Some(Request::Input { attachment, group }) => {
+                            if !attached || attachment != Attachment(self.attachments) {
                                 continue;
                             }
-                        },
+                            match group.iter().map(GridInput::encode).collect::<Result<Vec<_>, _>>() {
+                                Ok(frames) => frames.into_iter().map(Message::binary).collect(),
+                                Err(error) => {
+                                    tracing::warn!(%error, "dropping a terminal input group that does not encode");
+                                    continue;
+                                }
+                            }
+                        }
                         Some(Request::Resize { cols, rows }) => {
                             (self.attach.cols, self.attach.rows) = (cols, rows);
-                            control_frame(&TerminalClientMessage::Resize { cols, rows })
+                            vec![control_frame(&TerminalClientMessage::Resize { cols, rows })]
                         }
                     };
                     // A write the peer never drains would otherwise block this loop, and with it the watchdog.
-                    if !matches!(timeout(watchdog_period, sink.send(message)).await, Ok(Ok(()))) {
+                    let mut sent = true;
+                    for message in messages {
+                        if !matches!(timeout(watchdog_period, sink.send(message)).await, Ok(Ok(()))) {
+                            sent = false;
+                            break;
+                        }
+                    }
+                    if !sent {
                         break Ended::Dropped { attached, skip_wait: answered };
                     }
                 },
@@ -572,18 +615,22 @@ impl Stream {
         ended
     }
 
-    /// Queue `Attached` ahead of an attachment's first output.
+    /// Queue `Attached`, with the new attachment's stamp, ahead of an attachment's first output.
     ///
     /// Takes the stream's fields rather than `self` because it runs inside the select that borrows the event sender.
     fn mark_attached(
         attached: &mut bool,
         pending: &mut VecDeque<TerminalEvent>,
         reconnecting_shown: &mut bool,
+        attachments: &mut u64,
     ) {
         if !*attached {
             *attached = true;
             *reconnecting_shown = false;
-            pending.push_back(TerminalEvent::State(StreamState::Attached));
+            *attachments += 1;
+            pending.push_back(TerminalEvent::State(StreamState::Attached(Attachment(
+                *attachments,
+            ))));
         }
     }
 
@@ -606,7 +653,7 @@ impl Stream {
                     Some(Request::TakeControl) if until.is_none() => return true,
                     Some(Request::ReconnectNow) if until.is_some() => return true,
                     Some(Request::Resize { cols, rows }) => (self.attach.cols, self.attach.rows) = (cols, rows),
-                    Some(Request::Input(_) | Request::TakeControl | Request::ReconnectNow) => {}
+                    Some(Request::Input { .. } | Request::TakeControl | Request::ReconnectNow) => {}
                 },
                 _ = timeout => return true,
             }

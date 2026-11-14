@@ -22,7 +22,7 @@ use farhelm_proto::ui_channel::{
 };
 use gpui::{
     AppContext as _, Context, Entity, FocusHandle, IntoElement, Modifiers, ParentElement, Render,
-    Styled, TestAppContext, Window, div, px,
+    Styled, TestAppContext, VisualTestContext, Window, div, px,
 };
 use gpui_component::Root;
 
@@ -823,6 +823,58 @@ fn reduced_motion_delivers_no_animation_ticks(cx: &mut TestAppContext) {
     cx.executor().advance_clock(Duration::from_secs(1));
     cx.run_until_parked();
     assert_eq!(cx.update(|_, cx| render_count::count("spinner", cx)), 0);
+}
+
+/// A view whose cursor blinks for as long as it holds the ticker's blink handle.
+struct Blinker {
+    blinking: Option<ticker::Blinking>,
+}
+
+impl Render for Blinker {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        render_count::record("blinker", cx);
+        div()
+    }
+}
+
+/// A cursor blink changes twice a second, so its view is woken twice a second, not at every tick: a focused terminal
+/// otherwise redraws its window ten times a second for a cursor that changes twice. The handle starts on its shown
+/// half and says which half it is in, half a second each (the old cursor's one-second blink); under reduced motion it
+/// stays shown and nothing wakes the view.
+#[gpui::test]
+fn a_blink_wakes_its_view_only_when_it_changes_half(cx: &mut TestAppContext) {
+    test_support::install(cx);
+    let (blinker, cx) = cx.add_window_view(|window, cx| Blinker {
+        blinking: Some(ticker::blink(window, cx)),
+    });
+    cx.update(|window, _| window.activate_window());
+    cx.run_until_parked();
+    let on = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| blinker.read(cx).blinking.as_ref().unwrap().is_on(cx))
+    };
+    assert!(on(cx), "a new blink starts shown");
+    cx.update(|_, cx| render_count::reset(cx));
+    let mut halves = Vec::new();
+    for _ in 0..2 * ticker::BLINK_HALF_TICKS {
+        cx.executor().advance_clock(ticker::TICK);
+        cx.run_until_parked();
+        halves.push(on(cx));
+    }
+    let half = ticker::BLINK_HALF_TICKS as usize;
+    assert_eq!(&halves[..half - 1], vec![true; half - 1]);
+    assert_eq!(&halves[half - 1..2 * half - 1], vec![false; half]);
+    assert!(halves[2 * half - 1], "shown again after a whole blink");
+    assert_eq!(
+        cx.update(|_, cx| render_count::count("blinker", cx)),
+        2,
+        "woken once per change of half"
+    );
+
+    cx.update(|_, cx| ticker::set_reduced_motion(true, cx));
+    assert!(
+        on(cx),
+        "shown under reduced motion, whichever half it was in"
+    );
 }
 
 /// One-shot deadlines are about the user's time, not drawing: they fire on time even with every window inactive, and
