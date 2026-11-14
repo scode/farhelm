@@ -1,5 +1,6 @@
 //! Headless screenshot goldens: one per component, per dialog frame and per overlay kind (tooltip, popover, the prompt
-//! over its veil) and the keyboard focus ring, in both appearances, compared pixel for pixel.
+//! over its veil), the keyboard focus ring and host-supplied text over its spoofing corpus, in both appearances,
+//! compared pixel for pixel.
 //!
 //! These are test references, not documentation media: they pin what each component draws, so a change to a token, a
 //! padding or a font shows up as a failing test with the new picture beside the old one, instead of drifting unnoticed.
@@ -25,6 +26,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::focus::{self, Mark};
+use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, Popover, TooltipOwner};
 use crate::prompt::{self, Answer, Question};
 use crate::test_support;
@@ -311,7 +313,38 @@ fn prompt_setup(_: &SceneState, window: &mut Window, cx: &mut App) {
     prompt::ask(question, None, &mark, |_, _, _| {}, window, cx);
 }
 
-static SCENES: [Scene; 7] = [
+/// The host-text element over the spoofing corpus, one value per line, then a sentence mixing the app's words with two
+/// host values: every hidden or direction-changing character shows as `<U+XXXX>`.
+///
+/// Only the corpus entries the bundled Latin fonts can draw are pictured: the goldens render with the bundled fonts
+/// alone (so a font installed on the machine cannot change a result), and goldens of fallback fonts are not in scope
+/// yet, so a CJK or Hebrew value would only picture missing-glyph boxes. The unit tests in `host_text` cover the whole
+/// corpus.
+fn host_text(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
+    let title = HostText::from_host("invoice\u{202E}fdp.exe");
+    let host = HostText::from_host("build\u{200B}box");
+    div()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .children(
+            host_text::tests::SPOOFING_CORPUS
+                .iter()
+                .filter(|(_, shown)| shown.chars().all(|ch| ch < '\u{0250}'))
+                .map(|(raw, _)| host_text::element(&HostText::from_host(*raw))),
+        )
+        .child(
+            HostSentence::new("host-text-sentence")
+                .text("Delete ")
+                .host(&title)
+                .text(" on ")
+                .host(&host)
+                .text("?"),
+        )
+        .into_any_element()
+}
+
+static SCENES: [Scene; 8] = [
     Scene {
         name: "buttons",
         size: (560., 64.),
@@ -353,6 +386,12 @@ static SCENES: [Scene; 7] = [
         size: (560., 320.),
         draw: empty,
         setup: prompt_setup,
+    },
+    Scene {
+        name: "host-text",
+        size: (420., 440.),
+        draw: host_text,
+        setup: no_setup,
     },
 ];
 

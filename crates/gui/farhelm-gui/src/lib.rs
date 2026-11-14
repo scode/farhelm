@@ -13,13 +13,14 @@
 //! - [`layers`]: the layer manager, the one owner of overlays: dialogs, popovers and the tooltip.
 //! - [`prompt`]: the one way to ask a question, frozen at the moment it opens.
 //! - [`actions`]: the app's actions and their keys, declared in one place.
+//! - [`host_text`]: host-supplied text, escaped and direction-isolated wherever the GUI shows it.
 //! - [`cache`]: the one way to cache a view.
 //! - [`render_count`]: per-view render counts in test builds.
 //! - [`assets`]: the bundled fonts and icons.
 //! - [`marks`]: the agent harnesses' marks as plain geometry, kept from the old Dioxus UI.
 //!
 //! Still to come, each under its own module: the store fed by the UI channel, the operation stores, drafts,
-//! host-supplied text, the rest of actions and keys, the ticker and the notice center.
+//! the rest of actions and keys, the ticker and the notice center.
 //!
 //! The `agent` feature adds the test-automation bridge (`gpui-agent`), which `scripts/gui-agent.py` drives; see
 //! `docs/gui-agent.md`.
@@ -41,6 +42,7 @@ pub mod bootstrap;
 pub mod cache;
 pub mod components;
 pub mod focus;
+pub mod host_text;
 pub mod layers;
 pub mod main_view;
 pub mod marks;

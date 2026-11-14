@@ -2011,6 +2011,7 @@ name = "farhelm-gui"
 version = "0.0.0-unreleased"
 dependencies = [
  "anyhow",
+ "farhelm-proto",
  "gpui-agent",
  "gpui-base",
  "gpui-component",

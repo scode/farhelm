@@ -21,6 +21,8 @@ agent = ["dep:gpui-agent", "gpui/test-support", "gpui_platform/test-support"]
 # GPUI and GPUI Kit at their exact pins (root Cargo.toml), routed through the vendored, patched GPUI trees.
 [dependencies]
 anyhow.workspace = true
+# The one escape table and notation for host-supplied text, shared with the command line (`farhelm_proto::text`).
+farhelm-proto.workspace = true
 gpui.workspace = true
 gpui-agent = { workspace = true, optional = true }
 gpui-base.workspace = true

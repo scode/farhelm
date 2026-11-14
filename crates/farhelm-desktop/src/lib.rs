@@ -1225,8 +1225,8 @@ fn not_connected_in_time(spawned: bool) -> anyhow::Error {
 ///
 /// Peer builds and identities need visible presentation here, before the
 /// refusal reaches the native alert: AppleScript quoting only protects its
-/// syntax. Identity evidence also exposes spaces and literal escape markers
-/// so distinct installs cannot look alike. The app's own text and line breaks
+/// syntax. Identity evidence also spells out spaces and everything outside
+/// printable ASCII so distinct installs cannot look alike. The app's own text and line breaks
 /// keep their original spelling.
 fn local_supervisor_refusal(
     hosts: &[farhelm_proto::ui_channel::HostView],
@@ -1881,22 +1881,24 @@ mod tests {
     /// rewriting the app's diagnostic. AppleScript quoting alone leaves bidi
     /// and zero-width characters active; escaping the whole refusal would also
     /// destroy the app's structural newlines. Identity evidence has the stronger
-    /// contract that spaces and literal escape markers cannot hide a difference.
+    /// contract that spaces and characters outside printable ASCII cannot hide a
+    /// difference.
     /// The real helper argv is inspected without launching either native helper.
     #[farhelm_testtrace::test]
     fn native_supervisor_refusals_escape_only_peer_fragments() {
         let dir = Path::new("/state/farhelm");
         let host = |state| crate::local_host::tests::host("local", state);
 
-        // Builds use ordinary peer presentation: readable spaces and literal
-        // markers survive, while peer line breaks and format controls do not.
-        // Local values deliberately include those same bytes to catch accidental
-        // escaping of the whole app-authored message.
+        // Builds use ordinary peer presentation: readable spaces survive, a
+        // literal marker has its `<` escaped so it cannot pose as an escape, and
+        // peer line breaks and format controls are escaped. Local values
+        // deliberately include those same bytes to catch accidental escaping of
+        // the whole app-authored message.
         for (peer_build, shown_build) in [
             ("old-build", "old-build"),
             (
                 "old build<U+0020>\u{202E}\u{200B}\npeer line",
-                "old build<U+0020><U+202E><U+200B><U+000A>peer line",
+                "old build<U+003C>U+0020><U+202E><U+200B><U+000A>peer line",
             ),
         ] {
             let refusal = local_supervisor_refusal(

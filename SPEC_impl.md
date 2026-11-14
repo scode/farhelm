@@ -501,6 +501,11 @@ its own rendering contract (SPEC.md: "Terminal output is not part of this rule")
 text are its escaped presentation, used for display and accessible names, and its raw value, used for editing and
 operations. Raw values keep their bytes, and an escaped presentation never becomes a saved value.
 
+Direction isolation is structural: every piece of host text is laid out as its own text element, never concatenated into
+a string with the app's words, so a right-to-left value reorders only within itself, as HTML's `<bdi>` did in the old
+app; a sentence that mixes both keeps each part its own element. The table lists Unicode's whole format category, which
+the old app's terminal-link disclosure escaped, so that disclosure uses it too.
+
 Enforced by the type: host text has no other conversion to a string, and the component layer accepts it only through the
 escaping element. A corpus of spoofing strings is pushed through the host-text element and the views that render it in
 the slice.

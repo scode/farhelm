@@ -7,7 +7,7 @@
 //! app receives over the UI channel, so there is no second description of a host to drift. Strict decoding is safe
 //! here because the desktop binary and the helm it embeds are always the same build.
 
-use farhelm_proto::text::is_presentation_unsafe;
+use farhelm_proto::text::{escaped, is_presentation_unsafe, notation};
 use farhelm_proto::ui_channel::HostView;
 use serde::Deserialize;
 
@@ -30,50 +30,47 @@ pub(crate) async fn decode_hosts(resp: reqwest::Response) -> Result<Vec<HostView
         .map_err(|e| e.to_string())
 }
 
-/// Show a host-supplied value with every presentation-unsafe character (controls, direction overrides, invisible
-/// characters; the shared table in `farhelm_proto::text`) written as `<U+XXXX>`, and an empty or whitespace-only value
-/// named rather than shown as nothing. Moved unchanged from the old UI's `peer.rs`.
+/// Show a host-supplied value (a peer's build string, say) the way the desktop app shows all host text,
+/// `farhelm_proto::text::escaped`: every presentation-unsafe character written as `<U+XXXX>` and a literal `<U+` the
+/// peer wrote escaped so it cannot pose as one. An empty or whitespace-only value is named rather than shown as
+/// nothing. Ported from the old UI's `peer.rs`, which did not escape a literal `<U+`.
 pub(crate) fn display_peer(raw: &str) -> String {
     if raw.is_empty() {
         return "(empty)".to_string();
     }
-    let mut shown = String::with_capacity(raw.len());
-    // Whether anything the user can actually SEE survived. An escape counts
-    // (it prints as `<U+202E>`); an ordinary space does not.
-    let mut anything_visible = false;
-    for ch in raw.chars() {
-        if is_presentation_unsafe(ch) {
-            shown.push_str(&format!("<U+{:04X}>", ch as u32));
-            anything_visible = true;
-        } else {
-            anything_visible |= !ch.is_whitespace();
-            shown.push(ch);
-        }
-    }
-    if anything_visible {
-        shown
+    // Whether anything the user can actually SEE survives. An escaped
+    // character counts (it prints as `<U+202E>`); an ordinary space does not.
+    if raw
+        .chars()
+        .any(|ch| is_presentation_unsafe(ch) || !ch.is_whitespace())
+    {
+        escaped(raw)
     } else {
         format!("(whitespace only: {} characters)", raw.chars().count())
     }
 }
 
-/// Show an identity so that two different ones can never look alike: spaces and the characters that start an escape
-/// or a placeholder are escaped too, on top of [`display_peer`]. Comparisons must still use the raw bytes. Moved
-/// unchanged from the old UI's `peer.rs`.
+/// Show an identity so that two different ones can never look alike: everything but printable ASCII is escaped, and
+/// so are `<` (which starts an escape) and the parentheses of the `(empty)` placeholder, so neither can be imitated.
+/// Comparisons must still use the raw bytes. Ported from the old UI's `peer.rs`.
+///
+/// It escapes the raw value once, on its own, rather than going through [`display_peer`]: its output already holds
+/// escapes, which `display_peer` would escape a second time.
 pub(crate) fn display_identity(raw: &str) -> String {
-    let escaped: String = raw
-        .chars()
+    // Only an empty identity needs the placeholder: every space gains a
+    // visible spelling, so an otherwise blank identity is never blank.
+    if raw.is_empty() {
+        return "(empty)".to_string();
+    }
+    raw.chars()
         .map(|ch| {
             if ch.is_ascii_graphic() && !matches!(ch, '<' | '(' | ')') {
                 ch.to_string()
             } else {
-                format!("<U+{:04X}>", ch as u32)
+                notation(ch)
             }
         })
-        .collect();
-    // Keep the empty-value placeholder; all spaces have already gained a
-    // visible spelling, including in an otherwise blank identity.
-    display_peer(&escaped)
+        .collect()
 }
 
 #[cfg(test)]
@@ -258,6 +255,24 @@ pub(crate) mod tests {
             "a non-breaking space is still invisible, and is still whitespace"
         );
         assert_eq!(display_peer("\u{202E}"), "<U+202E>");
+    }
+
+    /// Why this matters: a peer's build string reaches the startup alert and the update readout raw, so a literal
+    /// `<U+202E>` in it would read as an escape the app made, hiding whether the value held a real override; and an
+    /// identity's display, which escapes its own `<`, must not escape its escapes a second time.
+    ///
+    /// Specification: a peer value's literal `<U+` has its `<` escaped, so a literal and a real override show
+    /// differently; an identity holding the same literal shows it the same way, and a real override in an identity is a
+    /// single escape.
+    #[farhelm_testtrace::test]
+    fn literal_escape_notation_from_a_peer_cannot_pose_as_an_escape() {
+        assert_eq!(display_peer("<U+202E>"), "<U+003C>U+202E>");
+        assert_eq!(display_peer("v1<U+202E>2"), "v1<U+003C>U+202E>2");
+        assert_ne!(display_peer("v1<U+202E>2"), display_peer("v1\u{202E}2"));
+        assert_eq!(display_peer("a < b"), "a < b");
+        assert_eq!(display_identity("<U+202E>"), "<U+003C>U+202E>");
+        assert_eq!(display_identity("\u{202E}"), "<U+202E>");
+        assert_ne!(display_identity("<U+202E>"), display_identity("\u{202E}"));
     }
 
     /// Host text reaches a native alert, so hidden and direction-changing characters must be visible and an identity

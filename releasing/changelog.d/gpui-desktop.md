@@ -15,3 +15,12 @@ command line keep working as before.
 The new `farhelm licenses` command prints the license notices for the open-source code Farhelm is built from: the
 crates its binaries depend on, and code it ported from xterm.js or derived from Unicode data, whose notices used to ship
 inside the browser interface. (Curator: this sentence belongs under Added.)
+
+Text from hosts and agents that Farhelm shows, such as session titles in `farhelm agent sessions`, now also makes the
+rest of Unicode's invisible format characters visible as escapes (for example Arabic number signs and musical symbol
+format controls), not only the controls, direction overrides and zero-width characters it already showed. Saving a
+template whose session name, launch command or resume command contains one of these characters is now refused, as it
+already was for the others; templates saved earlier still apply. (Curator: this paragraph fixes behavior that shipped in
+released versions and belongs under Fixed, not with the GUI migration above. The same wider set is also dropped from
+ntfy alerts and from Tensorlake error messages, escaped in the helm's audit log and in the error of a launch that never
+started, and replaced with `_` in the supervisor's hook log; those are probably not worth an entry of their own.)
