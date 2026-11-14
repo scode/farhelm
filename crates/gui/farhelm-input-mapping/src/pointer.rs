@@ -245,15 +245,36 @@ mod wheel_tests {
     /// scrolls nothing (the platform turned it horizontal). The sign follows GPUI's: positive is toward older lines.
     #[test]
     fn wheel_pixels_keeps_the_old_distances() {
-        assert_eq!(wheel_pixels(1.0, WheelUnit::Lines, false, false, false), 50.0);
-        assert_eq!(wheel_pixels(-1.0, WheelUnit::Lines, false, false, false), -50.0);
-        assert_eq!(wheel_pixels(1.0, WheelUnit::Lines, true, false, false), 250.0);
-        assert_eq!(wheel_pixels(8.0, WheelUnit::Pixels, false, false, false), 10.0);
-        assert_eq!(wheel_pixels(1.0, WheelUnit::Pixels, false, false, false), 2.0);
-        assert_eq!(wheel_pixels(-1.0, WheelUnit::Pixels, false, false, false), -2.0);
+        assert_eq!(
+            wheel_pixels(1.0, WheelUnit::Lines, false, false, false),
+            50.0
+        );
+        assert_eq!(
+            wheel_pixels(-1.0, WheelUnit::Lines, false, false, false),
+            -50.0
+        );
+        assert_eq!(
+            wheel_pixels(1.0, WheelUnit::Lines, true, false, false),
+            250.0
+        );
+        assert_eq!(
+            wheel_pixels(8.0, WheelUnit::Pixels, false, false, false),
+            10.0
+        );
+        assert_eq!(
+            wheel_pixels(1.0, WheelUnit::Pixels, false, false, false),
+            2.0
+        );
+        assert_eq!(
+            wheel_pixels(-1.0, WheelUnit::Pixels, false, false, false),
+            -2.0
+        );
         assert_eq!(wheel_pixels(1.0, WheelUnit::Lines, false, true, false), 0.0);
         assert_eq!(wheel_pixels(1.0, WheelUnit::Lines, false, true, true), 50.0);
-        assert_eq!(wheel_pixels(f64::NAN, WheelUnit::Lines, false, false, false), 0.0);
+        assert_eq!(
+            wheel_pixels(f64::NAN, WheelUnit::Lines, false, false, false),
+            0.0
+        );
     }
 }
 
