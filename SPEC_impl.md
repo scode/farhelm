@@ -578,9 +578,11 @@ when one of those crates loses the denial.
 GPUI is pinned to gpui-pre 0.3.12 and GPUI Kit to 0.9.1 exactly, with the lockfile committed, unless the early macOS
 checks force a change. Upgrades happen only at milestones, as a dedicated change. Patched GPUI crates are vendored under
 `vendor/` with their patch files, per `vendor/README.md`. Besides the layers ported from the GPUI prototype, Farhelm
-carries one layer written for the shipping app, `frame-source`, which keeps GPUI's older `CVDisplayLink` frame source on
-macOS 14 and later for typing latency at or below the old app's; the maintainer accepted its costs (slightly higher idle
-CPU, no power-policy frame rates), and a TODO.md entry revisits it.
+carries two layers written for the shipping app. `frame-source` keeps GPUI's older `CVDisplayLink` frame source on macOS
+14 and later for typing latency at or below the old app's; the maintainer accepted its costs (slightly higher idle CPU,
+no power-policy frame rates), and a TODO.md entry revisits it. `no-kde-blur` removes `wayland-protocols-plasma`, a crate
+declared MIT that bundles LGPL-licensed protocol files compiled into the Linux build, with GPUI's KDE-blur fallback that
+was its only use (Farhelm never asks for a blurred window).
 
 No GPL-family code (GPL, AGPL, LGPL) enters the tree, as a dependency or as copied or closely paraphrased source.
 MPL-2.0 is allowed only as an unmodified dependency. Agents read GPL or other copyleft source only in an isolated

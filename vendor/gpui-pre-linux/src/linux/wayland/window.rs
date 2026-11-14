@@ -30,7 +30,6 @@ use wayland_protocols::{
     wp::fractional_scale::v1::client::wp_fractional_scale_v1,
     xdg::dialog::v1::client::xdg_dialog_v1::XdgDialogV1,
 };
-use wayland_protocols_plasma::blur::client::org_kde_kwin_blur;
 use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1;
 
 use crate::linux::wayland::{display::WaylandDisplay, serial::SerialKind};
@@ -110,7 +109,6 @@ pub struct WaylandWindowState {
     pub surface: wl_surface::WlSurface,
     app_id: Option<String>,
     appearance: WindowAppearance,
-    kde_blur: Option<org_kde_kwin_blur::OrgKdeKwinBlur>,
     background_effects: Option<ext_background_effect_surface_v1::ExtBackgroundEffectSurfaceV1>,
     viewport: Option<wp_viewport::WpViewport>,
     outputs: HashMap<ObjectId, Output>,
@@ -614,7 +612,6 @@ impl WaylandWindowState {
             children: FxHashMap::default(),
             surface,
             app_id: options.app_id,
-            kde_blur: None,
             background_effects: None,
             viewport,
             globals,
@@ -787,11 +784,6 @@ impl Drop for WaylandWindow {
         let client = state.client.clone();
 
         state.renderer.take();
-
-        // Destroy blur first, this has no dependencies.
-        if let Some(blur) = &state.kde_blur {
-            blur.release();
-        }
 
         // Destroy background effects, this has no dependencies.
         if let Some(background_effects) = &state.background_effects {
@@ -2496,9 +2488,10 @@ fn update_window(mut state: RefMut<WaylandWindowState>) {
         state.surface.set_opaque_region(None);
     }
 
-    // Prefer the ext-background-effect protocol, as it is DE agnostic and
-    // replaces the deprecated kde-blur protocol, which is no longer supported
-    // since KDE Plasma 6.7.
+    // Blur behind the window comes only from the DE-agnostic ext-background-effect
+    // protocol. Farhelm removes the kde-blur fallback with its crate, whose bundled
+    // protocol files are LGPL-licensed (vendor/README.md, "no-kde-blur"); KDE itself
+    // dropped kde-blur in Plasma 6.7.
     // https://invent.kde.org/plasma/kwin/-/commit/7f9e0aa1cd2c2ab4fea1097800893b6f780089eb
     if let Some(ref background_effects_manager) = state.globals.background_effects_manager {
         if state.background_appearance == WindowBackgroundAppearance::Blurred {
@@ -2523,20 +2516,6 @@ fn update_window(mut state: RefMut<WaylandWindowState>) {
                 .set_blur_region(Some(&region));
         } else if let Some(background_effects) = state.background_effects.take() {
             background_effects.destroy();
-        }
-    } else if let Some(ref blur_manager) = state.globals.kde_blur_manager {
-        if state.background_appearance == WindowBackgroundAppearance::Blurred {
-            if state.kde_blur.is_none() {
-                log::debug!("Using kde-blur protocol");
-                let blur = blur_manager.create(&state.surface, &state.globals.qh, ());
-                state.kde_blur = Some(blur);
-            }
-            state.kde_blur.as_ref().unwrap().commit();
-        } else {
-            blur_manager.unset(&state.surface);
-            if let Some(b) = state.kde_blur.take() {
-                b.release()
-            }
         }
     }
 
