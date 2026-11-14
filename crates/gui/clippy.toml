@@ -128,6 +128,14 @@ disallowed-methods = [
   { path = "gpui_component::theme::try_parse_background", reason = "colors come from theme tokens in the component layer" },
   { path = "gpui_component::theme::ColorName::scale", reason = "colors come from theme tokens in the component layer" },
   { path = "gpui_component::theme::Colorize::parse_hex", reason = "colors come from theme tokens in the component layer" },
+
+  # View caching: only the cache wrapper caches a view. GPUI replays a cached view's last frame until that view
+  # notifies, so a direct call is one forgotten notification away from a view showing stale state, and a replayed view
+  # also loses its accessibility nodes. The wrapper computes the view's inputs from the store and notifies only when
+  # they change. `Entity::cached` is what a call on a view entity resolves to; `AnyView::cached` is the same thing on a
+  # type-erased view.
+  { path = "gpui::Entity::cached", reason = "cache a view only through the cache wrapper (cache::element)" },
+  { path = "gpui::AnyView::cached", reason = "cache a view only through the cache wrapper (cache::element)" },
 ]
 
 disallowed-types = [

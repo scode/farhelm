@@ -13,6 +13,14 @@
 //! an explicit size (it is laid out from its style alone), and cached views are kept flat (a cache miss re-renders the
 //! whole subtree uncached, so nesting buys nothing).
 //!
+//! This is the only place a view is cached: clippy bans GPUI's `Entity::cached` and `AnyView::cached` everywhere else in
+//! the GUI crates (`crates/gui/clippy.toml`), so a feature cannot cache a view directly and skip the input comparison.
+//!
+//! NOTE: GPUI rebuilds the platform accessibility tree every frame and cannot replay it for a cached view, so a replayed
+//! view drops its accessibility nodes, focus report and actions while assistive technology is active. The migration's
+//! orchestrator decided on 2026-11-14 that before this wrapper is first used in production on a view with roles, that
+//! gap is revisited (a vendored GPUI patch that restores the tree on replay is the likely fix).
+//!
 //! NOTE: One source entity per cached view. A view that draws from two sources (a session row that also shows its
 //! host's name, say) is settled when the store lands: either the store offers one entity that joins them, or the
 //! wrapper observes each source explicitly. It must never become a second, unobserved read inside `compute`.
@@ -80,6 +88,10 @@ impl<S: 'static, I: PartialEq + 'static> Render for Cached<S, I> {
 
 /// `view` as an element its parent can place, replayed from cache until its inputs change. `size` must give the view
 /// a definite size: a cached view is laid out from this style alone, never measured from its content.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the cache wrapper is the one owner of view caching (SPEC_impl.md, \"The store, and how views redraw\")"
+)]
 pub fn element<S: 'static, I: PartialEq + 'static>(
     view: &Entity<Cached<S, I>>,
     size: StyleRefinement,
