@@ -264,6 +264,18 @@ fn with_animations() -> impl IntoElement {
     )
 }
 
+// View caching.
+
+fn entity_cached<V: gpui::Render>(view: Entity<V>) -> impl IntoElement {
+    // expect: disallowed_methods gpui::Entity::cached
+    view.cached(gpui::StyleRefinement::default())
+}
+
+fn any_view_cached(view: gpui::AnyView) -> impl IntoElement {
+    // expect: disallowed_methods gpui::AnyView::cached
+    view.cached(gpui::StyleRefinement::default())
+}
+
 // Raw colors.
 
 fn color_rgb() {

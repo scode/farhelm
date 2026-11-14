@@ -417,8 +417,9 @@ whole grid, which the wrapper's comparison of computed inputs cannot express. Th
 that change what it shows; render-count tests pin that shown output redraws it and output it does not show does not.
 
 Enforced by tests that count redraws per view (an app-level render counter compiled into test builds; no GPUI patch), by
-a test for each store that a change through its public methods redraws the views that read it, and by the per-PR review
-gate.
+a test for each store that a change through its public methods redraws the views that read it, by clippy
+`disallowed-methods` on GPUI's view caching (`Entity::cached` and `AnyView::cached`) everywhere in the GUI crates except
+the cache wrapper, and by the per-PR review gate.
 
 ### Focus: the focus coordinator
 
@@ -710,7 +711,9 @@ Traps that an earlier rule already prevents get one line pointing at it.
   `run_until_parked()` outside `update_window` and renders a frame before querying.
 - **Caching has sharp edges.** A cache miss re-renders the whole subtree uncached, nested cached views miss when their
   parent re-renders (zed#66451), a cached view is laid out from its style alone so it needs an explicit size, and
-  per-frame paint callbacks are skipped on replay. Rule: flat, explicitly sized cached views behind the wrapper.
+  per-frame paint callbacks are skipped on replay, and so are the view's accessibility nodes, focus report and actions
+  while assistive technology is active. Rule: flat, explicitly sized cached views behind the wrapper, and none with
+  accessibility roles until replay restores them (decided by the migration's orchestrator on 2026-11-14).
 - **`focus()` clears pending keystrokes and refreshes the whole window;** see "Focus: the focus coordinator".
 - **A focus move made in a focus-lost listener draws no frame.** GPUI runs those listeners while it finishes a frame,
   when a refresh is ignored, so the drawn frame keeps showing nothing focused until something else redraws; found when
