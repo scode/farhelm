@@ -73,8 +73,10 @@
 //!   has to be checked against the latter by hand.
 //! - **How the GUI shows it.** The GPUI app's harness marks are plain
 //!   geometry in `crates/gui/farhelm-gui/src/marks.rs`, with provenance in
-//!   `docs/harness-marks.md`. The rest of the GUI's per-harness vocabulary is
-//!   not ported yet: labels, display orders checked against
+//!   `docs/harness-marks.md`. The launcher's harness names and permission
+//!   names are `harness_label` and `permission_name` in
+//!   `crates/gui/farhelm-gui/src/launcher/draft.rs`. The rest of the GUI's
+//!   per-harness vocabulary is not ported yet: display orders checked against
 //!   `LaunchHarness::ALL`, help text, the harness-to-mark mapping and the
 //!   marks' identity colors, the new-session form's Cursor support notice, and
 //!   the per-agent-KIND facts that also cover command and legacy launches
