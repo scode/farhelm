@@ -25,6 +25,10 @@ a release install has; `target/debug/` already has both, or set `FARHELM_DESKTOP
 The crate is outside the workspace's default members, so a bare `cargo build` does not compile it. On Linux it needs the
 GLib development package for GIO, which opens saved downloads.
 
+On a Mac, `scripts/devbuild-mac.sh` does the same thing in release mode, stages the pair in `target/devbuild/` with
+Linux `farhelm` payloads built from the same working copy (so Update works on remote hosts), and runs the app on a state
+directory of its own instead of the installed app's. Its header has the details.
+
 The release still describes `farhelm-desktop` as a generic dist package (`packaging/farhelm-desktop/dist.toml`) whose
 build ran `dx` over the old Dioxus app. That build is broken until the GPUI cutover replaces it; the cargo package here
 is marked `dist = false` so the two descriptions cannot both produce an asset.
