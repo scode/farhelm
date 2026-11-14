@@ -61,6 +61,11 @@ pub enum Tier {
     /// retired fill as [`Tier::Danger`] does; busy, it keeps its outline and loses only its hover, as the old
     /// `aria-disabled` rule left it.
     DangerOutline,
+    /// `.btn-primary.btn-outline`: accent text and an accent outline on no fill, with the control hover fill. The
+    /// permanent answer beside a one-off primary answer, for the same reason as [`Tier::DangerOutline`]: the host setup
+    /// confirmation's "Set up, don't ask again" beside Set up. Unavailable, it takes the retired fill as
+    /// [`Tier::Primary`] does; busy, it keeps its outline and loses only its hover.
+    PrimaryOutline,
     /// `.btn.banner-reclaim`: a compact ghost button for the red banner (the old terminal's "Take control"). It has a
     /// pale red outline and white text so it reads against the banner's fill, a darker red hover, and a white focus
     /// ring because the accent ring is not calibrated for a red background. Use it only on a red banner.
@@ -380,6 +385,13 @@ impl Button {
                 Some(palette.danger),
                 palette.danger,
             ),
+            Tier::PrimaryOutline if self.disabled => retired,
+            Tier::PrimaryOutline => (
+                None,
+                palette.control_hover,
+                Some(palette.accent),
+                palette.accent,
+            ),
         }
     }
 }
@@ -406,9 +418,12 @@ impl RenderOnce for Button {
             Tier::Rail | Tier::Link => (px(0.), px(0.)),
             Tier::Chip => (px(CHIP_PAD.0), px(CHIP_PAD.1)),
             Tier::Nav => (px(NAV_PAD.0), px(NAV_PAD.1)),
-            Tier::Ghost | Tier::Neutral | Tier::Primary | Tier::Danger | Tier::DangerOutline => {
-                metrics::BUTTON_PAD
-            }
+            Tier::Ghost
+            | Tier::Neutral
+            | Tier::Primary
+            | Tier::Danger
+            | Tier::DangerOutline
+            | Tier::PrimaryOutline => metrics::BUTTON_PAD,
         };
         let pressed = self.pressed == Some(true);
         let ring_color = match self.tier {
@@ -421,6 +436,7 @@ impl RenderOnce for Button {
             | Tier::Primary
             | Tier::Danger
             | Tier::DangerOutline
+            | Tier::PrimaryOutline
             | Tier::Rail
             | Tier::Chip
             | Tier::Link

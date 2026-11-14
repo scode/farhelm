@@ -8,7 +8,8 @@
 //! editor, the select closed and open, the
 //! YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer, the Settings dialog at
 //! Sessions, at Appearance, at Hosts, at Terminal and at Agent trust, the Hosts panel (closed, with Details, and with a
-//! host failing to connect), and the Add host dialog, in both appearances, compared pixel for pixel.
+//! host failing to connect), and the Add host dialog and the setup confirmation it leads to, in both appearances,
+//! compared pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
@@ -1907,6 +1908,35 @@ fn settings_agent_trust_setup(state: &SceneState, window: &mut Window, cx: &mut 
     settings_scene(state, crate::settings::Section::AgentTrust, window, cx);
 }
 
+/// The setup confirmation for the reference screens' plan (reference `host-add-setup-plan`), as a probe's plan opens it
+/// in place of Add host: the plan, Copy plan, the footer note and the three answers, focus on Set up. The opener is the
+/// scene's ring handle. The fake and the connection are kept for the scene's life, like Add host's.
+fn host_add_setup_plan_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    helm.connect(vec![crate::hosts::tests::hosts(
+        &crate::hosts::tests::reference_hosts(),
+    )]);
+    let handle = window.window_handle();
+    let opener = state.ring.clone();
+    let opened = std::cell::Cell::new(false);
+    let watch = cx.observe(&connection, move |connection, cx| {
+        if opened.get() || connection.read(cx).session().is_none() {
+            return;
+        }
+        opened.set(true);
+        let _ = handle.update(cx, |_, window, cx| {
+            let mark = Mark::take(cx);
+            let offer = crate::hosts::setup::tests::reference_offer(opener.clone(), mark);
+            crate::hosts::setup::confirm(offer, window, cx);
+        });
+    });
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    keep.push(Box::new(watch));
+}
+
 /// Make the Hosts panel over a fake helm holding `listed` hosts, with Details on when `details` is; the scene draws it
 /// through [`hosts_panels`]. The fake, the connection and the panel are kept for the scene's life.
 fn hosts_panel_scene(state: &SceneState, listed: &[HostView], details: bool, cx: &mut App) {
@@ -2267,6 +2297,12 @@ static SCENES: &[Scene] = &[
         size: (420., 418.),
         draw: session_lists_then,
         setup: hosts_shown_with_a_host_chosen_setup,
+    },
+    Scene {
+        name: "host-add-setup-plan",
+        size: (600., 1000.),
+        draw: empty,
+        setup: host_add_setup_plan_setup,
     },
 ];
 

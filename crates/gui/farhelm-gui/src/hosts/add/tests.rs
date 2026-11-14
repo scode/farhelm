@@ -7,13 +7,16 @@
 //! through [`Opened`], which only test builds record. Every step ends in one of the shared harness's step helpers, so
 //! the focus and layer invariants are checked after each. Typed text avoids `-` and spaces, which GPUI's simulated
 //! input reads as keystroke syntax rather than characters.
+//!
+//! The helpers are shared with the setup tests (`hosts/setup/tests.rs`), which go on from a probe's plan; the root
+//! view draws the Hosts panel beside Add host for them, since a setup refused after the user moved on shows there.
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
-use farhelm_proto::ui_channel::HostView;
+use farhelm_proto::ui_channel::{CollectionState, HostView};
 use gpui::{
-    Context, FocusHandle, Global, IntoElement, ParentElement as _, Render, Styled as _,
-    TestAppContext, VisualTestContext, WeakEntity, Window, div, px, size,
+    AppContext as _, Context, Entity, FocusHandle, Global, IntoElement, ParentElement as _, Render,
+    Styled as _, TestAppContext, VisualTestContext, WeakEntity, Window, div, px, size,
 };
 use serde_json::{Value, json};
 
@@ -21,6 +24,7 @@ use super::{AddHostDialog, refused_before_contact};
 use crate::components::{Button, HoverHelp, Role};
 use crate::drafts::DraftInput;
 use crate::focus::Mark;
+use crate::hosts::HostsPanel;
 use crate::hosts::tests::{aliased, connected, host, hosts};
 use crate::operations::Work;
 use crate::test_support::{self, click, focused, focused_id, frame, keys, settle, started};
@@ -35,10 +39,11 @@ impl Global for Opened {}
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
 /// The root view the tests open Add host from: the host rail's Add host as a plain button with a focus handle the test
-/// holds, after another control standing in for whatever held focus before.
+/// holds, after another control standing in for whatever held focus before, and the Hosts panel below them.
 struct Rail {
     root: root::Attachment,
     add: FocusHandle,
+    panel: Entity<HostsPanel>,
 }
 
 impl Render for Rail {
@@ -65,7 +70,8 @@ impl Render for Rail {
                     let mark = Mark::take(cx);
                     super::open(&add, &mark, window, cx);
                 }),
-            );
+            )
+            .child(div().w(px(340.)).h(px(400.)).child(self.panel.clone()));
         root::wrap(content, &self.root, window, cx)
     }
 }
@@ -76,17 +82,28 @@ const ADDED: &str = "dev@buildbox";
 /// The app over the fake helm listing the local host and `build-box` at [`ADDED`], in an active window, with Add host's
 /// focus handle. Nothing is open yet.
 fn open_rail(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext, FocusHandle) {
+    open_rail_with(cx, Vec::new())
+}
+
+/// [`open_rail`], with `more` collections in the helm's snapshot beside the hosts (the preference row, say).
+pub(crate) fn open_rail_with(
+    cx: &mut TestAppContext,
+    more: Vec<CollectionState>,
+) -> (FakeHelm, &mut VisualTestContext, FocusHandle) {
     let (mut helm, _connection) = started(cx);
-    helm.connect(vec![hosts(&[
+    let mut snapshot = vec![hosts(&[
         host(1, "local", connected()),
         aliased(host(2, "ssh", connected()), "build-box", ADDED),
-    ])]);
+    ])];
+    snapshot.extend(more);
+    helm.connect(snapshot);
     cx.run_until_parked();
     let add = cx.update(|cx| cx.focus_handle().tab_stop(true));
     let held = add.clone();
     let (_, window) = test_support::open_view(cx, move |window, cx| Rail {
         root: root::attach(window, cx),
         add: held,
+        panel: cx.new(HostsPanel::new),
     });
     window.simulate_resize(size(px(1600.), px(1000.)));
     settle(window);
@@ -95,7 +112,7 @@ fn open_rail(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext, Focu
 
 /// Click Add host and check that the dialog opened with focus in the destination field, where every test starts
 /// typing (the module docs: "Focus starts in the destination field").
-fn open_dialog(cx: &mut VisualTestContext) {
+pub(crate) fn open_dialog(cx: &mut VisualTestContext) {
     click(cx, "rail-add-host");
     assert!(any_open(cx), "the premise: Add host opened");
     assert!(
@@ -104,37 +121,55 @@ fn open_dialog(cx: &mut VisualTestContext) {
     );
 }
 
-fn any_open(cx: &mut VisualTestContext) -> bool {
+pub(crate) fn any_open(cx: &mut VisualTestContext) -> bool {
     cx.update(|window, cx| layers::any_open(window, cx))
 }
 
 /// Type `text` into the focused field.
-fn type_text(cx: &mut VisualTestContext, text: &str) {
+pub(crate) fn type_text(cx: &mut VisualTestContext, text: &str) {
     cx.simulate_input(text);
     test_support::check(cx);
 }
 
 /// The one command sent since the last call, which must be a probe: its id and body.
-fn one_probe(helm: &mut FakeHelm) -> (u64, Value) {
+pub(crate) fn one_probe(helm: &mut FakeHelm) -> (u64, Value) {
+    one_command(helm, Method::Post, "/api/hosts/probe")
+}
+
+/// The one command sent since the last call, which must be `method` on `path`: its id and body.
+pub(crate) fn one_command(helm: &mut FakeHelm, method: Method, path: &str) -> (u64, Value) {
     let sent: Vec<FakeCommand> = helm.commands();
     assert_eq!(sent.len(), 1, "one command was sent: {sent:?}");
-    assert_eq!(
-        (sent[0].method, sent[0].path.as_str()),
-        (Method::Post, "/api/hosts/probe")
-    );
+    assert_eq!((sent[0].method, sent[0].path.as_str()), (method, path));
     (sent[0].id, sent[0].body.clone().unwrap_or_default())
 }
 
 /// The open dialog's destination field as it reads now; panics if no dialog was opened.
-fn destination(cx: &mut VisualTestContext) -> String {
+pub(crate) fn destination(cx: &mut VisualTestContext) -> String {
     cx.update(|_, cx| {
         let dialog = cx.global::<Opened>().0.upgrade().expect("a dialog is open");
         dialog.read(cx).destination.input().text(cx).to_string()
     })
 }
 
+/// The open dialog's alias field as it reads now; panics if no dialog was opened.
+pub(crate) fn alias(cx: &mut VisualTestContext) -> String {
+    cx.update(|_, cx| {
+        let dialog = cx.global::<Opened>().0.upgrade().expect("a dialog is open");
+        dialog.read(cx).alias.input().text(cx).to_string()
+    })
+}
+
+/// The open dialog's host-add key, which its probe runs under and its setup continues under.
+pub(crate) fn dialog_key(cx: &mut VisualTestContext) -> crate::operations::OpKey {
+    cx.update(|_, cx| {
+        let dialog = cx.global::<Opened>().0.upgrade().expect("a dialog is open");
+        dialog.read(cx).key.clone()
+    })
+}
+
 /// The work in flight on the open dialog's key.
-fn probe_work(cx: &mut VisualTestContext) -> Option<Work> {
+pub(crate) fn probe_work(cx: &mut VisualTestContext) -> Option<Work> {
     cx.update(|_, cx| {
         let key = cx.global::<Opened>().0.upgrade()?.read(cx).key.clone();
         session::current_operations(cx)?.read(cx).in_flight(&key)
@@ -142,7 +177,7 @@ fn probe_work(cx: &mut VisualTestContext) -> Option<Work> {
 }
 
 /// The accessible name of what is drawn under `id`, if anything is.
-fn label(cx: &mut VisualTestContext, id: &str) -> Option<String> {
+pub(crate) fn label(cx: &mut VisualTestContext, id: &str) -> Option<String> {
     frame(cx)
         .into_iter()
         .find(|node| node.element_id.as_deref() == Some(id))
@@ -150,7 +185,7 @@ fn label(cx: &mut VisualTestContext, id: &str) -> Option<String> {
 }
 
 /// Whether the open dialog's alias field holds focus.
-fn alias_focused(cx: &mut VisualTestContext) -> bool {
+pub(crate) fn alias_focused(cx: &mut VisualTestContext) -> bool {
     field_focused(cx, |dialog| &dialog.alias)
 }
 
@@ -173,7 +208,7 @@ const SELECT_ALL: &str = if cfg!(target_os = "macos") {
 };
 
 /// The dialog's error line, as assistive technology reads it.
-fn error_line(cx: &mut VisualTestContext) -> Option<String> {
+pub(crate) fn error_line(cx: &mut VisualTestContext) -> Option<String> {
     label(cx, "add-host-error")
 }
 
@@ -324,11 +359,10 @@ fn a_discovered_host_closes_the_dialog(cx: &mut TestAppContext) {
 
 /// Every answer short of a registered host leaves the user something to correct or to try again, so it shows in the
 /// dialog with the destination still there (the old dialog's error line, and SPEC.md's bounded-host-wait rule that a
-/// timeout is an ordinary reply). The interim `provisionable` line stands in for the setup confirmation that is not
-/// ported yet. Specified: for a `manual` reply, a `provisionable` one, a 409 refusal and the 504 that says the check
-/// carries on, the dialog stays open with the reason (the helm's words, or the interim sentence) in its error line,
-/// `dev@newbox` still in the destination field, the key free and Add reading "Add" again; a 200 whose body is no probe
-/// reply says the reply could not be read.
+/// timeout is an ordinary reply). Specified: for a `manual` reply, a 409 refusal and the 504 that says the check
+/// carries on, the dialog stays open with the helm's words in its error line, `dev@newbox` still in the destination
+/// field, the key free and Add reading "Add" again; a 200 whose body is no probe reply says the reply could not be
+/// read.
 #[gpui::test]
 fn manual_setup_refusals_and_the_timeout_show_in_the_dialog_with_the_destination_kept(
     cx: &mut TestAppContext,
@@ -340,15 +374,6 @@ fn manual_setup_refusals_and_the_timeout_show_in_the_dialog_with_the_destination
             200,
             json!({ "result": "manual", "reason": "this host has no systemd user manager" }),
             "this host has no systemd user manager",
-        ),
-        (
-            200,
-            json!({
-                "result": "provisionable", "probe_id": "p-1", "plan": { "anything": "the helm keeps" },
-                "confirmation": "the plan",
-                "steps": { "lead": "Farhelm will set up dev@newbox:", "steps": [], "kept": null },
-            }),
-            "Farhelm is not running on this host, and this version of the app cannot set it up yet; nothing was added",
         ),
         (
             409,
