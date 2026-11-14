@@ -20,6 +20,8 @@
 //!   [`local_state`]: the selected session's id, the one piece of window state that survives a reset.
 //! - [`session_list`]: the sidebar's session list and the selection rules; [`session_pane`]: the pane beside it.
 //! - [`settings`]: the Settings dialog the host rail's gear opens, with its sections.
+//! - [`hosts`]: host management, the Hosts panel the sidebar swaps in for its session list, and the per-host rules
+//!   (which actions a host offers).
 //! - [`operations`]: the operation store, which holds work that finishes later (on a session, a host, a template, the
 //!   preferences, a launch), above the views that start it; [`drafts`]: editor fields that follow pushed changes
 //!   until the user touches them, and their saves.
@@ -54,6 +56,7 @@ pub mod components;
 pub mod drafts;
 pub mod focus;
 pub mod host_text;
+pub mod hosts;
 pub mod launcher;
 pub mod layers;
 pub mod local_state;
