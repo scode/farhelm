@@ -1,11 +1,14 @@
 //! `/api/sessions/{id}/term` — the terminal WebSocket, and the pump behind
 //! it.
 //!
-//! One browser socket on this side, one multiplexed channel to a supervisor
+//! One client socket on this side, one multiplexed channel to a supervisor
 //! on the other, and a translation between them that has to survive either
-//! end going away at any moment. This is the only route in the helm that
-//! holds a connection open for the life of a user's attention, which is why
-//! nearly everything here is about teardown rather than about bytes.
+//! end going away at any moment. The client is the desktop app's terminal
+//! stream (`farhelm-helm-client`'s `terminal` module), one socket per
+//! attached terminal, which reconnects on its own. This is the only route in
+//! the helm that holds a connection open for the life of a user's attention,
+//! which is why nearly everything here is about teardown rather than about
+//! bytes.
 //!
 //! ## Auth is refused before upgrade; attach failures are delivered on-socket
 //!
@@ -20,20 +23,25 @@
 //!
 //! Every one of those refusals therefore leaves the same way: a
 //! `{"type":"detached","reason":...}` text frame, then a close. That
-//! uniformity is the point. A browser cannot read a status code off a
-//! failed upgrade in any useful way, so the alternative is a socket that
-//! opens and closes with nothing said — which the user experiences as a
-//! terminal that flickered and vanished, and which the browser blames on
-//! the network rather than on the request it just made.
+//! uniformity is the point. The notice carries a detach code the client acts
+//! on (wait for Take control, stop retrying a closed tab, reconnect after
+//! transport trouble) and a reason. The desktop client shows the reason when
+//! the code stops the stream (a takeover, a closed tab, a stall); an `other`
+//! refusal sends it into its reconnect backoff, and the reason reaches only
+//! its log for now. The rule dates from the browser client, which could not
+//! read a status code off a failed upgrade at all: the alternative was a
+//! socket that opened and closed with nothing said, which the user
+//! experienced as a terminal that flickered and vanished, blamed on the
+//! network rather than on the request.
 //!
 //! ## Teardown is the hard part
 //!
-//! A wedged browser must not be able to hold anything on this side open,
+//! A wedged client must not be able to hold anything on this side open,
 //! and a socket that closes normally must not be reported as an error.
 //! `settle_outbound` is where that lands: the outbound drain is given
 //! `WS_TEARDOWN_GRACE` to finish and is then abandoned, and a handle that
 //! has ALREADY completed is never polled again — a real bug once, and
-//! invisible from the browser, since the socket was closing either way.
+//! invisible from the client, since the socket was closing either way.
 //!
 //! ## What crosses the socket
 //!
@@ -51,15 +59,16 @@
 //!
 //! - Outbound frames can be up to `GRID_MAX_MESSAGE` (1 MiB), and the
 //!   per-terminal queue holds up to 4,096 of them, bounded by its 16 MiB of
-//!   bytes (the client's `GRID_EVENT_QUEUE` and `TERM_QUEUE_BYTES`).
+//!   bytes (the supervisor client's `GRID_EVENT_QUEUE` and
+//!   `TERM_QUEUE_BYTES`).
 //! - Each inbound binary message is one grid input message and goes up as
 //!   one data frame (`SupervisorClient::send_grid_input`); one over
 //!   `GRID_MAX_INPUT_MESSAGE` ends the attachment.
-//! - The grid client sends no pause or resume, so the helm pauses and
-//!   resumes the supervisor from its own queue's fill (the client's
-//!   `GRID_PAUSE_BYTES`, which also works out how slow a browser that still
+//! - The client sends no pause or resume, so the helm pauses and resumes the
+//!   supervisor from its own queue's fill (the supervisor client's
+//!   `GRID_PAUSE_BYTES`, which also works out how slow a client that still
 //!   reads may be). A pause that outlives the supervisor's stall timeout,
-//!   from a browser that stopped reading, ends the attachment as stalled.
+//!   from a client that stopped reading, ends the attachment as stalled.
 //!
 //! Version skew needs nothing of its own here: the protocol version must
 //! match, so a supervisor from before protocol 77, which could still stream
@@ -239,18 +248,20 @@ fn resolve_attach_request(q: &TermQuery) -> anyhow::Result<(TerminalSelector, &s
 /// Folding the local query-shape check, the owner lookup, and the
 /// supervisor round trip into a single function is what lets `serve_term`
 /// report every kind of failure through one notice-then-close arm instead
-/// of three copies of the same three lines: a caller here cannot tell (and
-/// does not need to) whether an `Err` came from `resolve_attach_request`
-/// refusing the shape, from the session's host being unreachable, or from
-/// the supervisor refusing the attach itself — all are, from the browser's
-/// perspective, "this attach did not happen," and all deserve the identical
-/// visible treatment.
+/// of three copies of the same three lines: whether an `Err` came from
+/// `resolve_attach_request` refusing the shape, from the session's host
+/// being unreachable, or from the supervisor refusing the attach itself,
+/// all are, from the client's perspective, "this attach did not happen,"
+/// and all leave through that one arm, with a detach code (`taken_over`,
+/// `tab_closed` or `other`) read from the error's kind (and, for
+/// `tab_closed`, whether a tab was asked for).
 ///
 /// That uniformity is also what gives the terminal socket its half of
 /// SPEC.md's host-unreachable story for free: the refusal text names the
 /// host's actual state, and it arrives as the same
-/// `{"type":"detached","reason":...}` notice a takeover would, so nothing
-/// on the browser side needs a new message shape to render it.
+/// `{"type":"detached","reason":...}` notice a takeover would, so the old
+/// browser client needed no new message shape to render it. The desktop
+/// client treats it as transport trouble (code `other`) and retries.
 ///
 /// The client is returned alongside the attachment because `serve_term`
 /// must keep talking to the SAME connection for the socket's whole life —
@@ -268,7 +279,7 @@ async fn attach_from_query(
     let key = resolve_session_ref(state, session_id).await?;
     let (_claim, client) = route_active_session(state, &key).await?;
     // Which of the two attach contracts this socket wants, decided by the
-    // query the browser sent: an unattended reconnect refuses rather than
+    // query the client sent: an unattended reconnect refuses rather than
     // displaces (see `TermQuery::if_unowned`), everything else is the
     // ordinary last-attach-wins attach.
     let (channel, stream) = if if_unowned {
@@ -296,7 +307,7 @@ fn refused_as_taken_over(error: &anyhow::Error) -> bool {
 }
 
 /// Whether this failure says the TAB being attached does not exist, which
-/// the browser must hear as `tab_closed` rather than as a failed attempt.
+/// the client must hear as `tab_closed` rather than as a failed attempt.
 ///
 /// Every `NotFound` a tab attach can meet describes current state, not a
 /// passing condition: the supervisor looks the tab up among the session's
@@ -305,15 +316,16 @@ fn refused_as_taken_over(error: &anyhow::Error) -> bool {
 /// taken its tabs with it.
 /// Transport trouble (a lost supervisor, an unreachable host) arrives as
 /// other kinds and keeps recovering. Reported as `other`, this refusal
-/// sent the browser's reconnect ladder through six attempts per tab, each
-/// rebuilding a terminal, which is what starved the page in the island-cap
-/// test (FLAKES.md, 2026-09-29) and would do the same to a view listing
-/// tabs the supervisor no longer has.
+/// sent the old browser client's reconnect ladder through six attempts per
+/// tab, each rebuilding a terminal, which is what starved the old browser
+/// page in the island-cap test (FLAKES.md, 2026-09-29) and would do the same
+/// to a view listing tabs the supervisor no longer has.
 ///
 /// Tab attaches only. The agent terminal's `NotFound` carries the
 /// supervisor's account of what happened to the session (a reboot, a
-/// restart gap, what restart would do), and the browser keeps showing it
-/// rather than hiding the terminal.
+/// restart gap, what restart would do), and the client keeps retrying it
+/// (that account reaches only its log) rather than stopping as it does for
+/// a closed tab.
 fn refused_as_missing_tab(error: &anyhow::Error, q: &TermQuery) -> bool {
     q.tab.is_some()
         && error
@@ -323,8 +335,10 @@ fn refused_as_missing_tab(error: &anyhow::Error, q: &TermQuery) -> bool {
 
 /// The `{"type":"detached","reason":...,"code":...}` notice the GUI's terminal client receives.
 ///
-/// `code` is the [`farhelm_proto::DetachCode`] a client decides from (latch a
-/// takeover, hold a stall, hide a closed tab); `reason` is only ever shown.
+/// `code` is the [`farhelm_proto::DetachCode`] a client decides from (wait
+/// for Take control after a takeover or a stall, stop retrying a closed tab,
+/// retry anything else); `reason` is only ever shown or logged, never
+/// decided from.
 /// One builder so every exit from this socket carries both.
 fn detached_notice(detach: &crate::client::Detach) -> TerminalServerMessage {
     TerminalServerMessage::Detached {
@@ -341,7 +355,7 @@ fn control_frame(message: &TerminalServerMessage) -> ws::Message {
 /// Terminal WebSocket: binary frames are the attachment's grid messages in
 /// both directions; text frames are small JSON control messages (client →
 /// resize/ping; server → detached notice, replay-complete marker, pong).
-/// This is the browser-facing twin of the proto data channel, kept equally
+/// This is the client-facing twin of the proto data channel, kept equally
 /// dumb.
 ///
 /// `?cols=`/`?rows=` set the initial size (see `TermQuery`'s docs).
@@ -350,7 +364,7 @@ fn control_frame(message: &TerminalServerMessage) -> ws::Message {
 /// here as an ordinary `{"type":"detached","reason":"another client
 /// attached"}` notice — the same notice, and the same string, a client
 /// displaced while attached receives. That identity is the point: a
-/// browser that was away when it lost the session renders the state it is
+/// client that was away when it lost the session renders the state it is
 /// actually in without a second vocabulary for it. See `term_ws_if_unowned`
 /// for why it is a path rather than a parameter.
 ///
@@ -364,8 +378,9 @@ fn control_frame(message: &TerminalServerMessage) -> ws::Message {
 /// everything else, including an unknown tab id, is the supervisor's own
 /// `NotFound` and reaches this socket exactly like any other attach
 /// failure — a `{"type":"detached",...}` notice, then close, never a bare
-/// disconnect the browser would blame on the network instead of the
-/// session (see `serve_term`'s single attach-failure arm).
+/// disconnect the client could only report as a lost connection rather
+/// than as the session's state (see `serve_term`'s single attach-failure
+/// arm).
 ///
 /// The client → server text messages, all `{"type": ...}` and typed as
 /// [`TerminalClientMessage`] (the server → client ones as
@@ -389,9 +404,9 @@ fn control_frame(message: &TerminalServerMessage) -> ws::Message {
 /// It would also put a periodic message on every idle session's control
 /// path for no added signal.
 ///
-/// The browser sends no flow control: the helm pauses and resumes the
+/// The client sends no flow control: the helm pauses and resumes the
 /// supervisor from its own queue (this module's "Bounds and flow control").
-/// A `pause` or `resume` from a page is an unknown message, ignored.
+/// A `pause` or `resume` from a client is an unknown message, ignored.
 ///
 /// Server → client, all text: `{"type":"pong"}`,
 /// `{"type":"detached","reason":...}` and, as of PLAN_M5.md item 4,
@@ -418,9 +433,10 @@ pub(crate) async fn term_ws(
 ///
 /// A route of its own, served only by a helm that understands the contract
 /// — see `build_router` for why the request has to be unaskable rather
-/// than merely ignorable. Only the browser's automatic reconnect uses it;
-/// a click, a reload and a take-control all carry user intent and go to
-/// the ordinary path.
+/// than merely ignorable. Only the client's reconnect uses it, automatic or
+/// hurried by the client's reconnect-now request; opening a terminal and
+/// Take control both carry the intent to take it and go to the ordinary
+/// path.
 pub(crate) async fn term_ws_if_unowned(
     State(state): State<Arc<AppState>>,
     upgrade: WebSocketUpgrade,
@@ -431,10 +447,10 @@ pub(crate) async fn term_ws_if_unowned(
 }
 
 /// The largest WebSocket message, and frame, a terminal socket accepts from
-/// the browser: 8 MiB, the protocol's frame cap
+/// the client: 8 MiB, the protocol's frame cap
 /// ([`farhelm_proto::MAX_FRAME_LEN`]).
 ///
-/// A browser message is at most `GRID_MAX_INPUT_MESSAGE` (64 KiB), and one
+/// A client message is at most `GRID_MAX_INPUT_MESSAGE` (64 KiB), and one
 /// over that ends the attachment when it arrives
 /// (`SupervisorClient::send_grid_input`), so this only bounds what the
 /// socket layer reads before that check, and what it reserves for a frame's
@@ -468,10 +484,10 @@ fn serve_term_upgrade(
         .on_upgrade(move |socket| async move {
             if let Err(e) = serve_term(state, id, q, socket, if_unowned).await {
                 // A refused non-displacing attach is an ORDINARY outcome,
-                // not a fault: a browser probing every thirty seconds for a
-                // session someone else holds is the reconnect ladder
-                // working exactly as designed (PLAN_M6.md item 7), and
-                // logging each probe at ERROR would fill the helm's log
+                // not a fault: a client whose reconnect finds the session
+                // held by someone else is the reconnect working exactly as
+                // designed (PLAN_M6.md item 7), and logging each such
+                // refusal at ERROR would fill the helm's log
                 // with the sound of nothing going wrong. It is still
                 // logged, because SPEC.md lists reconnection among the
                 // things that must be observable — just at the level the
@@ -500,7 +516,7 @@ fn serve_term_upgrade(
 /// SPEC.md requires a takeover — and now a stall — to be visibly itself
 /// rather than a bare connection close, and that notice is one small text
 /// frame, so this only has to cover a socket that is working. A socket
-/// that is NOT working is the case this bound exists for: the browser
+/// that is NOT working is the case this bound exists for: the client
 /// that stopped reading is precisely the one whose detach is being
 /// delivered, and waiting on it indefinitely would reinstate the pin the
 /// detach just removed.
@@ -513,7 +529,7 @@ const WS_TEARDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(5)
 #[cfg(test)]
 const TEST_PANIC_TEXT_MESSAGE: &str = r#"{"type":"panic"}"#;
 
-/// Pump one attached terminal between the browser and the supervisor.
+/// Pump one attached terminal between the client and the supervisor.
 ///
 /// The body of the terminal path, and deliberately the dumbest part of it:
 /// frames are never inspected, buffered, or transformed in either
@@ -526,12 +542,12 @@ const TEST_PANIC_TEXT_MESSAGE: &str = r#"{"type":"panic"}"#;
 /// detach notice goes out *before* the close, because a bare close renders
 /// as a generic "connection closed" and SPEC.md requires a takeover to be
 /// visibly a takeover. `detach` runs on every exit path, including an inbound
-/// task panic, so the supervisor never keeps an attachment alive for a browser
+/// task panic, so the supervisor never keeps an attachment alive for a client
 /// that is gone.
 ///
 /// # Why two tasks
 ///
-/// Inbound (browser → supervisor) and outbound (supervisor → browser) run
+/// Inbound (client → supervisor) and outbound (supervisor → client) run
 /// as separate tasks rather than two arms of one `select!`. Since the
 /// helm's outbound queue became bounded, every inbound forward — input and
 /// resize — can park waiting for capacity, and in a single
@@ -557,9 +573,9 @@ async fn serve_term(
     // — a locally-refused query shape (an explicit empty `?lease=`) and a
     // supervisor-side attach refusal (unknown session, unknown tab, a
     // terminal that cannot be read) — because both must reach the user
-    // identically: a `{"type":"detached",...}` notice, then a closed
-    // socket, never a bare disconnect the browser would blame on the
-    // network instead of the request it just made. See
+    // the same way: a `{"type":"detached",...}` notice, then a closed
+    // socket, never a bare disconnect the client could only report as a lost
+    // connection rather than as a refusal of the request it just made. See
     // `attach_from_query`'s own docs for why folding them into one
     // `Result` is what keeps this a single arm instead of two copies of
     // the same three lines.
@@ -591,7 +607,7 @@ async fn serve_term(
     let (mut ws_tx, mut ws_rx) = socket.split();
 
     // The detach signal, watched independently of the event queue. This is
-    // the priority path that makes teardown always possible: a browser
+    // the priority path that makes teardown always possible: a client
     // that has stopped reading can block the `ws_tx.send` below
     // indefinitely, and without a way to abandon that send, a stall detach
     // would leave this handler, its queued frames, and the attachment
@@ -624,7 +640,7 @@ async fn serve_term(
             // so parking the answer behind it would answer late precisely
             // when the answer is being timed. It still goes out through the
             // same detach-racing send below as everything else, which is
-            // what keeps a wedged browser from pinning this handler on a
+            // what keeps a wedged client from pinning this handler on a
             // one-frame write — and through the same sink, since two halves
             // writing to one socket is exactly the interleaving that would
             // let a pong land in the middle of a terminal frame.
@@ -644,7 +660,7 @@ async fn serve_term(
                 // The catch-up boundary (PLAN_M5.md item 4). Built as an
                 // ordinary outbound `Message` rather than sent inline like
                 // `Detached` below, deliberately: it must go through the
-                // SAME `select!` — racing the browser's detach signal —
+                // SAME `select!` — racing the client's detach signal —
                 // as a `Data` message would, so a viewer that vanished
                 // between the marker and this send abandons it exactly
                 // like abandoned data, instead of the marker getting a
@@ -702,7 +718,7 @@ async fn serve_term(
                     // The attachment is over: this message was over the
                     // bound and ended it (the reason is published for the
                     // outbound half to deliver), or it had already ended.
-                    // Stop reading the browser. `send_grid_input` forwards
+                    // Stop reading the client. `send_grid_input` forwards
                     // nothing for an ended attachment either way.
                     if client_inbound
                         .send_grid_input(channel, bytes.to_vec())
@@ -725,15 +741,15 @@ async fn serve_term(
                         }
                         // The one client message answered HERE rather than
                         // relayed (see `term_ws`'s docs). Notifying never parks,
-                        // which is the property this loop needs: the browser
+                        // which is the property this loop needs: the client
                         // that is not draining is exactly the one whose ping
                         // would otherwise block every keystroke queued behind
                         // it.
                         Ok(TerminalClientMessage::Ping) => pong.notify_one(),
                         // Unparseable or unknown: ignored on purpose, so a
-                        // newer browser bundle talking to an older helm
+                        // newer client talking to an older helm
                         // degrades rather than dropping the terminal. That
-                        // includes a `pause` or `resume`, which no page sends
+                        // includes a `pause` or `resume`, which no client sends
                         // now: the supervisor keeps one paused flag per
                         // attachment, and the helm's own flow control
                         // (`SupervisorClient::spawn_grid_flow`) owns it.
@@ -755,7 +771,7 @@ async fn serve_term(
     let mut inbound = inbound;
 
     // Either half ending must end the whole handler, and the outbound arm
-    // is the one that matters for teardown. A browser that stops reading
+    // is the one that matters for teardown. A client that stops reading
     // never closes its socket and never sends anything, so the inbound
     // loop alone would wait forever — pinning this handler, its socket,
     // and every frame queued for it for exactly as long as the wedge
@@ -774,7 +790,7 @@ async fn serve_term(
         SocketEnd::Inbound(result) => {
             // Keep the panic as the returned result, but do not return before
             // the detach below: the supervisor attachment must be cleaned up
-            // even when the browser-to-supervisor task panics.
+            // even when the client-to-supervisor task panics.
             let result =
                 match result {
                     Ok(result) => result,
@@ -798,7 +814,7 @@ async fn serve_term(
     result
 }
 
-/// Bound local detach after browser I/O is gone. Once the local attachment
+/// Bound local detach after client I/O is gone. Once the local attachment
 /// is removed, the client's independent task owns upstream notification;
 /// this timeout cannot cancel a send waiting for writer capacity.
 async fn detach_bounded(client: &SupervisorClient, channel: u32) {
@@ -823,11 +839,11 @@ async fn detach_bounded(client: &SupervisorClient, channel: u32) {
 /// not a fused future — and the teardown it belongs to had two independent
 /// ways to do exactly that: the `select!` above can be what drives the
 /// handle to completion (the supervisor ended the attachment first), and so
-/// can the timeout below (the ordinary case — the browser navigated away,
-/// the drain sent its detach notice and stopped). Either one left the old
+/// can the timeout below (the ordinary case — the client went away, the
+/// drain sent its detach notice and stopped). Either one left the old
 /// `timeout(...); handle.await` pair polling a spent handle, so a plain page
-/// navigation printed "JoinHandle polled after completion" into the helm's
-/// log on the way out.
+/// navigation in the old browser client printed "JoinHandle polled after
+/// completion" into the helm's log on the way out.
 ///
 /// `already_finished` is the caller's report of the first case; the second
 /// is handled by only awaiting after an `abort`, which is the one path where
@@ -2082,7 +2098,7 @@ mod tests {
     /// item 7).
     ///
     /// Pinned at the wire because that is where the safety property lives:
-    /// the browser's automatic reconnect asks for the refusal by CHOOSING
+    /// the client's automatic reconnect asks for the refusal by CHOOSING
     /// A PATH, and what has to be true is that the path it chose becomes
     /// the flag the supervisor reads. A regression that dropped the flag
     /// would leave every automatic reconnect displacing again — silently,
@@ -2420,15 +2436,16 @@ mod tests {
 
     /// `tab_closed` is reserved for the one refusal that proves a TAB is
     /// gone. The same `NotFound` on the agent terminal carries the
-    /// supervisor's account of what happened to the session, which the
-    /// browser must keep showing rather than silently hiding, and a tab
+    /// supervisor's account of what happened to the session, and the client
+    /// must keep retrying the agent terminal rather than stopping it as it
+    /// does for a closed tab; and a tab
     /// refused for any other reason, such as a host the helm cannot reach,
-    /// is transport trouble that the browser's reconnect ladder exists to
+    /// is transport trouble that the client's reconnect ladder exists to
     /// ride out. Both stay `other`.
     ///
     /// This pins the edges of the mapping that stopped phantom tabs from
     /// retrying (see `refused_as_missing_tab`): widened to the agent, it
-    /// would hide a rebooted session's explanation; widened past
+    /// would stop the agent terminal's recovery after a reboot; widened past
     /// `NotFound`, it would end recovery for tabs on a host that is only
     /// briefly away.
     #[farhelm_testtrace::test]
@@ -2441,7 +2458,7 @@ mod tests {
         assert_eq!(agent["type"], "detached");
         assert_eq!(
             agent["code"], "other",
-            "the agent terminal's NotFound keeps its explanation visible: {agent}"
+            "the agent terminal's NotFound keeps the agent terminal retrying: {agent}"
         );
 
         let unreachable = detach_notice_for_refused_attach(
