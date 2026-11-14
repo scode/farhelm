@@ -13,7 +13,7 @@ use gpui::{
     Subscription, Window, div,
 };
 
-use crate::components::{Button, HoverHelp, Role, Tier};
+use crate::components::{Banner, Button, HoverHelp, Role, Tier};
 use crate::notices::{self, Notice};
 use crate::theme::metrics;
 use crate::{focus, layers, render_count, session, theme};
@@ -62,11 +62,7 @@ impl Render for MainView {
                 .flex()
                 .flex_col()
                 .size_full()
-                .children(
-                    notices::posted(cx)
-                        .into_iter()
-                        .map(|notice| banner(notice, cx)),
-                )
+                .children(notices::posted(cx).into_iter().map(banner))
                 .into_any_element()
         } else {
             inert(&state, cx)
@@ -151,31 +147,16 @@ fn inert(state: &ChannelState, cx: &App) -> AnyElement {
 /// `.banner-reclaim`, in the stylesheet at `24bc0580`). SPEC_impl.md, "Notices", asks for an existing style.
 /// Like that banner, the text runs first and the button follows it rather than being pushed to the far edge. Visible to
 /// the crate so the goldens can pin it.
-pub(crate) fn banner(notice: Notice, cx: &App) -> AnyElement {
-    let palette = theme::palette(cx);
-    let (pad_y, pad_x) = metrics::BANNER_PAD;
-    div()
-        .flex()
-        .flex_row()
-        .flex_wrap()
-        .items_center()
-        .py(pad_y)
-        .px(pad_x)
-        .bg(theme::color(palette.danger_bg))
-        .text_color(theme::color(palette.on_fill))
-        .text_size(metrics::TEXT_MD)
-        .child(div().min_w_0().child(notice.text()))
-        .child(
-            div().ml(metrics::BANNER_BUTTON_GAP).child(
-                Button::new(
-                    SharedString::from(format!("notice-dismiss-{notice:?}")),
-                    "Dismiss",
-                    HoverHelp::tooltip("Dismiss this notice"),
-                    Role::Button,
-                )
-                .tier(Tier::OnBanner)
-                .on_click(move |_, _, cx| notices::withdraw(notice, cx)),
-            ),
+pub(crate) fn banner(notice: Notice) -> AnyElement {
+    Banner::new(notice.text())
+        .action(
+            Button::new(
+                SharedString::from(format!("notice-dismiss-{notice:?}")),
+                "Dismiss",
+                HoverHelp::tooltip("Dismiss this notice"),
+                Role::Button,
+            )
+            .on_click(move |_, _, cx| notices::withdraw(notice, cx)),
         )
         .into_any_element()
 }

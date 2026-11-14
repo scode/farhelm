@@ -14,7 +14,11 @@
 //! combining marks and emoji sequences stay together, and ink clipped to the cell box the wire assigns so a fallback
 //! glyph never moves later columns. Selection, link and scrollback views are not here yet; they come with the
 //! terminal area's later work.
+//!
+//! [`attached`] holds the owner that connects a view to a terminal stream: when to attach, which view receives a
+//! replay, and what the pane says while the stream is not live.
 
+pub mod attached;
 mod style;
 #[cfg(test)]
 mod tests;
