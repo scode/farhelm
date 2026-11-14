@@ -609,8 +609,8 @@ impl TerminalElement {
                             origin,
                             size(px(f32::from(piece.width) * m.width), px(m.height)),
                         );
-                        // ASCII keeps its run's italic overhang (once an italic face is bundled); other text is
-                        // clipped to its own box.
+                        // ASCII keeps its run's italic overhang (an italic glyph can lean past its own cell into the
+                        // next one); other text is clipped to its own box.
                         let clip = if run.plain_flow { area } else { cell };
                         // The cell stays the clip; only the glyphs move, by less than half a logical pixel, so
                         // stacked rows' block and box-drawing glyphs meet (`Baselines`).
@@ -743,9 +743,9 @@ impl TerminalElement {
 
 /// The terminal face for a resolved style, with ligatures off so every character keeps its own cell.
 ///
-/// NOTE: italic draws upright for now. Only the regular and bold faces are bundled (the old app shipped no italic face
-/// and let the browser slant the regular one), and GPUI does not synthesize an oblique. The italic request stays, so
-/// the Italic and Bold Italic faces a follow-up change bundles are picked up here without a code change.
+/// Bold and italic select the bundled Bold, Italic and Bold Italic faces ([`crate::assets::terminal_fonts`]). GPUI
+/// never fakes either attribute, so a style is drawn slanted or heavy only because its face is: the old app's browser
+/// slanted the regular face instead, which is why the italic faces had to be bundled for the GPUI app.
 fn terminal_face(style: ResolvedStyle) -> gpui::Font {
     let mut face = font(TERMINAL_FONT);
     if style.bold {

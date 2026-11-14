@@ -292,6 +292,44 @@ fn the_cell_is_the_bundled_fonts_advance_by_its_ascent_plus_descent() {
     assert_eq!(m.cell_size(0, 0, 2.), Size::default());
 }
 
+/// Every combination of bold and italic draws in a bundled face of its own. GPUI never slants or emboldens a face
+/// itself, so a style whose request lands on another face draws wrong without any error: italic text drew upright
+/// until the Italic and Bold Italic faces were bundled. The styles golden shows the result as pixels; this names the
+/// face selection itself, so a missing face fails here by name.
+///
+/// Spec: the faces `terminal_face` asks for with neither attribute, bold, italic, and both resolve to four different
+/// fonts, and each is a JetBrains Mono face, not the interface font: its advance at 14 points is 0.6 times the size.
+#[test]
+fn each_bold_and_italic_combination_resolves_to_its_own_bundled_face() {
+    let mut cx = test_support::headless().unwrap();
+    let faces = cx.update(|cx| {
+        [0, flags::BOLD, flags::ITALIC, flags::BOLD | flags::ITALIC].map(|bits| {
+            let resolved = style::resolve(
+                Style {
+                    flags: bits,
+                    ..Style::PLAIN
+                },
+                None,
+            );
+            let id = cx.text_system().resolve_font(&terminal_face(resolved));
+            let advance = cx.text_system().advance(id, px(14.), 'W').unwrap().width;
+            (bits, id, f32::from(advance))
+        })
+    });
+    for (i, (bits, id, advance)) in faces.iter().enumerate() {
+        assert!(
+            (advance - 0.6 * 14.).abs() < 1e-3,
+            "flags {bits:#x} resolved to a face with advance {advance}, not JetBrains Mono"
+        );
+        for (other_bits, other_id, _) in &faces[i + 1..] {
+            assert_ne!(
+                id, other_id,
+                "flags {bits:#x} and {other_bits:#x} resolved to the same face"
+            );
+        }
+    }
+}
+
 /// The device-pixel baseline GPUI's `paint_line` and `paint_glyph` give a line handed origin `y`: the line height
 /// minus ascent and descent, halved, plus the ascent, scaled and rounded half toward zero (GPUI keeps one vertical
 /// subpixel variant, so every glyph sits on a whole device pixel). Restated here because the seam it causes is the
