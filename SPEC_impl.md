@@ -746,13 +746,29 @@ on real hardware such events are input-method text and replayed keystrokes, neve
 takes these keys before the element that owns the input handler, refusing one typed mid-composition (SPEC.md asks it of
 Keyboard shortcuts) falls to the action's handler, which can ask the focused input whether it is composing.
 
+A mode that takes every key without taking focus (SPEC.md's quick-launch sequence) arms the one app-wide key capture
+slot in the same module. Focus cannot move to a capturing element, so the same keystroke interceptor hands every
+key-down to the armed slot's handler before the physical-key rows, the bindings (Escape's dismiss binding included) and
+the focused element, a terminal included, and held repeats with them. The handler answers consumed, which stops the key,
+or cancel, which disarms the slot and lets the key go on as if nothing had been armed. Modifiers pressed alone never
+reach it. Arming an armed slot is refused, so no mode silently takes the keys from another; the holder disarms the slot
+explicitly, and a reset disarms it too, telling the holder through a callback given when it armed. Input-method text is
+not covered: committed text from a composition, a CJK input source or a dead key (and on Wayland a commit of several
+characters) reaches the focused element's input handler without a key-down, so the slot never sees it, and refusing it
+while armed falls to the text receiver (a terminal's input handler, a text field), which can ask whether the slot is
+armed.
+
 Enforced by a test that walks the keymap and fails on a chord prefix in any context containing a terminal, by a test
 that every pass-through key reaches the terminal with the app's bindings loaded, and by tests that a held listed
 shortcut runs once, from a focused terminal too and without reaching it, and again on a fresh press, while an unlisted
 key and a deeper binding of a listed chord keep every repeat. The physical-key table is enforced by tests on both
 platforms' identities: each row runs from a focused terminal without reaching it, and a held one acts once or on every
 repeat as its action says; a key without an identity falls back to its US key; the position decides on another layout; a
-keypad digit, an extra modifier or a missing one matches nothing; and no row's key types into a text field.
+keypad digit, an extra modifier or a missing one matches nothing; and no row's key types into a text field. The key
+capture slot is enforced by tests that an armed slot takes every key-down, held repeats too, ahead of a focused
+terminal, a binding and a physical-key row; that it sees Escape before Dismiss; that a cancel disarms it and the key
+reaches its normal target; that a second arm is refused; that its handler can close a layer and disarm from inside; and
+that a reset disarms it and tells its holder.
 
 ### Animation time: the ticker
 

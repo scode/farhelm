@@ -9,8 +9,10 @@
 //! Copy with no Kit selection). So the tests also read the keymap's resolution in the focused terminal's real context
 //! stack, which shows whether any binding would run at all.
 //!
-//! The last section tests the repeat guard: a held key's auto-repeats are key-down events with `is_held` set, sent
-//! with `simulate_event`, since `simulate_keystrokes` only ever sends fresh presses.
+//! Later sections test the repeat guard and the physical-key table: a held key's auto-repeats are key-down events with
+//! `is_held` set, sent with `simulate_event`, since `simulate_keystrokes` only ever sends fresh presses. The last
+//! section tests the key capture slot, which takes every key ahead of all of the above; that a reset disarms it is
+//! tested with the reset itself, in `session_tests.rs`.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -23,10 +25,11 @@ use gpui::{
 };
 
 use crate::actions::{
-    CONTEXT, DecreaseTerminalTextSize, DeleteSession, IncreaseTerminalTextSize, KeyOwner,
+    CONTEXT, Captured, DecreaseTerminalTextSize, DeleteSession, IncreaseTerminalTextSize, KeyOwner,
     PHYSICAL_KEYS, PhysicalKey, QuickSwitcher, RenameSession, ShowKeyboardShortcuts,
     TERMINAL_CONTEXT, TERMINAL_KEYS, TEXT_INPUT_CONTEXT, THIS_PLATFORM, TemplateNumberKey,
-    owner_on, physical_key_at, physical_on, terminal_key_owner,
+    arm_key_capture, disarm_key_capture, key_capture_armed, owner_on, physical_key_at, physical_on,
+    terminal_key_owner,
 };
 use crate::components::{Button, HoverHelp, Role, TextInput, TextInputState};
 use crate::focus::{self, OnPress};
@@ -1317,4 +1320,365 @@ fn a_physical_shortcut_with_no_handler_never_reaches_a_focused_text_field(cx: &m
             .any(|context| context.contains(TEXT_INPUT_CONTEXT)),
         "the field kept focus: {stack:?}"
     );
+}
+
+// ---- The key capture slot --------------------------------------------------------------------------------------------
+
+/// Every key-down a test capture was handed, in order: its logical key and whether it was a held repeat.
+type Seen = Rc<RefCell<Vec<(String, bool)>>>;
+
+/// The app shortcut a test binds a [`Probe`] to (the template list's chord, which no feature binds yet), so a test can
+/// see whether a key reached Farhelm's bindings.
+fn probe_chord() -> &'static str {
+    match THIS_PLATFORM {
+        Platform::Mac => "cmd-j",
+        Platform::Linux => "ctrl-shift-j",
+    }
+}
+
+impl Opened<'_> {
+    /// Bind a [`Probe`] to [`probe_chord`] in Farhelm's context, as a feature binds an app shortcut.
+    fn bind_probe(&mut self) {
+        self.cx
+            .update(|_, cx| cx.bind_keys([KeyBinding::new(probe_chord(), Probe, Some(CONTEXT))]));
+    }
+
+    /// Arm the key capture slot with a handler that records each key-down it is handed and answers what `answer` says
+    /// for it, and assert that the slot took it. Returns the record and a count of the times a reset told the holder.
+    fn arm(
+        &mut self,
+        answer: impl Fn(&KeyDownEvent) -> Captured + 'static,
+    ) -> (Seen, Rc<Cell<usize>>) {
+        let seen = Seen::default();
+        let resets = Rc::new(Cell::new(0));
+        let (record, told) = (seen.clone(), resets.clone());
+        let armed = self.cx.update(|_, cx| {
+            arm_key_capture(
+                move |event, _, _| {
+                    record
+                        .borrow_mut()
+                        .push((event.keystroke.key.clone(), event.is_held));
+                    answer(event)
+                },
+                move |_| told.set(told.get() + 1),
+                cx,
+            )
+        });
+        assert!(armed, "the premise: the slot was idle and armed");
+        (seen, resets)
+    }
+
+    /// Whether the key capture slot is armed now.
+    fn capture_armed(&mut self) -> bool {
+        self.cx.update(|_, cx| key_capture_armed(cx))
+    }
+}
+
+/// The keys `seen` recorded, without the held flag.
+fn keys_of(seen: &Seen) -> Vec<String> {
+    seen.borrow().iter().map(|(key, _)| key.clone()).collect()
+}
+
+/// SPEC.md, "Quick-launch sequences": while armed, typed characters never reach the terminal's program, and a held key
+/// adds nothing, which only the handler can decide if it sees the repeats. The slot exists because no focused element
+/// can take keys from a focused terminal without taking focus. Specified: with a terminal focused and the slot armed,
+/// a letter, an app shortcut bound in Farhelm's context, Escape, a number-key chord and a held letter all reach the
+/// handler, repeats marked held, and none reaches the terminal, the binding or the number key's action; a modifier
+/// tapped alone reaches nothing (SPEC.md: Shift on its own does not cancel); focus stays put. Once disarmed, keys go
+/// their normal way again, and the explicit disarm does not run the reset callback.
+#[gpui::test]
+fn an_armed_capture_takes_every_key_down_before_the_terminal_bindings_and_rows(
+    cx: &mut TestAppContext,
+) {
+    let mut opened = open(cx);
+    opened.bind_probe();
+    opened.focus_terminal();
+    let number = row_of(&TemplateNumberKey { digit: 3 });
+    let number_key = us_down(THIS_PLATFORM, number, false).keystroke.key;
+    let (seen, resets) = opened.arm(|_| Captured::Consumed);
+
+    test_support::keys(opened.cx, "a");
+    test_support::keys(opened.cx, probe_chord());
+    test_support::keys(opened.cx, "escape");
+    opened
+        .cx
+        .simulate_event(us_down(THIS_PLATFORM, number, false));
+    test_support::settle(opened.cx);
+    opened.hold("b");
+    let shift = gpui::Modifiers {
+        shift: true,
+        ..Default::default()
+    };
+    opened.cx.simulate_modifiers_change(shift);
+    opened.cx.simulate_modifiers_change(gpui::Modifiers::none());
+    test_support::settle(opened.cx);
+
+    let probe_key = parse(probe_chord()).key;
+    let expected: Vec<(String, bool)> = [
+        ("a", false),
+        (probe_key.as_str(), false),
+        ("escape", false),
+        (number_key.as_str(), false),
+        ("b", false),
+        ("b", true),
+        ("b", true),
+    ]
+    .iter()
+    .map(|(key, held)| (key.to_string(), *held))
+    .collect();
+    assert_eq!(*seen.borrow(), expected, "the handler saw every key-down");
+    assert!(
+        opened.received.borrow().is_empty(),
+        "nothing reached the terminal: {:?}",
+        opened.received.borrow()
+    );
+    assert_eq!(
+        opened.probes.get(),
+        0,
+        "the app shortcut's binding did not run"
+    );
+    assert!(
+        opened.digits.borrow().is_empty(),
+        "the number key did not run"
+    );
+    assert!(opened.terminal_focused(), "the terminal kept focus");
+    assert!(opened.capture_armed(), "the slot is still armed");
+
+    assert!(
+        opened.cx.update(|_, cx| disarm_key_capture(cx)),
+        "disarming found the slot armed"
+    );
+    assert!(!opened.capture_armed());
+    assert!(
+        opened.reaches_terminal("a"),
+        "a letter reaches the terminal again"
+    );
+    assert!(!opened.reaches_terminal(probe_chord()));
+    assert_eq!(opened.probes.get(), 1, "the app shortcut runs again");
+    assert_eq!(
+        seen.borrow().len(),
+        expected.len(),
+        "the handler saw nothing more"
+    );
+    assert_eq!(resets.get(), 0, "an explicit disarm runs no reset callback");
+}
+
+/// SPEC.md: "Escape cancels and is consumed". Farhelm binds Escape to Dismiss, which would close the topmost layer or
+/// the tooltip instead, so the capture must see Escape before that binding does; the layer manager needs no part in
+/// it. Specified: with focus outside any terminal, a tooltip showing and the slot armed, Escape reaches the handler and
+/// the tooltip stays; once disarmed, the same Escape closes it, which shows the binding was live all along.
+#[gpui::test]
+fn escape_reaches_an_armed_capture_before_the_dismiss_binding(cx: &mut TestAppContext) {
+    let mut opened = open(cx);
+    // Kept for the whole test, because the owner token's release would take the tooltip down by itself.
+    let owner = opened.cx.update(|_, cx| cx.new(|_| layers::TooltipOwner));
+    opened.cx.update(|window, cx| {
+        layers::show_tooltip_at(&owner, "help".into(), point(px(5.), px(5.)), window, cx)
+    });
+    test_support::settle(opened.cx);
+    let shown = |opened: &mut Opened| {
+        opened
+            .cx
+            .update(|window, cx| layers::shown_tooltip(window, cx).is_some())
+    };
+    assert!(shown(&mut opened), "the premise: the tooltip shows");
+    let (seen, _) = opened.arm(|_| Captured::Consumed);
+
+    test_support::keys(opened.cx, "escape");
+    assert_eq!(keys_of(&seen), ["escape"], "the handler saw Escape");
+    assert!(shown(&mut opened), "and Dismiss never ran");
+
+    assert!(opened.cx.update(|_, cx| disarm_key_capture(cx)));
+    test_support::keys(opened.cx, "escape");
+    assert!(
+        !shown(&mut opened),
+        "the premise: unarmed, Escape closes the tooltip"
+    );
+}
+
+/// SPEC.md: "Non-sequence keys, including arrows, other chords and Shift+Enter, cancel and reach their normal
+/// target." Specified: a handler's Cancel disarms the slot, and the key it cancelled on goes where it would have with
+/// nothing armed: an arrow to the focused terminal, an app shortcut to its binding, a number-key chord to its
+/// physical-key row; the next key does not reach the handler.
+#[gpui::test]
+fn a_cancel_disarms_the_capture_and_the_key_goes_on_to_its_normal_target(cx: &mut TestAppContext) {
+    let mut opened = open(cx);
+    opened.bind_probe();
+    opened.focus_terminal();
+    // Consumes plain single characters, as a sequence does with a word's letters, and cancels on anything else.
+    let answer = |event: &KeyDownEvent| {
+        if event.keystroke.modifiers.modified() || event.keystroke.key.chars().count() != 1 {
+            Captured::Cancel
+        } else {
+            Captured::Consumed
+        }
+    };
+
+    let (seen, resets) = opened.arm(answer);
+    test_support::keys(opened.cx, "a");
+    assert!(
+        opened.received.borrow().is_empty(),
+        "the premise: the letter was consumed"
+    );
+    assert!(
+        opened.reaches_terminal("down"),
+        "the arrow it cancelled on reached the terminal"
+    );
+    assert!(!opened.capture_armed(), "the cancel disarmed the slot");
+    assert!(
+        opened.reaches_terminal("b"),
+        "the next key reached the terminal"
+    );
+    assert_eq!(keys_of(&seen), ["a", "down"], "and not the handler");
+
+    let (seen, _) = opened.arm(answer);
+    assert!(!opened.reaches_terminal(probe_chord()));
+    assert_eq!(
+        opened.probes.get(),
+        1,
+        "the chord it cancelled on ran its binding"
+    );
+    assert_eq!(seen.borrow().len(), 1);
+    assert!(!opened.capture_armed());
+
+    let (seen, _) = opened.arm(answer);
+    let number = row_of(&TemplateNumberKey { digit: 5 });
+    opened
+        .cx
+        .simulate_event(us_down(THIS_PLATFORM, number, false));
+    test_support::settle(opened.cx);
+    assert_eq!(
+        *opened.digits.borrow(),
+        [5],
+        "the number key it cancelled on ran its row"
+    );
+    assert_eq!(seen.borrow().len(), 1);
+    assert!(!opened.capture_armed());
+    assert_eq!(resets.get(), 0, "a cancel runs no reset callback");
+}
+
+/// There is one slot, so a second arm while it is held must not silently take the keys from the first holder, which
+/// would go on showing its mode with nothing feeding it. Specified: arming an armed slot is refused and drops the
+/// refused closures; keys keep going to the first handler; once the first holder disarms, the second can arm.
+#[gpui::test]
+fn arming_an_armed_capture_is_refused_until_it_is_disarmed(cx: &mut TestAppContext) {
+    let mut opened = open(cx);
+    opened.focus_terminal();
+    let (first, _) = opened.arm(|_| Captured::Consumed);
+    let second = Seen::default();
+    let record = second.clone();
+    let armed = opened.cx.update(|_, cx| {
+        arm_key_capture(
+            move |event, _, _| {
+                record
+                    .borrow_mut()
+                    .push((event.keystroke.key.clone(), event.is_held));
+                Captured::Consumed
+            },
+            |_| {},
+            cx,
+        )
+    });
+    assert!(!armed, "the second arm was refused");
+    assert_eq!(Rc::strong_count(&second), 1, "and its handler was dropped");
+
+    test_support::keys(opened.cx, "a");
+    assert_eq!(
+        keys_of(&first),
+        ["a"],
+        "the first handler still gets the keys"
+    );
+    assert!(second.borrow().is_empty());
+
+    assert!(opened.cx.update(|_, cx| disarm_key_capture(cx)));
+    let (third, _) = opened.arm(|_| Captured::Consumed);
+    test_support::keys(opened.cx, "b");
+    assert_eq!(keys_of(&third), ["b"], "after a disarm the slot arms again");
+    assert_eq!(keys_of(&first), ["a"]);
+}
+
+/// The handler runs with the window and the app in hand and will open and close layers and end its own mode (Enter
+/// launches, then the sequence is over), so the slot must not hold anything borrowed while it runs. Specified: a
+/// handler that closes the shown tooltip through the layer manager, disarms the slot and answers Consumed has the key
+/// consumed, the tooltip closed and the slot disarmed; an arm from inside the handler is refused; the next key reaches
+/// the terminal.
+#[gpui::test]
+fn the_capture_handler_may_close_a_layer_and_disarm_from_inside(cx: &mut TestAppContext) {
+    let mut opened = open(cx);
+    opened.focus_terminal();
+    let owner = opened.cx.update(|_, cx| cx.new(|_| layers::TooltipOwner));
+    opened.cx.update(|window, cx| {
+        layers::show_tooltip_at(&owner, "help".into(), point(px(5.), px(5.)), window, cx)
+    });
+    test_support::settle(opened.cx);
+    assert!(
+        opened
+            .cx
+            .update(|window, cx| layers::shown_tooltip(window, cx).is_some()),
+        "the premise: the tooltip shows"
+    );
+    let inner_arm = Rc::new(Cell::new(None));
+    let inner = inner_arm.clone();
+    let armed = opened.cx.update(|_, cx| {
+        arm_key_capture(
+            move |_, window, cx| {
+                layers::dismiss_top(window, cx);
+                disarm_key_capture(cx);
+                inner.set(Some(arm_key_capture(
+                    |_, _, _| Captured::Consumed,
+                    |_| {},
+                    cx,
+                )));
+                Captured::Consumed
+            },
+            |_| {},
+            cx,
+        )
+    });
+    assert!(armed, "the premise: the slot armed");
+
+    test_support::keys(opened.cx, "enter");
+    assert!(opened.received.borrow().is_empty(), "Enter was consumed");
+    assert!(
+        !opened
+            .cx
+            .update(|window, cx| layers::shown_tooltip(window, cx).is_some()),
+        "the handler closed the tooltip"
+    );
+    assert_eq!(
+        inner_arm.get(),
+        Some(false),
+        "the arm from inside the handler was refused"
+    );
+    assert!(!opened.capture_armed(), "the handler's disarm held");
+    assert!(
+        opened.reaches_terminal("a"),
+        "the next key reached the terminal"
+    );
+}
+
+/// A handler may dispatch something itself before it decides, and GPUI's action handlers stop propagation by default,
+/// so a Cancel must not depend on the handler leaving GPUI's propagation flag alone, or the key it cancelled on would
+/// silently go nowhere. Specified: a handler that stops propagation and then answers Cancel still has the key reach
+/// the focused terminal, and the slot disarms.
+#[gpui::test]
+fn a_cancel_lets_the_key_go_on_even_after_the_handler_stopped_propagation(cx: &mut TestAppContext) {
+    let mut opened = open(cx);
+    opened.focus_terminal();
+    let armed = opened.cx.update(|_, cx| {
+        arm_key_capture(
+            |_, _, cx| {
+                cx.stop_propagation();
+                Captured::Cancel
+            },
+            |_| {},
+            cx,
+        )
+    });
+    assert!(armed, "the premise: the slot armed");
+    assert!(
+        opened.reaches_terminal("down"),
+        "the arrow it cancelled on reached the terminal"
+    );
+    assert!(!opened.capture_armed(), "the cancel disarmed the slot");
 }
