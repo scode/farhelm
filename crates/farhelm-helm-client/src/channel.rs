@@ -121,7 +121,7 @@ pub use farhelm_proto::ui_channel::Method;
 /// How a command's completion travels. It rides the event queue, so it is delivered in order with the events.
 pub(crate) type Completion = oneshot::Sender<Result<Reply, CommandError>>;
 
-/// What a handle asks of the channel task. Public within the crate so [`crate::fake`] can serve the same handles.
+/// What a handle asks of the channel task. Public within the crate so `crate::fake` can serve the same handles.
 pub(crate) enum Request {
     Command {
         method: Method,

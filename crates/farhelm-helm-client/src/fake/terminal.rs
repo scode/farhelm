@@ -11,7 +11,9 @@
 //! ahead of an attachment's first output or end of replay, not when its socket opens; `Reconnecting` once per outage
 //! however many attempts follow; a detach that stops the stream (decided by the same function the real stream uses, so
 //! the two cannot disagree) waits in `Detached`; `Closed` on close from every state; and input sent while not attached
-//! is dropped rather than delivered later.
+//! is dropped rather than delivered later. Everything but `detach_stops` is restated here rather than shared, so the
+//! real stream's parity test (`terminal/tests/parity.rs`) plays one script against both and fails when they part.
+//! Change a rule in either place and that test says whether the other still agrees.
 //!
 //! NOTE: Like the channel fake, this models outcomes, not mechanics: there is no ping, watchdog or backoff timer here.
 //! A dropped link or an undecodable grid message is the state the GUI would see next (`Reconnecting`), and the test

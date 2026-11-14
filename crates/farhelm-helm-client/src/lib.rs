@@ -15,8 +15,9 @@
 //! - [`collections`] applies that feed to keyed collections with one generic code path.
 //! - [`terminal`] attaches terminal streams (the agent terminal and tabs) and reconnects them.
 //! - [`ApiPath`] (from `farhelm-proto`, where the helm decodes it too) is the only constructor of a command path.
-//! - [`fake`] stands in for the helm in GUI tests, in process and without a runtime: the UI channel, and terminal
-//!   streams through [`fake::terminal::FakeTerminal`].
+//! - `fake` stands in for the helm in GUI tests, in process and without a runtime: the UI channel, and terminal
+//!   streams through `fake::terminal::FakeTerminal`. It exists only in this crate's own tests and with the
+//!   `test-support` feature, which the GUI turns on for its tests alone, so the app never compiles it.
 //!
 //! NOTE: There is no HTTP client here yet. File transfers (attachment uploads, downloads) are the one thing that does
 //! not fit a JSON command, and nothing in the first GPUI milestone uses them, so the area that ports transfers adds
@@ -24,6 +25,8 @@
 
 pub mod channel;
 pub mod collections;
+// The crate docs above name `fake` in plain code, not as links, which would break in every build without the feature.
+#[cfg(any(test, feature = "test-support"))]
 pub mod fake;
 mod reconnect;
 pub mod terminal;
