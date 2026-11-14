@@ -106,8 +106,9 @@ const UNICODE_NOTICE: &str = include_str!("../../../vendor/UNICODE-LICENSE.txt")
 const INTER_FONT_NOTICE: &str = include_str!("../../gui/farhelm-gui/assets/fonts/OFL-Inter.txt");
 
 /// The SIL Open Font License text of the JetBrains Mono Nerd Font files the GUI crate embeds in this binary for the
-/// terminal (`farhelm-gui`'s `assets`), which the license requires to travel with the fonts. It is the notice the old
-/// app shipped beside the same files (`THIRD_PARTY_NOTICES.md`, "JetBrains Mono terminal font").
+/// terminal (`farhelm-gui`'s `assets`), which the license requires to travel with the fonts. One text covers all four
+/// faces: it is the notice the old app shipped beside its regular and bold files, byte for byte the `OFL.txt` of the
+/// Nerd Fonts release the italic faces come from (`THIRD_PARTY_NOTICES.md`, "JetBrains Mono terminal font").
 const TERMINAL_FONT_NOTICE: &str =
     include_str!("../../gui/farhelm-gui/assets/fonts/OFL-JetBrainsMono.txt");
 

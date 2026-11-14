@@ -447,7 +447,7 @@ fn terminal_view(
 }
 
 /// The terminal's styles in the bundled font: the default colors, the sixteen palette colors as backgrounds, bold
-/// brightening, dim, italic (drawn upright: no italic face is bundled yet), inverse, the five underline shapes,
+/// brightening, dim, italic (in the bundled Italic face, so slanted), inverse, the five underline shapes,
 /// strikethrough, hidden text that keeps its underline, a truecolor foreground, samples of the 256-color cube and gray
 /// ramp, and box drawing. ASCII and box drawing only: no fallback font is bundled for goldens, because the migration's
 /// orchestrator decided on 2026-11-13 that M1 has no fallback-font goldens.
