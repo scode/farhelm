@@ -1,6 +1,6 @@
 """Checksum-pinned installation of a single prebuilt executable, shared by the pinned tool installers.
 
-`install-pinned-nextest.py`, `install-pinned-dx.py` and `install-pinned-cargo-deny.py` each name one upstream release
+`install-pinned-nextest.py` and `install-pinned-cargo-deny.py` each name one upstream release
 archive per platform and pin two digests for it: the archive's and the executable's. This module holds what they have in
 common: the size limits, the verification of the archive and of the one executable taken from it, reuse of an already
 installed copy, and atomic publication into a per-version directory. It never executes what it downloads.

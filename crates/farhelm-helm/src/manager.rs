@@ -143,10 +143,10 @@ pub const REPROBE_INTERVAL: Duration = Duration::from_secs(45);
 
 /// How often a CONNECTED host's session list is drained into the cache.
 ///
-/// Matched to `farhelm-ui`'s own `POLL_INTERVAL_MS` (three seconds), which
-/// is the freshness the single-host path already delivers today: the
-/// browser polls the helm every three seconds and the helm answers with a
-/// live round trip. Multi-host aggregation moves that round trip off the
+/// Matched to the old Dioxus GUI's own `POLL_INTERVAL_MS` (three seconds),
+/// which was the freshness the single-host path delivered when this was
+/// written: that GUI polled the helm every three seconds and the helm
+/// answered with a live round trip. Multi-host aggregation moves that round trip off the
 /// request path and behind this cadence, so keeping the number identical
 /// is what stops the visible list from getting *staler* than it is now as
 /// a side effect of gaining hosts.
@@ -775,10 +775,10 @@ pub fn peer_text(text: &str) -> String {
 }
 
 /// [`peer_text`] with a caller-chosen byte cap, for peers whose diagnostics
-/// have a different natural size than a supervisor's one-sentence refusals —
-/// the webview console pipe (`client_log`) wants room for a JS stack trace
-/// on the message and much less for a source label. The escaping half is
-/// identical and non-negotiable; only the bound varies.
+/// have a different natural size than a supervisor's one-sentence refusals.
+/// The escaping half is identical and non-negotiable; only the bound varies.
+/// Its one other caller, the old desktop webview's console pipe, went with the
+/// Dioxus UI.
 pub fn peer_text_capped(text: &str, cap: usize) -> String {
     let truncated = text.len() > cap;
     // Split on a char boundary — `text` is a Rust `String`, so a byte

@@ -4,14 +4,14 @@
 //! 10, 11 and 12 for the foreground, background and cursor), most often to
 //! decide whether to draw for a light or a dark background. The answers must
 //! be the colors the user actually sees, which are Farhelm's terminal theme:
-//! Ghostty's default palette, kept for the browser in
-//! `crates/farhelm-ui/assets/terminal-theme.js`. A test in this module reads
-//! that file and fails if the two drift apart.
+//! Ghostty's default palette. The old browser UI kept a second copy of it in
+//! JavaScript, checked against this one by a test; that copy went with the
+//! old UI (GPUI migration, F1), so whatever draws the terminal now must agree
+//! with these answers.
 //!
 //! The theme names only the 16 ANSI colors. Entries 16 to 255 are the
 //! standard xterm 256-color extension (a 6x6x6 color cube, then a 24-step gray
-//! ramp), which the browser's grid terminal derives for them too
-//! (`crates/farhelm-ui/assets/grid-style.js`).
+//! ramp), which a terminal renderer derives the same way.
 
 use alacritty_terminal::vte::ansi::{NamedColor, Rgb};
 
@@ -77,71 +77,11 @@ pub fn color(index: usize) -> Option<Rgb> {
 mod tests {
     use super::*;
 
-    /// The browser's theme file, which this module must agree with.
-    const THEME_JS: &str = include_str!("../../farhelm-ui/assets/terminal-theme.js");
-
-    /// The `#RRGGBB` value the theme file gives `key`.
-    fn theme_js(key: &str) -> Rgb {
-        let needle = format!("{key}: \"#");
-        let start = THEME_JS
-            .find(&needle)
-            .unwrap_or_else(|| panic!("terminal-theme.js has no {key}"))
-            + needle.len();
-        let hex = &THEME_JS[start..start + 6];
-        let channel = |at: usize| u8::from_str_radix(&hex[at..at + 2], 16).expect("hex digits");
-        rgb(channel(0), channel(2), channel(4))
-    }
-
-    /// Every color the theme file names is the one this crate answers with.
-    ///
-    /// Why: programs choose light or dark output from these answers, so an
-    /// answer that differs from what the browser paints makes them choose
-    /// wrong. The two lists are in two languages and nothing else ties them
-    /// together.
-    #[test]
-    fn answers_match_the_browser_theme() {
-        let names = [
-            "black",
-            "red",
-            "green",
-            "yellow",
-            "blue",
-            "magenta",
-            "cyan",
-            "white",
-            "brightBlack",
-            "brightRed",
-            "brightGreen",
-            "brightYellow",
-            "brightBlue",
-            "brightMagenta",
-            "brightCyan",
-            "brightWhite",
-        ];
-        for (index, name) in names.iter().enumerate() {
-            assert_eq!(
-                color(index),
-                Some(theme_js(name)),
-                "palette entry {index} ({name})"
-            );
-        }
-        assert_eq!(
-            color(NamedColor::Foreground as usize),
-            Some(theme_js("foreground"))
-        );
-        assert_eq!(
-            color(NamedColor::Background as usize),
-            Some(theme_js("background"))
-        );
-        assert_eq!(color(NamedColor::Cursor as usize), Some(theme_js("cursor")));
-    }
-
     /// The extended palette follows the xterm formula at its corners and
     /// steps.
     ///
-    /// Why: it is computed rather than listed, and the browser's grid
-    /// terminal computes the same values to draw them; a slip in the
-    /// arithmetic would go unnoticed until a program asked.
+    /// Why: it is computed rather than listed, so a slip in the arithmetic
+    /// would go unnoticed until a program asked.
     #[test]
     fn extended_palette_follows_the_xterm_formula() {
         assert_eq!(color(16), Some(rgb(0, 0, 0)));

@@ -21,10 +21,10 @@
 //!   that sequence in the legacy xterm encoding only (the kitty keyboard
 //!   protocol stays off), with Option on a Mac not acting as Meta, plus
 //!   Shift+Enter as ESC CR in one write. Farhelm's key table
-//!   (`tests/fixtures/grid-keys.jsonl`, rendered by
-//!   `crates/farhelm-ui/js-tests/grid-input-tables.js`, and first computed
-//!   from the xterm.js code Farhelm's terminals used before the grid) holds this encoder and the page's
-//!   keyboard rules to the same bytes for every key code, modifier set,
+//!   (`tests/fixtures/grid-keys.jsonl`, edited by hand since the old web
+//!   GUI's generator went with it, and first computed from the xterm.js code
+//!   Farhelm's terminals used before the grid) holds this encoder and the
+//!   GUI's keyboard rules (`crates/gui/farhelm-input-mapping`) to the same bytes for every key code, modifier set,
 //!   platform and cursor-key mode. The application keypad mode (DECKPAM) is
 //!   ignored: the keypad's keys send their digits, as they always have in
 //!   Farhelm's terminals.

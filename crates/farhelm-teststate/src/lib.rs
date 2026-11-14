@@ -1,8 +1,9 @@
 //! Shared /tmp discipline for Farhelm's test harnesses: one naming scheme,
 //! one liveness protocol, one sweep.
 //!
-//! Every harness that builds state under /tmp — the desktop smoke, the Rust integration tests and the test recorder's
-//! per-command TMPDIR — leaks that state when it is killed
+//! Every harness that builds state under /tmp — the Rust integration tests,
+//! the test recorder's per-command TMPDIR, and before them the removed
+//! desktop smoke and browser suite — leaks that state when it is killed
 //! without running its cleanup (SIGKILL, OOM, a crashed shell). One long day
 //! of killed runs accumulated 423 orphans (~22 GB) and hit disk-full. The
 //! old defense was a shell `find` in the (since removed) browser suite's
@@ -61,11 +62,11 @@ use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-/// Where the family lives. Hardcoded rather than honoring TMPDIR because
-/// scripts/desktop-smoke.sh hardcodes /tmp too (short socket paths under
-/// SUN_LEN, no predictable-name pre-creation) and the sweep must look
-/// where creators actually create; a TMPDIR-honoring sweep on a machine
-/// with TMPDIR set would silently stop matching the script's dirs.
+/// Where the family lives. Hardcoded rather than honoring TMPDIR because the
+/// family's creators used /tmp regardless (short socket paths under SUN_LEN,
+/// no predictable-name pre-creation) and the sweep must look where they
+/// created; a TMPDIR-honoring sweep on a machine with TMPDIR set would
+/// silently stop matching their directories.
 pub const TMP_ROOT: &str = "/tmp";
 
 /// The prefix of the removed browser suite's stack script (its `mktemp`).
@@ -76,12 +77,14 @@ const PLAYWRIGHT_PREFIX: &str = "fh-e2e.";
 /// Prefix used by [`tempdir`] for the Rust integration tests' dirs.
 const RUST_HARNESS_PREFIX: &str = "fh-it.";
 
-/// The desktop smoke's prefix (scripts/desktop-smoke.sh's `mktemp`). The
-/// smoke keeps its directory when it fails, and it used to do so under a
-/// name outside the family, where nothing ever removed it: 23 such
-/// directories of up to 470 MB each had piled up on the shared host by
-/// 2026-11. In the family, a kept directory carries a [`KEEP_FILE_NAME`]
-/// marker and is reaped once [`SweepPolicy::kept`] has passed.
+/// The prefix of the removed desktop smoke script's directories (its
+/// `mktemp`). Nothing creates these any more; the prefix stays in the family
+/// so the directories that script kept behind remain sweepable. The smoke
+/// kept its directory when it failed, and before it joined the family it did
+/// so under a name nothing ever removed: 23 such directories of up to 470 MB
+/// each had piled up on the shared host by 2026-11. A kept directory carries
+/// a [`KEEP_FILE_NAME`] marker and is reaped once [`SweepPolicy::kept`] has
+/// passed.
 const DESKTOP_SMOKE_PREFIX: &str = "fh-smoke.";
 
 /// The test recorder's prefix (scripts/record-test-run.py's
@@ -122,9 +125,9 @@ const RANDOM_SUFFIX_LEN: usize = 6;
 pub const LOCK_FILE_NAME: &str = "fh-run.lock";
 
 /// A marker a run writes into its state dir when it ends and deliberately
-/// leaves the dir behind as evidence for someone to read (the desktop smoke
-/// does this when it fails). The lock protocol alone would let the next
-/// sweep reap that evidence minutes after its creator exits; the marker
+/// leaves the dir behind as evidence for someone to read (the removed
+/// desktop smoke did this when it failed). The lock protocol alone would let
+/// the next sweep reap that evidence minutes after its creator exits; the marker
 /// holds the dir for [`SweepPolicy::kept`], measured from the marker's own
 /// mtime, after which the dir is judged like any other. It postpones a reap
 /// and never prevents one: a run that wants its state kept forever moves it

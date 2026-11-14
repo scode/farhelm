@@ -54,15 +54,9 @@
 //! Feedback contact uses the feedback submission's code-point cap. Refusals
 //! must never echo it, since clients log preference-write errors.
 //!
-//! ## Why no CORS layer
-//!
-//! The desktop webview's JavaScript reaches exactly four helm routes across
-//! origins (device validation, attachment uploads, the console log, and the
-//! clipboard), and this is deliberately not a fifth: the desktop
-//! UI's preference read and write go through the same native reqwest
-//! funnel every other REST call does (`farhelm-ui`'s `api::send`), so the
-//! route sits inside the ordinary protected group with nothing special
-//! about it.
+//! The route sits inside the ordinary protected group with nothing special
+//! about it. The helm refuses any request that carries an `Origin` header,
+//! so no browser page can reach it.
 
 use crate::store::{self, PreferencePatch};
 use crate::{AppState, SupervisorError, http_error};

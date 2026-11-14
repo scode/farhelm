@@ -110,12 +110,8 @@ impl Fixture {
             sources,
         )
         .unwrap();
-        let mut state = crate::AppState::with_provisioning(
-            manager.clone(),
-            store.clone(),
-            service.clone(),
-            harness.state.mode,
-        );
+        let mut state =
+            crate::AppState::with_provisioning(manager.clone(), store.clone(), service.clone());
         state.tensorlake = tensorlake;
         state.podman = Some(provider.clone());
         harness.manager = manager;

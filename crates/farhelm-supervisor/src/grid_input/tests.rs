@@ -96,9 +96,10 @@ fn hex(text: &str) -> Vec<u8> {
 /// something other than what shells and agents expect, and other than what
 /// Farhelm's terminals have always typed. The table was first computed from
 /// the xterm.js code Farhelm's terminals used before the grid (its own
-/// `evaluateKeyboardEvent`), and the JS harness holds the page's half of the rules to the same table. Which keydowns are sent at
-/// all is the grid client's to decide and test, so the table covers
-/// keydowns it would drop too.
+/// `evaluateKeyboardEvent`), and the GUI's input mapping
+/// (`crates/gui/farhelm-input-mapping`) holds its half of the rules to the
+/// same table. Which keydowns are sent at all is the grid client's to
+/// decide and test, so the table covers keydowns it would drop too.
 #[test]
 fn every_key_encodes_as_the_key_table_says() {
     let table = include_str!("../../tests/fixtures/grid-keys.jsonl");

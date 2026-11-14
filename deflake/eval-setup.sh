@@ -81,7 +81,7 @@ mod tests {
 }
 EOF
 printf '\n// Deflake-eval fixture module; throwaway.\nmod deflake_eval;\n' >> crates/farhelm-proto/src/lib.rs || exit 1
-cat > crates/farhelm-ui/js-tests/zz-deflake-eval.test.js <<'EOF'
+cat > crates/farhelm-supervisor/asset-js-tests/zz-deflake-eval.test.js <<'EOF'
 // Deflake-eval fixture: a deterministic failure. Throwaway; never merged.
 const test = require("node:test");
 const assert = require("node:assert");

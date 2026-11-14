@@ -117,13 +117,13 @@ classification did not happen. For a `phase` id on a nextest phase it means the 
 that: read the phase log's tail, and treat it as an environment or tooling problem to report to the user, not as a flake
 to record.
 
-**`failure` on a `phase` id of a monolithic battery** (doctests, install.sh, CentOS, desktop smoke, JS). The whole
-battery was rerun three times, so the verdict means what it does for a test, and the flake and deterministic rules in
-`deflake/AGENTS.md`, "Handling an event", apply unchanged: when the excerpt names the failing test or scenario, record
-or fix that. Two extra outcomes are specific to whole batteries. A deterministic failure is often an environment problem
-(a missing package, a tool below its floor); when it is, tell the user what is missing rather than filing a PR. And a
-battery that cannot run on this host at all can be kept out of every sweep with a `phase <name>` line in
-`deflake/known-flakes.txt`, paired with a TODO.md entry like any other exclusion.
+**`failure` on a `phase` id of a monolithic battery** (doctests, install.sh, CentOS, JS). The whole battery was rerun
+three times, so the verdict means what it does for a test, and the flake and deterministic rules in `deflake/AGENTS.md`,
+"Handling an event", apply unchanged: when the excerpt names the failing test or scenario, record or fix that. Two extra
+outcomes are specific to whole batteries. A deterministic failure is often an environment problem (a missing package, a
+tool below its floor); when it is, tell the user what is missing rather than filing a PR. And a battery that cannot run
+on this host at all can be kept out of every sweep with a `phase <name>` line in `deflake/known-flakes.txt`, paired with
+a TODO.md entry like any other exclusion.
 
 **`stalled`.** No output for the stall window. Look at the named log's tail once. If it is a legitimately long step (a
 cold cargo build, the CentOS musl build, a 20 minute e2e module), ack and wait. If it is wedged, `stop` the run, tell

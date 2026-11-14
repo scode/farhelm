@@ -177,7 +177,7 @@ def held_cargo_locks(target: pathlib.Path) -> list[pathlib.Path]:
 
     Cargo takes `flock` locks on `.cargo-lock`, `.cargo-build-lock` and
     `.cargo-artifact-lock` in each profile directory (`target/debug/`,
-    `target/<triple>/debug/`, the dx profiles) for as long as it builds, and
+    `target/<triple>/debug/`) for as long as it builds, and
     this probes each with a non-blocking exclusive `flock`, released at once.
     A lock that cannot be taken means a cargo is building in that tree right
     now. Only the top three levels are searched, which is where profile
@@ -187,8 +187,8 @@ def held_cargo_locks(target: pathlib.Path) -> list[pathlib.Path]:
     catches a killed daemon's surviving command. It covers the gaps that lock
     cannot: a surviving command from a driver version that predates it, and
     the exit-time cleanup, when the daemon holds the use lock itself. On its
-    own it is not enough, because dx keeps writing under `target/dx` after
-    its cargo step has released cargo's locks.
+    own it is not enough: a build tool other than cargo can keep writing
+    under `target/` without holding cargo's locks (the old UI's dx did).
 
     It is deliberately narrower than "some process is still using the
     worktree". The sweep's own batteries routinely leave long-lived processes
@@ -294,10 +294,8 @@ def nextest_exclusion(ids: list[TestId]) -> list[str]:
     The filterset names the binary as well as the test so a same-named test in
     another binary (unit and integration tests share module naming habits) is
     not excluded by accident. `-E` is one of the selection options the
-    recorder's nextest mode accepts. One binary id is shared across phases:
-    `farhelm-ui` names the crate's lib tests both with and without the desktop
-    feature, so a `nextest farhelm-ui ...` line excludes the test from the
-    workspace phase and the desktop phase alike.
+    recorder's nextest mode accepts. Every phase gets the whole exclusion
+    list; a line for a binary a phase does not build simply matches nothing.
     """
     terms = [f"(binary_id(={b}) & test(={t}))" for b, t in (i.parts for i in ids if i.kind == "nextest")]
     if not terms:
@@ -506,13 +504,13 @@ def phases(profile: str = "full") -> list[Phase]:
                   ["cargo", "nextest", "run", "-p", "farhelm-proto", "--lib"],
                   rerun=nextest_rerun, runner="nextest"),
             Phase("js-unit", "monolithic", "asset JavaScript unit harness", "node default discovery",
-                  ["bash", "-c", "cd crates/farhelm-ui/js-tests && node --test"]),
+                  ["bash", "-c", "cd crates/farhelm-supervisor/asset-js-tests && node --test"]),
             Phase("install-sh", "monolithic", "install.sh harness", "single process",
                   ["bash", "-c", "cargo build -p farhelm --locked && "
                    "bash scripts/test-install-sh.sh --farhelm target/debug/farhelm"]),
         ]
     workspace_nextest = ["cargo", "nextest", "run", "--workspace", "--exclude", "farhelm-desktop"]
-    desktop_nextest = ["cargo", "nextest", "run", "-p", "farhelm-ui", "--features", "desktop"]
+    desktop_nextest = ["cargo", "nextest", "run", "-p", "farhelm-desktop"]
     return [
         Phase("rust-nextest", "nextest", "workspace Rust targets", "4 nextest slots; retries 0",
               workspace_nextest, rerun=nextest_rerun, runner="nextest"),
@@ -522,10 +520,8 @@ def phases(profile: str = "full") -> list[Phase]:
               ["cargo", "test", "--locked", "--doc", "--workspace", "--exclude", "farhelm-desktop",
                "--", "--show-output", "--test-threads=4"]),
         Phase("desktop-doctests", "monolithic", "desktop doctests", "4 doctest threads",
-              ["cargo", "test", "--locked", "--doc", "-p", "farhelm-ui", "--features", "desktop",
+              ["cargo", "test", "--locked", "--doc", "-p", "farhelm-desktop",
                "--", "--show-output", "--test-threads=4"]),
-        Phase("js-unit", "monolithic", "asset JavaScript unit harness", "node default discovery",
-              ["bash", "-c", "cd crates/farhelm-ui/js-tests && node --test"]),
         # The release gate runs this suite, so a sweep that skipped it would
         # leave a release-blocking battery without flake discovery.
         Phase("omp-js", "monolithic", "OMP reporter asset scenarios", "node default discovery",
@@ -535,8 +531,6 @@ def phases(profile: str = "full") -> list[Phase]:
                    "bash scripts/test-install-sh.sh --farhelm target/debug/farhelm"]),
         Phase("provision-centos", "monolithic", "CentOS provisioning over ssh", "one container",
               ["scripts/test-provision-centos.sh"]),
-        Phase("desktop-smoke", "monolithic", "desktop smoke", "one Xvfb display",
-              ["scripts/desktop-smoke.sh"]),
     ]
 
 
@@ -1014,8 +1008,8 @@ class Daemon:
         """Delete the worktree's cargo `target/`; returns an error description, or None.
 
         This is `cargo clean` for the worktree, and it covers the sweep's
-        build outputs: cargo's debug and per-target trees, the dx web bundle,
-        and the musl and desktop-smoke builds all land under `target/`
+        build outputs: cargo's debug and per-target trees and the musl build
+        all land under `target/`
         (env() pins that). The one exception is a test that builds its own
         temporary project (the testtrace compile contract), which gives that
         project its own target directory and deletes it itself. That test
@@ -1025,7 +1019,7 @@ class Daemon:
         mostly one copy of each large test binary per feature set cargo
         resolves, plus incremental compilation caches, and nothing ever
         pruned it. The trade is a cold build per run (a few minutes of
-        `cargo build` and `dx build` in prepare, plus the per-phase test
+        `cargo build` in prepare, plus the per-phase test
         builds) against hours of sweep. Repeat mode is unaffected: its sweeps
         share one daemon, one prepare, and one build.
 
@@ -1101,7 +1095,7 @@ class Daemon:
 
         The worktree itself is persistent across runs, so the pinned nextest
         stays warm and only the working-copy commit moves.
-        The cargo and dx builds do not: `target/` is deleted here and at
+        The cargo build does not: `target/` is deleted here and at
         daemon exit (see clean_build_outputs), so every run builds cold. Each
         step is logged under phases/prepare-<step>.log.
         """
@@ -1159,7 +1153,6 @@ class Daemon:
             # before any battery runs. Any working tmux will do.
             ("tmux", ["tmux", "-V"], "."),
             ("cargo-build", ["cargo", "build"], "."),
-            ("dx-build", ["dx", "build", "--package", "farhelm-ui", "--platform", "web", "--release"], "crates/farhelm-ui"),
         ]
         for name, argv, cwd in steps:
             if self.stop_requested:
@@ -1219,7 +1212,7 @@ class Daemon:
             excluded = self.exclusions()
             # A `phase <name>` line skips any phase, per-test ones included:
             # that is how a battery that cannot run on this host at all (no
-            # webkit dev packages, no docker) is kept from failing every sweep.
+            # docker, say) is kept from failing every sweep.
             if TestId("phase", (phase.name,)) in excluded:
                 self.say(f"[{phase.name}] excluded by known-flakes.txt")
                 continue

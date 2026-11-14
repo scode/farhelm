@@ -90,8 +90,8 @@ is refused is an event like any other tooling problem.
 ## Scope
 
 The sweep is the AGENTS.md finishing-work inventory minus what cannot flake: formatters, clippy, compile-only checks,
-generated-file and asset-parity checks, and shellcheck are not run. Slow deterministic batteries (CentOS provisioning,
-desktop smoke) ARE run; the run is meant to take hours in the background and their cost in inference is zero when green.
+generated-file and asset-parity checks, and shellcheck are not run. Slow deterministic batteries (CentOS provisioning)
+ARE run; the run is meant to take hours in the background and their cost in inference is zero when green.
 
 ## Non-goals
 

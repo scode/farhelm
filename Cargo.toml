@@ -11,7 +11,6 @@ members = [
   "crates/farhelm-teststate",
   "crates/farhelm-testtrace",
   "crates/farhelm-testtrace-macros",
-  "crates/farhelm-ui",
   "crates/gui/farhelm-grid-model",
   "crates/gui/farhelm-gui",
   "crates/gui/farhelm-input-mapping",
@@ -32,19 +31,10 @@ exclude = [
   "vendor/gpui-pre-macos",
   "vendor/gpui-agent",
 ]
-# Application and ordinary library members, excluding `farhelm-desktop`, so that a bare `cargo
-# build`/`test`/`clippy --all-targets` — the workspace checks the
-# inventory in .agents/validation.md runs on every change, and CI runs on an ordinary
-# runner — never compiles WebKit. `farhelm-desktop` unconditionally enables
-# `farhelm-ui`'s `desktop` feature, which pulls in wry and needs the
-# webkit2gtk/gtk development packages; only the `desktop` CI job installs
-# them, and that job reaches the crate through an explicit `-p
-# farhelm-desktop`.
-#
-# The cost of this line is that `-p farhelm-desktop` is the ONLY way the
-# crate gets compiled: nothing in the default battery will notice it break.
-# That is what the `desktop` job's `cargo check -p farhelm-desktop` step is
-# for, and why it is not optional.
+# Application and ordinary library members, excluding `farhelm-desktop`: on Linux it links GIO, which needs the GLib
+# development packages, and once the GPUI app is wired in it compiles GPUI too, so it follows `farhelm-gui` below. The
+# cost is that `-p farhelm-desktop` (or a `--workspace` run) is the only way the crate gets compiled; the `desktop` CI
+# job's explicit `-p farhelm-desktop` steps are what notice it break.
 #
 # `farhelm-gui` (the GPUI desktop GUI) IS a default member, so the ordinary `cargo clippy --all-targets` lints it under
 # crates/gui/clippy.toml's bans (SPEC_impl.md, "GUI architecture"). It compiles GPUI, which needs a few Linux
@@ -63,7 +53,6 @@ default-members = [
   "crates/farhelm-terminal-emulator",
   "crates/farhelm-fixtures",
   "crates/farhelm-teststate",
-  "crates/farhelm-ui",
   "crates/gui/farhelm-grid-model",
   "crates/gui/farhelm-gui",
   "crates/gui/farhelm-input-mapping",
@@ -89,20 +78,6 @@ default-members = [
 # releases onto release branches), main kept whatever number last reached it,
 # 0.14.0-rc.2 from a bump that rode along with an unrelated fix (#879), while
 # releases moved past it; this fixed value replaces that stale number.
-#
-# ## The number is also the browser-edge skew guard
-#
-# It is the build stamp the helm puts on every reply and the browser bundle
-# compares against its own (farhelm-ui's `skew` module). That comparison is
-# EXACT equality, so it tells two releases apart, and a release apart from an
-# unreleased build, but NOT two unreleased builds from each other: a stale
-# tab open across an upgrade between two builds of main gets no reload
-# prompt. That gap only affects development builds; installs come from
-# release tags, which always carry distinct versions.
-#
-# The helm↔supervisor edge does NOT rely on this: it has a real handshake
-# (`PROTOCOL_VERSION`) and refuses at connect. This number is what stands in
-# for that handshake on the browser edge, which has none.
 [workspace.package]
 version = "0.0.0-unreleased"
 edition = "2024"
@@ -114,16 +89,9 @@ license = "Apache-2.0"
 repository = "https://github.com/scode/farhelm"
 
 # Shared dependency versions. Pinned here so every crate agrees; SPEC_impl.md
-# calls for workspace-level pinning of churn-prone dependencies (Dioxus in
-# particular).
+# calls for workspace-level pinning of churn-prone dependencies.
 [workspace.dependencies]
 anyhow = "1"
-# The desktop shell's native system-clipboard writer — the receiving end of
-# `POST /api/clipboard` (farhelm-helm's clipboard.rs; the webview's own
-# clipboard API does not exist on WKWebView's custom-scheme pages).
-# default-features = false drops the image-data half and its `image`
-# dependency tree: only text ever crosses this seam.
-arboard = { version = "3.6", default-features = false }
 async-trait = "0.1"
 axum = { version = "0.8", features = ["ws"] }
 # Binary-to-text for credentials that travel inside text: the helm's web
@@ -133,11 +101,6 @@ axum = { version = "0.8", features = ["ws"] }
 # served whole now and there are none.)
 base64 = "0.22"
 clap = { version = "4", features = ["derive", "env"] }
-# Patch-pinned rather than "0.7": dx insists on a dioxus crate at its own
-# exact version (a mismatch is a loud per-build ERROR), and CI installs dx at
-# this same number — bump both together, plus scripts/desktop-smoke.sh's
-# prerequisite note.
-dioxus = "0.7.10"
 # Decompresses a downloaded/staged release `.tar.gz` archive (D14) before
 # `tar` reads the archive layer — the provisioning payload extractor
 # (`provisioning/payloads.rs`) and the verified download source
@@ -147,31 +110,19 @@ futures-util = { version = "0.3", default-features = false }
 # The helm's in-memory client credentials are credentials, not identifiers:
 # they are minted directly from 128 bits of operating-system randomness.
 getrandom = "0.3"
-# List-view polling sleep on wasm32 (farhelm-ui's `ListView`): a thin
-# `wasm-bindgen` binding to `setTimeout`, the only timer a browser tab
-# actually has for this. Non-wasm32 targets use `tokio::time::sleep`
-# instead — see farhelm-ui/Cargo.toml's target-dependency comment.
-gloo-timers = { version = "0.3", features = ["futures"] }
-# The web UI tree a release build compiles into `farhelm-helm`
-# (`FARHELM_UI_DIST` at build time, D12) — see build.rs and
-# `embedded_ui.rs`.
-include_dir = "0.7"
 # The `--ensure-hosts` file's format (PLAN_M6.md item 5). JSON5 rather than
 # JSON because the file is hand-edited: comments and trailing commas are
 # what make a checked-in fleet description survivable, and it is otherwise
 # ordinary serde.
 json5 = "1"
 libc = "0.2"
-# Content type for an asset the desktop webview's asset handler serves.
-mime_guess = "2"
 # Verifies a release's `SHA256SUMS.minisig` against the public key compiled
 # into the binary (D3) — the whole trust anchor of download-based
 # provisioning. A verify-only crate on purpose: nothing in farhelm ever
 # signs, so the signing half of minisign stays out of the binary and out of
 # the audit surface.
 minisign-verify = "0.3"
-# Percent-encoding for download file names and the desktop webview's asset
-# paths. Already in `Cargo.lock` transitively, but a transitive crate cannot
+# Percent-encoding for download file names. Already in `Cargo.lock` transitively, but a transitive crate cannot
 # be imported directly.
 percent-encoding = "2"
 # The terminal grid model's link detection, which must match the old web
@@ -209,7 +160,7 @@ regex = "1"
 # - `stream` for the byte-at-a-time download loop (a release archive is tens
 #   of megabytes; it is never buffered whole in memory).
 # - `json` is not used by the download source at all — it is farhelm's and
-#   farhelm-ui's, and stays for them.
+#   farhelm-desktop's, and stays for them.
 reqwest = { version = "0.13", features = ["json", "stream"] }
 # `bundled` compiles SQLite from source rather than linking the host's
 # libsqlite3 — required for the musl-static supervisor artifacts
@@ -270,7 +221,6 @@ tree-sitter-bash = "0.25.1"
 # the download payload source fetches from it.
 url = "2"
 uuid = { version = "1", features = ["v4"] }
-web-sys = { version = "0.3", features = ["Window", "Location"] }
 
 farhelm-grid-model = { path = "crates/gui/farhelm-grid-model" }
 farhelm-helm = { path = "crates/farhelm-helm" }
@@ -280,11 +230,6 @@ farhelm-terminal-emulator = { path = "crates/farhelm-terminal-emulator" }
 farhelm-teststate = { path = "crates/farhelm-teststate" }
 farhelm-testtrace = { path = "crates/farhelm-testtrace" }
 farhelm-testtrace-macros = { path = "crates/farhelm-testtrace-macros" }
-# Only `farhelm-desktop` depends on this, and only with the `desktop`
-# feature on — see that crate's Cargo.toml and the `default-members` note
-# above for why the dependency is deliberately unreachable from the default
-# workspace battery.
-farhelm-ui = { path = "crates/farhelm-ui" }
 terminal-host = { path = "crates/terminal-host" }
 
 # GPUI, Zed's GPU-rendered UI framework (the crates.io snapshot published as gpui-pre), and GPUI Kit (gpui-component and
@@ -348,21 +293,6 @@ opt-level = 3
 # use the release profiles and are not affected.
 [profile.test.build-override]
 debug = true
-
-# `wasm-release` is the cargo profile dx compiles the web UI under; this
-# stanza merges into dx's own definition of it. The strip exists because
-# rustc's precompiled wasm32 std ships DWARF debug sections (~1.4 MB in our
-# module even though release builds compile our own code without debug
-# info), and dx then feeds the module to Binaryen's wasm-opt, whose DWARF
-# parser lags rustc's DWARF version and aborts with SIGABRT ("compile unit
-# size was incorrect"). dx treats that abort as a soft failure — the build
-# logs an ERROR and ships the UNOPTIMIZED wasm — so until this strip, every
-# release quietly skipped wasm-opt. Nothing consumes that DWARF in the
-# browser; stripping it at link time keeps wasm-opt actually running.
-# Scoped to dx's profile on purpose: native binaries keep their debug info.
-[profile.wasm-release]
-inherits = "release"
-strip = "debuginfo"
 
 # The profile that 'dist' will build with
 #

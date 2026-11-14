@@ -73,12 +73,12 @@ fine.
 Several agents work on this project at once, on this machine, as the same unix user, each in its own checkout or jj
 workspace. Do not reintroduce a fixed port, a fixed path under `/tmp` or `$HOME`, a fixed unit or container name, or a
 fixed ssh alias in a harness; when a harness genuinely needs a stable name, derive it from the run's own random
-directory. (Fixed lock files like `/tmp/fh-build.lock`, and the CentOS script's lock next to the ssh config, are the
-exception the fixed-path rule allows: a lock exists to be shared, and it names no state.) `website/scripts/preview.sh`'s
-fixed port is deliberate and is not a harness that the fixed-port rule applies to.
+directory. (A fixed lock file, like the CentOS script's lock next to the ssh config, is the exception the fixed-path
+rule allows: a lock exists to be shared, and it names no state.) `website/scripts/preview.sh`'s fixed port is deliberate
+and is not a harness that the fixed-port rule applies to.
 
 - One agent per checkout or workspace. Sibling checkouts and `jj workspace` directories are the supported shape; a
-  shared `CARGO_TARGET_DIR` across workspaces is fine for cargo (it locks) but not for the dx build.
+  shared `CARGO_TARGET_DIR` across workspaces is fine for cargo (it locks).
 - Processes you did not start are someone else's. A helm or supervisor answering on a port you did not choose, a
   `farhelm-<uuid>-*.scope` unit whose UUID no run of yours minted, an `fh-it.*`, `fh-e2e.*` or `fh-smoke.*` directory
   holding a live flock, or a docker container from the CentOS script: leave them alone. The one exception is
@@ -195,8 +195,8 @@ layer, and say where a new per-harness capability goes. Read that map before add
 behavior, add to the places it names, and do not write `kind == X`, `matches!` over specific harnesses, or a `_` arm
 over harnesses in shared code: each of those hands a new harness whatever the branch does for the ones it does not name.
 
-Read `docs/harness-marks.md` before adding or changing a harness mark (`crates/farhelm-ui/src/icons.rs` and the geometry
-under `crates/farhelm-ui/src/icons/`); vendored geometry gets an entry in `THIRD_PARTY_NOTICES.md`.
+Read `docs/harness-marks.md` before adding or changing a harness mark (`crates/gui/farhelm-gui/src/marks.rs` and the
+geometry under `crates/gui/farhelm-gui/src/marks/`); vendored geometry gets an entry in `THIRD_PARTY_NOTICES.md`.
 
 Every disposable-environment provider decision belongs in its implementation or an exhaustive method on the provider
 kind, place, binding, recipe base, recipe state, host kind or shared recipe projection. Read the module-doc map in
@@ -278,7 +278,7 @@ Before creating, editing or deleting anything under these paths, read the file n
 - `website/`, `README.md`: `website/AGENTS.md`.
 - `deflake/`: `deflake/AGENTS.md`.
 - `lore/`: `lore/AGENTS.md`.
-- `crates/farhelm-ui/src/icons.rs`, `crates/farhelm-ui/src/icons/`: `docs/harness-marks.md`.
+- `crates/gui/farhelm-gui/src/marks.rs`, `crates/gui/farhelm-gui/src/marks/`: `docs/harness-marks.md`.
 - `crates/farhelm-supervisor/tests/fixtures/screens/`: `docs/agent-screen-fixtures.md`.
 - `crates/terminal-host/`: `crates/terminal-host/SPEC.md` (running hosts outlive every release; its "Change policy").
 - `packaging/farhelm-desktop/`, `website/src/assets/intro/`, `docs/readme-hero/`, `docs/readme-video/`,
@@ -339,7 +339,6 @@ Each entry: trigger phrases, the file to read in full before the first action, a
   the screenshot refs; never commit a captured screenshot on main; never hand-edit the wordmark SVGs.
 - **Agent screens** ("re-capture agent screens", checking a new claude or codex against status detection):
   `docs/agent-screen-fixtures.md`. Fence: it spends real vendor turns; only when asked or after an agent upgrade.
-- **Desktop or web UI bug reports**: before investigating one, read `docs/desktop-web-triage.md`.
 - **Agent TUI behavior**: before relying on a claim about how an installed agent behaves in a terminal, read
   `.agents/real-agent-tui.md`.
 

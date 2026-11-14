@@ -84,10 +84,9 @@ same pin CI and release builds use; no second clippy run on floating stable is n
 - `python -B scripts/check-test-sleeps.py`, with the isolated interpreter from `docs/test-sleep-check.md` (create its
   venv in your scratch directory)
 - `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`
-- `cargo check -p farhelm-ui --features desktop` and `cargo check -p farhelm-desktop`
+- `cargo clippy -p farhelm-desktop --all-targets -- -D warnings`
 - `python3 -B scripts/check-gui-lints.py` and `python3 -B scripts/test-check-gui-lints.py` (every GUI lint ban fires)
 - `python3 -B scripts/check-crate-layering.py` and `python3 -B scripts/test-check-crate-layering.py`
-- `scripts/check-desktop-assets.sh` (including its head-product-assets parity fixtures)
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh`
 - `bash -n scripts/devbuild-mac.sh && bash -n scripts/test-provision-centos.sh`, and `shellcheck` on both scripts
 - `bash -n scripts/build-podman-test-payloads.sh` and `shellcheck scripts/build-podman-test-payloads.sh` (the focused
@@ -124,8 +123,7 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   checks, including the snapshot listing and archive configuration preserving the scoped Podman payload setup while
   removing the local fixture build). Run the harness only on the maintainer's request, per `.agents/tensorlake.md`.
 - `python3 scripts/test-record-test-run.py` and `python3 scripts/test-test-run-traces.py`
-- `python3 -B scripts/test-install-pinned-nextest.py`, `python3 -B scripts/test-install-pinned-dx.py` and
-  `python3 -B scripts/test-install-pinned-cargo-deny.py`
+- `python3 -B scripts/test-install-pinned-nextest.py` and `python3 -B scripts/test-install-pinned-cargo-deny.py`
 - The vendored terminal crates' three recorded test commands from `.agents/validation.md` (`vendor/vte`,
   `vendor/alacritty_terminal`, and both together in `vendor/pair-tests`), which the sweep's workspace batteries never
   reach
@@ -153,14 +151,14 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   `crates/terminal-host/TESTING.md`: a drop in line coverage below 95% or a new surviving mutant is a finding.
 
 Deliberately not here: everything the sweep runs (workspace nextest including the e2e suite, desktop nextest, both
-doctest runs, the two JS harnesses, `test-install-sh.sh`, CentOS provisioning, desktop smoke, including the
-public-to-local session identity boundary), and the macOS-only uninstall acceptance (the rehearsal's macOS leg runs it
-in step 4, including legacy upgrade-floor refusal with the old installation preserved and uninstall through an indirect
-Terminal link). The focused macOS CI job's terminal host step (the host crate, its entry test in the CLI, and the
-supervisor's spawning, its client, its host terminal runtime, discovery, the test-state cleanup and the stop command)
-runs only with `gh workflow run ci.yml --ref <branch> -f suite=uninstall-macos`; its Linux side is part of the sweep's
-workspace nextest. The same goes for that job's desktop supervisor record and stop tests and the stop's macOS
-process-exit check (`managed_supervisor::`, `procs::tests::finished_exiting`).
+doctest runs, the OMP reporter's JS harness, `test-install-sh.sh`, CentOS provisioning), and the macOS-only uninstall
+acceptance (the rehearsal's macOS leg runs it in step 4, including legacy upgrade-floor refusal with the old
+installation preserved and uninstall through an indirect Terminal link). The focused macOS CI job's terminal host step
+(the host crate, its entry test in the CLI, and the supervisor's spawning, its client, its host terminal runtime,
+discovery, the test-state cleanup and the stop command) runs only with
+`gh workflow run ci.yml --ref <branch> -f suite=uninstall-macos`; its Linux side is part of the sweep's workspace
+nextest. The same goes for that job's desktop supervisor record and stop tests and the stop's macOS process-exit check
+(`managed_supervisor::`, `procs::tests::finished_exiting`).
 
 The workspace nextest selection includes historical `containerized_sessions` compatibility and the real Linux
 `podman_environments` managed-checkout and lifecycle fixture. It covers credential delivery and ordinary tab, file,
@@ -179,19 +177,6 @@ recorder. Cargo is unavailable on clones. An intentional opt-out uses `FARHELM_T
 recorder's `--keep-farhelm-env FARHELM_TEST_SKIP_PODMAN` option. Setup then skips the payload build. Read and report
 explicit SKIPPED output as missing real-environment coverage and exclude it from runtime pass evidence.
 `.agents/validation.md` gives focused selections.
-
-The opt-in `DESKTOP_SMOKE_APPEARANCE=1 scripts/desktop-smoke.sh` checks four native fresh/stored dark/light cases:
-startup palette, ordinary Settings choices, private-profile persistence, fonts and same-attachment terminal input, its
-terminal checks reading the session's grid terminal. It retains JSON and one final client image per case. Normal
-appshots supply visual review; DOM observations do not prove transient paint correctness. This is not an extra default
-battery. See `.agents/validation.md` for coverage.
-
-The separate `DESKTOP_SMOKE_APPEARANCE=no-initialize scripts/desktop-smoke.sh` leg exercises one fixed
-missing-initialize fault through the same builds and owned display. It observes the hidden native creation deadline,
-natural refusal, the owned supervisor's detached setup and the app's record of it, and that the supervisor keeps running
-after the refusal (teardown stops it by that record). It retains bounded process/window evidence, with sampled X11
-visibility rather than a continuous no-map assertion. It is not another default battery or ordinary appearance coverage;
-see `.agents/validation.md` for its Linux pidfd prerequisite and limits.
 
 A failure here is fixed or recorded per the ground rules before going on. Static fixes can be verified at once by
 rerunning the check.

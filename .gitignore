@@ -34,8 +34,10 @@ e2e/.stacks/
 
 # Verified local tool binaries; release and CI jobs install into their temporary directory.
 .ci-nextest/
-.ci-dx/
 .ci-cargo-deny/
+# The pinned dx the deleted Dioxus UI was built with. Nothing installs it any more; it stays ignored so that jj never
+# sweeps an old checkout's copy into a commit.
+.ci-dx/
 
 # Personal use-it-for-real dev-loop script; carries user-specific hostnames
 # and stays out of the repo on purpose.

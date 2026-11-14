@@ -10,7 +10,8 @@ against the tables the supervisor's encoder is checked against:
 - `crates/farhelm-supervisor/tests/fixtures/grid-mouse.jsonl`: 768 mouse rows.
 
 The old web client's two tables are copied unchanged from reference commit `24bc058066fd57848e788b465719b0e6da2f98f7`,
-because their original directory goes away with the old GUI:
+because their original directory goes away with the old GUI. Only their header comments changed since, to stop naming
+the deleted generator:
 
 | File                    | Original path                                                     |
 | ----------------------- | ----------------------------------------------------------------- |

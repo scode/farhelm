@@ -135,17 +135,13 @@ pub enum LaunchRequest {
 
 impl CommandLaunch {
     /// Refuse a command that cannot be safely started with its stored shell text.
-    /// Native admission checks literal shape and placeholder source positions.
-    /// Browser preflight retains the same shape checks;
-    /// the receiving helm and supervisor own the authoritative shell check.
+    /// Admission checks literal shape and placeholder source positions; the
+    /// receiving helm and supervisor own the authoritative shell check.
     pub fn validate(&self) -> Result<(), String> {
         self.validate_stored()?;
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            crate::command_shell::validate_command_placeholders("command", &self.command)?;
-            if let Some(resume) = &self.resume {
-                crate::command_shell::validate_command_placeholders("resume command", resume)?;
-            }
+        crate::command_shell::validate_command_placeholders("command", &self.command)?;
+        if let Some(resume) = &self.resume {
+            crate::command_shell::validate_command_placeholders("resume command", resume)?;
         }
         Ok(())
     }

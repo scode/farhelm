@@ -1,6 +1,7 @@
 # The arrow keys an Alt-click types to move a shell's cursor (grid-input.js's moveToCellSequence), one line per
 # case of grid-input-tables.js's seeded moveCases, in order: Farhelm's Alt-click contract. Change it only on
-# purpose: regenerate with `node crates/farhelm-ui/js-tests/grid-input-tables.js --write` and review the diff.
+# purpose: edit it by hand and review the diff (its generator,
+# the old web GUI's `grid-input-tables.js`, went with that GUI; read it at commit 24bc0580).
 # "3D1A" is three lefts then one up (A up, B down, C right, D left; lowercase with application cursor keys);
 # "-" is no move.
 1C

@@ -1742,7 +1742,6 @@ mod tests {
                 Arc::clone(&harness.manager),
                 harness.store.clone(),
                 Arc::clone(&service),
-                crate::ServingMode::Standalone,
             ));
             state._automatic_updates.stop();
             harness
@@ -3902,7 +3901,6 @@ mod tests {
             Arc::clone(&harness.manager),
             harness.store.clone(),
             Arc::clone(&service),
-            crate::ServingMode::Standalone,
         ));
         harness.state = Arc::clone(&state);
         let response = harness
@@ -5184,7 +5182,6 @@ mod tests {
             Arc::clone(&harness.manager),
             harness.store.clone(),
             Arc::clone(&service),
-            crate::ServingMode::Standalone,
         ));
         let router = harness.router();
         let probe = router
@@ -5264,7 +5261,6 @@ mod tests {
             Arc::clone(&harness.manager),
             harness.store.clone(),
             service,
-            crate::ServingMode::Standalone,
         ));
         let host = harness.store.list_hosts().await.unwrap()[0].id;
         let response = harness
@@ -5306,7 +5302,6 @@ mod tests {
             Arc::clone(&harness.manager),
             harness.store.clone(),
             Arc::clone(&service),
-            crate::ServingMode::Standalone,
         ));
         harness.state = Arc::clone(&state);
         let router = harness.router();
@@ -5484,7 +5479,6 @@ mod tests {
             Arc::clone(&harness.manager),
             harness.store.clone(),
             Arc::clone(&service),
-            crate::ServingMode::Standalone,
         ));
         let refused = tokio::time::timeout(
             Duration::from_secs(10),
@@ -6722,7 +6716,6 @@ mod tests {
             Arc::clone(&harness.manager),
             harness.store.clone(),
             Arc::clone(&service),
-            crate::ServingMode::Standalone,
         ));
         harness.state = Arc::clone(&state);
         let router = harness.router();
@@ -6782,7 +6775,6 @@ mod tests {
             Arc::clone(&harness.manager),
             harness.store.clone(),
             service,
-            crate::ServingMode::Standalone,
         ));
         harness.state = Arc::clone(&state);
         let router = harness.router();
@@ -10807,7 +10799,6 @@ mod tests {
             Arc::clone(&harness.manager),
             harness.store.clone(),
             service,
-            crate::ServingMode::Standalone,
         ));
         harness.state = Arc::clone(&state);
         let response = harness
@@ -10951,7 +10942,6 @@ mod tests {
             Arc::clone(&harness.manager),
             harness.store.clone(),
             Arc::clone(&service),
-            crate::ServingMode::Standalone,
         ));
         harness.state = Arc::clone(&state);
         let response = harness

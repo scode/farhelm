@@ -76,7 +76,6 @@ pub use environment::{
     ProviderKind, RecipePlaceView, WhenStatusUnanswered,
 };
 
-#[cfg(feature = "io")]
 pub mod tcp_relay;
 
 /// Declares a fieldless enum and its `ALL` constant from one list of
@@ -124,7 +123,6 @@ pub mod host_name;
 /// Tokens the UI branches on in the helm's HTTP replies (see the module's own
 /// docs).
 pub mod http;
-#[cfg(feature = "io")]
 pub mod io;
 pub mod launch;
 /// Final-extension policy shared by desktop settings and the helm's opener.
@@ -160,8 +158,7 @@ pub use launch::{
     check_wrapper_prefix, split_permission_flags, split_wrapper_prefix,
 };
 pub use version::{UPGRADE_FLOOR, below_upgrade_floor, is_development_build};
-/// Native Bash placeholder admission and original-source rendering.
-#[cfg(not(target_arch = "wasm32"))]
+/// Bash placeholder admission and original-source rendering.
 pub mod command_shell;
 /// The launcher's shared rules: the model catalog, agent-type
 /// reconciliation and launch templates.
@@ -230,10 +227,8 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// replies; adding one has the same strict-decoder constraint even though the
 /// template itself is stored only by the helm.
 ///
-/// The browser edge cannot use the hello, having none: it is gated on the
-/// helm's build stamp instead (farhelm-ui's `skew` module), which refuses
-/// unattended attaches whenever the helm answering is not the build this
-/// bundle was made for.
+/// The GUI edge has no hello either: the desktop app embeds its helm, so the
+/// two are always the same build.
 ///
 /// Two standing decisions shape what this protocol carries. There is no
 /// supervisor-to-helm push channel except [`ControlMsg::AgentRequest`]
@@ -785,8 +780,8 @@ pub enum SessionStatus {
     ///   stays on screen across the gap.
     /// - **Create** has no prior definite status to hold, so the client
     ///   shows NO STATUS BADGE until the first classified status arrives
-    ///   (farhelm-ui's `status::status_badge` returns nothing for this
-    ///   variant, and the row renders no badge element at all).
+    ///   (the old Dioxus GUI rendered no badge element at all for this
+    ///   variant).
     ///
     /// No latency is promised for that gap, and none can be: nothing in
     /// this protocol orders a classification against the write that created
