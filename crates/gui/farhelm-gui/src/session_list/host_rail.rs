@@ -8,11 +8,25 @@
 //!
 //! The rail lists, top to bottom: **All**, one avatar per registered host in the registry's order (a host a session
 //! owns, a sandbox or container made for one session, has no avatar of its own: its sessions appear under All), a "?"
-//! placeholder for a chosen host the registry no longer lists, and a "?" status while the host list has never been
-//! read. Each avatar is the host's chosen mark in its chosen color with its short name as a caption under it; the
-//! caption repeats what the avatar's accessible name already says, so it has no node of its own for assistive
-//! technology. Names, destinations and aliases are the host's own text, drawn and named through the host-text
-//! element.
+//! placeholder for a chosen host the registry no longer lists, a "?" status while the host list has never been read,
+//! and **Add host** last. Each avatar is the host's chosen mark in its chosen color with its short name as a caption
+//! under it; the caption repeats what the avatar's accessible name already says, so it has no node of its own for
+//! assistive technology. Names, destinations and aliases are the host's own text, drawn and named through the
+//! host-text element.
+//!
+//! Add host opens the Add host dialog ([`crate::hosts::add::open`]) with itself as the opener, so that closing the
+//! dialog returns focus to it, as the gear does for Settings. It is never disabled: the old button was, while the old
+//! page's one token for launches and host registry changes was held (`ops::OpLock` at the reference commit), but here
+//! refusing belongs to the dialog's own Add, each side refusing its own action while the other's work is in flight
+//! (decided by the migration's orchestrator on 2026-11-14). That Add does not refuse during a launch yet (interim, in
+//! the dialog's module docs), so until it does a host can be added while a session launches, which the old app did not
+//! allow.
+//!
+//! The rail's entries scroll on their own, and a focus move the keyboard or the app makes onto an entry below or above
+//! the rail's fold scrolls it into view: the scrolling part is a focus coordinator scroll region
+//! ([`focus::scroll_region`]). A press on All or an avatar scrolls nothing, as in a browser. A press on Add host does
+//! scroll a half-hidden Add host into view: opening the dialog hands focus to its opener ([`focus::focus_control`]),
+//! which is an app's focus move, and so is the dialog's return of focus when it closes.
 //!
 //! Choosing is a query, not a filter the window applies: a press (or Space or Enter) on All or an avatar sends the UI
 //! channel's session query (`PUT /ui/session-query`, `{"host": <id>}`, or `{}` for All), and the helm then serves only
@@ -48,14 +62,13 @@
 //! through the list (or the Hosts panel) to the foot. The rail leaves the foot's height free at its bottom
 //! ([`FOOT_HEIGHT`]), and the foot is drawn over that room.
 //!
-//! NOTE: Not drawn yet, each waiting for its area: Add host and the rest of the rail's foot (the notices bell, Help and
-//! the expand toggle) for the settings-and-hosts, help and notices areas; an avatar's right-click menu; every host
-//! status (connection dots, update badges, progress rings, dimming and the state words that join the avatar's name, and
-//! the update count that joins Hosts' name); the rail's expansion to 220 pixels; and the status segments that share the
-//! chip's row. A keyboard focus move onto an avatar below the rail's fold does not scroll it into view (the rail holds
-//! about seven hosts at the minimum window height). The foot is sized for the two controls it holds: the old foot was
-//! 208 pixels, five 40-pixel controls, and it grows back as the others arrive. An accepted quick-switcher pick does not
-//! return from the Hosts panel to Sessions yet, which SPEC.md asks for (recorded in the switcher's NOTE too).
+//! NOTE: Not drawn yet, each waiting for its area: the rest of the rail's foot (the notices bell, Help and the expand
+//! toggle) for the help and notices areas; an avatar's right-click menu; every host status (connection dots, update
+//! badges, progress rings, dimming and the state words that join the avatar's name, and the update count that joins
+//! Hosts' name); the rail's expansion to 220 pixels, with Add host's "Add host" label; and the status segments that
+//! share the chip's row. The foot is sized for the two controls it holds: the old foot was 208 pixels, five 40-pixel
+//! controls, and it grows back as the others arrive. An accepted quick-switcher pick does not return from the Hosts
+//! panel to Sessions yet, which SPEC.md asks for (recorded in the switcher's NOTE too).
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -66,7 +79,8 @@ use farhelm_proto::ui_channel::{
 };
 use gpui::{
     AnyElement, App, Context, FocusHandle, InteractiveElement, IntoElement, ParentElement, Pixels,
-    SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window, div, px, svg,
+    ScrollHandle, SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window, div, px,
+    svg,
 };
 
 use super::SessionList;
@@ -129,6 +143,10 @@ const HOSTS_HELP: &str = "Hosts: show host management";
 /// The gear's hover help, the old app's words. The old app added ", and this app's automatic updates" when the desktop
 /// app's updater was active; this app has no updater yet, so the words stop where the old app's did without one.
 const SETTINGS_HELP: &str = "Settings: choices that apply to every host on this helm";
+
+/// Add host's hover help, the old app's words, kept although the dialog it opens offers SSH alone for now (the
+/// dialog's module docs record the missing Tensorlake choice).
+const ADD_HOST_HELP: &str = "Add host: connect a machine or create a Tensorlake sandbox";
 
 /// The empty state sentence's line height: fixed, so the mark can be centered on the first line of a wrapped name.
 const EMPTY_LINE: f32 = 20.;
@@ -354,19 +372,43 @@ fn registered(collections: &Collections, id: i64) -> Option<&HostView> {
 
 // ---- The rail ------------------------------------------------------------------------------------------------------
 
+/// What the rail keeps across frames, which the list holds for the window's life because the rail itself is rebuilt
+/// on every draw.
+pub(super) struct Kept {
+    /// Add host's focus handle, a tab stop: the opener the Add host dialog takes focus from and gives it back to when
+    /// it closes, so it must be the same handle from the frame that opened the dialog to the one that closes it.
+    add_host_focus: FocusHandle,
+    /// The scrolling part's scroll state, tracked through [`focus::scroll_region`]: a fresh handle per frame would
+    /// put the rail back at its top on every draw.
+    scroll: ScrollHandle,
+}
+
+impl Kept {
+    /// A new rail's state: scrolled to its top, nothing focused.
+    pub(super) fn new(cx: &mut App) -> Self {
+        Kept {
+            add_host_focus: cx.focus_handle().tab_stop(true),
+            scroll: ScrollHandle::new(),
+        }
+    }
+}
+
 /// The rail, for the hosts in `collections` with `chosen` pressed; its entries choose through `list`, and All tracks
 /// `all_focus`, the list's handle that removing the filter focuses. While `quiet` (the Hosts panel shows), the chosen
 /// entry wears the quieter pressed look, which leaves the filled Hosts control as the mark of the view on screen.
+/// `kept` is the rail's state across frames ([`Kept`]).
 ///
 /// It scrolls on its own when its entries overflow it, beside the list, which scrolls separately (`overflow: hidden
 /// auto`); its padding and gaps are inside the scrolling element, so a wheel over them scrolls the rail. The scrolling
 /// part stops [`FOOT_HEIGHT`] above the sidebar's bottom (the old rail's `bottom: 208px`), leaving room the list draws
-/// the [`foot`] over, so no entry ever scrolls under the foot.
+/// the [`foot`] over, so no entry ever scrolls under the foot. It is a scroll region of the focus coordinator, so the
+/// keyboard reaching an entry outside its visible part scrolls that entry into view.
 pub(super) fn rail(
     collections: &Collections,
     chosen: Option<i64>,
     list: &WeakEntity<SessionList>,
     all_focus: &FocusHandle,
+    kept: &Kept,
     quiet: bool,
     palette: &Palette,
 ) -> impl IntoElement {
@@ -426,6 +468,9 @@ pub(super) fn rail(
     } else {
         entries.push(unavailable(palette));
     }
+    // Last, whatever the registry holds or failed to: adding a host needs no host list, and the old rail drew it even
+    // while the list could not be read.
+    entries.push(add_host(&kept.add_host_focus));
     let scrolling = div()
         .id("host-rail")
         // Tests find the rail by this; it records nothing outside test builds.
@@ -455,7 +500,7 @@ pub(super) fn rail(
         .h_full()
         .flex()
         .flex_col()
-        .child(scrolling)
+        .child(focus::scroll_region(scrolling, &kept.scroll))
         // The foot's room: empty here, since the list draws the foot over it after its own column (see the module
         // docs for why the foot is not this element's child).
         .child(div().flex_none().h(px(FOOT_HEIGHT)))
@@ -525,6 +570,29 @@ fn unavailable(palette: &Palette) -> AnyElement {
             .ink(palette.warn),
         )
         .into_any_element()
+}
+
+/// The rail's Add host (`.host-rail-add`): the old Add glyph, a plus, in a rail button, which opens the Add host dialog
+/// with `handle`, its kept focus handle, as the opener. Never pressed, so always the rail's quiet ink; the module docs
+/// say why it is never disabled.
+fn add_host(handle: &FocusHandle) -> AnyElement {
+    let opener = handle.clone();
+    IconButton::new(
+        "host-rail-add",
+        Icon::Add,
+        "Add host",
+        HoverHelp::tooltip(ADD_HOST_HELP),
+        Role::Button,
+    )
+    .tier(Tier::Rail)
+    .focus(handle)
+    .on_click(move |_, window, cx| {
+        // Taken in the handler, after the coordinator counted this press or key, so the dialog opens for this press and
+        // not for one the user has since moved on from.
+        let mark = Mark::take(cx);
+        crate::hosts::add::open(&opener, &mark, window, cx);
+    })
+    .into_any_element()
 }
 
 /// The rail's foot (`.host-rail-footer`), for the list to draw after its own column, as its last child, over the room

@@ -8,12 +8,12 @@ between the app, the helm and the supervisor shows up somewhere, plus the area s
 terminal's: a large paste, on a Mac only, text an input method commits, and scrollback; 32, the sidebar's quick
 switcher; 34, the session list's Stop and Replace from a row's menu; 35, the sidebar's host rail; 36, the row menu's
 Mark read and Mark unread; 37, the sidebar's resize divider; 38, Restart from the open session's header; 39, the
-host rail's foot, Hosts and the Settings gear; 40, the settings-and-hosts area's scripted host setup). The behavior
-itself is specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`,
-`session_pane/`, `terminal/attached/tests.rs`); nothing here checks layout or wording beyond the names it clicks. A
-menu's commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open session's header has
-buttons with the same names (Stop, Replace, Delete), and a `text:` target picks the first match in drawing order, which
-is the header's.
+host rail's foot, Hosts and the Settings gear; 40, the settings-and-hosts area's scripted host setup; 41, the host
+rail's Add host). The behavior itself is specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`,
+`session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`); nothing here checks layout or wording beyond the
+names it clicks. A menu's commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open
+session's header has buttons with the same names (Stop, Replace, Delete), and a `text:` target picks the first match in
+drawing order, which is the header's.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -103,6 +103,10 @@ SETTINGS_SUMMARY = "For every host on this helm, and for this device"
 
 # The Hosts panel's accessible name, quoted as the snapshot prints it: only the shown panel draws it.
 HOSTS_PANEL = '"Host management"'
+
+# The Add host dialog's header summary: text only the open dialog draws, so waiting for it (or for it to go) tells
+# whether the dialog is open.
+ADD_HOST_SUMMARY = "An SSH destination this helm can reach"
 
 # What every step's name must look like (the module docs say why); `main` checks it before starting the app.
 STEP_NAME = re.compile(r"test_\d\d_")
@@ -680,6 +684,22 @@ class Smoke(unittest.TestCase):
                 if not failing:
                     raise
                 print(f"gui-e2e-smoke: step 40 left host {host} ({destination}) registered: {error}", file=sys.stderr)
+
+    # ---- The sidebar area's rail Add host (41) ----------------------------------------------------------------------
+
+    def test_41_the_rails_add_host_opens_its_dialog_and_escape_returns_to_it(self) -> None:
+        """The host rail's Add host is the app's way into adding a host, and closing the dialog it opens hands focus
+        back the way SPEC.md says ("Closing something the user opened returns focus to where it was before it
+        opened"). The step seeds and touches no session, types nothing and so sends no probe, leaving the host registry
+        as it found it. Specified: with the dialog not open, a click on Add host opens it, and Escape closes it with
+        focus on Add host. The dialog's summary is the oracle for open and closed, since only the open dialog draws
+        it."""
+        self.assertNotIn(ADD_HOST_SUMMARY, self.ok("snapshot"), "premise: the Add host dialog is not open")
+        self.ok("click", "id:host-rail-add")
+        self.ok("wait", "--text", ADD_HOST_SUMMARY)
+        self.ok("press", "escape")
+        self.ok("wait", "--gone", ADD_HOST_SUMMARY)
+        self.assertRegex(self.ok("snapshot", "-i"), r'button "Add host" \[focused\]', "focus is back on Add host")
 
 
 # The receiver for the large-paste step: once the step types `copy`, it writes its payload file to the clipboard with

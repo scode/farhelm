@@ -44,6 +44,8 @@
 //!
 //! So is the Appearance section glyph (`ActionGlyph::Appearance`), in the same box and stroke; its filled half has no
 //! stroke, as the old one's did not. So is the Agent trust section glyph (`ActionGlyph::AgentTrust`).
+//!
+//! So is the Add glyph (`ActionGlyph::Add`, a plus), on the host rail's Add host, in the same box and stroke.
 
 use std::borrow::Cow;
 
@@ -159,6 +161,8 @@ pub enum Icon {
     Restart,
     /// A shield with a tick: the Settings dialog's Agent trust section (the old app's Agent trust glyph).
     AgentTrust,
+    /// A plus: add something new (the old app's Add glyph, on the host rail's Add host).
+    Add,
 }
 
 impl Icon {
@@ -205,6 +209,7 @@ impl Icon {
         Icon::Terminal,
         Icon::Restart,
         Icon::AgentTrust,
+        Icon::Add,
     ];
 }
 
@@ -250,6 +255,7 @@ impl Icon {
             Icon::Terminal => "icons/terminal.svg",
             Icon::Restart => "icons/restart.svg",
             Icon::AgentTrust => "icons/agent-trust.svg",
+            Icon::Add => "icons/add.svg",
         }
     }
 }
@@ -316,6 +322,7 @@ impl Assets {
                 "../../../../packaging/farhelm-desktop/wordmark-light.svg"
             )),
             "icons/restart.svg" => Some(include_bytes!("../assets/icons/restart.svg")),
+            "icons/add.svg" => Some(include_bytes!("../assets/icons/add.svg")),
             _ => None,
         }
     }

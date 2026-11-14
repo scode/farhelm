@@ -105,9 +105,10 @@ while any Settings save is in flight is refused (Deviations).
 
 The Add host dialog and its probe are ported; setup's confirmation, the submission and its progress are not yet.
 
-NOTE: The app does not open Add host yet. Its entry point is `hosts::add::open`, and the host rail's Add host and the
-Hosts heading's add button that call it are drawn by the sidebar and by a later piece of this area; until then only the
-tests and the screenshot golden open the dialog, and no end-to-end smoke step drives it.
+The app opens the dialog from the host rail's Add host, which calls `hosts::add::open` with itself as the opener; that
+button's own tests, and the end-to-end smoke step that opens the dialog and closes it with Escape, are in the sidebar's
+parity file (`docs/gpui/parity/sidebar-and-session-view.md`, the `tests/filters.spec.ts` row). The Hosts heading's add
+button, the dialog's other entry point, is not drawn yet.
 
 Replacing tests, in `crates/gui/farhelm-gui/src/hosts/add/tests.rs`:
 
