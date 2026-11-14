@@ -382,6 +382,11 @@
       "reference": "row-delete-confirmation"
     },
     {
+      "golden": "inline-prompt",
+      "title": "The YOLO confirmation drawn inline, with its outlined permanent answer",
+      "reference": "launcher-yolo-confirmation"
+    },
+    {
       "golden": "popover",
       "title": "A menu popover",
       "reference": "session-row-menu"

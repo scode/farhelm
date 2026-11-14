@@ -30,7 +30,9 @@
 //!   drawn positions), and to the layer itself only when no control is left. A menu traps Tab like a dialog (SPEC.md:
 //!   "Inside a dialog or menu, focus stays inside"). A popover that never takes focus (a list floating under the field
 //!   the user types in) is not a layer for any of this: it traps nothing and gives nothing back, and while only such a
-//!   popover is open, focus moves on the page as if nothing were open ([`layers::focus_layer_open`]).
+//!   popover is open, focus moves on the page as if nothing were open ([`layers::focus_layer_open`]). Inside the
+//!   topmost layer, focus moves between parts of it only through [`move_within_control`]: within a radio group, and
+//!   into and out of a question the prompt draws inline in a dialog.
 //! - **Which press focuses an element.** Every focusable element is tracked through [`track`], which suppresses GPUI's
 //!   own focus-on-press (GPUI focuses any tracked element on mouse-down, a move no lint could see) and applies the
 //!   coordinator's rule instead: on Linux a click focuses the control it lands on; on macOS it does not, as in WebKit
@@ -403,13 +405,22 @@ pub fn focus_control(target: &FocusHandle, chosen: &Mark, window: &mut Window, c
     apply_and_reveal(Move::To(target), window, cx);
 }
 
-/// Carry focus from `from` to `to`, two parts of one control, because the key being handled on `from` moved the
-/// control's own position there: the arrows in a radio group move the choice and focus together, as native radios do.
+/// Carry focus from `from` to `to`, two parts of one place inside the topmost layer (or the page), because what the
+/// user just did moved the place's own position there. Two callers:
 ///
-/// It moves nothing unless `from` holds focus, so it only ever carries focus along inside the control the user is
-/// typing into and never takes it from anywhere else; it needs no [`Mark`], being the direct answer to the key being
-/// handled. Unlike [`focus_control`], it works inside a dialog, where such controls live. The caller must draw `to`
-/// inside the same control as `from`, which keeps the move inside the topmost layer.
+/// - A radio group: the key being handled on `from` moved the choice, and the arrows move the choice and focus
+///   together, as native radios do. The caller draws `to` inside the same control as `from`.
+/// - A question the prompt draws inline in its owner's dialog (SPEC.md's YOLO confirmation in the launcher). On
+///   opening, `from` is what held focus when the question was asked and `to` its starting answer, drawn in the same
+///   dialog from the next frame on; the prompt checks [`has_moved_on`] first, so a question that arrives after the user
+///   moved on shows and waits. On closing, `from` is each of its answers and `to` what held focus when it opened, so
+///   focus goes back only from the answer that holds it, and stays wherever the user took it otherwise.
+///
+/// It moves nothing unless `from` holds focus, so it only ever carries focus along from where it is and never takes it
+/// from anywhere else; it needs no [`Mark`] of its own. Unlike [`focus_control`], it works inside a dialog. The caller
+/// must draw `to` beside `from` in the same layer: the coordinator cannot check a target that is not drawn yet, the
+/// per-step focus invariant catches a caller that breaks this, and a target not drawn in the next frame loses focus to
+/// the closest control left in the layer.
 pub fn move_within_control(
     from: &FocusHandle,
     to: &FocusHandle,

@@ -1,6 +1,7 @@
 //! Behavior tests for the prompt, on GPUI's simulated platform: that a confirmation acts only on what it showed, where
-//! a question starts and how it is answered, cancelled and closed, how its summary draws a host value, and the anchored
-//! question asked beside its control.
+//! a question starts and how it is answered, cancelled and closed, how its summary draws a host value, the anchored
+//! question asked beside its control, the inline question drawn inside its owner's dialog (SPEC.md's YOLO
+//! confirmation in the launcher), and the answer whose action can fail, which keeps its question up with the reason.
 //!
 //! Each test opens its window through the shared harness ([`crate::test_support::open`]: GPUI Kit's `Root` around a
 //! root view wired as the app's), drives it through simulated keys and clicks, so key bindings resolve as they do in
@@ -11,19 +12,20 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gpui::{
-    AppContext as _, Entity, FocusHandle, InteractiveElement as _, IntoElement, Modifiers,
-    MouseButton, ParentElement, StatefulInteractiveElement as _, Styled, TestAppContext,
-    VisualTestContext, div, point, px,
+    AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
+    KeyDownEvent, Keystroke, Modifiers, MouseButton, ParentElement, Render,
+    StatefulInteractiveElement as _, Styled, TestAppContext, VisualTestContext, Window, div, point,
+    px,
 };
 
 use crate::components::{HoverHelp, Role, Tier};
 use crate::focus::{self, Mark, OnPress};
 use crate::host_text::{HostSentence, HostText};
-use crate::layers::{self, Anchor, LayerId, Subject};
+use crate::layers::{self, Anchor, Dialog, LayerId, Subject};
 use crate::prompt::{self, Answer, Presentation, Question};
 use crate::test_support::{
-    Thing, advance, bounds, button, center, check, click, focused, frame, handle, is_open, keys,
-    open, question, redraw,
+    Thing, advance, bounds, button, center, check, click, focused, focused_id, frame, handle,
+    is_open, keys, open, question, redraw, settle,
 };
 
 // ---- The prompt ------------------------------------------------------------------------------------------------------
@@ -94,8 +96,10 @@ fn open_row(cx: &mut TestAppContext) -> (&mut VisualTestContext, Row) {
 /// command (SPEC_impl.md, "Questions: the prompt"); this test's teeth are the answer ordering (without the
 /// first-answer-wins guard, Cancel then Confirm would send).
 ///
-/// It runs for both presentations, centered and anchored: the anchored one is a different layer kind with its own
-/// answer wiring, and the guarantee must not depend on where the question is drawn.
+/// It runs for both layer presentations, centered and anchored: the anchored one is a different layer kind with its own
+/// answer wiring, and the guarantee must not depend on where the question is drawn. The inline presentation shares
+/// the same answer path and has its own no-draw case in
+/// [`an_inline_question_answers_once_and_returns_focus_inside_its_dialog`].
 #[gpui::test]
 fn a_confirmation_acts_only_on_what_it_showed(cx: &mut TestAppContext) {
     let (cx, row) = open_row(cx);
@@ -1031,5 +1035,545 @@ fn escape_on_a_question_can_return_focus_home(cx: &mut TestAppContext) {
                 "{case}: where focus went"
             );
         }
+    }
+}
+
+// ---- The inline question ---------------------------------------------------------------------------------------------
+
+/// Where a test keeps the inline question its launcher draws, shared between the test and the launcher's view.
+type InlineCell = Rc<RefCell<Option<prompt::Inline<String>>>>;
+
+/// The dialog an inline question is asked in, standing in for the session launcher: its Launch button at the top, a
+/// Reset button lower down, then the question, drawn while the test's cell holds it, as the launcher draws its YOLO
+/// question in its body. The test holds both buttons' focus handles.
+///
+/// Reset sits closer to the question than Launch does, so it is what the focus coordinator's recovery would pick if a
+/// closing question let focus drop: a test that sees focus back on Launch knows the question returned it.
+struct Launcher {
+    launch: FocusHandle,
+    reset: FocusHandle,
+    question: InlineCell,
+}
+
+impl Render for Launcher {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .debug_selector(|| "launcher".into())
+            .w(px(1100.))
+            .p(px(20.))
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(div().w(px(80.)).child(button("launch", &self.launch)))
+            .child(div().h(px(40.)))
+            .child(div().w(px(80.)).child(button("reset", &self.reset)))
+            .children(self.question.borrow().clone())
+    }
+}
+
+/// An open [`Launcher`]: its layer, its buttons' focus handles (focus starts on Launch) and the question's cell.
+struct OpenLauncher {
+    layer: LayerId,
+    launch: FocusHandle,
+    reset: FocusHandle,
+    question: InlineCell,
+}
+
+/// Open the harness with a [`Launcher`] dialog over an empty page, focus on its Launch button. The dialog has no
+/// dismissal hook, so Escape that reaches it closes it: a test can tell whether the question took the key.
+fn open_launcher(cx: &mut TestAppContext) -> (&mut VisualTestContext, OpenLauncher) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    let (launch, reset, container) = (handle(cx), handle(cx), handle(cx));
+    let question: InlineCell = Rc::default();
+    let (start, drawn, lower) = (launch.clone(), question.clone(), reset.clone());
+    let layer = cx.update(move |window, cx| {
+        let view = cx.new(|_| Launcher {
+            launch: start.clone(),
+            reset: lower,
+            question: drawn,
+        });
+        let mark = Mark::take(cx);
+        layers::open_dialog(
+            Dialog {
+                view: view.into(),
+                container,
+                start,
+                subject: None,
+                main_action: None,
+                keeps_focus_on_empty_click: true,
+                returns_to: focus::ReturnTo::Opener,
+                on_dismiss: None,
+                placement: layers::DialogPlacement::Centered,
+                dismiss_on_outside_press: false,
+            },
+            &mark,
+            window,
+            cx,
+        )
+    });
+    settle(cx);
+    let Some(layer) = layer else {
+        panic!("the launcher did not open")
+    };
+    assert!(
+        focused(cx, &launch),
+        "the premise: the launcher's Launch button has focus"
+    );
+    (
+        cx,
+        OpenLauncher {
+            layer,
+            launch,
+            reset,
+            question,
+        },
+    )
+}
+
+/// What the test question's answers ran, each as "<answer> <frozen value>", in order.
+type Ran = Rc<RefCell<Vec<String>>>;
+
+/// The attempts the permanent answer was handed, oldest first, for the test to settle.
+type Attempts = Rc<RefCell<Vec<prompt::Attempt>>>;
+
+/// SPEC.md's YOLO confirmation as the launcher asks it, with the old app's words: Cancel, the guarded option, the
+/// outlined permanent answer, then the filled one-time answer, which confirms. The permanent answer can fail, as the
+/// real one does (it changes the host's setting first): each press records its run in `ran` and its attempt in
+/// `attempts` for the test to settle. It starts on Cancel and is drawn loud.
+fn yolo(ran: &Ran, attempts: &Attempts) -> Question<String> {
+    let (guarded, always, kept) = (ran.clone(), ran.clone(), attempts.clone());
+    Question::new(
+        "Confirm YOLO launch",
+        Answer {
+            label: "Start YOLO session anyway".into(),
+            help: HoverHelp::tooltip(
+                "Start the session in YOLO mode, where the agent acts without asking",
+            ),
+            tier: Tier::Danger,
+        },
+        "codex on build-box".to_string(),
+    )
+    .summary("YOLO means the agent bypasses its safety checks.")
+    .line("Nothing has been started.")
+    .cancel_answer(Answer {
+        label: "Cancel".into(),
+        help: HoverHelp::tooltip("Cancel: go back without starting anything"),
+        tier: Tier::Neutral,
+    })
+    .alternative(
+        Answer {
+            label: "Start guarded session instead".into(),
+            help: HoverHelp::tooltip("Start this session in guarded mode instead"),
+            tier: Tier::Primary,
+        },
+        move |frozen, _, _| guarded.borrow_mut().push(format!("guarded {frozen}")),
+    )
+    .fallible_alternative(
+        Answer {
+            label: "Start, and don't ask again on this host".into(),
+            help: HoverHelp::tooltip(
+                "Start it, and start YOLO sessions on this host without asking from now on",
+            ),
+            tier: Tier::DangerOutline,
+        },
+        move |frozen, attempt, _, _| {
+            always.borrow_mut().push(format!("always {frozen}"));
+            kept.borrow_mut().push(attempt);
+        },
+    )
+    .starts_on_cancel()
+    .loud()
+}
+
+/// Ask `question` inline in the open launcher, with a mark taken now (the user just pressed Launch and the helm's
+/// refusal came back), confirming into `ran`, and draw it. The cell is filled inside the same update, so the frame
+/// that follows already draws the question its starting answer took focus in.
+fn ask_inline_in(
+    cx: &mut VisualTestContext,
+    launcher: &OpenLauncher,
+    question: Question<String>,
+    ran: &Ran,
+) -> prompt::Inline<String> {
+    let (cell, confirmed) = (launcher.question.clone(), ran.clone());
+    let inline = cx.update(move |window, cx| {
+        let mark = Mark::take(cx);
+        let inline = prompt::ask_inline(
+            question,
+            &mark,
+            move |frozen, _, _| confirmed.borrow_mut().push(format!("confirmed {frozen}")),
+            window,
+            cx,
+        );
+        cell.replace(Some(inline.clone()));
+        inline
+    });
+    redraw(cx);
+    inline
+}
+
+/// Settle the oldest unsettled attempt: failed with `reason`, or succeeded with `None`.
+fn settle_attempt(cx: &mut VisualTestContext, attempts: &Attempts, reason: Option<HostSentence>) {
+    let attempt = attempts.borrow_mut().remove(0);
+    cx.update(move |_, cx| match reason {
+        Some(reason) => attempt.failed(reason, cx),
+        None => attempt.succeeded(cx),
+    });
+    settle(cx);
+}
+
+/// Every line of text painted inside the inline question in a fresh frame.
+fn painted_in_question(cx: &mut VisualTestContext) -> Vec<String> {
+    let nodes = frame(cx);
+    let inside = |mut index: usize| loop {
+        if nodes[index].element_id.as_deref() == Some("prompt") {
+            return true;
+        }
+        match nodes[index].parent {
+            Some(parent) => index = parent,
+            None => return false,
+        }
+    };
+    (0..nodes.len())
+        .filter(|&index| inside(index))
+        .flat_map(|index| nodes[index].texts.iter().map(|text| text.text.to_string()))
+        .collect()
+}
+
+/// The answer ids SPEC.md's YOLO question reads and tabs in: Cancel, the guarded option, the permanent answer, the
+/// one-time answer.
+const YOLO_ORDER: [&str; 4] = [
+    "prompt-cancel",
+    "prompt-alternative-0",
+    "prompt-alternative-1",
+    "prompt-confirm",
+];
+
+/// Why this matters: SPEC.md's YOLO question is drawn inline in the launcher, and it is the confirmation that stops a
+/// YOLO launch on the wrong machine. It must start on Cancel and tab in SPEC.md's order ("Cancel keeps initial focus",
+/// "Tab follows that same order"), or a user tabbing to Cancel lands on a YOLO answer. Each answer must run once, and
+/// the question must close inside its dialog: focus goes back to where it was before the question opened, in the
+/// launcher, not to the page behind it. Escape on the question means Cancel and must not also throw away the launcher
+/// and the draft in it, which is what the layer manager would do with an Escape the question let through.
+///
+/// Specified: asked inline in a dialog right after the user acted, the question is an alert dialog and takes focus on
+/// Cancel, and Tab from Cancel reaches the guarded option, the permanent answer and the one-time answer in turn. Enter
+/// on each answer runs it once on the frozen value (Cancel runs nothing; the permanent answer's attempt then succeeds),
+/// and Escape on the permanent answer runs nothing. Each closes the question, returns focus to the launcher's Launch
+/// button and leaves the launcher open. Cancel then Confirm sent with no draw between them run nothing: the first
+/// answer wins inline too. Escape from Launch afterwards closes the launcher.
+#[gpui::test]
+fn an_inline_question_answers_once_and_returns_focus_inside_its_dialog(cx: &mut TestAppContext) {
+    let (cx, launcher) = open_launcher(cx);
+    let frozen = "codex on build-box";
+    for (tabs, key, expected) in [
+        (0, "enter", None),
+        (1, "enter", Some("guarded")),
+        (2, "enter", Some("always")),
+        (3, "enter", Some("confirmed")),
+        (2, "escape", None),
+    ] {
+        let (ran, attempts): (Ran, Attempts) = Default::default();
+        let inline = ask_inline_in(cx, &launcher, yolo(&ran, &attempts), &ran);
+        if tabs == 0 && key == "enter" {
+            let nodes = frame(cx);
+            let role = nodes
+                .iter()
+                .find(|node| node.element_id.as_deref() == Some("prompt"))
+                .and_then(|node| node.role);
+            assert_eq!(
+                role,
+                Some(Role::AlertDialog),
+                "the question is an alert dialog"
+            );
+        }
+        for _ in 0..tabs {
+            keys(cx, "tab");
+        }
+        let answer = YOLO_ORDER[tabs];
+        assert_eq!(
+            focused_id(cx).as_deref(),
+            Some(answer),
+            "focus starts on Cancel and Tab walks the answers in order"
+        );
+        keys(cx, key);
+        if !attempts.borrow().is_empty() {
+            settle_attempt(cx, &attempts, None);
+        }
+        let expected: Vec<String> = expected
+            .map(|ran| format!("{ran} {frozen}"))
+            .into_iter()
+            .collect();
+        assert_eq!(*ran.borrow(), expected, "{key} on {answer} ran it once");
+        assert!(
+            !cx.update(|_, cx| inline.is_open(cx)),
+            "{key} on {answer} closed the question"
+        );
+        assert!(
+            focused(cx, &launcher.launch),
+            "after {key} on {answer}, focus went back to Launch"
+        );
+        assert!(is_open(cx, launcher.layer), "the launcher stayed open");
+    }
+    let (ran, attempts): (Ran, Attempts) = Default::default();
+    let inline = ask_inline_in(cx, &launcher, yolo(&ran, &attempts), &ran);
+    cx.update(|window, cx| {
+        inline.cancel(window, cx);
+        inline.confirm(window, cx);
+    });
+    settle(cx);
+    assert!(
+        ran.borrow().is_empty(),
+        "Cancel won over the Confirm behind it"
+    );
+    keys(cx, "escape");
+    assert!(
+        !is_open(cx, launcher.layer),
+        "Escape outside the question closed the launcher"
+    );
+}
+
+/// Why this matters: SPEC.md, "Who may move focus": a question that arrives after the user moved on (a plain Replace's
+/// YOLO question, after they typed elsewhere) shows where it belongs and waits; it must not take focus from what they
+/// are doing. And an answer that runs while focus is elsewhere leaves focus there: the question returns focus only when
+/// it held it, so it never pulls focus away from a control the user moved to.
+///
+/// Specified: asked inline with a mark the user has moved on from (a key pressed since), the question is drawn and
+/// open, and focus stays on the launcher's Launch button. With focus then moved to Reset, a Cancel pressed without
+/// taking focus (a macOS click) closes the question and leaves focus on Reset.
+#[gpui::test]
+fn an_inline_question_that_arrives_after_the_user_moved_on_waits(cx: &mut TestAppContext) {
+    let (cx, launcher) = open_launcher(cx);
+    let mark = cx.update(|_, cx| Mark::take(cx));
+    keys(cx, "x");
+    let (ran, attempts): (Ran, Attempts) = Default::default();
+    let cell = launcher.question.clone();
+    let question = yolo(&ran, &attempts);
+    let inline = cx.update(move |window, cx| {
+        let inline = prompt::ask_inline(question, &mark, |_, _, _| {}, window, cx);
+        cell.replace(Some(inline.clone()));
+        inline
+    });
+    redraw(cx);
+    assert!(
+        cx.update(|_, cx| inline.is_open(cx)),
+        "the question is open"
+    );
+    assert!(
+        cx.debug_bounds("prompt-cancel").is_some(),
+        "and drawn in the launcher"
+    );
+    assert!(
+        focused(cx, &launcher.launch),
+        "focus stayed where the user had it"
+    );
+    click(cx, "reset");
+    assert!(
+        focused(cx, &launcher.reset),
+        "the premise: the user moved focus to Reset"
+    );
+    cx.update(|window, cx| inline.cancel(window, cx));
+    settle(cx);
+    assert!(
+        !cx.update(|_, cx| inline.is_open(cx)),
+        "Cancel closed the question"
+    );
+    assert!(
+        focused(cx, &launcher.reset),
+        "focus stayed on Reset, where the user had put it"
+    );
+}
+
+/// Why this matters: a plain Replace's YOLO question arrives on the page, with no dialog open (SPEC.md: it "takes focus
+/// only if the user has not moved on since answering Replace"). There the question cannot borrow a dialog's focus
+/// rules, so it must take focus through the page's own move and give it back to the control that asked.
+///
+/// Specified: with focus on a page control and no layer open, a question asked inline right after the user acted takes
+/// focus on Cancel; Escape on it runs nothing, closes it and returns focus to that control.
+#[gpui::test]
+fn an_inline_question_on_the_page_takes_and_returns_focus(cx: &mut TestAppContext) {
+    let replace = cx.update(|cx| cx.focus_handle().tab_stop(true));
+    let cell: InlineCell = Rc::default();
+    let (drawn, shown) = (replace.clone(), cell.clone());
+    let cx = open(cx, move |_, _| {
+        div()
+            .flex()
+            .flex_col()
+            .child(div().w(px(80.)).child(button("replace", &drawn)))
+            .children(shown.borrow().clone())
+            .into_any_element()
+    });
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &replace),
+        "the premise: the header's Replace has focus"
+    );
+    assert!(
+        !cx.update(|window, cx| layers::any_open(window, cx)),
+        "the premise: no layer is open"
+    );
+    let (ran, attempts): (Ran, Attempts) = Default::default();
+    let (question, confirmed) = (yolo(&ran, &attempts), ran.clone());
+    let inline = cx.update(move |window, cx| {
+        let mark = Mark::take(cx);
+        let inline = prompt::ask_inline(
+            question,
+            &mark,
+            move |frozen, _, _| confirmed.borrow_mut().push(format!("confirmed {frozen}")),
+            window,
+            cx,
+        );
+        cell.replace(Some(inline.clone()));
+        inline
+    });
+    redraw(cx);
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("prompt-cancel"),
+        "the question took focus on Cancel"
+    );
+    keys(cx, "escape");
+    assert!(ran.borrow().is_empty(), "Escape answered nothing");
+    assert!(
+        !cx.update(|_, cx| inline.is_open(cx)),
+        "Escape closed the question"
+    );
+    assert!(focused(cx, &replace), "focus went back to Replace");
+}
+
+// ---- Stays up with the reason ----------------------------------------------------------------------------------------
+
+/// Why this matters: SPEC.md's YOLO question has an answer that first changes the host's setting, and "if changing
+/// that setting fails, nothing is started and the confirmation stays up with the reason". A question that closed
+/// before the setting was written would leave the user with no answer to pick again and no reason; one that let
+/// another answer through while the write was in flight would start a second launch, or cancel one already under way.
+///
+/// Specified: Enter on the fallible answer runs its action once and leaves the question open, focus still on that
+/// answer, and the owner sees an attempt in flight until it settles (so its dismissal hook can keep it open). While it
+/// is in flight, every other answer and Escape (which leaves the launcher open too) run nothing. When the attempt
+/// fails, the question stays open with the reason painted inside it (a host value in it escaped), focus still on the
+/// answer, and a held Enter left over from the first press does not retry. A new Enter retries, running the action
+/// again and clearing the reason; when that attempt succeeds, the question closes, focus returns to Launch, and the
+/// launcher stays open. The one-time answer never ran.
+#[gpui::test]
+fn a_failing_answer_keeps_its_question_up_with_the_reason(cx: &mut TestAppContext) {
+    let (cx, launcher) = open_launcher(cx);
+    let (ran, attempts): (Ran, Attempts) = Default::default();
+    let inline = ask_inline_in(cx, &launcher, yolo(&ran, &attempts), &ran);
+    let always = "always codex on build-box";
+    let open_with_focus_on_it = |cx: &mut VisualTestContext, when: &str| {
+        assert!(
+            cx.update(|_, cx| inline.is_open(cx)),
+            "{when}: the question is open"
+        );
+        assert_eq!(
+            focused_id(cx).as_deref(),
+            Some("prompt-alternative-1"),
+            "{when}: focus stayed on the answer"
+        );
+    };
+
+    let in_flight = |cx: &mut VisualTestContext| cx.update(|_, cx| inline.in_flight(cx));
+    keys(cx, "tab tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("prompt-alternative-1"),
+        "the premise: the permanent answer has focus"
+    );
+    assert!(!in_flight(cx), "the premise: nothing is in flight yet");
+    keys(cx, "enter");
+    assert_eq!(*ran.borrow(), [always], "the answer ran once");
+    assert!(in_flight(cx), "the owner sees the attempt in flight");
+    open_with_focus_on_it(cx, "in flight");
+
+    cx.update(|window, cx| {
+        inline.cancel(window, cx);
+        inline.confirm(window, cx);
+        inline.alternative(0, window, cx);
+        inline.alternative(1, window, cx);
+    });
+    settle(cx);
+    keys(cx, "escape");
+    assert_eq!(*ran.borrow(), [always], "nothing else ran in flight");
+    assert_eq!(attempts.borrow().len(), 1, "one attempt is in flight");
+    assert!(is_open(cx, launcher.layer), "Escape left the launcher open");
+    open_with_focus_on_it(cx, "after the presses in flight");
+
+    let host = HostText::from_host("build-box\u{202E}");
+    let reason = HostSentence::new("prompt-reason")
+        .text("Could not stop asking for ")
+        .host(&host)
+        .text(". This answer started nothing.");
+    settle_attempt(cx, &attempts, Some(reason));
+    assert!(!in_flight(cx), "the failed attempt is no longer in flight");
+    open_with_focus_on_it(cx, "failed");
+    let painted = painted_in_question(cx);
+    assert!(
+        painted
+            .iter()
+            .any(|text| text.contains("build-box<U+202E>")),
+        "the reason is painted inside the question, its host value escaped; painted: {painted:?}"
+    );
+    cx.simulate_event(KeyDownEvent {
+        native_key: None,
+        keystroke: Keystroke::parse("enter").unwrap(),
+        is_held: true,
+        prefer_character_input: false,
+    });
+    check(cx);
+    assert_eq!(*ran.borrow(), [always], "a held Enter did not retry");
+
+    keys(cx, "enter");
+    assert_eq!(*ran.borrow(), [always, always], "Enter retried");
+    assert!(in_flight(cx), "the retry is in flight");
+    let painted = painted_in_question(cx);
+    assert!(
+        !painted
+            .iter()
+            .any(|text| text.contains("Could not stop asking")),
+        "the retry cleared the old reason; painted: {painted:?}"
+    );
+    settle_attempt(cx, &attempts, None);
+    assert!(
+        !in_flight(cx),
+        "the attempt that succeeded is no longer in flight"
+    );
+    assert!(
+        !cx.update(|_, cx| inline.is_open(cx)),
+        "success closed the question"
+    );
+    assert!(focused(cx, &launcher.launch), "focus went back to Launch");
+    assert!(is_open(cx, launcher.layer), "the launcher stayed open");
+    assert_eq!(
+        *ran.borrow(),
+        [always, always],
+        "the one-time answer never ran"
+    );
+}
+
+/// Why this matters: a layer closes on a press outside it or when its subject goes, which would take the question away
+/// while its answer's work runs on; the work would then finish for a question the user can no longer see. So only an
+/// inline question may carry an answer that can fail, and asking one as a layer must fail at once rather than open.
+///
+/// Specified: a question with a fallible answer, asked centered or anchored, does not open.
+#[gpui::test]
+fn a_question_with_an_answer_that_can_fail_opens_only_inline(cx: &mut TestAppContext) {
+    let (cx, row) = open_row(cx);
+    for (kind, presentation) in row.presentations() {
+        let (ran, attempts): (Ran, Attempts) = Default::default();
+        let question = yolo(&ran, &attempts);
+        let asked = cx.update(|window, cx| {
+            let mark = Mark::take(cx);
+            prompt::ask_for_test(
+                presentation,
+                question,
+                None,
+                &mark,
+                |_, _, _| {},
+                window,
+                cx,
+            )
+        });
+        settle(cx);
+        assert!(asked.is_none(), "{kind}: it did not open");
     }
 }

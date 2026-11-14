@@ -117,6 +117,11 @@ pub struct Palette {
     pub danger_bg: Token,
     /// `--danger-fill-hover`: hover on that fill.
     pub danger_fill_hover: Token,
+    /// `--danger-bg-dim`: a subdued red fill, the hover of an outlined danger button (a permanent answer).
+    pub danger_bg_dim: Token,
+    /// `color-mix(in srgb, var(--danger) 14%, transparent)`, as `0xRRGGBBAA`: the red wash behind a loud question,
+    /// the old YOLO confirmation's `.yolo-confirmation` background.
+    pub danger_wash: Token,
     /// `--info`: idle with output nobody has looked at.
     pub info: Token,
     /// `--on-accent-dim`: secondary text on a selection fill.
@@ -176,6 +181,9 @@ pub const DARK: Palette = Palette {
     danger_soft: rgb_token(0xf2c0c4),
     danger_bg: rgb_token(0xa83e4d),
     danger_fill_hover: rgb_token(0x983644),
+    danger_bg_dim: rgb_token(0x3a292f),
+    // `--danger` at 14% alpha (0x24 is 14% of 255, rounded).
+    danger_wash: rgba_token(0xee8a8a24),
     info: rgb_token(0x8ea2f5),
     on_accent_dim: rgb_token(0xf4f6ff),
     link: rgb_token(0x9cb7ff),
@@ -231,6 +239,9 @@ pub const LIGHT: Palette = Palette {
     danger_soft: rgb_token(0xf2c0c4),
     danger_bg: rgb_token(0xa83e4d),
     danger_fill_hover: rgb_token(0x983644),
+    danger_bg_dim: rgb_token(0xfae9ec),
+    // `--danger` at 14% alpha (0x24 is 14% of 255, rounded).
+    danger_wash: rgba_token(0xa63e4d24),
     info: rgb_token(0x445acf),
     on_accent_dim: rgb_token(0xf4f6ff),
     link: rgb_token(0x3158bd),
