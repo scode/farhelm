@@ -65,6 +65,12 @@
 //! first saw the run, and whether the user folded it). A running setup opens its row; a running Update leaves it
 //! folded, and its failure opens it like any failure.
 //!
+//! While any row shows a setup's or an Update's elapsed time, the panel holds the ticker's shared one-second clock
+//! ([`ticker::every_second`]), which redraws it once a second in an inactive window and under reduced motion too, so
+//! the count moves on with nothing pushed; while its window is active and a row shows a run in progress, it also holds
+//! the shared pulse. It lets go of both the moment the sidebar hides it ([`HostsPanel::hidden`]) and when a reset
+//! replaces the UI session, so a panel nobody sees keeps no ticker loop awake.
+//!
 //! A host list never read says "Loading hosts…"; a failed first read says so in red; a failed refresh keeps the rows it
 //! had and says above them that they are the last state read. The panel never invents a host.
 //!
@@ -200,18 +206,19 @@ pub struct HostsPanel {
 }
 
 /// What the panel keeps about the hosts' runs for one UI session, all of it dropped with that session: a reset starts
-/// the fold and the clock over, as the old app's reload did, and lets go of the pulse and the clock's deadline, which
-/// the next draw takes again if it needs them.
+/// the fold and the elapsed time over, as the old app's reload did, and lets go of the pulse and the one-second clock,
+/// which the next draw takes again if it needs them.
 #[derive(Default)]
 struct Runs {
     /// Each host's run as the panel saw it ([`progress::Seen`]), by host id.
     seen: HashMap<i64, progress::Seen>,
-    /// The shared pulse's ticks, held exactly while the panel is drawn in an active window and a row shows a setup in
-    /// progress.
+    /// The shared pulse's ticks, held exactly while the panel is drawn in an active window and a row shows a run in
+    /// progress (a setup or an Update, pending or running).
     pulse: Option<ticker::Pulsing>,
-    /// The deadline that redraws the panel when a shown run's elapsed time reaches its next second (`progress`'s module
-    /// docs say why it is a deadline); held only while the panel is drawn and a run shows, and taken when it fires.
-    tick: Option<ticker::Deadline>,
+    /// The ticker's one-second clock, held exactly while the panel is drawn and a row shows a run's elapsed time
+    /// (`progress`'s module docs say why it is this clock and not the pulse). It redraws the panel once a second,
+    /// whatever the window's activity and the reduced-motion setting.
+    clock: Option<ticker::Clock>,
 }
 
 impl HostsPanel {
@@ -232,7 +239,7 @@ impl HostsPanel {
 
     /// Record what the current store's host progress says about each host's run ([`progress::follow`]), now. Reaching
     /// the runs through [`PerSession::current`] here, on every change of the connection, is also what drops them, the
-    /// pulse and the deadline included, as soon as a reset replaces the UI session, whether or not the panel is drawn.
+    /// pulse and the clock included, as soon as a reset replaces the UI session, whether or not the panel is drawn.
     fn follow_runs(&mut self, cx: &mut Context<Self>) {
         let now = ticker::wall_now(cx);
         let runs = &mut self.runs.current(cx).seen;
@@ -246,15 +253,16 @@ impl HostsPanel {
         );
     }
 
-    /// The sidebar stopped drawing the panel (Sessions shows instead): drop the pulse and the clock's deadline. Only a
+    /// The sidebar stopped drawing the panel (Sessions shows instead): drop the pulse and the one-second clock. Only a
     /// drawn panel needs them, and the panel cannot tell it is not drawn, since only drawing runs its code, so without
     /// this a pulse taken while Hosts showed would keep the ticker's loop waking ten times a second for a panel nobody
-    /// sees (the ticker's rule: no view holds a pulse while it draws no pulsing mark). The sidebar calls it where it
-    /// hides the panel; a reset needs no call ([`HostsPanel::follow_runs`]). The next draw takes what it needs again.
+    /// sees (the ticker's rule: no view holds a pulse while it draws no pulsing mark), and the clock would keep its own
+    /// loop waking every second. The sidebar calls it where it hides the panel; a reset needs no call
+    /// ([`HostsPanel::follow_runs`]). The next draw takes what it needs again.
     pub fn hidden(&mut self, cx: &App) {
         let runs = self.runs.current(cx);
         runs.pulse = None;
-        runs.tick = None;
+        runs.clock = None;
     }
 
     /// Fold `host`'s run `run_id`, as its Collapse does: the row closes unless something else holds it open, and the
@@ -359,9 +367,10 @@ impl Render for HostsPanel {
                 .map_or(0, |pulse| pulse.step(cx)),
             palette.status_pulse_min,
         );
-        // Whether a row shows setup in progress (for the pulse), and when the soonest shown clock turns over.
+        // Whether a row shows a run in progress (for the pulse), and whether one shows a run's elapsed time (for the
+        // one-second clock): a pending "Setting up…" pulses but has no time to count.
         let mut pulsing = false;
-        let mut next_second: Option<std::time::Duration> = None;
+        let mut counting = false;
         let mut status = None;
         let mut drawn: Vec<AnyElement> = Vec::new();
         // `None` until the hosts collection arrived: the count is not known yet.
@@ -406,10 +415,7 @@ impl Render for HostsPanel {
                         let available = update::available(host, progress, in_flight.is_some());
                         any_updatable |= available;
                         pulsing |= status.is_some();
-                        if let Some(progress::Status::Running { elapsed, .. }) = &status {
-                            let due = progress::next_second(*elapsed);
-                            next_second = Some(next_second.map_or(due, |soonest| soonest.min(due)));
-                        }
+                        counting |= matches!(status, Some(progress::Status::Running { .. }));
                         let input = RowInput {
                             host,
                             progress,
@@ -431,7 +437,7 @@ impl Render for HostsPanel {
             }
         }
 
-        self.keep_time(pulsing, next_second, window, cx);
+        self.keep_time(pulsing, counting, window, cx);
         // `.hosts-heading-actions`: Update all at the heading's end, the free room split around the Details switch, as
         // both carried `margin-left: auto`.
         let update_all = Button::new(
@@ -567,13 +573,14 @@ impl Render for HostsPanel {
 }
 
 impl HostsPanel {
-    /// Hold the pulse while the window is active and a row shows setup in progress (`pulsing`), and while a run's clock
-    /// shows, a deadline that redraws the panel when the soonest one turns over (`next_second`). The ticker's rule for
+    /// Hold the pulse while the window is active and a row shows a run in progress (`pulsing`), and the one-second
+    /// clock while a row shows a run's elapsed time (`counting`), whatever the window's activity. The ticker's rule for
     /// the pulse: never held for a window nobody is looking at, where it would keep the tick loop firing for nothing.
+    /// The clock has no such rule, since a count must still be right when the user looks back at the window.
     fn keep_time(
         &mut self,
         pulsing: bool,
-        next_second: Option<std::time::Duration>,
+        counting: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -582,18 +589,8 @@ impl HostsPanel {
         if pulses != runs.pulse.is_some() {
             runs.pulse = pulses.then(|| ticker::pulse(window, cx));
         }
-        match next_second {
-            None => runs.tick = None,
-            Some(due) if runs.tick.is_none() => {
-                let panel = cx.weak_entity();
-                runs.tick = Some(ticker::after(due, cx, move |cx| {
-                    let _ = panel.update(cx, |panel, cx| {
-                        panel.runs.current(cx).tick = None;
-                        cx.notify();
-                    });
-                }));
-            }
-            Some(_) => {}
+        if counting != runs.clock.is_some() {
+            runs.clock = counting.then(|| ticker::every_second(cx));
         }
     }
 
@@ -631,9 +628,9 @@ impl HostsPanel {
             .collect()
     }
 
-    /// One host's row (`.host-row`): its header line ending in its menu `toggle` (with the inline status of a setup in
+    /// One host's row (`.host-row`): its header line ending in its menu `toggle` (with the inline status of a run in
     /// progress under it), then its details while it is open, then the last refusal of work on it, which shows open or
-    /// not, then a setup run's steps while it is open. `twin` names a host by id for a duplicate's details; `panel` is
+    /// not, then a run's steps while it is open. `twin` names a host by id for a duplicate's details; `panel` is
     /// what a run's Collapse folds it in, and `pulse` the running pulse's opacity for this frame.
     fn row(
         &self,

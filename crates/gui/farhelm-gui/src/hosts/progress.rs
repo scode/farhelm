@@ -29,12 +29,14 @@
 //!   settings-and-hosts goal (M2.9) caps what the panel holds to the fold; the time it first saw a run is the one
 //!   other fact, because SPEC.md asks for an elapsed time measured by the client and nothing else can give one.
 //!
-//! Time comes from the ticker, one clock for every row whatever its run. The running marker and the inline dot pulse on
-//! the shared pulse ([`crate::ticker::pulse`], held by the panel only while its window is active), still under reduced
-//! motion. The elapsed time is read from [`crate::ticker::wall_now`] whenever the panel draws, and the panel arms a
-//! one-second [`crate::ticker::after`] deadline while a run shows, because the pulse stops under reduced motion and in
-//! an inactive window while the clock must still count, and the ticker's [`crate::ticker::Clock`] notifies only every
-//! 30 seconds.
+//! Time comes from the ticker, shared by every row whatever its run. The running marker and the inline dot pulse on the
+//! shared pulse ([`crate::ticker::pulse`]), which the panel holds only while its window is active and which stands
+//! still under reduced motion. The elapsed time is read from [`crate::ticker::wall_now`] whenever the panel draws, and
+//! the panel holds the ticker's one-second clock ([`crate::ticker::every_second`]) while a setup's or an Update's run
+//! shows, because the clock must still count in an inactive window and under reduced motion, where the pulse redraws
+//! nothing. That clock's beat is shared with every other count of seconds in the app rather than set by this run, so a
+//! run first seen mid-second turns over up to a second after its own whole second, as the ticker allows for every
+//! count.
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -252,12 +254,6 @@ pub(crate) fn clock(elapsed: Duration) -> String {
     } else {
         format!("{minutes}:{seconds:02}")
     }
-}
-
-/// How long until the elapsed time `elapsed` shows its next second: when the panel must draw again to keep the clock
-/// right. A whole second away when `elapsed` is on one.
-pub(crate) fn next_second(elapsed: Duration) -> Duration {
-    Duration::from_millis(1_000 - u64::from(elapsed.subsec_millis()))
 }
 
 /// Host `id`'s inline status (`.host-update-running`): drawn under `host-status-<id>` like the phase words it replaces,

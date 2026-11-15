@@ -291,12 +291,14 @@ menu offers Re-run once a setup failed (`hosts::setup::rerun`). Replacing tests,
   the user folded the run first; end to end, step 43.
 - The inline status's count, current step and clock:
   `the_inline_status_counts_steps_names_the_current_one_and_times_the_run`,
-  `the_clock_reads_minutes_and_seconds_and_turns_over_on_the_second` and
-  `the_elapsed_time_counts_from_when_the_panel_first_saw_the_run` (the clock moving with nothing pushed, under reduced
-  motion, redrawn only by the panel's ticker deadline); a run pushed while Hosts is closed keeps its clock, and a reset
-  starts the clock and the fold over: `a_run_keeps_its_clock_while_hosts_is_closed_and_a_reset_starts_it_over`; the
-  pulse stops when Sessions replaces Hosts, through Hosts, a host choice or a reset:
-  `hiding_hosts_stops_the_setup_pulse` and `a_host_choice_and_a_reset_stop_the_setup_pulse_too`.
+  `the_clock_reads_minutes_and_seconds_and_grows_hours` and
+  `the_elapsed_time_counts_from_when_the_panel_first_saw_the_run` (the clock moving with nothing pushed, in an inactive
+  window under reduced motion, redrawn only by the ticker's one-second clock, which the panel lets go of once the run
+  ends); a run pushed while Hosts is closed keeps its clock, and a reset starts the clock and the fold over:
+  `a_run_keeps_its_clock_while_hosts_is_closed_and_a_reset_starts_it_over`; the pulse stops when Sessions replaces
+  Hosts, through Hosts, a host choice or a reset: `hiding_hosts_stops_the_setup_pulse` and
+  `a_host_choice_and_a_reset_stop_the_setup_pulse_too`; the one-second clock stops too, through the same hook:
+  `an_updates_clock_counts_until_the_panel_is_hidden`.
 - "failed ADD rerun probes the registered destination and discovery resolves the run":
   `re_run_probes_the_registered_destination_and_sets_up_under_the_hosts_key` (the probe for the registered destination
   with its recorded install paths, the question, the submission under the host's key, a refused submission under the
@@ -379,7 +381,9 @@ Replacing tests, in `crates/gui/farhelm-gui/src/hosts/update/tests.rs` unless na
   back on the toggle), and end to end, step 47 of `scripts/gui-e2e-smoke.py`. The inline status's words and counting:
   `hosts/progress/tests.rs` `the_inline_status_counts_steps_names_the_current_one_and_times_the_run` and
   `a_running_setup_opens_its_row_until_folded` (a running Update never opens its row). Its clock is the setup's, the
-  panel's one deadline for every row (`the_elapsed_time_counts_from_when_the_panel_first_saw_the_run`).
+  ticker's one-second clock that the panel holds for every row while a run shows
+  (`the_elapsed_time_counts_from_when_the_panel_first_saw_the_run`, and for an Update's run
+  `an_updates_clock_counts_until_the_panel_is_hidden`).
 - "global details alone control disclosure while update progress stays inline": the same test (Details shows the run's
   steps, and nothing else opens the row while it runs); failure opening the row: the same test and step 47.
 - "UPDATE planning refusal shows the concrete reason in a dialog" and the Update half of "uninstall and Update planning
@@ -869,9 +873,10 @@ Where the port does not match the old app, and why. Each stays until the work na
   "Update all" for the heading's press (the migration's rule of 2026-11-14; the old app refused through its page lock,
   with its generic busy words). A press that meets other work on the host's key sends nothing and says nothing: no
   control offers Update on a busy host, so only a press racing a frame gets there.
-- **The inline `↑ Update` shows on every host kind whose Update is available**, as the old app drew it (its
-  `remote_update_available` admitted Tensorlake and container hosts too). SPEC.md ("Session list") and the migration's
-  goal name an SSH host; the port follows the old app.
+- The inline `↑ Update` shows on every remote host kind whose Update is available, SSH, Tensorlake and container, as the
+  old app drew it (its `remote_update_available` admitted all three). SPEC.md ("Session list") named an SSH host until
+  the migration's orchestrator decided on 2026-11-14 to keep the old behaviour and reword SPEC.md to a remote host, so
+  this is not a deviation.
 - **The inline button's urgency is not described separately.** The old button pointed assistive technology at a hidden
   copy of its hover; here the hover help is the button's own and its name is "Update <name>".
 
