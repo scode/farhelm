@@ -11,10 +11,11 @@
 //!
 //! "Pinned" in this crate's comments means the old web client as it stood at the
 //! migration's reference commit 24bc0580 (`grid-model.js`, `grid-buffer.js`,
-//! `terminal-links.js`), whose behavior this model reproduces.
+//! `terminal-links.js`, and `terminal-files.js` for printed paths), whose behavior this model reproduces.
 
 mod link_disclosure;
 mod links;
+mod paths;
 mod selection;
 mod viewport;
 

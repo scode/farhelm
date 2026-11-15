@@ -25,8 +25,16 @@ static URLS: LazyLock<Regex> = LazyLock::new(|| {
 /// must never replace a program's explicit target with its visible label.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LinkKind {
+    /// A program's OSC 8 hyperlink, with `uri` its target as sent: a web address, a `file://` target
+    /// (`TerminalLink::file_path`), or an inert other scheme.
     Osc { id: String },
+    /// A web address printed as text, with `uri` the matched text.
     Text,
+    /// A file path a program printed (`crate::paths`), with `uri` the path as printed. It is never a URL: recognition
+    /// refuses every scheme-bearing token, so [`web_target`] never accepts one, and only the session's host can say
+    /// what file it names. [`GridModel::row_links`] and [`GridModel::link_at`] never return one;
+    /// [`GridModel::path_links`] does.
+    Path,
 }
 
 /// An immutable lookup result over absolute cell ranges. Evidence includes

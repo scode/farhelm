@@ -2433,6 +2433,9 @@ impl AttachedTerminal {
         let disclosed = match link.kind {
             LinkKind::Text => self.tunnel_hint(link, cx).is_some(),
             LinkKind::Osc { .. } => true,
+            // A printed path needs a shown disclosure (its file hover's check), which no path link gets yet, so it
+            // is never admitted. The view does not hand the terminal one yet either: `link_at` finds no paths.
+            LinkKind::Path => true,
         };
         !disclosed
             || self.disclosure.as_ref().is_some_and(|shown| {
