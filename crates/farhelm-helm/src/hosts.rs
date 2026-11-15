@@ -1141,11 +1141,37 @@ pub(crate) async fn registry_row(state: &AppState, host: HostId) -> anyhow::Resu
 /// under a fresh host id. Refuses the reserved local row (409) and an
 /// unknown id (404).
 ///
-/// The one exception is a Tensorlake host, whose removal deletes its
-/// sandbox first (see [`forget_host_locked`]). That takes a few API calls,
-/// each bounded, so the answer can take seconds; a failure answers with
-/// Tensorlake's reason (409 without an API key, 503 otherwise) and the host
-/// stays listed.
+/// The exceptions are the hosts whose removal deletes their machine
+/// ([`HostKind::removal_deletes_machine`]): a Tensorlake host's sandbox and a
+/// container host's container go first (see [`forget_host_locked`]). That
+/// takes a few Tensorlake API calls of up to 20 seconds each, or a few Podman
+/// commands of up to 30 seconds each on the container host; a failure answers
+/// with the provider's reason (for Tensorlake, 409 without an API key and 503
+/// otherwise) and the host stays listed.
+///
+/// ## Answering within the host reply bound
+///
+/// So the reply comes within the host reply bound
+/// (`crate::sessions::HOST_REPLY_BOUND`), as the GUI's ordered channel needs:
+/// past it the reply says the removal carries on. The removal itself runs on
+/// a task of its own, so it finishes whether or not anyone still waits, which
+/// also gives this handler the ownership through actor teardown that
+/// [`remove_host_for`] asks of its caller. A late success shows in the pushed
+/// hosts list, which no longer names the host. A late failure does not show
+/// anywhere but the helm's log: the host stays listed in its ordinary state,
+/// with no record of why, and the user learns of it only by seeing the host
+/// still there (keeping the reason would need a failure record such as the
+/// seal's, which nothing here writes). Until the removal ends it holds the
+/// host's provisioning lock, so removing the same host again meanwhile meets
+/// the "busy" refusal ([`provision_lock_or_busy`]).
+///
+/// Only a machine-deleting removal can meet the bound; every other removal
+/// touches nothing but the registry and the actor map, so the wrapper costs
+/// it nothing and needs no decision by host kind here. Decided by the
+/// migration's orchestrator on 2026-11-15, under its rule that every
+/// host-waiting route the GUI sends is bounded. The agent relay's removal
+/// ([`remove_host_checked`]) refuses machine-deleting hosts before any card,
+/// so it never waits this way and is left as it was.
 ///
 /// FAILS CLOSED through an INFALLIBLE teardown rather than a reconcile.
 /// `stop_actor` takes the id this handler already committed and needs no
@@ -1169,11 +1195,21 @@ pub(crate) async fn registry_row(state: &AppState, host: HostId) -> anyhow::Resu
 pub(crate) async fn remove_host(
     State(state): State<Arc<AppState>>,
     AxPath(host): AxPath<HostId>,
-) -> impl IntoResponse {
-    match remove_host_for(&state, host).await {
-        Ok(()) => axum::Json(serde_json::json!({})).into_response(),
-        Err(e) => http_error(e),
-    }
+) -> axum::response::Response {
+    crate::sessions::within_host_reply_bound_saying(
+        async move {
+            match remove_host_for(&state, host).await {
+                Ok(()) => axum::Json(serde_json::json!({})).into_response(),
+                Err(e) => http_error(e),
+            }
+        },
+        format!(
+            "removing the host did not finish within {} seconds; the removal carries on, and \
+             the hosts list will show the result",
+            crate::sessions::HOST_REPLY_BOUND.as_secs()
+        ),
+    )
+    .await
 }
 
 /// Forget `host` the way [`remove_host`] does, with its refusals: the
@@ -1183,7 +1219,7 @@ pub(crate) async fn remove_host(
 ///
 /// The caller must own the operation through actor teardown, so a dropped
 /// caller cannot leave an actor running for a host no longer registered.
-/// The HTTP handler inherits that from the router.
+/// The HTTP handler runs it on a task of its own ([`remove_host`]).
 async fn remove_host_for(state: &AppState, host: HostId) -> anyhow::Result<()> {
     let provisioning = provision_lock_or_busy(state, host)?;
     forget_host_locked(
@@ -1268,6 +1304,12 @@ pub(crate) async fn finish_sealed_environment(
 /// The host's provisioning lock, taken without waiting, or removal's
 /// "busy" refusal while a setup, update or uninstall holds it; see
 /// [`remove_host`] for why removal never waits.
+///
+/// An earlier removal of the same host holds the lock too, until it ends.
+/// Since removal answers within the host reply bound and goes on after that
+/// answer, a retry after a timed-out removal of a machine-deleting host meets
+/// this refusal while the first removal is still deleting the machine, so the
+/// words name that case alongside the others.
 fn provision_lock_or_busy(
     state: &AppState,
     host: HostId,
@@ -1276,7 +1318,8 @@ fn provision_lock_or_busy(
         anyhow::Error::new(crate::SupervisorError::helm(
             farhelm_proto::ErrorKind::Conflict,
             format!(
-                "host {host} is busy with a setup, update or uninstall; remove it after that finishes"
+                "host {host} is busy with another operation, such as a setup, update or uninstall, or an \
+                 earlier removal that is still finishing; try again after it finishes"
             ),
         ))
     })

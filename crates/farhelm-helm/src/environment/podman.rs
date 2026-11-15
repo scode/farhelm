@@ -769,6 +769,13 @@ impl Podman {
     /// Include unfinished session-owned rows: an interrupted launch can leave
     /// a real container without ever creating a session. Recipe helpers remain
     /// recipe cleanup's responsibility, including after an interrupted build.
+    ///
+    /// Every place is asked at once: the route is bounded as a whole
+    /// ([`list_leftovers`]), so a sequential walk would make the bound cover
+    /// the sum of every host's commands, and a large healthy fleet would never
+    /// answer in time. The first failure fails the whole listing, because a
+    /// partial list would claim that the hosts it could not ask have no
+    /// leftovers ([`listing`]).
     async fn leftovers(
         &self,
     ) -> anyhow::Result<Vec<farhelm_proto::environment::ContainerLeftoverView>> {
@@ -791,13 +798,18 @@ impl Podman {
                     .filter_map(|(place, state)| state.needs_cleanup().then_some(*place)),
             );
         }
+        let discovered =
+            futures_util::future::try_join_all(places.into_iter().map(|place| async move {
+                let owned = self.list_owned(Place::PodmanHost(place)).await?;
+                anyhow::Ok((place, owned))
+            }))
+            .await?;
+        // Read ownership after discovery: a helper created while listing must
+        // not briefly appear as an unrecorded deletion candidate.
+        let recipes = self.0.store.tensorlake_recipe_rows().await?;
+        let rows = self.0.store.list_hosts().await?;
         let mut result = Vec::new();
-        for place in places {
-            let owned = self.list_owned(Place::PodmanHost(place)).await?;
-            // Read ownership after discovery: a helper created while listing
-            // must not briefly appear as an unrecorded deletion candidate.
-            let recipes = self.0.store.tensorlake_recipe_rows().await?;
-            let rows = self.0.store.list_hosts().await?;
+        for (place, owned) in discovered {
             for item in owned {
                 let recipe_helper = recipes.iter().any(|(_, _, state)| {
                     state.podman.get(&place).is_some_and(|state| {
@@ -838,27 +850,59 @@ impl Podman {
     }
 }
 
+/// `GET /api/container-orphans`: the containers this helm owns on its
+/// container hosts that no completed session on this helm holds, for
+/// Settings → Containers.
+///
 /// The provider-owned Containers adapter uses the same concrete service
 /// installed in the manager registry. Injected assemblies without it answer
 /// Unavailable rather than constructing another cache or provider instance.
+///
+/// Answers within the host reply bound (`crate::sessions::HOST_REPLY_BOUND`),
+/// since each Podman command may wait up to [`COMMAND`] (after up to 30
+/// seconds for the host's Podman check), so one host that does not answer
+/// would otherwise hold the GUI's ordered channel past its watchdog
+/// ([`listing`] has the shape). The listing asks the container hosts
+/// concurrently ([`Podman::leftovers`]), so the bound limits the slowest host
+/// rather than the sum of all of them, and a large fleet of healthy hosts
+/// still answers. Decided by the migration's orchestrator on 2026-11-15,
+/// under its rule that every host-waiting route the GUI sends is bounded.
 pub(crate) async fn list_leftovers(
     axum::extract::State(state): axum::extract::State<Arc<crate::AppState>>,
 ) -> axum::response::Response {
+    listing(state.podman.as_deref().cloned()).await
+}
+
+/// The body of [`list_leftovers`], taking only the Podman service so tests
+/// can hand it one whose commands stall.
+///
+/// A listing that reaches the bound is dropped and answers 504 with the
+/// shared "the host did not answer" words: a read leaves nothing to finish,
+/// and a partial list would claim that the hosts not yet asked have no
+/// leftovers. Every other failure keeps its 502 and the provider's reason, so
+/// a failed discovery stays an error rather than an empty list.
+async fn listing(podman: Option<Podman>) -> axum::response::Response {
     use axum::response::IntoResponse as _;
-    let Some(podman) = state.podman.as_ref() else {
+    let Some(podman) = podman else {
         return (
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "this helm has no Podman service",
         )
             .into_response();
     };
-    match podman.leftovers().await {
-        Ok(items) => axum::Json(items).into_response(),
-        Err(error) => (
-            axum::http::StatusCode::BAD_GATEWAY,
-            format!("could not list this helm's container leftovers: {error:#}"),
-        )
-            .into_response(),
+    let read = async move {
+        Ok(match podman.leftovers().await {
+            Ok(items) => axum::Json(items).into_response(),
+            Err(error) => (
+                axum::http::StatusCode::BAD_GATEWAY,
+                format!("could not list this helm's container leftovers: {error:#}"),
+            )
+                .into_response(),
+        })
+    };
+    match crate::sessions::within_host_read_bound(read).await {
+        Ok(response) => response,
+        Err(timed_out) => crate::http_error(timed_out),
     }
 }
 
@@ -871,15 +915,43 @@ pub(crate) struct DeleteLeftover {
     id: String,
 }
 
+/// `DELETE /api/container-orphans`: remove one unregistered leftover after
+/// the user confirmed it.
+///
 /// Row-backed entries must use ordinary host removal and its connection hold.
-/// A dropped HTTP request leaves this explicit cleanup attempt owned until its
-/// absence check completes; it never becomes an automatic cleanup queue.
+/// The cleanup runs on a task of its own, so a dropped HTTP request or a reply
+/// given at the bound leaves the attempt owned until its absence check
+/// completes; it never becomes an automatic cleanup queue.
+///
+/// Answers within the host reply bound (`crate::sessions::HOST_REPLY_BOUND`):
+/// an inspection, the ownership check, `podman rm` and the absence check each
+/// wait up to [`COMMAND`] on the container host. Past the bound the reply says
+/// the cleanup carries on, and the next read of the list shows whether the
+/// container is gone; a late failure reaches only the log. Bounded by the
+/// migration's orchestrator's decision of 2026-11-15, as [`list_leftovers`]
+/// is.
 pub(crate) async fn delete_leftover(
     axum::extract::State(state): axum::extract::State<Arc<crate::AppState>>,
     axum::Json(request): axum::Json<DeleteLeftover>,
 ) -> axum::response::Response {
+    deleting(
+        state.podman.as_deref().cloned(),
+        Arc::clone(state.manager.events()),
+        request,
+    )
+    .await
+}
+
+/// The body of [`delete_leftover`], taking the Podman service and the feed it
+/// bumps once the container is confirmed gone, so tests can stall the
+/// removal and watch it finish after the reply.
+async fn deleting(
+    podman: Option<Podman>,
+    events: Arc<FleetEvents>,
+    request: DeleteLeftover,
+) -> axum::response::Response {
     use axum::response::IntoResponse as _;
-    let Some(podman) = state.podman.clone() else {
+    let Some(podman) = podman else {
         return (
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "this helm has no Podman service",
@@ -896,17 +968,28 @@ pub(crate) async fn delete_leftover(
     if let Err(error) = canonical(&request.id) {
         return (axum::http::StatusCode::BAD_REQUEST, error.to_string()).into_response();
     }
-    match crate::run_owned(async move { podman.delete_leftover(place, &request.id).await }).await {
-        Ok(()) => {
-            state.manager.events().bump();
-            axum::Json(serde_json::json!({})).into_response()
-        }
-        Err(error) => (
-            axum::http::StatusCode::BAD_GATEWAY,
-            format!("container cleanup did not finish: {error:#}"),
-        )
-            .into_response(),
-    }
+    crate::sessions::within_host_reply_bound_saying(
+        async move {
+            match podman.delete_leftover(place, &request.id).await {
+                Ok(()) => {
+                    events.bump();
+                    axum::Json(serde_json::json!({})).into_response()
+                }
+                Err(error) => (
+                    axum::http::StatusCode::BAD_GATEWAY,
+                    format!("container cleanup did not finish: {error:#}"),
+                )
+                    .into_response(),
+            }
+        },
+        format!(
+            "the container host did not answer within {} seconds; the cleanup carries on, and \
+             Containers not on this helm shows whether the container is gone when it is read \
+             again",
+            crate::sessions::HOST_REPLY_BOUND.as_secs()
+        ),
+    )
+    .await
 }
 
 #[async_trait::async_trait]
