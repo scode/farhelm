@@ -71,19 +71,23 @@
 //!   Help in paragraphs ([`Help::Paragraphs`]) is drawn wider and never cut short, as the old app drew it.
 //! - **The innermost help wins** when a control with hover help sits inside another with its own (a session row's
 //!   marks inside the row); [`hover_began`], "Nested hover help", explains the rule and how it is decided.
-//! - **One pill, drawn above every layer and under the tooltip, that is not a layer** ([`show_pill`]). It is the one
-//!   thing a feature draws over the dialogs without opening one: SPEC.md's quick-launch sequence pill, which stays in
-//!   view above the launcher's veil, as the old one sat at z-index 50 over the launcher's backdrop at 40. It is display
-//!   only, like the tooltip: it asks for no pointer input and holds no focus, so a press on it is a press on whatever it
+//! - **Two pill slots, drawn above every layer, that are not layers** ([`show_pill`], [`show_launch_pill`]). They are
+//!   the things a feature draws over the dialogs without opening one. The pill is SPEC.md's quick-launch sequence pill,
+//!   which stays in view above the launcher's veil, as the old one sat at z-index 50 over the launcher's backdrop at 40;
+//!   it sits centered over an [`Anchor`] element or at its bottom edge ([`PillPlacement`]) and goes when that element is
+//!   no longer drawn. The launch pill is SPEC.md's launch progress pill and its "Started" report, centered 20 pixels
+//!   above the window's bottom edge, where the old `.launch-progress-pill` was fixed; it is drawn under the approval
+//!   region and the pill, as the old one sat at z-index 40 under the cards' 45 and the sequence pill's 50 (the old
+//!   stylesheet's z-index ladder at `.header-confirm`). Each slot holds one pill, and the two show at once, each hidden
+//!   only through the id its show returned ([`hide_pill`]); both go on a reset ([`close_all`]). Both are display only,
+//!   like the tooltip: they ask for no pointer input and hold no focus, so a press on one is a press on whatever it
 //!   covers, and nothing that asks about layers ([`any_open`], Tab's trap, where focus recovers, Escape's
-//!   [`dismiss_top`]) sees it. It sits centered over an [`Anchor`] element or at its bottom edge ([`PillPlacement`]) and
-//!   goes when that element is no longer drawn, when its feature hides it ([`hide_pill`]), or on a reset
-//!   ([`close_all`]).
-//! - **One approval region, drawn above every dialog and popover and under the pill and the tooltip, that is not a
-//!   layer either** ([`install_approval_region`]): where SPEC.md's independent agent approval cards stay usable while a
-//!   dialog is open. Unlike the pill it takes presses and focus; like it, nothing that asks about layers sees it, and
-//!   it is installed once per window, never shown or hidden. SPEC_impl.md, "Overlays: the layer manager", says why it
-//!   has this shape and which of its behaviors follow from the rules above.
+//!   [`dismiss_top`]) sees them.
+//! - **One approval region, drawn above every dialog, popover and the launch pill and under the pill and the tooltip,
+//!   that is not a layer either** ([`install_approval_region`]): where SPEC.md's independent agent approval cards stay
+//!   usable while a dialog is open. Unlike the pills it takes presses and focus; like them, nothing that asks about
+//!   layers sees it, and it is installed once per window, never shown or hidden. SPEC_impl.md, "Overlays: the layer
+//!   manager", says why it has this shape and which of its behaviors follow from the rules above.
 //!
 //! State is kept per window: multi-window support is a watch-list item, and the one thing it asks of the foundations
 //! now is that overlays are not shared between windows. Each window's [`LayerStack`] is an entity that notifies, and
@@ -135,7 +139,7 @@ use crate::ticker;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LayerId(u64);
 
-/// One window's overlays: its open layers, bottom to top, its pill and its tooltip.
+/// One window's overlays: its open layers, bottom to top, its two pills and its tooltip.
 pub struct LayerStack {
     window: AnyWindowHandle,
     layers: Vec<Layer>,
@@ -143,7 +147,11 @@ pub struct LayerStack {
     /// The pill showing in this window, if any ([`show_pill`]). Kept apart from `layers` so that nothing that walks the
     /// layers for focus, Escape or "is anything open" can count it.
     pill: Option<ShownPill>,
-    /// The id the next shown pill gets.
+    /// The launch pill showing in this window, if any ([`show_launch_pill`]): the second slot, kept apart from `layers`
+    /// for the same reason as `pill`, and apart from `pill` so that neither show replaces the other's pill.
+    launch_pill: Option<ShownLaunchPill>,
+    /// The id the next shown pill gets, in either slot: one counter, so a [`PillId`] names one pill in one slot and
+    /// [`hide_pill`] never takes down a pill in the other.
     next_pill_id: u64,
     /// The approval region installed in this window, if any ([`install_approval_region`]). Kept apart from `layers`,
     /// as the pill is, so that nothing that walks the layers for focus, Escape or "is anything open" counts it.
@@ -297,6 +305,7 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
         layers: Vec::new(),
         next_id: 0,
         pill: None,
+        launch_pill: None,
         next_pill_id: 0,
         region: None,
         tooltip: None,
@@ -1078,11 +1087,11 @@ fn close_taking(
 /// This is the one close that does not need the layer's id: a reset is not any opener's decision, and a dialog that
 /// survived it would keep its veil over the inert window, where it takes the clicks meant for Take back or Retry and
 /// traps Tab away from them. Focus follows the ordinary close rule, returning to what held it when the bottom layer
-/// that took focus opened (and going home once that is no longer drawn). The pill goes too ([`show_pill`]): what it
-/// showed belonged to the UI session the reset retired, and its feature, which lives in that session, is no longer
-/// there to hide it. The tooltip is left alone: it goes with its control. So is the approval region
-/// ([`install_approval_region`]): its feature installs it once per window, and its view draws from the current UI
-/// session, which after a reset has no cards until the new session brings them.
+/// that took focus opened (and going home once that is no longer drawn). Both pills go too ([`show_pill`],
+/// [`show_launch_pill`]): what they showed belonged to the UI session the reset retired, and their features, which live
+/// in that session, are no longer there to hide them. The tooltip is left alone: it goes with its control. So is the
+/// approval region ([`install_approval_region`]): its feature installs it once per window, and its view draws from the
+/// current UI session, which after a reset has no cards until the new session brings them.
 pub fn close_all(cx: &mut App) {
     let Some(windows) = installed::<Windows>(cx) else {
         return;
@@ -1091,7 +1100,8 @@ pub fn close_all(cx: &mut App) {
         windows.0.values().filter_map(WeakEntity::upgrade).collect();
     for stack in stacks {
         stack.update(cx, |stack, cx| {
-            if stack.pill.take().is_some() {
+            // `|`, not `||`: both slots are emptied whatever the first held.
+            if stack.pill.take().is_some() | stack.launch_pill.take().is_some() {
                 cx.notify();
             }
         });
@@ -1169,7 +1179,8 @@ pub fn is_open(id: LayerId, window: &Window, cx: &App) -> bool {
     stack(window, cx).is_some_and(|stack| stack.read(cx).layers.iter().any(|layer| layer.id == id))
 }
 
-/// Whether any dialog or popover is open in `window`. The pill ([`show_pill`]) is not a layer and never counts.
+/// Whether any dialog or popover is open in `window`. Neither pill ([`show_pill`], [`show_launch_pill`]) is a layer, and
+/// neither ever counts.
 pub fn any_open(window: &Window, cx: &App) -> bool {
     stack(window, cx).is_some_and(|stack| !stack.read(cx).layers.is_empty())
 }
@@ -1727,7 +1738,8 @@ pub fn shown_tooltip(window: &Window, cx: &App) -> Option<ShownTooltip> {
 /// `track_scroll`) takes the wheel; `list` and `uniform_list` always ask, and so does interactive text; and a drop
 /// target or drag-over style reacts to a drag passing over it. The layer manager cannot see inside the view to check
 /// any of this. Nothing in it can hold focus either: it opens no layer, and no control in it may be focus-tracked, so
-/// its keys come from the feature's own capture, not from the view.
+/// its keys come from the feature's own capture, not from the view. All of this holds for a launch pill's view too
+/// ([`show_launch_pill`]).
 pub struct Pill {
     /// What the pill draws. The feature updates it in place (a notify on its view redraws it, as any view) rather than
     /// showing a new pill for every change.
@@ -1739,8 +1751,8 @@ pub struct Pill {
     pub placement: PillPlacement,
 }
 
-/// Identifies one shown pill. Returned by [`show_pill`]; the only way to hide that pill, as a [`LayerId`] is the only
-/// way to close its layer.
+/// Identifies one shown pill, in either slot. Returned by [`show_pill`] and [`show_launch_pill`]; the only way to hide
+/// that pill, as a [`LayerId`] is the only way to close its layer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PillId(u64);
 
@@ -1773,10 +1785,10 @@ struct ShownPill {
 /// that hides it, or `None` when its anchor element is already gone (there is nowhere to place it) or the window has
 /// no layer stack.
 ///
-/// One slot per window: showing replaces whatever shows, and [`hide_pill`] hides only the pill its id names, so a
-/// feature that hides a pill another show has replaced does nothing. SPEC.md has one such pill and arms one sequence at
-/// a time, so one slot is all it needs. A second display-only pill that can show at the same time (the launch progress
-/// pill, say) needs a slot of its own here, or each show would replace the other's pill.
+/// One slot per window for this pill: showing replaces whatever pill shows in it, and [`hide_pill`] hides only the pill
+/// its id names, so a feature that hides a pill another show has replaced does nothing. SPEC.md arms one sequence at a
+/// time, so one slot is all it needs. The launch pill has a slot of its own ([`show_launch_pill`]), and neither show
+/// replaces the other's pill.
 ///
 /// It is not a layer and changes nothing that layers decide: showing it moves no focus, takes no tooltip down, and is
 /// not counted by [`any_open`], [`focus_layer_open`], [`trap`] or Escape's [`dismiss_top`]. A layer opening over it
@@ -1819,7 +1831,65 @@ pub fn show_pill(pill: Pill, window: &mut Window, cx: &mut App) -> Option<PillId
     Some(id)
 }
 
-/// Take down the pill `id` in `window`, if it still shows. Nothing happens once another show has replaced it.
+/// The launch pill a window shows: what [`show_launch_pill`] was given. It has no anchor: the window places it.
+struct ShownLaunchPill {
+    id: PillId,
+    view: AnyView,
+}
+
+/// How far the launch pill keeps from the window's bottom and side edges: the old `.launch-progress-pill`'s
+/// `bottom: 20px` and `max-width: calc(100vw - 40px)`, centered by `left: 50%; transform: translateX(-50%)`.
+const LAUNCH_PILL_INSET: Pixels = px(20.);
+
+/// Show `view` as `window`'s launch pill, replacing any launch pill showing there: SPEC.md's launch progress pill
+/// ("Launching", "Restarting" or "Replacing", the host, the session name and the elapsed seconds) and the "Started"
+/// report that follows it when nothing navigates. Returns the id that hides it ([`hide_pill`]), or `None` when the
+/// window has no layer stack.
+///
+/// The second pill slot. It shows beside the sequence pill ([`show_pill`]) without replacing it or being replaced by
+/// it, so a sequence armed while a launch pill shows leaves both up, and each feature hides only its own. The progress
+/// pill and the "Started" report share this slot. The old app drew them as two elements with the same class at the same
+/// fixed place (`list/create_form.rs` and `list/view.rs` at reference commit `24bc0580`), so a launch whose progress
+/// pill appeared while a report still showed had the report, later in the page, covering it until the report's four
+/// seconds ran out. Here each show replaces the other, so the launcher decides which shows. The [`Pill`] rules hold for
+/// `view`: it must ask for no pointer input and hold no focus.
+///
+/// It is placed against the window, not an element, as the old pill was `position: fixed`: centered across the window,
+/// its bottom edge 20 pixels above the window's, and at most the window's width less 20 pixels a side. The view is as
+/// wide as its content up to that cap and keeps its text inside it (clip or wrap); a view wider than the cap overflows
+/// it. Having no anchor, it goes only when its feature hides it or on a reset ([`close_all`]).
+///
+/// It is drawn above every layer and under the approval region, the sequence pill and the tooltip: the old progress
+/// pill sat inside the launcher's backdrop at z-index 40 and the old "Started" report at z-index 40 itself, above the
+/// row menus (20) and header questions (30), under the approval cards (45), the sequence pill and the tooltip (50).
+/// Like the pill it is not a layer, takes no [`Mark`], and changes nothing that layers decide.
+///
+/// NOTE: The old dialogs sat at z-index 40 beside the old pills, except the tunnel consent dialog at 50, which was
+/// always above them. Among the 40s, element order decided: the launcher, the quick switcher, the templates dialog, the
+/// checkout trash dialog and the Hosts panel's dialogs came before the pills and sat under them, and Delete, Stop,
+/// Rename and the app bar's dialogs (Settings and the help menu's) came after and covered them. Here the launch pill is
+/// above every dialog, which matches the launcher and the other dialogs that start a launch, a deviation chosen by the
+/// foundations owner on 2026-11-15 when the slot was ported. Below every dialog would put the "Started" report under a
+/// launcher opened again while it shows, which the old report covered; above, it only hides part of a later dialog from
+/// view, never from a click, as it takes no pointer input; and below some dialogs only would need a per-layer choice,
+/// where the old app's split fell out of element order. The old launcher drew no veil and took no input while its own
+/// progress pill showed (`.launch-request-pending`). One overlap is kept as the old app had it: the launch pill at the
+/// window's bottom and the sequence pill on the main area's bottom edge (while the launcher is open) can overlap, and
+/// the sequence pill then covers it.
+pub fn show_launch_pill(view: AnyView, window: &mut Window, cx: &mut App) -> Option<PillId> {
+    let stack = stack(window, cx)?;
+    let id = stack.update(cx, |stack, cx| {
+        let id = PillId(stack.next_pill_id);
+        stack.next_pill_id += 1;
+        stack.launch_pill = Some(ShownLaunchPill { id, view });
+        cx.notify();
+        id
+    });
+    Some(id)
+}
+
+/// Take down the pill `id` in `window`, in whichever slot it shows, if it still shows. Nothing happens once another
+/// show has replaced it, and the pill in the other slot is never touched.
 pub fn hide_pill(id: PillId, window: &mut Window, cx: &mut App) {
     let Some(stack) = stack(window, cx) else {
         return;
@@ -1829,17 +1899,20 @@ pub fn hide_pill(id: PillId, window: &mut Window, cx: &mut App) {
             stack.pill = None;
             cx.notify();
         }
+        if stack.launch_pill.as_ref().is_some_and(|pill| pill.id == id) {
+            stack.launch_pill = None;
+            cx.notify();
+        }
     });
 }
 
-/// Whether the pill `id` still shows in `window`: not hidden, replaced, taken down by a reset, or gone with its anchor.
+/// Whether the pill `id` still shows in `window`, in either slot: not hidden, replaced, taken down by a reset, or gone
+/// with its anchor.
 pub fn pill_shown(id: PillId, window: &Window, cx: &App) -> bool {
     stack(window, cx).is_some_and(|stack| {
-        stack
-            .read(cx)
-            .pill
-            .as_ref()
-            .is_some_and(|pill| pill.id == id)
+        let stack = stack.read(cx);
+        stack.pill.as_ref().is_some_and(|pill| pill.id == id)
+            || stack.launch_pill.as_ref().is_some_and(|pill| pill.id == id)
     })
 }
 
@@ -1888,7 +1961,7 @@ pub fn install_approval_region(view: AnyView, window: &mut Window, cx: &mut App)
 // ---- Drawing ---------------------------------------------------------------------------------------------------------
 
 /// Everything above the window's content, which the root view draws as its last child: each open layer, bottom to top,
-/// then the approval region, then the pill, then the tooltip.
+/// then the launch pill, the approval region, the pill and the tooltip.
 #[allow(
     clippy::disallowed_methods,
     reason = "the layer manager is the one owner of deferred and anchored"
@@ -1897,12 +1970,18 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
     let stack = stack(window, cx)?;
     let stack = stack.read(cx);
     if stack.layers.is_empty()
+        && stack.launch_pill.is_none()
         && stack.region.is_none()
         && stack.pill.is_none()
         && stack.tooltip.is_none()
     {
         return None;
     }
+    // The deferred priorities above the layers, bottom to top: the old z-index ladder's order for these (the launch
+    // pill at 40, the approval cards at 45, the sequence pill and the tooltip at 50, the tooltip drawn last).
+    let above = stack.layers.len();
+    let (launch_depth, region_depth, pill_depth, tooltip_depth) =
+        (above + 1, above + 2, above + 3, above + 4);
     let palette = theme::palette(cx);
     let mut overlay = div().absolute().top_0().left_0().size_full();
     for (depth, layer) in stack.layers.iter().enumerate() {
@@ -2015,18 +2094,27 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
         };
         overlay = overlay.child(gpui::deferred(element).with_priority(depth + 1));
     }
+    if let Some(launch) = &stack.launch_pill {
+        // Above every layer, as the old launch pill sat over the launcher's backdrop and above the row menus and
+        // header questions, and under the approval cards and the sequence pill. Display only, as the pill below is.
+        let placed = PlacedLate {
+            place: LateBox::WindowBottom,
+            child: launch.view.clone().into_any_element(),
+        };
+        overlay = overlay.child(gpui::deferred(placed).with_priority(launch_depth));
+    }
     if let Some(region) = &stack.region {
         let placed = PlacedLate {
             place: LateBox::Window,
             child: region_wrapper(region).into_any_element(),
         };
-        overlay = overlay.child(gpui::deferred(placed).with_priority(stack.layers.len() + 1));
+        overlay = overlay.child(gpui::deferred(placed).with_priority(region_depth));
     }
     if let Some(pill) = &stack.pill {
-        // Above every layer and the approval region, as the old pill sat above the launcher's backdrop and the
-        // approval cards, and under the tooltip, which the old z-index ladder put above every panel. Nothing here asks
-        // for the pointer (no listener, no `occlude`), so GPUI registers no hit area for the placing wrapper and a
-        // press on the pill reaches what it covers.
+        // Above every layer, the launch pill and the approval region, as the old pill sat above the launcher's
+        // backdrop, the launch pill and the approval cards, and under the tooltip, which the old z-index ladder put
+        // above every panel. Nothing here asks for the pointer (no listener, no `occlude`), so GPUI registers no hit
+        // area for the placing wrapper and a press on the pill reaches what it covers.
         let placed = PlacedLate {
             place: LateBox::Pill {
                 anchor: pill.anchor.clone(),
@@ -2034,7 +2122,7 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
             },
             child: pill.view.clone().into_any_element(),
         };
-        overlay = overlay.child(gpui::deferred(placed).with_priority(stack.layers.len() + 2));
+        overlay = overlay.child(gpui::deferred(placed).with_priority(pill_depth));
     }
     if let Some(shown) = &stack.tooltip {
         // Offset like a native tooltip so the pointer never covers the text.
@@ -2043,7 +2131,7 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
             .position(at)
             .snap_to_window()
             .child(tooltip_card(shown, window, cx));
-        overlay = overlay.child(gpui::deferred(placed).with_priority(stack.layers.len() + 3));
+        overlay = overlay.child(gpui::deferred(placed).with_priority(tooltip_depth));
     }
     Some(overlay.into_any_element())
 }
@@ -2234,12 +2322,13 @@ impl Element for PlacedPopover {
     }
 }
 
-/// Draws the pill or the approval region, deciding the place while the frame is laid out, for the reason
+/// Draws a pill or the approval region, deciding the place while the frame is laid out, for the reason
 /// [`PlacedPopover`] does: anchors record this frame's bounds before overlays are prepared, so the pill follows a moved
 /// or resized anchor in the same frame, and the approval region's view, which renders as it is laid out here, reads
 /// this frame's bounds ([`Anchor::drawn_bounds`]). Nothing is drawn while the pill's anchor has never been drawn. In
 /// the one frame that no longer draws the anchor, the pill is drawn once more at the anchor's last place, as a popover
-/// is, before the anchor's release takes it down.
+/// is, before the anchor's release takes it down. The launch pill, which has no anchor, takes the window's size of
+/// this frame.
 struct PlacedLate {
     place: LateBox,
     child: AnyElement,
@@ -2254,6 +2343,9 @@ enum LateBox {
     },
     /// The whole window from its origin: the approval region, whose view places its card itself.
     Window,
+    /// The whole window, with the child centered across it on its bottom inset: the launch pill
+    /// ([`show_launch_pill`]).
+    WindowBottom,
 }
 
 impl IntoElement for PlacedLate {
@@ -2302,6 +2394,25 @@ impl Element for PlacedLate {
     ) -> bool {
         let (origin, size) = match &self.place {
             LateBox::Window => (point(px(0.), px(0.)), window.viewport_size()),
+            LateBox::WindowBottom => {
+                // A window-sized column that sets the view on its bottom inset, centered across: the old pill's
+                // `bottom: 20px; left: 50%; translateX(-50%)`. The wrapper's cap is the old `max-width: calc(100vw -
+                // 40px)`, the column's width less its side insets. Neither box asks for the pointer.
+                let viewport = window.viewport_size();
+                let content = std::mem::replace(&mut self.child, gpui::Empty.into_any_element());
+                self.child = div()
+                    .w(viewport.width)
+                    .h(viewport.height)
+                    .flex()
+                    .flex_col()
+                    .justify_end()
+                    .items_center()
+                    .px(LAUNCH_PILL_INSET)
+                    .pb(LAUNCH_PILL_INSET)
+                    .child(div().max_w_full().child(content))
+                    .into_any_element();
+                (point(px(0.), px(0.)), viewport)
+            }
             LateBox::Pill { anchor, placement } => {
                 let Some(anchor) = anchor.get() else {
                     return false;

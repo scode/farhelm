@@ -2670,16 +2670,19 @@ fn a_press_on_the_pill_reaches_what_it_covers_and_the_pill_is_not_a_layer(cx: &m
 /// A pill that breaks the [`layers::Pill`] rule on purpose: it blocks and counts every press on it, so a test can tell
 /// whether it is drawn above what it covers. A rule-abiding pill takes no press, so its draw order cannot be seen by
 /// pressing it.
+///
+/// `id` is both its element id and its selector, so a test can tell two probes apart, in the frame and by place.
 struct ProbePill {
     presses: Rc<Cell<u32>>,
+    id: &'static str,
 }
 
 impl Render for ProbePill {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        let presses = self.presses.clone();
+        let (presses, id) = (self.presses.clone(), self.id);
         div()
-            .id("probe-pill")
-            .debug_selector(|| "probe".into())
+            .id(id)
+            .debug_selector(move || id.into())
             .w(px(120.))
             .h(px(30.))
             .occlude()
@@ -2691,16 +2694,20 @@ impl Render for ProbePill {
 
 /// Why this matters: the pill exists so the sequence pill stays in view above the launcher's veil (the old one at
 /// z-index 50 over the launcher's backdrop at 40); drawn under the veil it would be dimmed and, for SPEC.md, missing.
-/// The approval cards sit between the two, as the old ones did at z-index 45.
-/// The tooltip goes above it, a choice made here: the old ladder had the two level at z-index 50. A rule-abiding pill shows neither
-/// order to a press, so this test uses a probe that takes presses, and reads the order the frame drew in for the
-/// tooltip, whose card takes no press either.
+/// The approval cards sit under it, as the old ones did at z-index 45, and the launch pill under them, as the old launch
+/// pills sat at 40 over the launcher's backdrop (the old z-index ladder at `.header-confirm`): drawn under a dialog's
+/// veil the progress pill would vanish, over the cards it would cover a waiting agent's answer buttons, and over the
+/// sequence pill it would cover what the user is typing. The tooltip goes above the pill, a choice made here: the old
+/// ladder had the two level at z-index 50. A rule-abiding pill shows no order to a press, so this test uses probes that
+/// take presses, and reads the order the frame drew in for the tooltip, whose card takes no press either.
 ///
-/// Specified: with a dialog open, a press on a probe pill over the page reaches the probe, not the dialog's veil; and in
-/// the drawn frame the dialog's layer comes before an approval card, the card before the probe, and the probe before a
-/// tooltip shown over it.
+/// Specified: with a dialog open, a press on a probe pill over the page, and one on a probe launch pill, each reaches
+/// its probe, not the dialog's veil; and in the drawn frame the dialog's layer comes before the launch pill, the launch
+/// pill before an approval card, the card before the pill, and the pill before a tooltip shown over it.
 #[gpui::test]
-fn the_pill_is_drawn_above_every_layer_and_under_the_tooltip(cx: &mut TestAppContext) {
+fn the_pills_are_drawn_above_every_layer_in_the_old_order_and_under_the_tooltip(
+    cx: &mut TestAppContext,
+) {
     let anchor_out: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));
     let out = anchor_out.clone();
     let cx = open(cx, move |window, cx| {
@@ -2709,21 +2716,42 @@ fn the_pill_is_drawn_above_every_layer_and_under_the_tooltip(cx: &mut TestAppCon
     let only = handle(cx);
     let (dialog, _, _) = open_dialog(cx, vec![("only", only.clone())], &only);
     install_card(cx, top_right());
-    let presses = Rc::new(Cell::new(0));
-    let probe = presses.clone();
-    let view = cx.update(move |_, cx| cx.new(|_| ProbePill { presses: probe }));
+    let probe = |cx: &mut VisualTestContext, id: &'static str| {
+        let presses = Rc::new(Cell::new(0));
+        let counted = presses.clone();
+        let view = cx.update(move |_, cx| {
+            cx.new(|_| ProbePill {
+                presses: counted,
+                id,
+            })
+        });
+        (presses, gpui::AnyView::from(view))
+    };
+    let (presses, pill) = probe(cx, "probe-pill");
+    let (launch_presses, launch) = probe(cx, "launch-probe");
     let anchor = anchor_out.borrow().clone().unwrap();
-    if show_pill_view(cx, view.into(), anchor, PillPlacement::Centered).is_none() {
+    if show_pill_view(cx, pill, anchor, PillPlacement::Centered).is_none() {
         panic!("the premise: the probe pill shows");
     }
+    if show_launch_view(cx, launch).is_none() {
+        panic!("the premise: the probe launch pill shows");
+    }
 
-    let at = center(cx, "probe");
+    let at = center(cx, "probe-pill");
     cx.simulate_click(at, Modifiers::none());
     check(cx);
     assert_eq!(
         presses.get(),
         1,
         "the press reached the probe pill, drawn above the dialog's veil"
+    );
+    let launch_at = center(cx, "launch-probe");
+    cx.simulate_click(launch_at, Modifiers::none());
+    check(cx);
+    assert_eq!(
+        launch_presses.get(),
+        1,
+        "the press reached the probe launch pill, drawn above the dialog's veil"
     );
     assert!(is_open(cx, dialog), "the premise: the dialog is still open");
 
@@ -2741,23 +2769,21 @@ fn the_pill_is_drawn_above_every_layer_and_under_the_tooltip(cx: &mut TestAppCon
         Some(index) => index,
         None => panic!("the premise: the frame draws {what}"),
     };
-    let layer = position("the dialog's layer", &|node| {
-        node.element_id.as_deref() == Some("layer-0")
-    });
-    let card = position("the approval card", &|node| {
-        node.element_id.as_deref() == Some("card")
-    });
-    let pill = position("the probe pill", &|node| {
-        node.element_id.as_deref() == Some("probe-pill")
-    });
+    let element =
+        |id: &'static str| move |node: &gpui::DriverNode| node.element_id.as_deref() == Some(id);
+    let layer = position("the dialog's layer", &element("layer-0"));
+    let launch = position("the probe launch pill", &element("launch-probe"));
+    let card = position("the approval card", &element("card"));
+    let pill = position("the probe pill", &element("probe-pill"));
     let tooltip = position("the tooltip's text", &|node| {
         node.texts
             .iter()
             .any(|text| text.text.as_ref() == "Probe help")
     });
     assert!(
-        layer < card && card < pill && pill < tooltip,
-        "drawn bottom to top: the dialog ({layer}), the card ({card}), the pill ({pill}), the tooltip ({tooltip})"
+        layer < launch && launch < card && card < pill && pill < tooltip,
+        "drawn bottom to top: the dialog ({layer}), the launch pill ({launch}), the card ({card}), the pill ({pill}), \
+         the tooltip ({tooltip})"
     );
 }
 
@@ -2824,6 +2850,220 @@ fn hiding_the_pill_or_a_reset_takes_it_down(cx: &mut TestAppContext) {
                 "the premise: the reset closed the dialog too"
             );
         }
+    }
+}
+
+// ---- The launch pill -------------------------------------------------------------------------------------------------
+
+/// Show `view` as the window's launch pill and settle. Returns what [`layers::show_launch_pill`] returned.
+fn show_launch_view(cx: &mut VisualTestContext, view: gpui::AnyView) -> Option<PillId> {
+    let id = cx.update(move |window, cx| layers::show_launch_pill(view, window, cx));
+    settle(cx);
+    id
+}
+
+/// Show a [`PillBox`] drawn under `selector` as the launch pill, for a step whose premise is that it shows.
+fn shown_launch(cx: &mut VisualTestContext, selector: &'static str) -> PillId {
+    let view = cx.update(|_, cx| cx.new(|_| PillBox { selector }));
+    match show_launch_view(cx, view.into()) {
+        Some(id) => id,
+        None => panic!("the premise: the launch pill {selector} shows"),
+    }
+}
+
+/// Why this matters: SPEC.md's launch progress pill (and the "Started" report after it) and the quick-launch sequence
+/// pill can be up at the same time, and each feature takes down only its own. With one slot, a sequence armed while a
+/// launch pill shows (the "Started" report, say) would wipe it.
+///
+/// Specified: a launch pill and a pill show together; showing a launch pill again replaces only the launch pill, and
+/// showing a pill again replaces only the pill; hiding either leaves the other drawn, and hiding a replaced launch
+/// pill's id does nothing; a reset takes both down.
+#[gpui::test]
+fn the_launch_pill_shows_beside_the_pill_and_each_hides_alone(cx: &mut TestAppContext) {
+    let anchor_out: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));
+    let out = anchor_out.clone();
+    let cx = open(cx, move |window, cx| {
+        anchor_element("area", &out, window, cx).into_any_element()
+    });
+    let anchor = || anchor_out.borrow().clone().unwrap();
+    let hide = |cx: &mut VisualTestContext, id: PillId| {
+        cx.update(move |window, cx| layers::hide_pill(id, window, cx));
+        settle(cx);
+    };
+    let drawn =
+        |cx: &mut VisualTestContext, selector: &'static str| cx.debug_bounds(selector).is_some();
+
+    let pill = shown(cx, anchor(), "pill", PillPlacement::Centered);
+    let launch = shown_launch(cx, "launch");
+    assert!(
+        pill_shown(cx, pill) && pill_shown(cx, launch),
+        "both pills show"
+    );
+    assert!(
+        drawn(cx, "pill") && drawn(cx, "launch"),
+        "and both are drawn"
+    );
+
+    let launch_b = shown_launch(cx, "launch-b");
+    assert!(
+        !pill_shown(cx, launch) && !drawn(cx, "launch"),
+        "showing a launch pill replaced the launch pill"
+    );
+    assert!(
+        pill_shown(cx, pill) && drawn(cx, "pill"),
+        "and left the pill showing"
+    );
+
+    let pill_b = shown(cx, anchor(), "pill-b", PillPlacement::Centered);
+    assert!(
+        !pill_shown(cx, pill) && !drawn(cx, "pill"),
+        "showing a pill replaced the pill"
+    );
+    assert!(
+        pill_shown(cx, launch_b) && drawn(cx, "launch-b"),
+        "and left the launch pill showing"
+    );
+
+    hide(cx, launch);
+    assert!(
+        pill_shown(cx, launch_b),
+        "hiding a replaced launch pill left the one shown after it"
+    );
+    hide(cx, launch_b);
+    assert!(
+        !pill_shown(cx, launch_b) && !drawn(cx, "launch-b"),
+        "hiding took the launch pill down"
+    );
+    assert!(
+        pill_shown(cx, pill_b) && drawn(cx, "pill-b"),
+        "and left the pill drawn"
+    );
+
+    let launch_c = shown_launch(cx, "launch-c");
+    hide(cx, pill_b);
+    assert!(
+        !pill_shown(cx, pill_b) && !drawn(cx, "pill-b"),
+        "hiding took the pill down"
+    );
+    assert!(
+        pill_shown(cx, launch_c) && drawn(cx, "launch-c"),
+        "and left the launch pill drawn"
+    );
+
+    let pill_c = shown(cx, anchor(), "pill-c", PillPlacement::Centered);
+    // Deferred, as the reset runs from the channel's events (see `hiding_the_pill_or_a_reset_takes_it_down`).
+    cx.update(|_, cx| cx.defer(layers::close_all));
+    settle(cx);
+    assert!(
+        !pill_shown(cx, launch_c) && !pill_shown(cx, pill_c),
+        "a reset took both pills down"
+    );
+    assert!(
+        !drawn(cx, "launch-c") && !drawn(cx, "pill-c"),
+        "and neither is drawn"
+    );
+}
+
+/// Why this matters: the old launch progress pill was fixed to the window, `bottom: 20px` and centered across it with
+/// `max-width: calc(100vw - 40px)`, and `pointer-events: none`: the user goes on working while a launch is pending, so
+/// a press on the pill must reach what it covers, and the pill must neither take focus nor count as a layer (which
+/// would stop the shortcuts that refuse while one is open, trap Tab or swallow Escape).
+///
+/// Specified: a launch pill is centered across the window with its bottom edge 20 pixels above the window's; a view
+/// wider than the window keeps 20 pixels clear at each side; showing it moves no focus and opens no layer; a press on it
+/// reaches the element under it.
+#[gpui::test]
+fn the_launch_pill_sits_at_the_windows_bottom_and_a_press_passes_through(cx: &mut TestAppContext) {
+    let presses = Rc::new(Cell::new(0));
+    let page = Rc::new(RefCell::new(None::<FocusHandle>));
+    let (counted, drawn) = (presses.clone(), page.clone());
+    let cx = open(cx, move |window, _| {
+        let Some(page) = drawn.borrow().clone() else {
+            return div().into_any_element();
+        };
+        let counted = counted.clone();
+        // A floor under the whole window, so whatever the pill covers is the floor.
+        div()
+            .relative()
+            .w(window.viewport_size().width)
+            .h(window.viewport_size().height)
+            .child(button("page", &page))
+            .child(
+                div()
+                    .id("floor")
+                    .absolute()
+                    .top(px(40.))
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .on_mouse_down(MouseButton::Left, move |_, _, _| {
+                        counted.set(counted.get() + 1)
+                    }),
+            )
+            .into_any_element()
+    });
+    let focus = handle(cx);
+    page.replace(Some(focus.clone()));
+    redraw(cx);
+    click(cx, "page");
+    assert!(
+        focused(cx, &focus),
+        "the premise: the page control holds focus"
+    );
+
+    shown_launch(cx, "launch");
+    let viewport = cx.update(|window, _| window.viewport_size());
+    let pill = bounds(cx, "launch");
+    assert_eq!(
+        pill.size,
+        gpui::size(px(120.), px(30.)),
+        "the premise: the launch pill is drawn at its own size"
+    );
+    assert_eq!(
+        (pill.center().x, pill.bottom()),
+        (viewport.width / 2., viewport.height - px(20.)),
+        "the launch pill is centered across the window, 20 pixels above its bottom: {pill:?} in {viewport:?}"
+    );
+    assert!(
+        focused(cx, &focus),
+        "showing the launch pill moved no focus"
+    );
+    assert!(
+        cx.update(|window, cx| !layers::any_open(window, cx)
+            && !layers::focus_layer_open(window, cx)
+            && layers::trap(window, cx).is_none()),
+        "the launch pill is not an open layer"
+    );
+
+    cx.simulate_click(pill.center(), Modifiers::none());
+    check(cx);
+    assert_eq!(
+        presses.get(),
+        1,
+        "the press on the launch pill reached the floor under it"
+    );
+
+    // A wrapped line far wider than the window: the cap holds it inside the side insets.
+    let wide = cx.update(|_, cx| cx.new(|_| WideText));
+    if show_launch_view(cx, wide.into()).is_none() {
+        panic!("the premise: the wide launch pill shows");
+    }
+    let wide = bounds(cx, "wide");
+    assert!(
+        wide.left() >= px(20.) && wide.right() <= viewport.width - px(20.),
+        "a wide launch pill keeps 20 pixels clear at each side: {wide:?} in {viewport:?}"
+    );
+}
+
+/// A launch pill's content far wider than any test window, as one wrapping line: [`layers::show_launch_pill`]'s cap
+/// must hold it inside the window's side insets.
+struct WideText;
+
+impl Render for WideText {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .debug_selector(|| "wide".into())
+            .child("Launching a session with a long name ".repeat(40))
     }
 }
 
