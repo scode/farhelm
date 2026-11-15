@@ -79,6 +79,11 @@
 //!   [`dismiss_top`]) sees it. It sits centered over an [`Anchor`] element or at its bottom edge ([`PillPlacement`]) and
 //!   goes when that element is no longer drawn, when its feature hides it ([`hide_pill`]), or on a reset
 //!   ([`close_all`]).
+//! - **One approval region, drawn above every dialog and popover and under the pill and the tooltip, that is not a
+//!   layer either** ([`install_approval_region`]): where SPEC.md's independent agent approval cards stay usable while a
+//!   dialog is open. Unlike the pill it takes presses and focus; like it, nothing that asks about layers sees it, and
+//!   it is installed once per window, never shown or hidden. SPEC_impl.md, "Overlays: the layer manager", says why it
+//!   has this shape and which of its behaviors follow from the rules above.
 //!
 //! State is kept per window: multi-window support is a watch-list item, and the one thing it asks of the foundations
 //! now is that overlays are not shared between windows. Each window's [`LayerStack`] is an entity that notifies, and
@@ -140,6 +145,9 @@ pub struct LayerStack {
     pill: Option<ShownPill>,
     /// The id the next shown pill gets.
     next_pill_id: u64,
+    /// The approval region installed in this window, if any ([`install_approval_region`]). Kept apart from `layers`,
+    /// as the pill is, so that nothing that walks the layers for focus, Escape or "is anything open" counts it.
+    region: Option<Region>,
     tooltip: Option<ShownTooltip>,
     /// Takes the tooltip down when its owner is released; replaced with each new tooltip.
     tooltip_release: Option<Subscription>,
@@ -290,6 +298,7 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
         next_id: 0,
         pill: None,
         next_pill_id: 0,
+        region: None,
         tooltip: None,
         tooltip_release: None,
         pending_tooltip: None,
@@ -439,6 +448,23 @@ impl Anchor {
             .left_0()
             .size_full()
     }
+
+    /// Where the anchor element is drawn, in window coordinates, or `None` when it has never been drawn or is no longer
+    /// drawn. For a view that places itself against an element another view draws, as the approval region's view
+    /// places its card below the session's tabs ([`install_approval_region`]).
+    ///
+    /// Read from the approval region's render, it is this frame's bounds: that view is laid out after every tracker has
+    /// recorded its element. Read anywhere else (a view laid out with the rest of the window, an event handler), it is
+    /// the last frame's, since trackers record as a frame is prepared, after the window's layout.
+    ///
+    /// NOTE: In the one frame that no longer draws the element it still returns the element's last bounds, and it turns
+    /// `None` only once that frame has ended, which redraws nothing. So a view must choose which anchor to read from
+    /// its own state (the store saying no session is open), not by falling back when one reads `None`: such a fallback
+    /// would leave its card where the gone element was until something else redrew.
+    pub fn drawn_bounds(&self) -> Option<Bounds<Pixels>> {
+        self.state.upgrade()?;
+        self.bounds.get()
+    }
 }
 
 // ---- Opening and closing ---------------------------------------------------------------------------------------------
@@ -489,7 +515,8 @@ pub struct Dialog {
     /// Whether a press on the veil, outside the dialog, dismisses it: the old quick switcher closed that way; every
     /// other dialog passes `false`, and its veil only takes the press. It goes through the same path as Escape
     /// ([`dismiss_top`]), so [`Dialog::on_dismiss`] still decides and focus returns as Escape returns it; the veil
-    /// still takes the press, so the page behind never sees it.
+    /// still takes the press, so the page behind never sees it. A press on an approval card, drawn above the veil
+    /// ([`install_approval_region`]), is the card's and leaves the dialog open, as the old switcher stayed open.
     pub dismiss_on_outside_press: bool,
 }
 
@@ -988,7 +1015,9 @@ fn close_taking(
 /// traps Tab away from them. Focus follows the ordinary close rule, returning to what held it when the bottom layer
 /// that took focus opened (and going home once that is no longer drawn). The pill goes too ([`show_pill`]): what it
 /// showed belonged to the UI session the reset retired, and its feature, which lives in that session, is no longer
-/// there to hide it. The tooltip is left alone: it goes with its control.
+/// there to hide it. The tooltip is left alone: it goes with its control. So is the approval region
+/// ([`install_approval_region`]): its feature installs it once per window, and its view draws from the current UI
+/// session, which after a reset has no cards until the new session brings them.
 pub fn close_all(cx: &mut App) {
     let Some(windows) = installed::<Windows>(cx) else {
         return;
@@ -1150,8 +1179,8 @@ pub(crate) fn tab_through(window: &Window, cx: &App) -> Option<TabThrough> {
     })
 }
 
-/// Whether focus is inside the topmost dialog or a layer above it (a menu opened from inside the dialog): where SPEC.md
-/// lets focus be while a dialog is open. `true` when no dialog is open.
+/// Whether focus is inside the topmost dialog, a layer above it (a menu opened from inside the dialog) or the approval
+/// region: where SPEC.md lets focus be while a dialog is open. `true` when no dialog is open.
 pub fn focus_is_where_dialogs_allow(window: &Window, cx: &App) -> bool {
     let Some(stack) = stack(window, cx) else {
         return true;
@@ -1164,9 +1193,15 @@ pub fn focus_is_where_dialogs_allow(window: &Window, cx: &App) -> bool {
     else {
         return true;
     };
+    // SPEC.md, "Keyboard focus": approval cards "remain usable" while a dialog is open, so focus on one of their
+    // controls is allowed too ([`install_approval_region`]).
     stack.layers[top_dialog..]
         .iter()
         .any(|layer| layer.container.contains_focused(window, cx))
+        || stack
+            .region
+            .as_ref()
+            .is_some_and(|region| region.container.contains_focused(window, cx))
 }
 
 /// The container of the topmost layer that holds focus, where focus recovers to when its holder disappears inside an
@@ -1743,10 +1778,52 @@ pub fn pill_shown(id: PillId, window: &Window, cx: &App) -> bool {
     })
 }
 
+// ---- The approval region ---------------------------------------------------------------------------------------------
+
+/// The approval region a window has: its feature's view, and the focus handle of the wrapper around it, which tells
+/// whether focus is on one of its controls ([`focus_is_where_dialogs_allow`]).
+struct Region {
+    view: AnyView,
+    container: FocusHandle,
+}
+
+/// Install `view` as `window`'s approval region: SPEC.md's independent agent approval cards, which stay usable while a
+/// dialog is open. The approvals feature installs it once per window, at window start, and never shows or hides it:
+/// the view draws its cards from the store, and nothing while no card waits. Installing again replaces the view and
+/// keeps the region's focus handle. A reset ([`close_all`]) leaves it installed. SPEC_impl.md, "Overlays: the layer
+/// manager", has its rules and why they are so, the decision about Escape, and what is not built yet.
+///
+/// The view is laid out as the frame is prepared, inside a zero-size box at the window's origin, so it places its card
+/// itself with absolute insets and an explicit width, from an element the session view draws ([`Anchor::drawn_bounds`],
+/// this frame's there) and `window.viewport_size()`. Percent sizes resolve against the zero-size box.
+///
+/// NOTE: Whatever the view draws must occlude (`occlude()`), and while it has nothing to show it draws nothing with a
+/// size or a listener. A card that does not occlude passes a press on to what it covers as well as taking it, and
+/// something drawn while empty covers the page. The layer manager cannot see inside the view; review holds it. The
+/// slot is named for the one thing it is for: a second feature that wants to draw over the dialogs needs a decision of
+/// the layer manager's owner, not this slot.
+pub fn install_approval_region(view: AnyView, window: &mut Window, cx: &mut App) {
+    let Some(stack) = stack(window, cx) else {
+        return;
+    };
+    stack.update(cx, |stack, cx| {
+        // Not a tab stop, as a layer's container: Tab moves between the card's controls, never onto the wrapper. A
+        // second install keeps the handle, so focus already on a card stays inside the region as the frame on screen
+        // draws it.
+        let container = stack
+            .region
+            .take()
+            .map(|region| region.container)
+            .unwrap_or_else(|| cx.focus_handle().tab_stop(false));
+        stack.region = Some(Region { view, container });
+        cx.notify();
+    });
+}
+
 // ---- Drawing ---------------------------------------------------------------------------------------------------------
 
 /// Everything above the window's content, which the root view draws as its last child: each open layer, bottom to top,
-/// then the pill, then the tooltip.
+/// then the approval region, then the pill, then the tooltip.
 #[allow(
     clippy::disallowed_methods,
     reason = "the layer manager is the one owner of deferred and anchored"
@@ -1754,7 +1831,11 @@ pub fn pill_shown(id: PillId, window: &Window, cx: &App) -> bool {
 pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
     let stack = stack(window, cx)?;
     let stack = stack.read(cx);
-    if stack.layers.is_empty() && stack.pill.is_none() && stack.tooltip.is_none() {
+    if stack.layers.is_empty()
+        && stack.region.is_none()
+        && stack.pill.is_none()
+        && stack.tooltip.is_none()
+    {
         return None;
     }
     let palette = theme::palette(cx);
@@ -1784,16 +1865,11 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
             .child(layer.view.clone());
         let element = match &layer.kind {
             Kind::Dialog(options) => {
-                let content = content.when(options.dismiss_on_outside_press, |content| {
-                    content.on_mouse_down_out(move |_, window, cx| {
-                        // Only while this dialog is the top layer: a press inside a menu (or another dialog) opened over
-                        // it is outside this dialog too, and belongs to that layer. GPUI runs these handlers from the
-                        // bottom layer up, so this one sees such a layer still open and leaves the press to it.
-                        if top_layer(window, cx) == Some(id) {
-                            dismiss_top(window, cx);
-                        }
-                    })
-                });
+                let dismissible = options.dismiss_on_outside_press;
+                // An outside press is a press the veil itself takes, not one outside the dialog's bounds: a press on an
+                // occluding surface drawn above the veil (an approval card, a menu) never reaches the veil. The content
+                // occludes so a press on it does not reach the veil either.
+                let content = content.when(dismissible, |content| content.occlude());
                 let veil = div()
                     .absolute()
                     .top_0()
@@ -1803,6 +1879,21 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
                     .bg(theme::color(palette.scrim_dialog))
                     .flex()
                     .justify_center();
+                let veil = veil.when(dismissible, |veil| {
+                    // Only while this dialog is the top layer: a press beside a menu opened over it is outside that
+                    // menu, which closes, and the press is the menu's alone. Read before any handler acts (capture
+                    // runs bottom layer up, before every bubble handler), since the menu's own close runs in capture.
+                    let was_top = Rc::new(Cell::new(false));
+                    let noted = was_top.clone();
+                    veil.capture_any_mouse_down(move |_, window, cx| {
+                        noted.set(top_layer(window, cx) == Some(id));
+                    })
+                    .on_any_mouse_down(move |_, window, cx| {
+                        if was_top.take() {
+                            dismiss_top(window, cx);
+                        }
+                    })
+                });
                 match options.placement {
                     DialogPlacement::Centered => veil.items_center().child(content),
                     DialogPlacement::Top => {
@@ -1859,16 +1950,26 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
         };
         overlay = overlay.child(gpui::deferred(element).with_priority(depth + 1));
     }
-    if let Some(pill) = &stack.pill {
-        // Above every layer, as the old pill sat above the launcher's backdrop, and under the tooltip, which the old
-        // z-index ladder put above every panel. Nothing here asks for the pointer (no listener, no `occlude`), so GPUI
-        // registers no hit area for the placing wrapper and a press on the pill reaches what it covers.
-        let placed = PlacedPill {
-            anchor: pill.anchor.clone(),
-            placement: pill.placement,
-            child: pill.view.clone().into_any_element(),
+    if let Some(region) = &stack.region {
+        let placed = PlacedLate {
+            place: LateBox::Window,
+            child: region_wrapper(region).into_any_element(),
         };
         overlay = overlay.child(gpui::deferred(placed).with_priority(stack.layers.len() + 1));
+    }
+    if let Some(pill) = &stack.pill {
+        // Above every layer and the approval region, as the old pill sat above the launcher's backdrop and the
+        // approval cards, and under the tooltip, which the old z-index ladder put above every panel. Nothing here asks
+        // for the pointer (no listener, no `occlude`), so GPUI registers no hit area for the placing wrapper and a
+        // press on the pill reaches what it covers.
+        let placed = PlacedLate {
+            place: LateBox::Pill {
+                anchor: pill.anchor.clone(),
+                placement: pill.placement,
+            },
+            child: pill.view.clone().into_any_element(),
+        };
+        overlay = overlay.child(gpui::deferred(placed).with_priority(stack.layers.len() + 2));
     }
     if let Some(shown) = &stack.tooltip {
         // Offset like a native tooltip so the pointer never covers the text.
@@ -1877,7 +1978,7 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
             .position(at)
             .snap_to_window()
             .child(tooltip_card(shown, window, cx));
-        overlay = overlay.child(gpui::deferred(placed).with_priority(stack.layers.len() + 2));
+        overlay = overlay.child(gpui::deferred(placed).with_priority(stack.layers.len() + 3));
     }
     Some(overlay.into_any_element())
 }
@@ -2068,18 +2169,29 @@ impl Element for PlacedPopover {
     }
 }
 
-/// Draws the pill over its anchor as its [`PillPlacement`] says, deciding the place while the frame is laid out, for
-/// the reason [`PlacedPopover`] does: the anchor records this frame's bounds before overlays are prepared, so the pill
-/// follows a moved or resized anchor in the same frame. Nothing is drawn while the anchor has never been drawn. In the
-/// one frame that no longer draws the anchor, the pill is drawn once more at the anchor's last place, as a popover is,
-/// before the anchor's release takes it down.
-struct PlacedPill {
-    anchor: AnchorBounds,
-    placement: PillPlacement,
+/// Draws the pill or the approval region, deciding the place while the frame is laid out, for the reason
+/// [`PlacedPopover`] does: anchors record this frame's bounds before overlays are prepared, so the pill follows a moved
+/// or resized anchor in the same frame, and the approval region's view, which renders as it is laid out here, reads
+/// this frame's bounds ([`Anchor::drawn_bounds`]). Nothing is drawn while the pill's anchor has never been drawn. In
+/// the one frame that no longer draws the anchor, the pill is drawn once more at the anchor's last place, as a popover
+/// is, before the anchor's release takes it down.
+struct PlacedLate {
+    place: LateBox,
     child: AnyElement,
 }
 
-impl IntoElement for PlacedPill {
+/// The box a [`PlacedLate`] lays its child out in.
+enum LateBox {
+    /// Over the pill's anchor, as its [`PillPlacement`] says.
+    Pill {
+        anchor: AnchorBounds,
+        placement: PillPlacement,
+    },
+    /// The whole window from its origin: the approval region, whose view places its card itself.
+    Window,
+}
+
+impl IntoElement for PlacedLate {
     type Element = Self;
 
     fn into_element(self) -> Self {
@@ -2087,7 +2199,7 @@ impl IntoElement for PlacedPill {
     }
 }
 
-impl Element for PlacedPill {
+impl Element for PlacedLate {
     type RequestLayoutState = ();
     /// Whether the child was laid out and prepared, and so may be painted.
     type PrepaintState = bool;
@@ -2123,33 +2235,36 @@ impl Element for PlacedPill {
         window: &mut Window,
         cx: &mut App,
     ) -> bool {
-        let Some(anchor) = self.anchor.get() else {
-            return false;
+        let (origin, size) = match &self.place {
+            LateBox::Window => (point(px(0.), px(0.)), window.viewport_size()),
+            LateBox::Pill { anchor, placement } => {
+                let Some(anchor) = anchor.get() else {
+                    return false;
+                };
+                // A box exactly over the anchor, which centers the view across and centers it or sets it on the bottom
+                // edge down. Flex centering lets a view wider or taller than the anchor overflow it evenly, as the old
+                // pill's `translate(-50%, …)` did. The box takes no pointer input, like the view.
+                let content = std::mem::replace(&mut self.child, gpui::Empty.into_any_element());
+                let frame = div()
+                    .w(anchor.size.width)
+                    .h(anchor.size.height)
+                    .flex()
+                    .justify_center();
+                let frame = match placement {
+                    PillPlacement::Centered => frame.items_center(),
+                    PillPlacement::Bottom => frame.items_end(),
+                };
+                self.child = frame.child(content).into_any_element();
+                (anchor.origin, anchor.size)
+            }
         };
-        // A box exactly over the anchor, which centers the view across and centers it or sets it on the bottom edge
-        // down. Flex centering lets a view wider or taller than the anchor overflow it evenly, as the old pill's
-        // `translate(-50%, …)` did. The box takes no pointer input, like the view.
-        let content = std::mem::replace(&mut self.child, gpui::Empty.into_any_element());
-        let frame = div()
-            .w(anchor.size.width)
-            .h(anchor.size.height)
-            .flex()
-            .justify_center();
-        let frame = match self.placement {
-            PillPlacement::Centered => frame.items_center(),
-            PillPlacement::Bottom => frame.items_end(),
-        };
-        self.child = frame.child(content).into_any_element();
         let space = gpui::size(
-            AvailableSpace::Definite(anchor.size.width),
-            AvailableSpace::Definite(anchor.size.height),
+            AvailableSpace::Definite(size.width),
+            AvailableSpace::Definite(size.height),
         );
         self.child.layout_as_root(space, window, cx);
-        self.child.prepaint_at(
-            point(anchor.origin.x.round(), anchor.origin.y.round()),
-            window,
-            cx,
-        );
+        self.child
+            .prepaint_at(point(origin.x.round(), origin.y.round()), window, cx);
         true
     }
 
@@ -2167,6 +2282,15 @@ impl Element for PlacedPill {
             self.child.paint(window, cx);
         }
     }
+}
+
+/// The element around the approval region's view: a zero-size box (see [`install_approval_region`] for why) that
+/// tracks the region's focus handle, so containment says when focus is on one of its controls, and that takes Escape
+/// there, so it never reaches the root's dismissal of the topmost layer.
+fn region_wrapper(region: &Region) -> gpui::Div {
+    focus::track(div().size_0(), &region.container, focus::OnPress::Keep)
+        .on_action(|_: &actions::Dismiss, _, _| {})
+        .child(region.view.clone())
 }
 
 /// The popover panel the old menus drew: the floating surface with its 4-pixel padding at top and bottom, and the menu
