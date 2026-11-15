@@ -457,8 +457,9 @@ impl TrashButton {
                 // SPEC.md's list of dialogs that keep focus on an empty click does not name the trash.
                 keeps_focus_on_empty_click: false,
                 returns_to,
-                // Close and Escape stay available during a request (SPEC.md): nothing holds the dialog open.
-                on_dismiss: None,
+                // Close and Escape stay available during a request (SPEC.md); an open question goes first, as the old
+                // band did ([`TrashDialog::dismissed`]).
+                on_dismiss: Some(TrashDialog::dismiss_hook(dialog.downgrade())),
                 placement: layers::DialogPlacement::Centered,
                 dismiss_on_outside_press: false,
             },

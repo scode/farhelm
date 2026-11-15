@@ -4809,15 +4809,15 @@ fn checkout_trash_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut
     trash_scene(state, trash_reference, TrashOpen::Dialog, window, cx);
 }
 
-/// The Trash dialog over the reference trash asking to delete everything: the question in its loud look in the region
+/// The Trash dialog over the reference trash asking to delete everything: the question in its red band in the region
 /// above the footer, naming the three checkouts on this machine and build-box with their size and the warning, Cancel
 /// and Delete permanently (where focus is, its ring hidden as on any pointer-opened question).
 fn checkout_trash_confirm_all_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     trash_scene(state, trash_reference, TrashOpen::Asking(None), window, cx);
 }
 
-/// The Trash dialog over the reference trash asking to delete build-box's one archive: the question inside build-box's
-/// card, under its header.
+/// The Trash dialog over the reference trash asking to delete build-box's one archive: the question in its red band
+/// inside build-box's card, under its header.
 fn checkout_trash_confirm_host_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     trash_scene(
         state,

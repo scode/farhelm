@@ -127,9 +127,13 @@ button's, `trash/listing/tests.rs` the rules'):
   the `trash-button-emptying` golden. Delete all waiting on every reachable host and skipping an unreachable one is
   `delete_all_waits_for_every_reachable_host`, and
   `delete_all_batches_every_reachable_host_and_waits_on_any_unsettled_one` in `trash/listing/tests.rs`; Cancel and
-  Escape returning focus to the button that asked, and a confirmation that would overlap another trash delete sending
-  nothing, are `cancelling_returns_focus_to_the_asking_button_and_overlaps_send_nothing` and
-  `cancelling_returns_focus_to_delete_all_while_it_is_unavailable`.
+  Escape returning focus to the button that asked, the band going with the question, are
+  `cancelling_returns_focus_to_the_asking_button_and_takes_the_band_away` and
+  `cancelling_returns_focus_to_delete_all_while_it_is_unavailable`; an open question holding the entries' Deletes and
+  Close, the header's close and Escape dismissing it before the dialog, with the settle pause restarting as it closes,
+  are `an_open_question_holds_the_dialog_and_close_or_escape_dismisses_it_first`; a confirmation refused at the press
+  (its host reconnected under the question) sending nothing and leaving the dialog open is
+  `a_confirmation_the_guards_refuse_sends_nothing_and_keeps_the_dialog`.
 - "trash batch issues survive reopening after ${http | transport} failure", partly: a bulk delete's lost answer is one
   notice naming every ID it sent until later reports settle them,
   `a_bulk_delete_answer_is_one_notice_that_later_reports_shrink` in `trash/listing/tests.rs`; it is kept and shown on
@@ -309,20 +313,18 @@ Where the port does not match the old app, and why. Each stays until the work na
   longer than the region cannot be read by keyboard. The region needs a keyboard stop of its own, or Page Up and Page
   Down scrolling, while it holds controls; the shared frame has neither. Requested of the foundations by the
   other-dialogs area's coordinator (2026-11-15).
-- **Waiting for the prompt to say whether an inline question is open.** The dialog cannot tell when its question was
-  cancelled (the prompt's `Inline::is_open` is test-only), which leaves these as they are until it can, each requested
-  of the foundations with that change:
-  - The question takes the prompt's loud look, a red-edged, red-washed block at 16-pixel text headed by the old band's
-    accessible name, "Confirm permanent checkout deletion". The old band was the dialog's 12-pixel text on a red-tinted
-    strip under a red rule, with no heading; a band drawn around a plain question would stay behind, empty, after
-    Cancel. The loud look is temporary.
-  - The rest of the dialog stays usable while a question is up, where the old one held still: an entry's own Delete
-    stays available, and Close and the header's close close the dialog rather than dismiss the question first. Escape
-    cancels the question only while focus is in it; elsewhere it closes the dialog.
-  - Once the global question is answered, the footer's notices region stays drawn, empty, until the dialog closes or
-    another question opens.
-  - A host's question opening restarts the settle pause of the entries' Deletes, since it moves the rows under it; its
-    closing, which moves them back, does not.
+- **The question's band is the old band with the prompt's plain text.** The band is the old strip, red-tinted under a
+  red rule with 10 by 12 pixels of padding, drawn only while the question is open. The words inside are the prompt's
+  plain look, 13-pixel text at a line height of 19.5, where the old band had the dialog's 12-pixel text at 1.6: the
+  prompt sets its own text size. The plain look also gives the question the status role and names it by its first line,
+  the count and hosts, where the old band was a group named "Confirm permanent checkout deletion"; neither changes
+  without changing the prompt. The global band sits on the footer's background under the footer's top rule, inside the
+  footer's own inset, rather than in a region of its own reaching the dialog's edges.
+- **Dismissing a host's question returns focus to its "Delete all on".** Close, the header's close and Escape with a
+  question open dismiss the question, as in the old dialog, and return focus to the button that asked it. The old dialog
+  returned focus to Delete all for the global question; for a host's it moved none, so focus left inside the band (its
+  Cancel, or Escape inside it) fell to the footer's Close, and stayed in place only for Close or Escape outside the
+  band. Cancel here does the same as dismissing, since the prompt returns focus to the button that asked.
 - **Each of the question's paragraphs is two lines.** The old band's paragraphs ran on after the host names ("… on this
   machine, build-box? Work in them …"); here each ends where the host names do, and the rest is a line of its own, in
   the same words. A host value is drawn as a block of its own, so the rest started a new line anyway, with the "?" alone
