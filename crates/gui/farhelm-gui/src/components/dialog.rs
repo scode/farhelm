@@ -63,6 +63,10 @@ const NOTICES_MAX_SHARE: f32 = 0.24;
 /// `.launch-composer-footer-summary`: a footer lead's basis (`flex: 1 1 220px`) before the row wraps the answers.
 const FOOTER_LEAD_BASIS: f32 = 220.;
 
+/// The window width from which a frame asking for it keeps a flat vertical margin
+/// ([`DialogFrame::flat_margin_when_wide`]): the old launcher backdrop's `@media (min-width: 1000px)`.
+const FLAT_MARGIN_MIN_WIDTH: Pixels = px(1000.);
+
 /// A compact frame's header padding, vertical then horizontal: the old Announcements and Welcome dialogs' `10px 14px`.
 const COMPACT_HEADER_PAD: (Pixels, Pixels) = (px(10.), px(14.));
 /// A compact frame's body padding: the old `12px 14px`.
@@ -91,6 +95,7 @@ pub struct DialogFrame {
     notices: Option<AnyElement>,
     compact: bool,
     scroll_stop: Option<SharedString>,
+    flat_margin_when_wide: bool,
 }
 
 impl DialogFrame {
@@ -122,6 +127,7 @@ impl DialogFrame {
             notices: None,
             compact: false,
             scroll_stop: None,
+            flat_margin_when_wide: false,
         }
     }
 
@@ -220,6 +226,16 @@ impl DialogFrame {
         self
     }
 
+    /// Keep a flat [`metrics::DIALOG_VERTICAL_MARGIN`] above and below the frame in a window at least
+    /// [`FLAT_MARGIN_MIN_WIDTH`] wide, in place of 5% of the window's height: the old launcher's backdrop rule
+    /// (`.launch-composer-backdrop { --dialog-vertical-margin: 24px; }` from 1000 pixels wide, `app.css` at the reference
+    /// commit, line 6629), which spends the room on the launcher's rows rather than on empty space above and below it.
+    /// Narrower windows keep the ordinary margin.
+    pub fn flat_margin_when_wide(mut self) -> Self {
+        self.flat_margin_when_wide = true;
+        self
+    }
+
     /// Give the body a tab stop named `label` ("Announcement content") whenever it holds no tab stop, as a long
     /// announcement without a link or a list whose every action is disabled holds none (a button counts, whatever Tab
     /// reaches on macOS; a disabled control does not). The keys scroll it as they do the scroll box; `scroll_box.rs`'s
@@ -249,10 +265,15 @@ impl RenderOnce for DialogFrame {
         let viewport = window.viewport_size();
         // `max-height: calc(100dvh - 2 * var(--dialog-vertical-margin))`, with the margin `max(24px, 5dvh)`: on a tall
         // window a dialog that fills the cap (Settings, say) keeps 5% of the height above and below it, not a flat 24
-        // pixels. (The old launcher's backdrop set a flat 24 pixels in windows at least 1000 pixels wide; that
-        // exception is the launcher's to restore, not every dialog's. The old `max-width: 620px` rule, which shrank the
-        // margin to `max(12px, 3dvh)`, never applies: the window is at least 720 pixels wide.)
-        let vertical_margin = metrics::DIALOG_VERTICAL_MARGIN.max(viewport.height * 0.05);
+        // pixels, except in a frame that asks for the old launcher's flat margin in a wide window
+        // ([`Self::flat_margin_when_wide`]). (The old `max-width: 620px` rule, which shrank the margin to
+        // `max(12px, 3dvh)`, never applies: the window is at least 720 pixels wide.)
+        let vertical_margin =
+            if self.flat_margin_when_wide && viewport.width >= FLAT_MARGIN_MIN_WIDTH {
+                metrics::DIALOG_VERTICAL_MARGIN
+            } else {
+                metrics::DIALOG_VERTICAL_MARGIN.max(viewport.height * 0.05)
+            };
         let max_height = viewport.height - vertical_margin * 2.;
         // The old `width: min(Npx, 100%)` inside a backdrop padded 20 pixels each side. The layer manager centers a
         // dialog without padding or constraining it, so `max_w_full` here would be relative to a parent as wide as the
