@@ -15,7 +15,8 @@
 //! `hover_help.rs` (hover help and its tooltip), `enter_choice.rs` (the choice controls' Enter rule) and
 //! `focus_stop.rs` (the focus stop under every scroll stop, with a handle its caller owns). `transition.rs` tests the
 //! one-shot entrance (`components/transition.rs`), and `spinner.rs` the stepped spinner's turn
-//! (`components/spinner.rs`); neither draws a control. A new control's tests go in a new file here, declared below.
+//! (`components/spinner.rs`); neither draws a control. `menu_keys.rs` tests a toggled menu's shared key handlers
+//! (`components/menu_keys.rs`), which draw nothing either. A new control's tests go in a new file here, declared below.
 //!
 //! This file holds only the step helpers that tests of more than one component use: reading the tooltip and waiting
 //! out the hover delay, sending a key's press and release separately (GPUI's keyboard click happens on the release),
@@ -36,6 +37,7 @@ mod focus_stop;
 mod hover_help;
 mod mark_toggle;
 mod menu_item;
+mod menu_keys;
 mod option_row;
 mod radio_group;
 mod scroll_box;

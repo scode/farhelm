@@ -70,7 +70,10 @@ use gpui::{
 
 use super::{SessionList, selection};
 use crate::assets::Icon;
-use crate::components::{Button, HoverHelp, MenuHeader, MenuItem, Role, menu_separator};
+use crate::components::{
+    Button, HoverHelp, MenuHeader, MenuItem, MenuStart, Role, home_end_keys, menu_separator,
+    toggle_arrow_keys,
+};
 use crate::drafts::{self, Draft};
 use crate::focus::{self, Mark};
 use crate::layers::{self, Anchor, LayerId, Popover};
@@ -259,15 +262,6 @@ impl OrderState {
     }
 }
 
-/// Which item a menu opened from the title starts on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Start {
-    /// The first order: a click, or Down on the closed title.
-    First,
-    /// The last order: Up on the closed title.
-    Last,
-}
-
 impl SessionList {
     /// The current UI session's order state, made the first time it is asked for under the session.
     pub(super) fn order_state(&mut self, cx: &mut Context<Self>) -> Entity<OrderState> {
@@ -303,12 +297,12 @@ impl SessionList {
             }
             return;
         }
-        self.open_order_menu(Start::First, window, cx);
+        self.open_order_menu(MenuStart::First, window, cx);
     }
 
     /// Open the title's menu with focus on the item `start` names, unless it is open already or the title is not
     /// drawn. Nothing opens while the window is inert, or once the user has moved on since the key or click that asked.
-    fn open_order_menu(&mut self, start: Start, window: &mut Window, cx: &mut Context<Self>) {
+    fn open_order_menu(&mut self, start: MenuStart, window: &mut Window, cx: &mut Context<Self>) {
         if self.order_menu_open(window, cx) {
             return;
         }
@@ -319,8 +313,8 @@ impl SessionList {
         let mark = Mark::take(cx);
         let items: [FocusHandle; ITEMS] = std::array::from_fn(|_| cx.focus_handle().tab_stop(true));
         let start = match start {
-            Start::First => items[0].clone(),
-            Start::Last => items[ITEMS - 1].clone(),
+            MenuStart::First => items[0].clone(),
+            MenuStart::Last => items[ITEMS - 1].clone(),
         };
         let list = cx.weak_entity();
         let view = cx.new(|_| OrderMenu {
@@ -475,23 +469,10 @@ impl SessionList {
         .expanded(open)
         .focus(&self.order_focus)
         .content(content)
-        .on_key_down(move |event, window, cx| {
-            // Down and Up open the closed menu on its first or last order, as the old toggle did; an open menu holds
-            // focus, so these never reach the title while it is open.
-            let start = match event.keystroke.key.as_str() {
-                "down" => Start::First,
-                "up" => Start::Last,
-                _ => return,
-            };
-            if event.keystroke.modifiers.modified() {
-                return;
-            }
-            cx.stop_propagation();
-            if event.is_held {
-                return;
-            }
+        // Down and Up open the closed menu on its first or last order, as the old toggle did.
+        .on_key_down(toggle_arrow_keys(move |start, window, cx| {
             let _ = keyed.update(cx, |list, cx| list.open_order_menu(start, window, cx));
-        })
+        }))
         .on_click(move |_, window, cx| {
             // The list may be gone with its window; then there is no menu to open.
             let _ = clicked.update(cx, |list, cx| list.toggle_order_menu(window, cx));
@@ -562,21 +543,8 @@ impl Render for OrderMenu {
             .id("session-order-menu")
             .debug_selector(|| "session-order-menu".into())
             .w(px(MENU_WIDTH))
-            // Home and End, the old menu's, handled here rather than by the layer manager, whose menu context binds
-            // only Up and Down: a move to another item of the open menu, through the focus coordinator.
-            .on_key_down(move |event, window, cx| {
-                let target = match event.keystroke.key.as_str() {
-                    "home" => &first,
-                    "end" => &last,
-                    _ => return,
-                };
-                if event.keystroke.modifiers.modified() {
-                    return;
-                }
-                cx.stop_propagation();
-                let mark = Mark::take(cx);
-                focus::focus_in_layer(target, &mark, window, cx);
-            })
+            // Home and End, the old menu's: the layer manager's menu context binds only Up and Down.
+            .on_key_down(home_end_keys(first, last))
             .child(MenuHeader::app(MENU_TITLE, MENU_SUMMARY))
             .child(
                 div()
