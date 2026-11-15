@@ -239,8 +239,8 @@ pub struct Saved;
 /// One explicitly saved checkout field, as a view of its own: its label, field, note, Save (or Retry) and outcome line.
 ///
 /// The folder field ([`CheckoutField::folder`]) is shared. Settings → Checkouts draws it over the default folder; the
-/// host settings dialog is to draw it over a host's own folder ([`FolderScope::Host`], the default as placeholder and
-/// Use default to clear the override, SPEC.md "Topology"); and the launcher's managed-checkout destination is to draw
+/// host settings dialog draws it over a host's own folder ([`FolderScope::Host`], the default as placeholder and Use
+/// default to clear the override, SPEC.md "Topology"); and the launcher's managed-checkout destination is to draw
 /// it over the default folder when the chosen host has no folder in effect (SPEC.md, "Managed checkouts"), subscribing
 /// to [`Saved`] to refresh its suggestions and preview. Each owner makes the view when its dialog or section first
 /// shows (which reads the route then), keeps the entity for as long as the dialog is open, and draws it as a child: a
@@ -255,7 +255,8 @@ pub struct Saved;
 ///   `.create-session-form .checkout-root-field`) with its error in the warning color (`--warn-bright`) rather than
 ///   the danger color; the launcher adds those as builders here when it reuses the field.
 /// - **No outside gate.** The old host dialog also locked the field while the rest of the dialog was busy (its
-///   `disabled` prop). Whether that ports is the host dialog's decision; if it does, it is a builder here too.
+///   `disabled` prop). The host dialog does not port that lock (its module docs say why: saves under the host's key
+///   already refuse each other), so the field has no builder for it. An owner that does need one adds it here.
 pub struct CheckoutField {
     target: Target,
     /// The words under the field: the caller's for a folder (the old field's `note`), the old wording for the command.
@@ -414,21 +415,29 @@ impl CheckoutField {
         }
     }
 
-    /// The field's text, for tests, which find no other way to it: GPUI Kit's field reports no accessible value.
+    /// The field's text, for tests (Settings' and the host dialog's), which find no other way to it: GPUI Kit's field
+    /// reports no accessible value.
     #[cfg(test)]
-    pub(super) fn text(&self, cx: &App) -> String {
+    pub(crate) fn text(&self, cx: &App) -> String {
         self.input.input().text(cx).to_string()
     }
 
     /// Whether the field itself holds focus, for tests that type into it and must know the keys reach it.
     #[cfg(test)]
-    pub(super) fn focused(&self, window: &Window, cx: &App) -> bool {
+    pub(crate) fn focused(&self, window: &Window, cx: &App) -> bool {
         self.input.input().focus_handle(cx).is_focused(window)
     }
 
-    /// A line under the field: the note, the saved line or a failure, at the note's size and line.
+    /// A line under the field: the note, the saved line or a failure, at the note's size and line, as wide as the field
+    /// so it wraps there.
+    ///
+    /// NOTE: The width is set because the field's column puts its children at the start (`items_start`, so the buttons
+    /// keep their own width), and there a child is as wide as its content. A failure is a [`HostSentence`], whose
+    /// content width is its whole unwrapped sentence, so without this a helm refusal longer than the field ran past
+    /// the host settings dialog's edge and was cut off (found driving the dialog with a relative folder).
     fn line(color: gpui::Hsla) -> Div {
         div()
+            .w_full()
             .text_size(metrics::TEXT_SM)
             .line_height(px(NOTE_LINE_HEIGHT))
             .text_color(color)
