@@ -294,7 +294,8 @@ fn a_repeated_enter_on_launch_still_opens_the_session(cx: &mut gpui::TestAppCont
     );
 }
 
-/// A host-registry change one of the hosts area's dialogs starts, for the exclusion tests.
+/// Work one of the hosts area's dialogs starts, for the exclusion tests: three host-registry changes, and a host
+/// settings save, which is not one.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum HostChange {
     /// Add host's probe of a new destination, under a fresh host-add key.
@@ -367,10 +368,9 @@ pub(super) fn start_host_change(cx: &mut VisualTestContext, change: HostChange) 
 /// SPEC.md, "Creation": "Launches and changes to the host registry still exclude each other." A launch that picked
 /// its host while the registry was changing could aim at an entry the change is about to rewrite, which is why the old
 /// app held one token for both. Each kind of change counts: a new host's probe (the migration's orchestrator decided
-/// it counts, though the old token left it out) and setup, a host's removal, and any save on a registered host's own
-/// key. Specified: for
-/// each, while it is in flight a press of Launch on a complete draft sends no create and says why after "Not
-/// launched."; once it is answered, the same press launches.
+/// it counts, though the old token left it out) and setup, and a host's removal. Specified: for each, while it is in
+/// flight a press of Launch on a complete draft sends no create and says why after "Not launched."; once it is
+/// answered, the same press launches.
 #[gpui::test]
 fn launch_waits_for_a_host_change(cx: &mut gpui::TestAppContext) {
     let (mut helm, cx) = launcher_on(cx, command_draft());
@@ -378,12 +378,7 @@ fn launch_waits_for_a_host_change(cx: &mut gpui::TestAppContext) {
         creates(&mut helm, cx).is_empty(),
         "the premise: opening sends no create"
     );
-    for change in [
-        HostChange::Probe,
-        HostChange::Setup,
-        HostChange::HostSave,
-        HostChange::Remove,
-    ] {
+    for change in [HostChange::Probe, HostChange::Setup, HostChange::Remove] {
         let path = start_host_change(cx, change);
         cx.run_until_parked();
         let sent = helm.commands();
@@ -422,4 +417,46 @@ fn launch_waits_for_a_host_change(cx: &mut gpui::TestAppContext) {
         1,
         "with every change answered, Launch launches"
     );
+}
+
+/// The migration's orchestrator decided on 2026-11-14 that a launch does not wait for a save of a registered host's
+/// settings, its destination and alias included: that window is one short save, and the hosts side is to refuse a
+/// destination change during a launch instead. Host1 is a host the window lists, so the save is on a listed host's own
+/// key, which an earlier version counted. Specified: while host1's alias save is in flight, a press of Launch on a
+/// complete draft sends its create.
+#[gpui::test]
+fn launch_does_not_wait_for_a_host_settings_save(cx: &mut gpui::TestAppContext) {
+    let (mut helm, cx) = launcher_on(cx, command_draft());
+    assert!(
+        creates(&mut helm, cx).is_empty(),
+        "the premise: opening sends no create"
+    );
+    assert!(
+        cx.update(|_, cx| {
+            crate::session::current_store(cx).is_some_and(|store| {
+                store
+                    .read(cx)
+                    .collections()
+                    .ordered::<farhelm_proto::ui_channel::HostView>()
+                    .iter()
+                    .any(|host| host.id == 1)
+            })
+        }),
+        "the premise: host1 is a host the window lists"
+    );
+    let path = start_host_change(cx, HostChange::HostSave);
+    cx.run_until_parked();
+    let sent = helm.commands();
+    assert!(
+        sent.iter().any(|command| command.path == path),
+        "the premise: the save is in flight"
+    );
+    test_support::click(cx, "launcher-launch");
+    cx.run_until_parked();
+    let creates: Vec<_> = helm
+        .commands()
+        .into_iter()
+        .filter(|command| command.path == "/api/sessions")
+        .collect();
+    assert_eq!(creates.len(), 1, "Launch launched beside the save");
 }
