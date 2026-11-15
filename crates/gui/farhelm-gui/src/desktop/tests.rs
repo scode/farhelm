@@ -1329,3 +1329,75 @@ fn the_notices_window_is_titled_and_fits_its_column() {
         assert!(min.is_some_and(|width| width >= licenses::COLUMNS as f32 * licenses::CHAR_WIDTH));
     });
 }
+
+// ---- A second launch -----------------------------------------------------------------------------------------------
+
+/// On Linux a second launch hands its activation token to the app already open, and a compositor raises the window only
+/// for that token, so the token must reach the main window intact and each launch must activate it once; a launch with
+/// no token still activates it. Specified twice. With the activation passed in, the reported launches activate the main
+/// window in order with their tokens, and the end of the feed ends it. With the real activation, a second launch
+/// brings the main window forward over another window that was in front (GPUI's test platform activates windows).
+#[gpui::test]
+fn each_second_launch_activates_the_main_window_with_its_token(cx: &mut TestAppContext) {
+    use std::cell::RefCell;
+    use std::collections::VecDeque;
+    test_support::install(cx);
+    let (_, main) = test_support::open_view(cx, |_, _| Blank);
+    let handle = main.update(|window, _| window.window_handle());
+    let launches = Rc::new(RefCell::new(VecDeque::from([
+        Some(Some("token-1".to_string())),
+        Some(None),
+        None,
+    ])));
+    let reported = launches.clone();
+    let activations = super::Activations {
+        next: Box::new(move || {
+            let launch = reported.borrow_mut().pop_front().flatten();
+            Box::pin(async move { launch })
+        }),
+    };
+    /// Each activation as the window saw it: which window, with which token.
+    type Seen = Vec<(gpui::WindowId, Option<String>)>;
+    let seen: Rc<RefCell<Seen>> = Rc::default();
+    let recorded = seen.clone();
+    main.cx.update(|cx| {
+        super::follow_activations_with(
+            handle,
+            Some(activations),
+            move |window, token| {
+                recorded
+                    .borrow_mut()
+                    .push((window.window_handle().window_id(), token))
+            },
+            cx,
+        )
+    });
+    main.run_until_parked();
+    assert_eq!(
+        *seen.borrow(),
+        [
+            (handle.window_id(), Some("token-1".to_string())),
+            (handle.window_id(), None)
+        ]
+    );
+    assert!(launches.borrow().is_empty(), "the feed was read to its end");
+
+    let (_, other) = test_support::another_window(main, |_, _| Blank);
+    other.run_until_parked();
+    assert_ne!(
+        main.update(|_, cx| cx.active_window()),
+        Some(handle),
+        "the premise: another window is in front"
+    );
+    let once = Rc::new(RefCell::new(Some(Some(None))));
+    let activations = super::Activations {
+        next: Box::new(move || {
+            let launch = once.borrow_mut().take().flatten();
+            Box::pin(async move { launch })
+        }),
+    };
+    main.cx
+        .update(|cx| super::follow_activations(handle, Some(activations), cx));
+    main.run_until_parked();
+    assert_eq!(main.update(|_, cx| cx.active_window()), Some(handle));
+}

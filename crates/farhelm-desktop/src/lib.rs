@@ -42,6 +42,7 @@ mod agent;
 pub mod bundle;
 mod local_host;
 mod reduced_motion;
+mod second_launch;
 pub mod state;
 mod tab_reach;
 pub mod updater;
@@ -143,6 +144,9 @@ const RULE: &str =
 /// the app quits (GPUI's event loop has to run there, on macOS because AppKit requires it). The window connects to the
 /// embedded helm over its UI channel and shows the connection's states; it shows no sessions yet.
 ///
+/// On Linux, a launch while the app is already open on the same state directory hands its activation token to the open
+/// app, which brings its window forward, and returns at once without starting anything (`second_launch`).
+///
 /// A bootstrap failure, and a window that fails to open, go through [`refuse_and_exit`], the pre-window refusal path:
 /// there is no window in which to show an error, and a launcher launch still needs its native surface. SIGTERM and Ctrl+C quit the app the ordinary
 /// way. Quitting asks the embedded helm to stop; the local supervisor keeps running, as it always has after a quit. On
@@ -150,6 +154,19 @@ const RULE: &str =
 /// GPUI's event loop, so the helm gets only GPUI's quit deadline to stop and this function never returns.
 pub fn run() -> anyhow::Result<()> {
     init_tracing();
+    // A second launch of the Linux app hands its activation token to the app already open and exits, before it takes
+    // or waits for the app lock (`second_launch`). A state directory that cannot be resolved is left for startup to
+    // report.
+    if SECOND_LAUNCH_FORWARDS
+        && let Ok(state_dir) = desktop_state_dir()
+        && second_launch::forward_to_running(
+            &state_dir.join(second_launch::SOCKET_FILE),
+            std::env::var("XDG_ACTIVATION_TOKEN").ok().as_deref(),
+        )
+    {
+        eprintln!("farhelm-desktop: Farhelm is already open; asked it to bring its window forward");
+        return Ok(());
+    }
     let mut desktop = match DesktopBootstrap::start() {
         Ok(desktop) => desktop,
         Err(error) => refuse_and_exit(&format!("farhelm-desktop: {error:#}")),
@@ -162,6 +179,17 @@ pub fn run() -> anyhow::Result<()> {
         desktop.state_dir().join(window_state::WINDOW_STATE_FILE),
     )));
     let quit_frame = Rc::clone(&frame);
+    // From here this launch owns the state directory, so it is the one later launches hand over to. A socket that
+    // cannot be made only costs the forwarding: a later launch then refuses at the app lock, as it always did.
+    let quit_socket = desktop.state_dir().join(second_launch::SOCKET_FILE);
+    let activations = match SECOND_LAUNCH_FORWARDS.then(|| second_launch::listen(&quit_socket)) {
+        Some(Ok(receiver)) => Some(second_launch::activations(receiver)),
+        Some(Err(error)) => {
+            tracing::warn!("second launches cannot reach this app: {error:#}");
+            None
+        }
+        None => None,
+    };
     farhelm_gui::bootstrap::run(farhelm_gui::bootstrap::Host {
         quit_requested: Box::pin(async move {
             // A sender dropped without sending means the signal thread failed, not that anyone asked to quit, so the
@@ -170,8 +198,12 @@ pub fn run() -> anyhow::Result<()> {
                 std::future::pending::<()>().await;
             }
         }),
-        // The helm first, since only its stop takes time; then the frame change still pending, one small file.
+        // The second-launch socket first, so no launch hands over to an app that is going away; then the helm, since
+        // only its stop takes time; then the frame change still pending, one small file.
         on_quit: Box::new(move || {
+            if SECOND_LAUNCH_FORWARDS {
+                second_launch::retire(&quit_socket);
+            }
             helm_shutdown.request();
             if let Ok(mut frame) = quit_frame.try_borrow_mut() {
                 frame.flush();
@@ -192,7 +224,7 @@ pub fn run() -> anyhow::Result<()> {
         // Only the installed release bundle on a Mac starts one (`updater::start` decides); everywhere else the window
         // gets none and shows no update surface.
         updater: updater::start(desktop.state_dir().join(APP_STATE_FILE)).map(updater_host),
-        activations: None,
+        activations,
     });
     // Linux only: GPUI's event loop has returned. Dropping the bootstrap waits for the helm the quit asked to stop.
     tracing::info!("the app quit; waiting for the embedded helm to stop");
@@ -244,6 +276,10 @@ fn readout_feed(
     });
     (first, next)
 }
+
+/// Whether a second launch hands over to the app already open (`second_launch`): only on Linux. On the Mac, Launch
+/// Services brings an installed app forward by itself, and a bare development binary keeps the app lock's refusal.
+const SECOND_LAUNCH_FORWARDS: bool = cfg!(target_os = "linux");
 
 /// The window's frame host over `keeper`: the window asks it where to open, tells it every change, and says when it
 /// has settled, which is when the keeper writes the record (`window_state`; the quit handler flushes it too). The

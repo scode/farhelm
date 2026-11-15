@@ -6,9 +6,9 @@
 //! NOTE: This is area code, not a foundation (`docs/gpui/foundation-ownership.md`, "What is not a foundation"). It
 //! belongs to the desktop-integration area, which builds it here and under `desktop/`. It started as the stub the
 //! bootstrap's seams were cut against. The menu bar (`menu`), quitting on close, the notices window (`licenses`), the
-//! updater's window side (`updates`), the main window's frame and the macOS title band (`title_band`) are built; a
-//! second launch and the Linux window's decorations are not yet, so [`follow_activations`] does nothing and
-//! [`dress_window`] sets the macOS options only.
+//! updater's window side (`updates`), a second launch bringing the window forward, the main window's frame and the macOS
+//! title band (`title_band`) are built; the Linux window's decorations are not yet, so [`dress_window`] sets the macOS
+//! options only.
 //!
 //! The bootstrap's contract with this module is the signatures of the functions below, the names of [`FrameHost`],
 //! [`FrameFollow`], [`UpdaterHost`] and [`Activations`], and the four window options [`dress_window`] may set, nothing
@@ -36,11 +36,13 @@
 //! Nothing in the bootstrap interprets what passes through these calls: the host's frame callbacks reach this module
 //! as they are, and the conversion between the host's frames and GPUI's window bounds lives here.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 
 use gpui::{
     AnyWindowHandle, App, AppContext as _, Bounds, Context, Global, Pixels, Size, Subscription,
-    Window, WindowBounds, WindowOptions, point, px, size,
+    Task, Window, WindowBounds, WindowOptions, point, px, size,
 };
 
 use crate::ticker;
@@ -121,20 +123,77 @@ pub fn keep_updater(updater: Option<UpdaterHost>, cx: &mut App) {
 
 // ---- A second launch ------------------------------------------------------------------------------------------------
 
+/// The next second launch the host reports: resolves with `Some(token)`, the launch's activation token (itself `None`
+/// when its launcher gave none), or with `None` once the host stops listening, after which it is not called again.
+/// Called again only once the previous call's future has resolved.
+pub type NextActivation = Box<dyn FnMut() -> Pin<Box<dyn Future<Output = Option<Option<String>>>>>>;
+
 /// How the host reports that the app was launched again while it runs (`Host::activations`), so the running app can
-/// bring its main window forward. A host that listens for no second launch passes none. Empty until the desktop
-/// integration fills it in. The bootstrap passes it through whole.
-pub struct Activations {}
+/// bring its main window forward. Only the Linux app listens; the Mac's Launch Services brings an installed app forward
+/// by itself, so a Mac host passes none. The bootstrap passes it through whole.
+pub struct Activations {
+    /// The feed of second launches.
+    pub next: NextActivation,
+}
 
 /// Bring `main` forward whenever the host reports a second launch, `None` when it reports none. The bootstrap calls
-/// this once the main window is open, after [`follow_frame`], because bringing the window forward needs its handle. The
-/// stub drops it.
-pub fn follow_activations(
-    _main: AnyWindowHandle,
-    _activations: Option<Activations>,
-    _cx: &mut App,
-) {
+/// this once the main window is open, after [`follow_frame`], because bringing the window forward needs its handle.
+///
+/// The token matters on Wayland, where a compositor moves focus to a window only with a valid activation token from the
+/// launch that asked; without one the window is activated the ordinary way, which a compositor may turn into a mere
+/// request for attention.
+pub fn follow_activations(main: AnyWindowHandle, activations: Option<Activations>, cx: &mut App) {
+    follow_activations_with(main, activations, activate, cx);
 }
+
+/// Activate `window` for one second launch: with its token when it brought one.
+fn activate(window: &mut Window, token: Option<String>) {
+    match token {
+        Some(token) => window.activate_window_with_token(token),
+        None => window.activate_window(),
+    }
+}
+
+/// [`follow_activations`] with the activation passed in, so a test sees which token reached the window. Follows the
+/// feed for the app's life and stops once the main window is gone.
+fn follow_activations_with(
+    main: AnyWindowHandle,
+    activations: Option<Activations>,
+    activate: impl Fn(&mut Window, Option<String>) + 'static,
+    cx: &mut App,
+) {
+    let Some(Activations { mut next }) = activations else {
+        return;
+    };
+    let following = cx.spawn(async move |cx| {
+        while let Some(token) = next().await {
+            // Logged so a run can tell that a second launch reached the app even where the window cannot show it
+            // (headless compositors report every window inactive).
+            tracing::info!(
+                token = token.is_some(),
+                "a second launch asked to bring the window forward"
+            );
+            cx.update(|cx| cx.activate(true));
+            if main
+                .update(cx, |_, window, _| activate(window, token))
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
+    cx.set_global(FollowingActivations {
+        _following: following,
+    });
+}
+
+/// What keeps the window following second launches: dropping the task would stop it, so the app holds it as a global
+/// for its whole life.
+struct FollowingActivations {
+    _following: Task<()>,
+}
+
+impl Global for FollowingActivations {}
 
 // ---- The main window's frame ----------------------------------------------------------------------------------------
 //
