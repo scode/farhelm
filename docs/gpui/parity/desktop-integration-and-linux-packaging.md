@@ -96,6 +96,10 @@ unit tests (in `crates/farhelm-desktop` unless another crate is named).
   desktop menu shows nothing. Tested by `tests::a_linux_launch_without_wayland_refuses_with_a_clear_line` in
   `crates/farhelm-desktop` (which environments refuse) and `scripts/gui-lifecycle.py` step 03 (a launch without one
   exits 1 with the line and creates no state directory) and step 05 (a second launch without one is handed over).
+- **Linux installation and updates: not built.** The maintainer decided on 2026-11-15 that the migration builds no Linux
+  package, desktop entry install or Linux auto-update; the Linux app runs from a build, shows no update UI (no updater
+  runs there), and is tested for real on Linux by the bridge, `scripts/gui-e2e-smoke.py` and `scripts/gui-lifecycle.py`.
+  The packaging work is the "Linux installation and updates for the desktop app" entry in `TODO.md`'s "Near term".
 
 ## Deviations
 
