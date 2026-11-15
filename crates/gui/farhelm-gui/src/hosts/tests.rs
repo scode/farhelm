@@ -47,6 +47,7 @@ pub(crate) fn host(id: i64, kind: &str, state: HostStateView) -> HostView {
         is_session_owned: false,
         tensorlake: None,
         environment: None,
+        container_check: None,
         name: destination
             .clone()
             .unwrap_or_else(|| "this machine".to_owned()),
