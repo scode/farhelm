@@ -6,16 +6,17 @@
 //! NOTE: This is area code, not a foundation (`docs/gpui/foundation-ownership.md`, "What is not a foundation"). It
 //! belongs to the desktop-integration area, which builds it here and under `desktop/`. It started as the stub the
 //! bootstrap's seams were cut against. The menu bar (`menu`), quitting on close, the notices window (`licenses`), the
-//! updater's window side (`updates`), a second launch bringing the window forward, the main window's frame and the macOS
-//! title band (`title_band`) are built; the Linux window's decorations are not yet, so [`dress_window`] sets the macOS
-//! options only.
+//! updater's window side (`updates`), a second launch bringing the window forward, the main window's frame, the macOS
+//! title band (`title_band`) and the Linux window's own title bar where the compositor draws none (`linux_title_bar`)
+//! are built.
 //!
 //! The bootstrap's contract with this module is the signatures of the functions below, the names of [`FrameHost`],
-//! [`FrameFollow`], [`UpdaterHost`] and [`Activations`], and the four window options [`dress_window`] may set, nothing
-//! more: it passes a `FrameHost`, an `UpdaterHost` and an `Activations` through whole and never reads a field of any of
-//! these types, so the area reshapes every type here (the frame host's fields, the follower's contents, the frame value
-//! types the host sees, what the updater and the activation source hold) without touching `bootstrap.rs`. Only a
-//! changed signature, or a window option beyond those four, is a bootstrap change.
+//! [`FrameFollow`], [`UpdaterHost`] and [`Activations`], and the four window options [`dress_window`] may set (and the
+//! minimum size it may grow, never shrink, which the migration's coordinator added on 2026-11-14), nothing more: it
+//! passes a `FrameHost`, an `UpdaterHost` and an `Activations` through whole and never reads a field of any of these
+//! types, so the area reshapes every type here (the frame host's fields, the follower's contents, the frame value types
+//! the host sees, what the updater and the activation source hold) without touching `bootstrap.rs`. Only a changed
+//! signature, or a window option beyond those four, is a bootstrap change.
 //!
 //! The bootstrap calls into this module at fixed points, and each point is fixed for a reason the area cannot change
 //! from here:
@@ -48,6 +49,7 @@ use gpui::{
 use crate::ticker;
 
 pub(crate) mod licenses;
+pub(crate) mod linux_title_bar;
 pub(crate) mod menu;
 #[cfg(test)]
 mod tests;
@@ -502,18 +504,28 @@ pub fn follow_frame(main: AnyWindowHandle, follow: FrameFollow, cx: &mut App) {
 
 // ---- The title band and decorations ---------------------------------------------------------------------------------
 
-/// Set how the main window's frame is drawn, in the options the bootstrap built for it: the macOS title band (a
+/// Set how the main window's frame is drawn, in the options the bootstrap built for it. On macOS, the title band (a
 /// transparent title bar, the traffic lights moved into the band, and the app owning the drag), so the sidebar's app
-/// bar and the session's top row reach the window's top edge and become its title bar (`title_band`).
+/// bar and the session's top row reach the window's top edge and become its title bar (`title_band`). On Linux, a
+/// request for the compositor's title bar, and a minimum grown by the frame GPUI Kit draws and the bar the window draws
+/// where the compositor declines (`linux_title_bar`), so the 720 by 560 minimum holds for the app's content (SPEC.md,
+/// "Desktop window chrome").
 ///
 /// This may set only `titlebar`'s `appears_transparent` and `traffic_light_position`, `app_owns_titlebar_drag` and
-/// `window_decorations` (the last is left alone until the Linux title bar needs it). The rest of the options (the
-/// title, the bounds, the minimum size, the app id, the frame intervals) are the bootstrap's and stay as it set them.
+/// `window_decorations`, and may grow `window_min_size` but never shrink it. The rest of the options (the title, the
+/// bounds, the app id, the frame intervals) are the bootstrap's and stay as it set them.
 ///
 /// NOTE: A transparent title bar with app-owned dragging leaves the window without any drag area but the band's rows
-/// (`title_band::row`), so these values and the band change together. Off macOS nothing changes yet: the Linux window
-/// keeps GPUI's default decorations until its own title bar is built.
+/// (`title_band::row`), so these values and the band change together.
 pub fn dress_window(options: &mut WindowOptions, _cx: &App) {
+    if cfg!(target_os = "linux") {
+        // Ask for the compositor's title bar (GPUI's default, made explicit); where the compositor declines, the
+        // window draws its own (`linux_title_bar`), and the minimum grows so the app's content keeps it.
+        options.window_decorations = Some(gpui::WindowDecorations::Server);
+        if let Some(minimum) = options.window_min_size.as_mut() {
+            *minimum = *minimum + linux_title_bar::minimum_allowance();
+        }
+    }
     if !title_band::ON {
         return;
     }

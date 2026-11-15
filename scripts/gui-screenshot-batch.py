@@ -84,6 +84,11 @@ LINUX_FRAME_MARGIN = 20
 LINUX_FRAME_BORDER = 1
 LINUX_FRAME = LINUX_FRAME_MARGIN + LINUX_FRAME_BORDER
 
+# The title bar the Linux window draws for itself under Mutter, which draws none (`linux_title_bar::HEIGHT` in the GUI
+# crate), in pixels, inside Kit's frame at the window's top. The old app's pictures have no title bar, so a Linux run
+# asks for a window taller by it too and crops it off with the frame.
+LINUX_TITLE_BAR = 34
+
 # Where app runs' directories go. Not the platform's default temporary directory: on a Mac that is under
 # /var/folders/, deep enough that a run's deepest socket path is estimated (not measured) to come within a byte or two
 # of the 103-byte limit `gui-agent.py start` enforces there.
@@ -284,11 +289,13 @@ def png_size(path: Path) -> tuple[int, int] | None:
     return struct.unpack(">II", head[16:24])
 
 
-def crop_frame(path: Path, margin: int, border: int) -> str | None:
-    """Crop Kit's Linux window frame (`margin` black pixels, then `border`) off every side of a capture, in place.
+def crop_frame(path: Path, margin: int, border: int, top: int = 0) -> str | None:
+    """Crop Kit's Linux window frame (`margin` black pixels, then `border`) off every side of a capture, in place, and
+    `top` more rows inside it at the top (the window's own title bar).
 
     Returns why it did not crop, or None. The frame is checked before anything is cut: along the middle row and column,
-    exactly `margin` black pixels from each edge, then a pixel that is not black (the border). A capture that does not
+    exactly `margin` black pixels from each edge, then a pixel that is not black (the border). The `top` rows are cut
+    unchecked: the bar the app draws there has no fixed look to check, only its height. A capture that does not
     show that frame (a Kit release that changed its shadow, a compositor that draws decorations itself) is left as it
     was and reported, rather than cropped into the app's drawing or left with a band under a label that claims the
     asked size.
@@ -298,7 +305,7 @@ def crop_frame(path: Path, margin: int, border: int) -> str | None:
     except (OSError, ValueError, zlib.error) as problem:
         return f"could not crop the window frame: {problem}"
     cut = margin + border
-    if width <= 2 * cut or height <= 2 * cut:
+    if width <= 2 * cut or height <= 2 * cut + top:
         return f"the capture is {width}x{height}, too small to hold the window frame"
 
     def black(x: int, y: int) -> bool:
@@ -324,8 +331,8 @@ def crop_frame(path: Path, margin: int, border: int) -> str | None:
         found = ", ".join(f"{side} {run}" for side, run in zip(("left", "right", "top", "bottom"), runs))
         return f"left uncropped: expected a {margin}-pixel black window frame on every side, found {found}"
     stride = width * 4
-    kept = b"".join(pixels[y * stride + cut * 4:(y + 1) * stride - cut * 4] for y in range(cut, height - cut))
-    write_rgba(path, width - 2 * cut, height - 2 * cut, kept)
+    kept = b"".join(pixels[y * stride + cut * 4:(y + 1) * stride - cut * 4] for y in range(cut + top, height - cut))
+    write_rgba(path, width - 2 * cut, height - 2 * cut - top, kept)
     return None
 
 
@@ -394,14 +401,15 @@ def capture(
                 shown[theme] = str(target.relative_to(out))
 
     frame = LINUX_FRAME if platform == "linux" else 0
+    bar = LINUX_TITLE_BAR if platform == "linux" else 0
     runs = runs or Path(tempfile.mkdtemp(prefix="gui-batch-", dir=RUNS_PARENT))
     first_run = True
     for variant in scenes["app_variants"]:
         theme, size = variant["theme"], variant["size"]
         width, height = variant["window"]
-        # The window is asked larger by the frame so that, once the frame is cropped, the app's drawing is the size the
-        # variant names (and the size the old app's pictures of it have).
-        window = (width + 2 * frame, height + 2 * frame)
+        # The window is asked larger by the frame (and, on Linux, the window's own title bar) so that, once they are
+        # cropped, the app's drawing is the size the variant names (and the size the old app's pictures of it have).
+        window = (width + 2 * frame, height + 2 * frame + bar)
         for group, (extra, group_scenes) in enumerate(start_groups(scenes["app_scenes"], scenes.get("app_start", []))):
             # The first group keeps the plain `<theme>-<size>` name; a later one, its own app run, is numbered.
             run = runs / (f"{theme}-{size}" if group == 0 else f"{theme}-{size}-{group}")
@@ -433,7 +441,9 @@ def capture(
                     if failed is None and run_agent(agent, run, ["screenshot", str(target)], step_timeout) == 0:
                         shot = str(target.relative_to(out))
                         record["app"].setdefault(entry["id"], {}).setdefault(theme, {})[size] = shot
-                        problem = crop_frame(target, LINUX_FRAME_MARGIN, LINUX_FRAME_BORDER) if frame else None
+                        problem = (
+                            crop_frame(target, LINUX_FRAME_MARGIN, LINUX_FRAME_BORDER, LINUX_TITLE_BAR) if frame else None
+                        )
                         if problem:
                             error(entry["id"], f"{label}: {problem}")
                     else:

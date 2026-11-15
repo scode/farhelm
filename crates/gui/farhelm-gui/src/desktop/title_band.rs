@@ -33,7 +33,9 @@
 //! breaks the pair. The same listeners start an armed drag once the pointer has moved past a small threshold.
 //!
 //! The band is macOS only; on Linux the rows are drawn without it (SPEC.md: "The Linux window layout retains its
-//! existing appearance and gains no drag or zoom behavior").
+//! existing appearance and gains no drag or zoom behavior"). The same press rule also serves the title bar the Linux
+//! window draws for itself where the compositor draws none ([`title_bar_row`]; `linux_title_bar`), which is not part of
+//! the app's layout but a stand-in for the compositor's own bar.
 
 use gpui::{
     App, Global, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
@@ -74,6 +76,8 @@ pub enum Row {
     EmptyPane,
     /// The strip above the notice banners, which keeps a posted notice clear of the traffic lights.
     AboveBanners,
+    /// The title bar the Linux window draws for itself under a compositor that draws none (`linux_title_bar`).
+    LinuxTitleBar,
 }
 
 /// What one press on the band does. Exactly one of these per press: no press both drags and zooms. A drag starts only
@@ -201,6 +205,15 @@ pub fn row<E: InteractiveElement>(element: E, row: Row) -> E {
     } else {
         element
     }
+}
+
+/// Make `element` the Linux window's drawn title bar: the band's press rule on every platform (the bar is drawn only on
+/// Linux, but tests run its rule everywhere), so a press on its background and a move drag the window and a
+/// double-click maximizes or restores it, as a compositor's own title bar does.
+pub(crate) fn title_bar_row<E: InteractiveElement>(element: E) -> E {
+    band(element, Row::LinuxTitleBar, move |action, window, cx| {
+        act(Row::LinuxTitleBar, action, window, cx)
+    })
 }
 
 /// [`row`] on every platform, with what a decided press does passed in (`act` in the app), so tests on GPUI's fake

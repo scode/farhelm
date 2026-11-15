@@ -191,6 +191,12 @@ pub enum Icon {
     /// A page with a folded corner and two lines: a document to read, the update menu's What's new (the old app's
     /// Document glyph).
     Document,
+    /// A low line: minimize the window (the Linux window's drawn title bar).
+    Minimize,
+    /// A square: maximize the window (the Linux window's drawn title bar).
+    Maximize,
+    /// Two overlapping squares: restore a maximized window's size (the Linux window's drawn title bar).
+    Restore,
     /// A shield with a tick: the Settings dialog's Agent trust section (the old app's Agent trust glyph).
     AgentTrust,
     /// A plus: add something new (the old app's Add glyph, on the host rail's Add host).
@@ -286,6 +292,9 @@ impl Icon {
         Icon::Update,
         Icon::Refresh,
         Icon::Document,
+        Icon::Minimize,
+        Icon::Maximize,
+        Icon::Restore,
         Icon::AgentTrust,
         Icon::Add,
         Icon::Templates,
@@ -355,6 +364,9 @@ impl Icon {
             Icon::Update => "icons/update.svg",
             Icon::Refresh => "icons/refresh.svg",
             Icon::Document => "icons/document.svg",
+            Icon::Minimize => "icons/minimize.svg",
+            Icon::Maximize => "icons/maximize.svg",
+            Icon::Restore => "icons/restore.svg",
             Icon::AgentTrust => "icons/agent-trust.svg",
             Icon::Add => "icons/add.svg",
             Icon::Templates => "icons/templates.svg",
@@ -470,6 +482,9 @@ impl Assets {
             "icons/update.svg" => Some(include_bytes!("../assets/icons/update.svg")),
             "icons/refresh.svg" => Some(include_bytes!("../assets/icons/refresh.svg")),
             "icons/document.svg" => Some(include_bytes!("../assets/icons/document.svg")),
+            "icons/minimize.svg" => Some(include_bytes!("../assets/icons/minimize.svg")),
+            "icons/maximize.svg" => Some(include_bytes!("../assets/icons/maximize.svg")),
+            "icons/restore.svg" => Some(include_bytes!("../assets/icons/restore.svg")),
             "icons/bell.svg" => Some(include_bytes!("../assets/icons/bell.svg")),
             WORDMARK_DARK => Some(include_bytes!(
                 "../../../../packaging/farhelm-desktop/wordmark-dark.svg"

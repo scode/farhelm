@@ -342,6 +342,26 @@ class Pictures(unittest.TestCase):
         self.assertEqual((width, height), (8, 4))
         self.assertEqual(set(bytes(pixels[i:i + 4]) for i in range(0, len(pixels), 4)), {GROUND})
 
+    def test_the_linux_windows_own_title_bar_is_cropped_with_the_frame(self) -> None:
+        """Under Mutter the window draws its own title bar inside Kit's frame, which the old app's pictures do not
+        have, so it is cropped off the top with the frame and the capture keeps only the app's drawing below it, at
+        the variant's size."""
+        path = self.root / "shot.png"
+        pixels = bytearray(framed_pixels(50, 50, 20, 1))
+        bar = b"\x60\x60\x60\xff"
+        for y in range(21, 25):
+            for x in range(21, 29):
+                pixels[(y * 50 + x) * 4:(y * 50 + x) * 4 + 4] = bar
+        filtered_png(path, 50, 50, bytes(pixels))
+        self.assertIsNone(batch.crop_frame(path, 20, 1, 4))
+        width, height, kept = batch.read_rgba(path)
+        self.assertEqual((width, height), (8, 4))
+        self.assertEqual(set(bytes(kept[i:i + 4]) for i in range(0, len(kept), 4)), {GROUND},
+                         "the bar's rows are cut from the top, not the bottom")
+        tiny = self.root / "tiny.png"
+        filtered_png(tiny, 50, 46, framed_pixels(50, 46, 20, 1))
+        self.assertIn("too small", batch.crop_frame(tiny, 20, 1, 4) or "")
+
     def test_a_capture_without_the_expected_frame_is_left_alone(self) -> None:
         """If Kit's frame changes (or a compositor draws decorations itself), cropping a fixed width would cut into the
         app or leave a band under a label that claims the asked size; the capture is kept as it was and the reason
@@ -434,14 +454,15 @@ class Capture(unittest.TestCase):
     def test_each_variant_is_its_own_run_with_its_theme_and_size(self) -> None:
         """The bridge cannot change theme or size, so each variant is a fresh app run started with them; only the first
         run builds, and the shared lock reaches every start. On Linux the window is asked 42 pixels larger than the
-        variant (Kit's frame) on a monitor that holds it, and the cropped capture is the variant's size."""
+        variant (Kit's frame) and 34 taller still (the window's own title bar) on a monitor that holds it, and the
+        cropped capture is the variant's size."""
         record = self.capture(lock=Path("/locks/gui"))
         self.assertEqual(self.verbs("light-wide"), ["start", "wait", "screenshot", "stop"])
         self.assertEqual(self.verbs("dark-narrow"), ["start", "wait", "screenshot", "stop"])
         starts = {call[0]: call[2:] for call in self.calls() if call[1] == "start"}
-        self.assertEqual(starts["light-wide"], ["--window-size", "1642x1042", "--appearance", "light",
-                                                "--size", "1842x1242", "--lock", "/locks/gui"])
-        self.assertEqual(starts["dark-narrow"], ["--window-size", "942x742", "--appearance", "dark",
+        self.assertEqual(starts["light-wide"], ["--window-size", "1642x1076", "--appearance", "light",
+                                                "--size", "1842x1276", "--lock", "/locks/gui"])
+        self.assertEqual(starts["dark-narrow"], ["--window-size", "942x776", "--appearance", "dark",
                                                  "--size", "1600x1200", "--no-build", "--lock", "/locks/gui"])
         self.assertEqual(record["app"]["app-main-window"]["dark"]["narrow"],
                          "captures/app-main-window--dark--narrow.png")
