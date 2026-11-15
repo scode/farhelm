@@ -460,3 +460,69 @@ fn launch_does_not_wait_for_a_host_settings_save(cx: &mut gpui::TestAppContext) 
         .collect();
     assert_eq!(creates.len(), 1, "Launch launched beside the save");
 }
+
+/// The words the helm's bounded create answers with when the host does not answer in time
+/// (`sessions::within_host_reply_bound`).
+const TIMED_OUT: &str = "the host did not answer within 20 seconds; the request is still being carried out, and the \
+                         session list will show its result";
+
+/// SPEC_impl.md, "The UI channel": a bounded command answers "the host timed out" while the work carries on, so a
+/// timed-out create may still start a session. Calling it "Not launched." would invite a second launch of the same
+/// draft; the old app waited without a deadline and never had to say this. Specified: the helm answers the create with
+/// a 504 and no marker; the launcher comes back with the helm's words alone, no "Not launched." lead, and its draft.
+#[gpui::test]
+fn a_timed_out_create_comes_back_without_not_launched(cx: &mut gpui::TestAppContext) {
+    let (mut helm, cx, create) = launched(cx);
+    helm.reply(create.id, 504, Some(json!(TIMED_OUT)));
+    settle(cx);
+    assert!(any_open(cx), "the launcher came back");
+    assert_eq!(shown_refusal(cx).as_deref(), Some(TIMED_OUT));
+    assert_eq!(
+        read(cx, |launcher, _, _| launcher.draft.command.command.clone()),
+        "true",
+        "with its draft"
+    );
+}
+
+/// A create the helm can prove never reached the host carries its marker, and was not launched whatever the status, so
+/// it keeps the ordinary lead. Specified: a 504 marked as never accepted by the host shows "Not launched." before the
+/// helm's words.
+#[gpui::test]
+fn a_create_the_host_never_accepted_is_not_launched(cx: &mut gpui::TestAppContext) {
+    let (mut helm, cx, create) = launched(cx);
+    helm.reply_marked(
+        create.id,
+        504,
+        vec![crate::operations::HelmMarker::CreateUnaccepted],
+        Some(json!("the create did not reach host1")),
+    );
+    settle(cx);
+    assert_eq!(
+        shown_refusal(cx).as_deref(),
+        Some("Not launched. the create did not reach host1")
+    );
+}
+
+/// The notice for a timed-out create the user moved on from must not say "Not launched." either. Specified: a key
+/// press after Launch, then a 504: the notice for a launch that may still start is posted, not the not-launched one, and
+/// its Open launcher brings the launcher back with the helm's words.
+#[gpui::test]
+fn a_timed_out_create_the_user_moved_on_from_has_its_own_notice(cx: &mut gpui::TestAppContext) {
+    let (mut helm, cx, create) = launched(cx);
+    keys(cx, "x");
+    helm.reply(create.id, 504, Some(json!(TIMED_OUT)));
+    settle(cx);
+    let posted = cx.update(|_, cx| notices::posted(cx));
+    assert_eq!(posted, vec![Notice::LaunchMayStillStart]);
+    assert_eq!(
+        name_of(cx, "notice-open-launcher").as_deref(),
+        Some("Open launcher"),
+        "its banner offers the launcher"
+    );
+    test_support::click(cx, "notice-open-launcher");
+    assert_eq!(shown_refusal(cx).as_deref(), Some(TIMED_OUT));
+    assert!(
+        cx.update(|_, cx| notices::posted(cx)).is_empty(),
+        "the notice went"
+    );
+}
