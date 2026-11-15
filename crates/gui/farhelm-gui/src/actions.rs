@@ -434,6 +434,20 @@ pub fn install(cx: &mut App) {
         let chord = key.chord(THIS_PLATFORM)?;
         key.bind.map(|bind| bind(chord))
     }));
+    install_interceptor(cx);
+}
+
+/// Subscribe [`intercept`] for the app's lifetime: the GUI crates' one keystroke interceptor (GPUI Kit's text fields
+/// add their own, which only pause the cursor blink and never stop a key), and the one item in the GUI crates allowed
+/// to watch keys app-wide (`crates/gui/clippy.toml` bans the call everywhere else). The rules it applies
+/// to every key (key capture, the physical-key rows, dropped repeats) live in one place that way; a control that needs
+/// to know more about its own keys, such as whether Enter was held, reads its key events and reports that through its
+/// own events instead.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the actions module is the one owner of app-wide keystroke interception (SPEC_impl.md, \"Actions and keymap\")"
+)]
+fn install_interceptor(cx: &mut App) {
     let interceptor = cx.intercept_keystrokes(intercept);
     cx.set_global(KeyInterceptor {
         _interceptor: interceptor,

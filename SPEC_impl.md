@@ -998,7 +998,8 @@ keypad digit, an extra modifier or a missing one matches nothing; and no row's k
 capture slot is enforced by tests that an armed slot takes every key-down, held repeats too, ahead of a focused
 terminal, a binding and a physical-key row; that it sees Escape before Dismiss; that a cancel disarms it and the key
 reaches its normal target; that a second arm is refused; that its handler can close a layer and disarm from inside; and
-that a reset disarms it and tells its holder.
+that a reset disarms it and tells its holder. Clippy bans GPUI's app-wide keystroke interceptor in the GUI crates
+outside the actions module, so these rules cannot be bypassed by a second interceptor.
 
 ### Animation time: the ticker
 

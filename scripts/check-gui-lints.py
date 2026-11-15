@@ -48,6 +48,7 @@ FUNCTION = re.compile(r"^\s*fn\s+(\w+)")
 # The items that may switch a ban off, as (file under crates/gui, item name): the owners in the ownership table's lint
 # exceptions column. Adding one is a foundation change.
 EXCEPTION_OWNERS = {
+    ("farhelm-gui/src/actions.rs", "install_interceptor"),
     ("farhelm-gui/src/cache.rs", "element"),
     ("farhelm-gui/src/components/transition.rs", "one_shot"),
     ("farhelm-gui/src/focus.rs", "apply"),

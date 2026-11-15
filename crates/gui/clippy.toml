@@ -145,6 +145,12 @@ disallowed-methods = [
   # type-erased view.
   { path = "gpui::Entity::cached", reason = "cache a view only through the cache wrapper (cache::element)" },
   { path = "gpui::AnyView::cached", reason = "cache a view only through the cache wrapper (cache::element)" },
+
+  # Keystroke interception: the actions module's interceptor runs the rules every key goes through (key capture, the
+  # physical-key rows, dropped repeats), and a second interceptor would act on keys before any binding, outside those
+  # rules. GPUI defines the call on `App` only; `cx.` on a `Context` reaches it through `Context`'s deref, so this one
+  # entry covers both (the lint demo calls it through a `Context`).
+  { path = "gpui::App::intercept_keystrokes", reason = "app-wide keystroke interception lives in actions.rs; a control reports what its keys were through its events" },
 ]
 
 disallowed-types = [
