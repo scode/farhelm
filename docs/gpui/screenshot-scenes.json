@@ -725,6 +725,15 @@
       "mockup": false,
       "steps": [
         [
+          "press",
+          "escape"
+        ],
+        [
+          "wait",
+          "--gone",
+          "Farhelm guides and feedback"
+        ],
+        [
           "click",
           "id:app-help-toggle"
         ],
