@@ -1232,6 +1232,18 @@ Traps that an earlier rule already prevents get one line pointing at it.
 - **Headless Mutter reports the window inactive forever.** `Window::is_window_active()` stays false even after Mutter
   focuses the window, so a ticker that pauses while inactive never ticks in headless end-to-end runs. Rule: the ticker
   takes its notion of "active" through a test override.
+- **A `cfg(test)` branch in production code tests a program that does not ship.** Past the branch, a test exercises code
+  the app never runs, so its pass says nothing about the code the branch skips. Rule (decided by the migration's
+  orchestrator on 2026-11-15): pass the dependency in, so the production path reads it the same way in every build and a
+  test hands it a different one, as the ticker reads "active" through `ticker::set_active_override` and the connection
+  opens terminals through the source `Connection::serve_terminals` installs. A test-only setter for such a value, and a
+  test-only accessor or entry point that adds nothing to a production path (`layers::top_is_above_approval_region`,
+  `layers::show_tooltip_at`), are not branches. Where a branch is still needed, two places limit it to reading. In a
+  render path it must not change what is drawn or done, or the frame a test checks differs from the one the app draws.
+  In a refused-tier foundation file (`docs/gpui/foundation-ownership.md`) it must not change what is drawn or done
+  either, or it changes, under test, a rule every area's tests build on. Recording into state that only test builds have
+  counts as reading and is allowed anywhere: the render counter's `record`, which views call first thing in `render`, is
+  one such recording, and needs no exception.
 - **The test context's text system is fake.** Every character advances 0.6 em (1.2 em outside the BMP), there is one
   font, no fallback and no wide CJK. Rule: tests whose outcome depends on layout (wrapping, truncation, the terminal
   cell grid) use the real text system (`HeadlessAppContext` with a real text system).
