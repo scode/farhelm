@@ -528,7 +528,7 @@ scrolls nothing.
 Enforced by clippy `disallowed-methods` on GPUI's focus calls and on `track_focus` everywhere in the GUI crates except
 the coordinator, by the review gate, which refuses area code that defers a focus move to a later frame itself (a
 `window.defer` around a call to the coordinator), and by the focus invariant that in-process tests check after every
-step: exactly one focused element, inside the topmost modal (or a menu opened above it) or in an agent approval card if
+step: exactly one focused element, inside the topmost modal (or a layer opened above it) or in an agent approval card if
 a modal is open (SPEC.md, "Keyboard focus"). When nothing else holds focus it rests where SPEC.md's "Where focus rests"
 says (the selected session's terminal, New, a stopped session's card), and on the window's root view only when none of
 those is on screen, so a key press always reaches Farhelm's own key bindings rather than GPUI Kit's.
@@ -557,12 +557,21 @@ popover, but it closes alone: closing any other layer closes what was opened ove
 it, so a dialog opened while it shows (a shortcut pressed in the terminal beside a link's disclosure) stays open, with
 focus inside, when it goes. The launcher's floating lists and the terminal's overlays on a zero-size anchor element use
 it, and wherever the focus rules say "the topmost layer" (Tab's trap, where focus recovers) they mean the topmost layer
-that holds focus, which such a popover never is. Whether a click on a dialog's empty space (label text included) keeps
-focus on the control in use is a property of each dialog, set as SPEC.md's list says; a dialog without it takes focus
-itself, so Enter then presses its main action. Whether a terminal link's destination disclosure is covered is a hit
-test, never a hand-kept list of covering surfaces. Things the user did not start never open a layer over what they are
-doing (SPEC.md, "Keyboard focus"): every open carries the mark its feature took when the user acted. The one exception
-is SPEC.md's window-start dialogs (the Welcome card, and the first batch of announcements when nothing is open ahead of
+that holds focus, which such a popover never is. A popover may also take focus without trapping Tab, for SPEC.md's
+tunnel list ("Tab follows its ordinary controls and leaving the list closes it without reclaiming focus"): it starts on
+its first control and Escape returns focus to the toggle its opener names, but Tab walks its controls as if they stood
+right after that toggle in the page and goes on out of it, and focus leaving it (Tab, a press elsewhere) closes it with
+no focus returned; focus on the toggle, as in the old list, which lived inside the pill's element, is not leaving. GPUI
+orders Tab by paint order and paints overlays after the page, so the focus coordinator splices the popover's controls in
+after the toggle itself. Such a popover holds focus, so it counts as a layer that holds the keyboard (a shortcut that
+refuses under a menu refuses under it too, also while focus is on its toggle) and focus recovers inside it, but it is
+not a trap: Tab's trap concerns only the layers that keep Tab in, and the focus invariant's "topmost modal" is the
+topmost dialog, which such a popover is not. Whether a click on a dialog's empty space (label text included) keeps focus
+on the control in use is a property of each dialog, set as SPEC.md's list says; a dialog without it takes focus itself,
+so Enter then presses its main action. Whether a terminal link's destination disclosure is covered is a hit test, never
+a hand-kept list of covering surfaces. Things the user did not start never open a layer over what they are doing
+(SPEC.md, "Keyboard focus"): every open carries the mark its feature took when the user acted. The one exception is
+SPEC.md's window-start dialogs (the Welcome card, and the first batch of announcements when nothing is open ahead of
 it). Each takes its mark through its own constructor, `focus::Mark::at_ui_session_start`, when its owner first sees a
 new UI session, before that session's first snapshot is drawn. If the user types or clicks before the open, the layer
 manager refuses it and the dialog stays unseen until a later window start or reset, as the maintainer decided on

@@ -17,7 +17,7 @@ use gpui::{
     AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
     KeyDownEvent, Keystroke, Modifiers, MouseButton, ParentElement, Render,
     StatefulInteractiveElement as _, Styled, TestAppContext, VisualTestContext, Window, div, point,
-    px,
+    prelude::FluentBuilder as _, px,
 };
 
 use crate::cache::{self, Cached};
@@ -1124,6 +1124,7 @@ fn open_floating_list(cx: &mut VisualTestContext, anchor: Anchor) -> LayerId {
             start: None,
             anchor,
             returns_to: focus::ReturnTo::Opener,
+            traps_tab: true,
         };
         layers::open_popover(list, &mark, window, cx)
     });
@@ -1314,6 +1315,583 @@ fn focus_moves_go_on_under_a_popover_that_never_takes_focus(cx: &mut TestAppCont
     move_to(&first, cx);
     assert!(focused(cx, &item), "under a menu, the move did nothing");
     assert!(is_open(cx, menu), "and the menu stayed open");
+}
+
+// ---- Layers: a popover that lets Tab through -------------------------------------------------------------------------
+
+/// The controls the Tab-through tests draw, as the terminal's top row draws the tunnel pill: a control before the
+/// pill, the pill (a button that is also the list's anchor), room for the list to open into, and a control after the
+/// pill unless the scene ends at it ([`PillScene`]).
+fn pill_controls(page: &PillPage, with_after: bool, pill_anchor: &Anchor) -> gpui::Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(8.))
+        .child(button("before", &page.before))
+        .child(
+            div()
+                .relative()
+                .w(px(80.))
+                .child(button("pill", &page.pill))
+                .child(pill_anchor.track()),
+        )
+        // Room for the list under the pill, so it covers nothing a test clicks.
+        .child(div().h(px(120.)))
+        .when(with_after, |column| {
+            column.child(button("after", &page.after))
+        })
+}
+
+/// Where the Tab-through tests draw the pill and its neighbours.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PillScene {
+    /// On the page, with a control after the pill.
+    Page,
+    /// On the page, the pill its last control, so a walk out of the list forward has to wrap past the page's end.
+    PageEndingAtPill,
+    /// Inside a dialog on the page, as a list opened from a dialog's control would be: the dialog is then the trap
+    /// below the list.
+    Dialog,
+}
+
+/// The dialog of [`PillScene::Dialog`]: the pill's controls, in a dialog of their own.
+struct PillDialog {
+    page: PillPage,
+}
+
+impl Render for PillDialog {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let pill_anchor = Anchor::for_element("pill-anchor", window, cx);
+        self.page.anchor.replace(Some(pill_anchor.clone()));
+        div()
+            .debug_selector(|| "pill-dialog".into())
+            .w(px(300.))
+            .p(px(20.))
+            .child(pill_controls(&self.page, true, &pill_anchor))
+    }
+}
+
+/// What the Tab-through tests hold of their scene: the controls before, at and after the pill, and the pill's anchor
+/// as last drawn. Clones share the anchor.
+#[derive(Clone)]
+struct PillPage {
+    before: FocusHandle,
+    pill: FocusHandle,
+    after: FocusHandle,
+    anchor: Rc<RefCell<Option<Anchor>>>,
+}
+
+impl PillPage {
+    /// Open the page of [`PillScene::Page`].
+    fn open(cx: &mut TestAppContext) -> (&mut VisualTestContext, PillPage) {
+        PillPage::open_scene(cx, PillScene::Page)
+    }
+
+    /// Open a window drawing `scene`, and a spot of empty page under "elsewhere". Nothing holds focus but the root
+    /// until a test moves it, except in [`PillScene::Dialog`], whose dialog starts on the control before the pill.
+    fn open_scene(cx: &mut TestAppContext, scene: PillScene) -> (&mut VisualTestContext, PillPage) {
+        let drawn: Rc<RefCell<Option<PillPage>>> = Rc::new(RefCell::new(None));
+        let on_page = drawn.clone();
+        let cx = open(cx, move |window, cx| {
+            let mut column = div().flex().flex_col();
+            if scene != PillScene::Dialog
+                && let Some(page) = on_page.borrow().clone()
+            {
+                let pill_anchor = Anchor::for_element("pill-anchor", window, cx);
+                page.anchor.replace(Some(pill_anchor.clone()));
+                column = column.child(pill_controls(&page, scene == PillScene::Page, &pill_anchor));
+            }
+            column
+                .child(div().debug_selector(|| "elsewhere".into()).size(px(40.)))
+                .into_any_element()
+        });
+        let page = PillPage {
+            before: handle(cx),
+            pill: handle(cx),
+            after: handle(cx),
+            anchor: Rc::new(RefCell::new(None)),
+        };
+        drawn.replace(Some(page.clone()));
+        redraw(cx);
+        if scene == PillScene::Dialog {
+            let (in_dialog, start, container) = (page.clone(), page.before.clone(), handle(cx));
+            let id = cx.update(move |window, cx| {
+                let view = cx.new(|_| PillDialog { page: in_dialog });
+                let mark = Mark::take(cx);
+                layers::open_dialog(
+                    Dialog {
+                        view: view.into(),
+                        container,
+                        start,
+                        subject: None,
+                        main_action: None,
+                        keeps_focus_on_empty_click: true,
+                        returns_to: focus::ReturnTo::Opener,
+                        on_dismiss: None,
+                        placement: DialogPlacement::Centered,
+                        dismiss_on_outside_press: false,
+                    },
+                    &mark,
+                    window,
+                    cx,
+                )
+            });
+            settle(cx);
+            assert!(id.is_some(), "the premise: the pill's dialog opened");
+        }
+        (cx, page)
+    }
+
+    /// Open the tunnel list's stand-in below the pill, starting on the first of `controls`, letting Tab through and
+    /// returning focus to the pill, for a mark taken now. Returns its id and the switch that takes its last control
+    /// away ([`Panel`]).
+    fn open_list(
+        &self,
+        cx: &mut VisualTestContext,
+        controls: Vec<(&'static str, FocusHandle)>,
+    ) -> (LayerId, Rc<Cell<bool>>) {
+        let start = controls[0].1.clone();
+        let anchor = self.anchor.borrow().clone().unwrap();
+        let pill = self.pill.clone();
+        let shown = Rc::new(Cell::new(true));
+        let panel_shown = shown.clone();
+        let id = cx.update(move |window, cx| {
+            let view = cx.new(|_| Panel {
+                controls,
+                shown: panel_shown,
+            });
+            let mark = Mark::take(cx);
+            layers::open_popover(
+                Popover {
+                    view: view.into(),
+                    container: cx.focus_handle(),
+                    start: Some(start),
+                    anchor,
+                    returns_to: focus::ReturnTo::Control(pill),
+                    traps_tab: false,
+                },
+                &mark,
+                window,
+                cx,
+            )
+        });
+        settle(cx);
+        match id {
+            Some(id) => (id, shown),
+            None => panic!("the premise: the list opened"),
+        }
+    }
+}
+
+/// Why this matters: SPEC.md's tunnel list ("Tab follows its ordinary controls and leaving the list closes it without
+/// reclaiming focus") is a list of ordinary controls in the page's Tab order, not a menu that keeps Tab in. GPUI orders
+/// Tab by paint order and paints every overlay after the page, so without the coordinator's splice Tab from the list's
+/// last control would wrap to the window's first control and Shift+Tab from its first would land on the page's last,
+/// nowhere near the pill. And a trap would leave the controls after the pill unreachable while the list is open.
+///
+/// Specified: the list takes focus on its first control when it opens, holds the keyboard (`focus_layer_open`) and
+/// traps nothing (`trap`). Tab walks its controls, and from the last goes to the control after the pill, closing the
+/// list. Shift+Tab from its first control reaches the pill, which leaves the list open (the pill is not outside it, as
+/// in the old app, where the list lived inside the pill's element); Tab from the pill enters the list's first control;
+/// Shift+Tab from the pill reaches the control before it and closes the list.
+#[gpui::test]
+fn tab_and_shift_tab_walk_a_list_that_lets_tab_through_in_page_order(cx: &mut TestAppContext) {
+    let (cx, page) = PillPage::open(cx);
+    let (one, two) = (handle(cx), handle(cx));
+    let items = vec![("one", one.clone()), ("two", two.clone())];
+
+    let (list, _) = page.open_list(cx, items.clone());
+    assert!(
+        focused(cx, &one),
+        "the premise: the list starts on its first control"
+    );
+    assert!(
+        cx.update(
+            |window, cx| layers::focus_layer_open(window, cx) && layers::trap(window, cx).is_none()
+        ),
+        "the list holds the keyboard but traps no Tab"
+    );
+    keys(cx, "tab");
+    assert!(focused(cx, &two), "Tab walks the list's controls");
+    keys(cx, "tab");
+    settle(cx);
+    assert!(
+        focused(cx, &page.after),
+        "Tab from the list's last control goes on to the control after the pill"
+    );
+    assert!(!is_open(cx, list), "and focus leaving the list closed it");
+
+    let (list, _) = page.open_list(cx, items.clone());
+    keys(cx, "shift-tab");
+    settle(cx);
+    assert!(
+        focused(cx, &page.pill),
+        "Shift+Tab from the list's first control reaches the pill"
+    );
+    assert!(
+        is_open(cx, list),
+        "focus on the pill does not close the list"
+    );
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &one),
+        "Tab from the pill enters the list, which follows it in Tab order"
+    );
+    keys(cx, "shift-tab shift-tab");
+    settle(cx);
+    assert!(
+        focused(cx, &page.before),
+        "Shift+Tab from the pill reaches the control before it"
+    );
+    assert!(!is_open(cx, list), "and focus leaving the list closed it");
+}
+
+/// Why this matters: SPEC.md, "Escape closes the list and returns focus to the pill", and on macOS the click that
+/// opened the list left the pill unfocused, so only the name the opener gave brings focus back there. A guard rather
+/// than a test of the Tab-through change: Escape's return to a named control predates it, and this keeps the close
+/// that returns no focus (focus leaving the list) from taking Escape's return with it.
+///
+/// Specified: from any control of a list that lets Tab through, Escape closes it and focus goes to the pill its opener
+/// named.
+#[gpui::test]
+fn escape_closes_a_list_that_lets_tab_through_and_returns_focus_to_the_pill(
+    cx: &mut TestAppContext,
+) {
+    let (cx, page) = PillPage::open(cx);
+    let (one, two) = (handle(cx), handle(cx));
+    let (list, _) = page.open_list(cx, vec![("one", one.clone()), ("two", two.clone())]);
+    keys(cx, "tab");
+    assert!(focused(cx, &two), "the premise: focus is inside the list");
+    keys(cx, "escape");
+    assert!(!is_open(cx, list), "Escape closed the list");
+    assert!(focused(cx, &page.pill), "and returned focus to the pill");
+}
+
+/// Why this matters: SPEC.md's "leaving the list closes it without reclaiming focus" covers the pointer too. A menu
+/// closed by an outside press returns focus to its opener; this list must not, or a click on another control (or, on
+/// macOS, where a click focuses no button, a click anywhere) would put focus back on the pill instead of where the user
+/// went.
+///
+/// Specified: a press on the page's empty space, or on a control after the pill (with either platform's click rule),
+/// closes the list and leaves focus off the pill: on the control where a click focuses it, and home where the press
+/// focuses nothing (the empty page, or a button where clicks focus none). A press on the pill itself, which is the
+/// list's anchor, leaves it open for the pill's own toggle to decide, and the pill taking focus from it (Linux) is not
+/// leaving.
+#[gpui::test]
+fn a_press_elsewhere_closes_a_list_that_lets_tab_through_without_reclaiming_focus(
+    cx: &mut TestAppContext,
+) {
+    let (cx, page) = PillPage::open(cx);
+    let one = handle(cx);
+    let items = vec![("one", one.clone())];
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    // A home other than the pill, standing in for the terminal, so a press that focuses nothing shows where focus
+    // rests after it.
+    let home = page.before.clone();
+    cx.update(move |window, cx| focus::set_home(Some(&home), window, cx));
+    settle(cx);
+
+    let (list, _) = page.open_list(cx, items.clone());
+    click(cx, "elsewhere");
+    settle(cx);
+    assert!(
+        !is_open(cx, list),
+        "a press on the empty page closed the list"
+    );
+    assert!(
+        focused(cx, &page.before),
+        "and focus went home, not back to the pill"
+    );
+
+    let (list, _) = page.open_list(cx, items.clone());
+    click(cx, "after");
+    settle(cx);
+    assert!(
+        !is_open(cx, list),
+        "a press on another control closed the list"
+    );
+    assert!(
+        focused(cx, &page.after),
+        "and focus is on that control, where a click focuses controls"
+    );
+
+    let (list, _) = page.open_list(cx, items.clone());
+    click(cx, "pill");
+    settle(cx);
+    assert!(
+        focused(cx, &page.pill),
+        "the premise: the press focused the pill"
+    );
+    assert!(
+        is_open(cx, list),
+        "a press on the pill is the pill's, and focus there is not leaving"
+    );
+    keys(cx, "escape");
+    assert!(!is_open(cx, list), "the premise: Escape closed the list");
+
+    cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
+    let (list, _) = page.open_list(cx, items);
+    click(cx, "after");
+    settle(cx);
+    assert!(
+        !is_open(cx, list),
+        "a press on another control closed the list where clicks focus no button"
+    );
+    assert!(
+        focused(cx, &page.before),
+        "and focus, left on a control no longer drawn, recovered home rather than going back to the pill"
+    );
+}
+
+/// Why this matters: closing one tunnel takes its row, and the close button that held focus, out of the list. SPEC.md:
+/// "When the focused control goes away, focus moves to the closest remaining control". The focus coordinator's recovery
+/// does that for any layer that holds focus, but GPUI reports the lost focus as focus leaving the list, so the rule that
+/// closes the list on leaving must see where recovery put focus rather than the report.
+///
+/// Specified: when the focused control of a list that lets Tab through goes away, focus moves to the list's remaining
+/// control and the list stays open.
+#[gpui::test]
+fn a_list_that_lets_tab_through_keeps_focus_when_its_focused_control_goes(cx: &mut TestAppContext) {
+    let (cx, page) = PillPage::open(cx);
+    let (one, two) = (handle(cx), handle(cx));
+    let (list, last_shown) = page.open_list(cx, vec![("one", one.clone()), ("two", two.clone())]);
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &two),
+        "the premise: the last control holds focus"
+    );
+    last_shown.set(false);
+    redraw(cx);
+    settle(cx);
+    assert!(
+        focused(cx, &one),
+        "focus moved to the list's remaining control"
+    );
+    assert!(is_open(cx, list), "and the list stayed open");
+}
+
+/// Why this matters: a list opened from a control inside a dialog has the dialog as the trap below it, and the layer
+/// manager draws each layer apart, so the dialog's container never contains the list's controls. A walk that let only
+/// stops inside the trap qualify would pass over every control of the list and leave it, so Tab could never reach the
+/// list and it would close at once.
+///
+/// Specified: with the pill inside a dialog, Tab walks the list's controls and from the last reaches the dialog's
+/// control after the pill, closing the list and leaving the dialog open; Shift+Tab from the list's first control
+/// reaches the pill, and Tab from the pill enters the list.
+#[gpui::test]
+fn tab_walks_a_list_that_lets_tab_through_inside_a_dialog(cx: &mut TestAppContext) {
+    let (cx, page) = PillPage::open_scene(cx, PillScene::Dialog);
+    assert!(
+        focused(cx, &page.before),
+        "the premise: the dialog starts on the control before the pill"
+    );
+    let (one, two) = (handle(cx), handle(cx));
+    let items = vec![("one", one.clone()), ("two", two.clone())];
+
+    let (list, _) = page.open_list(cx, items.clone());
+    keys(cx, "tab");
+    assert!(focused(cx, &two), "Tab walks the list's controls");
+    keys(cx, "tab");
+    settle(cx);
+    assert!(
+        focused(cx, &page.after),
+        "Tab from the list's last control reaches the dialog's control after the pill"
+    );
+    assert!(!is_open(cx, list), "and focus leaving the list closed it");
+    assert!(
+        cx.update(|window, cx| layers::trap(window, cx).is_some()),
+        "while the dialog stays open, holding Tab"
+    );
+
+    let (list, _) = page.open_list(cx, items);
+    keys(cx, "shift-tab");
+    settle(cx);
+    assert!(
+        focused(cx, &page.pill),
+        "Shift+Tab from the list's first control reaches the pill in the dialog"
+    );
+    keys(cx, "tab");
+    assert!(focused(cx, &one), "Tab from the pill enters the list");
+    assert!(is_open(cx, list), "and the list stayed open throughout");
+}
+
+/// Send an auto-repeat of `key`, held down since its last press (a key-down with `is_held` set), and check.
+fn held(cx: &mut VisualTestContext, key: &'static str) {
+    let keystroke = match Keystroke::parse(key) {
+        Ok(keystroke) => keystroke.with_simulated_ime(),
+        Err(error) => panic!("{key} is not a keystroke: {error}"),
+    };
+    cx.simulate_event(KeyDownEvent {
+        native_key: None,
+        keystroke,
+        is_held: true,
+        prefer_character_input: false,
+    });
+    check(cx);
+}
+
+/// Why this matters: a held Escape closes one layer and then reaches nothing (the focus coordinator swallows the
+/// repeats of a dismissal). With focus on the pill while its list is open, focus is outside the layer Escape closes, a
+/// state no other layer has; unless that dismissal is noted like one from inside the list, the repeats go on to close
+/// the dialog the pill sits in.
+///
+/// Specified: with the pill inside a dialog and focus on it while its list is open, Escape closes the list and leaves
+/// focus on the pill, and a held repeat of that Escape leaves the dialog open with focus still on the pill.
+#[gpui::test]
+fn a_held_escape_on_the_pill_closes_only_its_list(cx: &mut TestAppContext) {
+    let (cx, page) = PillPage::open_scene(cx, PillScene::Dialog);
+    let one = handle(cx);
+    let (list, _) = page.open_list(cx, vec![("one", one.clone())]);
+    keys(cx, "shift-tab");
+    settle(cx);
+    assert!(
+        focused(cx, &page.pill) && is_open(cx, list),
+        "the premise: focus is on the pill, with the list open"
+    );
+    keys(cx, "escape");
+    settle(cx);
+    assert!(!is_open(cx, list), "Escape on the pill closed the list");
+    assert!(focused(cx, &page.pill), "and left focus on the pill");
+    held(cx, "escape");
+    settle(cx);
+    assert!(
+        cx.update(|window, cx| layers::trap(window, cx).is_some()),
+        "the held repeat left the pill's dialog open"
+    );
+    assert!(focused(cx, &page.pill), "with focus still on the pill");
+}
+
+/// Why this matters: Escape on the pill counts the pill as inside its list so that the dismissal is noted (the test
+/// above), but only Escape may: the pill's own toggle closes its list with an ordinary close while focus is on the
+/// pill, and if that close were noted too, the same key pressed again within the repeat interval, a deliberate press
+/// to reopen the list, would be swallowed.
+///
+/// Specified: with focus on the pill while its list is open, a key press followed by an ordinary close of the list
+/// returns no focus; once focus has moved elsewhere without a key press, a fresh press of the same key still counts as
+/// the user moving on.
+#[gpui::test]
+fn an_ordinary_close_from_the_pill_keeps_a_fresh_press(cx: &mut TestAppContext) {
+    let (cx, page) = PillPage::open(cx);
+    let one = handle(cx);
+    let (list, _) = page.open_list(cx, vec![("one", one.clone())]);
+    keys(cx, "shift-tab");
+    settle(cx);
+    assert!(
+        focused(cx, &page.pill) && is_open(cx, list),
+        "the premise: the pill holds focus with its list open"
+    );
+    keys(cx, "x");
+    cx.update(|window, cx| layers::close(list, window, cx));
+    settle(cx);
+    assert!(
+        !is_open(cx, list),
+        "the premise: the ordinary close closed the list"
+    );
+    let before = page.before.clone();
+    cx.update(move |window, cx| {
+        let mark = Mark::take(cx);
+        focus::focus_control(&before, &mark, window, cx)
+    });
+    settle(cx);
+    assert!(
+        focused(cx, &page.before),
+        "the premise: focus moved elsewhere without a key press"
+    );
+    let mark = cx.update(|_, cx| Mark::take(cx));
+    keys(cx, "x");
+    assert!(
+        cx.update(|_, cx| focus::has_moved_on(&mark, cx)),
+        "a fresh press of the key pressed before the ordinary close still counts"
+    );
+}
+
+/// Why this matters: GPUI orders the list's controls after the whole page, so a walk out of the list that has to wrap
+/// past the page's end passes them again on its way round. Counted as stops already seen, they would end the walk as if
+/// it had come full circle, and focus would stay in the list.
+///
+/// Specified: with the pill the page's last control, Tab from the list's last control wraps to the page's first
+/// control and closes the list.
+#[gpui::test]
+fn tab_out_of_a_list_that_lets_tab_through_wraps_past_the_pages_end(cx: &mut TestAppContext) {
+    let (cx, page) = PillPage::open_scene(cx, PillScene::PageEndingAtPill);
+    let (one, two) = (handle(cx), handle(cx));
+    let (list, _) = page.open_list(cx, vec![("one", one.clone()), ("two", two.clone())]);
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &two),
+        "the premise: the list's last control holds focus"
+    );
+    keys(cx, "tab");
+    settle(cx);
+    assert!(
+        focused(cx, &page.before),
+        "Tab wrapped past the pill, the page's last control, to its first"
+    );
+    assert!(!is_open(cx, list), "and focus leaving the list closed it");
+}
+
+/// Why this matters: a control of the list may ask something in a layer of its own, which takes focus out of the list
+/// without the user leaving it. Closing the list then would also close the question opened over it, as a layer that
+/// takes focus closes what was opened over it.
+///
+/// Specified: a dialog opened from a control of a list that lets Tab through takes focus and leaves the list open;
+/// when the dialog is dismissed, focus is back on that control and the list is still open.
+#[gpui::test]
+fn a_layer_opened_above_a_list_that_lets_tab_through_leaves_it_open(cx: &mut TestAppContext) {
+    let (cx, page) = PillPage::open(cx);
+    let one = handle(cx);
+    let (list, _) = page.open_list(cx, vec![("one", one.clone())]);
+    assert!(
+        focused(cx, &one),
+        "the premise: focus is on the list's control"
+    );
+    let asked = handle(cx);
+    let (question, _, _) = open_dialog(cx, vec![("asked", asked.clone())], &asked);
+    settle(cx);
+    assert!(focused(cx, &asked), "the premise: the dialog took focus");
+    assert!(
+        is_open(cx, list),
+        "focus in a layer above the list is not leaving it"
+    );
+    keys(cx, "escape");
+    settle(cx);
+    assert!(
+        !is_open(cx, question),
+        "the premise: Escape closed the dialog"
+    );
+    assert!(
+        focused(cx, &one) && is_open(cx, list),
+        "focus went back to the list's control, and the list is still open"
+    );
+}
+
+/// Why this matters: GPUI reports focus leaving every focused element when the window stops being active, though no
+/// focus moved. The old list stayed open when the user switched apps (the browser's active element did not change),
+/// and closing it then would lose the user's place.
+///
+/// Specified: with focus in a list that lets Tab through, the window going inactive leaves the list open and focus
+/// where it was.
+#[gpui::test]
+fn switching_apps_leaves_a_list_that_lets_tab_through_open(cx: &mut TestAppContext) {
+    let (cx, page) = PillPage::open(cx);
+    let (one, two) = (handle(cx), handle(cx));
+    let (list, _) = page.open_list(cx, vec![("one", one.clone()), ("two", two.clone())]);
+    keys(cx, "tab");
+    assert!(focused(cx, &two), "the premise: focus is inside the list");
+    cx.deactivate_window();
+    settle(cx);
+    assert!(
+        cx.update(|window, _| !window.is_window_active()),
+        "the premise: the window is inactive"
+    );
+    assert!(
+        is_open(cx, list),
+        "the window going inactive left the list open"
+    );
+    assert!(focused(cx, &two), "and focus where it was");
+    cx.update(|window, _| window.activate_window());
+    settle(cx);
+    assert!(is_open(cx, list), "and coming back left it open too");
 }
 
 // ---- Layers: what a close takes with it ------------------------------------------------------------------------------
@@ -1691,6 +2269,7 @@ fn arrows_walk_every_menu_item_and_wrap_and_the_pointer_moves_the_same_highlight
                 start: Some(start),
                 anchor,
                 returns_to: focus::ReturnTo::Opener,
+                traps_tab: true,
             },
             &mark,
             window,

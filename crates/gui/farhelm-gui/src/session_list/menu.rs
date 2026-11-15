@@ -240,6 +240,7 @@ impl SessionList {
                 // The button, not what held focus before: on macOS the click that opened the menu left the button
                 // unfocused, and SPEC.md returns focus to the button when the menu closes.
                 returns_to: focus::ReturnTo::Control(button),
+                traps_tab: true,
             },
             &mark,
             window,

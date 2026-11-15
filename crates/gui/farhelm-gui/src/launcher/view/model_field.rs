@@ -238,6 +238,7 @@ impl Launcher {
                 start: None,
                 anchor,
                 returns_to: ReturnTo::Opener,
+                traps_tab: true,
             },
             &mark,
             window,

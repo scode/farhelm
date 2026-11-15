@@ -829,6 +829,7 @@ fn popover_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
             start: Some(container),
             anchor,
             returns_to: focus::ReturnTo::Opener,
+            traps_tab: true,
         },
         &mark,
         window,

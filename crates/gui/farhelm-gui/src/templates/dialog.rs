@@ -513,6 +513,7 @@ impl TemplatesDialog {
                 start: Some(focus[start].clone()),
                 anchor,
                 returns_to: ReturnTo::Opener,
+                traps_tab: true,
             },
             &mark,
             window,
