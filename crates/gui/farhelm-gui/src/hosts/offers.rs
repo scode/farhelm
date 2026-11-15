@@ -19,18 +19,10 @@
 //!   dropped with the old modal queue it existed for. A host's own Settings still waits for that host's own work.
 //! - Uninstall, Suspend, Resume and Delete sandbox come with their own pieces of the port, and are not offered here.
 //!
-//! Nothing draws the host menu yet. This module exists ahead of it so the menu only renders what it says; the rules
-//! are tested here, without a window.
-
-// The menu, the only user of most of this module, is a later piece of the port. Remove this expectation when the menu
-// lands: it covers the whole module, so it stays fulfilled while any one item is unused and would hide leftovers.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the host menu that renders these offers is not ported yet"
-    )
-)]
+//! The host menu ([`super::menu`]) renders only what this says; the rules are tested here, without a window. The menu
+//! draws Settings and the helm's own machine's greyed Update so far. The rerun, the live Update and Remove are decided
+//! here already and drawn by the pieces of the port that send them; until then only the rerun's description is unused
+//! outside tests, under its own `expect(dead_code)`.
 
 use farhelm_proto::http::LOCAL_SUPERVISOR_NOT_RUNNING;
 use farhelm_proto::provisioning::{ProvisioningOperation, ProvisioningView, RunStatus};
@@ -104,6 +96,26 @@ impl HostKind {
             HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman | HostKind::Unrecognized => {
                 false
             }
+        }
+    }
+
+    /// Whether the host's SSH destination can be changed in its settings: only a registered SSH host has one the user
+    /// chose. The helm's own machine has none, and a sandbox's or a container's address is Farhelm's to manage.
+    pub(crate) fn edits_destination(self) -> bool {
+        match self {
+            HostKind::Ssh => true,
+            HostKind::Local | HostKind::Tensorlake | HostKind::Podman | HostKind::Unrecognized => {
+                false
+            }
+        }
+    }
+
+    /// Whether the host has an identity mark the user can choose (its icon and color): every kind this build knows.
+    /// A kind it does not know draws no mark, so its settings offer none to choose.
+    pub(crate) fn supports_appearance(self) -> bool {
+        match self {
+            HostKind::Local | HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman => true,
+            HostKind::Unrecognized => false,
         }
     }
 
@@ -202,6 +214,13 @@ pub(crate) enum Rerun {
 
 impl Rerun {
     /// The menu item's description line, as the old menu worded it.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the menu draws the rerun with the setup and Update pieces"
+        )
+    )]
     pub(crate) fn description(self) -> &'static str {
         match self {
             Rerun::Setup => "Try the failed setup again",

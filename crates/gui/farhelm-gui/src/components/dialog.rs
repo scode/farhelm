@@ -19,6 +19,9 @@
 //! answers ([`DialogFrame::note`]), and a width of their own ([`DialogFrame::width`]): Settings, and the host setup
 //! confirmation asked through the prompt. Settings alone also keeps a fixed height that does not follow its content
 //! ([`DialogFrame::fixed_height`]), so switching sections never moves the frame or its Close.
+//! The host settings dialog's header shows more than a title and a one-line summary can: the host's name over its
+//! status line, a colored phase dot beside the build. It draws its own heading in their place
+//! ([`DialogFrame::heading`]), and its title, "Host settings · <name>", stays the dialog's accessible name.
 //! The session launcher's footer had two more parts (`.launch-composer-footer`): a summary of what its main action
 //! would start, beside the answers ([`DialogFrame::footer_lead`]), and a region above them for what a press of an
 //! answer has to say ([`DialogFrame::notices`]).
@@ -63,6 +66,7 @@ pub struct DialogFrame {
     id: SharedString,
     title: Line,
     summary: Option<Line>,
+    heading: Option<AnyElement>,
     body: AnyElement,
     answers: Vec<Button>,
     close: Option<IconButton>,
@@ -91,6 +95,7 @@ impl DialogFrame {
             id: id.into(),
             title: title.into(),
             summary: None,
+            heading: None,
             body: body.into_any_element(),
             answers,
             close: None,
@@ -131,6 +136,15 @@ impl DialogFrame {
     /// [`HostSentence`](crate::host_text::HostSentence) when it names a host value (the session a delete removes).
     pub fn summary(mut self, summary: impl Into<Line>) -> Self {
         self.summary = Some(summary.into());
+        self
+    }
+
+    /// Draw `heading` in place of the title, the title staying the dialog's accessible name: for a header that shows
+    /// more than a title line and a one-line summary can (the host settings dialog's, whose status line has the phase's
+    /// colored dot), so the heading draws its own summary too. A [`DialogFrame::summary`] set beside it is still drawn
+    /// under it; no caller sets both. The heading draws any host value through the host-text element, as everywhere.
+    pub fn heading(mut self, heading: impl IntoElement) -> Self {
+        self.heading = Some(heading.into_any_element());
         self
     }
 
@@ -189,13 +203,17 @@ impl RenderOnce for DialogFrame {
         let (foot_y, foot_x) = metrics::DIALOG_FOOTER_PAD;
         let max_height = window.viewport_size().height - metrics::DIALOG_VERTICAL_MARGIN * 2.;
 
-        let mut heading = div().flex_1().min_w_0().child(
-            div()
-                .text_size(metrics::TEXT_TITLE)
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(theme::color(palette.fg_0))
-                .child(self.title),
-        );
+        let mut heading = div().flex_1().min_w_0();
+        heading = match self.heading {
+            Some(drawn) => heading.child(drawn),
+            None => heading.child(
+                div()
+                    .text_size(metrics::TEXT_TITLE)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(theme::color(palette.fg_0))
+                    .child(self.title),
+            ),
+        };
         if let Some(summary) = self.summary {
             heading = heading.child(
                 div()
