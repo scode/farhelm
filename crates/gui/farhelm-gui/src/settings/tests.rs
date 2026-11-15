@@ -1077,8 +1077,8 @@ fn link_row(word: &str) -> Preferences {
 #[gpui::test]
 fn the_terminal_section_offers_the_link_choices_with_their_risks(cx: &mut TestAppContext) {
     let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
-    on_the_mac(cx);
     open_settings(cx);
+    on_the_mac(cx);
     click(cx, "settings-section-terminal");
     assert_eq!(heading(cx).as_deref(), Some("Terminal"));
     let nodes = frame(cx);
@@ -1253,10 +1253,16 @@ fn tunnel_failure(cx: &mut VisualTestContext) -> Option<(Option<Role>, Option<St
         .map(|node| (node.role, node.label.map(|label| label.to_string())))
 }
 
-/// Decide Settings' tunnel switch for the Mac, the platform that draws it, whatever machine runs the test. Takes effect
-/// at the next draw.
+/// Decide the open Settings dialog's tunnel switch for `platform` whatever machine runs the test, through the dialog's
+/// test-only setter (the production path reads the same field, set from this build's platform). Takes effect at the next
+/// draw.
+fn decide_tunnels_for(cx: &mut VisualTestContext, platform: Platform) {
+    cx.update(|_, cx| super::decide_tunnels_for_opened(platform, cx));
+}
+
+/// [`decide_tunnels_for`] the Mac, the platform that draws the switch.
 fn on_the_mac(cx: &mut VisualTestContext) {
-    cx.update(|_, cx| cx.set_global(super::TunnelsPlatform(Platform::Mac)));
+    decide_tunnels_for(cx, Platform::Mac);
 }
 
 /// Settings at Terminal over a row storing `preferences`, decided for the Mac, with the tunnel switch drawn.
@@ -1265,8 +1271,8 @@ fn show_terminal<'a>(
     preferences: &Preferences,
 ) -> (FakeHelm, &'a mut VisualTestContext) {
     let (helm, cx, _gear) = open_rail(cx, preferences);
-    on_the_mac(cx);
     open_settings(cx);
+    on_the_mac(cx);
     click(cx, section_button(Section::Terminal));
     assert!(drawn(cx, TUNNELS), "the premise: the switch is drawn");
     (helm, cx)
@@ -1279,8 +1285,8 @@ fn show_terminal<'a>(
 #[gpui::test]
 fn the_tunnel_switch_is_drawn_only_on_the_mac(cx: &mut TestAppContext) {
     let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
-    cx.update(|_, cx| cx.set_global(super::TunnelsPlatform(Platform::Linux)));
     open_settings(cx);
+    decide_tunnels_for(cx, Platform::Linux);
     click(cx, section_button(Section::Terminal));
     assert!(
         drawn(cx, super::terminal::ID),

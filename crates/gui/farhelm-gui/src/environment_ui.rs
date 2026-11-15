@@ -58,11 +58,46 @@ impl ProviderUi {
     /// the reference commit). Podman's follows the helm's own refusal of a container rebuild for such a base ("this
     /// recipe's base cannot run in a container"), since the old app drew no such line for a container place: its
     /// per-place rows listed only the places a base supports. Nothing asks for Podman's words yet: the row asks only
-    /// for the Tensorlake account's, and the per-place container lines that could ask come later.
+    /// for the Tensorlake account's, and its per-place container lines ([`ProviderUi::recipe_place`]) show the helm's
+    /// own reason for a place whose base it cannot run, as the old lines did.
     pub(crate) fn recipe_base_unsupported(self) -> &'static str {
         match self.0 {
             ProviderKind::Tensorlake => "This recipe's base cannot run on Tensorlake",
             ProviderKind::Podman => "This recipe's base cannot run in a container",
         }
     }
+
+    /// The words of a recipe's per-place line in Settings → Recipes for a place of this provider: what the line says
+    /// while the place builds, once it is ready, before anything is built there, while an older artifact still awaits
+    /// cleanup, and its Rebuild's hover help; `None` for a provider whose places get no such line. This is where the row
+    /// decides which places it lists one by one. Podman's words are the old app's (`RecipePlaces` in
+    /// `containers_settings.rs` at the reference commit). The Tensorlake account gets no line: the row's built-snapshot
+    /// and prepared-snapshot lines already report that place.
+    pub(crate) fn recipe_place(self) -> Option<RecipePlaceWords> {
+        match self.0 {
+            ProviderKind::Tensorlake => None,
+            ProviderKind::Podman => Some(RecipePlaceWords {
+                building: "Preparing…",
+                ready: "Ready",
+                not_built: "Not built; builds on first launch",
+                cleanup_pending: "Previous image cleanup is unfinished",
+                rebuild_help: "Rebuild this recipe at this place; existing environments retain their files",
+            }),
+        }
+    }
+}
+
+/// A provider's words for a recipe's per-place line, as [`ProviderUi::recipe_place`] chooses them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RecipePlaceWords {
+    /// While the place builds or prepares the recipe's artifact.
+    pub(crate) building: &'static str,
+    /// Once the place has an artifact ready for launches.
+    pub(crate) ready: &'static str,
+    /// Before anything is built at the place.
+    pub(crate) not_built: &'static str,
+    /// While an artifact the place replaced still awaits deletion.
+    pub(crate) cleanup_pending: &'static str,
+    /// The place's Rebuild button's hover help.
+    pub(crate) rebuild_help: &'static str,
 }

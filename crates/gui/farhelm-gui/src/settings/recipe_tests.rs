@@ -19,6 +19,7 @@ use gpui::{TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
 
 use super::Section;
+use super::recipe_place_tests::places_state;
 use super::recipes::{BuildAction, Tone, line_texts, snapshot_status, summary};
 use super::tests::{
     available, drawn, label_of, open_rail, open_rail_with, open_settings, painted, section_button,
@@ -32,7 +33,7 @@ use crate::test_support::{advance, click, frame, meta, settle};
 // ---- A row's words, from its view alone ---------------------------------------------------------------------------
 
 /// A recipe on `base` with `tunnels` tunnels and nothing built, so the list's wording can be checked without a window.
-fn view(base: RecipeBase, tunnels: usize) -> RecipeView {
+pub(super) fn view(base: RecipeBase, tunnels: usize) -> RecipeView {
     RecipeView {
         name: "rust-dev".into(),
         size: RecipeSize {
@@ -379,7 +380,7 @@ fn only_the_running_builds_line_carries_the_pulse() {
 /// A recipe as `GET /api/tensorlake/recipes` lists it, and so as the pushed catalog carries it: `name` on managed
 /// Ubuntu with 2 CPUs, 4 GB, 20 GB and the package `jq`, with `build` as its build state and `snapshot` as its built
 /// snapshot.
-fn entry(name: &str, build: Value, snapshot: Value) -> Value {
+pub(super) fn entry(name: &str, build: Value, snapshot: Value) -> Value {
     json!({
         "name": name,
         "size": { "cpus": 2, "memory_gb": 4, "disk_gb": 20 },
@@ -414,7 +415,7 @@ fn keyed(recipes: &[Value]) -> (Vec<String>, Vec<KeyedEntry>) {
 }
 
 /// The pushed catalog holding `recipes`, in that order, for the helm's first snapshot.
-fn catalog(recipes: Vec<Value>) -> CollectionState {
+pub(super) fn catalog(recipes: Vec<Value>) -> CollectionState {
     let (names, entries) = keyed(&recipes);
     let order: Vec<&str> = names.iter().map(String::as_str).collect();
     CollectionState {
@@ -426,7 +427,7 @@ fn catalog(recipes: Vec<Value>) -> CollectionState {
 
 /// Push `recipes` as the whole catalog, in that order: each entry replaced whole, and nothing removed, since no test
 /// here drops a recipe.
-fn push(helm: &mut FakeHelm, recipes: Vec<Value>) {
+pub(super) fn push(helm: &mut FakeHelm, recipes: Vec<Value>) {
     let (names, upsert) = keyed(&recipes);
     let order: Vec<&str> = names.iter().map(String::as_str).collect();
     helm.push(CollectionChanges {
@@ -454,7 +455,7 @@ fn push_unreadable(helm: &mut FakeHelm, error: &str, kept: &[&str]) {
 }
 
 /// The Tensorlake account as `GET /api/tensorlake` answers it, with or without a saved API key.
-fn account(key_set: bool) -> Value {
+pub(super) fn account(key_set: bool) -> Value {
     json!({ "api_key_set": key_set, "create_without_asking": false, "helm_tag": "ab12",
             "ssh_key": { "state": "not_created" } })
 }
@@ -475,15 +476,20 @@ fn one_account_read(helm: &mut FakeHelm) -> FakeCommand {
 }
 
 /// Answer the account read the section sends next, with or without a saved key.
-fn answer_account(helm: &mut FakeHelm, cx: &mut VisualTestContext, key_set: bool) {
+pub(super) fn answer_account(helm: &mut FakeHelm, cx: &mut VisualTestContext, key_set: bool) {
     let read = one_account_read(helm);
     helm.reply(read.id, 200, Some(account(key_set)));
     settle(cx);
 }
 
-/// The gear's rail over a helm whose first snapshot pushes `recipes` as the catalog.
+/// The gear's rail over a helm whose first snapshot pushes `recipes` as the catalog, and no recipe places (the
+/// per-place lines have their own tests, `super::recipe_place_tests`).
 fn open_with(cx: &mut TestAppContext, recipes: Vec<Value>) -> (FakeHelm, &mut VisualTestContext) {
-    let (helm, cx, _gear) = open_rail_with(cx, &Preferences::default(), vec![catalog(recipes)]);
+    let (helm, cx, _gear) = open_rail_with(
+        cx,
+        &Preferences::default(),
+        vec![catalog(recipes), places_state(Vec::new())],
+    );
     (helm, cx)
 }
 
@@ -503,7 +509,7 @@ fn show_again(helm: &mut FakeHelm, cx: &mut VisualTestContext, key_set: bool) {
 }
 
 /// The window's painted text without the isolates around host values, for looking up sentences that name one.
-fn words(cx: &mut VisualTestContext) -> String {
+pub(super) fn words(cx: &mut VisualTestContext) -> String {
     painted_words(&painted(cx))
 }
 
@@ -517,7 +523,7 @@ fn recipe_work(cx: &mut VisualTestContext, name: &str) -> Option<Work> {
 
 /// Whether the control under `id` acts when pressed; `None` when it is not drawn. A busy button stays focusable (so
 /// [`available`] still says yes) but takes no press, which is what tells it from an available one.
-fn pressable(cx: &mut VisualTestContext, id: &str) -> Option<bool> {
+pub(super) fn pressable(cx: &mut VisualTestContext, id: &str) -> Option<bool> {
     frame(cx)
         .into_iter()
         .find(|node| node.element_id.as_deref() == Some(id))
@@ -543,7 +549,7 @@ fn one_build(helm: &mut FakeHelm, name: &str) -> FakeCommand {
 }
 
 /// The ticker's count of delivered ticks.
-fn ticks(cx: &mut VisualTestContext) -> u64 {
+pub(super) fn ticks(cx: &mut VisualTestContext) -> u64 {
     cx.update(|_, cx| crate::ticker::ticks(cx))
 }
 
@@ -553,12 +559,12 @@ fn building_at(step: &str) -> Value {
 }
 
 /// A build at its fourth step.
-fn building() -> Value {
+pub(super) fn building() -> Value {
     building_at("connecting")
 }
 
 /// No build running.
-fn idle() -> Value {
+pub(super) fn idle() -> Value {
     json!({ "state": "idle" })
 }
 
@@ -594,14 +600,15 @@ fn recipes_draws_the_pushed_catalog_and_reads_only_the_account_when_shown(cx: &m
     assert!(
         text.contains(
             "rust-dev 2 CPU · 4 GB · 20 GB · base: Tensorlake Ubuntu · 1 package Snapshot built 2026-11-03 14:02 UTC · \
-             2.0.1 (Claude Code) · codex-cli 0.40.0 Rebuild snapshot"
+             2.0.1 (Claude Code) · codex-cli 0.40.0 Not prepared yet; the first new host or session prepares it \
+             (about a minute). Rebuild snapshot"
         ),
         "{text}"
     );
     assert!(
         text.contains(
-            "py-data 2 CPU · 4 GB · 20 GB · base: Tensorlake Ubuntu · 1 package No snapshot yet Build \
-             snapshot"
+            "py-data 2 CPU · 4 GB · 20 GB · base: Tensorlake Ubuntu · 1 package No snapshot yet Not prepared yet; \
+             the first new host or session prepares it (about a minute). Build snapshot"
         ),
         "{text}"
     );
