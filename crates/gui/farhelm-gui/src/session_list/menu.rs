@@ -1,15 +1,30 @@
-//! A session row's actions menu: the ⋯ button at the end of the row, and the menu it opens below itself.
+//! A session row's actions menu: the ⋯ button at the end of the row, and the menu it opens beside itself.
 //!
-//! Ported from the old app's `list/row.rs` (the menu toggle, `menu_label`, `menu_header_summary_parts` and the Delete
-//! item) and the stylesheet's `.session-row-menu` and `.session-row-menu-panel` rules at the reference commit. The menu
-//! is a popover of the layer manager, anchored to its row's button through an [`Anchor`] kept under the session's key,
-//! so an open menu moves with its session when the list reorders and closes when the row is no longer drawn (SPEC.md,
-//! "Things changing underneath" and "Nothing closes a dialog … it did not open").
+//! Ported from the old app's `list/row.rs` (the menu toggle, `menu_label`, `menu_header_summary_parts` and the
+//! commands it offers), its `menu_panel.rs` (the flyout's placement and the toggle's keys), and the stylesheet's
+//! `.session-row-menu` and `.session-row-menu-panel` rules at the reference commit. The menu is a popover of the layer
+//! manager, anchored to its row's button through an [`Anchor`] kept under the session's key, so an open menu moves with
+//! its session when the list reorders and closes when the row is no longer drawn (SPEC.md, "Things changing
+//! underneath" and "Nothing closes a dialog … it did not open").
+//!
+//! **Where it opens.** The anchor asks for the layer manager's beside placement ([`Anchor::beside`]): the menu's left
+//! edge 10 pixels past the button's right edge and its top 4 pixels above the button's, the old flyout's
+//! `session_menu_placement_style`. The button ends just inside the sidebar's edge, so the menu stands out over the
+//! session pane rather than over the rows below its own, and a row near the window's bottom has its menu shifted up
+//! to fit. The questions the commands ask open from the same anchor ([`SessionList::ask_about_row`]), so they stand
+//! beside the row too.
 //!
 //! The menu's header is the shared [`MenuHeader`], which the host menu draws too: it names the session and says, in one
 //! line, which agent it runs and its status. Below it come the commands, in a [`Role::Menu`] of their own, so the
-//! header is not read out as one of them. Up and Down walk the commands (the layer manager's menu context), and the
-//! pointer moves the same highlight.
+//! header is not read out as one of them.
+//!
+//! **Keys and the one highlight.** A click, Enter or Space on the closed button opens the menu on its first command,
+//! Rename; Down opens it there too and Up on its last, Delete, as the old toggle did ([`toggle_arrow_keys`]). Inside it
+//! Up and Down walk the commands and wrap (the layer manager's menu context), and Home and End go to Rename and Delete
+//! ([`home_end_keys`]). The pointer entering a command moves focus there ([`MenuItem`]'s one highlight, which is
+//! focus), so the arrows go on from the command the pointer last entered, and the pointer resting on one command while
+//! the arrows move on leaves no second fill behind (SPEC.md, "A menu has one highlight"; the old
+//! `menu-highlight.spec.ts`).
 //!
 //! The menu names its button as where closing returns focus ([`focus::ReturnTo::Control`]), so Escape and every command
 //! chosen from it leave focus on the button, also on macOS, where the click that opened the menu left the button
@@ -63,13 +78,13 @@
 //! While any row's menu or a question it asked is open, the list's order hold stays on ([`RowLayers::any_open`],
 //! [`super::hold`]), so the row the menu belongs to does not move away from it.
 //!
-//! NOTE: The environment commands come with their area, in the old order around these, with no placeholder
-//! meanwhile; the old row menu had no Restart, which the open session's header offers instead
-//! (`session_pane/header.rs`). Also not ported: opening the menu with the arrow keys from the closed button, placing
-//! the menu beside the sidebar with a pointer notch (the layer manager places it below its anchor), the
-//! old reveal's 100 ms fade (the button appears and goes at once: a fade per row would need a ticker animation for
-//! each row in motion, which nothing else in the list holds), and its rule that a touch screen always shows the button
-//! (GPUI reports no coarse pointer to ask about).
+//! NOTE: The environment commands come with their area, in the old order around these (Delete stays last), with no
+//! placeholder meanwhile; the old row menu had no Restart, which the open session's header offers instead
+//! (`session_pane/header.rs`). Also not ported: the old flyout's pointer notch toward its row (the layer manager draws
+//! no notch for a popover; it comes with the row hovers' notch), the beside placement's own clamp (the layer manager's
+//! `Placement::Beside` docs record how it differs), the old reveal's 100 ms fade (the button appears and goes at once:
+//! a fade per row would need a ticker animation for each row in motion, which nothing else in the list holds), and its
+//! rule that a touch screen always shows the button (GPUI reports no coarse pointer to ask about).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -86,7 +101,10 @@ use gpui::{
 use super::{SessionList, delete, outcome, replace, seen, selection, status, stop};
 use crate::actions::RENAME_SESSION_SHORTCUT_NAME;
 use crate::assets::Icon;
-use crate::components::{HoverHelp, IconButton, MenuHeader, MenuItem, Role, Tier, menu_separator};
+use crate::components::{
+    HoverHelp, IconButton, MenuHeader, MenuItem, MenuStart, Role, Tier, home_end_keys,
+    menu_separator, toggle_arrow_keys,
+};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::entry;
@@ -209,11 +227,14 @@ pub(super) fn menu_button(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
+    // Beside the button rather than below it, as the old flyout stood out past the sidebar's edge: the menu, and the
+    // question a command asks from the same anchor, cover the session pane instead of the rows under this one.
     let anchor = Anchor::for_element(
         SharedString::from(format!("session-menu-anchor-{key}")),
         window,
         cx,
-    );
+    )
+    .beside();
     let open = {
         let mut rows = rows.borrow_mut();
         rows.anchors.insert(key.to_owned(), anchor.clone());
@@ -229,8 +250,8 @@ pub(super) fn menu_button(
     // reach with Tab. None of them latches: the button goes once none holds.
     let visible = selected || open || row_active;
     let selector_id = id.clone();
-    let list = list.clone();
-    let toggled = key.to_owned();
+    let (list, keyed_list) = (list.clone(), list.clone());
+    let (toggled, keyed) = (key.to_owned(), key.to_owned());
     let toggle = IconButton::new(
         id,
         Icon::More,
@@ -241,6 +262,10 @@ pub(super) fn menu_button(
     .tier(Tier::RowMenu { on_fill: selected })
     .expanded(open)
     .focus(&focus)
+    // Down and Up on the closed button open the menu on its first or last command, as the old toggle did.
+    .on_key_down(toggle_arrow_keys(move |start, window, cx| {
+        let _ = keyed_list.update(cx, |list, cx| list.open_menu(&keyed, start, window, cx));
+    }))
     .on_click(move |_, window, cx| {
         // The list may be gone with its window; then there is no menu to open.
         let _ = list.update(cx, |list, cx| list.toggle_menu(&toggled, window, cx));
@@ -263,10 +288,34 @@ pub(super) fn menu_button(
 }
 
 impl SessionList {
-    /// The menu button of `key`'s row was activated: open its menu, close the menu if it is open, and do nothing while
-    /// a question it asked is open. A row scrolled out of view is scrolled back first, so the menu opens beside a row
-    /// the user can see. Visible to the crate for the screenshot goldens, which open a menu without a click.
+    /// The menu button of `key`'s row was activated (a click, Enter or Space): open its menu on its first command,
+    /// close the menu if it is open, and do nothing while a question it asked is open. Visible to the crate for the
+    /// screenshot goldens, which open a menu without a click.
     pub(crate) fn toggle_menu(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let open = self
+            .current
+            .current(cx)
+            .rows
+            .borrow_mut()
+            .still_open(key, window, cx);
+        if let Some((menu, Opened::Menu)) = open {
+            layers::close(menu, window, cx);
+            return;
+        }
+        self.open_menu(key, MenuStart::First, window, cx);
+    }
+
+    /// Open `key`'s menu with focus on the command `start` names: Rename, its first, or Delete, its last (Up on the
+    /// closed button). Nothing opens while the row's menu or a question it asked is open, when the button was not
+    /// drawn, while the window is inert, or once the user has moved on since the key or click that asked. A row
+    /// scrolled out of view is scrolled back first, so the menu opens beside a row the user can see.
+    fn open_menu(
+        &mut self,
+        key: &str,
+        start: MenuStart,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.reveal_row(key, cx);
         let (open, anchor, button) = {
             let mut rows = self.current.current(cx).rows.borrow_mut();
@@ -276,28 +325,25 @@ impl SessionList {
                 rows.buttons.get(key).cloned(),
             )
         };
-        match open {
-            Some((_, Opened::Question)) => return,
-            Some((menu, Opened::Menu)) => {
-                layers::close(menu, window, cx);
-                return;
-            }
-            None => {}
-        }
-        let (Some(anchor), Some(button)) = (anchor, button) else {
+        let (None, Some(anchor), Some(button)) = (open, anchor, button) else {
             return;
         };
         let mark = Mark::take(cx);
         let rename_focus = cx.focus_handle().tab_stop(true);
+        let delete_focus = cx.focus_handle().tab_stop(true);
+        let start = match start {
+            MenuStart::First => rename_focus.clone(),
+            MenuStart::Last => delete_focus.clone(),
+        };
         let list = cx.weak_entity();
         let view = cx.new(|_| RowMenu {
             key: key.to_owned(),
             list,
-            rename_focus: rename_focus.clone(),
+            rename_focus,
+            delete_focus,
         });
         let opened = layers::open_popover(
-            // Focus starts on the first command, as the old menu started.
-            Popover::menu(view, cx.focus_handle(), anchor, rename_focus)
+            Popover::menu(view, cx.focus_handle(), anchor, start)
                 // The button, not what held focus before: on macOS the click that opened the menu left the button
                 // unfocused, and SPEC.md returns focus to the button when the menu closes.
                 .returns_to(focus::ReturnTo::Control(button)),
@@ -573,8 +619,11 @@ fn actions_label(title: &str) -> String {
 pub(super) struct RowMenu {
     key: String,
     list: WeakEntity<SessionList>,
-    /// The Rename command's focus handle, where the menu starts.
+    /// The Rename command's focus handle: the menu's first command, where a click or Down opens it and Home goes.
     rename_focus: FocusHandle,
+    /// The Delete command's focus handle: the menu's last command, where Up on the closed button opens it and End
+    /// goes. Delete is last whichever commands the row offers, as in the old menu's order.
+    delete_focus: FocusHandle,
 }
 
 impl Render for RowMenu {
@@ -582,7 +631,12 @@ impl Render for RowMenu {
         let panel = layers::panel(cx)
             .id("session-menu")
             .debug_selector(|| "session-menu".into())
-            .w(px(PANEL_WIDTH));
+            .w(px(PANEL_WIDTH))
+            // Home and End, the old menu's: the layer manager's menu context binds only Up and Down.
+            .on_key_down(home_end_keys(
+                self.rename_focus.clone(),
+                self.delete_focus.clone(),
+            ));
         // Read before the row, which borrows the store from the context.
         let launcher_wait = launcher_wait(cx);
         let Some(store) = session::current_store(cx) else {
@@ -730,7 +784,8 @@ impl Render for RowMenu {
             "Delete: remove this session and its state",
             "Removes the session and its state",
             LifecycleCommand::Delete,
-        );
+        )
+        .focus(&self.delete_focus);
         panel
             .child(MenuHeader::new(&title, summary(&self.key, row)))
             .child(
