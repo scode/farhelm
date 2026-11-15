@@ -59,6 +59,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use super::identity::{display_name, host_mark};
+use super::listed;
 use super::refusal;
 use super::setup::PlanBody;
 use crate::assets::Icon;
@@ -150,13 +151,6 @@ struct Plan {
     steps: PlanSteps,
     /// The kept data directory, raw, for the notice's Copy.
     kept: String,
-}
-
-/// Host `host` as the registry lists it now, or `None` when the window is inert or it is not listed.
-fn listed(host: i64, cx: &App) -> Option<HostView> {
-    let store = session::current_store(cx)?;
-    let collections = store.read(cx).collections();
-    collections.get::<HostView>(&HostView::key(host)).cloned()
 }
 
 /// Say on the Hosts panel's line that the uninstall of `view` was not started because a session launch is in flight.

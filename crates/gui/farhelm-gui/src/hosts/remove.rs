@@ -67,6 +67,7 @@ use gpui::{
 };
 
 use super::identity::{display_name, host_mark, phase};
+use super::listed;
 use super::offers;
 use super::setup::UNDO_NOTE;
 use crate::assets;
@@ -146,13 +147,6 @@ impl Removal {
             destination: HostText::from_host(view.destination.as_deref().unwrap_or(&view.name)),
         }
     }
-}
-
-/// Host `host` as the registry lists it now, or `None` when the window is inert or it is not listed.
-fn listed(host: i64, cx: &App) -> Option<HostView> {
-    let store = session::current_store(cx)?;
-    let collections = store.read(cx).collections();
-    collections.get::<HostView>(&HostView::key(host)).cloned()
 }
 
 /// Whether a Remove asks first: the shared "Remove hosts without asking" preference is off or the helm stored no

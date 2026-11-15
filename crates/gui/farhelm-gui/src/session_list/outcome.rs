@@ -86,6 +86,8 @@ fn prefix(work: Work) -> Option<&'static str> {
         | Work::Answer
         | Work::UpdateHost
         | Work::UninstallHost
+        | Work::RetryHost
+        | Work::AdoptHost
         | Work::TrashDelete
         | Work::TabClose => None,
     }
@@ -194,6 +196,8 @@ fn waiting(work: Work) -> Option<(&'static str, &'static str)> {
         | Work::Answer
         | Work::UpdateHost
         | Work::UninstallHost
+        | Work::RetryHost
+        | Work::AdoptHost
         | Work::TrashDelete
         | Work::TabOpen
         | Work::TabClose => None,

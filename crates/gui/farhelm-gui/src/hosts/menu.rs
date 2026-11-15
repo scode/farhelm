@@ -7,18 +7,20 @@
 //! [`Role::Menu`] of their own, each an icon, a label and a description line, walked with Up and Down.
 //!
 //! What the menu offers is [`offers::menu_offers`], one pure function of the pushed host, its retained run, its work in
-//! flight and whether the desktop app's updater runs, read while the menu draws, so an open menu follows the host. So
-//! far it draws Re-run on an SSH host whose setup failed, which runs it again ([`super::setup::rerun`]), and on a host
-//! whose Update failed, which sends that Update again ([`super::update::rerun`]); Update on a remote host, which
-//! updates it without asking (the same request); Settings, which opens the host settings dialog ([`super::settings`]);
-//! on the helm's own machine the greyed Update with the reason it is greyed ("Run the installer again to update this
-//! machine"), which sends nothing (SPEC.md, "Session list"), as is a failed Update's Re-run there; in the installed
-//! desktop app, where the app's updater runs, that machine's Update is live instead, "Check for a newer Farhelm and
-//! install it", and asks the updater to check now ([`crate::desktop::updates::check_now`]), whose progress and outcome
-//! show beside the version readout, so the menu just closes, as the old one did; and on an SSH host, behind a separator
-//! in the danger red, Uninstall, which removes Farhelm from the host ([`super::uninstall`]), and Remove, which forgets
-//! the host ([`super::remove`]). Settings, Uninstall and Remove are unavailable while the host has work in flight or a
-//! run going on.
+//! flight and whether the desktop app's updater runs, read while the menu draws, so an open menu follows the host. It
+//! draws Retry first, which tries the host's connection again now, then Adopt for a mismatched identity, naming the
+//! identity it accepts as the host reported it when the menu opened, which is the one the click sends
+//! ([`super::remedies`]); then Re-run on an SSH host whose setup failed, which runs it again ([`super::setup::rerun`]),
+//! and on a host whose Update failed, which sends that Update again ([`super::update::rerun`]); Update on a remote
+//! host, which updates it without asking (the same request); Settings, which opens the host settings dialog
+//! ([`super::settings`]); on the helm's own machine the greyed Update with the reason it is greyed ("Run the installer
+//! again to update this machine"), which sends nothing (SPEC.md, "Session list"), as is a failed Update's Re-run there;
+//! in the installed desktop app, where the app's updater runs, that machine's Update is live instead, "Check for a
+//! newer Farhelm and install it", and asks the updater to check now ([`crate::desktop::updates::check_now`]), whose
+//! progress and outcome show beside the version readout, so the menu just closes, as the old one did; and on an SSH
+//! host, behind a separator in the danger red, Uninstall, which removes Farhelm from the host ([`super::uninstall`]),
+//! and Remove, which forgets the host ([`super::remove`]). Retry, Adopt, Settings, Uninstall and Remove are unavailable
+//! while the host has work in flight or a run going on.
 //!
 //! [`open_menu`] is the entry point. The Hosts panel's row toggle calls it, and so will the host rail's avatar menu,
 //! with its own anchor and focus handle. Focus goes back to that control on every platform, also where a click leaves a
@@ -28,11 +30,10 @@
 //! focus goes back to what held it before the menu opened, or, when that was the control itself (a click focuses it on
 //! Linux), home.
 //!
-//! NOTE: Each of the other commands arrives with the piece of the port that sends it, at its place in the old order
-//! (a rerun, Update, Settings, then Uninstall and Remove behind a separator), and the toggle keeps the old hover help,
-//! which names them already. Not ported yet: the old menu's Retry and Adopt (the
-//! migration's settings-and-hosts area left both out of the port's second milestone on 2026-11-14), opening the menu
-//! with the arrow keys from the closed toggle, and the flyout's pointer notch.
+//! NOTE: Each of the other commands (Suspend, Resume, Delete sandbox) arrives with the piece of the port that sends it,
+//! at its place in the old order (Retry, Suspend or Resume, Adopt, a rerun, Update, Settings, then Uninstall and Remove
+//! behind a separator), and the toggle keeps the old hover help, which names them already. Not ported: opening the
+//! menu with the arrow keys from the closed toggle, and the flyout's pointer notch.
 
 use farhelm_proto::ui_channel::HostView;
 use gpui::{
@@ -80,8 +81,8 @@ pub(super) fn toggle_parts(id: i64, window: &mut Window, cx: &mut App) -> (Ancho
     (anchor, focus)
 }
 
-/// Host `id`'s menu toggle (named after the host's `name`), as a Hosts panel row draws it: the ghost ⋯ in the quiet ink,
-/// always visible (the old `.host-row-menu` had no rule hiding it at rest), drawn pressed while its menu is open
+/// Host `id`'s menu toggle (named after the host's `name`), as a Hosts panel row draws it: the ghost ⋯ in the quiet
+/// ink, always visible (the old `.host-row-menu` had no rule hiding it at rest), drawn pressed while its menu is open
 /// (`open`), over `anchor`, the element the menu opens beside, with `focus` as its focus handle ([`toggle_parts`]).
 pub(super) fn toggle(
     id: i64,
@@ -119,10 +120,11 @@ pub(super) fn toggle(
 /// there too (see the module docs). Nothing opens, and no focus moves, when the user has moved on since `mark`, the
 /// window is inert, the registry does not list the host, or `anchor` is not drawn.
 ///
-/// Why not simply the first command: the old menu started on its first command, but that was always Retry, which this
-/// port leaves out, so the old local menu never opened on its greyed Update. Starting there now would put focus where
-/// the menu draws no highlight (a greyed item takes none), so the user could not see where Enter goes. The arrow keys
-/// still walk every command, the greyed Update included, as the old menu's did.
+/// Why not simply the first command: the old menu started on its first command, which was always Retry, available
+/// whenever the host was idle, so it never opened on a greyed command. Here Retry is first too and so is usually where
+/// focus starts; when the host is busy every command but a greyed one may be unavailable, and starting on a greyed
+/// command would put focus where the menu draws no highlight (a greyed item takes none), so the user could not see
+/// where Enter goes. The arrow keys still walk every command, the greyed ones included, as the old menu's did.
 ///
 /// Returns the menu's layer, or `None` when nothing opened.
 pub fn open_menu(
@@ -137,19 +139,29 @@ pub fn open_menu(
     if focus::has_moved_on(mark, cx) {
         return None;
     }
+    let retry_focus = cx.focus_handle().tab_stop(true);
+    let adopt_focus = cx.focus_handle().tab_stop(true);
     let rerun_focus = cx.focus_handle().tab_stop(true);
     let update_focus = cx.focus_handle().tab_stop(true);
     let settings_focus = cx.focus_handle().tab_stop(true);
-    // Focus starts on the first command that can act: an available Re-run, then the live Update, then Settings when
-    // available. A greyed command (the local host's Update, or its Re-run of a failed Update) is never where it starts
-    // (see `open_menu`'s docs); only a menu where nothing can act starts on its first command.
+    // Focus starts on the first command that can act. Retry is offered in every phase but an environment's deletion
+    // and can act whenever the host is idle, so that is almost always Retry, where the old menu always opened; Adopt,
+    // which comes next, can act only when Retry can, so it is never where focus starts. While an environment is being
+    // deleted (no Retry), it is the first of Re-run, the live Update and Settings that can act. A greyed command (the
+    // local host's Update, or its Re-run of a failed Update) is never where it starts while another can act (see
+    // `open_menu`'s docs). When none can act (the host is busy), it starts on the first command drawn: Retry, else a
+    // greyed Re-run, Update or Settings.
     let rerun_drawn = rerun(&view, &offered);
-    let start = if rerun_drawn.is_some_and(|(_, enabled)| enabled) {
+    let start = if offered.retry == Some(true) {
+        retry_focus.clone()
+    } else if rerun_drawn.is_some_and(|(_, enabled)| enabled) {
         rerun_focus.clone()
     } else if offered.update.is_some_and(Update::acts) {
         update_focus.clone()
     } else if offered.settings_enabled {
         settings_focus.clone()
+    } else if offered.retry.is_some() {
+        retry_focus.clone()
     } else if rerun_drawn.is_some() {
         rerun_focus.clone()
     } else if offered.update.is_some() {
@@ -160,6 +172,9 @@ pub fn open_menu(
     let menu = cx.new(|_| HostMenu {
         host,
         opener: opener.clone(),
+        retry_focus,
+        adopt_focus,
+        adopt_identity: offers::adoptable(&view.state).map(str::to_owned),
         rerun_focus,
         update_focus,
         settings_focus,
@@ -196,9 +211,9 @@ fn current(host: i64, cx: &App) -> Option<(HostView, Offers)> {
     Some((view, offered))
 }
 
-/// The Re-run the menu draws for `view`, and whether it can be chosen: the rerun of a failed setup on a kind whose setup
-/// the rerun can run again so far ([`HostKind::reruns_setup`]), or of a failed Update, greyed where the panel cannot
-/// update the host. `None` when it draws none.
+/// The Re-run the menu draws for `view`, and whether it can be chosen: the rerun of a failed setup on a kind whose
+/// setup the rerun can run again so far ([`HostKind::reruns_setup`]), or of a failed Update, greyed where the panel
+/// cannot update the host. `None` when it draws none.
 fn rerun(view: &HostView, offered: &Offers) -> Option<(Rerun, bool)> {
     offered.rerun.filter(|(rerun, _)| match rerun {
         Rerun::Setup => HostKind::of(view).reruns_setup(),
@@ -212,17 +227,31 @@ fn actions_label(name: &HostText) -> String {
     format!("Host actions for {}", MenuHeader::clamp_name(name))
 }
 
-/// The open menu of one host: drawn from the store while it is open, so its header and its commands follow the host.
+/// The open menu of one host: drawn from the store while it is open, so its header and its commands follow the host,
+/// except the identity Adopt names, which the menu froze when it opened ([`HostMenu::adopt_identity`]).
 pub(crate) struct HostMenu {
     host: i64,
     /// The control the menu was opened from, where the settings dialog returns focus.
     opener: FocusHandle,
-    /// Re-run's focus handle, where the menu starts when it offers it.
+    /// Retry's focus handle, where the menu starts whenever Retry can be chosen, and when nothing can act.
+    retry_focus: FocusHandle,
+    /// Adopt's focus handle. Never where the menu starts: Adopt can be chosen only when Retry, before it, can.
+    adopt_focus: FocusHandle,
+    /// The identity a mismatched host reported when the menu opened, raw: the one Adopt shows and sends for as long as
+    /// the menu is open. Frozen at the opening rather than read while drawing, because a key press (Enter) is
+    /// dispatched after a fresh frame (GPUI draws a dirty window before it dispatches a key), so Enter on an item that
+    /// read the store while drawing could send an identity no frame the user saw showed. A host that has since moved on
+    /// is refused by the helm, and opening the menu again shows what it reports now. A menu opened before the host
+    /// became mismatched offers no Adopt until it is opened again.
+    adopt_identity: Option<String>,
+    /// Re-run's focus handle, where the menu starts when it offers no Retry (an environment being deleted) and Re-run
+    /// can act, or is the first command drawn when nothing can.
     rerun_focus: FocusHandle,
-    /// Update's focus handle, where the menu starts when the live Update is its first command that can act, or the
-    /// greyed one when no command in it can act.
+    /// Update's focus handle, where the menu starts when it offers no Retry and the live Update is its first command
+    /// that can act, or is the first command drawn when nothing can.
     update_focus: FocusHandle,
-    /// Settings' focus handle, where the menu starts when it offers no Re-run and Settings is available.
+    /// Settings' focus handle, where the menu starts when it offers no Retry and Settings is its first command that
+    /// can act, and the last fallback.
     settings_focus: FocusHandle,
     /// Set right after the layer opens; what a chosen command closes.
     layer: Option<LayerId>,
@@ -240,6 +269,54 @@ impl Render for HostMenu {
             return panel;
         };
         let name = display_name(&view);
+        // Retry, first in the old order, in every phase but an environment's deletion.
+        let retry = offered.retry.map(|enabled| {
+            let (menu, host) = (cx.weak_entity(), self.host);
+            MenuItem::new(
+                "host-menu-retry",
+                Icon::Restart,
+                "Retry",
+                HoverHelp::tooltip("Retry: try this host's connection again now"),
+                Role::MenuItem,
+            )
+            .description("Try the connection again")
+            .disabled(!enabled)
+            .focus(&self.retry_focus)
+            .on_click(move |_, window, cx| {
+                // The mark of this click, taken before the menu closes; a refusal opens only through it.
+                let mark = Mark::take(cx);
+                close(&menu, window, cx);
+                super::remedies::retry(host, mark, window, cx);
+            })
+        });
+        // Adopt, while the host is still mismatched: the identity it names and sends is the one the menu opened with
+        // (`HostMenu::adopt_identity`), never one read again later (`super::remedies`).
+        let adopt = offered
+            .adopt
+            .zip(self.adopt_identity.clone())
+            .map(|(enabled, reported)| {
+                let (menu, host) = (cx.weak_entity(), self.host);
+                let shown = HostSentence::new("host-menu-adopt-identity")
+                    .text("Accept identity ")
+                    .mono(&HostText::identity(reported.as_str()));
+                MenuItem::new(
+                    "host-menu-adopt",
+                    Icon::Adopt,
+                    "Adopt",
+                    HoverHelp::tooltip(
+                        "Adopt: accept the identity shown; this host's five permissions go back to asking",
+                    ),
+                    Role::MenuItem,
+                )
+                .description_sentence(shown)
+                .disabled(!enabled)
+                .focus(&self.adopt_focus)
+                .on_click(move |_, window, cx| {
+                    let mark = Mark::take(cx);
+                    close(&menu, window, cx);
+                    super::remedies::adopt(host, reported.clone(), mark, window, cx);
+                })
+            });
         let rerun = rerun(&view, &offered).map(|(which, enabled)| {
             let (menu, host) = (cx.weak_entity(), self.host);
             let help = match which {
@@ -389,6 +466,8 @@ impl Render for HostMenu {
                 .aria_label(actions_label(&name))
                 .flex()
                 .flex_col()
+                .children(retry)
+                .children(adopt)
                 .children(rerun)
                 .children(update)
                 .child(settings)

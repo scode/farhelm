@@ -30,7 +30,7 @@ use crate::test_support::{
     any_open, click, focused_id, frame, keys, label, meta, one_command, settle,
 };
 
-// ---- Fixtures and steps ----------------------------------------------------------------------------------------------
+// ---- Fixtures and steps ---------------------------------------------------------------------------------------------
 
 /// A connected host on build `build`, older than the helm's.
 fn old(build: &str) -> HostStateView {
@@ -137,18 +137,19 @@ fn hold(key: OpKey, command: Command, cx: &mut VisualTestContext) {
     settle(cx);
 }
 
-// ---- The menu's Update -----------------------------------------------------------------------------------------------
+// ---- The menu's Update ----------------------------------------------------------------------------------------------
 
 /// SPEC.md, "Topology": "the user's Update click ... is the authorization: no plan is shown for confirmation", and the
 /// row "stays folded and shows `Updating…` until a progress snapshot is available, then shows the current step,
 /// completed-step count, and client-measured elapsed time inline"; failure "still expands the row". This is the
-/// Update's whole path through the one-use plan the helm keeps. Specified: `build-box`'s menu starts on Update ("Install
-/// the newer Farhelm version"); choosing it closes the menu and sends `POST /api/hosts/2/update` without a body under
-/// the host's key, the row reading "Updating…"; the plan's reply sends the same route with `{"probe_id": "u-1"}`, still
-/// "Updating…"; with the run pushed and the request accepted, the status counts "Updating: 1 of 3 steps done" with the
-/// running step, no question or dialog opened, focus is on the row's toggle, and the row shows no steps (folded) until
-/// Details is turned on ("global details alone control disclosure while update progress stays inline"); once the run
-/// fails, the row opens on "Update provisioning Failed" with Details off.
+/// Update's whole path through the one-use plan the helm keeps. Specified: `build-box`'s menu starts on Retry and
+/// offers Update ("Install the newer Farhelm version"); choosing it closes the menu and sends `POST
+/// /api/hosts/2/update` without a body under the host's key, the row reading "Updating…"; the plan's reply sends the
+/// same route with `{"probe_id": "u-1"}`, still "Updating…"; with the run pushed and the request accepted, the status
+/// counts "Updating: 1 of 3 steps done" with the running step, no question or dialog opened, focus is on the row's
+/// toggle, and the row shows no steps (folded) until Details is turned on ("global details alone control disclosure
+/// while update progress stays inline"); once the run fails, the row opens on "Update provisioning Failed" with Details
+/// off.
 #[gpui::test]
 fn the_menus_update_plans_then_confirms_under_the_hosts_key(cx: &mut TestAppContext) {
     // The host progress collection is in the snapshot, empty, as the helm sends it: a change to a collection the
@@ -158,7 +159,7 @@ fn the_menus_update_plans_then_confirms_under_the_hosts_key(cx: &mut TestAppCont
     cx.simulate_resize(size(px(1600.), px(1000.)));
     settle(cx);
     click(cx, "host-menu-toggle-2");
-    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-update"));
+    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-retry"));
     assert_eq!(label(cx, "host-menu-update").as_deref(), Some("Update"));
     click(cx, "host-menu-update");
     assert!(!any_open(cx), "the menu closed");
@@ -420,7 +421,7 @@ fn a_launch_in_flight_refuses_the_update_before_sending(cx: &mut TestAppContext)
     assert_eq!(label(cx, "hosts-update-not-started"), None, "the line went");
 }
 
-// ---- The inline button -----------------------------------------------------------------------------------------------
+// ---- The inline button ----------------------------------------------------------------------------------------------
 
 /// The listed hosts of the inline button's tests: the local host on an old build (1), `build-box` on an old build (2),
 /// `gpu-1` refused at the handshake on an older protocol (3), a current remote (4) and a newer one (5).
@@ -503,7 +504,7 @@ fn the_hover_names_both_builds_the_urgency_and_the_action() {
     }
 }
 
-// ---- Update all ------------------------------------------------------------------------------------------------------
+// ---- Update all -----------------------------------------------------------------------------------------------------
 
 /// SPEC.md, "Topology": Update all "makes the same authorized Update request for each remote host whose individual
 /// Update action is available at the click. A host already busy with setup or another run is skipped rather than
@@ -591,11 +592,11 @@ fn two_refusals_from_update_all_show_one_after_the_other(cx: &mut TestAppContext
     assert!(!any_open(cx));
 }
 
-// ---- The rerun -------------------------------------------------------------------------------------------------------
+// ---- The rerun ------------------------------------------------------------------------------------------------------
 
 /// The old menu offered a failed Update again as Re-run, which sends the same Update; on the helm's own machine, which
 /// the panel cannot update, it was greyed. Specified: with `build-box`'s Update failed, its row is open on "Update
-/// provisioning Failed" and its menu starts on Re-run ("Try the failed update again"), which sends the plan request;
+/// provisioning Failed" and its menu offers Re-run ("Try the failed update again"), which sends the plan request;
 /// with the local host's Update failed (a run an older helm retained), its Re-run is greyed and sends nothing.
 #[gpui::test]
 fn re_run_of_a_failed_update_sends_the_update_again(cx: &mut TestAppContext) {
@@ -609,7 +610,7 @@ fn re_run_of_a_failed_update_sends_the_update_again(cx: &mut TestAppContext) {
         Some("Update provisioning Failed")
     );
     click(cx, "host-menu-toggle-2");
-    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-rerun"));
+    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-retry"));
     let painted: String = frame(cx)
         .into_iter()
         .flat_map(|node| node.texts.into_iter().map(|line| line.text.to_string()))
@@ -622,8 +623,8 @@ fn re_run_of_a_failed_update_sends_the_update_again(cx: &mut TestAppContext) {
     click(cx, "host-menu-toggle-1");
     assert_eq!(
         focused_id(cx).as_deref(),
-        Some("host-menu-settings"),
-        "the premise: the menu starts on Settings, past its greyed Re-run and Update"
+        Some("host-menu-retry"),
+        "the premise: the menu opened, on Retry, its first command"
     );
     click(cx, "host-menu-rerun");
     assert_eq!(
@@ -633,7 +634,7 @@ fn re_run_of_a_failed_update_sends_the_update_again(cx: &mut TestAppContext) {
     );
 }
 
-// ---- How the operation store classifies an Update --------------------------------------------------------------------
+// ---- How the operation store classifies an Update -------------------------------------------------------------------
 
 /// The launcher refuses a launch while host registry work is in flight, and the host side refuses its changes while a
 /// session is being created, each by asking the operation store's classification of the work in flight. An Update was

@@ -20,7 +20,8 @@
 //! - Suspend, Resume and Delete sandbox come with their own pieces of the port, and are not offered here.
 //!
 //! The host menu ([`super::menu`]) renders only what this says; the rules are tested here, without a window. The menu
-//! draws the rerun of a failed setup on an SSH host ([`HostKind::reruns_setup`]), the rerun of a failed Update, Update
+//! draws Retry ([`Offers::retry`]) and, for a mismatched identity, Adopt ([`Offers::adopt`], [`adoptable`]), then
+//! the rerun of a failed setup on an SSH host ([`HostKind::reruns_setup`]), the rerun of a failed Update, Update
 //! (live, greyed on the helm's own machine, or the app's own check there in the installed desktop app), Settings,
 //! Uninstall on an SSH host ([`Offers::uninstall`]), and Remove on a host whose removal only forgets it
 //! ([`Offers::remove`]); the inline Update and Update all ask the panel's own offer (`super::update::available`), which
@@ -231,7 +232,8 @@ pub(crate) fn run_active(progress: Option<&ProvisioningView>) -> bool {
 }
 
 /// What the host's actions menu offers, and which of its offers can be chosen now. The menu lists them in the old
-/// order (a rerun, Update, Settings, then Remove behind a separator); an absent offer leaves no gap.
+/// order (Retry, Adopt, a rerun, Update, Settings, then Uninstall and Remove behind a separator); an absent offer
+/// leaves no gap.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Offers {
     /// Settings is always offered: every host has its permissions, whatever else its dialog lets the user change.
@@ -252,6 +254,36 @@ pub(crate) struct Offers {
     /// ([`HostKind::uninstalls_from_panel`]): `Some(true)` when it can be chosen now, `Some(false)` while the host is
     /// busy. A failed uninstall is continued by choosing it again, so a failed run leaves it available.
     pub(crate) uninstall: Option<bool>,
+    /// Retry, which asks the helm to try the host's connection again now, on every kind of host (the helm's retry does
+    /// not depend on the kind, and the old menu offered it on every row) and in every phase but an environment's
+    /// deletion, whose own retry belongs to Delete sandbox: `Some(true)` when it can be
+    /// chosen now, `Some(false)` while the host is busy.
+    pub(crate) retry: Option<bool>,
+    /// Adopt, offered only while the host reports an identity other than the recorded one ([`adoptable`]):
+    /// `Some(true)` when it can be chosen now, `Some(false)` while the host is busy. Which identity it adopts is the
+    /// menu's to freeze from the state it drew.
+    pub(crate) adopt: Option<bool>,
+}
+
+/// The identity an Adopt would accept: the one a mismatched host reports, raw, exactly as the helm compares it, and
+/// `None` in every other phase. An unverified host reports no identity, so there is nothing to adopt there, and the
+/// helm refuses the verb (SPEC.md, "Topology": the helm "asks whether to adopt the new host or fix the destination").
+/// Ported from the old app's `adoptable`.
+pub(crate) fn adoptable(state: &HostStateView) -> Option<&str> {
+    match state {
+        HostStateView::IdentityMismatch { reported, .. } => Some(reported),
+        HostStateView::Connecting { .. }
+        | HostStateView::Unreachable { .. }
+        | HostStateView::Connected { .. }
+        | HostStateView::VersionSkew { .. }
+        | HostStateView::IdentityUnverified { .. }
+        | HostStateView::Duplicate { .. }
+        | HostStateView::TensorlakeChanging { .. }
+        | HostStateView::Suspended { .. }
+        | HostStateView::Stopped { .. }
+        | HostStateView::Retired { .. }
+        | HostStateView::Deleting { .. } => None,
+    }
 }
 
 /// Which failed run a rerun repeats.
@@ -323,6 +355,9 @@ impl Update {
 /// - **Uninstall** for a kind the panel uninstalls, chosen only while the host is idle; after a failed uninstall too,
 ///   since choosing it again is how that run is continued.
 /// - **Remove** for a kind whose removal only forgets the host, chosen only while the host is idle.
+/// - **Retry** in every phase of every kind but an environment being deleted, and **Adopt** only for
+///   a mismatched identity, both chosen only while the host is idle. The old menu offered Retry "in every phase, like
+///   the button it replaces"; a deletion's Retry is the environment's own, which comes with Delete sandbox.
 pub(crate) fn offers(
     host: &HostView,
     progress: Option<&ProvisioningView>,
@@ -361,6 +396,8 @@ pub(crate) fn offers(
         update,
         remove: kind.removal_only_forgets().then_some(!busy),
         uninstall: kind.uninstalls_from_panel().then_some(!busy),
+        retry: (!matches!(host.state, HostStateView::Deleting { .. })).then_some(!busy),
+        adopt: adoptable(&host.state).map(|_| !busy),
     }
 }
 

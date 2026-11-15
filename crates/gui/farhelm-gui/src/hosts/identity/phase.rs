@@ -405,8 +405,8 @@ fn remedy(
             (!remediation.trim().is_empty()).then(|| line.host(&pushed(remediation)))
         }
         HostStateView::IdentityMismatch { .. } => Some(line.text(
-            "Adopt the identity the host reports, or fix the destination; adopting resets this host to asking before \
-             YOLO launches",
+            "Adopt the identity the host reports, or fix the destination; adopting resets all five of this host's \
+             permissions to asking",
         )),
         HostStateView::IdentityUnverified { .. } => Some(line.text(
             "Fix the host so it reports its identity, or retarget or remove this entry — it is re-probed meanwhile, \

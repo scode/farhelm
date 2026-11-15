@@ -3640,8 +3640,8 @@ fn take_pending(state: &SceneState) -> bool {
 }
 
 /// The reference screens' hosts in the Hosts panel, then `build-box`'s menu opened from its toggle (reference
-/// `host-menu`): the header naming it, its destination and build, then Update, highlighted, Settings, and Remove
-/// behind a separator.
+/// `host-menu`): the header naming it, its destination and build, then Retry, highlighted, Update, Settings, and
+/// Uninstall and Remove behind a separator.
 /// The menu opens through [`host_menu_scene`] once the toggle has been drawn.
 fn host_menu_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     hosts_panel_scene(state, &crate::hosts::tests::reference_hosts(), false, cx);

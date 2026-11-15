@@ -1,8 +1,8 @@
 //! Host management: the Hosts panel the sidebar shows in place of its session list while its Hosts control is pressed,
 //! and the per-host rules behind it.
 //!
-//! SPEC.md, "Session list" (the Hosts control, host rows, the update button and Too new) and "Topology", ported from the
-//! old app's `hosts.rs` (`HostsPanel`, `HostRow`, the phase vocabulary) and `provisioning.rs`
+//! SPEC.md, "Session list" (the Hosts control, host rows, the update button and Too new) and "Topology", ported from
+//! the old app's `hosts.rs` (`HostsPanel`, `HostRow`, the phase vocabulary) and `provisioning.rs`
 //! (`ProvisioningMenuState::offered`) and the stylesheet's `.hosts-heading` and `.host-row` rules at reference commit
 //! `24bc0580`.
 //!
@@ -23,8 +23,8 @@
 //! naming itself as where closing the dialog returns focus. A new host without Farhelm goes on to the setup
 //! confirmation and the setup's submission ([`setup`]); a setup the helm refused after the user moved on from it shows
 //! at the top of the panel, since it has no row. Add host, a setup's submission, a row's Re-run, Remove, Update, Update
-//! all and Uninstall refuse to start while a session launch is in flight ([`launch_in_flight`]), as the old app refused
-//! a host change during a launch.
+//! all, Uninstall, Retry and Adopt refuse to start while a session launch is in flight ([`launch_in_flight`]), as the
+//! old app refused a host change during a launch.
 //!
 //! SSH help ("SSH needs 2FA?"), the commands that start a host's two shared SSH connections by hand, is
 //! [`ssh_help::open`], the entry point for the ? menu's "SSH needs 2FA?" (drawn once the area that owns the ? menu
@@ -39,6 +39,10 @@
 //! The menu's Uninstall removes Farhelm from an SSH host ([`uninstall`]): it asks the helm for a plan, shows it for
 //! confirmation, and shows the run in the host's row like a setup's. Once the run has forgotten the host, a one-line
 //! removal notice at the top of the panel says where the host's data stays.
+//!
+//! The menu's Retry tries a host's connection again now, and its Adopt accepts the identity a mismatched host reports
+//! ([`remedies`]); the duplicate entry's remedy ends in Retry, and fixing the destination instead is the host settings
+//! dialog's.
 //!
 //! A remote host's Update ([`update`]) is sent the same way from the menu's Update and its rerun of a failed one, from
 //! a row's inline `↑ Update` and, for every host whose Update is available, from the heading's Update all. A refused
@@ -99,6 +103,7 @@ mod menu;
 pub(crate) mod offers;
 pub(crate) mod progress;
 pub(crate) mod refusal;
+mod remedies;
 pub(crate) mod remove;
 mod settings;
 pub(crate) mod setup;
@@ -147,11 +152,12 @@ const HEADING_GAP: f32 = 8.;
 /// `.hosts-heading .add-host-button`: the add button's side, which with the padding sets the heading's 32-pixel height.
 const ADD_SIZE: f32 = 24.;
 
-/// What a host registry change refuses with while a session launch is in flight ([`launch_in_flight`]), after the name
-/// of the action that was not started ("Add host: ", or "Set up <host>: ", "Re-run <host>: ", "Remove <host>: ",
-/// "Update <host>: ", "Update all: " on the Hosts panel's line, "Destination: " in the host settings): the old app's
-/// form for an action refused while another runs ("<action>: not started, another operation is in progress; try again",
-/// `list/lifecycle.rs` at the reference commit), naming the launch.
+/// What a host action from this module refuses with while a session launch is in flight ([`launch_in_flight`]), after
+/// the name of the action that was not started ("Add host: ", or "Set up <host>: ", "Re-run <host>: ",
+/// "Remove <host>: ", "Update <host>: ", "Update all: ", "Uninstall <host>: ", "Retry <host>: ", "Adopt <host>: " on
+/// the Hosts panel's line, "Destination: " in the host settings): the old app's form for an action refused while
+/// another runs ("<action>: not started, another operation is in progress; try again", `list/lifecycle.rs` at the
+/// reference commit), naming the launch.
 pub(crate) const LAUNCH_IN_FLIGHT: &str =
     "not started, a session launch is in progress; try again when it finishes";
 
@@ -748,8 +754,8 @@ impl HostsPanel {
         } else {
             Vec::new()
         };
-        // The run's steps under an open row, with Collapse while the row is open for the run alone and the user may fold
-        // it (with Details on, the switch holds every row open, so there is nothing to fold).
+        // The run's steps under an open row, with Collapse while the row is open for the run alone and the user may
+        // fold it (with Details on, the switch holds every row open, so there is nothing to fold).
         let run = progress::shown(input.progress).filter(|_| open).map(|run| {
             let collapse = (!self.details && progress::opens_row(Some(run), input.seen))
                 .then(|| run.run_id.clone())
@@ -860,31 +866,40 @@ fn add_button(focus: &FocusHandle) -> AnyElement {
     .into_any_element()
 }
 
-/// The entity id of the current UI session's operation store; `None` while the window is inert. What this module's
-/// app globals (the Hosts panel's lines in [`setup`] and [`remove`], the rail's state in [`status`], the removal notices
-/// in [`uninstall`]) tag what they keep with, and compare on every read: a reset makes a new operation store, so
-/// whatever was kept under the old one stops showing, as everything from the helm does after a reset. Private to this
-/// module and its submodules, which own those globals.
+/// Host `host` as the registry lists it now, or `None` when the window is inert or it is not listed: how this module's
+/// actions find the host a press or a reply is about, by id, at that moment. One copy for every submodule that needs
+/// it.
+fn listed(host: i64, cx: &App) -> Option<HostView> {
+    let store = session::current_store(cx)?;
+    let collections = store.read(cx).collections();
+    collections.get::<HostView>(&HostView::key(host)).cloned()
+}
+
+/// The entity id of the current UI session's operation store; `None` while the window is inert. What this module's app
+/// globals (the Hosts panel's lines in [`setup`] and [`remove`], the rail's state in [`status`], the removal notices in
+/// [`uninstall`]) tag what they keep with, and compare on every read: a reset makes a new operation store, so whatever
+/// was kept under the old one stops showing, as everything from the helm does after a reset. Private to this module and
+/// its submodules, which own those globals.
 fn current_operations_id(cx: &App) -> Option<EntityId> {
     session::current_operations(cx).map(|operations| operations.entity_id())
 }
 
-/// Whether a session launch is in flight anywhere in the operation store: what a host registry change from this module
-/// (Add host's probe, a setup's submission, a row's Re-run, a host's removal, a host's Update and Update all) refuses
-/// to start during. The old app refused a host change during a launch and the reverse, through one page-wide token; the
-/// migration's orchestrator decided on 2026-11-14 that each side refuses its own action instead, with a reason, while
-/// the other's work is in flight in the operation store. What counts as a launch is the operation store's to say
-/// ([`Work::creates_a_session`]: the launcher's New and Clone, and a session's Restart and Replace). `false` in an inert
-/// window, which has no store and starts nothing anyway.
+/// Whether a session launch is in flight anywhere in the operation store: what this module's host actions (Add host's
+/// probe, a setup's submission, a row's Re-run, a host's removal, a host's Update and Update all, its uninstall, and
+/// its Retry and Adopt) refuse to start during. The old app refused a host change during a launch and
+/// the reverse, through one page-wide token; the migration's orchestrator decided on 2026-11-14 that each side refuses
+/// its own action instead, with a reason, while the other's work is in flight in the operation store. What counts as a
+/// launch is the operation store's to say ([`Work::creates_a_session`]: the launcher's New and Clone, and a session's
+/// Restart and Replace). `false` in an inert window, which has no store and starts nothing anyway.
 pub(crate) fn launch_in_flight(cx: &App) -> bool {
     session::current_operations(cx)
         .is_some_and(|operations| operations.read(cx).any_in_flight(Work::creates_a_session))
 }
 
-/// Whether a host-registry change is in flight anywhere in the operation store: what refuses the launcher's Launch and a
-/// fresh New, and the card's open of an agent's Add host. The other half of [`launch_in_flight`]'s exclusion, which the
-/// migration's orchestrator decided on 2026-11-14 is kept by each side refusing its own action while the other's work is
-/// in flight, rather than by the old app's shared token. `false` in an inert window.
+/// Whether a host-registry change is in flight anywhere in the operation store: what refuses the launcher's Launch and
+/// a fresh New, and the card's open of an agent's Add host. The other half of [`launch_in_flight`]'s exclusion, which
+/// the migration's orchestrator decided on 2026-11-14 is kept by each side refusing its own action while the other's
+/// work is in flight, rather than by the old app's shared token. `false` in an inert window.
 ///
 /// What counts is the operation store's own classification ([`Work::changes_host_registry`]): a host's probe and setup
 /// (a new host's, or a registered one's re-run), its removal and its Update. The orchestrator decided on 2026-11-14
