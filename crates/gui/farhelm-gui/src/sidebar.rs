@@ -56,15 +56,17 @@ mod tests;
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences, SIDEBAR_WIDTH_RANGE};
 use gpui::{
-    AnyElement, App, Context, Entity, FocusHandle, InteractiveElement as _, IntoElement,
-    ParentElement, Pixels, Render, Styled, Window, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _,
+    IntoElement, ParentElement, Pixels, Render, Styled, Window, div, prelude::FluentBuilder as _,
+    px,
 };
 
 use crate::components::{Divider, DividerDrag, DividerStep, HoverHelp, Role};
-use crate::desktop::title_band;
+use crate::desktop::{title_band, updates};
 use crate::session::{self, PerSession};
 use crate::session_list::SessionList;
 use crate::theme::{self, metrics};
+use crate::update_readout::view::VersionReadout;
 use crate::{operations, render_count};
 
 /// The sidebar's width while the helm stores none: `--sidebar-width`'s default, the rail included, which the theme
@@ -99,6 +101,10 @@ pub struct Sidebar {
     /// The divider's focus handle, a tab stop. Kept here rather than in the divider's element state, so it survives the
     /// frames in which the window is inert and draws no sidebar.
     divider_focus: FocusHandle,
+    /// The version readout, while the desktop updater runs (`update_readout::view`); without one the header draws the
+    /// plain build text. Kept here, for the window's life, rather than in the header's element state, so Up to date's
+    /// five seconds and a dismissal survive the header moving into the narrow window's top row and back.
+    readout: Option<Entity<VersionReadout>>,
 }
 
 /// The sidebar's state in one UI session.
@@ -131,6 +137,8 @@ impl Sidebar {
             session_list,
             current: PerSession::default(),
             divider_focus: cx.focus_handle().tab_stop(true),
+            readout: updates::entity(cx)
+                .map(|updater| cx.new(|cx| VersionReadout::new(updater, cx))),
         }
     }
 
@@ -294,7 +302,8 @@ impl Sidebar {
     /// in `assets/sidebar-width.js` at reference commit `24bc0580`): the pane's floor and the sidebar's 1-pixel edge.
     pub fn floating_header(&mut self, window: &Window, cx: &App) -> Option<AnyElement> {
         let width = self.width(cx);
-        header_floats(width, window).then(|| header::header(window, cx).into_any_element())
+        header_floats(width, window)
+            .then(|| header::header(self.readout.clone(), window, cx).into_any_element())
     }
 }
 
@@ -321,7 +330,7 @@ impl Render for Sidebar {
             .border_r_1()
             .border_color(theme::color(palette.border_sidebar_edge))
             .when(!header_floats(width, window), |column| {
-                column.child(header::header(window, cx))
+                column.child(header::header(self.readout.clone(), window, cx))
             })
             .child(div().flex_1().min_h_0().child(self.session_list.clone()));
         // The column, then the divider's strip over the column's edge and reaching over the pane, its negative right

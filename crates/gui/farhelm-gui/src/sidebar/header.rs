@@ -19,14 +19,15 @@
 
 use farhelm_proto::{BUILD_VERSION, is_development_build};
 use gpui::{
-    App, InteractiveElement as _, IntoElement, ParentElement, StatefulInteractiveElement as _,
-    Styled, Window, div, img, prelude::FluentBuilder as _, px,
+    App, Entity, InteractiveElement as _, IntoElement, ParentElement,
+    StatefulInteractiveElement as _, Styled, Window, div, img, prelude::FluentBuilder as _, px,
 };
 
 use crate::assets;
 use crate::components::{HoverHelp, Role, StatusMark};
 use crate::desktop::title_band::{self, Row};
 use crate::theme::{self, Palette};
+use crate::update_readout::view::VersionReadout;
 
 /// `--sidebar-title-height` off macOS: the row's least height.
 const HEIGHT: f32 = 40.;
@@ -38,8 +39,13 @@ const PAD: (f32, f32) = (8., 12.);
 const WORDMARK_HEIGHT: f32 = 18.;
 const WORDMARK_WIDTH: f32 = 284. * WORDMARK_HEIGHT / 72.;
 
-/// The header row.
-pub(super) fn header(window: &Window, cx: &App) -> impl IntoElement {
+/// The header row. `readout` is the version readout while the desktop updater runs; without one the version is the
+/// plain build text.
+pub(super) fn header(
+    readout: Option<Entity<VersionReadout>>,
+    window: &Window,
+    cx: &App,
+) -> impl IntoElement {
     let palette = theme::palette(cx);
     let height = if title_band::ON {
         title_band::HEIGHT
@@ -80,19 +86,24 @@ pub(super) fn header(window: &Window, cx: &App) -> impl IntoElement {
                 .flex()
                 .flex_row()
                 .justify_end()
-                .child(title_band::claims_presses(
-                    div().min_w_0().child(
-                        StatusMark::new(
-                            "app-version",
-                            BUILD_VERSION,
-                            HoverHelp::tooltip(version_help(BUILD_VERSION)),
-                            Role::Label,
-                            BUILD_VERSION,
-                        )
-                        .monospace()
-                        .truncate(),
-                    ),
-                )),
+                .child(match readout {
+                    // Its controls keep their own presses; its status text claims them itself.
+                    Some(readout) => div().min_w_0().child(readout).into_any_element(),
+                    None => title_band::claims_presses(
+                        div().min_w_0().child(
+                            StatusMark::new(
+                                "app-version",
+                                BUILD_VERSION,
+                                HoverHelp::tooltip(version_help(BUILD_VERSION)),
+                                Role::Label,
+                                BUILD_VERSION,
+                            )
+                            .monospace()
+                            .truncate(),
+                        ),
+                    )
+                    .into_any_element(),
+                }),
         );
     title_band::row(row, Row::AppBar)
 }
