@@ -1,6 +1,7 @@
 //! The bodies the desktop app sends to the helm's launch routes: create
 //! (`POST /api/sessions`), Restart with (`POST /api/sessions/{id}/restart`) and
-//! Replace and Replace with (`POST /api/sessions/{id}/replace`).
+//! Replace and Replace with (`POST /api/sessions/{id}/replace`), plus the
+//! launcher's folder read (`POST /api/browse-directory`) and its reply.
 //!
 //! The helm decodes each route into a request type of its own (`CreateReq`,
 //! `RestartReq` and `ReplaceReq` in its sessions module), which also carries
@@ -22,7 +23,7 @@
 //! 80x24 default only decides how the agent's first lines wrap, as in the old
 //! app.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{CommandLaunch, GithubCheckoutRequest, LaunchSelection};
 
@@ -106,4 +107,29 @@ pub struct ReplaceSessionBody {
     /// when what was shown warned only about open terminal tabs. Set from the
     /// same [`crate::DeleteGuard`] (`only_if_agent_ended()`).
     pub only_if_agent_ended: bool,
+}
+
+/// `POST /api/browse-directory`: one bounded level of a folder on a host, for the launcher's folder check and its Browse
+/// picker. The helm decodes it into its own `BrowseDirectoryReq`.
+///
+/// `expected_incarnation` is the host connection the launcher is looking at, so a reply never describes a connection
+/// the user did not see. `membership_only` asks only whether the path is a usable directory, without listing it or
+/// refining the folder history: the automatic folder check sets it; an ordinary Browse does not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BrowseDirectoryBody {
+    pub host: i64,
+    pub cwd: String,
+    pub expected_incarnation: Option<u64>,
+    pub membership_only: bool,
+}
+
+/// The helm's answer to [`BrowseDirectoryBody`]: the directory as the host resolved it, its parent, and its children,
+/// at most a bounded number of them (`truncated` says when more were left out). A refusal (a missing folder, a path that
+/// is not a directory) is an error reply in the supervisor's words, not a body.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct BrowseDirectoryReply {
+    pub cwd: String,
+    pub parent: Option<String>,
+    pub children: Vec<String>,
+    pub truncated: bool,
 }

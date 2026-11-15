@@ -501,7 +501,7 @@ fn a_wrapper_prefix_that_does_not_parse_is_said_at_once(cx: &mut TestAppContext)
 /// Answer the launcher's catalog read with `rows` (`GET /api/launch-catalog`), or with a 500 when `rows` is `None`.
 /// The fake answers commands in the order they were sent, so every other command sent since the last call (the main
 /// view's own) is answered too, in its place, with a plain success, as the helm answers them.
-fn answer_catalog(
+pub(super) fn answer_catalog(
     helm: &mut FakeHelm,
     cx: &mut VisualTestContext,
     rows: Option<serde_json::Value>,

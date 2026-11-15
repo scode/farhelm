@@ -12758,4 +12758,45 @@ mod client_bodies {
             }
         }
     }
+
+    /// `POST /api/browse-directory`: the launcher's folder check and its Browse send the shared client body, which
+    /// decodes into `BrowseDirectoryReq` with every value intact, and the helm's reply decodes into the client's reply
+    /// type. Destructured without `..`, so a field added on either side fails to compile here until it is checked.
+    #[test]
+    fn a_browse_body_and_its_reply_decode_on_the_other_side() {
+        use super::super::{BrowseDirectoryBody as HelmReply, BrowseDirectoryReq};
+        use farhelm_proto::session_requests::{BrowseDirectoryBody, BrowseDirectoryReply};
+        let body = BrowseDirectoryBody {
+            host: 7,
+            cwd: "~/src/project".into(),
+            expected_incarnation: Some(3),
+            membership_only: true,
+        };
+        let BrowseDirectoryReq {
+            host,
+            cwd,
+            expected_incarnation,
+            membership_only,
+        } = decode(&body);
+        assert_eq!(
+            (host, cwd, expected_incarnation, membership_only),
+            (7, body.cwd.clone(), Some(3), true)
+        );
+        let reply = HelmReply {
+            cwd: "/home/user/src/project".into(),
+            parent: Some("/home/user/src".into()),
+            children: vec!["a".into(), "b".into()],
+            truncated: true,
+        };
+        let BrowseDirectoryReply {
+            cwd,
+            parent,
+            children,
+            truncated,
+        } = decode(&reply);
+        assert_eq!(cwd, "/home/user/src/project");
+        assert_eq!(parent.as_deref(), Some("/home/user/src"));
+        assert_eq!(children, ["a", "b"]);
+        assert!(truncated);
+    }
 }
