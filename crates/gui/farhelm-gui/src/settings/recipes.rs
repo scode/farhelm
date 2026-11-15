@@ -70,7 +70,7 @@ mod editor;
 mod places;
 pub(super) mod prepared;
 
-pub(super) use editor::Editor;
+pub(super) use editor::{Departure, Editor};
 
 use std::collections::HashSet;
 
@@ -90,6 +90,7 @@ use crate::components::{Button, HoverHelp, Tier, pulse_opacity};
 use crate::environment_ui::ProviderUi;
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
+use crate::layers::{self, LayerId};
 use crate::operations::{Command, OpKey, Work};
 use crate::session;
 use crate::theme::{self, Palette, metrics};
@@ -574,11 +575,14 @@ pub(super) struct Recipes {
     /// The window the section is drawn in, for moving focus when a reply closes the editor: a reply has no window at
     /// hand.
     window: AnyWindowHandle,
+    /// The hosting dialog's layer, which an editor's departure out of the dialog closes ([`Recipes::depart`]).
+    layer: Option<LayerId>,
 }
 
 impl Recipes {
-    /// The section, reading the account now and asking the helm to check every container host once.
-    pub(super) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// The section, inside the dialog on `layer`, reading the account now and asking the helm to check every
+    /// container host once.
+    pub(super) fn new(layer: Option<LayerId>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let recipes = Recipes {
             api_key_set: None,
             pulse: None,
@@ -590,6 +594,7 @@ impl Recipes {
             editor: None,
             new_recipe: cx.focus_handle().tab_stop(true),
             window: window.window_handle(),
+            layer,
         };
         recipes.read_account(cx);
         // Once per opening, as the old section did when Settings opened (the places module docs).
@@ -645,11 +650,46 @@ impl Recipes {
         cx.notify();
     }
 
-    /// The editor `editor` (by its entity id) is done: a press of Back or Cancel, or its save's done answer. If
-    /// `editor` is still the open editor it closes, with focus on New recipe unless the user moved on since `mark`, the
-    /// press that closed it or started the save. Nothing is read: a done save's change reached the store, pushed, before
-    /// its answer. `window` is the window when the press itself closes the editor; a reply has none at hand, and then
-    /// the window the section is drawn in is updated for the move.
+    /// The editor `editor` (by its entity id) is leaving for `departure`: back to the list ([`Recipes::close_editor`]),
+    /// or out of the dialog, which closes it. Nothing if `editor` is no longer the open editor, so a late reply never
+    /// moves an editor opened since. `window` is as [`Recipes::close_editor`] takes it.
+    pub(super) fn depart(
+        &mut self,
+        editor: EntityId,
+        departure: Departure,
+        mark: &Mark,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
+        match departure {
+            Departure::Back => self.close_editor(editor, mark, window, cx),
+            Departure::Close => {
+                if self.editor.as_ref().map(Entity::entity_id) != Some(editor) {
+                    return;
+                }
+                self.editor = None;
+                let Some(layer) = self.layer else {
+                    return;
+                };
+                // Closed outright, not dismissed: the editor has answered for itself, and the dismissal hook would ask
+                // it again.
+                match window {
+                    Some(window) => layers::close(layer, window, cx),
+                    None => {
+                        let _ = self
+                            .window
+                            .update(cx, |_, window, cx| layers::close(layer, window, cx));
+                    }
+                }
+            }
+        }
+    }
+
+    /// The editor `editor` (by its entity id) is done: Back or Cancel with nothing unsaved, Discard, or a done save or
+    /// delete. If `editor` is still the open editor it closes, with focus on New recipe unless the user moved on since
+    /// `mark`, the press that closed it or started the work. Nothing is read: a done save's or delete's change reached
+    /// the store, pushed, before its answer. `window` is the window when the press itself closes the editor; a reply has
+    /// none at hand, and then the window the section is drawn in is updated for the move.
     fn close_editor(
         &mut self,
         editor: EntityId,
@@ -811,7 +851,8 @@ impl Recipes {
                 }))
         });
         // The refusal of the last build or rebuild of this recipe, until its next one starts or the pushed state shows
-        // it start building ([`settle_refusals`]).
+        // it start building ([`settle_refusals`]); also a refusal of its save or delete that the editor did not show
+        // itself, such as a delete whose cleanup carries on past the helm's bound (the editor's `leaving` module).
         let refused = refusal.map(|reason| {
             choices::failure_outcome(format!("recipe-{name}-build-error"), &reason, cx)
         });

@@ -308,7 +308,7 @@ impl Editor {
 
     /// A picker chose `name` (empty for None).
     fn pick(&mut self, pick: Pick, name: String, cx: &mut Context<Self>) {
-        if self.saving {
+        if self.busy() {
             return;
         }
         match pick {
@@ -321,7 +321,7 @@ impl Editor {
 
     /// An agent's mode choice.
     fn choose_mode(&mut self, agent: Agent, mode: AgentMode, cx: &mut Context<Self>) {
-        if self.saving {
+        if self.busy() {
             return;
         }
         self.choices.agent_mut(agent).mode = mode;
@@ -374,7 +374,7 @@ impl Editor {
                 retained,
                 HoverHelp::tooltip("Not in Settings → Credentials; choose another or None"),
             )
-            .disabled(!loaded || self.saving)
+            .disabled(!loaded || self.busy())
             .on_choose(move |value, _, cx| {
                 let name = value.to_string();
                 let _ = weak.update(cx, |editor, cx| editor.pick(pick, name, cx));
@@ -410,7 +410,7 @@ impl Editor {
                             Role::Button,
                         )
                         .tier(Tier::Neutral)
-                        .disabled(self.saving)
+                        .disabled(self.busy())
                         .on_click(move |_, _, cx| {
                             let _ = weak.update(cx, |editor, cx| editor.read_credentials(cx));
                         }),
@@ -464,7 +464,7 @@ impl Editor {
             },
         )
         .chosen(Some(choice.mode))
-        .disabled(self.saving)
+        .disabled(self.busy())
         .on_change(move |&mode, _, cx| {
             let _ = weak.update(cx, |editor, cx| editor.choose_mode(agent, mode, cx));
         });

@@ -748,8 +748,7 @@ before leaving with unsaved changes come in later changes. Replacing tests, in
   and `a_pushed_change_redraws_the_rows_with_no_read`. The look: the goldens `settings-recipes` (empty, as the
   reference) and `settings-recipes-rows` (built with changed packages and rebuilding, failed, and a container base).
   What a build does in Tensorlake (the builder's source, its steps, the snapshots it keeps and deletes) is the helm's,
-  tested in `crates/farhelm-helm/src/tensorlake/build_tests.rs`. Not ported: Delete with the recipe, which waits for the
-  editor.
+  tested in `crates/farhelm-helm/src/tensorlake/build_tests.rs`. Delete is the editor's (the managed recipe row below).
 - "a failed recipe refresh says so and Retry loading recovers":
   `an_unreadable_catalog_keeps_the_rows_and_retry_loading_asks_again`, with the failure and the recovery pushed by the
   helm (see "Recipes" under Deviations for what Retry loading sends); a failed read with no rows,
@@ -781,15 +780,20 @@ before leaving with unsaved changes come in later changes. Replacing tests, in
   `a_refused_save_keeps_the_draft_and_leaves_no_refusal_under_the_row`; the editor opening at its top, Back included,
   from a scrolled list, `the_editor_opens_at_its_top_from_a_scrolled_list`; the form locked while a save is out, the
   credential choices included, `while_a_save_is_out_the_form_takes_no_edit`. The look, in both palettes: the golden
-  `settings-recipe-editor` (see "Recipes" under Deviations for the answers' band). Not ported: the leave and delete
-  questions in the answers' place, which come with Delete and the question before leaving.
+  `settings-recipe-editor` (see "Recipes" under Deviations for the answers' band). The leave and delete questions in the
+  answers' place, `every_way_out_asks_first_and_keep_editing_stays` and
+  `delete_asks_then_deletes_under_the_recipes_key`. No golden draws them: the reference screens have none.
 - "a managed recipe is created, edited and deleted without exposing its token": partly. Creation under the recipe's key
   with its row from the pushed catalog, `a_new_recipe_is_created_under_its_key_and_its_pushed_row_shows`; Edit with the
   name fixed, `a_saved_recipes_name_is_fixed`; Edit then Save sending the recipe's endpoint, login and GitHub token
   names back unchanged, `edit_then_save_sends_the_recipes_credential_choices_back_unchanged` and, without a window,
   `an_unchanged_reopened_recipe_saves_back_unchanged` and
   `named_endpoint_selection_survives_origin_changes_and_can_be_removed`; choosing the GitHub token and the Claude Code
-  endpoint in the form, `each_picker_offers_its_kind_and_save_sends_the_names_chosen`. Not ported: Delete.
+  endpoint in the form, `each_picker_offers_its_kind_and_save_sends_the_names_chosen`; Delete with its confirmation in
+  the old words, sent under the recipe's key and closing the editor when done,
+  `delete_asks_then_deletes_under_the_recipes_key`, a refusal the helm gives at once kept in the editor,
+  `a_refused_delete_stays_in_the_editor`, and a cleanup still running at the helm's bound (see "Recipes" under
+  Deviations), `a_delete_that_carries_on_closes_the_editor_and_the_row_says_so`.
 - "the recipe editor refuses bad names, asks before leaving, and saves a custom base": partly. The local name refusal,
   `a_bad_name_or_size_is_refused_locally_until_the_next_edit`; the helm's refusal kept with the draft,
   `a_refused_save_keeps_the_draft_and_leaves_no_refusal_under_the_row`; the cards, each base's fields, the requirements
@@ -797,8 +801,10 @@ before leaving with unsaved changes come in later changes. Replacing tests, in
   `each_base_card_shows_its_fields_and_keeps_every_bases_text`, `drafts_become_requests_or_local_refusals`,
   `all_bases_reopen_with_their_packages`, `reopening_a_container_base_preserves_its_reference_and_user` and
   `a_new_container_recipe_saves_edited_reference_and_user`; tunnel rows, `tunnel_rows_are_added_and_removed_by_row`; a
-  save refused for the recipe's build in flight, `a_save_while_the_recipes_build_is_out_says_why_and_sends_nothing`. Not
-  ported: the question before leaving.
+  save refused for the recipe's build in flight, `a_save_while_the_recipes_build_is_out_says_why_and_sends_nothing`; the
+  question before leaving, from Back, Cancel, Escape and both close controls,
+  `every_way_out_asks_first_and_keep_editing_stays`, with no question for an unchanged editor,
+  `an_unchanged_editor_leaves_without_asking`.
 - "${agent} modes retain drafts and select only named ${agent} logins": the draft's rules,
   `claude_modes_keep_drafts_and_submit_only_the_selected_credentials` and
   `codex_modes_keep_drafts_and_submit_exclusive_selections`; the mode choice keeping each mode's fields, with a local
@@ -808,8 +814,20 @@ before leaving with unsaved changes come in later changes. Replacing tests, in
   Retry loading credentials, `the_catalog_is_read_as_the_editor_opens_and_retry_reads_it_again`. That a referenced login
   cannot be deleted is the helm's, and the Credentials editor shows it
   (`delete_is_unavailable_while_a_recipe_uses_the_credential`).
-- "closing Settings with an unsaved recipe asks first and finishes the close" and "a recipe opening preserves a newer
-  field focus before header close": wait for the question before leaving.
+- "closing Settings with an unsaved recipe asks first and finishes the close": the question on Escape and both close
+  controls, `every_way_out_asks_first_and_keep_editing_stays`; Discard finishing the return or the close unsaved,
+  `discard_finishes_the_leave_without_saving`; Save finishing it once the save is done, and a refused save keeping the
+  editor, `the_questions_save_finishes_the_leave_once_the_save_is_done`; a close from another section showing Recipes
+  with the question first, `a_close_from_another_section_shows_recipes_first`; a close while the save is out waiting for
+  it and finishing even unanswered, `a_close_while_the_save_is_out_waits_for_it`, and one while a delete is out closing
+  at once, `a_close_while_the_delete_is_out_closes_at_once` (see "Recipes" under Deviations for both); a newer question
+  winning over an earlier answered Save, `keep_editing_after_an_earlier_save_answer_stays_in_settings`; and a refused
+  save taking an open question away, `a_refused_save_takes_an_open_question_away`.
+- "a recipe opening preserves a newer field focus before header close": partly. The editor's opening moves focus to Back
+  only if the user has not moved on since the press that opened it (`Recipes::open_editor`, through the focus
+  coordinator's mark), and the header close's question takes focus to its Save,
+  `every_way_out_asks_first_and_keep_editing_stays`. Not ported: a test that focuses a field between the opening and its
+  first frame.
 
 ## Deviations
 
@@ -998,8 +1016,29 @@ Where the port does not match the old app, and why. Each stays until the work na
   Save that names it is refused by the helm with its own words.
 - **The credential pickers show names in the interface font.** The old pickers were monospace (`font-mono`); the shared
   select has no monospace look, so the names read as the rest of the form's choices do.
-- **Until the question before leaving lands, leaving drops unsaved changes.** Back, Cancel and closing Settings close
-  the editor at once; their hover help says so ("without saving") rather than promising the old question.
+- **The leave question goes when it is answered.** The old question stayed up while its Save ran and after a refusal,
+  with the reason above it, so the user could answer again. The prompt's inline confirming answer runs once, so here
+  Save takes the question away; a refused save shows the helm's words above the ordinary answers, and leaving again asks
+  again.
+- **A delete whose cleanup outlasts the helm's bound closes the editor and leaves the helm's words on the row.** The old
+  editor waited for the delete however long its cleanup took. The helm now answers within 20 seconds, with a 504 saying
+  the deletion carries on, the recipe leaving the list once it is gone, and, if it is still listed later, to delete it
+  again to see why (a late failure is only in the helm's log). The editor has nothing left to edit, so it closes as for
+  a done delete, and the helm's words stay on the recipe's operation key, where the row shows them under its build
+  button until the push takes the recipe away. This area decided it on 2026-11-15, as the nearest to the old app the
+  bound allows: the user ends at the list either way, and the row says why the recipe is still there. The editor tells
+  the two apart by the status alone, and the helm answers any cleanup failure of its timeout kind with a 504 too, so
+  such a failure inside the bound also closes the editor; the row then shows the helm's own words for that failure while
+  the recipe stays listed.
+- **While a save is out, the leave question offers Keep editing and Save, and no Discard.** The old question, asked by a
+  close during a save, drew all three answers and disabled every one until the save ended. The prompt cannot disable one
+  answer, and a Discard could not keep its word, since the draft on screen is the one being saved. Keep editing and the
+  question's Save stay usable: Save waits for the save already out. As in the old editor, that save's done answer
+  finishes the close even while the question is unanswered. A refused save takes the open question away, so the ordinary
+  answers return under the helm's words; the old question came back with all three answers.
+- **A close while a delete is out closes at once.** The old editor asked the leave question then, with every answer
+  disabled, and dropped the close once the delete succeeded. Here Settings closes without asking: the recipe is going,
+  and the delete goes on in the operation store, its refusal, if any, shown under the recipe's row.
 - **A refused save that lands after Settings closed shows under the recipe's row.** Settings closing drops the editor,
   so a refusal that arrives after it has nowhere else to show; it stays on the recipe's operation key, which the row's
   build shares, and the row shows it in the helm's words until the recipe's next build or save starts or a push shows
