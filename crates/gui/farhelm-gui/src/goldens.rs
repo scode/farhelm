@@ -2118,6 +2118,31 @@ fn session_list_compact_setup(state: &SceneState, _: &mut Window, cx: &mut App) 
     session_list_scene_preferring(state, &rows, preferences, Vec::new(), cx);
 }
 
+/// A list with a pinned run: two pins in their shared order ahead of the unpinned rows, which keep the helm's order,
+/// the open session among the pins so the glyph's inverse ink on the selected fill is pinned too, and the heavier
+/// separator with its gap between the last pin and the first unpinned row. The helm serves the rows unpinned first, so
+/// the picture shows the list doing the grouping.
+fn session_list_pinned_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    let row = |key, title, ago: i64| {
+        session(key)
+            .title(title)
+            .status(serde_json::json!({ "state": "idle" }))
+            .activity(TEST_NOW - ago)
+            .seen(Some(TEST_NOW - ago))
+    };
+    let rows = [
+        row("u", "Fix the flaky upload test", 14 * 60).cwd("/srv/ci/uploads"),
+        row("p", "Refactor the API client", 2 * 60)
+            .cwd("/home/user/src/api")
+            .pinned(2),
+        row("v", "Benchmark the cache", 3 * 3_600).cwd("/home/user/bench"),
+        row("q", "Review the install docs", 5 * 60)
+            .cwd("/home/user/src/docs")
+            .pinned(1),
+    ];
+    session_list_scene_opening(state, &rows, Some("p"), cx);
+}
+
 /// The fleet of [`session_list_setup`], which the row menu and Delete scenes draw too. Each row lists the helm
 /// fixture's managed checkout, and the waiting row one terminal tab, which its Delete question names. The rows run on
 /// the local host (the red laptop, inverted on the selected row) and on remotes (the cloud), with one launch of each
@@ -4400,6 +4425,12 @@ static SCENES: &[Scene] = &[
         size: (420., 418.),
         draw: session_lists,
         setup: session_list_compact_setup,
+    },
+    Scene {
+        name: "session-list-pinned",
+        size: (420., 418.),
+        draw: session_lists,
+        setup: session_list_pinned_setup,
     },
     Scene {
         name: "session-row-menu",

@@ -104,7 +104,8 @@ fn only_the_rows_in_view_are_drawn_and_scrolling_reaches_every_row(cx: &mut Test
 /// The helm re-sends the listing whenever the fleet changes, and under "Recently active" running sessions reorder it
 /// all the time; the list state is spliced on each such change. A splice that dropped the scroll position would throw
 /// the user back to the top on every push. The old page kept its scroll offset; the port keeps the same row index and
-/// offset. Specified: scrolled down so the first drawn row is row i, a pushed listing with a new session at its top
+/// offset. Specified: scrolled down so the first drawn row is row i, and with the pointer then moved off the rows (over
+/// them, the order hold would keep the new session at the bottom), a pushed listing with a new session at its top
 /// still draws row i of the new order first, and does not draw the new session.
 #[gpui::test]
 fn a_change_to_the_listing_keeps_the_scroll_position(cx: &mut TestAppContext) {
@@ -121,6 +122,7 @@ fn a_change_to_the_listing_keeps_the_scroll_position(cx: &mut TestAppContext) {
         .position(|key| Some(*key) == before.first().map(String::as_str))
         .unwrap();
     assert!(first > 0, "the premise: the list is scrolled down");
+    super::pins_tests::away(cx);
 
     let mut grown = vec!["new"];
     grown.extend(&order);

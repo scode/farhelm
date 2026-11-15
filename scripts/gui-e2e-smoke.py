@@ -20,12 +20,13 @@ cards for agents' requests: Allow, the host-only grant, Deny over the quick swit
 the Add host dialog; 61, the settings-and-hosts area's host uninstall, its refusal, run and removal notice; 65, the
 other-dialogs area's Keyboard shortcuts overview; 66, the other-dialogs area's rail notices bell and its empty panel;
 67, the session list's Compact; 68, the other-dialogs area's status sound switches in Settings; 69, the session
-header's Replace with… and Clone). The behavior itself is specified and tested in process
-(`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`, `hosts/`,
-`help_menu/tests.rs`, `feedback/tests.rs`, `trash/`, `approvals/`, `shortcuts/tests.rs`, `notices_bell/tests.rs`,
-`sounds/`); nothing here checks layout or wording beyond the names it clicks. A menu's commands are clicked by their
-ids (`id:session-menu-delete`), not their labels: the open session's header has buttons with the same names (Stop,
-Replace, Delete), and a `text:` target picks the first match in drawing order, which is the header's.
+header's Replace with… and Clone; 70, the session list's Pin to top, Move up and Unpin). The behavior itself is specified
+and tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`,
+`terminal/attached/tests.rs`, `hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`, `trash/`, `approvals/`,
+`shortcuts/tests.rs`, `notices_bell/tests.rs`, `sounds/`); nothing here checks layout or wording beyond the names it
+clicks. A menu's commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open session's
+header has buttons with the same names (Stop, Replace, Delete), and a `text:` target picks the first match in drawing
+order, which is the header's.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -1950,6 +1951,60 @@ class Smoke(unittest.TestCase):
             r'button "Notifications: 0 unread" \[focused\]',
             "focus is back on the bell",
         )
+
+    # ---- The session list's pins (70), on two sessions of its own ----------------------------------------------
+
+    def test_70_pin_move_and_unpin_from_the_row_menu(self) -> None:
+        """Pins and their manual order are the helm's, shared by every client (SPEC.md, "Session list"), so a pin or a
+        move is only real once the helm stores it: the in-process tests prove what the window sends, and only the real
+        helm shows that it takes those bodies. Specified, on two basic fake-agent sessions this step creates under
+        titles of its own: both start unpinned in the helm's listing; each row menu's Pin to top makes the helm list
+        it pinned, the second below the first (a new pin goes at the bottom); the second's Move up makes the helm
+        list it above the first; and each Unpin makes the helm list both unpinned again, so later steps meet an
+        unpinned list. Before the Move the pointer rests on the list's count, off the rows, so the order hold the pins'
+        clicks took has ended and the second pin is no longer new to it (a pin made during a hold offers no Move until
+        the hold ends). The helm's listing is the oracle; the menu's items are clicked by their ids."""
+        fixtures = json.loads((RUN / "run.json").read_text())["binaries"]["fixtures"]
+        stamp = uuid.uuid4().hex[:8]
+        titles = [f"Pin first {stamp}", f"Pin second {stamp}"]
+        ids = []
+        for title in titles:
+            body = gui_agent.seed_body(0, gui_agent.SESSION_CWD, fixtures)
+            body["title"] = title
+            ids.append(gui_agent.helm_request(RUN, "POST", "/api/sessions", body)["id"])
+        for title in titles:
+            self.ok("wait", "--text", title)
+
+        def pins() -> list[tuple[bool, int | None]]:
+            rows = {row["id"]: row for row in gui_agent.helm_request(RUN, "GET", "/api/sessions")["sessions"]}
+            return [(rows[key]["pinned"], rows[key]["pin_position"]) for key in ids]
+
+        def ordered(first: int, second: int) -> bool:
+            [(_, a), (_, b)] = pins()
+            positions = {0: a, 1: b}
+            return None not in (a, b) and positions[first] < positions[second]
+
+        self.assertEqual(pins(), [(False, None), (False, None)], "premise: neither session is pinned")
+        for title in titles:
+            self.ok("click", f"text:Session actions for {title}")
+            self.ok("wait", "--text", "Keep this session above unpinned ones")
+            self.ok("click", "id:session-menu-pin")
+            self.ok("wait", "--gone", "Keep this session above unpinned ones")
+        eventually(lambda: ordered(0, 1), "the helm listing both pinned, the second below the first")
+
+        self.ok("hover", "id:session-count")
+        self.ok("click", f"text:Session actions for {titles[1]}")
+        self.ok("wait", "--text", "Place before the pinned session above")
+        self.ok("click", "id:session-menu-move-up")
+        self.ok("wait", "--gone", "Place before the pinned session above")
+        eventually(lambda: ordered(1, 0), "the helm listing the second pin above the first")
+
+        for title in titles:
+            self.ok("click", f"text:Session actions for {title}")
+            self.ok("wait", "--text", "Sort this session with the others again")
+            self.ok("click", "id:session-menu-pin")
+            self.ok("wait", "--gone", "Sort this session with the others again")
+        eventually(lambda: pins() == [(False, None), (False, None)], "the helm listing both unpinned again")
 
     # ---- The session list's Compact (67), on a session of its own ---------------------------------------------
 

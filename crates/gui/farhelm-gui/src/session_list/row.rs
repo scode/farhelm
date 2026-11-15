@@ -45,9 +45,12 @@
 //! The row's list item records whether the pointer is over it ([`RowHover`]), for its menu button's reveal
 //! ([`super::menu`]).
 //!
+//! A pinned row draws the muted pin glyph just before its title, and its accessible name starts with "Pinned"
+//! ([`super::pins`]).
+//!
 //! NOTE: The locality column keeps its width when a session's host cannot be placed and it draws no mark, so titles
 //! start where they did in the old app. The managed checkout's form of the last line (and its compact mark after the
-//! title) and the pin are not ported yet.
+//! title) is not ported yet.
 
 use farhelm_helm_client::Collections;
 use farhelm_proto::ui_channel::{HostView, SessionRow};
@@ -222,9 +225,16 @@ pub(crate) fn row(
     let inks = Inks::of(palette, selected, row.stale);
     let marks = RowMarks::of(row, collections, selected, palette);
     let cause = status::stale_cause(row, collections);
-    // The row's accessible name is its title, escaped as the screen shows it; its status word joins the hover help,
-    // which is also its accessible description. A compact row's help says what its hidden lines would have.
-    let label = HostSentence::new(id.clone()).host(&title).accessible_name();
+    // The row's accessible name is its title, escaped as the screen shows it, after "Pinned" on a pinned row as the old
+    // open button's name read its pin glyph first; its status word joins the hover help, which is also its accessible
+    // description. A compact row's help says what its hidden lines would have.
+    let label = if row.pinned {
+        HostSentence::new(id.clone()).text("Pinned ")
+    } else {
+        HostSentence::new(id.clone())
+    }
+    .host(&title)
+    .accessible_name();
     let item_label = label.clone();
     let help = if compact {
         compact_help(&id, row, cause)
@@ -281,6 +291,11 @@ pub(crate) fn row(
         .children(
             stop::in_flight(session.key, cx)
                 .then(|| stop::progress(session.key, steps.spinner, selected, cx)),
+        )
+        // A pinned row's glyph, immediately before the title ([`super::pins`]).
+        .children(
+            row.pinned
+                .then(|| super::pins::glyph(&id, inks.secondary, metrics::ROW_SLOT_GAP)),
         )
         // A pending Delete takes the title's place on screen, as the old row's did; the open control and the list item
         // keep the title as their accessible names.

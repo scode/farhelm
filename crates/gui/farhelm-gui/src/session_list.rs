@@ -1,13 +1,16 @@
-//! The session list: every session the helm lists, in the helm's order, with the open one selected.
+//! The session list: every session the helm lists, pinned ones first, then in the helm's order, with the open one
+//! selected.
 //!
 //! SPEC.md, "Session list". The list is drawn from the store while it draws and keeps nothing the helm pushed: its rows
 //! are the sessions collection in the order the collection's metadata gives (the helm sorts; the channel starts in the
-//! user's stored order), so a pushed change or a reset redraws it with nothing to go stale. Above the rows, a heading
-//! band carries the order's title, which opens the menu that changes the order ([`order`]), the count ("Sessions: N" to
-//! assistive technology and on hover, as the old count said) and, at its right, the Trash button (a view of the trash's
-//! own, [`crate::trash`]), the Templates button and New; a listing the helm's cap cut says so in an amber band in place of
-//! the count, and a failed read says so in red, while the rows it had stay (a failed read is no evidence that anything
-//! was deleted).
+//! user's stored order), with the pinned sessions moved ahead in their shared manual order ([`pins`]), so a pushed
+//! change or a reset redraws it with nothing to go stale. While the pointer is over the rows, the order hold keeps them
+//! in the order they had on screen ([`hold`]), a display-only snapshot that the frame applies on top. Above the rows, a
+//! heading band carries the order's title, which opens the menu that changes the order ([`order`]), the count
+//! ("Sessions: N" to assistive technology and on hover, as the old count said) and, at its right, the Trash button (a
+//! view of the trash's own, [`crate::trash`]), the Templates button and New; a listing the helm's cap cut says so in an
+//! amber band in place of the count, and a failed read says so in red, while the rows it had stay (a failed read is no
+//! evidence that anything was deleted).
 //!
 //! The list also owns the selection rules ([`selection`]), and applies them from observers, never from drawing: it
 //! settles the selection, the open session's seen mark and the open session its query names ([`SessionList::settle`],
@@ -77,7 +80,8 @@
 //! a view that draws an age must be, since the cache wrapper cannot see the time.
 //!
 //! Each row has an actions menu ([`menu`]) whose commands so far are Rename ([`rename`]), Mark read or Mark unread
-//! ([`seen`], also on a click on the row's status dot), Replace ([`replace`]), Stop ([`stop`]) and Delete ([`delete`]),
+//! ([`seen`], also on a click on the row's status dot), Pin to top or Unpin and Move up and Move down ([`pins`]),
+//! Replace ([`replace`]), Stop ([`stop`]) and Delete ([`delete`]),
 //! and the open session's header (`session_pane/header.rs`) asks the same Stop, Replace and Delete through the same
 //! functions, plus Restart ([`restart`]), which the old row menu never had; the Rename shortcut reaches Rename for the
 //! open session ([`rename::open_for_selected`]), and the Delete shortcut the header's Delete. A Replace that the
@@ -114,19 +118,20 @@
 //! The order menu also holds Compact, the helm-wide density preference: with it on, every row is one line
 //! ([`row`]'s "Compact rows"), read once per frame like the steps of the animations.
 //!
-//! NOTE: Not ported yet, each with the area that brings it: marking, pins,
-//! the row menu's other commands, and the rail's host status, the foot's controls other than Hosts and Settings, Add
-//! host and expansion. New is not yet where focus rests when there are no sessions (SPEC.md, "Where focus rests"):
-//! nothing names it home; that comes with the session pane's status-card work (M2.12), which decides home when no
-//! terminal is on screen.
+//! NOTE: Not ported yet, each with the area that brings it: marking, dragging pins, the row menu's other commands, and
+//! the rail's host status, the foot's controls other than Hosts and Settings, Add host and expansion. New is not yet
+//! where focus rests when there are no sessions (SPEC.md, "Where focus rests"): nothing names it home; that comes with
+//! the session pane's status-card work (M2.12), which decides home when no terminal is on screen.
 
 pub(crate) mod age;
 pub(crate) mod delete;
 pub(crate) mod filters;
+pub(crate) mod hold;
 pub(crate) mod host_rail;
 pub(crate) mod menu;
 pub(crate) mod order;
 pub(crate) mod outcome;
+pub(crate) mod pins;
 pub(crate) mod quick_switcher;
 pub(crate) mod rename;
 pub(crate) mod replace;
@@ -154,6 +159,9 @@ mod list_tests;
 
 #[cfg(test)]
 pub(crate) mod menu_tests;
+
+#[cfg(test)]
+mod pins_tests;
 
 #[cfg(test)]
 mod row_tests;
@@ -235,7 +243,9 @@ pub struct SessionList {
     /// with the store by [`SessionList::sync_rows`] at the top of every frame; it holds no session data of its own.
     rows: ListState,
     /// The listed sessions' keys in the order the list state was last rebuilt to, each with its row's focus handle:
-    /// how a frame tells whether the rows or their order changed, and what the item callback draws by index.
+    /// how a frame tells whether the rows or their order changed, and what the item callback draws by index. That is
+    /// the displayed order (pins first, as the order hold keeps it), which is also what the hold snapshots when the
+    /// pointer takes it, not the helm's.
     entries: Rc<[(String, FocusHandle)]>,
     /// Each listed session's row focus handle (see the module docs), owned here so it outlives a frame in which the
     /// row is not drawn and stays the same across rebuilds; dropped once the session is no longer listed.
@@ -284,6 +294,15 @@ pub struct SessionList {
     /// panel's Details choice survives closing and reopening it (SPEC.md: opening or closing Hosts keeps "the current
     /// ... details choice").
     hosts_panel: Entity<HostsPanel>,
+    /// Each movable pin's Move neighbors in the order last drawn ([`pins::neighbors`]), which an open row menu reads
+    /// to draw its Move up and Move down. Worked out with `entries` at the top of every frame, so the menu, drawn after
+    /// the list in the same frame, names the neighbors the user sees.
+    moves: HashMap<String, pins::Neighbors>,
+    /// Whether the pointer is inside the window, which the order hold asks when a row's menu closes
+    /// ([`SessionList::after_menus`]): GPUI's own answer, `Window::is_window_hovered`, in every build. A field rather
+    /// than a call so that a test can hand in another reading (`SessionList::pointer_in_window_reads`), since GPUI's test
+    /// window never reports the pointer inside it on Linux and offers no way to say it is.
+    pointer_in_window: fn(&Window) -> bool,
 }
 
 /// What the list keeps for one UI session.
@@ -307,6 +326,9 @@ struct Current {
     hosts_shown: bool,
     /// The order's write and its menu ([`order::OrderState`]), made the first time the title is drawn under the session.
     order: Option<Entity<order::OrderState>>,
+    /// The order hold ([`hold`]): the order on screen while the pointer is over the rows. Per UI session, so a reset
+    /// drops it with the listing it held.
+    hold: hold::Hold,
 }
 
 impl SessionList {
@@ -366,6 +388,8 @@ impl SessionList {
             order_anchor: None,
             rail: host_rail::Kept::new(cx),
             hosts_panel: cx.new(HostsPanel::new),
+            moves: HashMap::new(),
+            pointer_in_window: Window::is_window_hovered,
         };
         list.settle(cx);
         list
@@ -629,11 +653,28 @@ impl Render for SessionList {
             }
             return body_row.child(list);
         };
-        // One pass over the listing for what the frame needs from all of it: the keys, whether any row pulses or
+        // Whether a row's menu or its question is open, which keeps the order hold on whatever the pointer did.
+        let menu_open = self
+            .current
+            .current(cx)
+            .rows
+            .borrow_mut()
+            .any_open(window, cx);
+        self.after_menus(menu_open, window, cx);
+        // One pass over the listing for what the frame needs from all of it: the keys in the order drawn (pins first,
+        // then as the order hold keeps them), the pins' Move neighbors and the separator, whether any row pulses or
         // shows a spinner (a pending Delete or Stop, or a Replace that has waited long enough to say so), and whether
         // any has an activity stamp to show an age for. Everything else is read row by row, for the rows drawn.
-        let (keys, any_pulse, any_spinner, any_stamp) = {
-            let listed = selection::listed(store.read(cx).collections());
+        let (keys, separator, any_pulse, any_spinner, any_stamp) = {
+            let collections = store.read(cx).collections();
+            let list_id = self.list_id(collections, cx);
+            let current = self.current.current(cx);
+            current.hold.release_if_due(menu_open);
+            let listed = current
+                .hold
+                .apply(pins::pinned_first(selection::listed(collections)), list_id);
+            self.moves = pins::neighbors(&listed, current.hold.original_pins());
+            let separator = pins::separator_after(&listed).map(str::to_owned);
             let unchanged = listed.len() == self.entries.len()
                 && listed
                     .iter()
@@ -654,7 +695,7 @@ impl Render for SessionList {
             let any_stamp = listed
                 .iter()
                 .any(|session| session.row.info.effective_activity() > 0);
-            (keys, any_pulse, any_spinner, any_stamp)
+            (keys, separator, any_pulse, any_spinner, any_stamp)
         };
         let pulses = ticker::is_active(window, cx) && any_pulse;
         if pulses != self.pulse.is_some() {
@@ -786,19 +827,29 @@ impl Render for SessionList {
             // builds only the rows it draws.
             let entries = self.entries.clone();
             let weak = weak.clone();
-            div()
+            let rows = div()
                 .id("session-rows")
                 // Tests scroll the list over this; it records nothing outside test builds.
                 .debug_selector(|| "session-rows".into())
                 .flex_1()
-                .min_h_0()
+                .min_h_0();
+            hold::area(rows, &weak)
                 .child(
                     gpui::list(self.rows.clone(), move |ix, window, cx| {
                         let Some((key, focus)) = entries.get(ix) else {
                             return div().into_any_element();
                         };
                         let selected = selected.as_deref() == Some(key.as_str());
-                        draw_row(&shared, &weak, key, focus, selected, steps, window, cx)
+                        let row = draw_row(&shared, &weak, key, focus, selected, steps, window, cx);
+                        if separator.as_deref() == Some(key.as_str()) {
+                            // After the row's item, so the item's own border stays its bottom edge.
+                            div()
+                                .child(row)
+                                .child(pins::separator(theme::palette(cx)))
+                                .into_any_element()
+                        } else {
+                            row
+                        }
                     })
                     .size_full(),
                 )

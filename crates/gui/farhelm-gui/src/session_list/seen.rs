@@ -34,8 +34,7 @@ use super::selection::Listed;
 use super::status::{self, Live};
 use crate::components::{HoverHelp, MarkToggle, Role};
 use crate::host_text::{HostSentence, HostText};
-use crate::operations::{Command, OpKey, Work};
-use crate::session;
+use crate::operations::{Command, Work};
 use crate::theme;
 
 /// The id prefix of a row's status dot as a toggle; the rest is the session's key. Deliberately not under the row's own
@@ -117,23 +116,10 @@ pub(crate) fn command(session: &str, toggle: Toggle) -> Result<Command, PathErro
     ))
 }
 
-/// Send `key`'s `toggle` through the operation store. A refusal is the store's to keep and the row's to show; a
-/// success needs nothing, since the helm has pushed the new stamp by the time it replies. A session that already has a
-/// request in flight sends nothing.
+/// Send `key`'s `toggle` through the operation store ([`super::menu::send`]). A refusal is the store's to keep and the
+/// row's to show; a success needs nothing, since the helm has pushed the new stamp by the time it replies.
 pub(crate) fn send(key: &str, toggle: Toggle, cx: &mut App) {
-    let Some(operations) = session::current_operations(cx) else {
-        return;
-    };
-    let Ok(command) = command(key, toggle) else {
-        tracing::warn!("a session key that cannot be a path segment was not marked");
-        return;
-    };
-    let started = operations.update(cx, |operations, cx| {
-        operations.start(&OpKey::session(key), command, cx, |_, _| {})
-    });
-    if let Err(refused) = started {
-        tracing::debug!(?refused, "a seen toggle was not sent");
-    }
+    super::menu::send(key, command(key, toggle), cx);
 }
 
 /// `session`'s live status mark as drawn in its row, at pulse step `step`: the dot, as a [`MarkToggle`] that sends the

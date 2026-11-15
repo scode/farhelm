@@ -45,6 +45,13 @@
 //!   removal does not count as proof that it is gone (`SessionList::settle`). Any other Stop or Replace holds nothing
 //!   back.
 //!
+//! NOTE: An automatic pick reads the shared preferences (the visit history and the remembered last selection) as the
+//! helm last pushed them, with no read of its own first. SPEC.md asks a client to reread them "immediately before an
+//! automatic pick"; the migration's orchestrator ruled on 2026-11-15 that the UI channel's pushes supersede that read:
+//! the helm pushes every preference change, an agent's or the command line's included, and a change a command causes
+//! before that command's reply, so the store is never older than the listing the pick is made from. The old reread's
+//! fallback to the in-memory copy on a failed read has nothing to fall back from.
+//!
 //! NOTE: Not ported yet, because nothing in the app can cause it: the old app's refusal to stamp a retired
 //! environment's session, which arrives with environment sessions.
 

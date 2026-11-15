@@ -176,7 +176,9 @@ pub fn live(progress: Option<&ProvisioningView>, in_flight: Option<Work>) -> Opt
         | Work::SendFeedback
         | Work::TrashDelete
         | Work::TabOpen
-        | Work::TabClose => return None,
+        | Work::TabClose
+        | Work::Pin
+        | Work::MovePin => return None,
     };
     Some(Live {
         activity,

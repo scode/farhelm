@@ -24,6 +24,9 @@
 //! Right after Rename, in the same group with no separator between them, a live row offers Mark read or Mark unread,
 //! whichever its seen state calls for ([`super::seen`]); a row that offers neither omits the item, so the commands
 //! after it move up. Choosing it closes the menu, which leaves focus on the menu's button, and then sends the request.
+//! In the same group come Pin to top or Unpin, then Move up and Move down where the row has a displayed pin that way
+//! ([`super::pins`]), each closing the menu the same way before its request goes out, so focus stays on the moved row's
+//! button.
 //!
 //! After a separator come the launcher's two, Clone and Replace with…, in the old menu's group of "make a new
 //! session from this one" commands, ahead of Replace. Choosing one closes the menu, which leaves focus on its button,
@@ -57,7 +60,10 @@
 //! after keyboard input; the old `:hover` did not), and so that the reveal is one decision the tests can read: the
 //! button's wrapper names it in its debug selector, `session-menu-<key>:shown` or `:hidden`.
 //!
-//! NOTE: Pin and the environment commands come with their areas, in the old order around these, with no placeholder
+//! While any row's menu or a question it asked is open, the list's order hold stays on ([`RowLayers::any_open`],
+//! [`super::hold`]), so the row the menu belongs to does not move away from it.
+//!
+//! NOTE: The environment commands come with their area, in the old order around these, with no placeholder
 //! meanwhile; the old row menu had no Restart, which the open session's header offers instead
 //! (`session_pane/header.rs`). Also not ported: opening the menu with the arrow keys from the closed button, placing
 //! the menu beside the sidebar with a pointer notch (the layer manager places it below its anchor), the
@@ -69,7 +75,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use farhelm_helm_client::Collections;
+use farhelm_helm_client::{Collections, PathError};
 use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
     AnyElement, App, AppContext as _, Context, FocusHandle, InteractiveElement, IntoElement,
@@ -85,7 +91,7 @@ use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::entry;
 use crate::layers::{self, Anchor, LayerId, Popover, Subject};
-use crate::operations::{OpKey, Work};
+use crate::operations::{Command, OpKey, Work};
 use crate::prompt::{self, Question};
 use crate::{local_state, session};
 
@@ -161,6 +167,14 @@ impl RowLayers {
     /// Record that `key`'s row opened `layer`.
     pub(super) fn opened(&mut self, key: &str, layer: LayerId, kind: Opened) {
         self.open.insert(key.to_owned(), (layer, kind));
+    }
+
+    /// Whether any row's menu, or a question one of its commands asked, is still open: what keeps the order hold on
+    /// ([`super::hold`]).
+    pub(super) fn any_open(&mut self, window: &Window, cx: &App) -> bool {
+        self.open
+            .retain(|_, (layer, _)| layers::is_open(*layer, window, cx));
+        !self.open.is_empty()
     }
 
     /// The layer `key`'s row opened that is still open, if any.
@@ -302,7 +316,7 @@ impl SessionList {
 
     /// Close `key`'s menu if it is still open, which returns focus to its button (the menu names it, so on every
     /// platform): what every command chosen from the menu does first, at acceptance rather than at a reply.
-    fn close_menu(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn close_menu(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
         let open = self
             .current
             .current(cx)
@@ -451,6 +465,28 @@ pub(crate) fn actionable(key: &str, cx: &App) -> Option<Actionable> {
 /// inert while their question is open.
 pub(crate) fn refused(key: &str, cx: &App) -> bool {
     delete::busy(key, cx) || super::replace_yolo::open(key, cx)
+}
+
+/// Send `command`, one of the row's own requests (a seen toggle, a pin, a move), through the operation store under
+/// `key`'s session key, so it is that session's one request in flight and its other actions wait for it. Nothing waits
+/// for the reply: a refusal is the store's to keep and the row's to show ([`outcome`]), and a success needs nothing,
+/// since the helm has pushed its effect by the time it replies. Nothing is sent while the session already has a
+/// request in flight, while the window is inert, or for a key that cannot be a path segment (which no helm serves);
+/// each is logged.
+pub(super) fn send(key: &str, command: Result<Command, PathError>, cx: &mut App) {
+    let Some(operations) = session::current_operations(cx) else {
+        return;
+    };
+    let Ok(command) = command else {
+        tracing::warn!("a session key that cannot be a path segment was not sent a row request");
+        return;
+    };
+    let started = operations.update(cx, |operations, cx| {
+        operations.start(&OpKey::session(key), command, cx, |_, _| {})
+    });
+    if let Err(refused) = started {
+        tracing::debug!(?refused, "a row request was not sent");
+    }
 }
 
 /// Why every session's plain Restart and Replace wait now, if they do: while one of this window's host-registry changes
@@ -706,6 +742,9 @@ impl Render for RowMenu {
                     .flex_col()
                     .child(rename)
                     .children(seen_item)
+                    .children(super::pins::menu_items(
+                        &self.list, &self.key, row, busy, cx,
+                    ))
                     .child(menu_separator(cx))
                     .child(clone)
                     .child(replace_with)
