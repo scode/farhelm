@@ -26,6 +26,10 @@
 //! would start, beside the answers ([`DialogFrame::footer_lead`]), and a region above them for what a press of an
 //! answer has to say ([`DialogFrame::notices`]).
 //!
+//! Two of the old app's small information dialogs, Announcements and the Welcome card, drew their parts tighter than the
+//! ordinary dialog (`.announcements-dialog > .dialog-header` and `.welcome-dialog > .welcome-header` in the old
+//! stylesheet): [`DialogFrame::compact`].
+//!
 //! NOTE: The old Close changed only its color on hover; here it is a ghost icon button, which gets the ghost tier's
 //! hover fill. The old one was a 20-pixel "×" character; here it is the close icon at the icon buttons' size.
 
@@ -57,6 +61,13 @@ const NOTICES_MAX_SHARE: f32 = 0.24;
 /// `.launch-composer-footer-summary`: a footer lead's basis (`flex: 1 1 220px`) before the row wraps the answers.
 const FOOTER_LEAD_BASIS: f32 = 220.;
 
+/// A compact frame's header padding, vertical then horizontal: the old Announcements and Welcome dialogs' `10px 14px`.
+const COMPACT_HEADER_PAD: (Pixels, Pixels) = (px(10.), px(14.));
+/// A compact frame's body padding: the old `12px 14px`.
+const COMPACT_BODY_PAD: (Pixels, Pixels) = (px(12.), px(14.));
+/// A compact frame's footer padding: the old `8px 14px`.
+const COMPACT_FOOTER_PAD: (Pixels, Pixels) = (px(8.), px(14.));
+
 /// A dialog's frame. The title is the accessible name. The title and the summary are each a [`Line`]: the app's own
 /// words, or a [`HostSentence`](crate::host_text::HostSentence) when they name a host value, which then is a labelled
 /// node of its own inside the dialog. The answers are drawn right-aligned in the order given, the old footer's order
@@ -76,6 +87,7 @@ pub struct DialogFrame {
     fixed_height: Option<Pixels>,
     footer_lead: Option<AnyElement>,
     notices: Option<AnyElement>,
+    compact: bool,
 }
 
 impl DialogFrame {
@@ -105,6 +117,7 @@ impl DialogFrame {
             fixed_height: None,
             footer_lead: None,
             notices: None,
+            compact: false,
         }
     }
 
@@ -193,14 +206,28 @@ impl DialogFrame {
         self.notices = Some(notices.into_any_element());
         self
     }
+
+    /// Draw the header, body and footer with the tighter padding the old Announcements and Welcome dialogs had (header
+    /// 10 by 14 pixels, body 12 by 14, footer 8 by 14) in place of the ordinary dialog's. Only the padding changes.
+    pub fn compact(mut self) -> Self {
+        self.compact = true;
+        self
+    }
 }
 
 impl RenderOnce for DialogFrame {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let palette = theme::palette(cx);
         let name = self.title.accessible_text();
-        let (pad_y, pad_x) = metrics::DIALOG_PAD;
-        let (foot_y, foot_x) = metrics::DIALOG_FOOTER_PAD;
+        let ((head_y, head_x), (pad_y, pad_x), (foot_y, foot_x)) = if self.compact {
+            (COMPACT_HEADER_PAD, COMPACT_BODY_PAD, COMPACT_FOOTER_PAD)
+        } else {
+            (
+                metrics::DIALOG_PAD,
+                metrics::DIALOG_PAD,
+                metrics::DIALOG_FOOTER_PAD,
+            )
+        };
         let max_height = window.viewport_size().height - metrics::DIALOG_VERTICAL_MARGIN * 2.;
 
         let mut heading = div().flex_1().min_w_0();
@@ -240,8 +267,8 @@ impl RenderOnce for DialogFrame {
             .flex_shrink_0()
             .items_center()
             .gap(px(14.))
-            .py(pad_y)
-            .px(pad_x)
+            .py(head_y)
+            .px(head_x)
             .bg(theme::color(palette.control_hover))
             .border_b_1()
             .border_color(theme::color(palette.border_dim))

@@ -21,10 +21,12 @@
 //!   the same action as the Mac app menu's item (the maintainer decided on 2026-11-13 that the notices live in that
 //!   window, and the GPUI migration's orchestrator put the Linux item in this menu). SPEC.md does not place it, so it
 //!   comes last.
+//! - **Announcements** appears directly after Release notes once this helm has shown an announcement (the pushed
+//!   queue's history is not empty, read when the menu draws) and opens that history
+//!   ([`crate::announcements::open_history`]) with the `?` button as its opener.
 //!
-//! NOTE: Not drawn yet, each waiting for its own surface: Send feedback, Keyboard shortcuts, Announcements (after this
-//! helm has shown one) and Welcome. Each joins [`items`] in the old order when its dialog lands; a menu item whose
-//! dialog does not exist would open nothing.
+//! NOTE: Not drawn yet, each waiting for its own surface: Send feedback, Keyboard shortcuts and Welcome. Each joins
+//! [`items`] in the old order when its dialog lands; a menu item whose dialog does not exist would open nothing.
 //!
 //! NOTE: Deviations from the old flyout, both from the layer manager's one beside placement (its `Placement::Beside`
 //! docs record the shared clamp): the old Help menu hung from its toggle's bottom edge and kept at least 8 pixels from
@@ -75,6 +77,8 @@ enum Item {
     Documentation,
     /// Always offered, even when no installed update waits for a restart.
     ReleaseNotes,
+    /// The history of announcements this helm has shown; offered only once it has shown one.
+    Announcements,
     /// Commands to start a host's SSH connections by hand, for a host that asks for approval on every login.
     SshHelp,
     /// Offered only while an updater runs (SPEC.md, "Installation and updates").
@@ -90,6 +94,7 @@ impl Item {
             Item::ChatOnDiscord => "Chat on Discord",
             Item::Documentation => "Documentation",
             Item::ReleaseNotes => "Release notes",
+            Item::Announcements => "Announcements",
             Item::SshHelp => "SSH needs 2FA?",
             Item::CheckForUpdates => "Check for updates",
             Item::OpenSourceNotices => crate::desktop::licenses::TITLE,
@@ -102,6 +107,7 @@ impl Item {
             Item::ChatOnDiscord => "Opens Farhelm's Discord in your browser",
             Item::Documentation => "Opens farhelm.io/docs in your browser",
             Item::ReleaseNotes => "Opens the release notes in your browser",
+            Item::Announcements => "Shows previously shown announcements again",
             Item::SshHelp => "Start a host's SSH connections yourself",
             Item::CheckForUpdates => "Installs a newer Farhelm if there is one",
             Item::OpenSourceNotices => "Licenses of the code and fonts in this app",
@@ -121,6 +127,9 @@ impl Item {
             Item::ReleaseNotes => {
                 "Release notes: open Farhelm's release notes at farhelm.io/docs in your browser, each release with what changed"
             }
+            Item::Announcements => {
+                "Announcements: show the announcements Farhelm has shown you before, newest first, such as serious changes you needed to act on"
+            }
             Item::SshHelp => {
                 "SSH needs 2FA?: commands to start Farhelm's connections by hand when a host asks for approval on every SSH login"
             }
@@ -138,6 +147,7 @@ impl Item {
         match self {
             Item::ChatOnDiscord => Icon::External,
             Item::Documentation | Item::ReleaseNotes | Item::OpenSourceNotices => Icon::Document,
+            Item::Announcements => Icon::Info,
             Item::SshHelp => Icon::Terminal,
             Item::CheckForUpdates => Icon::Update,
         }
@@ -149,6 +159,7 @@ impl Item {
             Item::ChatOnDiscord => "help-menu-discord",
             Item::Documentation => "help-menu-documentation",
             Item::ReleaseNotes => "help-menu-release-notes",
+            Item::Announcements => "help-menu-announcements",
             Item::SshHelp => "help-menu-ssh-help",
             Item::CheckForUpdates => "help-menu-check-for-updates",
             Item::OpenSourceNotices => "help-menu-open-source-notices",
@@ -156,16 +167,16 @@ impl Item {
     }
 }
 
-/// The items the menu offers, in order: the fixed ones in SPEC.md's order, then Check for updates when an updater runs
-/// (`updater`), then Open-Source Notices on Linux (`linux`). Parameters rather than lookups, so the order is tested for
-/// every combination on any platform.
-fn items(updater: bool, linux: bool) -> Vec<Item> {
-    let mut items = vec![
-        Item::ChatOnDiscord,
-        Item::Documentation,
-        Item::ReleaseNotes,
-        Item::SshHelp,
-    ];
+/// The items the menu offers, in order: the fixed ones in SPEC.md's order, with Announcements directly after Release
+/// notes once this helm has shown one (`announced`), then Check for updates when an updater runs (`updater`), then
+/// Open-Source Notices on Linux (`linux`). Parameters rather than lookups, so the order is tested for every combination
+/// on any platform.
+fn items(updater: bool, announced: bool, linux: bool) -> Vec<Item> {
+    let mut items = vec![Item::ChatOnDiscord, Item::Documentation, Item::ReleaseNotes];
+    if announced {
+        items.push(Item::Announcements);
+    }
+    items.push(Item::SshHelp);
     if updater {
         items.push(Item::CheckForUpdates);
     }
@@ -320,6 +331,9 @@ impl HelpMenu {
             Item::ChatOnDiscord => cx.open_url(DISCORD_URL),
             Item::Documentation => cx.open_url(DOCS_URL),
             Item::ReleaseNotes => cx.open_url(RELEASE_NOTES_URL),
+            Item::Announcements => {
+                let _ = crate::announcements::open_history(opener, mark, window, cx);
+            }
             Item::SshHelp => {
                 let _ = crate::hosts::ssh_help::open(opener, mark, window, cx);
             }
@@ -331,7 +345,11 @@ impl HelpMenu {
 
 impl Render for HelpMenu {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let shown = items(crate::desktop::updates::runs(cx), cfg!(target_os = "linux"));
+        let shown = items(
+            crate::desktop::updates::runs(cx),
+            crate::announcements::has_history(cx),
+            cfg!(target_os = "linux"),
+        );
         let entries = shown.into_iter().enumerate().map(|(at, item)| {
             let (button, opener) = (self.button.clone(), self.opener.clone());
             let entry = MenuItem::new(

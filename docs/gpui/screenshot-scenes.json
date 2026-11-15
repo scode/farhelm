@@ -808,6 +808,11 @@
       "reference": "help-menu"
     },
     {
+      "golden": "announcements-dialog",
+      "title": "The Announcements dialog as Help's history opens it: two shown announcements, one with a detail line and a link (the old dialog was never captured)",
+      "reference": null
+    },
+    {
       "golden": "row-delete-confirmation",
       "title": "A session row's Delete question, asked from the row",
       "reference": "row-delete-confirmation"
