@@ -52,6 +52,7 @@
 //! - [`sounds`]: the status sounds as plain Rust: the rules for which one an observation plays, and the three sounds
 //!   synthesized into WAV bytes; observing the store and playing them come later.
 //! - [`help_menu`]: the host rail foot's `?` button and the Help menu it opens.
+//! - [`feedback`]: the Send feedback dialog, a private message to the maintainer sent through the helm.
 //!
 //! Still to come, each under its own module: the rest of actions and keys.
 //!
@@ -75,6 +76,7 @@ pub mod components;
 pub mod desktop;
 pub mod drafts;
 pub mod environment_ui;
+pub mod feedback;
 pub mod focus;
 pub mod harness;
 pub mod help_menu;

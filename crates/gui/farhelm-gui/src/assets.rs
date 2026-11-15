@@ -265,6 +265,9 @@ pub enum Icon {
     /// An i in a circle: a menu item that shows information Farhelm wrote, such as the announcements it has shown
     /// (the old app's `ActionGlyph::Info`).
     Info,
+    /// A speech bubble with two lines of text: send feedback, on the Help menu's Send feedback and in the feedback
+    /// dialog's header tile (the old app's `ActionGlyph::Feedback`, in the 14-unit action box with the 1.2 stroke).
+    Feedback,
 }
 
 impl Icon {
@@ -343,6 +346,7 @@ impl Icon {
         Icon::External,
         Icon::Adjust,
         Icon::Info,
+        Icon::Feedback,
     ];
 }
 
@@ -420,6 +424,7 @@ impl Icon {
             Icon::External => "icons/external.svg",
             Icon::Adjust => "icons/adjust.svg",
             Icon::Info => "icons/info.svg",
+            Icon::Feedback => "icons/feedback.svg",
         }
     }
 }
@@ -534,6 +539,7 @@ impl Assets {
             "icons/external.svg" => Some(include_bytes!("../assets/icons/external.svg")),
             "icons/adjust.svg" => Some(include_bytes!("../assets/icons/adjust.svg")),
             "icons/info.svg" => Some(include_bytes!("../assets/icons/info.svg")),
+            "icons/feedback.svg" => Some(include_bytes!("../assets/icons/feedback.svg")),
             _ => None,
         }
     }
