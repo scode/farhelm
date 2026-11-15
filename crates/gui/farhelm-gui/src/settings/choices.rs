@@ -349,15 +349,17 @@ pub(super) fn read_route<T: DeserializeOwned + 'static>(
     }
 }
 
-/// The line under a choice after the helm refused its save, drawn as an alert under the element id `id` so tests and
-/// the test bridge find it next to its control: the danger ink at the help's size and line.
-pub(super) fn failure_line(id: String, text: &'static str, cx: &App) -> Stateful<Div> {
+/// The line under a choice after its save failed, drawn as an alert under the element id `id` so tests and the test
+/// bridge find it next to its control: the danger ink at the help's size and line. The text is the app's own words
+/// (fixed, or App's updater reason); the helm's words go through [`host_failure_line`].
+pub(super) fn failure_line(id: String, text: impl Into<SharedString>, cx: &App) -> Stateful<Div> {
     let palette = theme::palette(cx);
+    let text = text.into();
     div()
         .id(gpui::ElementId::Name(id.clone().into()))
         .debug_selector(move || id.clone())
         .role(Role::Alert)
-        .aria_label(text)
+        .aria_label(text.clone())
         .text_size(metrics::TEXT_SM)
         .line_height(px(HELP_LINE_HEIGHT))
         .text_color(theme::color(palette.danger))

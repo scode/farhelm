@@ -103,8 +103,9 @@ LOCAL_CHIP = "Filtered to host Local; remove filter"
 DIVIDER_FOCUSED = re.compile(r'splitter "Sidebar width".*\[focused\]')
 
 # The Settings dialog's header summary: text only the open dialog draws, so waiting for it (or for it to go) tells
-# whether Settings is open.
-SETTINGS_SUMMARY = "For every host on this helm, and for this device"
+# whether Settings is open. The smoke app runs no updater, so App is not listed and the summary stops here; with App it
+# goes on ", and for this device", which this text matches too.
+SETTINGS_SUMMARY = "For every host on this helm"
 
 # The Hosts panel's accessible name, quoted as the snapshot prints it: only the shown panel draws it.
 HOSTS_PANEL = '"Host management"'

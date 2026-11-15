@@ -36,20 +36,21 @@ it; the sidebar's row keeps the cases that draw it.
 
 ## `tests/settings.spec.ts`, partly
 
-The dialog's shell and its Sessions, Appearance, Hosts, Terminal, Checkouts, Agent trust and Notifications sections are
-ported; the cases about the other sections (Recipes, Tensorlake, Containers, Credentials and App) wait for them.
-Notifications' own cases are in `tests/ntfy-settings.spec.ts`, below; of this spec's, the navigation case's
+The dialog's shell and its Sessions, Appearance, Hosts, Terminal, Checkouts, Agent trust, Notifications and App sections
+are ported; the cases about the other sections (Recipes, Tensorlake, Containers and Credentials) wait for them. App,
+listed only in the installed desktop app (where its updater runs), had no browser spec, since the web interface never
+showed it. Notifications' own cases are in `tests/ntfy-settings.spec.ts`, below; of this spec's, the navigation case's
 Notifications half (the "ntfy alerts" group under its 16-pixel sub-heading, below the 18-pixel section heading) is the
 golden `settings-notifications`, and its Sounds half waits for the Sounds sub-heading (Deviations). Appearance's own
 cases are in `tests/appearance.spec.ts`, below. Agent trust's are split between `tests/workspace-trust.spec.ts` (below)
 and this spec, whose hint-switch cases are mapped in the Agent trust bullet.
 
 NOTE: Terminal shows the link choice and the tunnel consent switch. Its **File types to open with Cmd-click** field
-governs opening downloaded files and comes with file downloads, later in the migration. The switch is the old Mac app's,
-and like it is drawn only on the Mac, where the terminal offers tunnels: turning it on asks the terminal's tunnel
-warning ("Allow tunnels from remote sessions?") and consent is saved only on Allow; turning it off saves at once, and
-the helm then closes every open tunnel. The golden `settings-terminal` is decided for the Mac on every machine, so it
-shows the switch.
+governs opening downloaded files, so it waits for the terminal area's downloads, which are not on `main` yet; until they
+land it is not drawn. The switch is the old Mac app's, and like it is drawn only on the Mac, where the terminal offers
+tunnels: turning it on asks the terminal's tunnel warning ("Allow tunnels from remote sessions?") and consent is saved
+only on Allow; turning it off saves at once, and the helm then closes every open tunnel. The golden `settings-terminal`
+is decided for the Mac on every machine, so it shows the switch.
 
 The app opens Settings from the gear on the host rail's foot, which calls `settings::open` with itself as the opener and
 opens it at Sessions; the gear's own tests, and the end-to-end smoke step that clicks it, are in the sidebar's parity
@@ -130,8 +131,17 @@ Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs` unless named 
   reason, the documentation link, a save through its route, a refusal restoring the stored choice). The switch shares
   Agent trust's state, read and failure line (`settings/configured.rs`), whose tests cover a reply reaching only its own
   opening.
+- App, which no browser spec covered (the old desktop app's only): `app_is_listed_last_while_the_desktop_updater_runs`
+  (listed after Notifications only with an updater; `the_dialog_lists_only_the_sections_this_build_has` has none) and
+  `the_app_switch_writes_the_apps_own_setting_and_shows_only_what_was_saved` (the note and the switch's two helps, a
+  write through the updater with nothing sent to the helm, a refused write showing the setting in force with the
+  updater's reason, kept across a section switch and gone after the next saved press), and
+  `the_app_switch_writes_while_a_preference_save_is_unanswered` (a helm save in flight never holds App's write back).
+  The header's words: `the_header_says_this_device_only_where_app_is_listed`.
 - The look: the goldens `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-terminal`,
-  `settings-checkouts`, `settings-agent-trust` and `settings-notifications` (`crates/gui/farhelm-gui/src/goldens.rs`).
+  `settings-checkouts`, `settings-agent-trust`, `settings-notifications` and `settings-app`
+  (`crates/gui/farhelm-gui/src/goldens.rs`). The reference set has no `settings-app` picture: its capture drove the web
+  interface, which has no App section.
 
 Not ported here, and why: the persistence across a second client and reload belongs to the helm's preference route and
 the UI channel's pushes, which their own tests cover; "settings gap keeps focus ..." is the layer manager's empty-space
@@ -538,8 +548,11 @@ Replacing tests, in `crates/gui/farhelm-gui/src/hosts/menu/tests.rs` and
 - The menu: `a_remote_hosts_toggle_opens_a_menu_offering_update_settings_and_remove` (its name, header and first
   command, and Escape back to the toggle), `the_local_hosts_greyed_update_says_why_and_sends_nothing`,
   `settings_waits_for_the_hosts_own_work_in_flight`, `a_second_press_on_the_toggle_closes_its_menu`,
-  `escape_on_the_menu_returns_focus_to_its_toggle_under_the_macos_click_rule`. What it offers is `offers::offers`, whose
-  tests are listed in the `tests/provisioning.spec.ts` row.
+  `escape_on_the_menu_returns_focus_to_its_toggle_under_the_macos_click_rule`, and in the installed desktop app
+  `in_the_desktop_app_the_local_hosts_update_asks_the_updater_to_check` (the local row's Update asks the app's updater
+  for a check and sends the helm nothing). What it offers is `offers::menu_offers`, whose tests are listed in the
+  `tests/provisioning.spec.ts` row, with `in_the_desktop_app_the_local_hosts_update_checks_for_a_release` in
+  `hosts/offers/tests.rs`.
 - Opening and closing ("rail ${action} modal ... returns to its avatar", its row half):
   `focus_starts_on_the_first_edit`, `escape_and_both_close_controls_return_focus_to_the_toggle`,
   `the_dialog_closes_when_the_registry_no_longer_lists_its_host`,
@@ -564,6 +577,11 @@ Where the port does not match the old app, and why. Each stays until the work na
 
 ### The Settings dialog
 
+- **The header's summary follows whether App is listed.** The old dialog always read "For every host on this helm, and
+  for this device"; it kept appearance and the status sounds per device. Here those are helm preferences, so only App's
+  switch is this device's, and without App (Linux, dev and agent builds, where no updater runs) the summary reads "For
+  every host on this helm" (decided by the migration's orchestrator on 2026-11-15). The goldens without App show the
+  shorter words.
 - **Appearance starts at System on the switch to this app.** The old app kept the choice in each device's web view
   storage, and nothing reads it: the maintainer decided on 2026-11-13 that the moved settings reset to their defaults,
   as a breaking change named where it ships.
@@ -784,13 +802,16 @@ Where the port does not match the old app, and why. Each stays until the work na
   there.
 - **A host that reports no build reads "Farhelm not connected"** in the header. The old header showed the host's
   recorded install path (`remote_farhelm`) in the build's place.
-- **The menu offers Re-run, Update, Settings and Remove so far,** with the local host's Update greyed with its reason.
-  Re-run is drawn for a failed Update, and for a failed setup on an SSH host only: a Tensorlake sandbox's setup rerun
-  probes through the Tensorlake route and comes with those pieces, and a container's setup belongs to its environment's
-  launch. Remove: see "Remove host" below. Uninstall arrives with its piece, at its old place; Retry and Adopt are not
-  offered in this milestone (decided by the migration's settings-and-hosts area on 2026-11-14), and the toggle keeps the
-  old hover help, which names them. The live Update's hover help is new ("Update: install this helm's Farhelm version on
-  this host"): the old menu items had none, and every menu item here has one.
+- **The menu offers Re-run, Update, Settings and Remove so far,** with the local host's Update greyed with its reason,
+  or, in the installed desktop app, live as the app's check for a newer release ("Check for a newer Farhelm and install
+  it"), whose progress and outcome show beside the version readout, as in the old app. Re-run is drawn for a failed
+  Update, and for a failed setup on an SSH host only: a Tensorlake sandbox's setup rerun probes through the Tensorlake
+  route and comes with those pieces, and a container's setup belongs to its environment's launch. Remove: see "Remove
+  host" below. Uninstall arrives with its piece, at its old place; Retry and Adopt are not offered in this milestone
+  (decided by the migration's settings-and-hosts area on 2026-11-14), and the toggle keeps the old hover help, which
+  names them. The live Update's hover help is new ("Update: install this helm's Farhelm version on this host", and the
+  desktop app's local check's "Update: check for a newer Farhelm release and install it"): the old menu items had none,
+  and every menu item here has one.
 - **One save per host at a time, and nothing goes unavailable while one runs.** Every setting saves under the host's one
   operation key, so a click on another setting of the same host while a save is in flight sends nothing (the switch or
   choice goes on showing what it showed) and "Not saved: another operation was in progress. Try again." shows where that

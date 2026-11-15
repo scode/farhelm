@@ -6,15 +6,18 @@
 //! layer manager anchored beside its toggle, the shared header ([`MenuHeader`]) naming the host, then the commands in a
 //! [`Role::Menu`] of their own, each an icon, a label and a description line, walked with Up and Down.
 //!
-//! What the menu offers is [`offers::offers`], one pure function of the pushed host, its retained run and its work in
-//! flight, read while the menu draws, so an open menu follows the host. So far it draws Re-run on an SSH host whose
-//! setup failed, which runs it again ([`super::setup::rerun`]), and on a host whose Update failed, which sends that
-//! Update again ([`super::update::rerun`]); Update on a remote host, which updates it without asking (the same
-//! request); Settings, which opens the host settings dialog ([`super::settings`]); on the helm's own machine the greyed
-//! Update with the reason it is greyed ("Run the installer again to update this machine"), which sends nothing
-//! (SPEC.md, "Session list"), as is a failed Update's Re-run there; and on an SSH host, behind a separator in the
-//! danger red, Remove, which forgets the host ([`super::remove`]). Settings and Remove are unavailable while the host
-//! has work in flight or a run going on.
+//! What the menu offers is [`offers::menu_offers`], one pure function of the pushed host, its retained run, its work in
+//! flight and whether the desktop app's updater runs, read while the menu draws, so an open menu follows the host. So
+//! far it draws Re-run on an SSH host whose setup failed, which runs it again ([`super::setup::rerun`]), and on a host
+//! whose Update failed, which sends that Update again ([`super::update::rerun`]); Update on a remote host, which
+//! updates it without asking (the same request); Settings, which opens the host settings dialog ([`super::settings`]);
+//! on the helm's own machine the greyed Update with the reason it is greyed ("Run the installer again to update this
+//! machine"), which sends nothing (SPEC.md, "Session list"), as is a failed Update's Re-run there; in the installed
+//! desktop app, where the app's updater runs, that machine's Update is live instead, "Check for a newer Farhelm and
+//! install it", and asks the updater to check now ([`crate::desktop::updates::check_now`]), whose progress and outcome
+//! show beside the version readout, so the menu just closes, as the old one did; and on an SSH host, behind a separator
+//! in the danger red, Remove, which forgets the host ([`super::remove`]). Settings and Remove are unavailable while the
+//! host has work in flight or a run going on.
 //!
 //! [`open_menu`] is the entry point. The Hosts panel's row toggle calls it, and so will the host rail's avatar menu,
 //! with its own anchor and focus handle. Focus goes back to that control on every platform, also where a click leaves a
@@ -142,13 +145,13 @@ pub fn open_menu(
     let rerun_drawn = rerun(&view, &offered);
     let start = if rerun_drawn.is_some_and(|(_, enabled)| enabled) {
         rerun_focus.clone()
-    } else if offered.update == Some(Update::Available) {
+    } else if offered.update.is_some_and(Update::acts) {
         update_focus.clone()
     } else if offered.settings_enabled {
         settings_focus.clone()
     } else if rerun_drawn.is_some() {
         rerun_focus.clone()
-    } else if offered.update == Some(Update::Greyed) {
+    } else if offered.update.is_some() {
         update_focus.clone()
     } else {
         settings_focus.clone()
@@ -173,8 +176,9 @@ pub fn open_menu(
     Some(layer)
 }
 
-/// Host `host` as the store holds it now, with what its menu offers: [`offers::offers`] over its pushed entry, its
-/// retained run and whether work on it is in flight. `None` when the window is inert or the registry does not list it.
+/// Host `host` as the store holds it now, with what its menu offers: [`offers::menu_offers`] over its pushed entry, its
+/// retained run, whether work on it is in flight and whether the desktop app's updater runs. `None` when the window is
+/// inert or the registry does not list it.
 fn current(host: i64, cx: &App) -> Option<(HostView, Offers)> {
     let store = session::current_store(cx)?;
     let key = HostView::key(host);
@@ -182,7 +186,12 @@ fn current(host: i64, cx: &App) -> Option<(HostView, Offers)> {
     let view = collections.get::<HostView>(&key)?.clone();
     let in_flight = session::current_operations(cx)
         .is_some_and(|operations| operations.read(cx).in_flight(&OpKey::host(&key)).is_some());
-    let offered = offers::offers(&view, collections.get(&key), in_flight);
+    let offered = offers::menu_offers(
+        &view,
+        collections.get(&key),
+        in_flight,
+        crate::desktop::updates::runs(cx),
+    );
     Some((view, offered))
 }
 
@@ -266,6 +275,9 @@ impl Render for HostMenu {
             let help = match offered {
                 Update::Available => "Update: install this helm's Farhelm version on this host",
                 Update::Greyed => "Update: run the installer again to update this machine",
+                Update::CheckForRelease => {
+                    "Update: check for a newer Farhelm release and install it"
+                }
             };
             MenuItem::new(
                 "host-menu-update",
@@ -275,15 +287,27 @@ impl Render for HostMenu {
                 Role::MenuItem,
             )
             .description(offered.description())
-            .disabled(offered == Update::Greyed)
+            .disabled(!offered.acts())
             .focus(&self.update_focus)
             .on_click(move |_, window, cx| {
-                // As Re-run's: the mark of this click, before the menu closes. Not checked again here: a press that meets
-                // work on the host's key sends nothing and says so under the row, and the helm refuses an Update of a
-                // host whose run started meanwhile.
-                let mark = Mark::take(cx);
-                close(&menu, window, cx);
-                super::update::start(host, mark, window, cx);
+                match offered {
+                    Update::Available => {
+                        // As Re-run's: the mark of this click, before the menu closes. Not checked again here: a press
+                        // that meets work on the host's key sends nothing and says so under the row, and the helm
+                        // refuses an Update of a host whose run started meanwhile.
+                        let mark = Mark::take(cx);
+                        close(&menu, window, cx);
+                        super::update::start(host, mark, window, cx);
+                    }
+                    // The app's own check: its progress and outcome show beside the version readout, so the menu only
+                    // closes. The updater runs one check at a time, so a press during one joins it.
+                    Update::CheckForRelease => {
+                        close(&menu, window, cx);
+                        crate::desktop::updates::check_now(cx);
+                    }
+                    // Never reached: the greyed item takes no click. Nothing to do if it were.
+                    Update::Greyed => {}
+                }
             })
         });
         let (menu, host, opener) = (cx.weak_entity(), self.host, self.opener.clone());

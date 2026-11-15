@@ -12,9 +12,10 @@
 //!   the frame or its close controls (`.app-settings-dialog[aria-label="Settings"]`).
 //! - **The sections.** A list of section buttons on the left, each with its icon and full label and the solid selection
 //!   fill on the one shown, and the shown section beside it under a heading of the same name. Only the sections this
-//!   build has are listed, in SPEC.md's order ([`Section::ALL`]). Each section's state lives in the dialog for as long
-//!   as it is open, so a hidden section keeps its pending saves, failure lines and unsaved text (Checkouts' fields);
-//!   only the shown one is drawn, so Tab never reaches a hidden control.
+//!   build has are listed, in SPEC.md's order ([`Section::ALL`]), and App only while the desktop app's updater runs
+//!   ([`Section::listed`]). Each section's state lives in the dialog for as long as it is open, so a hidden section
+//!   keeps its pending saves, failure lines and unsaved text (Checkouts' fields); only the shown one is drawn, so Tab
+//!   never reaches a hidden control.
 //! - **Opening and closing.** [`open`] is the gear's entry point. It opens at Sessions with focus on its first switch
 //!   (SPEC.md: "The gear always opens sessions and focuses its first switch"). [`open_at_agent_trust`] is a trust
 //!   hint's: it opens at Agent trust and puts focus on that agent's switch once the switch can take it. Escape, the
@@ -32,7 +33,9 @@
 //!   its route back after a done save ([`checkout_field`]). So are Notifications' ntfy alerts: a form the user saves
 //!   explicitly, a view of its own ([`ntfy`]). Terminal's tunnel switch saves like a switch only when turned off;
 //!   turned on, it asks the terminal's tunnel warning, whose Allow saves the consent, and shows the stored choice until
-//!   the helm pushes it ([`terminal`]).
+//!   the helm pushes it ([`terminal`]). App's switch is not the helm's at all: it writes the desktop app's own setting
+//!   through its updater, at once and with a final answer, so it has no draft and never holds the preference row's key
+//!   ([`app`]).
 //!
 //! NOTE: Quick flips do not follow the old app's "newest-choice" rule. Its preference queue coalesced a field's clicks,
 //! sent only the newest, and reported a failure only for the newest click. Here the operation store admits one request
@@ -53,9 +56,10 @@
 //! taller than the dialog's body even at the dialog's full height, by about 30 pixels, so its body scrolls: unscrolled,
 //! its last control, the docs link, sits at the body's visible edge with its descenders and underline below it, and
 //! scrolled to the end it lies wholly above the footer. The header is taller than the old one, and the docs link has a
-//! line of its own.
+//! line of its own. Terminal's file-types field waits for the terminal's file downloads, which it governs.
 
 mod agent_trust;
+mod app;
 mod appearance;
 mod checkout_field;
 mod checkouts;
@@ -114,13 +118,19 @@ const HEADING_LINE_HEIGHT: f32 = 22.;
 /// `.host-settings-section`'s gap between a section's heading and its groups.
 const SECTION_GAP: f32 = 14.;
 
-/// The header's summary, the old dialog's words.
+/// The header's summary where App is listed: the old dialog's words, true there because App's switch is this device's
+/// own setting while every other choice is the helm's.
 ///
 /// NOTE: "and for this device" described the old app, which kept appearance and the status sounds per device. In this
 /// app they are helm preferences (the maintainer's decision of 2026-11-13), so only the desktop app's automatic-update
-/// choice (Settings → App, not built yet) is this device's. The migration's orchestrator decided on 2026-11-14 to keep
-/// the words as they are, since they are true again once App is built.
-const SUMMARY: &str = "For every host on this helm, and for this device";
+/// choice (Settings → App) is this device's.
+const SUMMARY_WITH_APP: &str = "For every host on this helm, and for this device";
+
+/// The header's summary where App is not listed (no updater runs: Linux, and dev or agent builds), where nothing in the
+/// dialog belongs to this device. The migration's orchestrator decided on 2026-11-15 that the words follow whether App
+/// is listed, dropping "and for this device" without it. The old app at reference commit `24bc0580` had only the one
+/// summary, so these are its words cut short rather than words of their own.
+const SUMMARY: &str = "For every host on this helm";
 
 /// The footer's note, the old desktop app's words.
 ///
@@ -181,7 +191,7 @@ fn open_dialog(
     let container = cx.focus_handle();
     let start = dialog
         .read(cx)
-        .start(section)
+        .start(section, cx)
         .unwrap_or_else(|| container.clone());
     let layer = layers::open_dialog(
         Dialog {
@@ -314,6 +324,8 @@ pub(crate) enum Section {
     Checkouts,
     AgentTrust,
     Notifications,
+    /// The desktop app's own automatic-updates switch, listed only while its updater runs ([`Section::listed`]).
+    App,
 }
 
 impl Section {
@@ -328,7 +340,24 @@ impl Section {
         Section::Checkouts,
         Section::AgentTrust,
         Section::Notifications,
+        Section::App,
     ];
+
+    /// Whether the dialog lists this section in this app: every section in [`Section::ALL`], except App, which only a
+    /// desktop app whose updater runs has (SPEC.md: "followed by **App** only in a desktop app whose updater is
+    /// active"). The updater's own answer decides, so no platform or build is checked here.
+    fn listed(self, cx: &App) -> bool {
+        match self {
+            Section::App => crate::desktop::updates::runs(cx),
+            Section::Sessions
+            | Section::Appearance
+            | Section::Hosts
+            | Section::Terminal
+            | Section::Checkouts
+            | Section::AgentTrust
+            | Section::Notifications => true,
+        }
+    }
 
     /// The section's stable key, which its button's element id is built from.
     fn key(self) -> &'static str {
@@ -340,6 +369,7 @@ impl Section {
             Section::Checkouts => "checkouts",
             Section::AgentTrust => "agent-trust",
             Section::Notifications => "notifications",
+            Section::App => "app",
         }
     }
 
@@ -353,6 +383,7 @@ impl Section {
             Section::Checkouts => "Checkouts",
             Section::AgentTrust => "Agent trust",
             Section::Notifications => "Notifications",
+            Section::App => "App",
         }
     }
 
@@ -366,6 +397,7 @@ impl Section {
             Section::Checkouts => Icon::Folder,
             Section::AgentTrust => Icon::AgentTrust,
             Section::Notifications => Icon::Bell,
+            Section::App => Icon::App,
         }
     }
 
@@ -375,7 +407,8 @@ impl Section {
     /// app opens Settings at either; only their goldens do. `None` for Agent trust too, whose first switch is
     /// unavailable until the section's read answers ([`open_at_agent_trust`]), and for Checkouts, whose first control
     /// is a text field that is read-only until its read answers, and Notifications, whose controls are unavailable
-    /// until its read answers ([`ntfy`]); only their goldens open at either.
+    /// until its read answers ([`ntfy`]); only their goldens open at either. `None` for App as well, whose switch is
+    /// not a preference [`Choice`]: [`SettingsDialog::start`] gives it its own handle.
     fn first(self) -> Option<Choice> {
         match self {
             Section::Sessions => Some(Choice::SkipSessionConfirmations),
@@ -385,6 +418,7 @@ impl Section {
             Section::Checkouts => None,
             Section::AgentTrust => None,
             Section::Notifications => None,
+            Section::App => None,
         }
     }
 }
@@ -416,6 +450,8 @@ pub(crate) struct SettingsDialog {
     /// Notifications' ntfy alerts form, made the first time the section is shown in this opening, which is when it
     /// reads the helm's settings (the pattern Agent trust follows).
     ntfy: Option<Entity<ntfy::NtfyAlerts>>,
+    /// App's automatic-updates switch: its focus handle and the reason its last press was not saved ([`app`]).
+    app: app::AppUpdates,
     /// The handover a trust hint asked for ([`open_at_agent_trust`]), until its agent's read answers. Left set if that
     /// read fails, which is harmless: the read is sent once per opening, so nothing can match it again in this opening.
     focus_on: Option<Handover>,
@@ -473,6 +509,7 @@ impl SettingsDialog {
             checkout_fields: None,
             spare: Configured::new(),
             ntfy: None,
+            app: app::AppUpdates::new(cx.focus_handle().tab_stop(true)),
             focus_on: None,
             layer: None,
             refused: Refused::default(),
@@ -489,7 +526,13 @@ impl SettingsDialog {
 
     /// Where focus starts when the dialog opens at `section`, or `None` to start on the dialog itself
     /// ([`Section::first`]).
-    fn start(&self, section: Section) -> Option<FocusHandle> {
+    ///
+    /// App's switch is not a preference [`Choice`], so it has its own handle, given only while App is listed: where no
+    /// updater runs, the section draws nothing, and a handle with no element behind it could not take focus.
+    fn start(&self, section: Section, cx: &App) -> Option<FocusHandle> {
+        if section == Section::App {
+            return section.listed(cx).then(|| self.app.focus.clone());
+        }
         let first = section.first()?;
         Some(self.switches[Self::index(first)].focus.clone())
     }
@@ -903,6 +946,23 @@ impl SettingsDialog {
                 .iter()
                 .map(|form| form.clone().into_any_element())
                 .collect(),
+            Section::App => {
+                let weak = cx.weak_entity();
+                app::section(
+                    &self.app,
+                    move |on, _, cx| {
+                        let _ = weak.update(cx, |dialog, cx| {
+                            dialog.app.set(on, cx);
+                            cx.notify();
+                        });
+                    },
+                    cx,
+                )
+                .into_iter()
+                .flatten()
+                .map(IntoElement::into_any_element)
+                .collect()
+            }
         }
     }
 }
@@ -930,6 +990,10 @@ impl Render for SettingsDialog {
             .cloned();
         let weak = cx.weak_entity();
 
+        let listed = Section::ALL
+            .iter()
+            .copied()
+            .filter(|section| section.listed(cx));
         // `.app-settings-navigation`: the section buttons, 6 pixels apart, with a rule between them and the section.
         let navigation = div()
             .id("settings-sections")
@@ -943,7 +1007,7 @@ impl Render for SettingsDialog {
             .pr(px(12.))
             .border_r_1()
             .border_color(theme::color(palette.border_dialog))
-            .children(Section::ALL.iter().map(|&section| {
+            .children(listed.map(|section| {
                 let weak = weak.clone();
                 Button::new(
                     format!("settings-section-{}", section.key()),
@@ -995,7 +1059,11 @@ impl Render for SettingsDialog {
         .tier(Tier::Neutral)
         .on_click(dismiss(weak.clone()));
         DialogFrame::new("settings", "Settings", body, vec![close])
-            .summary(SUMMARY)
+            .summary(if Section::App.listed(cx) {
+                SUMMARY_WITH_APP
+            } else {
+                SUMMARY
+            })
             .tile(
                 svg()
                     .path(Icon::Settings.path())
