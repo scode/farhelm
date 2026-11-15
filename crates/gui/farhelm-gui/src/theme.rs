@@ -434,8 +434,14 @@ pub mod metrics {
     pub const TOOLTIP_PAD: (Pixels, Pixels) = (px(4.), px(8.));
     /// `.farhelm-tooltip`'s line height: `line-height: 1.35` at the 12-pixel control size.
     pub const TOOLTIP_LINE_HEIGHT: Pixels = px(16.2);
-    /// `.farhelm-tooltip`'s `-webkit-line-clamp`: longer help is cut at this many lines.
+    /// `.farhelm-tooltip`'s `-webkit-line-clamp`: longer help is cut at this many lines. Paragraph help has none.
     pub const TOOLTIP_MAX_LINES: usize = 8;
+    /// `.farhelm-tooltip[data-paragraphs="true"]`'s max width (`min(440px, 100vw - 8px)`; the layer manager applies
+    /// the viewport half): paragraph help's wider card.
+    pub const TOOLTIP_PARAGRAPHS_MAX_WIDTH: Pixels = px(440.);
+    /// The gap between two paragraphs of paragraph help: one empty line at the tooltip's line height, which is what the
+    /// blank line between paragraphs left under the old card's `white-space: pre-line`.
+    pub const TOOLTIP_PARAGRAPH_GAP: Pixels = TOOLTIP_LINE_HEIGHT;
     /// `--sidebar-width`: the sidebar column's default width, which the screenshot goldens draw the session list at.
     /// It holds the 56-pixel host rail as well as the session list beside it, as the old width did. The app's sidebar
     /// draws the width the helm stores instead, defaulting to the same 396 pixels (`crate::sidebar`).

@@ -566,6 +566,12 @@ moves controls under a still pointer), and a pointer moving back onto the outer 
 layer manager decides from every hovered control once each event has been handled, never from whichever hover arrived
 last.
 
+Hover help comes in the old app's two forms. Short help is one line of wording on a card at most 280 pixels wide, cut at
+eight lines. Help in paragraphs, for help whose closing sentences matter (the agent mark's and the permission shield's,
+which end in the permission's caveat and the stored command), is drawn on a card at most 440 pixels wide, a blank line
+between paragraphs and no line clamp, as the old app's `data-tooltip-paragraphs` help was; both are clipped at the
+window's height less 8 pixels.
+
 Enforced by clippy bans on GPUI's `deferred` and `anchored` outside the layer manager; by `disallowed-types` on GPUI
 Kit's Dialog, Sheet, Popover, HoverCard, PopupMenu, ContextMenu, DropdownMenu, Notification and Tooltip, and its Select,
 Combobox and DatePicker, which draw their dropdowns through `deferred` and `anchored` (dropdowns go through the layer
@@ -711,9 +717,9 @@ a string with the app's words, so a right-to-left value reorders only within its
 app; a sentence that mixes both keeps each part its own element. The table lists Unicode's whole format category, which
 the old app's terminal-link disclosure escaped, so that disclosure uses it too.
 
-Hover help may name a host value (the agent mark's, the permission shield's) only as a host sentence: the tooltip draws
-it through the escaping element, and the control's accessible description is the sentence's accessible text, the same
-words with each host value escaped.
+Hover help may name a host value (the agent mark's, the permission shield's) only as a host sentence, or as several, one
+per paragraph: the tooltip draws each through the escaping element, and the control's accessible description is the
+sentences' accessible text, the same words with each host value escaped.
 
 A dialog's title, which is also its accessible name, may likewise name a host value only as a host sentence (the host
 setup confirmation's "Set up host · <name>"): the title draws it through the escaping element, and the dialog's
