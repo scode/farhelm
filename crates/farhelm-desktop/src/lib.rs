@@ -189,7 +189,9 @@ pub fn run() -> anyhow::Result<()> {
         reduced_motion: reduced_motion::read(),
         licenses: licenses_text,
         window_frame: Some(frame_host(frame)),
-        updater: None,
+        // Only the installed release bundle on a Mac starts one (`updater::start` decides); everywhere else the window
+        // gets none and shows no update surface.
+        updater: updater::start(desktop.state_dir().join(APP_STATE_FILE)).map(updater_host),
         activations: None,
     });
     // Linux only: GPUI's event loop has returned. Dropping the bootstrap waits for the helm the quit asked to stop.
@@ -197,6 +199,50 @@ pub fn run() -> anyhow::Result<()> {
     drop(desktop);
     tracing::info!("the embedded helm stopped");
     Ok(())
+}
+
+/// The window's side of the running updater: its readouts as a feed and its commands as closures, so the GUI crate
+/// needs none of the updater's types. Every command returns at once: a check only wakes the updater's worker, and the
+/// automatic-updates setting is one small state file.
+fn updater_host(handle: updater::UpdaterHandle) -> farhelm_gui::desktop::UpdaterHost {
+    let (first_readout, next_readout) = readout_feed(handle.subscribe());
+    let (check, restart, read, set) = (handle.clone(), handle.clone(), handle.clone(), handle);
+    farhelm_gui::desktop::UpdaterHost {
+        first_readout,
+        next_readout,
+        check_now: Box::new(move || check.check_now()),
+        restart_to_update: Box::new(move || restart.start_relaunch()),
+        automatic_updates: Box::new(move || read.automatic_updates()),
+        set_automatic_updates: Box::new(move |on| set.set_automatic_updates(on)),
+    }
+}
+
+/// The readout for the updater's state now, and a feed of the readouts for its later states, latest wins: each call
+/// waits for the next change and reads the state then, so changes made while the window was busy collapse into one.
+/// The feed ends when the updater is gone (its sender dropped).
+///
+/// One receiver serves every call, kept between them: a clone made per call would start from the version the clone was
+/// made at and report the same change again and again. It is taken out for the wait and put back after; a wait dropped
+/// halfway (only at the app's end) takes it with it, and the feed then ends.
+fn readout_feed(
+    mut states: tokio::sync::watch::Receiver<updater::UpdaterState>,
+) -> (
+    farhelm_gui::update_readout::Readout,
+    farhelm_gui::desktop::updates::NextReadout,
+) {
+    let first = updater::readout(&states.borrow_and_update());
+    let kept = Rc::new(RefCell::new(Some(states)));
+    let next: farhelm_gui::desktop::updates::NextReadout = Box::new(move || {
+        let kept = Rc::clone(&kept);
+        Box::pin(async move {
+            let mut states = kept.borrow_mut().take()?;
+            states.changed().await.ok()?;
+            let readout = updater::readout(&states.borrow_and_update());
+            *kept.borrow_mut() = Some(states);
+            Some(readout)
+        })
+    });
+    (first, next)
 }
 
 /// The window's frame host over `keeper`: the window asks it where to open, tells it every change, and says when it
@@ -1563,6 +1609,69 @@ mod tests {
     use std::io::Read as _;
     use std::net::TcpListener;
     use std::time::Instant;
+
+    /// The window shows the updater's latest readout through this feed, so a feed that re-reported one change forever
+    /// would spin the window, and one that missed a change would hide an update. It is polled by GPUI's executor, with
+    /// no tokio runtime, while the updater publishes from its own worker thread, so that is how this test drives it: by
+    /// hand, with a waker that counts its wakes, and the change published from another thread. Specified: the first
+    /// readout is the state at subscription; a wait with nothing new stays pending; a change published on another
+    /// thread wakes it and resolves it with the readout for the state then; and once the updater is gone, the same wait
+    /// ends the feed.
+    #[farhelm_testtrace::test]
+    fn the_updater_feed_reports_each_change_once_and_ends_with_the_updater() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::task::{Context, Poll, Wake, Waker};
+
+        /// Counts its wakes, so the test sees that the publisher, not the test, made the wait ready.
+        #[derive(Default)]
+        struct Wakes(AtomicUsize);
+        impl Wake for Wakes {
+            fn wake(self: Arc<Self>) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let wakes = Arc::new(Wakes::default());
+        let waker = Waker::from(Arc::clone(&wakes));
+        let mut context = Context::from_waker(&waker);
+        let shared = Arc::new(updater::Shared::new("1.2.3"));
+        let (first, mut next) = readout_feed(shared.subscribe());
+        assert_eq!(first.notice_id, 0, "the premise: no check has run");
+
+        let mut waiting = next();
+        assert!(
+            waiting.as_mut().poll(&mut context).is_pending(),
+            "nothing new yet"
+        );
+        let publisher = Arc::clone(&shared);
+        std::thread::spawn(move || publisher.check_now())
+            .join()
+            .unwrap();
+        assert!(
+            wakes.0.load(Ordering::SeqCst) >= 1,
+            "the publish woke the wait"
+        );
+        match waiting.as_mut().poll(&mut context) {
+            Poll::Ready(readout) => {
+                assert_eq!(readout.map(|readout| readout.notice_id), Some(1));
+            }
+            Poll::Pending => panic!("a woken wait with a change must resolve"),
+        }
+
+        let mut nothing_new = next();
+        assert!(
+            nothing_new.as_mut().poll(&mut context).is_pending(),
+            "a change already reported is not reported again"
+        );
+        // The same wait, not a new one: dropping a wait halfway takes the subscription with it and ends the feed by
+        // itself, which would make the end below pass for the wrong reason.
+        drop(shared);
+        assert!(
+            matches!(nothing_new.as_mut().poll(&mut context), Poll::Ready(None)),
+            "the feed ends with the updater"
+        );
+    }
 
     /// The desktop binary ships on its own (its archive holds no `farhelm`), so it must carry the dependency notices
     /// itself (the maintainer decided on 2026-11-13 that every shipped binary carries them); losing them would ship
