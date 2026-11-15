@@ -47,7 +47,7 @@
 //! drawing the stored value again. A radio group reports a choice only when the option was not already chosen, as a
 //! native radio's change event did; a button group reports every press, as the old buttons' click handlers did.
 //!
-//! Four looks, one per old stylesheet rule, picked by the owner and independent of the role's keyboard (except that
+//! Five looks, one per old stylesheet rule, picked by the owner and independent of the role's keyboard (except that
 //! plain radio circles promise the radio keyboard, so [`RadioGroup::radios`] demands it):
 //!
 //! - **Segments** (the default): `.segmented-control`, the options side by side in one rounded well, the chosen one in
@@ -58,6 +58,9 @@
 //! - **Plain radios** ([`RadioGroup::radios`]): the launcher's YOLO fieldset, a circle before each option's words.
 //! - **Chips** ([`RadioGroup::chips`]): the launcher's harness row (`.launch-composer-options`), separate bordered
 //!   buttons on the well color, wrapping with an 8-pixel gap, and no well around them.
+//! - **Cards** ([`RadioGroup::cards`]): the recipe editor's Software choice (`.recipe-source-cards`), bordered cards
+//!   on the well color in a three-column grid, each with its title over its description, the chosen one edged in the
+//!   accent.
 //!
 //! An option can carry more than its words, each ported from one old use:
 //!
@@ -125,6 +128,13 @@ const GLYPH_GAP: f32 = 6.;
 /// A plain radio's gap between its circle and its words (`.create-session-form .launch-command-yolo > label`'s
 /// `gap: 6px`). Equal to [`GLYPH_GAP`] by coincidence; the two come from different old rules.
 const RADIO_GAP: f32 = 6.;
+
+/// `.recipe-source-cards`: three equal columns 8 pixels apart; `.recipe-source-card`: 10 pixels of padding and 4 between
+/// its title and its description, inside the chip's 1.5-pixel edge.
+const CARD_COLUMNS: u16 = 3;
+const CARD_GAP: f32 = 8.;
+const CARD_PAD: f32 = 10.;
+const CARD_INNER_GAP: f32 = 4.;
 
 /// `.terminal-link-description`: 12-pixel words at the segment's `line-height: 1.4`, 3 pixels under the label.
 const DESCRIPTION_LINE_HEIGHT: f32 = 16.8;
@@ -227,6 +237,7 @@ enum Look {
     SmallSegments,
     Radios,
     Chips,
+    Cards,
 }
 
 impl<V: Clone + PartialEq + 'static> RadioGroup<V> {
@@ -319,6 +330,16 @@ impl<V: Clone + PartialEq + 'static> RadioGroup<V> {
     /// with [`Role::RadioGroup`], as its old inputs were native radios.
     pub fn small_segments(mut self) -> Self {
         self.look = Look::SmallSegments;
+        self
+    }
+
+    /// Draw the options as the recipe editor's Software choice drew them (`.recipe-source-cards`): a card per option in a
+    /// grid of three equal columns, its label as a semibold title over its description line, on the well color inside
+    /// a 1.5-pixel edge that turns the accent on the chosen card (module docs). The old cards were buttons with
+    /// `aria-pressed` in a `role="group"`, so the recipe editor pairs this look with [`Role::Group`]; the look itself
+    /// says nothing about the keyboard. A described option's line is its accessible description, as in every look.
+    pub fn cards(mut self) -> Self {
+        self.look = Look::Cards;
         self
     }
 
@@ -515,6 +536,7 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
                 }
                 Look::Radios => state.radio(&ids[index], option, palette),
                 Look::Chips => state.chip(&ids[index], option, palette),
+                Look::Cards => state.card(&ids[index], option, palette),
             };
             let element = element
                 .role(option_role)
@@ -572,6 +594,13 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
         let group = match self.look {
             Look::Radios => group.gap_x(px(16.)).gap_y(px(8.)),
             Look::Chips => group.gap(px(CHIP_GAP)),
+            // A grid in place of the row or the stack: every card a third of the width, and a row of cards as tall as
+            // its tallest, as the old grid's stretched items were.
+            Look::Cards => group
+                .grid()
+                .grid_cols(CARD_COLUMNS)
+                .items_stretch()
+                .gap(px(CARD_GAP)),
             // `.segmented-control`: the options in a well with a 2-pixel gap and padding inside a dim edge.
             Look::Segments | Look::SmallSegments => group
                 .gap(px(2.))
@@ -787,6 +816,66 @@ impl OptionState {
                         .border_2()
                         .border_color(theme::color(ring))
                         .rounded(radius),
+                )
+            })
+    }
+
+    /// One card of the recipe editor's Software choice (`.recipe-source-card`): the label as a 13-pixel semibold title
+    /// over the description in the secondary ink at 12 pixels, left-aligned, on the well color inside the chip's
+    /// 1.5-pixel edge, which is the accent on the chosen card. The old card had no hover fill, and its disabled look was
+    /// only the default cursor; this one dims an unavailable card as every other look does, so an unavailable choice
+    /// never looks available. Its focus ring is the page's, outside the edge, as the unchosen chip's.
+    fn card<V>(
+        self,
+        id: &SharedString,
+        option: &RadioOption<V>,
+        palette: &Palette,
+    ) -> gpui::Stateful<gpui::Div> {
+        let edge = if self.chosen {
+            palette.accent
+        } else {
+            palette.border
+        };
+        let inset = -(CHIP_EDGE + 3.);
+        div()
+            .id(ElementId::Name(id.clone()))
+            .debug_selector(|| id.to_string())
+            .relative()
+            .flex()
+            .flex_col()
+            .gap(px(CARD_INNER_GAP))
+            .min_w_0()
+            .p(px(CARD_PAD))
+            .border(px(CHIP_EDGE))
+            .border_color(theme::color(edge))
+            .rounded(metrics::RADIUS_SM)
+            .bg(theme::color(palette.well))
+            .text_color(theme::color(palette.fg_0))
+            .when(self.enabled, |card| card.cursor_pointer())
+            .when(!self.enabled, |card| card.opacity(0.5))
+            .child(
+                div()
+                    .text_size(metrics::TEXT_MD)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(option.label.clone()),
+            )
+            .children(option.description.clone().map(|description| {
+                div()
+                    .text_size(metrics::TEXT_SM)
+                    .text_color(theme::color(palette.fg_1))
+                    .child(description)
+            }))
+            .when(self.ring, |card| {
+                card.child(
+                    div()
+                        .absolute()
+                        .top(px(inset))
+                        .left(px(inset))
+                        .right(px(inset))
+                        .bottom(px(inset))
+                        .border_2()
+                        .border_color(theme::color(palette.accent))
+                        .rounded(metrics::RADIUS_SM + px(3.)),
                 )
             })
     }
