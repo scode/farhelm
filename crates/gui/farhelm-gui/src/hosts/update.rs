@@ -34,7 +34,9 @@
 //!   showed is dropped from the operation store's record under the host's key ([`operations::Operations::forget`]), so the row
 //!   stays as it was, as in the old app; one that opened no dialog stays there, under the row, which opens for it. A
 //!   refused confirming request shows under the row only, as the old app kept its one-click Update's submission
-//!   outcomes on the row.
+//!   outcomes on the row. Either refusal, and a plan reply that names no plan, also warns the host's rail avatar while
+//!   Hosts is closed ([`super::status::failed`]), as the old app raised its attention on every failed planning or
+//!   submission, whether or not the dialog showed it.
 //! - **The inline button** ([`button`]): on a row whose host (a remote host of any kind whose Update is available, as
 //!   the old app drew it and SPEC.md says) runs an older build ("Old version", amber, optional) or an older protocol
 //!   ("Needs update", red, required) and whose Update is available, the outlined `↑ Update` beside the phase words. Its
@@ -217,6 +219,7 @@ fn start_with(host: i64, mark: Mark, window: AnyWindowHandle, cx: &mut App) {
                 // row neither shows it again nor opens for it, as the old app kept it in the dialog alone; not shown,
                 // it stays under the row, the one place left to show it.
                 Outcome::Refused(refusal) => {
+                    super::status::failed(host, super::status::Action::Update, cx);
                     let refusal = refusal.clone();
                     let shown = window
                         .update(cx, |_, window, cx| {
@@ -250,6 +253,7 @@ fn confirm(host: i64, key: &OpKey, body: Option<serde_json::Value>, cx: &mut App
         Ok(plan) => plan,
         Err(problem) => {
             note(key, problem, cx);
+            super::status::failed(host, super::status::Action::Update, cx);
             return;
         }
     };
@@ -264,7 +268,11 @@ fn confirm(host: i64, key: &OpKey, body: Option<serde_json::Value>, cx: &mut App
         }
     };
     let started = operations.update(cx, |operations, cx| {
-        operations.start(key, command, cx, |_, _| {})
+        operations.start(key, command, cx, move |settled, cx| {
+            if let Outcome::Refused(_) = settled.outcome {
+                super::status::failed(host, super::status::Action::Update, cx);
+            }
+        })
     });
     if let Err(not_started) = started {
         tracing::debug!(?not_started, "host update confirmation not sent");
@@ -307,15 +315,16 @@ fn note(key: &OpKey, message: HostText, cx: &mut App) {
 
 /// How urgent a host's update is, by what its phase says about its build: optional for a connected host on an older
 /// build, required for one refused at the handshake with an older protocol. Ported from the old `host_update_kind`.
+/// The inline button's tier and the rail's update badge ([`super::status::update_badge`]) both follow it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Urgency {
+pub enum Urgency {
     Optional,
     Required,
 }
 
 /// The urgency of `state`'s update, or `None` when its phase establishes none: a current, newer or unknown build, an
 /// equal protocol, or a host not connected. A newer build wins over the old-build hint, as it does for the phase words.
-fn urgency(state: &HostStateView) -> Option<Urgency> {
+pub(crate) fn urgency(state: &HostStateView) -> Option<Urgency> {
     match state {
         HostStateView::Connected {
             old_version: true,

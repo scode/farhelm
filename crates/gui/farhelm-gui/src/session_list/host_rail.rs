@@ -127,7 +127,9 @@ impl SessionList {
     fn toggle_hosts(&mut self, mark: &Mark, window: &mut Window, cx: &mut Context<Self>) {
         let current = self.current.current(cx);
         current.hosts_shown = !current.hosts_shown;
-        if !current.hosts_shown {
+        if current.hosts_shown {
+            self.hosts_panel.update(cx, |panel, cx| panel.shown(cx));
+        } else {
             self.hosts_panel.update(cx, |panel, cx| panel.hidden(cx));
         }
         cx.notify();
@@ -139,6 +141,7 @@ impl SessionList {
     #[cfg(test)]
     pub(crate) fn show_hosts(&mut self, cx: &mut Context<Self>) {
         self.current.current(cx).hosts_shown = true;
+        self.hosts_panel.update(cx, |panel, cx| panel.shown(cx));
         cx.notify();
     }
 }

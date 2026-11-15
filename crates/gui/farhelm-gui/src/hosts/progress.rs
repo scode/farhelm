@@ -217,16 +217,7 @@ pub(crate) fn status(
         .filter(|run| run.status == RunStatus::Running)
         .and_then(|run| Some((Run::of(run.operation)?, run)))
     {
-        let done = run
-            .steps
-            .iter()
-            .filter(|step| !matches!(step.status, StepStatus::Pending | StepStatus::Running))
-            .count();
-        let current = run
-            .steps
-            .iter()
-            .find(|step| step.status == StepStatus::Running)
-            .map(|step| HostText::from_host(step.name.as_str()));
+        let (done, current) = counts(run);
         let since = seen
             .filter(|kept| run.run_id.as_deref() == Some(kept.run_id.as_str()))
             .map_or(now, |kept| kept.since);
@@ -243,6 +234,23 @@ pub(crate) fn status(
         Work::UpdateHost => Some(Status::Pending(Run::Update)),
         _ => None,
     }
+}
+
+/// How many of `run`'s steps are done, and its current step (the first running one, by the helm's own name for it). A
+/// step counts as done once it completed, was unchanged, ended with a warning or failed. Shared by the row's inline
+/// status and the rail's live work ([`super::status::live`]), so the two surfaces count a run alike.
+pub(crate) fn counts(run: &ProvisioningView) -> (usize, Option<HostText>) {
+    let done = run
+        .steps
+        .iter()
+        .filter(|step| !matches!(step.status, StepStatus::Pending | StepStatus::Running))
+        .count();
+    let current = run
+        .steps
+        .iter()
+        .find(|step| step.status == StepStatus::Running)
+        .map(|step| HostText::from_host(step.name.as_str()));
+    (done, current)
 }
 
 /// An elapsed time as the old status showed it: `m:ss`, or `h:mm:ss` from an hour on, never capped.
