@@ -119,6 +119,11 @@ conflicted across all of it.
 | Settings dialog                 | `crates/gui/farhelm-gui/src/settings.rs`                                                                                                                                                                                                                                                                                       | [reported](#settings-dialog)             | none                                  |
 | Terminal cell metrics           | `crates/gui/farhelm-gui/src/terminal.rs`                                                                                                                                                                                                                                                                                       | [reported](#terminal-cell-metrics)       | none                                  |
 | Session selection               | `crates/gui/farhelm-gui/src/session_list/selection.rs`                                                                                                                                                                                                                                                                         | [reported](#session-selection)           | none                                  |
+| Session list                    | `crates/gui/farhelm-gui/src/session_list.rs`                                                                                                                                                                                                                                                                                   | [reported](#session-list)                | none                                  |
+| Status sounds                   | `crates/gui/farhelm-gui/src/sounds.rs`, `crates/gui/farhelm-gui/src/sounds/rules.rs`                                                                                                                                                                                                                                           | [reported](#status-sounds)               | none                                  |
+| Session restart                 | `crates/gui/farhelm-gui/src/session_list/restart.rs`                                                                                                                                                                                                                                                                           | [reported](#session-restart)             | none                                  |
+| Session menu                    | `crates/gui/farhelm-gui/src/session_list/menu.rs`                                                                                                                                                                                                                                                                              | [reported](#session-menu)                | none                                  |
+| Session delete                  | `crates/gui/farhelm-gui/src/session_list/delete.rs`                                                                                                                                                                                                                                                                            | [reported](#session-delete)              | none                                  |
 
 ## Extension points and lint exceptions, by foundation
 
@@ -772,6 +777,53 @@ there, and the review gate judges it.
 
 Lint exceptions: none.
 
+### Session list
+
+Extension points: reported, the whole file: owned by the sidebar-and-session-view area, which built it. Another area
+uses one of its items: the status sounds read which view the listing answers (`SessionList::listing_view`,
+other-dialogs), so that status changes seen while a host or status filter change is unanswered are recorded without a
+sound. They rely on the list notifying when such an answer arrives, so the sounds see the view change. The table holds
+only whole paths, so the row covers the whole session list module root and the owner's own changes to it are reported
+too; the review gate passes those that leave the shared item alone. Another area's change follows the pattern already
+there, and the review gate judges it.
+
+Lint exceptions: none.
+
+### Status sounds
+
+Extension points: reported, the whole files: owned by the other-dialogs area, which built them, and shared with
+settings-and-hosts, whose Settings → Notifications shows each sound's switch as the status sounds read it
+(`rules::Switches`, for each `Sound`). Another area's change follows the pattern already there, and the review gate
+judges it.
+
+Lint exceptions: none.
+
+### Session restart
+
+Extension points: reported, the whole file: owned by the sidebar-and-session-view area, which built it, and shared with
+the launcher, whose Restart with's reason for an uncaptured conversation ends with the same feedback invitation as the
+Restart control's hover help (`feedback_note`). Another area's change follows the pattern already there, and the review
+gate judges it.
+
+Lint exceptions: none.
+
+### Session menu
+
+Extension points: reported, the whole file: owned by the sidebar-and-session-view area, which built it, and shared with
+the terminal area, whose shell tab's × closes the tab without asking when the helm-wide Skip session confirmations
+preference is on (`skips_questions`). Another area's change follows the pattern already there, and the review gate
+judges it.
+
+Lint exceptions: none.
+
+### Session delete
+
+Extension points: reported, the whole file: owned by the sidebar-and-session-view area, which built it, and shared with
+the terminal area, whose New terminal button is refused while the session has a request in flight (`busy`). Another
+area's change follows the pattern already there, and the review gate judges it.
+
+Lint exceptions: none.
+
 ## What is not a foundation
 
 The rest of `crates/gui/farhelm-gui/src/` is area code, owned by the area that builds it and outside this table: the
@@ -913,3 +965,9 @@ conflict marker.
 | Settings dialog        | `crates/gui/farhelm-gui/src/settings.rs`               | `reported`    |
 | Terminal cell metrics  | `crates/gui/farhelm-gui/src/terminal.rs`               | `reported`    |
 | Session selection      | `crates/gui/farhelm-gui/src/session_list/selection.rs` | `reported`    |
+| Session list           | `crates/gui/farhelm-gui/src/session_list.rs`           | `reported`    |
+| Status sounds          | `crates/gui/farhelm-gui/src/sounds.rs`                 | `reported`    |
+| Status sounds          | `crates/gui/farhelm-gui/src/sounds/rules.rs`           | `reported`    |
+| Session restart        | `crates/gui/farhelm-gui/src/session_list/restart.rs`   | `reported`    |
+| Session menu           | `crates/gui/farhelm-gui/src/session_list/menu.rs`      | `reported`    |
+| Session delete         | `crates/gui/farhelm-gui/src/session_list/delete.rs`    | `reported`    |
