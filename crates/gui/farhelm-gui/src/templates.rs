@@ -66,6 +66,8 @@ mod editor_tests;
 #[cfg(test)]
 mod fields_tests;
 #[cfg(test)]
+mod launcher_modes_tests;
+#[cfg(test)]
 mod leave_tests;
 #[cfg(test)]
 mod naming_tests;
