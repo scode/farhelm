@@ -82,20 +82,21 @@ The golden is `welcome-dialog` (the reference scene's card).
 ## `tests/trash-dialog.spec.ts` and the trash cases of other specs, partly
 
 The Trash button is `trash::TrashButton`, which the session list keeps and draws in its header, and the dialog it opens
-is `trash::dialog`; the rules both use are `trash::listing`. This piece ports the button, its reads and rechecks, and
-the dialog with each checkout's own Delete and Retry. The per-host and global confirmed deletes (Delete all and Delete
-all on a host), the archive cue and the notices bell's Retry now and Open Trash come with their own pieces.
+is `trash::dialog`; the rules both use are `trash::listing`. Ported: the button, its reads and rechecks, and the dialog
+with each checkout's own Delete and Retry, and the per-host and global confirmed deletes (each host's "Delete all on"
+and the footer's Delete all). The archive cue and the notices bell's Retry now and Open Trash come with their own
+pieces.
 
 Replacing tests, in `crates/gui/farhelm-gui/src/trash/dialog/tests.rs` unless named otherwise (`trash/tests.rs` is the
 button's, `trash/listing/tests.rs` the rules'):
 
-- "trash list stays keyboard-scrollable while every list action is disabled", partly:
+- "trash list stays keyboard-scrollable while every list action is disabled":
   `opening_measures_each_reachable_host_and_starts_on_footer_close` (every entry's Delete unavailable while the
-  opening's measured reads are out, focus on footer Close, Tab to the header's close and then the first entry's Delete)
-  and `the_archive_list_has_its_own_stop_while_every_action_is_unavailable` (the list's own stop, "Archived checkouts",
+  opening's measured reads are out, focus on footer Close, Tab to the footer's Delete all, then round to the header's
+  close, the first host's "Delete all on" and its first entry's Delete) and
+  `the_archive_list_has_its_own_stop_while_every_action_is_unavailable` (the list's own stop, "Archived checkouts",
   while nothing in it can take focus; the keys that scroll it are the shared stop's, tested in
-  `components::tests::dialog`). Missing: Delete all and each host's Delete in the Tab walk, which come with the
-  confirmations piece.
+  `components::tests::dialog`).
 - "stuck trash retries in place until its host confirms the files are gone":
   `a_failed_removal_offers_retry_through_the_same_delete`,
   `an_entrys_delete_runs_at_once_and_keeps_its_row_until_a_listing_confirms_it_gone`, and in `trash/tests.rs`
@@ -118,20 +119,36 @@ button's, `trash/listing/tests.rs` the rules'):
 - "trash polls only the host freeing space and stops on its completion":
   `only_a_host_freeing_space_is_rechecked_until_it_reports_completion` and
   `reads_follow_each_hosts_connection_and_trash_epoch_only` in `trash/tests.rs`.
-- "${global | host} trash cleanup closes immediately with ${normal | reduced} motion": the confirmations piece's. Its
-  can, upside down and bobbing, and still under reduced motion, is ported here:
-  `the_can_bobs_while_space_is_freed_and_stands_still_under_reduced_motion` in `trash/tests.rs`, and the
-  `trash-button-emptying` golden.
-- "trash batch issues survive reopening after ${http | transport} failure", "a late trash poll cannot restore a
-  confirmed deletion" and "trash header and global confirmation remain reachable at width ${1000 | 360}": the
-  confirmations piece's (they confirm a bulk delete). The late poll's race is answered by the decision in
-  `trash/listing.rs`'s module docs, not by read generations: commands are answered in order, the newest read per host
-  wins, and the host is read again once the delete settles.
+- "${global | host} trash cleanup closes immediately with ${normal | reduced} motion":
+  `delete_all_sends_one_frozen_delete_per_reachable_host` and
+  `a_hosts_delete_all_asks_inside_its_card_and_deletes_only_there`; the can, upside down and bobbing, and still under
+  reduced motion, is `the_can_bobs_while_space_is_freed_and_stands_still_under_reduced_motion` in `trash/tests.rs`, and
+  the `trash-button-emptying` golden. Delete all waiting on every reachable host and skipping an unreachable one is
+  `delete_all_waits_for_every_reachable_host`, and
+  `delete_all_batches_every_reachable_host_and_waits_on_any_unsettled_one` in `trash/listing/tests.rs`; Cancel and
+  Escape returning focus to the button that asked, and a confirmation that would overlap another trash delete sending
+  nothing, are `cancelling_returns_focus_to_the_asking_button_and_overlaps_send_nothing` and
+  `cancelling_returns_focus_to_delete_all_while_it_is_unavailable`.
+- "trash batch issues survive reopening after ${http | transport} failure", partly: a bulk delete's lost answer is one
+  notice naming every ID it sent until later reports settle them,
+  `a_bulk_delete_answer_is_one_notice_that_later_reports_shrink` in `trash/listing/tests.rs`; it is kept and shown on
+  the next opening as an entry delete's is (`a_refused_delete_stays_visible_on_the_next_opening`), through the same
+  path.
+- "a late trash poll cannot restore a confirmed deletion": answered by the decision in `trash/listing.rs`'s module docs,
+  not by read generations: commands are answered in order, the newest read per host wins, and the host is read again
+  once the delete settles.
+- "trash header and global confirmation remain reachable at width ${1000 | 360}", partly: the global question is drawn
+  in the frame's pinned region above the footer, which scrolls on its own, and the focus coordinator scrolls its
+  starting answer into view (`delete_all_sends_one_frozen_delete_per_reachable_host` checks the answer takes focus; the
+  `checkout-trash-confirm-all` golden shows it). Scrolling the region by keyboard waits for a foundation change (the
+  first entry under "### Trash" below). The 360-pixel width is below the app's minimum window.
 - `tests/github-checkouts.spec.ts`, "trash count and cue follow the final reference, including another client": the
   count following another window's change is `reads_follow_each_hosts_connection_and_trash_epoch_only` (a moved trash
-  epoch reads that host); the cue and the per-host confirmation are later pieces'. "trash global confirmation freezes
-  archives and reports preserved recovery work" is the confirmations piece's. "single trash delete removes one real
-  archive and preserves its neighbour", partly: the frozen one-checkout command is
+  epoch reads that host); the per-host confirmation is `a_hosts_delete_all_asks_inside_its_card_and_deletes_only_there`;
+  the cue is a later piece's. "trash global confirmation freezes archives and reports preserved recovery work": the
+  freezing is `delete_all_sends_one_frozen_delete_per_reachable_host`, and a host's report of what it kept is shown as
+  any delete's is (`a_refused_delete_stays_visible_on_the_next_opening`). "single trash delete removes one real archive
+  and preserves its neighbour", partly: the frozen one-checkout command is
   `an_entrys_delete_runs_at_once_and_keeps_its_row_until_a_listing_confirms_it_gone`; the real archive's removal is not
   driven end to end, because the bridge's fake fleet holds no managed checkout (its sessions run in `/tmp`, and a
   checkout needs a repository source the bridge does not set up). The end-to-end smoke test's step 49 opens the dialog
@@ -140,8 +157,9 @@ button's, `trash/listing/tests.rs` the rules'):
   not ported yet (the sidebar's); the dialog is a layer of its own, so nothing that hides the button can close it.
   "archive cues require a visible Trash destination while marks remain" is the archive cue piece's.
 
-The goldens are `trash-button-empty`, `trash-button-full`, `trash-button-emptying` and `checkout-trash-dialog` (the
-reference scene's trash).
+The goldens are `trash-button-empty`, `trash-button-full`, `trash-button-emptying`, `checkout-trash-dialog` (the
+reference scene's trash), and `checkout-trash-confirm-all` and `checkout-trash-confirm-host` (its questions; the
+reference screens show none).
 
 ## Deviations
 
@@ -212,6 +230,40 @@ Where the port does not match the old app, and why. Each stays until the work na
   and one that timed out held the window's commands for the helm's 20-second host-wait bound, which the old app did not
   have; the window cannot tell a timeout from a quick failure (decided by the other-dialogs area's coordinator,
   2026-11-15).
+- **Waiting for a foundation change: the global question's region is not keyboard-scrollable.** SPEC.md puts the global
+  question in "its own bounded, keyboard-scrollable region directly above the footer". It is drawn in the frame's
+  bounded notices region above the footer's actions, which scrolls on its own beyond about a quarter of the window, but
+  while an answer holds focus Page Up and Page Down do not scroll it, and Tab reaches only the answers, so a warning
+  longer than the region cannot be read by keyboard. The region needs a keyboard stop of its own, or Page Up and Page
+  Down scrolling, while it holds controls; the shared frame has neither. Requested of the foundations by the
+  other-dialogs area's coordinator (2026-11-15).
+- **Waiting for the prompt to say whether an inline question is open.** The dialog cannot tell when its question was
+  cancelled (the prompt's `Inline::is_open` is test-only), which leaves these as they are until it can, each requested
+  of the foundations with that change:
+  - The question takes the prompt's loud look, a red-edged, red-washed block at 16-pixel text headed by the old band's
+    accessible name, "Confirm permanent checkout deletion". The old band was the dialog's 12-pixel text on a red-tinted
+    strip under a red rule, with no heading; a band drawn around a plain question would stay behind, empty, after
+    Cancel. The loud look is temporary.
+  - The rest of the dialog stays usable while a question is up, where the old one held still: an entry's own Delete
+    stays available, and Close and the header's close close the dialog rather than dismiss the question first. Escape
+    cancels the question only while focus is in it; elsewhere it closes the dialog.
+  - Once the global question is answered, the footer's notices region stays drawn, empty, until the dialog closes or
+    another question opens.
+  - A host's question opening restarts the settle pause of the entries' Deletes, since it moves the rows under it; its
+    closing, which moves them back, does not.
+- **Each of the question's paragraphs is two lines.** The old band's paragraphs ran on after the host names ("… on this
+  machine, build-box? Work in them …"); here each ends where the host names do, and the rest is a line of its own, in
+  the same words. A host value is drawn as a block of its own, so the rest started a new line anyway, with the "?" alone
+  at its start.
+- **A confirmation the guards refuse takes the question away.** A Delete permanently pressed while another trash delete
+  of this window's runs, while the registry cannot be read, or after a host reconnected or became busy with its own work
+  is taken: the question goes, nothing is sent, the dialog stays open, and nothing says why. The old band's answer was
+  unavailable while a delete ran, and a refused band answer kept the band up, also without a message. For a reconnected
+  host the outcome matches the old app's, which closed the band and read the trash again: the reconnect reads the host
+  again here, and the dialog shows its trash afresh.
+- **Hosts progress independently in outcome, not in time.** Each host's delete is its own request on its own key, and
+  one host's answer never waits on another's to be applied. But the helm answers the window's commands one at a time, so
+  a host that does not answer delays the others' answers by up to the helm's 20-second host bound.
 
 ### Session bell
 

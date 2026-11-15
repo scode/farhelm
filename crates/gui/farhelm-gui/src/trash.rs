@@ -25,16 +25,17 @@
 //!   at a time from the ticker ([`ticker::animate`]), and stays upside down and still under reduced motion, where no
 //!   ticks come. The hover help names the hosts freeing space and, while a refusal waits in the dialog, says to open
 //!   the trash to see why.
-//! - **Deletes are work on a host's trash key.** An entry's Delete or Retry in the dialog starts
-//!   [`operations::Work::TrashDelete`] under [`OpKey::trash`], never [`OpKey::host`], so it does not block the host's
-//!   other actions; the frozen command names the checkout and the connection it was listed on. Its answer marks what a
-//!   capable host accepted as removing, keeps refusals for the dialog, and reads the host again.
+//! - **Deletes are work on a host's trash key.** An entry's Delete or Retry in the dialog, and each host's share of a
+//!   confirmed Delete all, starts [`operations::Work::TrashDelete`] under [`OpKey::trash`], never [`OpKey::host`], so it
+//!   does not block the host's other actions; the frozen command names the checkouts and the connection they were
+//!   listed on. Its answer marks what a capable host accepted as removing, keeps refusals for the dialog, and reads the
+//!   host again.
 //! - **[`TrashButton::open`] is the entry point** for the dialog, with the return target the caller names: the
 //!   button's own press names the button, and the notices bell's Open Trash, when it comes, names its own control.
 //!
-//! NOTE: Not here yet, each with its own piece: the per-host and global confirmed deletes ("Delete all"), the archive
-//! cue (a deleted row's outline flying into the can), and the notices bell's Retry now and Open Trash. The old page's
-//! read generations and uncertain-outcome bookkeeping are not ported at all ([`listing`]'s module docs say why).
+//! NOTE: Not here yet, each with its own piece: the archive cue (a deleted row's outline flying into the can), and the
+//! notices bell's Retry now and Open Trash. The old page's read generations are not ported, and its uncertain-outcome
+//! bookkeeping only in a smaller form ([`listing`]'s module docs say why).
 //!
 //! NOTE: Deviations from the old button, both from what the GPUI app does not have: the old button was disabled while
 //! the page's launch-and-registry lock was held, a lock this app does not have (launches here are each on a key of their
@@ -475,19 +476,55 @@ impl TrashButton {
         else {
             return;
         };
+        self.send(target, cx);
+        cx.notify();
+    }
+
+    /// Send a confirmed delete's frozen `batches`, one request per host, each host progressing on its own (SPEC.md:
+    /// "sends one request per host with its frozen IDs; the hosts progress independently"). The batches are what the
+    /// question showed, never a selection made again now. They go out only while the registry is read, no other trash
+    /// delete of this window's runs (the trash control prevents overlapping deletes of its own), and every host is
+    /// still on the connection its batch was listed on, with its own key free (SPEC.md puts bulk cleanup under the
+    /// host-listing and operation guards, and the old dispatch rechecked them when pressed); otherwise nothing is sent,
+    /// as the old dispatch refused a frozen selection whose host had reconnected (the reconnect's read then shows the
+    /// host's trash afresh). Returns whether the batches went out, since only then does the dialog close: the old one
+    /// stayed open on a refused answer.
+    pub(crate) fn delete_batches(&mut self, batches: Vec<Target>, cx: &mut Context<Self>) -> bool {
+        let snapshot = self.snapshot(cx);
+        let guarded = batches.iter().all(|target| {
+            snapshot.hosts.iter().any(|host| {
+                host.id == target.host
+                    && host.connected
+                    && host.incarnation == target.incarnation
+                    && !host.busy
+            })
+        });
+        if !snapshot.hosts_known || snapshot.delete_in_flight || !guarded {
+            return false;
+        }
+        for target in batches {
+            self.send(target, cx);
+        }
+        cx.notify();
+        true
+    }
+
+    /// Start `target`'s delete as work on its host's trash key, and apply its answer when it settles
+    /// ([`TrashButton::deleted`]).
+    fn send(&mut self, target: Target, cx: &mut Context<Self>) {
         let (Some(operations), Ok(command)) =
             (session::current_operations(cx), delete_command(&target))
         else {
             return;
         };
         let button = cx.weak_entity();
-        let key = OpKey::trash(&HostView::key(host));
+        let key = OpKey::trash(&HostView::key(target.host));
         // The host's newest read as the delete goes out, so its answer can tell whether a read has gone out since.
         let read_before = self
             .current
             .current(cx)
             .hosts
-            .get(&host)
+            .get(&target.host)
             .map_or(0, |entry| entry.serial);
         let started = operations.update(cx, |operations, cx| {
             operations.start(&key, command, cx, move |settled, cx| {
@@ -499,7 +536,6 @@ impl TrashButton {
         if let Err(not_started) = started {
             tracing::debug!(?not_started, "trash delete not sent");
         }
-        cx.notify();
     }
 
     /// `target`'s delete settled: apply its answer to the kept listing and refusals, then read the host again (SPEC.md:
@@ -547,7 +583,7 @@ impl TrashButton {
         if listed {
             listing::record_outcome(
                 kept.notices.entry(target.host).or_default(),
-                &target.id,
+                &target.ids,
                 &outcome,
             );
         }
@@ -561,8 +597,8 @@ impl TrashButton {
     }
 }
 
-/// The frozen command for `target`: one ID, on the connection it was listed on, which the helm checks before it sends
-/// anything to the host.
+/// The frozen command for `target`: its IDs, on the connection they were listed on, which the helm checks before it
+/// sends anything to the host.
 pub(crate) fn delete_command(target: &Target) -> Result<Command, farhelm_helm_client::PathError> {
     Ok(Command::new(
         Work::TrashDelete,
@@ -571,7 +607,7 @@ pub(crate) fn delete_command(target: &Target) -> Result<Command, farhelm_helm_cl
         Some(json!({
             "host": target.host,
             "expected_incarnation": target.incarnation,
-            "ids": [target.id],
+            "ids": target.ids,
         })),
         DELETE_SHOWN,
     ))

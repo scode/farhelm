@@ -20,13 +20,28 @@
 //!   row must not delete the row a re-read moved under the pointer. Whenever what decides where rows are drawn changes,
 //!   every entry's Delete is unavailable for [`SETTLE`] (the old app's `SETTLE_MS`, matching the approval cards'
 //!   answer pause).
+//! - **Each host's "Delete all on" and the footer's Delete all ask once, in place.** Both are inline questions of the
+//!   prompt ([`prompt::ask_inline`]), frozen as they open: each host's IDs and connection ([`listing::Batch`]), and the
+//!   counts, size and host names they name. A host's question is drawn inside its card, under its header; the global
+//!   one in the frame's bounded region above the footer's actions ([`DialogFrame::notices`]), which scrolls on its own.
+//!   Focus starts on Delete permanently (SPEC.md, "Opening and closing": permanent trash deletion starts on its
+//!   confirming answer), scrolled into view by the focus coordinator; Cancel or Escape on the question returns focus to
+//!   the button that asked it, Delete all for the global one. That button is drawn busy rather than disabled while it
+//!   is unavailable (an entry's Delete pressed meanwhile, say), so it can still take focus back. Delete all waits until
+//!   every reachable host's listing is settled and skips unreachable hosts ([`Snapshot::global_batches`]). Confirming
+//!   closes the dialog at once and sends one request per host with its frozen IDs ([`TrashButton::delete_batches`]). A
+//!   confirmation the guards refuse when pressed (another trash delete of this window's running, a host reconnected or
+//!   busy) sends nothing and leaves the dialog open. The settle pause does not hold these buttons: a question stands
+//!   between them and a delete.
 //! - **Focus.** It starts on the footer's Close, and Tab goes header close, the archive list's controls (or, while
-//!   none of them is available, the list's own stop, "Archived checkouts"), then the footer (SPEC.md, "Initial focus
-//!   stays on footer Close"). Close, the header's close and Escape are never
-//!   unavailable, and closing never cancels a delete the helm took.
+//!   none of them is available, the list's own stop, "Archived checkouts"), then the footer's Close and Delete all
+//!   (SPEC.md, "Initial focus stays on footer Close"). Close, the header's close and Escape are never unavailable, and
+//!   closing never cancels a delete the helm took.
 //!
-//! NOTE: Not here yet: Delete all in the footer and each host's "Delete all on" with their in-place questions, which
-//! come with the confirmations piece; so the footer holds Close alone.
+//! NOTE: Not yet as SPEC.md and the old app have them, each waiting for a foundation change and recorded with its
+//! reason in the parity file ("### Trash"): the global question's region is not keyboard-scrollable while an answer
+//! holds focus; and, until an owner can tell that its inline question is still open, the questions take the prompt's
+//! loud look rather than the old band, and the rest of the dialog does not change while one is up.
 //!
 //! NOTE: A deviation from the old dialog, recorded in the parity file: the old dialog stacked its footer's actions as
 //! full-width rows at phone widths, which the app's 720 by 560 minimum window never reaches, so that is not ported.
@@ -34,6 +49,7 @@
 #[cfg(test)]
 pub(crate) mod tests;
 
+use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
@@ -46,11 +62,13 @@ use gpui::{
 };
 
 use super::TrashButton;
-use super::listing::{self, HostSnapshot, Notice, Snapshot};
+use super::listing::{self, Batch, HostSnapshot, Notice, Snapshot, Target};
 use crate::assets::Icon;
 use crate::components::{Button, DialogFrame, HoverHelp, Role, Tier};
+use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::layers::{self, LayerId};
+use crate::prompt::{self, Answer, Inline, Question};
 use crate::theme::{self, Palette, metrics};
 use crate::ticker;
 
@@ -76,6 +94,16 @@ pub(crate) struct TrashDialog {
     button: WeakEntity<TrashButton>,
     /// The footer's Close, where focus starts.
     close: FocusHandle,
+    /// The footer's Delete all, which a cancelled global question returns focus to.
+    delete_all: FocusHandle,
+    /// Each host's "Delete all on" button, by registry id, which its cancelled question returns focus to.
+    host_deletes: HashMap<i64, FocusHandle>,
+    /// The confirmation asked last: the host it is about (`None` for Delete all) and the question. It draws nothing once
+    /// answered, and a newer question replaces it.
+    asked: Option<(Option<i64>, Inline<Vec<Target>>)>,
+    /// How many questions this dialog has asked: part of the settle fence, so a question opening, which moves the rows
+    /// under a host's, pauses the entries' Deletes as any move does.
+    asks: u64,
     /// Set right after the layer opens.
     pub(super) layer: Option<LayerId>,
     /// The fingerprint of the layout last drawn ([`layout`]).
@@ -97,6 +125,10 @@ impl TrashDialog {
             _button: cx.observe(&button, |_, _, cx| cx.notify()),
             button: button.downgrade(),
             close: cx.focus_handle().tab_stop(true),
+            delete_all: cx.focus_handle().tab_stop(true),
+            host_deletes: HashMap::new(),
+            asked: None,
+            asks: 0,
             layer: None,
             drawn: None,
             settled: true,
@@ -110,6 +142,62 @@ impl TrashDialog {
         self.close.clone()
     }
 
+    /// Ask to delete everything on `host` (its "Delete all on"), or on every reachable host (`None`, Delete all), as the
+    /// state is now: nothing opens while the registry is unread, a trash delete of this window's runs, or the guards
+    /// leave nothing to delete. The question returns focus to the button that asked it when cancelled, so that button
+    /// takes focus first (a click on macOS leaves it unfocused). Visible to the crate for the screenshot goldens.
+    pub(crate) fn ask(&mut self, host: Option<i64>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(button) = self.button.upgrade() else {
+            return;
+        };
+        let snapshot = button.update(cx, |button, cx| button.snapshot(cx));
+        if !snapshot.hosts_known || snapshot.delete_in_flight {
+            return;
+        }
+        let batches = match host {
+            Some(id) => snapshot
+                .hosts
+                .iter()
+                .find(|shown| shown.id == id)
+                .and_then(HostSnapshot::batch)
+                .map(|batch| vec![batch]),
+            None => snapshot.global_batches(),
+        };
+        let Some(batches) = batches else {
+            return;
+        };
+        let mark = Mark::take(cx);
+        let opener = match host {
+            Some(id) => self.host_deletes.get(&id).cloned(),
+            None => Some(self.delete_all.clone()),
+        };
+        if let Some(opener) = opener {
+            focus::focus_in_layer(&opener, &mark, window, cx);
+        }
+        let dialog = cx.weak_entity();
+        let button = self.button.clone();
+        let inline = prompt::ask_inline(
+            confirmation(&batches),
+            &mark,
+            move |targets: Vec<Target>, window, cx| {
+                // SPEC.md: "Confirming a bulk delete closes the dialog immediately and sends one request per host". A
+                // confirmation the guards refuse sends nothing and leaves the dialog open on what changed.
+                let layer = dialog.upgrade().and_then(|dialog| dialog.read(cx).layer);
+                let sent = button
+                    .update(cx, |button, cx| button.delete_batches(targets, cx))
+                    .unwrap_or(false);
+                if let Some(layer) = layer.filter(|_| sent) {
+                    layers::close(layer, window, cx);
+                }
+            },
+            window,
+            cx,
+        );
+        self.asked = Some((host, inline));
+        self.asks += 1;
+        cx.notify();
+    }
+
     /// Draw every entry's Delete as if the rows had always been settled: the screenshot goldens' clock never moves, so
     /// a pause would never end in their pictures.
     #[cfg(test)]
@@ -120,7 +208,7 @@ impl TrashDialog {
     /// Start the settle pause when `snapshot`'s layout differs from the one last drawn. Called while drawing, so the
     /// frame that first shows moved rows already draws their Deletes unavailable.
     fn fence(&mut self, snapshot: &Snapshot, cx: &mut Context<Self>) {
-        let layout = layout(snapshot);
+        let layout = layout(snapshot, self.asks);
         if self.drawn == Some(layout) {
             return;
         }
@@ -139,11 +227,14 @@ impl TrashDialog {
     }
 }
 
-/// A fingerprint of everything that decides where entries' Deletes are drawn: the registry's state, a delete in flight,
-/// and per host its reachability, whether it is being read, its rows (with their removing and failure details, which
-/// change a row's height), its diagnostics and its kept outcomes.
-fn layout(snapshot: &Snapshot) -> u64 {
+/// A fingerprint of everything that decides where entries' Deletes are drawn: the questions asked (`asks`), the
+/// registry's state, a delete in flight, and per host its reachability, whether it is being read, its rows (with their
+/// removing and failure details, which change a row's height), its diagnostics and its kept outcomes.
+fn layout(snapshot: &Snapshot, asks: u64) -> u64 {
     let mut hasher = DefaultHasher::new();
+    // Opening a host's question moves the rows under it. Its closing moves them back unseen: the dialog cannot tell
+    // when an inline question closes.
+    asks.hash(&mut hasher);
     (snapshot.hosts_known, snapshot.delete_in_flight).hash(&mut hasher);
     for host in &snapshot.hosts {
         (
@@ -195,6 +286,17 @@ impl Handles {
         }
     }
 
+    /// Ask the confirmation for `host`'s "Delete all on", or Delete all's for `None` ([`TrashDialog::ask`]).
+    fn ask(
+        &self,
+        host: Option<i64>,
+    ) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static {
+        let dialog = self.dialog.clone();
+        move |_, window, cx| {
+            let _ = dialog.update(cx, |dialog, cx| dialog.ask(host, window, cx));
+        }
+    }
+
     /// Delete `id` on `host` at once, unless the rows have moved since the frame this press was aimed at.
     fn delete(
         &self,
@@ -227,6 +329,8 @@ impl Render for TrashDialog {
             dialog: cx.weak_entity(),
         };
         let deletes_allowed = self.settled && snapshot.hosts_known && !snapshot.delete_in_flight;
+        // The bulk deletes ask first, so the settle pause that guards an entry's immediate Delete does not hold them.
+        let asks_allowed = snapshot.hosts_known && !snapshot.delete_in_flight;
         let (count, _) = snapshot.count();
         let (bytes, partial) = snapshot.total();
 
@@ -265,12 +369,35 @@ impl Render for TrashDialog {
                 "The trash is empty on reachable hosts.",
             )));
         }
+        let global = match &self.asked {
+            Some((None, inline)) => Some(inline.clone()),
+            _ => None,
+        };
         for host in &snapshot.hosts {
-            if let Some(section) = host_section(host, &snapshot, deletes_allowed, &handles, palette)
+            let focus = self
+                .host_deletes
+                .entry(host.id)
+                .or_insert_with(|| cx.focus_handle().tab_stop(true))
+                .clone();
+            let asked = match &self.asked {
+                Some((Some(id), inline)) if *id == host.id => Some(inline.clone()),
+                _ => None,
+            };
+            let ask = HostAsk {
+                allowed: asks_allowed,
+                asker: matches!(self.asked, Some((Some(id), _)) if id == host.id),
+                focus: &focus,
+                asked,
+            };
+            if let Some(section) =
+                host_section(host, &snapshot, deletes_allowed, ask, &handles, palette)
             {
                 body = body.child(section);
             }
         }
+        // Hosts gone from the registry take their buttons' focus handles with them.
+        let present: Vec<i64> = snapshot.hosts.iter().map(|host| host.id).collect();
+        self.host_deletes.retain(|id, _| present.contains(id));
 
         let ink = theme::color(palette.fg_0);
         let heading = div()
@@ -294,7 +421,37 @@ impl Render for TrashDialog {
         .tier(Tier::Neutral)
         .focus(&self.close)
         .on_click(handles.dismiss());
-        DialogFrame::new("checkout-trash-dialog", "Trash", body, vec![close])
+        let delete_all = Button::new(
+            "trash-delete-all",
+            "Delete all",
+            HoverHelp::tooltip(
+                "Delete all: after you confirm, remove every archived checkout on every reachable host for good",
+            ),
+            Role::Button,
+        )
+        .tier(Tier::Danger)
+        .focus(&self.delete_all)
+        // Busy rather than disabled: a cancelled question returns focus to the button that asked it, which must still
+        // be able to take it when an entry's Delete started meanwhile. It sits in the footer, so the list's own stop is
+        // unaffected.
+        .busy(!asks_allowed || snapshot.global_batches().is_none())
+        .on_click(handles.ask(None));
+        let mut frame = DialogFrame::new(
+            "checkout-trash-dialog",
+            "Trash",
+            body,
+            vec![close, delete_all],
+        );
+        if let Some(global) = global {
+            // The old `.checkout-trash-global-confirmation`: directly above the footer's actions, bounded, and
+            // scrolling on its own, which is what the frame's notices region is.
+            frame = frame.notices(
+                div()
+                    .debug_selector(|| "trash-global-confirmation".into())
+                    .child(global),
+            );
+        }
+        frame
             .heading(heading)
             .summary(format!(
                 "{count} {} · {} on reachable hosts",
@@ -323,6 +480,7 @@ fn host_section(
     host: &HostSnapshot,
     snapshot: &Snapshot,
     deletes_allowed: bool,
+    ask: HostAsk,
     handles: &Handles,
     palette: &Palette,
 ) -> Option<AnyElement> {
@@ -348,12 +506,11 @@ fn host_section(
             |totals| listing::space(totals.bytes, totals.partial),
         )
     };
-    let header = div()
+    let named = div()
         .flex()
         .flex_col()
-        .py(px(PAD.0))
-        .px(px(PAD.1))
-        .bg(theme::color(palette.bg_1))
+        .flex_1()
+        .min_w_0()
         .child(
             div()
                 .font_weight(FontWeight::BOLD)
@@ -367,6 +524,43 @@ fn host_section(
                 .text_color(theme::color(palette.fg_1))
                 .child(format!("{count} · {size}")),
         );
+    let delete_label = HostSentence::new(format!("trash-host-delete-label-{id}"))
+        .text("Delete all on ")
+        .host(&host.name);
+    let delete = Button::new(
+        format!("trash-host-delete-{id}"),
+        "Delete all on",
+        HoverHelp::tooltip(
+            "Delete all on this host: after you confirm, remove every archived checkout listed here for good",
+        ),
+        Role::Button,
+    )
+    .tier(Tier::DangerOutline)
+    .accessible_name(delete_label.accessible_name())
+    .content(delete_label)
+    .focus(ask.focus)
+    .on_click(handles.ask(Some(id)));
+    // While unavailable, the host that asked last stays able to take focus back from its question, as Delete all does;
+    // any other is disabled, so a list whose actions are all unavailable keeps its own stop.
+    let unavailable = !ask.allowed || host.batch().is_none();
+    let delete = if ask.asker {
+        delete.busy(unavailable)
+    } else {
+        delete.disabled(unavailable)
+    };
+    // `.checkout-trash-host-header`: the name and totals, then the host's own Delete all, spread apart and wrapping.
+    let header = div()
+        .flex()
+        .flex_row()
+        .flex_wrap()
+        .items_center()
+        .justify_between()
+        .gap(px(10.))
+        .py(px(PAD.0))
+        .px(px(PAD.1))
+        .bg(theme::color(palette.bg_1))
+        .child(named)
+        .child(div().flex_none().child(delete));
     let mut card = div()
         .id(SharedString::from(format!("trash-host-{id}")))
         .debug_selector(move || format!("trash-host-{id}"))
@@ -379,7 +573,13 @@ fn host_section(
         .rounded(metrics::RADIUS_MD)
         .overflow_hidden()
         .when(!host.connected, |card| card.opacity(UNREACHABLE))
-        .child(header);
+        .child(header)
+        // The old band sat right under the header: a host's question stays inside its own card.
+        .children(ask.asked.map(|inline| {
+            div()
+                .debug_selector(move || format!("trash-host-confirmation-{id}"))
+                .child(inline)
+        }));
     if !host.connected {
         card = card.child(paragraph(
             format!("trash-unreachable-{id}"),
@@ -450,6 +650,44 @@ fn host_section(
         ));
     }
     Some(card.into_any_element())
+}
+
+/// What a host's card needs for its "Delete all on": whether asking is allowed at all, whether it asked last, the
+/// button's focus handle, and the host's question while one is asked.
+struct HostAsk<'a> {
+    allowed: bool,
+    /// Whether this host's button asked the dialog's latest question, which returns focus to it when cancelled.
+    asker: bool,
+    focus: &'a FocusHandle,
+    asked: Option<Inline<Vec<Target>>>,
+}
+
+/// The confirmation for `batches`, frozen with their targets: the old band's words under its accessible name, "Confirm
+/// permanent checkout deletion", which the loud look draws as the heading; then Cancel and Delete permanently, where
+/// focus starts (SPEC.md, "Opening and closing").
+fn confirmation(batches: &[Batch]) -> Question<Vec<Target>> {
+    let targets = batches.iter().map(|batch| batch.target.clone()).collect();
+    let mut question = Question::new(
+        "Confirm permanent checkout deletion",
+        Answer {
+            label: "Delete permanently".into(),
+            help: HoverHelp::tooltip(
+                "Delete permanently: remove these folders for good; work never committed or pushed is lost",
+            ),
+            tier: Tier::Danger,
+        },
+        targets,
+    )
+    .cancel_answer(Answer {
+        label: "Cancel".into(),
+        help: HoverHelp::tooltip("Cancel: delete nothing and go back to the trash"),
+        tier: Tier::Neutral,
+    })
+    .loud();
+    for line in listing::confirmation_text(batches) {
+        question = question.line(line);
+    }
+    question
 }
 
 /// One archived checkout (`.checkout-trash-entry`): its name, measured size and own Delete, Retry or Removing… on the

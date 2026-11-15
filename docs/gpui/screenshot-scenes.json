@@ -1094,8 +1094,18 @@
     },
     {
       "golden": "checkout-trash-dialog",
-      "title": "The Trash dialog over the reference trash: the title with its can and total, this machine's two archives and build-box's one with their sizes, repositories, archive times and Deletes, each host's folder, and the footer's Close (focus starts there, though its ring shows only under keyboard focus)",
+      "title": "The Trash dialog over the reference trash: the title with its can and total, each host's \"Delete all on\", this machine's two archives and build-box's one with their sizes, repositories, archive times and Deletes, each host's folder, and the footer's Close (focus starts there, though its ring shows only under keyboard focus) and Delete all",
       "reference": "checkout-trash-dialog"
+    },
+    {
+      "golden": "checkout-trash-confirm-all",
+      "title": "The Trash dialog over the reference trash asking before Delete all: the loud question in the bounded region above the footer, naming three checkouts on this machine and build-box with their partial size and the warning that uncommitted or unpushed work is lost, then Cancel and Delete permanently",
+      "reference": null
+    },
+    {
+      "golden": "checkout-trash-confirm-host",
+      "title": "The Trash dialog over the reference trash asking before build-box's Delete all on: the loud question inside build-box's card under its header, naming its one checkout and its size, then Cancel and Delete permanently",
+      "reference": null
     },
     {
       "golden": "session-order-menu",

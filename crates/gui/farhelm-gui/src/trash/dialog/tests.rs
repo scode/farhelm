@@ -7,12 +7,13 @@
 //! `trash-notice-<host>-<n>-message` and so on). The fixtures are the button tests'.
 
 use farhelm_helm_client::Method;
-use farhelm_helm_client::fake::FakeHelm;
+use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_proto::ui_channel::{Collection, CollectionChanges, HostView};
 use gpui::{DriverNode, TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
 
 use super::SETTLE;
+use crate::focus;
 use crate::operations::{OpKey, Work};
 use crate::session;
 use crate::test_support::{self, focused_id, frame, meta};
@@ -41,6 +42,15 @@ fn label(nodes: &[DriverNode], id: &str) -> String {
 fn enabled(nodes: &[DriverNode], id: &str) -> bool {
     match node(nodes, id) {
         Some(node) => node.flags.focusable,
+        None => panic!("{id} was not drawn"),
+    }
+}
+
+/// Whether the control under `id` was drawn and acts when pressed. Unlike [`enabled`], this tells a busy button, which
+/// stays focusable but does nothing, from an available one: the asking buttons are drawn busy while unavailable.
+fn pressable(nodes: &[DriverNode], id: &str) -> bool {
+    match node(nodes, id) {
+        Some(node) => node.flags.click,
         None => panic!("{id} was not drawn"),
     }
 }
@@ -102,8 +112,8 @@ fn drop_host(helm: &mut FakeHelm, kept: &[HostView], gone: i64) {
 /// close, the archive list, then the footer, and an entry's Delete is unavailable while its host's listing is not
 /// settled. Specified: pressing the button opens the dialog with focus on Close and one sized read per connected host
 /// (none for the unreachable one); while those reads are out every entry's Delete is unavailable, past the settle pause
-/// too, and once answered (and the rows have settled) they are available; Tab from Close goes to the header's close,
-/// then to the first entry's Delete.
+/// too, and once answered (and the rows have settled) they are available; Tab from Close goes to the footer's Delete
+/// all, then round to the header's close, the first host's "Delete all on", and its first entry's Delete.
 #[gpui::test]
 fn opening_measures_each_reachable_host_and_starts_on_footer_close(cx: &mut TestAppContext) {
     let (mut helm, _, cx) = open_button(
@@ -145,10 +155,14 @@ fn opening_measures_each_reachable_host_and_starts_on_footer_close(cx: &mut Test
     assert!(enabled(&nodes, "trash-entry-delete-1-a"));
     assert!(enabled(&nodes, "trash-entry-delete-2-c"));
     test_support::keys(cx, "tab");
+    assert_eq!(focused_id(cx).as_deref(), Some("trash-delete-all"));
+    test_support::keys(cx, "tab");
     assert_eq!(
         focused_id(cx).as_deref(),
         Some("checkout-trash-dialog-close")
     );
+    test_support::keys(cx, "tab");
+    assert_eq!(focused_id(cx).as_deref(), Some("trash-host-delete-1"));
     test_support::keys(cx, "tab");
     assert_eq!(focused_id(cx).as_deref(), Some("trash-entry-delete-1-a"));
 }
@@ -158,7 +172,7 @@ fn opening_measures_each_reachable_host_and_starts_on_footer_close(cx: &mut Test
 /// unreachable host must stay visible without offering anything (SPEC.md). Specified: the local host's card names it
 /// as the registry does, counts two checkouts with a partial size, and shows checkout `a`'s name, repository, archive
 /// time and the folder it is in; the header's total covers the reachable hosts and says partial; `gpu-1`'s card says it
-/// is not reachable and has no Delete.
+/// is not reachable and has no Delete, its "Delete all on" unavailable; the local host's is named for it.
 #[gpui::test]
 fn each_host_card_shows_its_archives_and_an_unreachable_host_offers_nothing(
     cx: &mut TestAppContext,
@@ -198,6 +212,11 @@ fn each_host_card_shows_its_archives_and_an_unreachable_host_offers_nothing(
             .as_deref()
             .is_some_and(|id| id.starts_with("trash-entry-delete-3-"))),
         "no Delete for an unreachable host"
+    );
+    assert!(!pressable(&nodes, "trash-host-delete-3"));
+    assert_eq!(
+        label(&nodes, "trash-host-delete-1"),
+        "Delete all on this machine"
     );
     assert!(node(&nodes, "trash-empty").is_none());
 }
@@ -615,4 +634,281 @@ fn the_archive_list_has_its_own_stop_while_every_action_is_unavailable(cx: &mut 
         test_support::label(cx, "checkout-trash-dialog-body-stop"),
         None
     );
+}
+
+// ---- Confirmed deletes ---------------------------------------------------------------------------------------------
+
+/// The delete commands among `commands`, as (host, body), in the order sent.
+fn deletes(commands: &[FakeCommand]) -> Vec<(i64, Value)> {
+    commands
+        .iter()
+        .filter(|command| command.path == "/api/checkout-trash/delete")
+        .map(|command| {
+            let body = command.body.clone().unwrap_or_default();
+            (body["host"].as_i64().unwrap_or_default(), body)
+        })
+        .collect()
+}
+
+/// Why this matters: Delete all removes work for good on several hosts at once, so it must delete exactly what its
+/// question named, even when a listing changes while the user reads it (SPEC.md: "Confirming a bulk delete closes the
+/// dialog immediately and sends one request per host with its frozen IDs; the hosts progress independently"), and its
+/// words must name the hosts, the count and the size with the warning. Specified: Delete all opens its question in the
+/// region above the footer, focus on Delete permanently, naming three checkouts on this machine and build-box with
+/// their partial size, then the warning; a new checkout `d` listed on the local host meanwhile changes neither the
+/// question nor what is sent: confirming closes the dialog at once and sends one delete for the local host naming `a`
+/// and `b` and one for build-box naming `c`, each on its host's connection, and none for the unreachable `gpu-1`;
+/// the local host's answer settles its own trash key while build-box's delete is still out.
+#[gpui::test]
+fn delete_all_sends_one_frozen_delete_per_reachable_host(cx: &mut TestAppContext) {
+    let (mut helm, _, cx) = opened(cx);
+    test_support::click(cx, "trash-delete-all");
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
+    let asked =
+        "Delete 3 archived checkouts (46.0 MiB measured · partial) on this machine, build-box?";
+    let nodes = frame(cx);
+    assert_eq!(label(&nodes, "trash-confirm-checkouts"), asked);
+    assert_eq!(
+        label(&nodes, "trash-confirm-warning"),
+        "Work in them that was never committed or pushed is lost permanently."
+    );
+
+    push_hosts(&mut helm, &[epoch(local(), 1), remote(), down()]);
+    test_support::settle(cx);
+    answer_reads(&mut helm, |host| match host {
+        1 => listing(
+            &[
+                checkout("a", Some(4096)),
+                checkout("b", None),
+                checkout("d", Some(1)),
+            ],
+            false,
+        ),
+        _ => archives(host),
+    });
+    let nodes = frame(cx);
+    assert_eq!(
+        label(&nodes, "trash-host-totals-1"),
+        "3 checkouts · 4.0 KiB measured · partial",
+        "the premise: the listing moved under the question"
+    );
+    assert_eq!(label(&nodes, "trash-confirm-checkouts"), asked);
+
+    test_support::click(cx, "prompt-confirm");
+    assert!(!test_support::any_open(cx), "confirming closed the dialog");
+    let sent = take(&mut helm);
+    assert_eq!(
+        deletes(&sent),
+        [
+            (
+                1,
+                json!({ "host": 1, "expected_incarnation": 1, "ids": ["a", "b"] })
+            ),
+            (
+                2,
+                json!({ "host": 2, "expected_incarnation": 1, "ids": ["c"] })
+            ),
+        ]
+    );
+    // The helm answers in the order the commands were sent, so the local host's comes first.
+    let local_delete = sent.iter().find(|command| {
+        command
+            .body
+            .as_ref()
+            .is_some_and(|body| body["host"] == json!(1))
+    });
+    let Some(local_delete) = local_delete else {
+        panic!("the local host's delete was sent");
+    };
+    helm.reply(
+        local_delete.id,
+        200,
+        Some(json!({ "removed": ["a", "b"], "issues": [] })),
+    );
+    test_support::settle(cx);
+    let in_flight = |key: &str, cx: &mut VisualTestContext| {
+        cx.update(|_, cx| {
+            let operations = session::current_operations(cx).unwrap();
+            operations.read(cx).in_flight(&OpKey::trash(key))
+        })
+    };
+    assert_eq!(in_flight("1", cx), None);
+    assert_eq!(in_flight("2", cx), Some(Work::TrashDelete));
+}
+
+/// Why this matters: a host's own Delete all must ask inside that host's card, not elsewhere in the dialog (SPEC.md:
+/// "Per-host confirmations stay inside their host sections"), and must delete only that host's archives. Specified:
+/// build-box's "Delete all on" asks in place, its words drawn within build-box's card, naming one checkout of 46.0 MiB
+/// on build-box; the rows it moved pause their Deletes for the settle pause, as any move does; confirming closes the
+/// dialog and sends one delete, for build-box only, naming `c`.
+#[gpui::test]
+fn a_hosts_delete_all_asks_inside_its_card_and_deletes_only_there(cx: &mut TestAppContext) {
+    let (mut helm, _, cx) = opened(cx);
+    test_support::click(cx, "trash-host-delete-2");
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
+    let nodes = frame(cx);
+    assert_eq!(
+        label(&nodes, "trash-confirm-checkouts"),
+        "Delete 1 archived checkout (46.0 MiB) on build-box?"
+    );
+    let bounds = |id: &str| match node(&nodes, id) {
+        Some(node) => node.bounds,
+        None => panic!("{id} was not drawn"),
+    };
+    let (card, words) = (bounds("trash-host-2"), bounds("trash-confirm-checkouts"));
+    assert!(
+        words.top() >= card.top() && words.bottom() <= card.bottom(),
+        "the question is inside build-box's card"
+    );
+    assert!(
+        !enabled(&nodes, "trash-entry-delete-2-c"),
+        "the question moved build-box's rows, which pauses their Deletes"
+    );
+    test_support::advance(cx, SETTLE);
+    assert!(enabled(&frame(cx), "trash-entry-delete-2-c"));
+    test_support::click(cx, "prompt-confirm");
+    assert!(!test_support::any_open(cx));
+    assert_eq!(
+        deletes(&take(&mut helm)),
+        [(
+            2,
+            json!({ "host": 2, "expected_incarnation": 1, "ids": ["c"] })
+        )]
+    );
+}
+
+/// Why this matters: Delete all must not offer a partial cleanup as if it were everything (SPEC.md: "The global action
+/// skips unreachable hosts and waits until every reachable host can be read"). Specified: with the opening's sized
+/// reads out, Delete all and each host's "Delete all on" are unavailable; with the local host answered and build-box
+/// still out, Delete all is still unavailable while the local host's own is available; once every reachable host has
+/// answered, Delete all is available although `gpu-1` was never read.
+#[gpui::test]
+fn delete_all_waits_for_every_reachable_host(cx: &mut TestAppContext) {
+    let (mut helm, _, cx) = open_button(
+        cx,
+        vec![crate::hosts::tests::hosts(&[local(), remote(), down()])],
+    );
+    answer_reads(&mut helm, archives);
+    test_support::settle(cx);
+    test_support::click(cx, BUTTON_ID);
+    let measured = take(&mut helm);
+    let nodes = frame(cx);
+    for control in [
+        "trash-delete-all",
+        "trash-host-delete-1",
+        "trash-host-delete-2",
+    ] {
+        assert!(!pressable(&nodes, control), "{control} waits for the reads");
+    }
+    let (local_read, remote_read): (Vec<_>, Vec<_>) = measured
+        .into_iter()
+        .partition(|command| reads(std::slice::from_ref(command))[0].1 == 1);
+    // The helm answers in the order the reads were sent: the local host's first.
+    answer(
+        &mut helm,
+        &local_read,
+        |host| (200, archives(host)),
+        |_| (500, Value::Null),
+    );
+    test_support::settle(cx);
+    let nodes = frame(cx);
+    assert!(
+        !pressable(&nodes, "trash-delete-all"),
+        "build-box is still being read"
+    );
+    assert!(pressable(&nodes, "trash-host-delete-1"));
+    answer(
+        &mut helm,
+        &remote_read,
+        |host| (200, archives(host)),
+        |_| (500, Value::Null),
+    );
+    test_support::settle(cx);
+    assert!(pressable(&frame(cx), "trash-delete-all"));
+}
+
+/// Why this matters: cancelling must leave the keyboard user where they were (SPEC.md: "cancelling returns focus to
+/// Delete all"), also on macOS, where a click does not focus the button it presses, so the dialog has to put focus on
+/// the asking button itself; and the trash control must never run two deletes of its own at once ("the trash control
+/// prevents overlapping deletes of its own"), which the confirmation itself has to refuse, since an entry's Delete stays
+/// available while a question is up. Specified: under the macOS click rule, Escape on the global question cancels it,
+/// keeps the dialog open and returns focus to Delete all, and the question is gone; Cancel on build-box's question,
+/// reached and pressed by keyboard, returns focus to its "Delete all on". Under the Linux rule, a global question
+/// confirmed after an entry's Delete went out sends nothing, leaves the dialog open, and returns focus to Delete all,
+/// now busy.
+#[gpui::test]
+fn cancelling_returns_focus_to_the_asking_button_and_overlaps_send_nothing(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, _, cx) = opened(cx);
+    cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
+    test_support::click(cx, "trash-delete-all");
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
+    test_support::keys(cx, "escape");
+    assert!(
+        test_support::any_open(cx),
+        "Escape answered only the question"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("trash-delete-all"));
+    assert!(node(&frame(cx), "trash-confirm-checkouts").is_none());
+
+    test_support::click(cx, "trash-host-delete-2");
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
+    // A macOS click on Cancel would leave focus on the dialog, not in the question: the keyboard reaches it.
+    test_support::keys(cx, "shift-tab");
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+    test_support::keys(cx, "enter");
+    assert_eq!(focused_id(cx).as_deref(), Some("trash-host-delete-2"));
+
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    test_support::click(cx, "trash-delete-all");
+    // Opening the question restarted the settle pause.
+    test_support::advance(cx, SETTLE);
+    test_support::click(cx, "trash-entry-delete-1-a");
+    let _ = one_delete(&mut helm);
+    test_support::click(cx, "prompt-confirm");
+    assert!(
+        take(&mut helm).is_empty(),
+        "the overlapping confirmation sent nothing"
+    );
+    assert!(test_support::any_open(cx));
+    assert_eq!(focused_id(cx).as_deref(), Some("trash-delete-all"));
+}
+
+/// Why this matters: Delete all can become unavailable while its question is up, and a cancelled question returns
+/// focus to it; a button that could not take focus then would drop the keyboard user out of the dialog (the old app
+/// fell back to Close for this). Specified: with the global question open, a pushed trash epoch sends a read of the
+/// local host, which makes Delete all unavailable; Escape then cancels the question and focus is on Delete all, drawn
+/// busy, and stays there once the read is answered and Delete all is available again. An entry's Delete pressed while
+/// the question is open does the same: Cancel then returns focus to Delete all, busy while that delete runs.
+#[gpui::test]
+fn cancelling_returns_focus_to_delete_all_while_it_is_unavailable(cx: &mut TestAppContext) {
+    let (mut helm, _, cx) = opened(cx);
+    test_support::click(cx, "trash-delete-all");
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
+    push_hosts(&mut helm, &[epoch(local(), 1), remote(), down()]);
+    test_support::settle(cx);
+    let nodes = frame(cx);
+    assert!(
+        enabled(&nodes, "trash-delete-all") && !pressable(&nodes, "trash-delete-all"),
+        "the premise: the re-read left Delete all busy"
+    );
+    test_support::keys(cx, "escape");
+    assert!(test_support::any_open(cx));
+    assert_eq!(focused_id(cx).as_deref(), Some("trash-delete-all"));
+    answer_reads(&mut helm, archives);
+    test_support::advance(cx, SETTLE);
+    assert!(pressable(&frame(cx), "trash-delete-all"));
+    assert_eq!(focused_id(cx).as_deref(), Some("trash-delete-all"));
+
+    test_support::click(cx, "trash-delete-all");
+    test_support::advance(cx, SETTLE);
+    test_support::click(cx, "trash-entry-delete-1-a");
+    let _ = one_delete(&mut helm);
+    test_support::click(cx, "prompt-cancel");
+    assert!(
+        !pressable(&frame(cx), "trash-delete-all"),
+        "the premise: busy"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("trash-delete-all"));
 }
