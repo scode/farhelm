@@ -10,7 +10,8 @@
 //! - `model`: the model field's rules (which catalog rows it lists, what Enter in it means), with no GPUI types.
 //! - [`request`]: whether a draft can launch, the one reason it cannot, and the request body it sends.
 //! - [`view`]: the launcher's dialog, drawing a draft and turning the user's input into its edits.
-//! - `words`: the launcher's names for agent choices and its permission help, ported from the old launcher.
+//! - `words`: the launcher's own words for agent choices (its chip order, docs link and agent notes); the permission
+//!   and effort names other surfaces show too are `crate::permission::words`.
 //!
 //! The launcher's seams, which the templates-and-quick-launch work plugs into rather than adding a mechanism of its
 //! own:
@@ -35,7 +36,7 @@ pub mod launch;
 mod model;
 pub mod request;
 pub mod view;
-pub(crate) mod words;
+mod words;
 
 #[cfg(test)]
 mod draft_tests;

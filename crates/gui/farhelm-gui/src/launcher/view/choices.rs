@@ -36,9 +36,9 @@ use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::launcher::draft::{Edit, Field, Mode, RestartBaseline, harness_label};
 use crate::launcher::request::capitalized;
-use crate::launcher::words::{
-    HARNESS_PICKER_ORDER, PERMISSION_DOCS, effort_label, guarded_permission_help,
-    permission_display, permission_help, permission_tooltip,
+use crate::launcher::words::{HARNESS_PICKER_ORDER, PERMISSION_DOCS, guarded_permission_help};
+use crate::permission::words::{
+    effort_label, permission_display, permission_help, permission_tooltip,
 };
 use crate::theme::{self, metrics};
 

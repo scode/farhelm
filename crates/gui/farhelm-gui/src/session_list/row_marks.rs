@@ -40,8 +40,8 @@ use crate::components::{HoverHelp, Role, StatusMark};
 use crate::harness;
 use crate::host_text::{HostSentence, HostText};
 use crate::hosts::identity;
-use crate::launcher::words;
 use crate::marks::HarnessGlyph;
+use crate::permission::words;
 use crate::permission::{Shield, observed_yolo_mode, permission};
 use crate::theme::{self, Palette, Token, metrics};
 
