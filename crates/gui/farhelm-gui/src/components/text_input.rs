@@ -422,6 +422,8 @@ pub struct TextInput {
     monospace: bool,
     /// The field's height in place of Kit's ([`TextInput::height`]).
     height: Option<Pixels>,
+    /// Drawn with the warning outline ([`TextInput::invalid`]).
+    invalid: bool,
 }
 
 /// What a field hands Up and Down to ([`TextInput::on_vertical`]).
@@ -484,6 +486,7 @@ impl TextInput {
             on_vertical: None,
             monospace: false,
             height: None,
+            invalid: false,
         }
     }
 
@@ -502,6 +505,16 @@ impl TextInput {
     /// with [`TextInput::monospace`].
     pub fn height(mut self, height: Pixels) -> Self {
         self.height = Some(height);
+        self
+    }
+
+    /// Draw the field with a 1-pixel border in `--warn` while `invalid`: a value the feature has checked and found
+    /// wrong, which a line beside the field explains (the old `input[aria-invalid="true"]` outline, as on the launcher's
+    /// folder after its check). It replaces the focus ring while set, as the old outline did, so the mark stays while
+    /// the user is in the field. Only the single-line field takes it; the others ignore it. It is a look, not a refusal: the field stays
+    /// editable and the feature decides what the value blocks.
+    pub fn invalid(mut self, invalid: bool) -> Self {
+        self.invalid = invalid;
         self
     }
 
@@ -570,6 +583,13 @@ impl RenderOnce for TextInput {
                     .text_size(metrics::TEXT_MD)
                     .when(self.monospace, |input| {
                         input.font_family(crate::assets::TERMINAL_FONT)
+                    })
+                    // Kit's focused style recolors the border with its focus ring, which would hide the mark exactly
+                    // while the user is still in the field; the old warning outline won over focus, so the ring goes.
+                    .when(self.invalid, |input| {
+                        input
+                            .border_color(theme::color(palette.warn))
+                            .focus_bordered(false)
                     })
                     // Kit centers its text in whatever height the field gets, and a refinement replaces Kit's own
                     // height. Called through `Styled` on purpose: Kit's `Input` has an inherent `h` of its own, for

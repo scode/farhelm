@@ -76,6 +76,7 @@ use changed::Changed;
 
 mod changed;
 mod choices;
+mod folder_check;
 mod host_picker;
 mod model_field;
 pub(in crate::launcher) mod yolo_question;
@@ -407,6 +408,8 @@ pub(crate) struct Launcher {
     model_field: model_field::ModelField,
     /// The host picker's list, highlight and typeahead.
     host_picker: host_picker::HostPicker,
+    /// The folder check: what was last asked about the folder and what the answer found (`folder_check`).
+    folder_check: folder_check::FolderCheck,
     /// The host button's focus handle; leaving it closes the host list.
     pub(super) host_focus: gpui::FocusHandle,
     command: TextInputState,
@@ -573,6 +576,7 @@ impl Launcher {
             model_input,
             model_field: model_field::ModelField::default(),
             host_picker: host_picker::HostPicker::default(),
+            folder_check: folder_check::FolderCheck::default(),
             host_focus,
             command,
             resume,
@@ -1664,6 +1668,8 @@ impl Launcher {
 
 impl Render for Launcher {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The folder check follows the folder and the host's connection as drawn (`folder_check`).
+        self.follow_folder_check(cx);
         let palette = theme::palette(cx);
         let weak = cx.weak_entity();
         let refusal = self.refusal(cx);
@@ -1695,6 +1701,7 @@ impl Render for Launcher {
                 ),
             )
             .monospace()
+            .invalid(self.folder_problem(cx).is_some())
             .into_any_element()
         };
         let name = (!self.draft.holds(Field::Name)).then(|| {
@@ -1722,6 +1729,7 @@ impl Render for Launcher {
                     choices::status_line("launcher-host-note", note.to_owned(), palette)
                 }))
                 .child(row("launcher-folder-row", "Folder", folder, palette))
+                .children(self.folder_problem_line(palette, cx))
                 .children(name);
         let (on_tab, on_tab_enter) = (weak.clone(), weak.clone());
         let tabs = (!self.draft.holds(Field::LaunchKind)).then(|| {
