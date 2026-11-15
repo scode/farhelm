@@ -19,15 +19,17 @@
 //! - **The name fallback.** Unlabelled text that matched nothing else offers "Set session name", so typing a name and
 //!   pressing Enter names the session.
 //!
-//! Every row is a draft choice the view applies through the draft's own edit methods, the same ones a hand edit uses;
-//! this module only builds rows. The group order is the old one with the groups not built yet left out (Templates
-//! between Harnesses and Models, then GitHub repositories and Recent setups after Folders), so each later piece adds
-//! its group in its place.
+//! - **Templates** are offered only under `tl:` (`tl:` alone lists them all), from the templates' own rows
+//!   (`crate::templates::rows`, which the quick switcher and the Cmd+J list share), matched by their rule.
+//!
+//! Every row is a draft choice the view applies through the draft's own edit methods, the same ones a hand edit uses
+//! (a template row through the templates' application path); this module only builds rows. The group order is the old
+//! one with the groups not built yet left out (GitHub repositories and Recent setups after Folders), so each later
+//! piece adds its group in its place.
 //!
 //! NOTE: Not built yet, each with the piece that brings its data: folder-history and recent-setup rows and models from
-//! past launches (the launch-history read), "Browse this path" (Browse), `gh:` repositories (managed checkouts) and
-//! `tl:` templates (the templates work, which adds its rows to [`search`]). Their labels are parsed already, so a
-//! scoped query for them says it has no match rather than becoming a name.
+//! past launches (the launch-history read), "Browse this path" (Browse) and `gh:` repositories (managed checkouts).
+//! Their labels are parsed already, so a scoped query for them says it has no match rather than becoming a name.
 
 use farhelm_proto::launcher::{EFFORT_ORDER, LaunchCatalogModel, compatible_efforts};
 use farhelm_proto::ui_channel::HostView;
@@ -39,6 +41,7 @@ use super::view::host_name_with_phase;
 use super::words::{HARNESS_SEARCH_ORDER, guarded_permission_help};
 use crate::host_text::{HostSentence, HostText};
 use crate::permission::words::{effort_label, permission_tooltip};
+use crate::templates::rows::{self as template_rows, Row as TemplateRow};
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The query
@@ -201,6 +204,8 @@ pub enum Row {
         label: HostText,
     },
     Harness(LaunchHarness),
+    /// Apply the template of this name (as stored: host text).
+    Template(String),
     /// A catalog model, with the agent type that owns it: choosing it chooses that agent type too.
     Model {
         id: String,
@@ -219,6 +224,7 @@ pub enum Group {
     Names,
     Hosts,
     Harnesses,
+    Templates,
     Models,
     Efforts,
     Permissions,
@@ -232,6 +238,7 @@ impl Group {
             Group::Names => "Session name",
             Group::Hosts => "Hosts",
             Group::Harnesses => "Harnesses",
+            Group::Templates => "Templates",
             Group::Models => "Models",
             Group::Efforts => "Efforts",
             Group::Permissions => "Permissions",
@@ -247,6 +254,7 @@ impl Row {
             Row::Name(_) => Group::Names,
             Row::Host { .. } => Group::Hosts,
             Row::Harness(_) => Group::Harnesses,
+            Row::Template(_) => Group::Templates,
             Row::Model { .. } => Group::Models,
             Row::Effort(_) => Group::Efforts,
             Row::Permission(_) => Group::Permissions,
@@ -266,6 +274,9 @@ impl Row {
                 .host(&HostText::from_host(name.as_str())),
             Row::Host { label, .. } => sentence.text("Host: ").host(label),
             Row::Harness(harness) => sentence.text(format!("Harness: {}", harness_label(*harness))),
+            Row::Template(name) => sentence
+                .text("Template: ")
+                .host(&HostText::from_host(name.as_str())),
             Row::Model { id, harness } => sentence
                 .text("Model: ")
                 .host(&HostText::from_host(id.as_str()))
@@ -293,6 +304,7 @@ impl Row {
             }
             Row::Host { .. } => "Run the session on this host".to_owned(),
             Row::Harness(_) => "Use this agent for the session".to_owned(),
+            Row::Template(_) => "Apply this template's settings to the draft".to_owned(),
             Row::Model { .. } => "Use this model for the session".to_owned(),
             Row::Effort(Some(_)) => "Use this reasoning effort for the session".to_owned(),
             Row::Effort(None) => "Use the agent's default reasoning effort".to_owned(),
@@ -312,6 +324,8 @@ impl Row {
     fn exact_word(&self) -> Option<String> {
         match self {
             Row::Harness(harness) => Some(harness_word(*harness)),
+            // Unicode lowercasing, as template names are matched (`crate::templates::rows::matches`).
+            Row::Template(name) => Some(name.to_lowercase()),
             Row::Model { id, .. } => Some(id.to_ascii_lowercase()),
             Row::Effort(effort) => Some(effort_word(*effort)),
             Row::Permission(permission) => Some(permission.word().to_owned()),
@@ -358,6 +372,9 @@ pub struct Inputs<'a> {
     pub catalog_pending: bool,
     /// Every host the registry lists; the search leaves out session-owned ones itself, as the old one did.
     pub hosts: &'a [HostView],
+    /// Every template as the templates' rows give it (`crate::templates::rows::rows` with an empty filter: the store's
+    /// templates in the helm's order), or why the templates cannot be listed, which a `tl:` query shows in place of rows.
+    pub templates: Result<&'a [TemplateRow], &'a HostSentence>,
 }
 
 /// A line the results area shows when there are no rows, and whether it is a warning (drawn in the warning color) or a
@@ -376,6 +393,9 @@ pub struct Results {
     /// The index into `rows` preselected: the first exact match by the query's priority, else the first row.
     pub default: usize,
     pub message: Option<Message>,
+    /// Why a `tl:` query has no rows when the helm reports its templates unavailable: the old launcher's "Couldn't
+    /// load templates:" with the helm's words, shown in the results area in place of [`Results::message`].
+    pub reason: Option<HostSentence>,
 }
 
 impl Results {
@@ -395,7 +415,11 @@ impl Results {
 /// The rows `inputs` offer (see the module docs).
 pub fn search(inputs: &Inputs<'_>) -> Results {
     let (scope, value) = scoped(inputs.query);
-    let lower = value.to_ascii_lowercase();
+    // Template names compare by Unicode lowercase, as they are matched; every other row by ASCII lowercase.
+    let lower = match scope {
+        Scope::Templates => value.to_lowercase(),
+        _ => value.to_ascii_lowercase(),
+    };
     let agent_tab = inputs.tab == Tab::Agent;
     // Models and efforts follow the agent type only on the Agent tab; the Command tab searches every agent type's
     // models.
@@ -434,6 +458,20 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
                 .filter(|harness| matches(&harness_word(**harness)))
                 .map(|harness| Row::Harness(*harness)),
         );
+    }
+    // Templates only under `tl:`: an unlabelled query is about the launch being built, and template names there would
+    // crowd out its agent types and models (the old search's rule).
+    let mut reason = None;
+    if scope == Scope::Templates {
+        match inputs.templates {
+            Ok(templates) => rows.extend(
+                templates
+                    .iter()
+                    .filter(|template| template_rows::matches(value, &template.name))
+                    .map(|template| Row::Template(template.name.clone())),
+            ),
+            Err(unavailable) => reason = Some(unavailable.clone()),
+        }
     }
     if any(Scope::Model) && !blank_all {
         rows.extend(
@@ -497,7 +535,7 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
     // added in, the rows still come out in group order, and the stable sort keeps each group's rows as built.
     rows.sort_by_key(|row| row.group() as u8);
     let default = default_index(scope, &lower, &rows);
-    let message = if rows.is_empty() {
+    let message = if rows.is_empty() && reason.is_none() {
         empty_message(
             scope,
             value,
@@ -512,6 +550,7 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
         rows,
         default,
         message,
+        reason,
     }
 }
 
@@ -534,7 +573,8 @@ fn default_index(scope: Scope, lower: &str, rows: &[Row]) -> usize {
         Scope::Model => &[Group::Models],
         Scope::Effort => &[Group::Efforts],
         Scope::Perms => &[Group::Permissions],
-        Scope::Name | Scope::Folder | Scope::Recent | Scope::Github | Scope::Templates => &[],
+        Scope::Templates => &[Group::Templates],
+        Scope::Name | Scope::Folder | Scope::Recent | Scope::Github => &[],
     };
     priority
         .iter()

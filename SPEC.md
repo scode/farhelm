@@ -1275,28 +1275,28 @@ agent choice is independent of that destination:
   Typed words resolve against current templates: a case-sensitive exact name, then a unique case-insensitive exact name,
   then a unique case-insensitive prefix, using Rust's Unicode lowercase. Unknown or ambiguous words refuse the whole
   sequence, naming the word and, for ambiguity, the competing candidates; a word's refusal wins over an unbound number
-  key in the same sequence. Outside the launcher it opens New with that error; in the launcher it appears beneath search
-  without changing the draft. While armed, typed characters never reach the terminal's program. Enter applies the
-  templates in that order, later edits winning, and directly launches through the same defaults, validation and
-  admission as quick launch. In the session launcher, Enter instead applies the queued templates to the current draft
-  without launching; each completed sequence is one refusal unit, and the pill says "apply" instead of "launch". An
-  unbound key opens Templates at Enter with the binding hint outside the launcher; inside the launcher it shows a
-  refusal beneath the search box without changing the draft. A refusal names its template and reveals New with the draft
-  outside the launcher; an incomplete result opens New with a prominent banner saying "This sequence doesn't make a
-  complete setup; complete it below", whether one or several templates were queued. A YOLO question uses the same
-  fallback. The banner follows the number-key banner's expiry and dismissal rules. Bindings refresh when the prefix
-  starts; Enter captures the bound names currently shown in the pill. Enter with nothing queued cancels without opening
-  anything. A non-modal amber status pill is centered over the terminal area, or the main area with no session open,
-  showing queued entries as chips and the word in progress. Its hint names typing, Tab, Enter and Escape. While a word
-  is in progress, a list below the pill shows at most five matching template names, exact matches before prefixes and
-  catalog order within each tier; non-matches are absent. Candidates and Tab use an independent catalog read when the
-  prefix starts, which never gates Enter or decides what Enter launches. Neither the pill nor the list takes focus or
-  pointer input. While the launcher is open, the pill stays at the bottom of the main area so it does not cover the
-  launcher. It is larger, with a soft amber halo and a short fade/scale entrance that is disabled for reduced motion; it
-  never loops or takes pointer input. There is no timeout. Escape cancels and is consumed; a click, switching windows or
-  opening a dialog cancels. Non-sequence keys, including arrows, other chords and Shift+Enter, cancel and reach their
-  normal target; Meta, Control and Shift on their own do not cancel. Repeated held keys add nothing and never launch
-  again.
+  key in the same sequence. Outside the launcher it opens New with that error; in the launcher it appears above the
+  search box without changing the draft (above rather than beneath, matching the old app; decided by the orchestrator on
+  2026-11-15). While armed, typed characters never reach the terminal's program. Enter applies the templates in that
+  order, later edits winning, and directly launches through the same defaults, validation and admission as quick launch.
+  In the session launcher, Enter instead applies the queued templates to the current draft without launching; each
+  completed sequence is one refusal unit, and the pill says "apply" instead of "launch". An unbound key opens Templates
+  at Enter with the binding hint outside the launcher; inside the launcher it shows a refusal above the search box
+  without changing the draft. A refusal names its template and reveals New with the draft outside the launcher; an
+  incomplete result opens New with a prominent banner saying "This sequence doesn't make a complete setup; complete it
+  below", whether one or several templates were queued. A YOLO question uses the same fallback. The banner follows the
+  number-key banner's expiry and dismissal rules. Bindings refresh when the prefix starts; Enter captures the bound
+  names currently shown in the pill. Enter with nothing queued cancels without opening anything. A non-modal amber
+  status pill is centered over the terminal area, or the main area with no session open, showing queued entries as chips
+  and the word in progress. Its hint names typing, Tab, Enter and Escape. While a word is in progress, a list below the
+  pill shows at most five matching template names, exact matches before prefixes and catalog order within each tier;
+  non-matches are absent. Candidates and Tab use an independent catalog read when the prefix starts, which never gates
+  Enter or decides what Enter launches. Neither the pill nor the list takes focus or pointer input. While the launcher
+  is open, the pill stays at the bottom of the main area so it does not cover the launcher. It is larger, with a soft
+  amber halo and a short fade/scale entrance that is disabled for reduced motion; it never loops or takes pointer input.
+  There is no timeout. Escape cancels and is consumed; a click, switching windows or opening a dialog cancels.
+  Non-sequence keys, including arrows, other chords and Shift+Enter, cancel and reach their normal target; Meta, Control
+  and Shift on their own do not cancel. Repeated held keys add nothing and never launch again.
 - Recent setups: the helm remembers bounded successful agent-launch combinations and used folders per target-install
   identity. A recent row fills every saved choice and destination; clicking it never launches, and pressing Enter on a
   focused row launches the filled setup through the ordinary Launch path. A retargeted registry row cannot expose the

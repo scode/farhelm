@@ -427,3 +427,207 @@ fn replace_with_refuses_a_host_row(cx: &mut TestAppContext) {
     );
     assert_eq!(draft(cx).host, Some(1), "the host stays");
 }
+
+// ---- Templates -------------------------------------------------------------------------------------------------------
+
+/// The templates collection as the helm sends it: `partial` sets only a folder, `go` is a command launch of `true`,
+/// and `nowhere` names a host no install has; with `unavailable`, marked unavailable with the helm's words for why.
+fn templates_state(unavailable: Option<&str>) -> farhelm_proto::ui_channel::CollectionState {
+    use farhelm_proto::launcher::{
+        LaunchTemplate, LauncherKind, TemplateDestination, TemplateFields,
+    };
+    use farhelm_proto::ui_channel::{Availability, Collection, CollectionState, KeyedEntry};
+    let all = [
+        LaunchTemplate {
+            name: "partial".into(),
+            fields: TemplateFields {
+                destination: Some(TemplateDestination::Folder("/srv/partial".into())),
+                ..TemplateFields::default()
+            },
+        },
+        LaunchTemplate {
+            name: "go".into(),
+            fields: TemplateFields {
+                kind: Some(LauncherKind::Command),
+                command: Some("true".into()),
+                yolo: Some(false),
+                ..TemplateFields::default()
+            },
+        },
+        LaunchTemplate {
+            name: "nowhere".into(),
+            fields: TemplateFields {
+                host: Some("no-such-install".into()),
+                ..TemplateFields::default()
+            },
+        },
+    ];
+    let mut meta = test_support::meta(&["partial", "go", "nowhere"]);
+    if let Some(error) = unavailable {
+        meta.availability = Availability::Unavailable {
+            error: error.into(),
+        };
+    }
+    CollectionState {
+        collection: Collection::Templates,
+        meta,
+        entries: all
+            .iter()
+            .map(|template| KeyedEntry {
+                key: template.name.clone(),
+                value: serde_json::to_value(template).unwrap(),
+            })
+            .collect(),
+    }
+}
+
+/// New on host1 at `~` in the real main view over the fake helm, whose first snapshot carries [`templates_state`].
+fn new_launcher_with_templates<'a>(
+    cx: &'a mut TestAppContext,
+    unavailable: Option<&str>,
+) -> (
+    farhelm_helm_client::fake::FakeHelm,
+    &'a mut VisualTestContext,
+) {
+    let (mut helm, _connection) = crate::test_support::started(cx);
+    helm.connect(vec![
+        crate::session_list::tests::listing(&["a"], &[crate::session_list::tests::session("a")]),
+        fixture_hosts(&[0]),
+        crate::session_list::tests::preferences(&[], None),
+        templates_state(unavailable),
+    ]);
+    cx.run_until_parked();
+    let (_, window) = test_support::open_view(cx, crate::main_view::MainView::new);
+    window.update(|window, cx| {
+        let mark = crate::focus::Mark::take(cx);
+        let draft = LaunchDraft::new(Some(1), "~".into(), None);
+        assert!(
+            super::view::open(draft, &mark, window, cx).is_some(),
+            "the launcher opened"
+        );
+    });
+    settle(window);
+    (helm, window)
+}
+
+/// SPEC.md, "Creation": "`tl:name` in the search box offers templates by name, and accepting one applies it", and
+/// applying keeps the launch kind unless the template sets one. Taking the row is the keyboard path to a template's
+/// edits, so it must make them exactly as applying elsewhere does. Specified: with New open and its catalog read,
+/// `tl:partial` offers "Template: partial", and Enter puts its folder in the draft, keeps the Agent tab and empties the
+/// box; `tl:go` and Enter then switch to the Command tab with the command `true`, the template's own launch kind.
+#[gpui::test]
+fn a_tl_row_applies_its_template_and_keeps_the_launch_kind(cx: &mut TestAppContext) {
+    let (mut helm, cx) = new_launcher_with_templates(cx, None);
+    answer_catalog(&mut helm, cx, Some(serde_json::json!([])));
+    type_in(cx, "tl:partial");
+    assert_eq!(
+        name_of(cx, "launcher-search-option-0").as_deref(),
+        Some("Template: partial")
+    );
+    keys(cx, "enter");
+    let applied = draft(cx);
+    assert_eq!(applied.folder.value(), "/srv/partial", "the folder applied");
+    assert_eq!(applied.tab, Tab::Agent, "the launch kind kept");
+    assert_eq!(search_text(cx), "", "the box is emptied");
+
+    type_in(cx, "tl:go");
+    keys(cx, "enter");
+    let applied = draft(cx);
+    assert_eq!(applied.tab, Tab::Command, "the template's launch kind");
+    assert_eq!(applied.command.command, "true");
+}
+
+/// SPEC.md: a template that does not apply "is refused with a message naming the field, and nothing from it is
+/// applied", and the old launcher said so above its search box. Applying part of it would leave a draft the user did
+/// not ask for. Specified: `tl:nowhere` and Enter leave the folder `~` and show the refusal, naming `nowhere`, in the
+/// launcher's note, drawn in the search row above the box.
+#[gpui::test]
+fn a_refused_tl_row_changes_nothing_and_says_why_above_the_box(cx: &mut TestAppContext) {
+    let (mut helm, cx) = new_launcher_with_templates(cx, None);
+    answer_catalog(&mut helm, cx, Some(serde_json::json!([])));
+    type_in(cx, "tl:nowhere");
+    keys(cx, "enter");
+    assert_eq!(draft(cx).folder.value(), "~", "nothing applied");
+    let shown = name_of(cx, "launcher-note").expect("the refusal is shown");
+    assert!(shown.contains("nowhere"), "{shown:?}");
+    let (note, field) = (
+        test_support::bounds(cx, "launcher-note"),
+        test_support::bounds(cx, "launcher-search-box"),
+    );
+    assert!(
+        note.bottom() <= field.top(),
+        "the refusal is drawn above the box: {note:?} over {field:?}"
+    );
+}
+
+/// A taken `tl:` row waits for New's catalog read, and the store can change meanwhile: the batch applies the template
+/// the store holds when it applies, and says so in the old launcher's words when it cannot (the old `tl:` acceptance's
+/// "No template is named …; it may have been deleted" and "Couldn't load templates: …; search tl: and retry").
+/// Applying a template the user saw deleted, or saying nothing, would hide what happened. Specified: `tl:partial` and
+/// Enter before the catalog answers, then `partial` deleted, then the answer: the folder stays `~` and the note reads
+/// `No template is named "partial"; it may have been deleted`; in a second launcher, the same press with the templates
+/// made unavailable ("busy") meanwhile says "Couldn't load templates: busy; search tl: and retry".
+#[gpui::test]
+fn a_tl_row_waiting_for_the_catalog_refuses_when_its_template_goes(cx: &mut TestAppContext) {
+    use farhelm_proto::ui_channel::{Collection, CollectionChanges};
+    let (mut helm, cx) = new_launcher_with_templates(cx, None);
+    type_in(cx, "tl:partial");
+    keys(cx, "enter");
+    helm.push(CollectionChanges {
+        collection: Collection::Templates,
+        meta: test_support::meta(&["go", "nowhere"]),
+        upsert: Vec::new(),
+        remove: vec!["partial".into()],
+    });
+    settle(cx);
+    answer_catalog(&mut helm, cx, Some(serde_json::json!([])));
+    assert_eq!(draft(cx).folder.value(), "~", "nothing applied");
+    assert_eq!(
+        name_of(cx, "launcher-note").as_deref(),
+        Some("No template is named \"partial\"; it may have been deleted")
+    );
+}
+
+/// The unavailable half of [`a_tl_row_waiting_for_the_catalog_refuses_when_its_template_goes`]: the old words for a
+/// failed read, with the helm's, when the templates become unavailable while the taken row waits for the catalog.
+#[gpui::test]
+fn a_tl_row_waiting_for_the_catalog_refuses_when_the_templates_become_unavailable(
+    cx: &mut TestAppContext,
+) {
+    use farhelm_proto::ui_channel::{Availability, Collection, CollectionChanges};
+    let (mut helm, cx) = new_launcher_with_templates(cx, None);
+    type_in(cx, "tl:partial");
+    keys(cx, "enter");
+    let mut meta = test_support::meta(&["partial", "go", "nowhere"]);
+    meta.availability = Availability::Unavailable {
+        error: "busy".into(),
+    };
+    helm.push(CollectionChanges {
+        collection: Collection::Templates,
+        meta,
+        upsert: Vec::new(),
+        remove: Vec::new(),
+    });
+    settle(cx);
+    answer_catalog(&mut helm, cx, Some(serde_json::json!([])));
+    assert_eq!(draft(cx).folder.value(), "~", "nothing applied");
+    assert_eq!(
+        name_of(cx, "launcher-note").as_deref(),
+        Some("Couldn't load templates: busy; search tl: and retry")
+    );
+}
+
+/// SPEC.md: a template list that cannot be read is "a reason shown in the results area", in the old launcher's words.
+/// Saying "No template matches" instead would tell the user their templates are gone. Specified: with the helm's
+/// templates unavailable ("busy"), `tl:` shows "Couldn't load templates: busy" in the results and offers no row.
+#[gpui::test]
+fn unavailable_templates_are_the_reason_in_the_results(cx: &mut TestAppContext) {
+    let (_helm, cx) = new_launcher_with_templates(cx, Some("busy"));
+    type_in(cx, "tl:");
+    assert!(results_shown(cx), "the results open with the reason");
+    assert_eq!(
+        name_of(cx, "launcher-search-reason").as_deref(),
+        Some("Couldn't load templates: busy")
+    );
+    assert_eq!(name_of(cx, "launcher-search-option-0"), None, "no row");
+}

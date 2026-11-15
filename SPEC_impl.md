@@ -8157,17 +8157,18 @@ template save sent before it. A launcher prepared out of sight shown after the u
 notice, as a refused launch does.
 
 One row search (`templates/rows.rs`) is what the quick switcher's templates section, the launcher's `tl:` search and the
-Cmd+J list will call; none of them draws rows yet. It matches a lowercased substring of the name, in the helm's order,
-each row with its summary, ⚡ and number key (the caller decides which to draw: the old switcher's section drew name and
-summary, Cmd+J the shortcuts too), read from the store when the list draws; the caller strips the `tl:` label, which is
-the trimmed query up to its first colon, `tl` in any case. A pick from the switcher's section
-(`dispatch::pick_from_switcher`) opens New on its prefill at once and applies the template to it as a press in the open
-launcher does (next paragraph), so it waits for New's catalog read; it never launches, and a press of Launch in that
-frame or two starts New's plain prefill and drops the pick, as it drops any batch still waiting. A template that cannot
-launch on its own is followed by the needs-more-choices banner once it applies. Its refusals are the old switcher pick's
-words, shown in New without "Not launched.", since nothing was launching. The Quick launch row is the ⚡ chord's
-dispatch with the switcher origin. Both act only once the switcher has closed, since the page path refuses while a
-dialog holds the keyboard, and do nothing while the launcher is busy.
+Cmd+J list call; the launcher's search draws its rows (`launcher::search` filters them by `rows::matches`, only under
+`tl:`, in a Templates group between Harnesses and Models, each "Template: " and the name), the other two lists do not
+yet. It matches a lowercased substring of the name, in the helm's order, each row with its summary, ⚡ and number key
+(the caller decides which to draw: the old switcher's section drew name and summary, Cmd+J the shortcuts too), read from
+the store when the list draws; the caller strips the `tl:` label, which is the trimmed query up to its first colon, `tl`
+in any case. A pick from the switcher's section (`dispatch::pick_from_switcher`) opens New on its prefill at once and
+applies the template to it as a press in the open launcher does (next paragraph), so it waits for New's catalog read; it
+never launches, and a press of Launch in that frame or two starts New's plain prefill and drops the pick, as it drops
+any batch still waiting. A template that cannot launch on its own is followed by the needs-more-choices banner once it
+applies. Its refusals are the old switcher pick's words, shown in New without "Not launched.", since nothing was
+launching. The Quick launch row is the ⚡ chord's dispatch with the switcher origin. Both act only once the switcher has
+closed, since the page path refuses while a dialog holds the keyboard, and do nothing while the launcher is busy.
 
 While the session launcher is the dialog holding the keyboard (`launcher::entry::open_launcher`: a weak slot the
 launcher sets each time it is shown, checked against the layer stack's topmost layer that takes focus, never a downcast
@@ -8175,12 +8176,14 @@ of the dialog's view), a press or a completed sequence applies to its draft inst
 (`Launcher::apply_batch`). Each is its own batch through the application path below, against the catalog the launcher
 has read, after which the launcher puts its text fields back in step with the draft; a batch that arrives while the
 launcher's catalog read is out waits in a plain ordered list and is applied when the read answers, or dropped if a press
-of Launch sends the draft first. A refusal changes nothing and is shown in the launcher's notices region as its own
-alert, at the top, above a press's reason, the helm's words or the YOLO question, none of which it hides, until the next
-press of Launch or edit, where the composer search's refusals will be once that search exists; a missing mark or an
-unbound key refuses there without opening Templates. Focus stays where it is, and a control the edits remove hands focus
-on through the focus coordinator, not yet to the search. While the YOLO question's host write is out a press changes
-nothing; a launch in flight hides the launcher, so a press then lands on the page and is taken without effect.
+of Launch sends the draft first. A taken `tl:` row in the composer search is one such batch
+(`templates::dispatch::search_row_batch`), built from the one row search above and keeping the launch kind unless the
+template sets one. A refusal changes nothing and is shown as its own alert above the search box, beside the box's own
+refusal of a held field, where the old launcher said why a template did not apply, until the next press of Launch or
+edit; a missing mark or an unbound key refuses there without opening Templates. Focus stays where it is, and a control
+the edits remove hands focus on through the focus coordinator, not yet to the search. While the YOLO question's host
+write is out a press changes nothing; a launch in flight hides the launcher, so a press then lands on the page and is
+taken without effect.
 
 In the GPUI app a sequence is one model with no GPUI types (`templates/sequence.rs`): the ordered references, the
 unfinished word and the sequence's own copy of the ⚡ mark and number keys, taken from the store when the prefix is
@@ -8217,12 +8220,13 @@ passes a number-key banner to New for a prominent alert explaining the prefix. D
 number key, bolt chord, template list, quick switcher, or sequence. Incomplete bolt/list/switcher choices instead say
 the template needs more choices; any incomplete sequence says its combined setup is incomplete
 (`templates::dispatch::incomplete_banner`). New opens with it, or with a quick launch's refusal, as a field the launcher
-draws at the top of its notices region (`launcher::view::Note`: the banner in the old banner's look, the refusal as its
-own refusal alert with "Not launched." first) until the draft is next edited. A banner also goes on its own six seconds
-after its batch applied, whatever the origin, as the old launcher's did (SPEC.md names the number-key and sequence
-banners and is silent on the others): one deadline the launcher keeps beside the note, started only once application has
-finished so that a slow catalog read cannot spend the viewing interval. A prepared launcher that waits behind the launch
-notice spends it there too. Nothing stores the hint or changes launch admission.
+draws until the draft is next edited (`launcher::view::Note`): the banner at the top of its notices region in the old
+banner's look, the refusal ("Not launched." first) above the search box as one plain line in the warning ink, as every
+template refusal in the launcher is. A banner also goes on its own six seconds after its batch applied, whatever the
+origin, as the old launcher's did (SPEC.md names the number-key and sequence banners and is silent on the others): one
+deadline the launcher keeps beside the note, started only once application has finished so that a slow catalog read
+cannot spend the viewing interval. A prepared launcher that waits behind the launch notice spends it there too. Nothing
+stores the hint or changes launch admission.
 
 A template is stored by the helm in `helm.db` (schema 38, table `launch_templates`): its unique name, and its fields as
 the JSON of `farhelm_proto::launcher::TemplateFields`. The fields stay one JSON value rather than a column each because

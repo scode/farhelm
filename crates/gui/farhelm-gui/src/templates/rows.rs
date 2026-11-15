@@ -48,6 +48,13 @@ pub fn template_query(query: &str) -> Option<&str> {
     label.eq_ignore_ascii_case("tl").then(|| value.trim())
 }
 
+/// Whether the template named `name` matches `filter`, by the old search's rule: `filter`, trimmed, is a substring of
+/// the name after Unicode lowercasing both, so an empty filter matches every template. [`rows`] filters by it, and so
+/// does the launcher's search over the rows it is given, so every template list matches the same way.
+pub fn matches(filter: &str, name: &str) -> bool {
+    name.to_lowercase().contains(&filter.trim().to_lowercase())
+}
+
 /// The templates whose names contain `filter` (trimmed), in the store's order, or why the templates cannot be listed.
 ///
 /// Matching is the old search's: a substring of the name after Unicode lowercasing both, so `Build` finds `nightly
@@ -65,12 +72,11 @@ pub fn rows(filter: &str, cx: &App) -> Result<Vec<Row>, HostSentence> {
         return Ok(Vec::new());
     };
     let collections = store.read(cx).collections();
-    let wanted = filter.trim().to_lowercase();
     let bindings = Bindings::current(cx);
     Ok(collections
         .ordered::<LaunchTemplate>()
         .into_iter()
-        .filter(|template| template.name.to_lowercase().contains(&wanted))
+        .filter(|template| matches(filter, &template.name))
         .map(|template| Row {
             name: template.name.clone(),
             summary: summary::parts(&template.fields),

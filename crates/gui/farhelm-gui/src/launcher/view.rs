@@ -136,9 +136,9 @@ pub fn open(draft: LaunchDraft, mark: &Mark, window: &mut Window, cx: &mut App) 
 }
 
 /// [`open`], with `host_note` said under the Host row until the user picks a host: why an opening did not keep the host
-/// its source names (Clone's, as the old launcher's `.create-session-host-note` said it); and `note`, if any, said in
-/// the notices region from the first frame until the draft is next edited or Launch is pressed: a quick launch's
-/// banner or refusal (`super::entry::open_with`).
+/// its source names (Clone's, as the old launcher's `.create-session-host-note` said it); and `note`, if any, said
+/// from the first frame until the draft is next edited or Launch is pressed: a quick launch's banner, in the notices
+/// region, or its refusal, above the search box ([`Note`]; `super::entry::open_with`).
 pub(in crate::launcher) fn open_noted(
     draft: LaunchDraft,
     host_note: Option<&'static str>,
@@ -240,8 +240,8 @@ pub(super) struct Shown {
 
 impl Global for Shown {}
 
-/// What the launcher says in its notices region for a quick launch that did not start, or a template shortcut that
-/// changed nothing, until the draft is next edited. The words are the caller's, as a host sentence, so template names
+/// What the launcher says for a quick launch that did not start, or a template that changed nothing, until the draft is
+/// next edited: a banner in the notices region, a refusal above the search box. The words are the caller's, as a host sentence, so template names
 /// in them are drawn escaped.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Note {
@@ -250,9 +250,9 @@ pub enum Note {
     /// [`BANNER_SHOWS_FOR`] after the templates applied, as the old banner did whatever its origin.
     Banner(HostSentence),
     /// Why a quick launch opened New instead of launching (its sentence starting "Not launched."), or why a template
-    /// shortcut changed nothing in this open launcher. Drawn as its own alert at the top of the notices region, above a
-    /// press's reason, the helm's words or the YOLO question, which it never hides, and cleared by the next press of
-    /// Launch as by an edit.
+    /// (a shortcut's press, a sequence, a taken `tl:` row) changed nothing in this open launcher. Drawn above the search
+    /// box as one plain line in the warning ink, as the box's own refusal is, where the old launcher said why a
+    /// template did not apply (`view::search`), and cleared by the next press of Launch as by an edit.
     Refusal(HostSentence),
 }
 
@@ -481,7 +481,7 @@ pub(crate) struct Launcher {
     /// the first time it is ([`show`]). The success path reads it to hand the new session to naming (SPEC.md, "Quick
     /// launch": only "When New was never shown"; `launch::settle`).
     pub(super) quick_launch_unseen: bool,
-    /// What the notices region says for a quick launch or a template shortcut ([`Note`]), until the next edit, or for a
+    /// What the launcher says for a quick launch or a template shortcut ([`Note`]), until the next edit, or for a
     /// banner until [`Launcher::banner_expiry`] if that comes first.
     note: Option<Note>,
     /// When a quick launch's banner goes on its own ([`BANNER_SHOWS_FOR`] after its templates applied). Dropped with
@@ -2152,9 +2152,10 @@ impl Render for Launcher {
         // first (Replace with's, or Restart with's while the agent works), then the YOLO question while it is up, else
         // the refusal. The warning comes first so that a tall question,
         // which scrolls in the notices region, cannot push it out of sight: the question's answers launch with the
-        // warning's guard, so the warning must be on screen at that click. This launcher's note (a quick launch's
-        // banner or refusal, a shortcut's refusal) comes right after the warning, as its own element: it answers what
-        // the user did last, and the question or alert below it still shows.
+        // warning's guard, so the warning must be on screen at that click. This launcher's banner (a quick launch's
+        // needs-more-choices or number-key banner) comes right after the warning, as its own element: it answers what
+        // the user did last, and the question or alert below it still shows. A refusal note is drawn above the search
+        // box instead (`view::search`).
         let warning = self.source_warning_line(palette, cx);
         let note = self.note_element(palette);
         // Why Save as template did not open: a plain line in the warning ink, not a refused launch.
@@ -2298,14 +2299,12 @@ impl Render for Launcher {
 }
 
 impl Launcher {
-    /// This launcher's note ([`Note`]) as drawn at the top of the notices region: a refusal as its own refusal alert,
-    /// a banner in the old `.partial-template-banner` look (a warning-colored edge on the left, the raised background
-    /// and the ordinary ink, the words in bold).
+    /// This launcher's banner ([`Note::Banner`]) as drawn at the top of the notices region, in the old
+    /// `.partial-template-banner` look (a warning-colored edge on the left, the raised background and the ordinary ink,
+    /// the words in bold). A refusal note is drawn above the search box instead (`view::search`).
     fn note_element(&self, palette: &theme::Palette) -> Option<AnyElement> {
         let sentence = match self.note.as_ref()? {
-            Note::Refusal(sentence) => {
-                return Some(refusal_alert("launcher-note", sentence.clone(), palette));
-            }
+            Note::Refusal(_) => return None,
             Note::Banner(sentence) => sentence,
         };
         Some(
@@ -2329,8 +2328,7 @@ impl Launcher {
 }
 
 /// `.launch-composer-refusal-alert` under `id`, saying `sentence`: a bordered alert with a warning sign, in the warning
-/// colors (red is kept for danger in the launcher). The press's reason and the helm's words use it, and so does a
-/// refusal note above them.
+/// colors (red is kept for danger in the launcher). The press's reason and the helm's words use it.
 fn refusal_alert(id: &'static str, sentence: HostSentence, palette: &theme::Palette) -> AnyElement {
     div()
         .id(id)
