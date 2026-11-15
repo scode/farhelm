@@ -2260,6 +2260,65 @@ class Smoke(unittest.TestCase):
                 self.ok("press", "cmd-shift--" if sys.platform == "darwin" else "ctrl-shift--")
         eventually(lambda: stored() == start, f"the helm storing the text size {start} again")
 
+    # ---- The sidebar area's rail host status (74), on a host of its own -------------------------------------------
+
+    def test_74_a_setup_that_fails_with_hosts_closed_marks_its_avatar_until_hosts_opens(self) -> None:
+        """A host's setup runs for a minute while the user may be looking at sessions, so a failure the Hosts panel
+        would show must still reach them: SPEC.md, "Session list": "A setup or Update warning has its own mark and
+        hover explanation", and opening Hosts acknowledges it. The old `host-rail-warning.spec.ts` drove this end to
+        end. This step adds a fake host through the helm's API with the scripted backend failing its setup while
+        Hosts is closed, and reads the avatar's accessible name, which carries the warning's words beside the drawn
+        mark. Specified: with Hosts closed, once the run has failed the host's avatar is named "<destination>: <phase
+        words>; setup or update needs attention; open Hosts for details"; after Hosts is opened and closed again, the
+        name ends at the phase words. The update badge, the dimmed mark and the Hosts control's `↑` have no step: a
+        scripted host never connects, so it never reports an older build to update from, and reaching unreachable
+        takes the helm's real ssh dial; the in-process tests and the host status golden cover them. The fake host is
+        removed and the backend's script emptied whatever happened."""
+        destination = f"warned-{uuid.uuid4().hex[:8]}.example"
+        gui_agent.script_hosts(
+            RUN, {"targets": {f"ssh:{destination}": {"fail_action": "install-farhelm", "message": "disk full"}}}
+        )
+        warning = "; setup or update needs attention; open Hosts for details"
+        try:
+            if HOSTS_PANEL in self.ok("snapshot"):
+                self.ok("click", "id:hosts-panel-toggle")
+            eventually(lambda: HOSTS_PANEL not in self.ok("snapshot"), "premise: Hosts is closed")
+            probe = gui_agent.helm_request(
+                RUN,
+                "POST",
+                "/api/hosts/probe",
+                {"target": {"kind": "ssh", "destination": destination}, "new_entry": {}},
+            )
+            self.assertEqual(probe["result"], "provisionable", probe)
+            host = gui_agent.helm_request(RUN, "POST", "/api/hosts/provision", {"probe_id": probe["probe_id"]})[
+                "host_id"
+            ]
+            eventually(
+                lambda: gui_agent.helm_request(RUN, "GET", f"/api/hosts/{host}/provisioning").get("status")
+                == "failed",
+                f"the scripted setup of {destination} failing",
+            )
+            named = re.compile(rf'button "{re.escape(destination)}: [^";]+{re.escape(warning)}"')
+            eventually(lambda: named.search(self.ok("snapshot", "-i")), "the avatar naming the warning")
+
+            self.ok("click", "id:hosts-panel-toggle")
+            eventually(lambda: HOSTS_PANEL in self.ok("snapshot"), "the Hosts panel showing")
+            self.ok("click", "id:hosts-panel-toggle")
+            # The phase words alone, with nothing after a ";": the warning's words are gone.
+            plain = re.compile(rf'button "{re.escape(destination)}: [^";]+"')
+            eventually(lambda: plain.search(self.ok("snapshot", "-i")), "opening Hosts acknowledging the warning")
+        finally:
+            failing = sys.exc_info()[0] is not None
+            try:
+                gui_agent.script_hosts(RUN, {})
+                remove_host(destination)
+                if HOSTS_PANEL in self.ok("snapshot"):
+                    self.ok("click", "id:hosts-panel-toggle")
+            except (AssertionError, urllib.error.HTTPError) as error:
+                if not failing:
+                    raise
+                print(f"gui-e2e-smoke: step 74 left {destination} behind: {error}", file=sys.stderr)
+
 
 def seed_stamped_basic(title: str, origin: str) -> None:
     """Create a basic fake-agent session titled `title` whose terminal shows `origin` on its first line, before the
@@ -2311,6 +2370,7 @@ def size_answer_after(screen: str, mark: str) -> tuple[int, int] | None:
         if answered := re.fullmatch(r"size:(\d+) (\d+)", line):
             return int(answered[1]), int(answered[2])
     return None
+
 
 
 def waiting_approvals() -> list[dict]:

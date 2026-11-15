@@ -1,7 +1,8 @@
 //! Tests of the button: a click and Enter or Space run it once, a disabled one is inert, a busy one keeps focus, its
 //! help and the retired look while ignoring presses, a pressed one reports its state with its label as its name, a
-//! square one keeps its side, the session list heading's padding lines its title's words up with the band's edge, and
-//! a split button's muted caret reads retired while it still opens its menu.
+//! square one keeps its side, the session list heading's padding lines its title's words up with the band's edge, a
+//! split button's muted caret reads retired while it still opens its menu, and a badge draws over a button without
+//! changing its size or name.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -451,4 +452,63 @@ fn a_heading_button_takes_the_heading_bands_padding(cx: &mut TestAppContext) {
         (52., 22.),
         "the 50-by-16 content, 2 pixels above and below it, none beside it, and the 1-pixel edge all round"
     );
+}
+
+/// A badge is a picture laid over the button (the Hosts control's `↑`), so it must neither move the button's own
+/// content nor change its size or name, which is what a sighted and a screen reader user rely on to find it. Specified:
+/// an icon button with a 10-pixel badge placed at its upper right is drawn the same size as the same button without
+/// one, keeps its label as its name, and draws the badge over its right half, starting above its top edge.
+#[gpui::test]
+fn a_badge_draws_over_the_button_without_changing_its_size_or_name(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| {
+        let hosts = |id: &'static str| {
+            IconButton::new(
+                id,
+                Icon::Hosts,
+                "Hosts",
+                HoverHelp::tooltip("Hosts: show host management"),
+                Role::Button,
+            )
+            .tier(Tier::Rail)
+        };
+        div()
+            .flex()
+            .items_start()
+            .gap(px(8.))
+            .p(px(8.))
+            .child(
+                hosts("badged").badge(
+                    div()
+                        .debug_selector(|| "badge".into())
+                        .absolute()
+                        .top(px(-2.))
+                        .right_0()
+                        .size(px(10.)),
+                ),
+            )
+            .child(hosts("plain"))
+            .into_any_element()
+    });
+    let (badged, plain, badge) = (
+        bounds(cx, "badged"),
+        bounds(cx, "plain"),
+        bounds(cx, "badge"),
+    );
+    assert_eq!(
+        badged.size, plain.size,
+        "the badge takes no room of its own"
+    );
+    assert!(
+        badge.left() > badged.center().x && badge.right() <= badged.right(),
+        "the badge {badge:?} sits over the right half of the button {badged:?}"
+    );
+    assert!(
+        badge.top() < badged.top(),
+        "the badge {badge:?} starts above the button {badged:?}"
+    );
+    let named = frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some("badged"))
+        .and_then(|node| node.label);
+    assert_eq!(named.as_deref(), Some("Hosts"));
 }

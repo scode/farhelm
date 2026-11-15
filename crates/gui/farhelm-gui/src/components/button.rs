@@ -276,6 +276,8 @@ pub struct Button {
     keeps_focus: bool,
     /// What the button shows in place of its label's text, when it shows more than words.
     content: Option<AnyElement>,
+    /// A mark drawn over the button's corner, placed by its caller ([`Button::badge`]).
+    badge: Option<AnyElement>,
     /// A fixed square side in place of the tier's padding ([`Button::square`]).
     side: Option<Pixels>,
     /// The part of a split button this is, if it is one ([`Button::split`]).
@@ -319,6 +321,7 @@ impl Button {
             quiet: false,
             keeps_focus: false,
             content: None,
+            badge: None,
             side: None,
             split: None,
             on_click: None,
@@ -436,6 +439,15 @@ impl Button {
     /// twice needs no hiding; content holding host text draws it through the host-text element, as everywhere.
     pub fn content(mut self, content: impl IntoElement) -> Self {
         self.content = Some(content.into_any_element());
+        self
+    }
+
+    /// Draw `badge` over the button, after its icon and content: a small corner mark such as the Hosts control's `↑`
+    /// when some host has an update. The badge places itself (absolutely, against the button's own box, which is
+    /// positioned for it) and draws its own look, since the old sheet gave each such mark its own rule. It is a picture
+    /// only: what it means belongs in the button's accessible name and hover help, so the badge needs no role.
+    pub fn badge(mut self, badge: impl IntoElement) -> Self {
+        self.badge = Some(badge.into_any_element());
         self
     }
 
@@ -1027,6 +1039,9 @@ impl RenderOnce for Button {
         } else if self.show_label {
             button = button.child(self.label);
         }
+        if let Some(badge) = self.badge {
+            button = button.child(badge);
+        }
         let button = super::with_hover_help(button, &self.id, &self.help, true, window, cx);
         let button = if enabled {
             let on_press = if self.keeps_focus {
@@ -1111,6 +1126,11 @@ impl IconButton {
     /// See [`Button::square`].
     pub fn square(self, side: Pixels) -> Self {
         IconButton(self.0.square(side))
+    }
+
+    /// See [`Button::badge`]: the Hosts control's `↑`.
+    pub fn badge(self, badge: impl IntoElement) -> Self {
+        IconButton(self.0.badge(badge))
     }
 
     /// See [`Button::keeps_focus_on_press`].

@@ -1112,6 +1112,11 @@
       "reference": "session-list-compact"
     },
     {
+      "golden": "host-rail-status",
+      "title": "Host status on the rail and the Hosts control's update arrow",
+      "reference": null
+    },
+    {
       "golden": "session-list-empty",
       "title": "The session list over an empty fleet",
       "reference": "empty-fleet"
