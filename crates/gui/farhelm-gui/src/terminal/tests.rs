@@ -627,6 +627,69 @@ fn wheel_pixels_add_up_to_whole_lines(cx: &mut TestAppContext) {
     assert!(terminal.read_with(cx, |view, _| view.is_following()));
 }
 
+/// The wheel moves the view from where it is now, by the step alone, also after the history cap dropped lines: the
+/// view stays on its line while the lines above it go, so a wheel position kept from before the drop (an index into
+/// the history, say) would jump the view by the number of lines dropped. Ported from the old app's test of the same
+/// name, with its three lines entering a full ten-line history.
+///
+/// Specified: on a 4 by 3 screen under a full 10-line history (lines 0 to 9), scrolled back to show line 5 at the top,
+/// three more lines entering the history drop lines 0 to 2 and leave line 5 at the top; one wheel step of exactly a
+/// row toward the screen then shows line 6 at the top, and one back shows line 5.
+#[gpui::test]
+fn a_wheel_step_after_the_cap_dropped_lines_moves_by_the_step_alone(cx: &mut TestAppContext) {
+    let row = |n: u64| {
+        let text = format!("{n:02}");
+        serde_json::json!({"w":false,"r":[[0,2,text,[0,-1,-1]]]})
+    };
+    let frame = |rev: u64, shift: u16| {
+        serde_json::json!({"t":"frame","rev":rev,"cols":4,"rows":3,"shift":shift,
+            "cursor":{"x":0,"y":0,"visible":false,"shape":"block","blink":true}})
+    };
+    let first: Vec<_> = (0..10).map(row).collect();
+    let recording = [
+        serde_json::json!({"t":"hello","cols":4,"rows":3,"history_cap":10}),
+        serde_json::json!({"t":"state","mouse":"off","focus":false,"alt_screen":false,
+            "default_fg":null,"default_bg":null,"history_trimmed":false,"exit":null}),
+        frame(1, 0),
+        serde_json::json!({"t":"history","first":0,"cols":4,"rows":first}),
+    ]
+    .map(|message| message.to_string())
+    .join("\n");
+    let (terminal, _window) = terminal_window(cx);
+    terminal.update(cx, |view, cx| {
+        let (_, applied) = view.apply(messages(&recording), cx);
+        applied.unwrap();
+        view.mark_replay_complete(cx).unwrap();
+    });
+    let top = |cx: &mut TestAppContext| terminal.read_with(cx, |view, _| view.line_at_row(0));
+    terminal.update(cx, |view, cx| view.scroll_lines(-5, cx));
+    assert_eq!(top(cx), Some(5), "the premise: scrolled back to line 5");
+
+    let more: Vec<_> = (10..13).map(row).collect();
+    let dropping = [
+        serde_json::json!({"t":"history","first":10,"cols":4,"rows":more}),
+        frame(2, 3),
+    ]
+    .map(|message| message.to_string())
+    .join("\n");
+    terminal.update(cx, |view, cx| {
+        let (_, applied) = view.apply(messages(&dropping), cx);
+        applied.unwrap();
+    });
+    assert_eq!(
+        terminal.read_with(cx, |view, _| view.oldest_line()),
+        3,
+        "the premise: the cap dropped lines 0 to 2"
+    );
+    assert_eq!(top(cx), Some(5), "the premise: the view stayed on its line");
+
+    let cell = 20.;
+    terminal.update(cx, |view, cx| view.scroll_pixels(-cell, cell, cx));
+    assert_eq!(top(cx), Some(6), "one row toward the screen");
+    terminal.update(cx, |view, cx| view.scroll_pixels(cell, cell, cx));
+    assert_eq!(top(cx), Some(5), "and one back");
+}
+
 /// Scrolled back, the cursor is drawn on its screen row where that row now shows, lower by the lines scrolled, and not
 /// at all once its row has left the view; drawn at its screen position instead, it would sit on a history line the
 /// program cannot write to.
@@ -905,6 +968,51 @@ fn a_hovered_link_is_underlined_and_dropped_when_its_text_changes(cx: &mut TestA
         None
     );
     assert_eq!(terminal.read_with(cx, |view, _| view.underlined_rows()), []);
+}
+
+/// Output elsewhere on the screen leaves a hover alone: an agent redraws its spinner or status row many times a second,
+/// and a hover dropped by each redraw would flicker its underline and take the link out from under a click the user
+/// is about to make. The web-link counterpart of the old app's "a history link keeps its answer and hover across lazy
+/// reads and unrelated output" (its asynchronous file checks are not built yet).
+///
+/// Specified: with the pointer resting on the fixture's hyperlink on screen row 1, output that rewrites only row 3
+/// leaves the same link hovered and the same columns underlined.
+#[gpui::test]
+fn a_hovered_link_stays_hovered_across_output_to_another_row(cx: &mut TestAppContext) {
+    let terminal = attached_with_history(cx);
+    terminal.update(cx, |view, cx| view.set_hover(Some((12, 1)), cx));
+    let hovered = terminal.read_with(cx, |view, _| view.hovered_link().cloned());
+    assert_eq!(
+        hovered.as_ref().map(|link| link.uri.as_str()),
+        Some("https://example.com/"),
+        "the premise: the fixture's hyperlink is under the pointer"
+    );
+
+    let busy: GridOutput = serde_json::from_value(serde_json::json!({
+        "t":"rows", "rows":[[3,{"w":false,"r":[[0,7,"busy...",[0,-1,-1]]]}]]
+    }))
+    .unwrap();
+    let frame: GridOutput = serde_json::from_value(serde_json::json!({
+        "t":"frame", "rev":2,"cols":20,"rows":4,
+        "cursor":{"x":2,"y":2,"visible":true,"shape":"block","blink":true}
+    }))
+    .unwrap();
+    terminal.update(cx, |view, cx| {
+        let (_, applied) = view.apply([busy, frame], cx);
+        applied.unwrap();
+    });
+    assert!(
+        shown_lines(&terminal, cx)[3].starts_with("busy..."),
+        "the premise: the output reached row 3"
+    );
+    assert_eq!(
+        terminal.read_with(cx, |view, _| view.hovered_link().cloned()),
+        hovered
+    );
+    assert_eq!(
+        terminal.read_with(cx, |view, _| view.underlined_rows()),
+        [(1, 11..14)]
+    );
 }
 
 /// A refused message ends the batch with its error and changes nothing itself, but what came before it in the batch
