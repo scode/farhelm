@@ -20,17 +20,19 @@
 //!   waits in the slot until the user opens that notice.
 //! - **The host's timeout** (the helm's bounded create answering 504 without saying the create never reached the host)
 //!   is handled as a refusal, except that it is shown without "Not launched." and offered by its own notice, since the
-//!   create may still happen. Once that reply has come, the window no longer counts the launch as in flight, so New, another
-//!   launch and host changes go ahead while the helm may still be creating; a duplicate session is then possible, an
-//!   accepted risk like the one around a lost connection (SPEC.md, "Creation").
+//!   create may still happen. Once that reply has come, the window no longer counts the launch as in flight, so New,
+//!   another launch and host changes go ahead while the helm may still be creating; a duplicate session is then
+//!   possible, an accepted risk like the one around a lost connection (SPEC.md, "Creation").
+//! - **The YOLO question.** A refusal saying the host asks before YOLO launches (`HelmMarker::YoloConfirmation`) is a
+//!   follow-up question, not a failure: the launcher comes back the same way, with the question asked in place
+//!   (`view::yolo_question`).
 //!
 //! The slot's "waiting for the reply" is the hidden launcher's own lifetime, not a copy of the operation store's busy
 //! state: the store still says whether the create is in flight, and the launcher reads the refusal it shows from the
 //! store, by the launch's key. Dismissing the notice withdraws only the notice; the launcher stays in the slot, and New
 //! brings it back.
 //!
-//! NOTE: Not built yet, each with the piece that brings it: the pending pill and the "Started" pill that report a
-//! launch while the launcher is hidden, and the YOLO question a refusal can carry (`HelmMarker::YoloConfirmation`).
+//! NOTE: Not built yet: the pending pill and the "Started" pill that report a launch while the launcher is hidden.
 
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::SessionInfo;
@@ -38,7 +40,7 @@ use farhelm_proto::session_requests::CreateSessionBody;
 use gpui::{AnyWindowHandle, App, AppContext as _, Entity, Global, Window};
 
 use super::view::{Launcher, show};
-use crate::focus::Mark;
+use crate::focus::{self, Mark};
 use crate::notices::{self, Notice};
 use crate::operations::{Command, HelmMarker, OpKey, Outcome, Settled, Work};
 use crate::session::{self, ObservingCurrent, PerSession};
@@ -150,14 +152,16 @@ fn hold(held: Option<Held>, cx: &mut App) {
 }
 
 /// Send `body`, the draft's create, for `launcher` (the open launcher in `window`) through the operation store, and
-/// hold the launcher in the slot while the create is out. Call it from the handler of the user's press of Launch: the
-/// store takes the [`Mark`] that decides what the reply may do then, and so does this. Returns whether the create went
-/// out; it does not without a UI session, or with a body that will not encode, which the draft's types rule out.
+/// hold the launcher in the slot while the create is out. `mark` is the user's answer the reply's moved-on check counts
+/// from: taken in the handler of the press of Launch, or of the YOLO question's answer whose host write this create
+/// waited for. Returns whether the create went out; it does not without a UI session, or with a body that will not
+/// encode, which the draft's types rule out.
 ///
 /// The caller closes the launcher's layer once this returns `true`; the launcher stays alive here.
 pub(super) fn start(
     launcher: Entity<Launcher>,
     body: &CreateSessionBody,
+    mark: Mark,
     window: &mut Window,
     cx: &mut App,
 ) -> bool {
@@ -175,7 +179,6 @@ pub(super) fn start(
         Some(body),
         "POST /api/sessions",
     );
-    let mark = Mark::take(cx);
     let handle = window.window_handle();
     let settling = launcher.clone();
     let key = OpKey::new_launch();
@@ -200,9 +203,9 @@ pub(super) fn start(
     true
 }
 
-/// `launcher`'s create, sent under `key`, settled. `mark` is the one taken at the press, which the store's [`Settled::user_moved_on`]
-/// also answers for; it is kept here to reopen the launcher, which the layer manager refuses for a mark the user moved
-/// on from.
+/// `launcher`'s create, sent under `key`, settled. `mark` is the user's answer the launch counts from (the press of
+/// Launch, or the YOLO question's answer), which also reopens the launcher: the layer manager refuses a mark the user
+/// moved on from.
 ///
 /// A launcher the slot no longer holds is left alone: nothing else lets go of a waiting launcher today, but its reply
 /// must not act for a launcher something else has since taken over.
@@ -217,14 +220,30 @@ fn settle(
     if waiting(&launcher, cx) != Some(Waiting::Reply) {
         return;
     }
+    // The store counts from when it sent the create; `mark` from the answer that asked for it, which for a create sent
+    // after the YOLO question's host write is earlier, and presses made during that write count too.
+    let user_moved_on = settled.user_moved_on || focus::has_moved_on(&mark, cx);
     match &settled.outcome {
         Outcome::Done(body) => {
             hold(None, cx);
-            opened(body.clone(), settled.user_moved_on, cx);
+            opened(body.clone(), user_moved_on, cx);
         }
         // A create is never accepted as long work, so this cannot arrive. If it did, nothing failed, and the pushed
         // list shows what the helm made of it.
         Outcome::Accepted(_) => hold(None, cx),
+        // The host asks before YOLO launches: not a failure but a follow-up question, which comes back the way a
+        // refusal does (SPEC.md: "A failure or follow-up question restores the same launcher").
+        Outcome::Refused(refusal) if refusal.has(HelmMarker::YoloConfirmation) => {
+            launcher.update(cx, |launcher, cx| launcher.yolo_asked(cx));
+            come_back(
+                launcher,
+                window,
+                mark,
+                user_moved_on,
+                Notice::LaunchNotStarted,
+                cx,
+            );
+        }
         Outcome::Refused(refusal) => {
             // The bounded create's timeout: the host did not answer within the helm's bound, and the create goes on
             // behind the reply, so it may still happen. A create that provably never reached the host says so with
@@ -235,14 +254,7 @@ fn settle(
                 key,
                 may_still_start,
             };
-            refused(
-                launcher,
-                refused_launch,
-                window,
-                mark,
-                settled.user_moved_on,
-                cx,
-            );
+            refused(launcher, refused_launch, window, mark, user_moved_on, cx);
         }
     }
 }
@@ -274,8 +286,25 @@ fn refused(
     user_moved_on: bool,
     cx: &mut App,
 ) {
-    let may_still_start = refused_launch.may_still_start;
+    let notice = if refused_launch.may_still_start {
+        Notice::LaunchMayStillStart
+    } else {
+        Notice::LaunchNotStarted
+    };
     launcher.update(cx, |launcher, cx| launcher.refused(refused_launch, cx));
+    come_back(launcher, window, mark, user_moved_on, notice, cx);
+}
+
+/// Bring `launcher` back for a reply the user must see (a refusal, a follow-up question): shown again in `window` if
+/// the user has not moved on since the press (`mark`), otherwise kept in the slot with `notice` offering it.
+fn come_back(
+    launcher: Entity<Launcher>,
+    window: AnyWindowHandle,
+    mark: Mark,
+    user_moved_on: bool,
+    notice: Notice,
+    cx: &mut App,
+) {
     let shown = !user_moved_on
         && cx
             .update_window(window, |_, window, cx| {
@@ -292,11 +321,6 @@ fn refused(
             }),
             cx,
         );
-        let notice = if may_still_start {
-            Notice::LaunchMayStillStart
-        } else {
-            Notice::LaunchNotStarted
-        };
         notices::post(notice, cx);
     }
 }
