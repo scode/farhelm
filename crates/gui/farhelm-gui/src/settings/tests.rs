@@ -25,7 +25,7 @@ use crate::focus::{self, Mark};
 use crate::main_view::MainView;
 use crate::operations::{OpKey, Work};
 use crate::test_support::{
-    self, bounds, click, focused, focused_id, frame, keys, meta, settle, started,
+    self, any_open, bounds, click, focused, focused_id, frame, keys, meta, settle, started,
 };
 use crate::{layers, root, session, theme};
 
@@ -77,6 +77,7 @@ fn section_button(section: Section) -> &'static str {
         Section::Terminal => "settings-section-terminal",
         Section::Checkouts => "settings-section-checkouts",
         Section::AgentTrust => "settings-section-agent-trust",
+        Section::Notifications => "settings-section-notifications",
     }
 }
 
@@ -139,10 +140,6 @@ const DIALOG_BODY: &str = "settings-body";
 fn shows_whole(cx: &mut VisualTestContext, selector: &'static str, region: &'static str) -> bool {
     let (inner, outer) = (bounds(cx, selector), bounds(cx, region));
     inner.top() >= outer.top() && inner.bottom() <= outer.bottom()
-}
-
-fn any_open(cx: &mut VisualTestContext) -> bool {
-    cx.update(|window, cx| layers::any_open(window, cx))
 }
 
 /// The commands the window sent since the last call.
@@ -223,12 +220,12 @@ fn the_gear_opens_settings_at_sessions_with_focus_on_its_first_switch(cx: &mut T
     );
 }
 
-/// SPEC.md lists every section, but this build has only Sessions, Appearance, Hosts, Terminal, Checkouts and Agent
-/// trust; listing a section with nothing behind it would offer a button that shows an empty pane. The list follows
-/// SPEC.md's order ("Sessions, Appearance, Hosts, Recipes, Tensorlake, Containers, Credentials, Terminal, Checkouts,
-/// Agent trust ..."), and the button of the shown section is the pressed one. Specified: the section list holds exactly
-/// the Sessions, Appearance, Hosts, Terminal, Checkouts and Agent trust buttons, in that order, Sessions pressed and
-/// the others not.
+/// SPEC.md lists every section, but this build has only Sessions, Appearance, Hosts, Terminal, Checkouts, Agent trust
+/// and Notifications; listing a section with nothing behind it would offer a button that shows an empty pane. The list
+/// follows SPEC.md's order ("Sessions, Appearance, Hosts, Recipes, Tensorlake, Containers, Credentials, Terminal,
+/// Checkouts, Agent trust and Notifications, followed by App"), and the button of the shown section is the pressed one.
+/// Specified: the section list holds exactly the Sessions, Appearance, Hosts, Terminal, Checkouts, Agent trust and
+/// Notifications buttons, in that order, Sessions pressed and the others not.
 #[gpui::test]
 fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
     let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
@@ -258,6 +255,7 @@ fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
             ("Terminal".to_string(), Some(Toggled::False)),
             ("Checkouts".to_string(), Some(Toggled::False)),
             ("Agent trust".to_string(), Some(Toggled::False)),
+            ("Notifications".to_string(), Some(Toggled::False)),
         ]
     );
 }
@@ -1454,9 +1452,9 @@ fn the_trust_hint_entry_point_focuses_its_agents_switch_once_known(cx: &mut Test
     );
 }
 
-/// Whether the switch drawn under `id` is available, which a disabled switch shows by taking no focus; `None` when it
-/// is not drawn.
-fn switch_available(cx: &mut VisualTestContext, id: &str) -> Option<bool> {
+/// Whether the control drawn under `id` (a switch, a button) is available, which an unavailable one shows by taking
+/// no focus; `None` when it is not drawn.
+fn available(cx: &mut VisualTestContext, id: &str) -> Option<bool> {
     frame(cx)
         .into_iter()
         .find(|node| node.element_id.as_deref() == Some(id))
@@ -1495,7 +1493,7 @@ fn a_trust_read_that_answers_after_the_user_moved_on_moves_no_focus(cx: &mut Tes
     );
     answer_trust(&mut helm, &reads, [false; 4], cx);
     assert_eq!(
-        switch_available(cx, TrustAgent::Codex.id()),
+        available(cx, TrustAgent::Codex.id()),
         Some(true),
         "the premise: the reads answered and Codex's switch is drawn available"
     );
@@ -1529,7 +1527,7 @@ fn a_click_that_leaves_focus_on_the_dialog_still_stops_the_trust_handover(cx: &m
     );
     answer_trust(&mut helm, &reads, [false; 4], cx);
     assert_eq!(
-        switch_available(cx, TrustAgent::Codex.id()),
+        available(cx, TrustAgent::Codex.id()),
         Some(true),
         "the premise: the reads answered and Codex's switch is drawn available"
     );
@@ -2117,4 +2115,513 @@ fn an_unsaved_draft_survives_a_section_switch_and_goes_with_the_dialog(cx: &mut 
     keys(cx, "escape");
     show_checkouts(&mut helm, cx, Value::Null, json!("stored"), true);
     assert_eq!(text(cx, Field::PostClone), "stored");
+}
+
+// ---- Notifications: ntfy alerts ------------------------------------------------------------------------------------
+
+/// Kit's select-all in a text field on this platform.
+const SELECT_ALL: &str = if cfg!(target_os = "macos") {
+    "cmd-a"
+} else {
+    "ctrl-a"
+};
+
+/// The helm's ntfy settings as its route answers them, on `server` with the given topic, priority and token presence.
+fn ntfy(server: &str, topic: &str, priority: &str, token_set: bool) -> Value {
+    json!({ "enabled": false, "server_url": server, "topic": topic, "priority": priority, "token_set": token_set })
+}
+
+/// Open Settings and show Notifications, returning the id of the one read that sent.
+fn show_notifications(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> u64 {
+    open_settings(cx);
+    assert_eq!(sent(helm), [], "the premise: Sessions reads nothing");
+    click(cx, section_button(Section::Notifications));
+    let reads = sent_reads(helm);
+    let paths: Vec<&str> = reads.iter().map(|(_, path)| path.as_str()).collect();
+    assert_eq!(paths, ["/api/ntfy-alerts"], "one read of the settings");
+    reads[0].0
+}
+
+/// Show Notifications and answer its read with `stored`.
+fn show_ntfy(helm: &mut FakeHelm, cx: &mut VisualTestContext, stored: Value) {
+    let read = show_notifications(helm, cx);
+    helm.reply(read, 200, Some(stored));
+    settle(cx);
+}
+
+/// Replace the text of the field drawn under `selector` with `text`, as the user would.
+fn fill(cx: &mut VisualTestContext, selector: &'static str, text: &str) {
+    click(cx, selector);
+    keys(cx, SELECT_ALL);
+    if text.is_empty() {
+        keys(cx, "backspace");
+    } else {
+        cx.simulate_input(text);
+        test_support::check(cx);
+    }
+}
+
+/// Tab until the control with element id `id` holds focus, which scrolls it into view: the form is taller than the
+/// dialog's body, so a click cannot reach its lower controls.
+fn reach(cx: &mut VisualTestContext, id: &str) {
+    for _ in 0..40 {
+        if focused_id(cx).as_deref() == Some(id) {
+            return;
+        }
+        keys(cx, "tab");
+    }
+    panic!("Tab never reached {id}");
+}
+
+/// Press Save, and return the one command it sent, which must be the settings' `PUT`: its id and body.
+fn save_ntfy(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> (u64, Value) {
+    reach(cx, "ntfy-save");
+    keys(cx, "space");
+    let sent = sent(helm);
+    assert_eq!(sent.len(), 1, "one command was sent: {sent:?}");
+    assert_eq!(
+        (sent[0].method, sent[0].path.as_str()),
+        (Method::Put, "/api/ntfy-alerts")
+    );
+    (sent[0].id, sent[0].body.clone().unwrap_or_default())
+}
+
+/// The settings live behind a route the helm does not push, so the form reads them when the section first shows, and
+/// until that answers the form's defaults are not the stored settings: a Save then would overwrite them (the old
+/// "load refusal does not seed an editable default"). Specified: showing Notifications sends one GET; until it
+/// answers, the switch takes no click and Save is unavailable; once answered, Save sends the stored server, topic and
+/// priority with no token (keep the saved one), and the topic field holds the stored topic, so typing after it extends
+/// it; showing Sessions and Notifications again reads nothing more.
+#[gpui::test]
+fn notifications_reads_its_settings_once_and_stays_locked_until_they_answer(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let read = show_notifications(&mut helm, cx);
+    click(cx, "ntfy-enabled");
+    assert_eq!(sent(&mut helm), [], "a form not read yet takes no edit");
+    assert_eq!(available(cx, "ntfy-enabled"), Some(false));
+    assert_eq!(available(cx, "ntfy-save"), Some(false));
+
+    helm.reply(
+        read,
+        200,
+        Some(ntfy("https://ntfy.example", "saved", "high", true)),
+    );
+    settle(cx);
+    assert_eq!(switch_on(cx, "ntfy-enabled"), Some(false));
+    let (id, body) = save_ntfy(&mut helm, cx);
+    let mut expected = json!({ "enabled": false, "server_url": "https://ntfy.example", "topic": "saved",
+                               "priority": "high", "token": null });
+    assert_eq!(body, expected);
+    assert_eq!(
+        preference_work(cx),
+        Some(Work::Save),
+        "under the preferences key"
+    );
+    let stored = ntfy("https://ntfy.example", "saved", "high", true);
+    helm.reply(id, 200, Some(stored.clone()));
+    settle(cx);
+    // The topic field shows the stored topic, not only the draft: typing at its end extends it.
+    click(cx, "ntfy-topic");
+    cx.simulate_input("-more");
+    let (id, body) = save_ntfy(&mut helm, cx);
+    expected["topic"] = json!("saved-more");
+    assert_eq!(body, expected);
+    helm.reply(id, 200, Some(stored));
+    settle(cx);
+    click(cx, section_button(Section::Sessions));
+    click(cx, section_button(Section::Notifications));
+    assert_eq!(sent(&mut helm), [], "read once per opening");
+}
+
+/// SPEC.md: the settings "are explicitly saved helm configuration", and "The stored token is never returned": the form
+/// must send what was typed, show the helm's answer, and then hold no token, or the next Save would send it again,
+/// possibly to another server. Specified: a server, topic and token typed, the switch turned on and High chosen in the
+/// priority select, Save sends all five in one `PUT` and shows "Working…" while it is out; the helm's answer shows
+/// "ntfy alert settings saved"; a second Save sends the same form with no token.
+#[gpui::test]
+fn a_save_sends_the_whole_form_and_holds_no_token_after(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_ntfy(&mut helm, cx, ntfy("https://ntfy.sh", "", "default", false));
+    click(cx, "ntfy-enabled");
+    fill(cx, "ntfy-server", "http://127.0.0.1:9");
+    fill(cx, "ntfy-topic", "browser-alerts");
+    fill(cx, "ntfy-token", "browser-token");
+    reach(cx, "ntfy-priority");
+    keys(cx, "space down enter");
+    assert_eq!(sent(&mut helm), [], "nothing saves before Save");
+
+    let (id, body) = save_ntfy(&mut helm, cx);
+    let mut form = json!({ "enabled": true, "server_url": "http://127.0.0.1:9", "topic": "browser-alerts",
+                           "priority": "high", "token": "browser-token" });
+    assert_eq!(body, form);
+    assert_eq!(label_of(cx, "ntfy-working").as_deref(), Some("Working…"));
+    let stored = json!({ "enabled": true, "server_url": "http://127.0.0.1:9", "topic": "browser-alerts",
+                         "priority": "high", "token_set": true });
+    helm.reply(id, 200, Some(stored));
+    settle(cx);
+    assert_eq!(
+        label_of(cx, "ntfy-saved").as_deref(),
+        Some("ntfy alert settings saved")
+    );
+    assert!(!drawn(cx, "ntfy-working"));
+
+    let (_, body) = save_ntfy(&mut helm, cx);
+    form["token"] = Value::Null;
+    assert_eq!(body, form, "the token field was emptied");
+}
+
+/// SPEC.md: "Save refusals appear inline", and SPEC.md's "Switching sections preserves unsaved fields, outcome lines
+/// and pending saves; closing discards unsaved fields". The helm refuses a bad topic with its own fixed words, and the
+/// user must be able to correct the form rather than retype it. Specified: a topic with a slash, saved and refused,
+/// shows the helm's words as an alert; after showing Sessions and Notifications again the words are still there and
+/// Save sends the same topic; once Settings is closed and opened again the form reads the settings again and Save
+/// sends the stored topic.
+#[gpui::test]
+fn a_refused_save_keeps_the_form_with_the_helms_words_until_closed(cx: &mut TestAppContext) {
+    let refusal = "topic must contain at most 64 letters, numbers, underscores or dashes";
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_ntfy(
+        &mut helm,
+        cx,
+        ntfy("https://ntfy.sh", "kept", "default", false),
+    );
+    fill(cx, "ntfy-topic", "bad/topic");
+    let (id, _) = save_ntfy(&mut helm, cx);
+    helm.reply(id, 400, Some(json!(refusal)));
+    settle(cx);
+    assert_eq!(label_of(cx, "ntfy-error").as_deref(), Some(refusal));
+    assert!(!drawn(cx, "ntfy-saved"));
+
+    click(cx, section_button(Section::Sessions));
+    click(cx, section_button(Section::Notifications));
+    assert_eq!(label_of(cx, "ntfy-error").as_deref(), Some(refusal));
+    let (id, body) = save_ntfy(&mut helm, cx);
+    assert_eq!(body["topic"], json!("bad/topic"), "the draft was kept");
+    helm.reply(id, 400, Some(json!(refusal)));
+    settle(cx);
+
+    keys(cx, "escape");
+    assert!(!any_open(cx), "the premise: Settings closed");
+    show_ntfy(
+        &mut helm,
+        cx,
+        ntfy("https://ntfy.sh", "kept", "default", false),
+    );
+    assert!(!drawn(cx, "ntfy-error"), "closing discarded the outcome");
+    let (_, body) = save_ntfy(&mut helm, cx);
+    assert_eq!(body["topic"], json!("kept"), "and the draft");
+}
+
+/// SPEC.md: "Changing to another server clears a saved token unless a new one is entered, and the form says so before
+/// saving", and the token can be cleared on purpose. The hint must follow the helm's same-server rule, or it would
+/// promise a removal that does not happen, or stay silent about one that does. Specified: with a token saved, another
+/// server shows the hint; the saved server with a path added hides it; another server with a token typed hides it, and
+/// emptying the token brings it back; Save then sends no token. The token field's placeholder, the form's only sign of
+/// whether a token is saved, reads "Token saved; leave blank to keep it" on the saved server, "Saved token will be
+/// cleared" on another, and "No token saved" once the helm answers that none is. Clear saved token holds the token field
+/// read-only, as the old field was: text typed into it then never reaches the form, so with Clear turned off again Save
+/// sends no token; with Clear on, Save sends an empty one.
+#[gpui::test]
+fn another_server_says_a_saved_token_will_be_cleared_before_saving(cx: &mut TestAppContext) {
+    let hint = "ntfy-token-origin-hint";
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_ntfy(
+        &mut helm,
+        cx,
+        ntfy("https://ntfy.example", "alerts", "default", true),
+    );
+    assert!(!drawn(cx, hint), "the premise: same server, no hint");
+    assert!(painted(cx).contains("Token saved; leave blank to keep it"));
+    fill(cx, "ntfy-server", "http://localhost:1");
+    assert!(drawn(cx, hint), "another server shows the hint");
+    assert!(painted(cx).contains("Changing the server clears the saved token when you save"));
+    assert!(painted(cx).contains("Saved token will be cleared"));
+    fill(cx, "ntfy-server", "https://ntfy.example/prefix");
+    assert!(!drawn(cx, hint), "a path stays on the same server");
+    fill(cx, "ntfy-server", "http://localhost:1");
+    fill(cx, "ntfy-token", "replacement-token");
+    assert!(!drawn(cx, hint), "a new token goes with the new server");
+    fill(cx, "ntfy-token", "");
+    assert!(drawn(cx, hint));
+
+    let (id, body) = save_ntfy(&mut helm, cx);
+    assert_eq!(
+        (&body["server_url"], &body["token"]),
+        (&json!("http://localhost:1"), &Value::Null)
+    );
+    helm.reply(
+        id,
+        200,
+        Some(ntfy("http://localhost:1", "alerts", "default", false)),
+    );
+    settle(cx);
+    assert!(!drawn(cx, hint), "no token is saved any more");
+    assert!(painted(cx).contains("No token saved"));
+
+    reach(cx, "ntfy-clear-token");
+    keys(cx, "space");
+    fill(cx, "ntfy-token", "typed-while-clearing");
+    reach(cx, "ntfy-clear-token");
+    keys(cx, "space");
+    assert_eq!(
+        switch_on(cx, "ntfy-clear-token"),
+        Some(false),
+        "the premise: Clear is off again"
+    );
+    let (id, body) = save_ntfy(&mut helm, cx);
+    assert_eq!(body["token"], Value::Null, "the token field was read-only");
+    helm.reply(
+        id,
+        200,
+        Some(ntfy("http://localhost:1", "alerts", "default", false)),
+    );
+    settle(cx);
+    reach(cx, "ntfy-clear-token");
+    keys(cx, "space");
+    let (_, body) = save_ntfy(&mut helm, cx);
+    assert_eq!(body["token"], json!(""), "an explicit clear");
+}
+
+/// The old spec's rule: "Load refusal does not seed an editable default that could overwrite saved settings. Retry
+/// obtains an authoritative snapshot before enabling writes." A form whose read failed must not let the defaults it
+/// shows be saved over the stored settings, and must say why and let the user read again. Specified: the read refused,
+/// its words show as an alert, the switch and Save are unavailable; Retry loading sends the read again, and once it
+/// answers the alert is gone and the switch and Save are available.
+#[gpui::test]
+fn a_failed_read_shows_its_reason_and_retry_reads_again(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let read = show_notifications(&mut helm, cx);
+    helm.reply(read, 500, Some(json!("could not read ntfy alert settings")));
+    settle(cx);
+    assert_eq!(
+        label_of(cx, "ntfy-load-error").as_deref(),
+        Some("could not read ntfy alert settings")
+    );
+    assert_eq!(available(cx, "ntfy-enabled"), Some(false));
+    assert_eq!(available(cx, "ntfy-save"), Some(false));
+
+    reach(cx, "ntfy-retry");
+    keys(cx, "space");
+    let reads = sent_reads(&mut helm);
+    assert_eq!(reads.len(), 1, "read again: {reads:?}");
+    assert_eq!(reads[0].1, "/api/ntfy-alerts");
+    helm.reply(
+        reads[0].0,
+        200,
+        Some(ntfy("https://ntfy.sh", "", "default", false)),
+    );
+    settle(cx);
+    assert!(!drawn(cx, "ntfy-load-error"));
+    assert_eq!(available(cx, "ntfy-enabled"), Some(true));
+    assert_eq!(available(cx, "ntfy-save"), Some(true));
+}
+
+/// The topic field of the ntfy form drawn last.
+fn topic_input(cx: &mut VisualTestContext) -> crate::components::TextInputState {
+    cx.update(|_, cx| {
+        let dialog = cx
+            .try_global::<Opened>()
+            .and_then(|opened| opened.0.upgrade());
+        let dialog = dialog.expect("the premise: Settings is open");
+        let form = dialog.read(cx).ntfy.clone();
+        form.expect("the premise: Notifications was shown")
+            .read(cx)
+            .topic_input()
+    })
+}
+
+/// SPEC_impl.md, "Drafts": while a save is in flight the value on screen is the one sent, and the bound field's tests
+/// include "a keystroke while saving". This form binds its fields to its draft itself (the drafts module's
+/// `DraftInput` saves one field per request), so the same legs are tested here: an edit taken while saving would be
+/// marked saved by the reply although it was never sent. Specified: while the `PUT` is unanswered, typing into the
+/// topic leaves the field as sent, the switch and the priority select take no click, and Save sends nothing more; a
+/// keystroke that still reaches the form while saving (here by lifting the field's read-only hold, as an event queued
+/// before it took effect would) is refused, and the field shows the topic sent again; after the helm refuses, Save
+/// sends the first body again. Which of the read-only hold and the put-back stopped the first keystroke is not told
+/// apart here: either leaves the field as sent.
+#[gpui::test]
+fn nothing_edits_the_form_while_its_save_is_in_flight(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_ntfy(&mut helm, cx, ntfy("https://ntfy.sh", "", "default", false));
+    fill(cx, "ntfy-topic", "sent-topic");
+    let (id, first) = save_ntfy(&mut helm, cx);
+    assert_eq!(preference_work(cx), Some(Work::Save), "the premise: saving");
+
+    click(cx, "ntfy-topic");
+    cx.simulate_input("typed");
+    test_support::check(cx);
+    click(cx, "ntfy-enabled");
+    click(cx, "ntfy-priority");
+    assert_eq!(switch_on(cx, "ntfy-enabled"), Some(false));
+    assert!(!drawn(cx, "ntfy-priority-list"), "the select did not open");
+    reach(cx, "ntfy-save");
+    keys(cx, "space");
+    assert_eq!(sent(&mut helm), [], "nothing more was sent");
+    let topic = topic_input(cx);
+    let text = |cx: &mut VisualTestContext| cx.update(|_, cx| topic.text(cx).to_string());
+    assert_eq!(
+        text(cx),
+        "sent-topic",
+        "typing while saving left the field as sent"
+    );
+
+    cx.update(|_, cx| topic.set_read_only(false, cx));
+    click(cx, "ntfy-topic");
+    cx.simulate_input("queued");
+    settle(cx);
+    assert_eq!(
+        text(cx),
+        "sent-topic",
+        "the queued edit was refused and put back"
+    );
+
+    helm.reply(id, 503, Some(json!("fixture ntfy save refused")));
+    settle(cx);
+    let (_, again) = save_ntfy(&mut helm, cx);
+    assert_eq!(again, first, "the form is still the one sent");
+}
+
+// ---- The body's foot ------------------------------------------------------------------------------------------------
+
+/// The frame scrolls a long section inside the body, above the pinned footer, so the section's last line must clear
+/// the footer once the body is scrolled to its end, or it can never be read whole. Checkouts is the tallest section,
+/// taller than the body at the dialog's full height, and ends with the spare switch's documentation link. Specified: in
+/// a window 1000 pixels tall, Checkouts shown and its body wheeled far past its end, the link lies wholly inside the
+/// body's visible part, whose lower edge is the footer's upper one (the frame's body and footer are sibling rows).
+#[gpui::test]
+fn the_tallest_sections_last_line_clears_the_footer_scrolled_to_the_end(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_checkouts(&mut helm, cx, Value::Null, Value::Null, true);
+    let body = bounds(cx, DIALOG_BODY);
+    assert!(
+        bounds(cx, super::checkouts::SPARE_DOCS_ID).bottom() > body.bottom(),
+        "the premise: the link starts below the body's visible part"
+    );
+    cx.simulate_event(gpui::ScrollEvent {
+        position: body.center(),
+        delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-5000.))),
+        ..Default::default()
+    });
+    settle(cx);
+    assert!(
+        shows_whole(cx, super::checkouts::SPARE_DOCS_ID, DIALOG_BODY),
+        "the link {:?} is inside the body's visible part {:?}",
+        bounds(cx, super::checkouts::SPARE_DOCS_ID),
+        bounds(cx, DIALOG_BODY)
+    );
+}
+
+/// SPEC.md: "Send test uses the saved configuration, even while disabled, and reports success or failure inline", and
+/// the old spec's rule: "A test send is a separate request with no form payload. Drafts and both outcomes survive
+/// navigation; closing discards drafts". The old form also locked itself while the test was out, so a Save could not
+/// overtake it, and showed one outcome at a time. Specified: right after a done save, Send test sends one `POST
+/// /api/ntfy-alerts/test` with no body, shows "Working…" and takes the saved line away; meanwhile Save and the switch
+/// send and change nothing; the helm's refusal shows in its own words with the alert role; an edit takes that line
+/// away; with an unsaved topic typed, a refusal stays after showing Sessions and Notifications again, beside the
+/// unsaved topic; a test answered with no body shows "Test alert sent" with the status role, which also stays across
+/// that switch; closing Settings with it showing and opening it again shows no line, and Save sends the stored topic,
+/// not the unsaved one.
+#[gpui::test]
+fn send_test_sends_nothing_of_the_form_and_reports_how_it_went(cx: &mut TestAppContext) {
+    let refusal = "the ntfy server could not be reached";
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_ntfy(
+        &mut helm,
+        cx,
+        ntfy("https://ntfy.sh", "saved-topic", "default", false),
+    );
+    let send_test = |helm: &mut FakeHelm, cx: &mut VisualTestContext| -> u64 {
+        reach(cx, "ntfy-send-test");
+        keys(cx, "space");
+        let sent = sent(helm);
+        assert_eq!(sent.len(), 1, "one command was sent: {sent:?}");
+        assert_eq!(
+            (sent[0].method, sent[0].path.as_str(), sent[0].body.clone()),
+            (Method::Post, "/api/ntfy-alerts/test", None),
+            "a test sends nothing of the form"
+        );
+        sent[0].id
+    };
+    let role_of = |cx: &mut VisualTestContext, id: &str| {
+        frame(cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+            .and_then(|node| node.role)
+    };
+    let switch_sections = |cx: &mut VisualTestContext| {
+        click(cx, section_button(Section::Sessions));
+        click(cx, section_button(Section::Notifications));
+    };
+
+    fill(cx, "ntfy-topic", "saved-again");
+    let (id, _) = save_ntfy(&mut helm, cx);
+    helm.reply(
+        id,
+        200,
+        Some(ntfy("https://ntfy.sh", "saved-again", "default", false)),
+    );
+    settle(cx);
+    assert!(drawn(cx, "ntfy-saved"), "the premise: the saved line shows");
+
+    let id = send_test(&mut helm, cx);
+    assert_eq!(label_of(cx, "ntfy-working").as_deref(), Some("Working…"));
+    assert!(!drawn(cx, "ntfy-saved"), "a test took the saved line away");
+    reach(cx, "ntfy-save");
+    keys(cx, "space");
+    click(cx, "ntfy-enabled");
+    assert_eq!(
+        sent(&mut helm),
+        [],
+        "nothing else is sent while the test is out"
+    );
+    assert_eq!(switch_on(cx, "ntfy-enabled"), Some(false));
+    helm.reply(id, 502, Some(json!(refusal)));
+    settle(cx);
+    assert_eq!(label_of(cx, "ntfy-tested").as_deref(), Some(refusal));
+    assert_eq!(role_of(cx, "ntfy-tested"), Some(Role::Alert));
+    assert!(!drawn(cx, "ntfy-working"));
+    fill(cx, "ntfy-topic", "unsaved-topic");
+    assert!(!drawn(cx, "ntfy-tested"), "an edit took the line away");
+
+    let id = send_test(&mut helm, cx);
+    helm.reply(id, 502, Some(json!(refusal)));
+    settle(cx);
+    switch_sections(cx);
+    assert_eq!(label_of(cx, "ntfy-tested").as_deref(), Some(refusal));
+    let topic = topic_input(cx);
+    let text = cx.update(|_, cx| topic.text(cx).to_string());
+    assert_eq!(text, "unsaved-topic", "the unsaved topic stayed");
+
+    let id = send_test(&mut helm, cx);
+    helm.reply(id, 204, None);
+    settle(cx);
+    assert_eq!(
+        label_of(cx, "ntfy-tested").as_deref(),
+        Some("Test alert sent")
+    );
+    assert_eq!(role_of(cx, "ntfy-tested"), Some(Role::Status));
+    switch_sections(cx);
+    assert_eq!(
+        label_of(cx, "ntfy-tested").as_deref(),
+        Some("Test alert sent"),
+        "the success stayed across sections"
+    );
+
+    reach(cx, "ntfy-send-test");
+    keys(cx, "escape");
+    assert!(!any_open(cx), "the premise: Settings closed");
+    show_ntfy(
+        &mut helm,
+        cx,
+        ntfy("https://ntfy.sh", "saved-again", "default", false),
+    );
+    assert!(!drawn(cx, "ntfy-tested"), "closing discarded the line");
+    let (_, body) = save_ntfy(&mut helm, cx);
+    assert_eq!(
+        body["topic"],
+        json!("saved-again"),
+        "closing discarded the draft"
+    );
 }

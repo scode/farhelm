@@ -62,6 +62,9 @@
 //! (`docs/harness-marks.md`, "Drawing the marks"). The four permission marks (`Permission*`) are the old app's
 //! `PermissionIcon` drawings at the reference commit, in its 12-unit box with the 1.25 stroke and round caps and joins;
 //! the own-setting shield is the plain one dashed.
+//!
+//! The Bell is the old app's quiet bell (`BellIcon` with `loud: false`), in its own 12-unit box with the 1.2 stroke and
+//! round caps and joins, unfilled: the Settings dialog's Notifications section.
 
 use std::borrow::Cow;
 
@@ -221,6 +224,8 @@ pub enum Icon {
     PermissionOwnSetting,
     /// A question mark: a command from before launch kinds, which carries no YOLO assertion.
     PermissionUnknown,
+    /// A bell, unfilled: the Settings dialog's Notifications section (the old app's quiet `BellIcon`).
+    Bell,
 }
 
 impl Icon {
@@ -287,6 +292,7 @@ impl Icon {
         Icon::PermissionShielded,
         Icon::PermissionOwnSetting,
         Icon::PermissionUnknown,
+        Icon::Bell,
     ];
 }
 
@@ -352,6 +358,7 @@ impl Icon {
             Icon::PermissionShielded => "icons/permission-shielded.svg",
             Icon::PermissionOwnSetting => "icons/permission-own-setting.svg",
             Icon::PermissionUnknown => "icons/permission-unknown.svg",
+            Icon::Bell => "icons/bell.svg",
         }
     }
 }
@@ -443,6 +450,7 @@ impl Assets {
                 Some(include_bytes!("../assets/icons/permission-unknown.svg"))
             }
             "icons/update.svg" => Some(include_bytes!("../assets/icons/update.svg")),
+            "icons/bell.svg" => Some(include_bytes!("../assets/icons/bell.svg")),
             WORDMARK_DARK => Some(include_bytes!(
                 "../../../../packaging/farhelm-desktop/wordmark-dark.svg"
             )),

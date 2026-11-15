@@ -29,7 +29,8 @@
 //!   (SPEC.md: "A failed save restores the last known value and shows an adjacent error"). Nothing is optimistic,
 //!   queued, retried or read back. Checkouts' folder and post-clone command are the exception: each is a text field
 //!   the user saves explicitly, a [`CheckoutField`] of its own, which keeps a refused draft for correction and reads
-//!   its route back after a done save ([`checkout_field`]).
+//!   its route back after a done save ([`checkout_field`]). So are Notifications' ntfy alerts: a form the user saves
+//!   explicitly, a view of its own ([`ntfy`]).
 //!
 //! NOTE: Quick flips do not follow the old app's "newest-choice" rule. Its preference queue coalesced a field's clicks,
 //! sent only the newest, and reported a failure only for the newest click. Here the operation store admits one request
@@ -46,9 +47,10 @@
 //! section switch does not move focus to the shown section's heading, as the old app did so a keyboard user went on
 //! from there: the focus coordinator moves focus to a control only while no layer is open, and the heading is not a
 //! control. The section list is not pinned while a long section scrolls (the old `position: sticky`). Checkouts is
-//! taller than the dialog's body even at the dialog's full height, by about 30 pixels: its last control, the docs
-//! link, sits at the body's foot, its descenders and underline cut by the footer until the user scrolls. The header is
-//! taller than the old one, and the docs link has a line of its own.
+//! taller than the dialog's body even at the dialog's full height, by about 30 pixels, so its body scrolls: unscrolled,
+//! its last control, the docs link, sits at the body's visible edge with its descenders and underline below it, and
+//! scrolled to the end it lies wholly above the footer. The header is taller than the old one, and the docs link has a
+//! line of its own.
 
 mod agent_trust;
 mod appearance;
@@ -56,6 +58,7 @@ mod checkout_field;
 mod checkouts;
 mod choices;
 mod configured;
+mod ntfy;
 mod terminal;
 #[cfg(test)]
 mod tests;
@@ -113,8 +116,8 @@ const SUMMARY: &str = "For every host on this helm, and for this device";
 
 /// The footer's note, the old desktop app's words.
 ///
-/// NOTE: It names the dialog's explicit-save editors; of them, only Checkouts' fields are built so far (the others come
-/// with their sections).
+/// NOTE: It names the dialog's explicit-save editors; of them, only ntfy alerts' form and Checkouts' fields are built so
+/// far (the others come with their sections).
 const FOOTER_NOTE: &str = "Most choices save immediately; credentials, the Tensorlake API key, ntfy alerts, checkout \
                            fields and file types use Save.";
 
@@ -269,6 +272,7 @@ pub(crate) enum Section {
     Terminal,
     Checkouts,
     AgentTrust,
+    Notifications,
 }
 
 impl Section {
@@ -282,6 +286,7 @@ impl Section {
         Section::Terminal,
         Section::Checkouts,
         Section::AgentTrust,
+        Section::Notifications,
     ];
 
     /// The section's stable key, which its button's element id is built from.
@@ -293,6 +298,7 @@ impl Section {
             Section::Terminal => "terminal",
             Section::Checkouts => "checkouts",
             Section::AgentTrust => "agent-trust",
+            Section::Notifications => "notifications",
         }
     }
 
@@ -305,6 +311,7 @@ impl Section {
             Section::Terminal => "Terminal",
             Section::Checkouts => "Checkouts",
             Section::AgentTrust => "Agent trust",
+            Section::Notifications => "Notifications",
         }
     }
 
@@ -317,6 +324,7 @@ impl Section {
             Section::Terminal => Icon::Terminal,
             Section::Checkouts => Icon::Folder,
             Section::AgentTrust => Icon::AgentTrust,
+            Section::Notifications => Icon::Bell,
         }
     }
 
@@ -325,7 +333,8 @@ impl Section {
     /// state, out of the dialog's reach, so opening there focuses the dialog itself (see [`open_at`]). Nothing in the
     /// app opens Settings at either; only their goldens do. `None` for Agent trust too, whose first switch is
     /// unavailable until the section's read answers ([`open_at_agent_trust`]), and for Checkouts, whose first control
-    /// is a text field that is read-only until its read answers, and which only its golden opens at.
+    /// is a text field that is read-only until its read answers, and Notifications, whose controls are unavailable
+    /// until its read answers ([`ntfy`]); only their goldens open at either.
     fn first(self) -> Option<Choice> {
         match self {
             Section::Sessions => Some(Choice::SkipSessionConfirmations),
@@ -334,6 +343,7 @@ impl Section {
             Section::Terminal => None,
             Section::Checkouts => None,
             Section::AgentTrust => None,
+            Section::Notifications => None,
         }
     }
 }
@@ -359,6 +369,9 @@ pub(crate) struct SettingsDialog {
     checkout_fields: Option<CheckoutFields>,
     /// Checkouts' spare switch. Its read is sent with the fields', so `checkout_fields` also says whether it was sent.
     spare: Configured,
+    /// Notifications' ntfy alerts form, made the first time the section is shown in this opening, which is when it
+    /// reads the helm's settings (the pattern Agent trust follows).
+    ntfy: Option<Entity<ntfy::NtfyAlerts>>,
     /// The handover a trust hint asked for ([`open_at_agent_trust`]), until its agent's read answers. Left set if that
     /// read fails, which is harmless: the read is sent once per opening, so nothing can match it again in this opening.
     focus_on: Option<Handover>,
@@ -410,6 +423,7 @@ impl SettingsDialog {
             trust_read: false,
             checkout_fields: None,
             spare: Configured::new(),
+            ntfy: None,
             focus_on: None,
             layer: None,
         }
@@ -432,9 +446,13 @@ impl SettingsDialog {
 
     /// Show `section`. Every section's state stays as it is: only which one is drawn changes. Showing Agent trust for
     /// the first time in this opening reads the agents' trust choices, and showing Checkouts for the first time makes
-    /// its fields (which read their routes) and reads the spare switch.
+    /// its fields (which read their routes) and reads the spare switch, and showing Notifications for the first time
+    /// makes its form, which reads the helm's ntfy settings.
     fn show(&mut self, section: Section, window: &mut Window, cx: &mut Context<Self>) {
         self.shown = section;
+        if section == Section::Notifications && self.ntfy.is_none() {
+            self.ntfy = Some(cx.new(|cx| ntfy::NtfyAlerts::new(window, cx)));
+        }
         if section == Section::Checkouts && self.checkout_fields.is_none() {
             self.checkout_fields = Some(CheckoutFields {
                 folder: cx.new(|cx| {
@@ -710,6 +728,11 @@ impl SettingsDialog {
                     )
                     .into_any_element()
                 })
+                .collect(),
+            Section::Notifications => self
+                .ntfy
+                .iter()
+                .map(|form| form.clone().into_any_element())
                 .collect(),
         }
     }
