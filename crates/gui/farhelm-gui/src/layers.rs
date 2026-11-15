@@ -71,23 +71,26 @@
 //!   Help in paragraphs ([`Help::Paragraphs`]) is drawn wider and never cut short, as the old app drew it.
 //! - **The innermost help wins** when a control with hover help sits inside another with its own (a session row's
 //!   marks inside the row); [`hover_began`], "Nested hover help", explains the rule and how it is decided.
-//! - **Two pill slots, drawn above every layer, that are not layers** ([`show_pill`], [`show_launch_pill`]). They are
+//! - **Two pill slots, drawn above the layers, that are not layers** ([`show_pill`], [`show_launch_pill`]). They are
 //!   the things a feature draws over the dialogs without opening one. The pill is SPEC.md's quick-launch sequence pill,
-//!   which stays in view above the launcher's veil, as the old one sat at z-index 50 over the launcher's backdrop at 40;
-//!   it sits centered over an [`Anchor`] element or at its bottom edge ([`PillPlacement`]) and goes when that element is
-//!   no longer drawn. The launch pill is SPEC.md's launch progress pill and its "Started" report, centered 20 pixels
-//!   above the window's bottom edge, where the old `.launch-progress-pill` was fixed; it is drawn under the approval
-//!   region and the pill, as the old one sat at z-index 40 under the cards' 45 and the sequence pill's 50 (the old
-//!   stylesheet's z-index ladder at `.header-confirm`). Each slot holds one pill, and the two show at once, each hidden
-//!   only through the id its show returned ([`hide_pill`]); both go on a reset ([`close_all`]). Both are display only,
-//!   like the tooltip: they ask for no pointer input and hold no focus, so a press on one is a press on whatever it
-//!   covers, and nothing that asks about layers ([`any_open`], Tab's trap, where focus recovers, Escape's
-//!   [`dismiss_top`]) sees them.
-//! - **One approval region, drawn above every dialog, popover and the launch pill and under the pill and the tooltip,
-//!   that is not a layer either** ([`install_approval_region`]): where SPEC.md's independent agent approval cards stay
-//!   usable while a dialog is open. Unlike the pills it takes presses and focus; like them, nothing that asks about
-//!   layers sees it, and it is installed once per window, never shown or hidden. SPEC_impl.md, "Overlays: the layer
-//!   manager", says why it has this shape and which of its behaviors follow from the rules above.
+//!   which stays in view above the launcher's veil, as the old one sat at z-index 50 over the launcher's backdrop at
+//!   40; it sits centered over an [`Anchor`] element or at its bottom edge ([`PillPlacement`]) and goes when that
+//!   element is no longer drawn. The launch pill is SPEC.md's launch progress pill and its "Started" report, centered
+//!   20 pixels above the window's bottom edge, where the old `.launch-progress-pill` was fixed; it is drawn under the
+//!   approval region and the pill, as the old one sat at z-index 40 under the cards' 45 and the sequence pill's 50 (the
+//!   old stylesheet's z-index ladder at `.header-confirm`), and under a raised layer ([`above_approval_region`]) and
+//!   its veil. Each slot holds one pill, and the two show at once, each hidden only through the id its show returned
+//!   ([`hide_pill`]); both go on a reset ([`close_all`]). Both are display only, like the tooltip: they ask for no
+//!   pointer input and hold no focus, so a press on one is a press on whatever it covers, and nothing that asks about
+//!   layers ([`any_open`], Tab's trap, where focus recovers, Escape's [`dismiss_top`]) sees them.
+//! - **One approval region, drawn above the launch pill and every layer but a raised one, and under the pill and the
+//!   tooltip, that is not a layer either** ([`install_approval_region`]): where SPEC.md's independent agent approval
+//!   cards stay usable while a dialog is open. Unlike the pills it takes presses and focus; like them, nothing that
+//!   asks about layers sees it, and it is installed once per window, never shown or hidden. SPEC_impl.md, "Overlays:
+//!   the layer manager", says why it has this shape and which of its behaviors follow from the rules above.
+//! - **One layer may be raised above the approval region** ([`above_approval_region`]), and every layer opened over it
+//!   goes with it: SPEC.md's tunnel warning, which the old app drew over the approval cards whatever opened it, so a
+//!   card that asks for it cannot cover it. Its box is raised and its veil is not, so the cards beside it stay usable.
 //!
 //! State is kept per window: multi-window support is a watch-list item, and the one thing it asks of the foundations
 //! now is that overlays are not shared between windows. Each window's [`LayerStack`] is an entity that notifies, and
@@ -222,6 +225,9 @@ struct Layer {
     empty_press: focus::OnPress,
     /// Close the layer when its subject is gone or its anchor is no longer drawn.
     _watches: Vec<Subscription>,
+    /// Whether its box, and every layer opened over it, is drawn above the approval region ([`above_approval_region`]).
+    /// It lives and goes with the layer: ids are never reused, so no later layer inherits it.
+    above_region: bool,
 }
 
 /// A dialog's main action, which Enter presses while the dialog itself has focus.
@@ -877,6 +883,7 @@ fn open(
             main_action,
             empty_press,
             _watches: watches,
+            above_region: false,
         });
         // A layer covers the tooltip of whatever is under it, and the next tooltip waits the full delay again.
         stack.put_tooltip_away();
@@ -1859,23 +1866,25 @@ const LAUNCH_PILL_INSET: Pixels = px(20.);
 /// wide as its content up to that cap and keeps its text inside it (clip or wrap); a view wider than the cap overflows
 /// it. Having no anchor, it goes only when its feature hides it or on a reset ([`close_all`]).
 ///
-/// It is drawn above every layer and under the approval region, the sequence pill and the tooltip: the old progress
-/// pill sat inside the launcher's backdrop at z-index 40 and the old "Started" report at z-index 40 itself, above the
-/// row menus (20) and header questions (30), under the approval cards (45), the sequence pill and the tooltip (50).
-/// Like the pill it is not a layer, takes no [`Mark`], and changes nothing that layers decide.
+/// It is drawn above every layer but a raised one ([`above_approval_region`]) and under the approval region, the
+/// sequence pill and the tooltip: the old progress pill sat inside the launcher's backdrop at z-index 40 and the old
+/// "Started" report at z-index 40 itself, above the row menus (20) and header questions (30), under the approval cards
+/// (45), the sequence pill and the tooltip (50). Like the pill it is not a layer, takes no [`Mark`], and changes
+/// nothing that layers decide.
 ///
 /// NOTE: The old dialogs sat at z-index 40 beside the old pills, except the tunnel consent dialog at 50, which was
 /// always above them. Among the 40s, element order decided: the launcher, the quick switcher, the templates dialog, the
 /// checkout trash dialog and the Hosts panel's dialogs came before the pills and sat under them, and Delete, Stop,
 /// Rename and the app bar's dialogs (Settings and the help menu's) came after and covered them. Here the launch pill is
-/// above every dialog, which matches the launcher and the other dialogs that start a launch, a deviation chosen by the
-/// foundations owner on 2026-11-15 when the slot was ported. Below every dialog would put the "Started" report under a
-/// launcher opened again while it shows, which the old report covered; above, it only hides part of a later dialog from
-/// view, never from a click, as it takes no pointer input; and below some dialogs only would need a per-layer choice,
-/// where the old app's split fell out of element order. The old launcher drew no veil and took no input while its own
-/// progress pill showed (`.launch-request-pending`). One overlap is kept as the old app had it: the launch pill at the
-/// window's bottom and the sequence pill on the main area's bottom edge (while the launcher is open) can overlap, and
-/// the sequence pill then covers it.
+/// above every dialog but the raised tunnel warning (which covered it in the old app too), which matches the launcher
+/// and the other dialogs that start a launch, a deviation chosen by the foundations owner on 2026-11-15 when the slot
+/// was ported. Below every dialog would put the "Started" report under a launcher opened again while it shows, which
+/// the old report covered; above, it only hides part of a later dialog from view, never from a click, as it takes no
+/// pointer input; and below some dialogs only would need a per-layer choice, where the old app's split fell out of
+/// element order. The old launcher drew no veil and took no input while its own progress pill showed
+/// (`.launch-request-pending`). One overlap is kept as the old app had it: the launch pill at the window's bottom and
+/// the sequence pill on the main area's bottom edge (while the launcher is open) can overlap, and the sequence pill
+/// then covers it.
 pub fn show_launch_pill(view: AnyView, window: &mut Window, cx: &mut App) -> Option<PillId> {
     let stack = stack(window, cx)?;
     let id = stack.update(cx, |stack, cx| {
@@ -1926,10 +1935,11 @@ struct Region {
 }
 
 /// Install `view` as `window`'s approval region: SPEC.md's independent agent approval cards, which stay usable while a
-/// dialog is open. The approvals feature installs it once per window, at window start, and never shows or hides it:
-/// the view draws its cards from the store, and nothing while no card waits. Installing again replaces the view and
-/// keeps the region's focus handle. A reset ([`close_all`]) leaves it installed. SPEC_impl.md, "Overlays: the layer
-/// manager", has its rules and why they are so, the decision about Escape, and what is not built yet.
+/// dialog is open (every dialog but one raised above it, [`above_approval_region`]). The approvals feature installs it
+/// once per window, at window start, and never shows or hides it: the view draws its cards from the store, and nothing
+/// while no card waits. Installing again replaces the view and keeps the region's focus handle. A reset
+/// ([`close_all`]) leaves it installed. SPEC_impl.md, "Overlays: the layer manager", has its rules and why they are so,
+/// the decision about Escape, and what is not built yet.
 ///
 /// The view is laid out as the frame is prepared, inside a zero-size box at the window's origin, so it places its card
 /// itself with absolute insets and an explicit width, from an element the session view draws ([`Anchor::drawn_bounds`],
@@ -1958,10 +1968,68 @@ pub fn install_approval_region(view: AnyView, window: &mut Window, cx: &mut App)
     });
 }
 
+/// Draw the open layer `id`'s own box, and every layer opened over it, above the approval region and under the pill
+/// and the tooltip, until it closes; its veil stays where an ordinary dialog's is, under the cards. Its opener calls
+/// this right after the open, before a frame shows it. Only SPEC.md's tunnel warning does, so a card that asks for the
+/// warning cannot cover it: the old app drew that dialog at z-index 50, over the approval cards' 45, whatever opened it
+/// (a Cmd-click in the terminal, Settings' switch or a card's Tunnel and open), and under the sequence pill and the
+/// tooltip, also at 50 and later in the page (`.tunnel-consent-backdrop` and `.approval-cards` in `app.css` at
+/// reference commit `24bc0580`, lines 9790 and 8842, and the z-index ladder at `.header-confirm`, line 2261). Every
+/// other old dialog, menu and question sat at 40 or lower, under the cards (the hosts dialog a card opens included), so
+/// no other opener raises its layer.
+///
+/// The old warning's backdrop was at 50 too, and blocked every card while it was up. Here the veil stays under the
+/// cards, so a press on a card outside the warning's box is the card's and focus may rest there, as SPEC.md's "Opening
+/// and closing" has it ("independent agent approval cards remain usable" while a modal dialog is open). Decided by the
+/// foundations owner on 2026-11-15: SPEC.md's "remain usable" wins over the old app's blocking backdrop. The box
+/// occludes, so a press on it where it overlaps a card is the warning's.
+///
+/// A layer opened over a raised one is drawn above the region with it, veil and all, where the old app would have
+/// drawn a later dialog at z-index 40 under the warning, so that the drawn order stays the stack's and "the topmost
+/// layer" means the same layer for drawing, presses, Tab's trap and Escape. While one is up, its veil covers the cards
+/// too, the one case where they do not remain usable over a dialog: under them, its veil would sit under the raised
+/// box, which would take presses meant for the dialog above. Nothing happens if `id` is no longer open.
+pub fn above_approval_region(id: LayerId, window: &mut Window, cx: &mut App) {
+    let Some(stack) = stack(window, cx) else {
+        return;
+    };
+    stack.update(cx, |stack, cx| {
+        if let Some(layer) = stack.layers.iter_mut().find(|layer| layer.id == id) {
+            layer.above_region = true;
+            cx.notify();
+        }
+    });
+}
+
+/// Whether the topmost open layer is raised above the approval region ([`above_approval_region`]): for the tests of
+/// the tunnel warning's openers, which have no other way to see that their call was made.
+#[cfg(test)]
+pub(crate) fn top_is_above_approval_region(window: &Window, cx: &App) -> bool {
+    stack(window, cx).is_some_and(|stack| {
+        stack
+            .read(cx)
+            .layers
+            .last()
+            .is_some_and(|layer| layer.above_region)
+    })
+}
+
+impl LayerStack {
+    /// The index of the lowest layer drawn above the approval region ([`above_approval_region`]), or the number of
+    /// layers when none is: the layers below it are drawn under the region, the rest above it.
+    fn raised_from(&self) -> usize {
+        self.layers
+            .iter()
+            .position(|layer| layer.above_region)
+            .unwrap_or(self.layers.len())
+    }
+}
+
 // ---- Drawing ---------------------------------------------------------------------------------------------------------
 
-/// Everything above the window's content, which the root view draws as its last child: each open layer, bottom to top,
-/// then the launch pill, the approval region, the pill and the tooltip.
+/// Everything above the window's content, which the root view draws as its last child, bottom to top: each open layer
+/// under the lowest raised one ([`above_approval_region`]), the launch pill, the raised dialog's veil, the approval
+/// region, the raised dialog's box and every layer opened over it, the pill and the tooltip.
 #[allow(
     clippy::disallowed_methods,
     reason = "the layer manager is the one owner of deferred and anchored"
@@ -1977,14 +2045,18 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
     {
         return None;
     }
-    // The deferred priorities above the layers, bottom to top: the old z-index ladder's order for these (the launch
-    // pill at 40, the approval cards at 45, the sequence pill and the tooltip at 50, the tooltip drawn last).
-    let above = stack.layers.len();
-    let (launch_depth, region_depth, pill_depth, tooltip_depth) =
-        (above + 1, above + 2, above + 3, above + 4);
+    // The deferred priorities, bottom to top: the old z-index ladder's order (dialogs and the launch pill at 40, the
+    // approval cards at 45, the tunnel warning, the sequence pill and the tooltip at 50, in that page order), except
+    // that the lowest raised dialog's veil goes under the cards ([`above_approval_region`]). The launch pill, that
+    // veil and the region go between the layers under the lowest raised one and the rest, so a layer's priority is
+    // its place in the stack plus one, or plus four from the lowest raised one up.
+    let (raised, above) = (stack.raised_from(), stack.layers.len());
+    let (launch_depth, veil_depth, region_depth) = (raised + 1, raised + 2, raised + 3);
+    let (pill_depth, tooltip_depth) = (above + 4, above + 5);
     let palette = theme::palette(cx);
     let mut overlay = div().absolute().top_0().left_0().size_full();
-    for (depth, layer) in stack.layers.iter().enumerate() {
+    for (index, layer) in stack.layers.iter().enumerate() {
+        let depth = if index < raised { index + 1 } else { index + 4 };
         let id = layer.id;
         let main_action = layer.main_action.clone();
         let container = layer.container.clone();
@@ -2010,19 +2082,20 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
         let element = match &layer.kind {
             Kind::Dialog(options) => {
                 let dismissible = options.dismiss_on_outside_press;
+                // The lowest raised dialog's veil stays under the approval region while its box goes above it
+                // ([`above_approval_region`]), so it is drawn on its own.
+                let split = index == raised;
                 // An outside press is a press the veil itself takes, not one outside the dialog's bounds: a press on an
                 // occluding surface drawn above the veil (an approval card, a menu) never reaches the veil. The content
-                // occludes so a press on it does not reach the veil either.
-                let content = content.when(dismissible, |content| content.occlude());
+                // occludes so a press on it does not reach the veil either, nor a card under a split dialog's box.
+                let content = content.when(dismissible || split, |content| content.occlude());
                 let veil = div()
                     .absolute()
                     .top_0()
                     .left_0()
                     .size_full()
                     .occlude()
-                    .bg(theme::color(palette.scrim_dialog))
-                    .flex()
-                    .justify_center();
+                    .bg(theme::color(palette.scrim_dialog));
                 let veil = veil.when(dismissible, |veil| {
                     // Only while this dialog is the top layer: a press beside a menu opened over it is outside that
                     // menu, which closes, and the press is the menu's alone. Read before any handler acts (capture
@@ -2038,15 +2111,25 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
                         }
                     })
                 });
+                // What places the dialog: its veil, or for a split one a window-sized box with no hit area, so a press
+                // beside the dialog goes on to the card or the veil under it.
+                let frame = if split {
+                    overlay = overlay.child(gpui::deferred(veil).with_priority(veil_depth));
+                    div().absolute().top_0().left_0().size_full()
+                } else {
+                    veil
+                };
+                let frame = frame.flex().justify_center();
                 match options.placement {
-                    DialogPlacement::Centered => veil.items_center().child(content),
+                    DialogPlacement::Centered => frame.items_center().child(content),
                     DialogPlacement::Top => {
                         let viewport = window.viewport_size();
                         // A column, so a view that can shrink (`flex_1` and `min_h_0`, a list that scrolls) fits the
                         // cap. A view that cannot spills past it: what it draws below the cap is outside the layer
                         // for presses and focus (an outside press there dismisses), so a top-placed view must shrink.
                         // It is not clipped at the cap: a clip there would also cut off the card's own drop shadow.
-                        veil.items_start()
+                        frame
+                            .items_start()
                             .pt((viewport.height * 0.12).min(px(80.)))
                             .child(content.max_h(viewport.height * 0.75).flex().flex_col())
                     }
@@ -2092,11 +2175,12 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
                 .into_any_element()
             }
         };
-        overlay = overlay.child(gpui::deferred(element).with_priority(depth + 1));
+        overlay = overlay.child(gpui::deferred(element).with_priority(depth));
     }
     if let Some(launch) = &stack.launch_pill {
-        // Above every layer, as the old launch pill sat over the launcher's backdrop and above the row menus and
-        // header questions, and under the approval cards and the sequence pill. Display only, as the pill below is.
+        // Above every layer but a raised one, as the old launch pill sat over the launcher's backdrop and above the row
+        // menus and header questions, and under the approval cards, the tunnel warning and the sequence pill. Display
+        // only, as the pill below is.
         let placed = PlacedLate {
             place: LateBox::WindowBottom,
             child: launch.view.clone().into_any_element(),

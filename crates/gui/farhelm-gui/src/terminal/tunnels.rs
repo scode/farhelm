@@ -347,7 +347,7 @@ impl Tunnels {
         let tunnels = cx.weak_entity();
         // The warning is about this terminal's tunnels: it closes, unanswered, if the terminal goes away.
         let subject = Subject::of(&cx.entity());
-        prompt::ask(
+        let warning = prompt::ask(
             consent_question(url),
             Some(subject),
             mark,
@@ -355,6 +355,10 @@ impl Tunnels {
             window,
             cx,
         );
+        // Its box above the approval cards, as the old warning was however opened (`layers::above_approval_region`).
+        if let Some(warning) = warning {
+            layers::above_approval_region(warning, window, cx);
+        }
     }
 
     /// Send the open command for `url` on the session's tunnel key; a refusal goes to the notice, a success re-reads.
@@ -671,14 +675,19 @@ pub(crate) fn ask_consent_about(
     cx: &mut App,
     done: impl FnOnce(Result<(), HostText>, &mut App) + 'static,
 ) -> Option<LayerId> {
-    prompt::ask(
+    let warning = prompt::ask(
         consent_question(()),
         subject,
         mark,
         move |(), _, cx| save_consent(cx, done),
         window,
         cx,
-    )
+    );
+    // Its box above the approval cards, so the card that asked cannot cover it (`layers::above_approval_region`).
+    if let Some(warning) = warning {
+        layers::above_approval_region(warning, window, cx);
+    }
+    warning
 }
 
 /// The security warning asked before the first tunnel opens, whose Allow acts on `frozen`: SPEC.md's Security

@@ -1,8 +1,8 @@
 //! Behavior tests for the layer manager, on GPUI's simulated platform: the modal dialog (its veil, its empty-space
 //! rule, its main action and its dismissal hook), the refusal to open a layer once the user has moved on, subjects
-//! and anchors, popovers and menus, the pill and the approval region drawn above every layer without being one, that
-//! the layer stack redraws only the root, and how a tooltip lays out help in paragraphs (that one test with the real
-//! text system, in a headless app rather than on the simulated platform).
+//! and anchors, popovers and menus, the pill and the approval region drawn above every layer without being one (and a
+//! layer raised above the region), that the layer stack redraws only the root, and how a tooltip lays out help in
+//! paragraphs (that one test with the real text system, in a headless app rather than on the simulated platform).
 //!
 //! Each test opens its window through the shared harness ([`crate::test_support::open`]: GPUI Kit's `Root` around a
 //! root view wired as the app's), drives it through simulated keys and clicks, so key bindings resolve as they do in
@@ -3448,6 +3448,155 @@ fn an_anchors_drawn_bounds_follow_its_element_in_the_frame_that_moves_it(cx: &mu
     area_shown.set(false);
     redraw(cx);
     assert_eq!(drawn(cx), None, "an element no longer drawn has no bounds");
+}
+
+/// Open a dialog of Other and Save, starting on Other, and give back its id and Save's handle: two dialogs opened this
+/// way draw Save at the same place, so a card placed over one's Save covers the other's.
+fn other_and_save(cx: &mut VisualTestContext) -> (LayerId, FocusHandle) {
+    let (other, save) = (handle(cx), handle(cx));
+    let (id, _, _) = open_dialog(
+        cx,
+        vec![("other", other.clone()), ("save", save.clone())],
+        &other,
+    );
+    (id, save)
+}
+
+/// Why this matters: SPEC.md's tunnel warning can be asked from an approval card (its Tunnel and open), and the old app
+/// drew the warning above the cards whatever opened it (z-index 50 over their 45); drawn under them, the card that
+/// asked can cover the warning answering it. Every other dialog stays under the cards, which "remain usable" over it,
+/// and the raise must go with the layer that asked for it.
+///
+/// Specified, where a click focuses controls: with a card drawn over a dialog's Save, a click there answers the card;
+/// with a dialog of the same controls raised above the approval region in its place, the same click answers nothing
+/// and focuses Save, and the frame draws the card, then the raised dialog's box (the second layer opened: ids are not
+/// reused), then a tooltip; once that dialog closes, the same click over a third, ordinary one answers the card again.
+#[gpui::test]
+fn a_raised_layers_box_is_drawn_above_the_cards_and_an_ordinary_dialog_under_them(
+    cx: &mut TestAppContext,
+) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    let (ordinary, _) = other_and_save(cx);
+    let over = center(cx, "save");
+    let card = install_card(
+        cx,
+        Rc::new(move |_: &Window| Some(over - point(px(10.), px(10.)))),
+    );
+    assert!(
+        bounds(cx, "card").contains(&over),
+        "the premise: the card covers Save"
+    );
+    cx.simulate_click(over, Modifiers::none());
+    check(cx);
+    assert_eq!(
+        card.answers.get(),
+        1,
+        "over an ordinary dialog, the press on Save's place was the card's"
+    );
+
+    cx.update(|window, cx| layers::close(ordinary, window, cx));
+    let (raised, save) = other_and_save(cx);
+    cx.update(|window, cx| layers::above_approval_region(raised, window, cx));
+    settle(cx);
+    assert_eq!(
+        center(cx, "save"),
+        over,
+        "the premise: the raised dialog's Save is where the first one's was"
+    );
+    cx.simulate_click(over, Modifiers::none());
+    check(cx);
+    assert_eq!(
+        card.answers.get(),
+        1,
+        "over the raised dialog's box, the press answered no card"
+    );
+    assert!(focused(cx, &save), "and was Save's");
+
+    let owner = cx.update(|_, cx| cx.new(|_| layers::TooltipOwner));
+    cx.update(|window, cx| layers::show_tooltip_at(&owner, "Probe help".into(), over, window, cx));
+    settle(cx);
+    let nodes = frame(cx);
+    let at = |found: &dyn Fn(&gpui::DriverNode) -> bool| nodes.iter().position(found);
+    let element =
+        |id: &'static str| move |node: &gpui::DriverNode| node.element_id.as_deref() == Some(id);
+    let (card_at, layer_at) = (at(&element("card")), at(&element("layer-1")));
+    let tooltip_at = at(&|node| {
+        node.texts
+            .iter()
+            .any(|text| text.text.as_ref() == "Probe help")
+    });
+    assert!(
+        matches!((card_at, layer_at, tooltip_at), (Some(card), Some(layer), Some(tip)) if card < layer && layer < tip),
+        "drawn bottom to top: the card ({card_at:?}), the raised dialog ({layer_at:?}), the tooltip ({tooltip_at:?})"
+    );
+
+    cx.update(|window, cx| layers::close(raised, window, cx));
+    other_and_save(cx);
+    cx.simulate_click(over, Modifiers::none());
+    check(cx);
+    assert_eq!(
+        card.answers.get(),
+        2,
+        "over the next, ordinary dialog, the press was the card's again"
+    );
+}
+
+/// Why this matters: SPEC.md has independent agent approval cards "remain usable" while any modal dialog is open, the
+/// raised tunnel warning included (the foundations owner's decision of 2026-11-15, over the old warning's backdrop,
+/// which blocked them). Only the warning's box goes above the cards; were its veil raised with it, every other agent's
+/// card would wait on the warning. The veil is still drawn, on its own under the cards, and is all that keeps the page
+/// behind the security warning from taking presses.
+///
+/// Specified, where a click focuses controls: with a dialog raised above the approval region, a press on a page button
+/// clear of its box and of a card reaches nothing and leaves focus in the dialog; a press on the card's Allow, clear of
+/// the box, answers the card and focuses Allow, and the dialog stays open.
+#[gpui::test]
+fn cards_beside_a_raised_dialog_stay_usable(cx: &mut TestAppContext) {
+    let clicks = Rc::new(Cell::new(0));
+    let counted = clicks.clone();
+    let cx = open(cx, move |_, _| {
+        let counted = counted.clone();
+        Button::new(
+            "behind",
+            "Behind",
+            HoverHelp::tooltip("A page control"),
+            Role::Button,
+        )
+        .on_click(move |_, _, _| counted.set(counted.get() + 1))
+        .into_any_element()
+    });
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    let behind = center(cx, "behind");
+    let card = install_card(cx, top_right());
+    let save = handle(cx);
+    let (raised, _, _) = open_dialog(cx, vec![("save", save.clone())], &save);
+    cx.update(|window, cx| layers::above_approval_region(raised, window, cx));
+    settle(cx);
+    assert!(
+        !bounds(cx, "card").intersects(&bounds(cx, "layer-0")),
+        "the premise: the card is clear of the dialog's box"
+    );
+    assert!(
+        !bounds(cx, "layer-0").contains(&behind) && !bounds(cx, "card").contains(&behind),
+        "the premise: the page button is clear of the dialog's box and the card"
+    );
+    cx.simulate_click(behind, Modifiers::none());
+    check(cx);
+    assert_eq!(
+        clicks.get(),
+        0,
+        "the page behind the raised dialog took no press: its veil did"
+    );
+    assert!(focused(cx, &save), "and focus stayed in the dialog");
+    click(cx, "card-allow");
+    assert_eq!(
+        card.answers.get(),
+        1,
+        "the press beside the raised dialog answered the card"
+    );
+    assert!(focused(cx, &card.allow), "and focused Allow");
+    assert!(is_open(cx, raised), "with the dialog still open");
 }
 
 // ---- Tooltips: paragraph help, laid out with the real text system ----------------------------------------------------
