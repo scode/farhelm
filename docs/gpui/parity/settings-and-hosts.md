@@ -737,11 +737,10 @@ Where the port does not match the old app, and why. Each stays until the work na
   value in both directions while a request ran. Here turning it off is a draft's save like any switch's, which shows the
   value being saved (the area's no-optimistic-copy rule allows a pending value only as the draft); turning it on still
   shows the stored value until the helm pushes consent.
-- **When Allow's save meets another preference save, the terminal's busy words show under the tunnel switch.** The press
-  checks the preference row's key before asking, so this happens only when a save starts while the warning is up. The
-  words are the terminal area's tunnel entry point's ("Another change to the preferences is still being saved; try
-  again"), not Settings' own busy line ("Not saved: another operation was in progress. Try again."), since the entry
-  point reports its refusal as text.
+- **When Allow's save meets another preference save, the busy line shows under the tunnel switch.** The press checks the
+  preference row's key before asking, so this happens only when a save starts while the warning is up. The words are
+  Settings' own busy line ("Not saved: another operation was in progress. Try again."), which the terminal area's tunnel
+  entry point gives as its refusal text.
 - **A tunnel switch refusal that arrives after Settings has closed is shown nowhere.** The old app's tunnel controller
   put such a failure in its global tunnel notice when no control was left to show it. Here, as for every Settings save,
   the reply settles nothing on screen once the dialog is gone; with no optimistic copy the switch's stored value is

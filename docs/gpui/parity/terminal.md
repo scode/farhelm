@@ -46,8 +46,8 @@ stay.
   Escape rule); it stays closed until the pointer moves to another cell. Escape from a focused terminal still reaches
   the program.
 - A refused click on a program's hyperlink explains itself on the terminal's top line at once, where the old line faded
-  in over 200 ms (the same reason as the scrollbar's fade). The destination display sits flush inside the window's edge
-  when clamped, where the old one kept 4 pixels from it: the layer manager's shared clamp.
+  in over 200 ms (not ported yet, like the scrollbar's fade). The destination display sits flush inside the window's
+  edge when clamped, where the old one kept 4 pixels from it: the layer manager's shared clamp.
 - The tunnel warning has no busy state: Allow closes it, then the consent save and the tunnel's opening run, and a
   refused save shows in the tunnel notice, where the old warning stayed up, disabled, reading "Saving…", until the save
   answered. The prompt closes every question before its answer runs, unless the answer is an inline one's extra answer.
@@ -73,9 +73,12 @@ stay.
   old app drew one in the ordinary text color. SPEC.md names only listed hosts' colors; a registry that has not been
   read yet would otherwise draw a frame that changes color a moment later.
 - The scrollback's scrollbar appears and disappears at once, where the old one faded in over 100 ms and out over 800 ms.
-  An animated fade must stand still under reduced motion, and the app's animation clock, which owns that setting, gives
-  a control no way to ask for it. It still hides 800 ms after the last scroll or after the pointer leaves the terminal,
-  as the old one finished fading then.
+  The fade is not ported yet; the animation clock now tells a control whether motion is reduced
+  (`ticker::reduced_motion`), so nothing blocks it. It still hides 800 ms after the last scroll or after the pointer
+  leaves the terminal, as the old one finished fading then.
+- Remote-localhost tunnels (the Cmd-click offer, the tunnel pill and the consent switch) are the Mac app's only for now
+  (the maintainer's decision, 2026-11-15). Porting them to the Linux app is the TODO.md "Near term" entry "Tunnels from
+  remote sessions on Linux".
 - Linux has no copy chord in the terminal (the old app had no Linux window, and SPEC.md names none); every completed
   selection is copied as it is made, as on every platform. A right click selects nothing: the old app's right-click word
   selection fed its browser context menu's Copy, which the desktop app does not have, and the migration does not port

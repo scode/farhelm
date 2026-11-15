@@ -1363,7 +1363,7 @@ fn turning_tunnels_off_during_another_save_sends_nothing_and_says_why(cx: &mut T
 /// The press checks the key before asking, but a save can still start while the warning is up, and Allow's own save is
 /// then refused before it is sent: the user accepted the warning, so the switch must say that nothing was saved rather
 /// than nothing at all. Specified: with the warning up and a save started on the preference row's key meanwhile, Allow
-/// sends nothing and the terminal's busy words show under the switch as an alert, the switch still off.
+/// sends nothing and the busy line shows under the switch as an alert, the switch still off.
 #[gpui::test]
 fn an_allow_whose_save_meets_another_says_so_under_the_switch(cx: &mut TestAppContext) {
     let (mut helm, cx) = show_terminal(cx, &Preferences::default());
@@ -1386,7 +1386,7 @@ fn an_allow_whose_save_meets_another_says_so_under_the_switch(cx: &mut TestAppCo
         tunnel_failure(cx),
         Some((
             Some(Role::Alert),
-            Some("Another change to the preferences is still being saved; try again".to_string())
+            Some("Not saved: another operation was in progress. Try again.".to_string())
         ))
     );
 }
