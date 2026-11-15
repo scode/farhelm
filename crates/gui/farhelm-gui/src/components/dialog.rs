@@ -26,7 +26,9 @@
 //! would start, beside the answers ([`DialogFrame::footer_lead`]), and a region above them for what a press of an
 //! answer has to say ([`DialogFrame::notices`]).
 //! A body whose content may hold nothing focusable can have a tab stop of its own that the keys scroll
-//! ([`DialogFrame::scroll_stop`]; `scroll_box.rs` has the full account).
+//! ([`DialogFrame::scroll_stop`]; `scroll_box.rs` has the full account). So can the notices region, which also scrolls
+//! on Page Up, Page Down, Home and End from a control inside it ([`DialogFrame::notices_stop`]), for a question whose
+//! text outgrows the region while one of its answers holds focus (the old Trash dialog's global confirmation).
 //!
 //! Two of the old app's small information dialogs, Announcements and the Welcome card, drew their parts tighter than the
 //! ordinary dialog (`.announcements-dialog > .dialog-header` and `.welcome-dialog > .welcome-header` in the old
@@ -41,7 +43,9 @@ use gpui::{
     StatefulInteractiveElement, Styled, Window, div, point, prelude::FluentBuilder as _, px,
 };
 
-use super::{Button, HoverHelp, IconButton, Ring, scroll_handle, scroll_stop};
+use super::{
+    Button, HoverHelp, IconButton, Ring, scroll_from_controls, scroll_handle, scroll_stop,
+};
 use crate::assets::Icon;
 use crate::focus::{self, RegionReport};
 use crate::host_text::Line;
@@ -95,6 +99,7 @@ pub struct DialogFrame {
     notices: Option<AnyElement>,
     compact: bool,
     scroll_stop: Option<SharedString>,
+    notices_stop: Option<SharedString>,
     flat_margin_when_wide: bool,
 }
 
@@ -127,6 +132,7 @@ impl DialogFrame {
             notices: None,
             compact: false,
             scroll_stop: None,
+            notices_stop: None,
             flat_margin_when_wide: false,
         }
     }
@@ -213,7 +219,8 @@ impl DialogFrame {
     /// A region above the answers' row for what pressing an answer has to say (the launcher's refusal beside Launch,
     /// later its YOLO question). It is pinned with the answers rather than scrolling with the body, so a refusal is
     /// always seen beside the action that caused it, and it scrolls on its own once taller than about a quarter of the
-    /// window (`.launch-composer-notices`), so long text never pushes the answers away.
+    /// window (`.launch-composer-notices`), so long text never pushes the answers away. The pointer scrolls it; the
+    /// keyboard does too once [`Self::notices_stop`] is set.
     pub fn notices(mut self, notices: impl IntoElement) -> Self {
         self.notices = Some(notices.into_any_element());
         self
@@ -245,6 +252,31 @@ impl DialogFrame {
     /// is drawn exactly as before.
     pub fn scroll_stop(mut self, label: impl Into<SharedString>) -> Self {
         self.scroll_stop = Some(label.into());
+        self
+    }
+
+    /// Make the [`Self::notices`] region scrollable from the keyboard, for a question there whose text can outgrow it
+    /// (the Trash dialog's global Delete all question, whose heading and the line naming what it deletes would
+    /// otherwise stay above view while an answer holds focus). Two parts, both the old region's:
+    ///
+    /// - Page Up, Page Down, Home and End scroll the region while a control inside it holds focus
+    ///   ([`scroll_from_controls`]), as the browser scrolled the region around a focused answer. The arrows and Space
+    ///   stay the control's.
+    /// - Whenever the region holds no tab stop (every answer disabled), it is a stop of its own named `label`, under
+    ///   [`Self::scroll_stop`]'s rule and with its keys, in Tab order after the body and before the answers' row. Its
+    ///   keys act only while the stop itself holds focus. Its ring reaches out to the card's sides, as the old
+    ///   full-width region's did, and two pixels above and below the notices.
+    ///
+    /// The old Trash dialog drew its question in the shared `ScrollRegion` named "Global checkout deletion
+    /// confirmation" (`crates/farhelm-ui/src/list/trash.rs` lines 1474 to 1479 at reference commit `24bc0580`), the
+    /// same component as a dialog's body: a tab stop with the region role and that name only while no control inside
+    /// it was in Tab order (`crates/farhelm-ui/src/modal_dialog.rs` lines 599 to 604), with the ring two pixels inside
+    /// its edge (`crates/farhelm-ui/assets/app.css` lines 9498 to 9500). With its answers usable it was no stop, and
+    /// the warning stayed "reachable by scrolling upwards" (`list/trash.rs` lines 658 to 661) through WebKit, which
+    /// scrolls the focused element's scrolling container on those keys. Without this, the region is drawn exactly as
+    /// before.
+    pub fn notices_stop(mut self, label: impl Into<SharedString>) -> Self {
+        self.notices_stop = Some(label.into());
         self
     }
 }
@@ -358,7 +390,22 @@ impl RenderOnce for DialogFrame {
         };
         let body = match self.scroll_stop {
             None => focus::scroll_region(place(body), &body_scroll).into_any_element(),
-            Some(label) => body_with_stop(&self.id, label, place, body, &body_scroll, window, cx),
+            // The body has no border: the ring lies along the stop's edge, inside the card, which would clip anything
+            // outside.
+            Some(label) => place(region_with_stop(
+                &format!("{}-body", self.id),
+                label,
+                Ring {
+                    inset_x: px(0.),
+                    inset_y: px(0.),
+                    radius: px(0.),
+                },
+                body.flex_grow(1.).min_h_0(),
+                &body_scroll,
+                window,
+                cx,
+            ))
+            .into_any_element(),
         };
         // A frame with nothing for its footer to hold draws none: the Templates dialog, whose editor carries its own
         // action row inside the body (SPEC.md: "the complete editor keeps scrolling within the dialog, including its
@@ -421,6 +468,7 @@ impl RenderOnce for DialogFrame {
         };
         // A scroll region like the body, so a control inside (a question's answers) is scrolled into view when focus
         // reaches it.
+        let notices_stop = self.notices_stop;
         let notices = self.notices.map(|notices| {
             let scroll = scroll_handle(format!("{}-notices-scroll", self.id), window, cx);
             let region = div()
@@ -429,7 +477,22 @@ impl RenderOnce for DialogFrame {
                 .max_h(window.viewport_size().height * NOTICES_MAX_SHARE)
                 .overflow_y_scroll()
                 .child(notices);
-            focus::scroll_region(region, &scroll)
+            let Some(label) = notices_stop else {
+                return focus::scroll_region(region, &scroll).into_any_element();
+            };
+            // The old region spanned the dialog's width with its text 24 pixels in (`app.css` line 9525 at the
+            // reference commit), and its ring lay two pixels inside that edge. The notices sit inside the footer's
+            // padding instead, so the ring's sides reach out across it to the card's inner edge, where the body's ring
+            // lies too; its top and bottom sit two pixels outside the notices, inside the footer's top padding and the
+            // gap above the answers' row, rather than over the text.
+            let ring = Ring {
+                inset_x: -foot_x,
+                inset_y: px(-2.),
+                radius: px(0.),
+            };
+            let region = scroll_from_controls(region, &scroll);
+            let notices = format!("{}-notices", self.id);
+            region_with_stop(&notices, label, ring, region, &scroll, window, cx).into_any_element()
         });
         let footer = div()
             .debug_selector(|| format!("{}-answers", self.id))
@@ -468,46 +531,40 @@ impl RenderOnce for DialogFrame {
     }
 }
 
-/// The body `body` (scroll state `scroll`) of the frame drawn under `id`, inside the box that is its scroll stop
-/// ([`DialogFrame::scroll_stop`]), which `place` puts where the body would otherwise sit. The box is drawn in every
-/// frame, so the body's layout never changes with the stop; only whether the box is a stop does, read from what the
-/// body reported the last time it was prepared.
-fn body_with_stop(
-    id: &SharedString,
+/// The scrolling `region` (scroll state `scroll`) of one of the frame's parts, drawn under `part` (`<frame id>-body`
+/// or `<frame id>-notices`), inside the box that is its scroll stop named `label` ([`DialogFrame::scroll_stop`],
+/// [`DialogFrame::notices_stop`]), with its ring at `ring`. The box is drawn in every frame, so the region's layout
+/// never changes with the stop; only whether the box is a stop does, read from what the region reported the last time
+/// it was prepared. The caller places the box where the region would otherwise sit.
+fn region_with_stop(
+    part: &str,
     label: SharedString,
-    place: impl FnOnce(Stateful<Div>) -> Stateful<Div>,
-    body: Stateful<Div>,
+    ring: Ring,
+    region: Stateful<Div>,
     scroll: &ScrollHandle,
     window: &mut Window,
     cx: &mut App,
-) -> AnyElement {
+) -> Stateful<Div> {
     let report: RegionReport = window
         .use_keyed_state(
-            ElementId::Name(format!("{id}-body-report").into()),
+            ElementId::Name(format!("{part}-report").into()),
             cx,
             |_, _| RegionReport::default(),
         )
         .read(cx)
         .clone();
     let holds_stops = report.get();
-    let region = focus::scroll_region(body.flex_grow(1.).min_h_0(), scroll).report(&report);
-    let stop_id: SharedString = format!("{id}-body-stop").into();
-    let stop = place(
-        div()
-            .id(ElementId::Name(stop_id.clone()))
-            .debug_selector(|| stop_id.to_string())
-            .flex()
-            .flex_col(),
-    )
-    .child(region);
+    let region = focus::scroll_region(region, scroll).report(&report);
+    let stop_id: SharedString = format!("{part}-stop").into();
+    let stop = div()
+        .id(ElementId::Name(stop_id.clone()))
+        .debug_selector(|| stop_id.to_string())
+        .flex()
+        .flex_col()
+        .child(region);
     if holds_stops {
-        return stop.into_any_element();
+        return stop;
     }
-    // The body has no border: the ring lies along the stop's edge, inside the card, which would clip anything outside.
-    let ring = Ring {
-        inset: px(0.),
-        radius: px(0.),
-    };
     scroll_stop(
         stop,
         &stop_id,
@@ -518,7 +575,6 @@ fn body_with_stop(
         window,
         cx,
     )
-    .into_any_element()
 }
 
 /// `--shadow-dialog`: `0 10px 24px` in the token's color, under the dialog frame and under the one modal panel the old

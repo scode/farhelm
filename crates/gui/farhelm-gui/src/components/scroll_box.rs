@@ -18,15 +18,19 @@
 //!   button counts whatever Tab reaches on macOS, as there (SPEC.md: "button-only regions need no extra stop"). A body
 //!   with a control is reached through that control, and the focus coordinator scrolls it into view. Whether the body
 //!   holds one is known only after layout, so the focus coordinator's scroll region reports it
-//!   ([`focus::ScrollRegion::report`](crate::focus::ScrollRegion::report)).
+//!   ([`focus::ScrollRegion::report`](crate::focus::ScrollRegion::report)). A dialog's notices region gets the same
+//!   stop under the same rule ([`DialogFrame::notices_stop`](super::DialogFrame::notices_stop)), as the old Trash
+//!   dialog's global confirmation was that same `ScrollRegion`. Because that region holds a question's answers, it
+//!   also takes Page Up, Page Down, Home and End from a control inside it
+//!   ([`scroll_from_controls`](super::scroll_from_controls)), which the stop never does.
 //!
 //! What both share, through [`scroll_stop`](super::scroll_stop):
 //!
 //! - **The keys**, as the old app's browser scrolled a focused region: Up and Down by a line, Page Up and Page Down and
 //!   Space by a page, Home and End to either end. A line is 40 pixels and a page seven eighths of the visible height,
 //!   WebKit's steps (`Scrollbar::pixelsPerLineStep` and `minFractionToStepWhenPaging`), since the old app ran in
-//!   WebKit. A held key keeps scrolling, as there. A key handled here stops at the stop, so it reaches no binding
-//!   above.
+//!   WebKit. A held key keeps scrolling, as there. A key handled here stops at the stop, so no key listener around it
+//!   sees it; bindings never do, since GPUI runs every matching binding on the focused path before any key listener.
 //! - **Tab reach.** A stop counts as a text field for the focus coordinator's Tab reach (`focus::OnPress::Focus`), so
 //!   plain Tab reaches it on macOS even with the system's Keyboard navigation setting off. In WebKit that setting
 //!   decides only whether Tab stops on buttons and the like; an element made focusable with `tabindex="0"`, as both old
@@ -34,7 +38,9 @@
 //!   regions need no extra stop"). A press of any mouse button on the region focuses it, as a press on such an element
 //!   did in WebKit.
 //! - **The ring**: the accent's two pixels inside the stop's edge, the old `outline-offset: -2px` both regions had, so
-//!   whatever clips the stop (the dialog's card) cannot cut it off.
+//!   whatever clips the stop (the dialog's card) cannot cut it off. A dialog's notices sit inside the footer's
+//!   padding, so their ring reaches out to the card's sides, where the old full-width region's ring lay, and two
+//!   pixels above and below the notices.
 //! - **Its shape.** The stop is not the scrolling element but a box around it. The ring and the focus coordinator's
 //!   position record are drawn as children of the stop, and a child of the scrolling element would move with its
 //!   content, add to its scroll extent and, for the record, make a Tab onto the stop scroll the region back to its top.
@@ -160,7 +166,8 @@ impl RenderOnce for ScrollBox {
         let stop = super::with_hover_help(stop, &self.id, &self.help, true, window, cx);
         // The ring covers the one-pixel border and one pixel inside it, as the old outline two pixels in did.
         let ring = Ring {
-            inset: px(-1.),
+            inset_x: px(-1.),
+            inset_y: px(-1.),
             radius: metrics::RADIUS_SM,
         };
         scroll_stop(

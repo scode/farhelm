@@ -906,7 +906,14 @@ for a dialog's body, a stop whenever the body holds no tab stop (a button counts
 coordinator detects that as the body is laid out, so the stop follows one frame behind with one redraw, rather than each
 dialog declaring it. Both take the region role, the old inset ring and the old browser's scroll keys, and both count as
 text fields for macOS's Tab reach: WebKit kept an element focusable through `tabindex="0"` in plain Tab's order whatever
-the Keyboard navigation setting. Colors come only from theme tokens, which are copied from the old stylesheet
+the Keyboard navigation setting. A stop's keys are its own only while the stop itself holds focus. A dialog's notices
+region can take the body's stop too (`DialogFrame::notices_stop`), as the old Trash dialog's global confirmation was the
+same old region; its ring reaches out to the card's sides, where the old full-width region's lay, since the notices sit
+inside the footer's padding. Because the region holds a question's answers, it is then also scrolled by Page Up, Page
+Down, Home and End from a control inside it, as WebKit scrolled the container around a focused button. That is narrower
+than WebKit, which also scrolled on Up and Down from a button and went on to scroll the containers outside once the
+region reached its end: here the arrows stay the control's and the keys scroll the notices only. No other region takes
+keys from a control inside it. Colors come only from theme tokens, which are copied from the old stylesheet
 (`crates/farhelm-ui/assets/app.css` at the reference commit). One dialog frame keeps the answer buttons pinned and
 scrolls the body, and when even those do not fit, the whole frame scrolls, as today's dialogs do. The window's minimum
 size is in SPEC.md ("Desktop window chrome"; `MIN_WINDOW_SIZE` in the app's bootstrap holds it).

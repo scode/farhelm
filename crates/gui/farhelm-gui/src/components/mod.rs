@@ -359,18 +359,21 @@ const LINE_STEP: Pixels = px(40.);
 /// stop's Page Up, Page Down and Space.
 const PAGE_SHARE: f32 = 0.875;
 
-/// Where a scroll stop draws its ring: `inset` from the stop's padding box (negative to cover a border), with corners
-/// of `radius`.
+/// Where a scroll stop draws its ring: `inset_x` from the stop's padding box at its sides and `inset_y` at its top and
+/// bottom (negative to cover a border, or to reach past the stop), with corners of `radius`. The two differ only for a
+/// dialog's notices, whose ring reaches out to the card's sides as the old full-width region's did
+/// ([`DialogFrame::notices_stop`]).
 pub(crate) struct Ring {
-    pub(crate) inset: Pixels,
+    pub(crate) inset_x: Pixels,
+    pub(crate) inset_y: Pixels,
     pub(crate) radius: Pixels,
 }
 
 /// Make `stop`, the box drawn under `id` around the scrolling element whose scroll state is `scroll`, a scroll stop: a
 /// tab stop with `role` and `label` as its accessible role and name, the ring while the keyboard has put focus on it,
-/// and the scroll keys. The rule both of a region's stops share, the scroll box's and the dialog body's, so their keys,
-/// ring and Tab reach cannot drift apart; `scroll_box.rs`'s module docs say what it does and why the stop wraps the
-/// scrolling element rather than being it. Its focus handle is its own, kept under `id`.
+/// and the scroll keys. The rule every scroll stop shares (the scroll box's, the dialog body's and the dialog
+/// notices'), so their keys, ring and Tab reach cannot drift apart; `scroll_box.rs`'s module docs say what it does and
+/// why the stop wraps the scrolling element rather than being it. Its focus handle is its own, kept under `id`.
 ///
 /// It handles no hover help: the box takes its own, as its constructor does, while a dialog body takes none, since a
 /// tooltip over a whole body would cover what the user is reading.
@@ -401,10 +404,10 @@ pub(crate) fn scroll_stop(
                 div()
                     .debug_selector(|| format!("{id}-ring"))
                     .absolute()
-                    .top(ring.inset)
-                    .left(ring.inset)
-                    .right(ring.inset)
-                    .bottom(ring.inset)
+                    .top(ring.inset_y)
+                    .left(ring.inset_x)
+                    .right(ring.inset_x)
+                    .bottom(ring.inset_y)
                     .border_2()
                     .border_color(theme::color(palette.accent))
                     .rounded(ring.radius),
@@ -423,6 +426,36 @@ pub(crate) fn scroll_stop(
             }
         });
     focus::track(stop, &focus, focus::OnPress::Focus)
+}
+
+/// Let Page Up, Page Down, Home and End scroll `region`, the scrolling element whose scroll state is `scroll`, while a
+/// control inside it holds focus: the browser's scrolling from a focused button, which WebKit applied to the button's
+/// scrolling container. It is the other half of a region that holds controls, where [`scroll_stop`] is no stop (and
+/// would refuse its keys anyway, since they are its own only while it holds focus itself): without it, a question's
+/// text scrolled above view stays there while one of its answers holds focus.
+///
+/// Only those four keys, and only unmodified: a narrower port than WebKit, which also scrolled on Up and Down from a
+/// focused button. The arrows are left out because some controls pass them on rather than stopping them (a closed
+/// select passes a held Up or Down on), so they would leak into scrolling; Space presses a button. A control that takes
+/// one of the four keeps it: a text field keeps all four, which GPUI Kit binds, because bindings run before any key
+/// listener, and a listener deeper in the tree that takes the key and stops it (a tab strip's Home and End) runs before
+/// this one. A held key keeps scrolling, as the stop's do. It scrolls this region only: at its end the key goes
+/// nowhere, where WebKit went on to scroll the next container out.
+pub(crate) fn scroll_from_controls(region: Stateful<Div>, scroll: &ScrollHandle) -> Stateful<Div> {
+    let keys = scroll.clone();
+    region.on_key_down(move |event, window, cx| {
+        if !matches!(
+            event.keystroke.key.as_str(),
+            "pageup" | "pagedown" | "home" | "end"
+        ) {
+            return;
+        }
+        if let Some(top) = scrolled_to(event, &keys) {
+            cx.stop_propagation();
+            keys.set_offset(point(keys.offset().x, top));
+            window.refresh();
+        }
+    })
 }
 
 /// Where `event`, a key pressed on a scroll stop, puts the scrolling content's offset (zero at the top, negative
