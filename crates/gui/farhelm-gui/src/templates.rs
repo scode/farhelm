@@ -11,6 +11,8 @@
 //!   cannot be saved. No GPUI types.
 //! - [`dialog`]: the Templates dialog beside New, with each template's ⚡ and number-key buttons.
 //! - [`shortcuts`]: which template holds ⚡ and each number key, and how a change to them is written.
+//! - [`sequence`]: the quick-launch sequence's state, its keys' rules, what its pill shows and what Enter resolves it
+//!   to. No GPUI types.
 //!
 //! The entry points other areas call are plain functions here: [`open`] for the list header's Templates button, with
 //! [`button_help`] for its hover text, and [`open_with_hint`] for a shortcut that found nothing to launch.
@@ -24,6 +26,7 @@
 pub mod apply;
 pub mod dialog;
 pub mod fields;
+pub mod sequence;
 pub mod shortcuts;
 pub mod summary;
 
@@ -33,6 +36,8 @@ mod apply_tests;
 mod dialog_tests;
 #[cfg(test)]
 mod fields_tests;
+#[cfg(test)]
+mod sequence_tests;
 #[cfg(test)]
 mod shortcuts_tests;
 #[cfg(test)]
