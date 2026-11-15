@@ -282,11 +282,22 @@ pub(crate) async fn create(
 }
 
 /// A replacement changes only its fixed identity's secret and revision.
+///
+/// A nonblank replacement is delivered to the hosts using it before the reply,
+/// which comes within the helm's host reply bound
+/// (`crate::sessions::HOST_REPLY_BOUND`) counted from this handler's start:
+/// hosts not reached by then are reported as not delivered while their
+/// delivery carries on (see `CredentialDelivery::push`).
 pub(crate) async fn save(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
     body: Result<Json<SaveCredential>, JsonRejection>,
 ) -> Response {
+    // Counted before the commit, so the catalog write's time comes out of the
+    // wait for hosts rather than adding to it. That keeps the reply within the
+    // bound only while the commit itself takes less than the bound: nothing
+    // bounds the commit.
+    let reply_by = tokio::time::Instant::now() + crate::sessions::HOST_REPLY_BOUND;
     let Ok(Json(save)) = body else {
         return Refusal::Invalid("could not read the credential request").response();
     };
@@ -304,7 +315,7 @@ pub(crate) async fn save(
                     state
                         .tensorlake
                         .credential_delivery()
-                        .push(&row.name, state.manager.events())
+                        .push(&row.name, reply_by, state.manager.events())
                         .await
                 } else {
                     Vec::new()

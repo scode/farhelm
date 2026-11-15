@@ -3642,7 +3642,10 @@ pub(crate) async fn rename_session(
 /// A create waits the same, and so do the launcher's host reads (see
 /// [`within_host_read_bound`]). The host management routes that can wait as
 /// long use the same bound: a host probe, an Update's plan, and a destination
-/// or alias change (see [`within_host_reply_bound_saying`]).
+/// or alias change (see [`within_host_reply_bound_saying`]). A credential
+/// replacement waits as long for its delivery to hosts, and reports the hosts
+/// it has not reached by then as not delivered rather than refusing, since the
+/// value is already saved (`crate::credentials::save`).
 ///
 /// The UI channel admits one command at a time, so this is also the longest
 /// any later click can wait behind a slow host; it has to stay short. Twenty
