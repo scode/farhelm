@@ -1462,7 +1462,7 @@ fn restart_with_shows_its_held_host_as_text(cx: &mut TestAppContext) {
 }
 
 /// The selected state the element under `id` reports in a fresh frame (`None` when selection does not apply to it).
-fn selected_state(cx: &mut VisualTestContext, id: &str) -> Option<bool> {
+pub(super) fn selected_state(cx: &mut VisualTestContext, id: &str) -> Option<bool> {
     test_support::frame(cx)
         .into_iter()
         .find(|node| node.element_id.as_deref() == Some(id))

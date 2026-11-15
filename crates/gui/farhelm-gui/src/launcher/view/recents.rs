@@ -82,6 +82,18 @@ impl RecentsStrip {
     }
 }
 
+/// Why a recent setup was not taken; the strip and the search each say it in their own place.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum RecentRefusal {
+    /// It carries a container choice: containers are retired, and the setup cannot be launched again as it was.
+    Retired,
+    /// It is no longer in the chosen host's history as read now: the host or its history changed after the row was
+    /// drawn.
+    Stale,
+    /// This launcher holds the agent type and destination the setup would change (Restart with).
+    Held,
+}
+
 impl Launcher {
     /// The draft's filter for the recent setups: its agent type, model and effort, and its permission only when the
     /// user chose it (`recents`' module docs).
@@ -116,26 +128,41 @@ impl Launcher {
             .collect()
     }
 
-    /// Take `entry`: fill the draft with its setup (see the module docs). Returns whether it did, which Enter needs
-    /// before it presses the main action.
-    fn take_recent(
-        &mut self,
+    /// Why `entry` cannot be taken now, if it cannot. The strip and the search say it in different places, so this only
+    /// decides.
+    pub(super) fn recent_refusal(
+        &self,
         entry: &LaunchHistoryEntry,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
+        cx: &App,
+    ) -> Option<RecentRefusal> {
         if entry.selection.container.is_some() {
-            self.notice = Some(RETIRED_CONTAINER_REASON.to_owned());
-            cx.notify();
-            return false;
+            return Some(RecentRefusal::Retired);
         }
         // The row was drawn from the history as it was; a host change since has dropped that history, and with it the
         // row's claim to this host's folders.
         let offered = self
             .launch_history(cx)
             .is_some_and(|history| history.launches.contains(entry));
-        if !offered || self.draft.holds(Field::AgentType) {
-            return false;
+        if !offered {
+            return Some(RecentRefusal::Stale);
+        }
+        // Restart with holds the agent type and destination a setup would change; the strip is not drawn there, and
+        // the search refuses the row before it gets here, so this only guards.
+        self.draft
+            .holds(Field::AgentType)
+            .then_some(RecentRefusal::Held)
+    }
+
+    /// Take `entry`: fill the draft with its setup (see the module docs), or change nothing and say why
+    /// ([`Self::recent_refusal`]). Enter on a strip row needs to know it filled before it presses the main action.
+    pub(super) fn take_recent(
+        &mut self,
+        entry: &LaunchHistoryEntry,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<(), RecentRefusal> {
+        if let Some(refusal) = self.recent_refusal(entry, cx) {
+            return Err(refusal);
         }
         self.draft
             .restore_recent(&entry.selection, self.catalog.as_deref());
@@ -149,7 +176,26 @@ impl Launcher {
         self.notice = None;
         self.sync_fields(window, cx);
         self.changed(cx);
-        true
+        Ok(())
+    }
+
+    /// Take a strip row's `entry`: a retired container choice is said under the agent choices, where the old strip said
+    /// it; a stale row does nothing. Returns whether it filled.
+    fn take_strip_recent(
+        &mut self,
+        entry: &LaunchHistoryEntry,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        match self.take_recent(entry, window, cx) {
+            Ok(()) => true,
+            Err(RecentRefusal::Retired) => {
+                self.notice = Some(RETIRED_CONTAINER_REASON.to_owned());
+                cx.notify();
+                false
+            }
+            Err(RecentRefusal::Stale | RecentRefusal::Held) => false,
+        }
     }
 
     /// The recent setups strip, or `None` while it has no rows (it then takes no room: SPEC.md).
@@ -197,7 +243,9 @@ impl Launcher {
                     .host(&destination)
                     .text(" · ")
                     .host(&placement)
-                    .text(format!(" · {summary}"));
+                    .text(" · ")
+                    // The choices are host text too: a custom model id is whatever the user typed.
+                    .host(&HostText::from_host(summary));
             let name = format!(
                 "{}{}",
                 if replacing { "Replace: " } else { "" },
@@ -236,14 +284,14 @@ impl Launcher {
                     return;
                 }
                 let _ = on_key.update(cx, |launcher, cx| {
-                    if launcher.take_recent(&entered, window, cx) {
+                    if launcher.take_strip_recent(&entered, window, cx) {
                         launcher.press(window, cx);
                     }
                 });
             })
             .on_click(move |_, window, cx| {
                 let _ = on_click.update(cx, |launcher, cx| {
-                    launcher.take_recent(&clicked, window, cx);
+                    launcher.take_strip_recent(&clicked, window, cx);
                 });
             });
             // `button + button { border-top: 1px solid var(--border-row) }`.

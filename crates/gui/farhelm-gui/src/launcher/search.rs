@@ -24,19 +24,25 @@
 //!
 //! Every row is a draft choice the view applies through the draft's own edit methods, the same ones a hand edit uses
 //! (a template row through the templates' application path); this module only builds rows. The group order is the old
-//! one with the groups not built yet left out (GitHub repositories and Recent setups after Folders), so each later
-//! piece adds its group in its place.
+//! one with the group not built yet left out (GitHub repositories, between Folders and Recent setups), so it can be
+//! added in its place.
+//! - **From the launch history** (`super::view::history`'s read of the chosen host): saved folders, offered after a
+//!   typed path's "Use this path"; whole recent setups, last, ranked as the recent setups strip ranks them but neither
+//!   capped nor narrowed by the draft; and models from past launches that the catalog does not list, after the
+//!   catalog's own, each with the agent type it ran with.
 //!
-//! NOTE: Not built yet, each with the piece that brings its data: folder-history and recent-setup rows and models from
-//! past launches (the launch-history read), "Browse this path" (Browse) and `gh:` repositories (managed checkouts).
-//! Their labels are parsed already, so a scoped query for them says it has no match rather than becoming a name.
+//! NOTE: Not built yet, each with the piece that brings its data: "Browse this path" (Browse) and `gh:` repositories
+//! (managed checkouts). Their labels are parsed already, so a scoped query for them says it has no match rather than
+//! becoming a name.
 
 use farhelm_proto::launcher::{EFFORT_ORDER, LaunchCatalogModel, compatible_efforts};
+use farhelm_proto::session_requests::{LaunchHistoryEntry, LaunchHistoryReply};
 use farhelm_proto::ui_channel::HostView;
 use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission};
 use gpui::ElementId;
 
 use super::draft::{Tab, harness_label};
+use super::recents::{RecentFilter, destination_label, ranked, selection_summary};
 use super::view::host_name_with_phase;
 use super::words::{HARNESS_SEARCH_ORDER, guarded_permission_help};
 use crate::host_text::{HostSentence, HostText};
@@ -211,11 +217,24 @@ pub enum Row {
         id: String,
         harness: LaunchHarness,
     },
+    /// A model from a past launch that the catalog does not list, with the agent type it ran with: choosing it chooses
+    /// that agent type and the model as a custom one, as typing it would.
+    HistoryModel {
+        id: String,
+        harness: LaunchHarness,
+    },
     /// An effort, or the agent's default (`None`).
     Effort(Option<LaunchEffort>),
     Permission(SearchPermission),
     /// Use the typed path as the folder.
     UsePath(String),
+    /// A folder an earlier launch on this host started in, as the user typed it then.
+    Folder(String),
+    /// A whole earlier setup, from the chosen host's history, with the host as the row names it.
+    Recent {
+        entry: Box<LaunchHistoryEntry>,
+        placement: HostText,
+    },
 }
 
 /// The groups rows are shown in, in this order; an empty group is left out.
@@ -229,6 +248,7 @@ pub enum Group {
     Efforts,
     Permissions,
     Folders,
+    RecentSetups,
 }
 
 impl Group {
@@ -243,6 +263,7 @@ impl Group {
             Group::Efforts => "Efforts",
             Group::Permissions => "Permissions",
             Group::Folders => "Folders",
+            Group::RecentSetups => "Recent setups",
         }
     }
 }
@@ -255,10 +276,11 @@ impl Row {
             Row::Host { .. } => Group::Hosts,
             Row::Harness(_) => Group::Harnesses,
             Row::Template(_) => Group::Templates,
-            Row::Model { .. } => Group::Models,
+            Row::Model { .. } | Row::HistoryModel { .. } => Group::Models,
             Row::Effort(_) => Group::Efforts,
             Row::Permission(_) => Group::Permissions,
-            Row::UsePath(_) => Group::Folders,
+            Row::UsePath(_) | Row::Folder(_) => Group::Folders,
+            Row::Recent { .. } => Group::RecentSetups,
         }
     }
 
@@ -277,7 +299,7 @@ impl Row {
             Row::Template(name) => sentence
                 .text("Template: ")
                 .host(&HostText::from_host(name.as_str())),
-            Row::Model { id, harness } => sentence
+            Row::Model { id, harness } | Row::HistoryModel { id, harness } => sentence
                 .text("Model: ")
                 .host(&HostText::from_host(id.as_str()))
                 .text(format!(" ({})", harness_label(*harness))),
@@ -285,9 +307,19 @@ impl Row {
             Row::Permission(permission) => {
                 sentence.text(format!("Permissions: {}", permission.label()))
             }
-            Row::UsePath(path) => sentence
+            // A saved folder reads as a typed path does, as in the old launcher.
+            Row::UsePath(path) | Row::Folder(path) => sentence
                 .text("Use this path: ")
                 .mono(&HostText::from_host(path.as_str())),
+            // The whole setup, as the old row's accessible name said it; the view draws it on two lines.
+            // The choices are host text too: a custom model id is whatever the user typed.
+            Row::Recent { entry, placement } => sentence
+                .text("Recent setup: ")
+                .host(&HostText::from_host(destination_label(entry)))
+                .text(" · ")
+                .host(placement)
+                .text(" · ")
+                .host(&HostText::from_host(selection_summary(&entry.selection))),
         }
     }
 
@@ -305,7 +337,9 @@ impl Row {
             Row::Host { .. } => "Run the session on this host".to_owned(),
             Row::Harness(_) => "Use this agent for the session".to_owned(),
             Row::Template(_) => "Apply this template's settings to the draft".to_owned(),
-            Row::Model { .. } => "Use this model for the session".to_owned(),
+            Row::Model { .. } | Row::HistoryModel { .. } => {
+                "Use this model for the session".to_owned()
+            }
             Row::Effort(Some(_)) => "Use this reasoning effort for the session".to_owned(),
             Row::Effort(None) => "Use the agent's default reasoning effort".to_owned(),
             Row::Permission(permission) => match permission.permission() {
@@ -315,7 +349,18 @@ impl Row {
                 Some(LaunchPermission::Guarded) => guarded_permission_help(harness),
                 Some(permission) => permission_tooltip(permission).to_owned(),
             },
-            Row::UsePath(_) => "Use this folder: the session will start here".to_owned(),
+            Row::UsePath(_) | Row::Folder(_) => {
+                "Use this folder: the session will start here".to_owned()
+            }
+            // The setup without its "Recent setup:" lead, as the old row's tooltip said it.
+            Row::Recent { entry, placement } => {
+                return sentence
+                    .host(&HostText::from_host(destination_label(entry)))
+                    .text(" · ")
+                    .host(placement)
+                    .text(" · ")
+                    .host(&HostText::from_host(selection_summary(&entry.selection)));
+            }
         };
         sentence.text(words)
     }
@@ -326,11 +371,11 @@ impl Row {
             Row::Harness(harness) => Some(harness_word(*harness)),
             // Unicode lowercasing, as template names are matched (`crate::templates::rows::matches`).
             Row::Template(name) => Some(name.to_lowercase()),
-            Row::Model { id, .. } => Some(id.to_ascii_lowercase()),
+            Row::Model { id, .. } | Row::HistoryModel { id, .. } => Some(id.to_ascii_lowercase()),
             Row::Effort(effort) => Some(effort_word(*effort)),
             Row::Permission(permission) => Some(permission.word().to_owned()),
             Row::Host { name, .. } => Some(name.to_ascii_lowercase()),
-            Row::Name(_) | Row::UsePath(_) => None,
+            Row::Name(_) | Row::UsePath(_) | Row::Folder(_) | Row::Recent { .. } => None,
         }
     }
 }
@@ -375,6 +420,9 @@ pub struct Inputs<'a> {
     /// Every template as the templates' rows give it (`crate::templates::rows::rows` with an empty filter: the store's
     /// templates in the helm's order), or why the templates cannot be listed, which a `tl:` query shows in place of rows.
     pub templates: Result<&'a [TemplateRow], &'a HostSentence>,
+    /// The chosen host's launch history while it is read and current, and the host as its rows name it; `None` before
+    /// or without one, which offers no saved folders, recent setups or past models.
+    pub history: Option<(&'a LaunchHistoryReply, &'a HostText)>,
 }
 
 /// A line the results area shows when there are no rows, and whether it is a warning (drawn in the warning color) or a
@@ -486,6 +534,32 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
                     harness: model.harness,
                 }),
         );
+        // Then models from past launches, in the recent setups' order, that the catalog does not list for their agent
+        // type under the catalog's spelling of the id, each once: the same test that makes a taken recent setup's model
+        // a custom one (`LaunchDraft::restore_recent`).
+        if let Some((history, _)) = inputs.history {
+            let catalog = inputs.catalog.unwrap_or_default();
+            for entry in ranked(history, &RecentFilter::default(), None) {
+                let Some(id) = &entry.selection.model else {
+                    continue;
+                };
+                let owner = entry.selection.harness;
+                let in_catalog = catalog
+                    .iter()
+                    .any(|model| model.harness == owner && model.id == owner.catalog_model_id(id));
+                let row = Row::HistoryModel {
+                    id: id.clone(),
+                    harness: owner,
+                };
+                if harness.is_none_or(|chosen| chosen == owner)
+                    && matches(&id.to_ascii_lowercase())
+                    && !in_catalog
+                    && !rows.contains(&row)
+                {
+                    rows.push(row);
+                }
+            }
+        }
     }
     if any(Scope::Effort)
         && !blank_all
@@ -523,6 +597,39 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
     }
     if any(Scope::Folder) && !blank_all && path_shaped(value) {
         rows.push(Row::UsePath(value.to_owned()));
+    }
+    if let Some((history, placement)) = inputs.history {
+        // Saved folders, matched on the folder as typed (so a visible `<U+…>` never stands for the character it
+        // escapes), uncapped, after a typed path's own row.
+        if any(Scope::Folder) && !blank_all {
+            rows.extend(
+                history
+                    .folders
+                    .iter()
+                    .filter(|folder| matches(&folder.display_cwd.to_ascii_lowercase()))
+                    .map(|folder| Row::Folder(folder.display_cwd.clone())),
+            );
+        }
+        // Whole setups, every one the history holds, matched on where they started, their agent type and their model.
+        if any(Scope::Recent) && !blank_all {
+            rows.extend(
+                ranked(history, &RecentFilter::default(), None)
+                    .into_iter()
+                    .filter(|entry| {
+                        let words = format!(
+                            "{} {} {}",
+                            destination_label(entry),
+                            harness_label(entry.selection.harness),
+                            entry.selection.model.as_deref().unwrap_or_default()
+                        );
+                        matches(&words.to_ascii_lowercase())
+                    })
+                    .map(|entry| Row::Recent {
+                        entry: Box::new(entry.clone()),
+                        placement: placement.clone(),
+                    }),
+            );
+        }
     }
 
     // The name fallback: unlabelled text that offered nothing else names the session, unless it is a word that needs an
