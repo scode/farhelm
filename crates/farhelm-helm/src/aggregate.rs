@@ -497,9 +497,10 @@ async fn session_list_staged(
     // A HOST filter scopes the notice, on both paths: a request for one
     // host's sessions cannot be missing rows another host's cap cut, so an
     // unrelated capped host must not mark it incomplete. Only the host
-    // dimension gets this — for every other filter (title, status,
-    // parent, directory) an omitted row COULD have matched, so
-    // any capped host keeps the conservative any-host rule.
+    // dimension gets this, a one-session read included, since its key names
+    // its host (`SessionFilter::host_scope`) — for every other filter
+    // (title, status, parent, directory) an omitted row COULD have matched,
+    // so any capped host keeps the conservative any-host rule.
     let counts_toward_notice =
         |host: HostId| filter.host_scope().is_none_or(|scoped| scoped == host);
     let mut hosts_truncated = slice

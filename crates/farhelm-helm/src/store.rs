@@ -1750,8 +1750,16 @@ impl SessionFilter {
     /// still read fleet-wide — `total` is the whole view's size whatever
     /// the filter says — and [`Self::matches`] still checks the host per
     /// row.
+    ///
+    /// A session filter names one host too (its key's), so a read of one
+    /// session is scoped to that session's host. That read is the UI
+    /// channel's read of the open session, whose cut flag decides whether a
+    /// missing session may be taken as deleted (`crate::ui_channel`'s
+    /// `Channel::read`): another host's cap must not make a deletion on an
+    /// uncut host unprovable.
     pub fn host_scope(&self) -> Option<HostId> {
         self.host
+            .or_else(|| self.session.as_ref().map(|key| key.host))
     }
 
     /// Whether this filter narrows nothing — which is what decides whether

@@ -2467,6 +2467,7 @@ fn listing_carrying_the_open_session(shown: &[&str], open: Option<String>) -> Co
                 truncated: false,
             }),
             selected_outside_query: carried,
+            selected_cut: false,
         },
         upsert: Vec::new(),
         remove,

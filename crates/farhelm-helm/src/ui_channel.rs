@@ -45,7 +45,11 @@
 //! (`CollectionMeta::selected_outside_query`), kept out of the order and
 //! counted nowhere. It is diffed like any entry, so it arrives, changes and
 //! goes (the selection moves, the filter starts to match it, it is deleted)
-//! through the ordinary push.
+//! through the ordinary push. When its own read finds nothing and was cut
+//! (its host lists only its newest sessions, up to the cap), the metadata
+//! says so (`CollectionMeta::selected_cut`): the session may be one the cap
+//! left out rather than one that was deleted. The counts stay the query's
+//! own, since the query's list may have been read whole.
 //!
 //! ## What the helm owes the GUI's watchdog
 //!
@@ -199,6 +203,10 @@ pub(crate) struct Projected {
     /// session query selected it (always the last entry). The diff keeps it
     /// out of the order and names it in the metadata.
     pub(crate) selected_outside_query: Option<String>,
+    /// The session query's selected session is in neither `entries` nor its
+    /// own read, and that read was cut at its host's cap
+    /// (`CollectionMeta::selected_cut`). `false` for every other collection.
+    pub(crate) selected_cut: bool,
 }
 
 /// How the channel reads one pushed collection: which GET to run, and how to
@@ -250,6 +258,7 @@ pub(crate) fn production_collections() -> Vec<CollectionSpec> {
                     entries: vec![(PREFERENCES_KEY.to_string(), body)],
                     counts: None,
                     selected_outside_query: None,
+                    selected_cut: false,
                 })
             },
             selected: None,
@@ -280,6 +289,7 @@ pub(crate) fn production_collections() -> Vec<CollectionSpec> {
                     entries: vec![(ANNOUNCEMENTS_KEY.to_string(), body)],
                     counts: None,
                     selected_outside_query: None,
+                    selected_cut: false,
                 })
             },
             selected: None,
@@ -331,6 +341,7 @@ fn split_recipe_places(body: Value) -> Result<Projected, String> {
         entries,
         counts: None,
         selected_outside_query: None,
+        selected_cut: false,
     })
 }
 
@@ -361,7 +372,9 @@ fn session_list_path(query: &SessionQuery) -> String {
 }
 
 /// `GET /api/sessions` narrowed to the one session served under `key`, with
-/// no other filter, so no filter and no cap can leave it out.
+/// no other filter, so no other filter and not the listing cap can leave it
+/// out. Its host's own cap still can, which the reply's `truncated` then
+/// says (scoped to that host, `store::SessionFilter::host_scope`).
 fn selected_session_path(key: &str) -> String {
     let params = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("id", key)
@@ -417,6 +430,7 @@ fn split_keyed_array(body: Value, field: &str, key: &str) -> Result<Projected, S
         entries,
         counts: None,
         selected_outside_query: None,
+        selected_cut: false,
     })
 }
 
@@ -475,6 +489,7 @@ pub(crate) fn diff(
                 order,
                 counts: projected.counts,
                 selected_outside_query: outside,
+                selected_cut: projected.selected_cut,
             };
             (meta, upsert, remove, entries)
         }
@@ -590,14 +605,26 @@ impl Channel {
     /// A selected entry that is listed anyway is not read again and not
     /// marked, so it is never sent twice. A selected key the helm knows no
     /// session under is simply not carried.
+    ///
+    /// When the selected read finds nothing and its own reply was cut (its
+    /// host's supervisor lists only its newest sessions, so an old one can
+    /// exist without being listed), the read says so in `selected_cut`
+    /// rather than in the counts: the query's own list may have been read
+    /// whole (a host filter naming another host), and its counts say only
+    /// what happened to it. Without the flag, that whole list missing the
+    /// open session would read to the GUI as proof that it was deleted.
     async fn read(&self, spec: &CollectionSpec, query: &SessionQuery) -> Result<Projected, String> {
         let mut projected = self.read_path(spec, &(spec.path)(query)).await?;
         if let (Some(selected_path), Some(key)) = (spec.selected, selected_key(query))
             && !projected.entries.iter().any(|(listed, _)| listed == key)
-            && let Some(entry) = self.read_selected(spec, &selected_path(key), key).await?
         {
-            projected.entries.push(entry);
-            projected.selected_outside_query = Some(key.to_owned());
+            match self.read_selected(spec, &selected_path(key), key).await? {
+                (Some(entry), _) => {
+                    projected.entries.push(entry);
+                    projected.selected_outside_query = Some(key.to_owned());
+                }
+                (None, cut) => projected.selected_cut = cut,
+            }
         }
         Ok(projected)
     }
@@ -619,20 +646,23 @@ impl Channel {
         (spec.split)(body)
     }
 
-    /// The selected entry's own read: `Ok(None)` when the helm serves no entry
-    /// under `key`.
+    /// The selected entry's own read: the entry, or `None` when the helm
+    /// serves none under `key`, and whether that reply was cut
+    /// (`truncated`), which is what says a `None` may not mean "deleted".
+    /// The one-session read is scoped to the key's host, so only that host's
+    /// cap cuts it (`store::SessionFilter::host_scope`).
     ///
     /// A refusal (a 4xx: a key that does not parse as a session reference, or
     /// whose host entry is gone) means the key names nothing, so the entry is
-    /// absent, as for a session deleted since. Any other failure fails the
-    /// collection's read like a failed list read, because a failed read is no
-    /// evidence that the session is gone.
+    /// absent and the reply uncut, as for a session deleted since. Any other
+    /// failure fails the collection's read like a failed list read, because a
+    /// failed read is no evidence that the session is gone.
     async fn read_selected(
         &self,
         spec: &CollectionSpec,
         path: &str,
         key: &str,
-    ) -> Result<Option<(String, Value)>, String> {
+    ) -> Result<(Option<(String, Value)>, bool), String> {
         let request = self
             .request(Method::GET, path, None)
             .map_err(|error| format!("the open session's read could not be built: {error}"))?;
@@ -640,7 +670,7 @@ impl Channel {
         // a reply, only merged into the push.
         let Routed { status, body, .. } = route(self.router.clone(), request).await;
         if status.is_client_error() {
-            return Ok(None);
+            return Ok((None, false));
         }
         if !status.is_success() {
             return Err(format!(
@@ -650,10 +680,13 @@ impl Channel {
         }
         let body: Value = serde_json::from_slice(&body)
             .map_err(|error| format!("the open session's reply was not JSON: {error}"))?;
-        Ok((spec.split)(body)?
+        let projected = (spec.split)(body)?;
+        let cut = projected.counts.is_some_and(|counts| counts.truncated);
+        let entry = projected
             .entries
             .into_iter()
-            .find(|(served, _)| served == key))
+            .find(|(served, _)| served == key);
+        Ok((entry, cut))
     }
 
     /// Sort the session list in the order the helm has stored as the shared
@@ -717,6 +750,7 @@ impl Channel {
                     order: Vec::new(),
                     counts: None,
                     selected_outside_query: None,
+                    selected_cut: false,
                 },
                 entries: BTreeMap::new(),
             };
@@ -755,6 +789,7 @@ impl Channel {
                     order: Vec::new(),
                     counts: None,
                     selected_outside_query: None,
+                    selected_cut: false,
                 },
                 entries: BTreeMap::new(),
             });

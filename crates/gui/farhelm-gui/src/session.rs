@@ -247,7 +247,10 @@ fn receive(connection: &WeakEntity<Connection>, event: ChannelEvent, cx: &mut Ap
 
 /// Whether `collections` prove that the session filed under `key` is gone: the one evidence rule for "this session no
 /// longer exists", shared by the selected session's survivor ([`keep_survivors`]) and the session subject of a layer
-/// ([`Subject::session`]), so a selection and a confirmation about the same session can never disagree.
+/// ([`Subject::session`]). The session list also drops a selected session that an available, uncut listing under a
+/// query naming it no longer has (`session_list::selection::absent_while_named`), which this rule does not count; so a
+/// hidden open session deleted elsewhere can move the selection on while a question or editor about it stays open
+/// until its answer or save is refused.
 ///
 /// Only a complete, successful read can show that: the sessions collection is the channel's session query, cut at the
 /// helm's listing cap, and a failed read arrives as `Unavailable` with no entries. A missing row in a truncated,
