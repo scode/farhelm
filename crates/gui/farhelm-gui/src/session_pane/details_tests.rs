@@ -1,7 +1,7 @@
 //! Tests of the open session's details bar: which parts it draws and in what order for each kind of status, what it
 //! leaves out (a stale session's badge and age, a host nobody named, a mark for a host nobody placed), the words it
-//! uses for the local host, how its parts give way in a narrow pane, its age moving on with the shared clock, and its
-//! absence for a session the list does not show.
+//! uses for the local host, how its parts give way in a narrow pane, and its age moving on with the shared clock. The
+//! bar of an open session the list does not show is `carried_tests.rs`'s.
 //!
 //! The decisions are a pure function ([`Details::of`]), tested without a window where only the decision matters.
 //! Everything else runs in a window over the helm client's fake and reads GPUI's driver record of the frame: the bar is
@@ -375,32 +375,6 @@ fn a_remote_host_is_named_in_full_and_only_the_local_host_reads_local(cx: &mut T
         ["ops@render-west.example.invalid"]
     );
     assert_eq!(label(cx, HOST_MARK_ID).as_deref(), Some("Remote"));
-}
-
-/// The bar reads the session's listed row, and a session the list does not show (a filter, or the list's cap, which
-/// proves nothing about it being gone) has none. How the pane is to read such a session is still open, and until it is
-/// settled the bar must not show what it last read, which would go stale with nothing to say so. Specified: with `a`
-/// open and its bar drawn, a truncated listing pushed without `a` keeps `a` open and draws no bar; a listing with `a`
-/// back draws it again.
-#[gpui::test]
-fn the_bar_is_absent_while_the_list_does_not_show_the_open_session(cx: &mut TestAppContext) {
-    let rows = [active("a", 120), active("b", 120)];
-    let (mut fake, cx) = open_main(cx, snapshot(&rows, Vec::new()));
-    assert!(node(&frame(cx), BAR_ID).is_some(), "the premise: a's bar");
-    fake.push(change(listing_meta(&["b"], 2, true), &[], &["a"]));
-    test_support::settle(cx);
-    assert_eq!(
-        selected(cx).as_deref(),
-        Some("a"),
-        "the premise: a stays open"
-    );
-    assert!(
-        node(&frame(cx), BAR_ID).is_none(),
-        "no bar for an unlisted session"
-    );
-    fake.push(change(listing_meta(&["a", "b"], 2, false), &rows, &[]));
-    test_support::settle(cx);
-    assert_eq!(painted_within(&frame(cx), TITLE_ID), ["a"]);
 }
 
 // ---- The clock -----------------------------------------------------------------------------------------------------

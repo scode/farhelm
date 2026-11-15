@@ -194,6 +194,20 @@ pub(crate) fn queries(fake: &mut FakeHelm) -> Vec<(FakeCommand, Value)> {
         .collect()
 }
 
+/// The bodies of the session queries the window sent since the last look, in order. Every command, queries and the
+/// rest (the selection remembered, a seen mark), is answered as done, so the next look sees only what came after; for
+/// a test that pins which queries a step sent among other commands.
+pub(crate) fn sent_queries(fake: &mut FakeHelm) -> Vec<Value> {
+    let mut bodies = Vec::new();
+    for command in fake.commands() {
+        if command.path == SESSION_QUERY_PATH {
+            bodies.push(command.body.clone().unwrap_or_default());
+        }
+        fake.reply(command.id, 204, None);
+    }
+    bodies
+}
+
 /// The one query the window sent since the last look, with its body; fails on none or several.
 pub(crate) fn one_query(fake: &mut FakeHelm) -> (FakeCommand, Value) {
     let mut sent = queries(fake);
@@ -413,10 +427,11 @@ fn a_host_list_never_read_shows_the_unavailable_status(cx: &mut TestAppContext) 
 
 /// Choosing a host is the helm's query, not a filter the window applies, so what reaches the helm is the behavior:
 /// SPEC.md's "Choosing a host sends a server-side query immediately and is not persisted, while All widens it again",
-/// and the old app sent nothing when the choice did not change. The query names only the host, so status, sort and the
-/// open session stay as they are. Specified: a click on host 3's avatar sends exactly one `PUT /ui/session-query` with
-/// `{"host": 3}` and presses that avatar at once, before any reply, with All no longer pressed and the open session
-/// unchanged; a second click sends nothing; after the reply, a click on All sends `{}` and presses All.
+/// and the old app sent nothing when the choice did not change. The query names the host and the open session it
+/// leaves open (so the helm keeps carrying it), never a sort, so status, sort and the open session stay as they are.
+/// Specified: a click on host 3's avatar sends exactly one `PUT /ui/session-query` with `{"host": 3, "selected": "a"}`
+/// and presses that avatar at once, before any reply, with All no longer pressed and the open session unchanged; a
+/// second click sends nothing; after the reply, a click on All sends `{"selected": "a"}` and presses All.
 #[gpui::test]
 fn choosing_a_host_sends_its_query_once_and_all_sends_an_empty_one(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot());
@@ -425,7 +440,7 @@ fn choosing_a_host_sends_its_query_once_and_all_sends_an_empty_one(cx: &mut Test
 
     test_support::click(cx, "host-rail-host-3");
     let (query, body) = one_query(&mut fake);
-    assert_eq!(body, json!({ "host": 3 }));
+    assert_eq!(body, json!({ "host": 3, "selected": "a" }));
     let nodes = frame(cx);
     assert!(
         pressed(&nodes, "host-rail-host-3"),
@@ -441,7 +456,7 @@ fn choosing_a_host_sends_its_query_once_and_all_sends_an_empty_one(cx: &mut Test
     cx.run_until_parked();
     test_support::click(cx, "host-rail-all");
     let (_, body) = one_query(&mut fake);
-    assert_eq!(body, json!({}));
+    assert_eq!(body, json!({ "selected": "a" }));
     assert!(pressed(&frame(cx), "host-rail-all"));
 }
 
@@ -462,7 +477,11 @@ fn a_refused_query_keeps_the_previous_choice_and_shows_the_helms_words(cx: &mut 
 
     test_support::click(cx, "host-rail-host-2");
     let (refused, body) = one_query(&mut fake);
-    assert_eq!(body, json!({ "host": 2 }), "the premise: host 2's query");
+    assert_eq!(
+        body,
+        json!({ "host": 2, "selected": "a" }),
+        "the premise: host 2's query"
+    );
     fake.reply(refused.id, 400, Some(json!("unknown host \u{202E}2")));
     cx.run_until_parked();
     let nodes = frame(cx);
@@ -487,7 +506,7 @@ fn a_refused_query_keeps_the_previous_choice_and_shows_the_helms_words(cx: &mut 
 /// matching the rail", with the name and destination as its tooltip, and removing it chooses All "exactly as the rail
 /// does". Specified: with no host chosen there is no chip; once host 3 is chosen, the chip is named "Filtered to host
 /// <alias>; remove filter", its hover help is the host's identity, and it paints the short name and ✕; a click on it
-/// sends `{}`, presses All and takes the chip away.
+/// sends `{"selected": "a"}`, presses All and takes the chip away.
 #[gpui::test]
 fn the_chip_names_the_chosen_host_and_removes_the_choice(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot());
@@ -515,7 +534,7 @@ fn the_chip_names_the_chosen_host_and_removes_the_choice(cx: &mut TestAppContext
 
     test_support::click(cx, "host-filter-chip");
     let (_, body) = one_query(&mut fake);
-    assert_eq!(body, json!({}));
+    assert_eq!(body, json!({ "selected": "a" }));
     let nodes = frame(cx);
     assert!(pressed(&nodes, "host-rail-all"));
     assert!(node(&nodes, "host-filter-chip").is_none());
@@ -527,7 +546,7 @@ fn the_chip_names_the_chosen_host_and_removes_the_choice(cx: &mut TestAppContext
 /// the chip leaves focus on All, whatever a click focuses on this platform; and by keyboard alone, from All, Tab twice
 /// and Space choose host 3, Tab seven times more (host 2, Add host, the heading's order title, Trash button and
 /// Templates button, the status segments' one stop) reaches the chip, and Enter on it removes the filter and leaves
-/// focus on All. Each removal sends `{}`.
+/// focus on All. Each removal sends `{"selected": "a"}`.
 #[gpui::test]
 fn clearing_the_filter_by_keyboard_or_click_focuses_all(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot());
@@ -538,7 +557,7 @@ fn clearing_the_filter_by_keyboard_or_click_focuses_all(cx: &mut TestAppContext)
     cx.run_until_parked();
     test_support::click(cx, "host-filter-chip");
     let (cleared, body) = one_query(&mut fake);
-    assert_eq!(body, json!({}));
+    assert_eq!(body, json!({ "selected": "a" }));
     fake.reply(cleared.id, 204, None);
     cx.run_until_parked();
     assert_eq!(
@@ -551,7 +570,7 @@ fn clearing_the_filter_by_keyboard_or_click_focuses_all(cx: &mut TestAppContext)
     let (query, body) = one_query(&mut fake);
     assert_eq!(
         body,
-        json!({ "host": 3 }),
+        json!({ "host": 3, "selected": "a" }),
         "the premise: host 3 chosen by keyboard"
     );
     fake.reply(query.id, 204, None);
@@ -564,7 +583,7 @@ fn clearing_the_filter_by_keyboard_or_click_focuses_all(cx: &mut TestAppContext)
     );
     test_support::keys(cx, "enter");
     let (_, body) = one_query(&mut fake);
-    assert_eq!(body, json!({}));
+    assert_eq!(body, json!({ "selected": "a" }));
     assert_eq!(
         focused_id(cx).as_deref(),
         Some("host-rail-all"),
@@ -580,8 +599,8 @@ fn clearing_the_filter_by_keyboard_or_click_focuses_all(cx: &mut TestAppContext)
 /// "Show all hosts" clears the choice like the chip. Specified: host 3 chosen and answered with an empty listing (0 of
 /// 2) shows the sentence "No sessions on <alias>." and the "Show all hosts" link; choosing host 2 with its reply held
 /// keeps that sentence and moves the chip to host 2; once host 2's empty listing and reply arrive the sentence names
-/// host 2; "Show all hosts" sends `{}` and leaves focus on All, and the full listing with its reply draws rows and no
-/// sentence.
+/// host 2; "Show all hosts" sends `{"selected": "a"}` and leaves focus on All, and the full listing with its reply draws
+/// rows and no sentence.
 #[gpui::test]
 fn the_empty_state_names_the_answered_host_and_show_all_hosts_clears_it(cx: &mut TestAppContext) {
     let rows = [session("a"), session("b")];
@@ -623,7 +642,7 @@ fn the_empty_state_names_the_answered_host_and_show_all_hosts_clears_it(cx: &mut
 
     test_support::click(cx, "filter-show-all-hosts");
     let (all, body) = one_query(&mut fake);
-    assert_eq!(body, json!({}));
+    assert_eq!(body, json!({ "selected": "a" }));
     assert_eq!(
         focused_id(cx).as_deref(),
         Some("host-rail-all"),
@@ -644,7 +663,7 @@ fn the_empty_state_names_the_answered_host_and_show_all_hosts_clears_it(cx: &mut
 /// user sees why the list is narrowed and how to undo it. Specified: with host 3 chosen and answered, a registry change
 /// without it draws `host-rail-removed-3` pressed, not focusable and with no click handler, named "Host 3 (no longer
 /// registered)", and the chip named "Filtered to host Host 3 (no longer registered); remove filter"; a click on the
-/// placeholder sends nothing; the chip's click sends `{}` and takes the placeholder away.
+/// placeholder sends nothing; the chip's click sends `{"selected": "a"}` and takes the placeholder away.
 #[gpui::test]
 fn a_removed_chosen_host_keeps_a_pressed_inert_placeholder(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot());
@@ -685,13 +704,15 @@ fn a_removed_chosen_host_keeps_a_pressed_inert_placeholder(cx: &mut TestAppConte
 
     test_support::click(cx, "host-filter-chip");
     let (_, body) = one_query(&mut fake);
-    assert_eq!(body, json!({}));
+    assert_eq!(body, json!({ "selected": "a" }));
     assert!(node(&frame(cx), "host-rail-removed-3").is_none());
 }
 
 /// The helm's channel forgets its query on a reset (a new channel starts unfiltered), so a window that kept its choice
-/// would press a host while the helm serves every session (SPEC_impl.md, "One failure path: the reset"). Specified:
-/// with host 3 chosen and answered, a broken channel and a new snapshot press All, draw no chip, and send no query.
+/// would press a host while the helm serves every session (SPEC_impl.md, "One failure path: the reset"). The open
+/// session survives the reset, so the one query the new channel gets only names it. Specified: with host 3 chosen and
+/// answered, a broken channel and a new snapshot press All, draw no chip, and send exactly one query, `{"selected":
+/// "a"}`, which chooses no host.
 #[gpui::test]
 fn a_reset_forgets_the_choice(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot());
@@ -713,11 +734,10 @@ fn a_reset_forgets_the_choice(cx: &mut TestAppContext) {
     assert!(pressed(&nodes, "host-rail-all"));
     assert!(!pressed(&nodes, "host-rail-host-3"));
     assert!(node(&nodes, "host-filter-chip").is_none());
-    assert!(
-        fake.commands()
-            .iter()
-            .all(|command| command.path != SESSION_QUERY_PATH),
-        "a reset sends no query"
+    assert_eq!(
+        sent_queries(&mut fake),
+        [json!({ "selected": "a" })],
+        "a reset chooses no host"
     );
 }
 
@@ -928,7 +948,7 @@ fn hosts_swaps_the_list_for_the_panel_and_back_keeping_focus(cx: &mut TestAppCon
 /// SPEC.md: "All or a host avatar returns to Sessions", and the old app closed the panel on every choice, also one
 /// equal to the current choice, which sends no query. Specified: with the panel shown, a click on All (already chosen)
 /// brings the list back and sends nothing; with the panel shown again, a click on host 3's avatar brings the list back
-/// and sends exactly one query, `{"host": 3}`, with Hosts no longer pressed.
+/// and sends exactly one query, `{"host": 3, "selected": "a"}`, with Hosts no longer pressed.
 #[gpui::test]
 fn choosing_all_or_a_host_returns_from_the_panel_to_sessions(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot());
@@ -944,7 +964,7 @@ fn choosing_all_or_a_host_returns_from_the_panel_to_sessions(cx: &mut TestAppCon
     test_support::click(cx, "host-rail-host-3");
     assert!(!panel_shown(cx), "an avatar returned to Sessions");
     let (_, body) = one_query(&mut fake);
-    assert_eq!(body, json!({ "host": 3 }));
+    assert_eq!(body, json!({ "host": 3, "selected": "a" }));
     assert!(!pressed(&frame(cx), HOSTS));
 }
 

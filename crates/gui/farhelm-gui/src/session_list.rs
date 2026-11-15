@@ -10,9 +10,10 @@
 //! was deleted).
 //!
 //! The list also owns the selection rules ([`selection`]), and applies them from observers, never from drawing: it
-//! settles the selection and the open session's seen mark ([`SessionList::settle`]) whenever the connection changes (a
-//! new UI session after a reset, or none while the window is inert), the selection changes, the current UI session's
-//! store applies a pushed change, or its operation store starts or settles a request. GPUI draws nothing for a window
+//! settles the selection, the open session's seen mark and the open session its query names ([`SessionList::settle`],
+//! [`filters`]' "The query names the open session") whenever the connection changes (a new UI session after a reset,
+//! or none while the window is inert), the selection changes, the current UI session's store applies a pushed change,
+//! or its operation store starts or settles a request. GPUI draws nothing for a window
 //! that is hidden, minimized or behind other windows, and SPEC.md, "Status", wants a session open in a window behind
 //! other apps recorded as seen the same way as one in a focused window; work driven by frames would wait until the
 //! window showed again. Each settle recomputes from the state as it is then. A settle that changes the selection
@@ -329,14 +330,20 @@ impl SessionList {
         list
     }
 
-    /// Apply the selection rules to the state as it is now: select (and remember) or clear, and send the open
-    /// session's seen mark when one is due. Nothing happens while the window is inert.
+    /// Apply the selection rules to the state as it is now: select (and remember) or clear, send the list's query again
+    /// when it does not yet name the session now open ([`Self::name_open_session`]), and send the open session's seen
+    /// mark when one is due. Nothing happens while the window is inert.
     fn settle(&mut self, cx: &mut Context<Self>) {
         let deleting = session::current_operations(cx).is_some_and(|operations| {
             operations
                 .read(cx)
                 .any_in_flight(|work| matches!(work, operations::Work::Delete(_)))
         });
+        let selected = local_state::selected(cx);
+        // Read before the store is borrowed below: `delete`'s "This window's own Delete is evidence".
+        let deleted_here = selected
+            .as_deref()
+            .is_some_and(|key| delete::deleted_here(key, cx));
         let current = self.current.current(cx);
         let Some(store) = session::current_store(cx) else {
             return;
@@ -348,10 +355,14 @@ impl SessionList {
         }
         let collections = store.read(cx).collections();
         let listed = selection::listed(collections);
-        let selected = local_state::selected(cx);
-        // `selection`'s "A Replace keeps its own source open until it answers".
+        // Gone on a complete listing without it, or once this window's own Delete of it succeeded and the store no
+        // longer holds it, which a filtered listing would never prove (`delete`'s "This window's own Delete is
+        // evidence"); and never while its own Replace is in flight (`selection`'s "A Replace keeps its own source open
+        // until it answers").
         let gone = selected.as_deref().is_some_and(|key| {
-            session::listing_proves_gone(collections, key) && !replace::in_flight(key, cx)
+            let proven = session::listing_proves_gone(collections, key)
+                || (deleted_here && collections.get::<SessionRow>(key).is_none());
+            proven && !replace::in_flight(key, cx)
         });
         let change = selection::hold_for_deletes(
             selection::settle(
@@ -362,7 +373,8 @@ impl SessionList {
             ),
             deleting,
         );
-        // The seen mark is for whichever session is open once the change is made.
+        // The seen mark is for whichever session is open once the change is made, read by key: the helm carries the
+        // open session in the store also while the list leaves it out (`filters`, "The query names the open session").
         let open = match &change {
             Change::Keep => selected,
             Change::Select(key) => Some(key.clone()),
@@ -371,10 +383,9 @@ impl SessionList {
         let seen = selection::seen_due(
             match open.as_deref() {
                 None => Open::Nothing,
-                Some(key) => listed
-                    .iter()
-                    .find(|session| session.key == key)
-                    .map_or(Open::Hidden(key), |session| Open::Shown(*session)),
+                Some(key) => collections
+                    .get::<SessionRow>(key)
+                    .map_or(Open::Hidden(key), |row| Open::Shown(Listed { key, row })),
             },
             &current.stamped,
         );
@@ -386,6 +397,8 @@ impl SessionList {
                 local_state::clear(cx);
             }
         }
+        // Read after the change above, which took effect at once: the query names the session open from here on.
+        self.name_open_session(cx);
         if let Some((stamped, send)) = seen {
             self.current.current(cx).stamped = stamped;
             if let Some((key, activity)) = send {

@@ -231,6 +231,19 @@ pub(crate) fn listing_meta(order: &[&str], total: u64, truncated: bool) -> Colle
     meta
 }
 
+/// `meta` with `key` as the session the helm carries outside the list's order because the query names it while its
+/// filter or cap leaves it out (`selected_outside_query`); the key must not be in `meta`'s order.
+pub(crate) fn carrying(meta: CollectionMeta, key: &str) -> CollectionMeta {
+    assert!(
+        !meta.order.iter().any(|listed| listed == key),
+        "a carried session is outside the order"
+    );
+    CollectionMeta {
+        selected_outside_query: Some(key.to_owned()),
+        ..meta
+    }
+}
+
 /// The collections a store would hold after this snapshot.
 pub(crate) fn collections(snapshot: Vec<CollectionState>) -> Collections {
     let mut collections = Collections::default();
@@ -264,6 +277,15 @@ pub(crate) fn sent(fake: &mut FakeHelm) -> Vec<(String, Value)> {
 
 fn remembered(key: &str) -> (String, Value) {
     ("/api/preferences".into(), json!({ "last_selected": key }))
+}
+
+/// The session query the list sends when `key` becomes the open session under the unfiltered choice: the query in
+/// force again, naming it (`filters`, "The query names the open session").
+fn named(key: &str) -> (String, Value) {
+    (
+        farhelm_proto::ui_channel::SESSION_QUERY_PATH.into(),
+        json!({ "selected": key }),
+    )
 }
 
 fn seen(key: &str, activity: i64) -> (String, Value) {
@@ -324,9 +346,9 @@ fn rows_follow_the_pushed_order_and_the_selection_follows_its_session(cx: &mut T
 }
 
 /// A row is where the user opens a session, and opening is also what the helm's visit history and the unseen marks are
-/// built from. Specified: clicking an unopened row selects it, writes it as the `last_selected` preference and records
-/// its unseen output as seen at its latest activity, in that order; clicking the open row again changes nothing and
-/// sends nothing.
+/// built from. Specified: clicking an unopened row selects it, writes it as the `last_selected` preference, names it in
+/// the session query and records its unseen output as seen at its latest activity, in that order; clicking the open row
+/// again changes nothing and sends nothing.
 #[gpui::test]
 fn a_click_opens_a_session_remembers_it_and_marks_it_seen_once(cx: &mut TestAppContext) {
     let rows = [session("a"), session("b").activity(250).seen(Some(100))];
@@ -340,7 +362,10 @@ fn a_click_opens_a_session_remembers_it_and_marks_it_seen_once(cx: &mut TestAppC
     test_support::click(cx, "session-row-b");
     cx.run_until_parked();
     assert_eq!(selected(cx).as_deref(), Some("b"));
-    assert_eq!(sent(&mut fake), [remembered("b"), seen("b", 250)]);
+    assert_eq!(
+        sent(&mut fake),
+        [remembered("b"), named("b"), seen("b", 250)]
+    );
 
     test_support::click(cx, "session-row-b");
     cx.run_until_parked();
@@ -399,8 +424,8 @@ fn item_selection(nodes: &[DriverNode]) -> Vec<(String, Option<bool>)> {
 /// the open session as seen in "a window behind other apps" the same way as in a focused one, and the selection must
 /// not wait for the window to show either. So the rules run from what the list observes, never from drawing; before
 /// that, they ran after each frame. Specified: a session list in no window at all, made before the first snapshot,
-/// opens the latest visit once the snapshot arrives and remembers it with the helm, and sends the open session's seen
-/// mark when the helm pushes new output.
+/// opens the latest visit once the snapshot arrives, remembers it with the helm and names it in the session query, and
+/// sends the open session's seen mark when the helm pushes new output.
 #[gpui::test]
 fn the_list_settles_without_drawing(cx: &mut TestAppContext) {
     let (mut fake, _connection) = started(cx);
@@ -414,7 +439,7 @@ fn the_list_settles_without_drawing(cx: &mut TestAppContext) {
         cx.update(|cx| local_state::selected(cx)).as_deref(),
         Some("b")
     );
-    assert_eq!(sent(&mut fake), [remembered("b")]);
+    assert_eq!(sent(&mut fake), [remembered("b"), named("b")]);
 
     fake.push(change(
         listing_meta(&["a", "b"], 2, false),
@@ -428,7 +453,8 @@ fn the_list_settles_without_drawing(cx: &mut TestAppContext) {
 /// A selection is dropped only on evidence: a session missing from a listing the helm's cap cut may just be past the
 /// cut, and dropping it would close what the user had open (the old app's `absence_is_evidence`). Once a complete
 /// listing shows it gone, the next one opens. Specified: with a open, a truncated push without a keeps a open and sends
-/// nothing; a complete push without a opens the newest-created remaining session and remembers it.
+/// nothing; a complete push without a opens the newest-created remaining session, remembers it and names it in the
+/// session query.
 #[gpui::test]
 fn a_selection_moves_only_once_a_complete_listing_shows_it_gone(cx: &mut TestAppContext) {
     let rows = [
@@ -458,7 +484,7 @@ fn a_selection_moves_only_once_a_complete_listing_shows_it_gone(cx: &mut TestApp
     fake.push(change(listing_meta(&["b", "c"], 2, false), &[], &[]));
     cx.run_until_parked();
     assert_eq!(selected(cx).as_deref(), Some("c"));
-    assert_eq!(sent(&mut fake), [remembered("c")]);
+    assert_eq!(sent(&mut fake), [remembered("c"), named("c")]);
 }
 
 /// SPEC.md, "Status": the open session's output counts as seen as it arrives, but a manual "mark unread" of the open
@@ -503,8 +529,8 @@ fn new_output_on_the_open_session_is_marked_seen_but_a_manual_unread_sticks(
 /// it. The seen mark's memory belonged to the old connection and starts over too ("Everything else starts over"), so
 /// the open session's unseen output is marked again even though its activity did not move. Specified: with b open and
 /// seen at its activity, a break and a snapshot of a, b and c in which b's stamp is gone but its activity is the same
-/// draws a, b, c, keeps b open, sends b's seen mark at that same activity and posts the notice; clicking the banner's
-/// Dismiss withdraws it.
+/// draws a, b, c, keeps b open, names b in the new channel's session query, sends b's seen mark at that same activity
+/// and posts the notice; clicking the banner's Dismiss withdraws it.
 #[gpui::test]
 fn a_reset_rebuilds_the_list_keeps_a_listed_selection_and_shows_a_dismissable_notice(
     cx: &mut TestAppContext,
@@ -530,7 +556,7 @@ fn a_reset_rebuilds_the_list_keeps_a_listed_selection_and_shows_a_dismissable_no
     let nodes = frame(cx);
     assert_eq!(row_order(&nodes), ["a", "b", "c"]);
     assert_eq!(selected(cx).as_deref(), Some("b"));
-    assert_eq!(sent(&mut fake), [seen("b", 100)]);
+    assert_eq!(sent(&mut fake), [named("b"), seen("b", 100)]);
     assert_eq!(
         cx.update(|_, cx| notices::posted(cx)),
         [Notice::ConnectionLost]
@@ -544,8 +570,8 @@ fn a_reset_rebuilds_the_list_keeps_a_listed_selection_and_shows_a_dismissable_no
 /// The seen mark's memory is kept per UI session ([`crate::session::PerSession`]), keyed on the session itself and
 /// not only on the window going inert in between: the connection retires the old session whenever a new snapshot
 /// arrives, and state made for the old one must not act for the new. Specified: with b open and seen, a second
-/// snapshot delivered with no break before it, in which b's stamp is gone but its activity is unchanged, sends b's
-/// seen mark again.
+/// snapshot delivered with no break before it, in which b's stamp is gone but its activity is unchanged, names b in the
+/// new channel's session query and sends b's seen mark again.
 #[gpui::test]
 fn a_new_snapshot_without_a_break_starts_the_seen_memory_over(cx: &mut TestAppContext) {
     let snapshot = |b: Fixture| {
@@ -560,7 +586,7 @@ fn a_new_snapshot_without_a_break_starts_the_seen_memory_over(cx: &mut TestAppCo
 
     fake.connect(snapshot(session("b").seen(None)));
     cx.run_until_parked();
-    assert_eq!(sent(&mut fake), [seen("b", 100)]);
+    assert_eq!(sent(&mut fake), [named("b"), seen("b", 100)]);
 }
 
 /// A reset replaces the store under the list, which is not rebuilt, so the list has to hear the new store's changes
@@ -568,7 +594,7 @@ fn a_new_snapshot_without_a_break_starts_the_seen_memory_over(cx: &mut TestAppCo
 /// settle only on the new snapshot itself, which the connection's own notification covers; a list still subscribed to
 /// the first store would pass them and then ignore every push after a reconnect. Specified: with a open, after a break
 /// and a new snapshot of a, b and c that keeps a open, a complete pushed listing without a opens the newest-created
-/// remaining session, c, and remembers it.
+/// remaining session, c, remembers it and names it in the session query.
 #[gpui::test]
 fn after_a_reset_a_pushed_change_still_settles_the_selection(cx: &mut TestAppContext) {
     let snapshot = || {
@@ -601,7 +627,7 @@ fn after_a_reset_a_pushed_change_still_settles_the_selection(cx: &mut TestAppCon
     fake.push(change(listing_meta(&["b", "c"], 2, false), &[], &["a"]));
     cx.run_until_parked();
     assert_eq!(selected(cx).as_deref(), Some("c"));
-    assert_eq!(sent(&mut fake), [remembered("c")]);
+    assert_eq!(sent(&mut fake), [remembered("c"), named("c")]);
 }
 
 /// Session titles, host names and directories are host text: a title could carry a direction override or a zero-width

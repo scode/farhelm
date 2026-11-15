@@ -969,10 +969,11 @@ impl Main<'_> {
 
 /// SPEC.md: "Opening a session hidden by the host choice or status filter resets both to All after the open is
 /// accepted ... A pick already visible through both leaves them in place" (the old `status-filter.spec.ts` cases), so
-/// the user sees what they opened in the list without losing filters that already show it. Specified, with host 2 and
-/// Idle chosen and answered (b listed): picking b, which the list shows, opens it and sends no query, host 2 and Idle
-/// still chosen; picking c, idle but on host 3, opens it and sends one query, `{}`, pressing All on the rail and
-/// checking All in the segments; with the filters chosen again, picking a, on host 2 but running, does the same.
+/// the user sees what they opened in the list without losing filters that already show it. Every pick changes the open
+/// session, which the query names. Specified, with host 2 and Idle chosen and answered (b listed): picking b, which the
+/// list shows, opens it and sends one query, the filters in force naming b, with host 2 and Idle still chosen; picking
+/// c, idle but on host 3, opens it and sends one query, `{"selected": "c"}`, pressing All on the rail and checking All
+/// in the segments; with the filters chosen again, picking a, on host 2 but running, does the same with a.
 #[gpui::test]
 fn a_pick_the_filters_hide_resets_both_and_a_shown_pick_keeps_them(cx: &mut TestAppContext) {
     let mut main = open_main(cx, filtered_fleet());
@@ -980,7 +981,11 @@ fn a_pick_the_filters_hide_resets_both_and_a_shown_pick_keeps_them(cx: &mut Test
 
     main.pick("b");
     assert_eq!(selected(main.cx).as_deref(), Some("b"));
-    assert_eq!(main.accept_commands(), Vec::<Value>::new(), "a shown pick");
+    assert_eq!(
+        main.accept_commands(),
+        [json!({ "host": 2, "status": "idle", "selected": "b" })],
+        "a shown pick keeps the filters"
+    );
     let nodes = frame(main.cx);
     assert!(pressed(&nodes, "host-rail-host-2") && pressed(&nodes, "session-status-Idle"));
 
@@ -989,7 +994,7 @@ fn a_pick_the_filters_hide_resets_both_and_a_shown_pick_keeps_them(cx: &mut Test
         assert_eq!(selected(main.cx).as_deref(), Some(pick));
         assert_eq!(
             main.accept_commands(),
-            [json!({})],
+            [json!({ "selected": pick })],
             "{pick}, hidden by {hidden_by}"
         );
         let nodes = frame(main.cx);
@@ -1008,8 +1013,11 @@ fn a_pick_the_filters_hide_resets_both_and_a_shown_pick_keeps_them(cx: &mut Test
 /// SPEC.md: "All or a host avatar returns to Sessions, as does an accepted quick-switcher pick". A pick is never
 /// refused in this app (as at the reference commit), so the refused pick SPEC.md mentions has no case; what can be
 /// refused is the query that widens the list, and then both choices must come back, as for any refused query.
-/// Specified: with host 2 and Idle chosen and answered and the Hosts panel shown, picking a (hidden by its status)
-/// opens a, shows Sessions again and sends `{}`; when the helm refuses it, host 2 and Idle are chosen again.
+/// Specified: with a open, host 2 and Idle chosen and answered and the Hosts panel shown, picking c (hidden by its
+/// host) opens c, shows Sessions again and sends `{"selected": "c"}`; when the helm refuses it, host 2 and Idle are
+/// chosen again, and the query is sent once more as host 2 and Idle naming c, since the helm still serves the query
+/// that named a and would otherwise not carry the session now open, with the refusal's words still shown under the
+/// heading.
 #[gpui::test]
 fn a_pick_leaves_the_hosts_panel_and_a_refused_widening_keeps_both_choices(
     cx: &mut TestAppContext,
@@ -1022,14 +1030,15 @@ fn a_pick_leaves_the_hosts_panel_and_a_refused_widening_keeps_both_choices(
         "the premise: the Hosts panel shows"
     );
 
-    main.pick("a");
-    assert_eq!(selected(main.cx).as_deref(), Some("a"));
+    main.pick("c");
+    assert_eq!(selected(main.cx).as_deref(), Some("c"));
     assert!(
         node(&frame(main.cx), "session-list").is_some(),
         "the pick showed Sessions again"
     );
     for command in main.helm.commands() {
-        let refused = command.path == SESSION_QUERY_PATH && command.body == Some(json!({}));
+        let refused =
+            command.path == SESSION_QUERY_PATH && command.body == Some(json!({ "selected": "c" }));
         let status = if refused { 400 } else { 204 };
         main.helm.reply(command.id, status, None);
     }
@@ -1038,5 +1047,14 @@ fn a_pick_leaves_the_hosts_panel_and_a_refused_widening_keeps_both_choices(
     assert!(
         pressed(&nodes, "host-rail-host-2") && pressed(&nodes, "session-status-Idle"),
         "the refused widening put both choices back"
+    );
+    assert_eq!(
+        main.accept_commands(),
+        [json!({ "host": 2, "status": "idle", "selected": "c" })],
+        "the filters the helm serves are sent again, naming the picked c"
+    );
+    assert!(
+        node(&frame(main.cx), "filter-refusal").is_some(),
+        "the re-send leaves the refusal's words shown"
     );
 }
