@@ -9,9 +9,10 @@
 //!   then Cancel, Reset choices (Agent tab), Save as template (not in Replace with) and the main action, with what a
 //!   press of it has to say pinned above them. Save as template opens its inline panel at the end of the body
 //!   (`crate::templates::save_panel`), which holds the launcher's Launch while it is open.
-//! - **The body**, in reading and Tab order: the destination rows (Folder, Name), the Agent and Command tabs, and the
-//!   chosen tab's fields. The other tab's fields are not drawn, but its draft is kept (SPEC.md: "switching tabs keeps
-//!   each tab's draft"). The Agent tab's harness, effort and permission choices are drawn by [`choices`].
+//! - **The body**, in reading and Tab order: the destination rows (Where, Host, a managed checkout's repository and
+//!   preview, Folder, Name), the Agent and Command tabs, and the chosen tab's fields. The other tab's fields are not
+//!   drawn, but its draft is kept (SPEC.md: "switching tabs keeps each tab's draft"). The Agent tab's harness, effort
+//!   and permission choices are drawn by [`choices`].
 //! - **Input to edits.** Every field's change becomes one of the draft's edit methods; nothing here decides a launch
 //!   rule. A field the draft changes on its own (Reset choices clearing the wrapper prefix) is put back in step after
 //!   the edit.
@@ -30,12 +31,12 @@
 //!   permission are read from the store while drawing, and the remembered wrapper prefixes when an agent type is chosen.
 //!
 //! NOTE: Not built yet, each with the piece that brings it: marking the folder field when the helm refuses the folder;
-//! the composer search; recent setups, Browse and the folder check, with its warning on the folder field; managed
-//! checkouts, with their folder and name placeholders; the escaped display of a prompt, wrapper prefix, Custom flags,
+//! the composer search; recent setups, Browse and the folder check, with its warning on the folder field; the rest of
+//! managed checkouts (`checkout` says which); the escaped display of a prompt, wrapper prefix, Custom flags,
 //! seeded model, command line or resume command holding invisible characters, with Clear wrapper prefix, Clear agent
 //! command and Clear resume command; and keyboard scrolling of an overflowing notice (the old region took focus once it
 //! overflowed; today's refusals are one or two lines). The model field is `model_field`, the host picker
-//! `host_picker`, Restart with's "● Changed" markers `changed`.
+//! `host_picker`, Restart with's "● Changed" markers `changed`, the managed-checkout destination `checkout`.
 
 use std::rc::Rc;
 use std::time::Duration;
@@ -56,6 +57,7 @@ use gpui::{
     Window, div, px, svg,
 };
 
+use super::draft::DestinationKind;
 use super::draft::{Catalog, Field, LaunchDraft, Mode, Tab, harness_label, remembered_permission};
 use super::launch::{self, Request};
 use super::request::{Target, capitalized};
@@ -80,6 +82,9 @@ use crate::{operations, session, ticker};
 use changed::Changed;
 
 mod changed;
+mod checkout;
+#[cfg(test)]
+pub(super) use checkout::repository_choices as repository_choices_for_tests;
 mod choices;
 mod folder_check;
 mod host_picker;
@@ -432,6 +437,8 @@ pub(crate) struct Launcher {
     host_picker: host_picker::HostPicker,
     /// The folder check: what was last asked about the folder and what the answer found (`folder_check`).
     folder_check: folder_check::FolderCheck,
+    /// The managed-checkout destination's fields, suggestions and preview (`checkout`).
+    checkout: checkout::CheckoutState,
     /// The host button's focus handle; leaving it closes the host list.
     pub(super) host_focus: gpui::FocusHandle,
     command: TextInputState,
@@ -592,6 +599,12 @@ impl Launcher {
         })
         .collect();
         fields.extend([model_events, model_focus, model_blur, host_blur]);
+        let repository = draft
+            .checkout
+            .as_ref()
+            .map(|checkout| checkout.field_text())
+            .unwrap_or_default();
+        let checkout = checkout::CheckoutState::new(&repository, window, cx);
         Launcher {
             draft,
             store: store.clone(),
@@ -610,6 +623,7 @@ impl Launcher {
             model_field: model_field::ModelField::default(),
             host_picker: host_picker::HostPicker::default(),
             folder_check: folder_check::FolderCheck::default(),
+            checkout,
             host_focus,
             command,
             resume,
@@ -627,10 +641,15 @@ impl Launcher {
         }
     }
 
-    /// Where focus starts: Cancel in Restart with, the first field otherwise.
+    /// Where focus starts: Cancel in Restart with, the first field otherwise: the folder field, or, while a managed
+    /// checkout is chosen, the read-only folder field drawn in its place (a launcher brought back after a refusal can
+    /// hold a checkout draft, and the editable folder field is not drawn then).
     fn start_focus(&self, cx: &App) -> gpui::FocusHandle {
         match self.draft.mode {
             Mode::RestartWith(_) => self.cancel_focus.clone(),
+            Mode::New | Mode::Clone | Mode::ReplaceWith { .. } if self.draft.checkout.is_some() => {
+                self.checkout_folder_focus(cx)
+            }
             Mode::New | Mode::Clone | Mode::ReplaceWith { .. } => self.folder.focus_handle(cx),
         }
     }
@@ -757,7 +776,17 @@ impl Launcher {
             (&self.folder, self.draft.folder.value().clone()),
             (&self.prompt, self.draft.prompt.clone()),
             (&self.flags, self.draft.agent.permission_flags.clone()),
-            (&self.name, self.draft.name.value().clone()),
+            // While a managed checkout is chosen the field shows the name the checkout gets, which ignores an untouched
+            // copied title.
+            (&self.name, self.draft.shown_name()),
+            (
+                &self.checkout.repository,
+                self.draft
+                    .checkout
+                    .as_ref()
+                    .map(|checkout| checkout.field_text())
+                    .unwrap_or_default(),
+            ),
             (&self.command, self.draft.command.command.clone()),
             (&self.resume, self.draft.command.resume.clone()),
         ];
@@ -824,6 +853,7 @@ impl Launcher {
         let target = Target {
             hosts: &hosts,
             catalog: self.catalog.as_deref(),
+            preview: self.checkout_preview(cx),
         };
         self.draft.refusal(target, self.live_launch(cx).as_ref())
     }
@@ -917,6 +947,7 @@ impl Launcher {
         let target = Target {
             hosts: &hosts,
             catalog: self.catalog.as_deref(),
+            preview: self.checkout_preview(cx),
         };
         let request = if self.refusal(cx).is_some() {
             None
@@ -1319,7 +1350,9 @@ impl Launcher {
             command: self.draft.tab == Tab::Command,
             harness: harness.map(harness_label),
             host,
-            folder: HostText::from_host(self.draft.folder.value().as_str()),
+            folder: self
+                .checkout_summary(cx)
+                .unwrap_or_else(|| HostText::from_host(self.draft.folder.value().as_str())),
         }
     }
 
@@ -1833,8 +1866,10 @@ impl Launcher {
 
 impl Render for Launcher {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // The folder check follows the folder and the host's connection as drawn (`folder_check`).
+        // The folder check follows the folder and the host's connection as drawn (`folder_check`), and a managed
+        // checkout's reads follow it the same way (`checkout`).
         self.follow_folder_check(cx);
+        self.follow_checkout(window, cx);
         let palette = theme::palette(cx);
         let weak = cx.weak_entity();
         let refusal = self.refusal(cx);
@@ -1846,7 +1881,9 @@ impl Render for Launcher {
         // A held destination (Restart with's) is shown, not edited: its folder as read-only text, its name not at all
         // (SPEC.md, "Restart with": held fields' "editing controls are hidden", and "The held agent type, host and
         // folder stay visible").
-        let folder: AnyElement = if self.draft.holds(Field::Destination) {
+        let folder: AnyElement = if self.draft.destination_kind() == DestinationKind::Checkout {
+            self.checkout_folder_field()
+        } else if self.draft.holds(Field::Destination) {
             div()
                 .pt(px(8.))
                 .font_family(crate::assets::TERMINAL_FONT)
@@ -1869,6 +1906,12 @@ impl Render for Launcher {
             .invalid(self.folder_problem(cx).is_some())
             .into_any_element()
         };
+        // An unnamed managed checkout's name field shows the `<repo>-N` it will get.
+        let placeholder = self.checkout_name_placeholder(cx);
+        if placeholder != self.checkout.name_placeholder {
+            self.name.set_placeholder(placeholder.clone(), window, cx);
+            self.checkout.name_placeholder = placeholder;
+        }
         let name = (!self.draft.holds(Field::Name)).then(|| {
             row(
                 "launcher-name-row",
@@ -1882,17 +1925,21 @@ impl Render for Launcher {
                 palette,
             )
         });
+        let where_row = self.where_row(palette, cx);
         let host_row = self.host_row(palette, window, cx);
+        let checkout_rows = self.checkout_rows(palette, window, cx);
         let destination =
             div()
                 .flex()
                 .flex_col()
                 .gap(px(ROW_GAP))
                 .child(section_label("Destination", palette))
+                .children(where_row)
                 .child(host_row)
                 .children(self.host_picker.note.map(|note| {
                     choices::status_line("launcher-host-note", note.to_owned(), palette)
                 }))
+                .children(checkout_rows)
                 .child(row("launcher-folder-row", "Folder", folder, palette))
                 .children(self.folder_problem_line(palette, cx))
                 .children(name);

@@ -12799,4 +12799,86 @@ mod client_bodies {
         assert_eq!(children, ["a", "b"]);
         assert!(truncated);
     }
+
+    /// The launcher's repository suggestions read is built from the shared client types, so its body must decode into
+    /// the helm's `GithubRepositoriesReq` and the helm's reply into the client's `GithubRepositoriesReply`, or the
+    /// managed-checkout destination would show nothing (or the wrong host's repositories) with no error to say why.
+    /// Specified: every field of each crosses intact, the reply's `needs_checkout_root` included; destructured without
+    /// `..`, so a field added on either side fails to compile here until it is checked.
+    #[test]
+    fn a_repositories_body_and_its_reply_decode_on_the_other_side() {
+        use super::super::{GithubRepositoriesBody as HelmReply, GithubRepositoriesReq};
+        use farhelm_proto::GithubRepo;
+        use farhelm_proto::session_requests::{GithubRepositoriesBody, GithubRepositoriesReply};
+        let body = GithubRepositoriesBody {
+            host: 7,
+            expected_incarnation: Some(3),
+            query: "acme/b".into(),
+        };
+        let GithubRepositoriesReq {
+            host,
+            expected_incarnation,
+            query,
+        } = decode(&body);
+        assert_eq!(
+            (host, expected_incarnation, query),
+            (7, Some(3), "acme/b".to_owned())
+        );
+        let repo = GithubRepo {
+            owner: "acme".into(),
+            name: "bar".into(),
+        };
+        let reply = HelmReply {
+            host: "7".into(),
+            incarnation: 3,
+            installation_identity: "install-a".into(),
+            repos: vec![repo.clone()],
+            truncated: true,
+            scan_error: Some("repository discovery is unavailable on this host".into()),
+            needs_checkout_root: true,
+        };
+        let GithubRepositoriesReply {
+            host,
+            incarnation,
+            installation_identity,
+            repos,
+            truncated,
+            scan_error,
+            needs_checkout_root,
+        } = decode(&reply);
+        assert_eq!((host.as_str(), incarnation), ("7", 3));
+        assert_eq!(installation_identity, "install-a");
+        assert_eq!(repos, [repo]);
+        assert!(truncated);
+        assert_eq!(scan_error, reply.scan_error);
+        assert!(needs_checkout_root);
+    }
+
+    /// The checkout preview's body must decode into the helm's `GithubCheckoutPreviewReq`: a repository or title lost on
+    /// the way would preview, and so launch into, a different folder than the user named. Its reply is
+    /// `AcceptedGithubPreview` on both sides already. Specified: host, connection, repository and title cross intact,
+    /// and so does an unnamed checkout's empty title.
+    #[test]
+    fn a_checkout_preview_body_decodes_on_the_other_side() {
+        use super::super::GithubCheckoutPreviewReq;
+        use farhelm_proto::session_requests::GithubCheckoutPreviewBody;
+        for title in [Some("Fix parser".to_owned()), Some(String::new()), None] {
+            let body = GithubCheckoutPreviewBody {
+                host: 7,
+                expected_incarnation: Some(3),
+                repo: "acme/bar".into(),
+                title: title.clone(),
+            };
+            let GithubCheckoutPreviewReq {
+                host,
+                expected_incarnation,
+                repo,
+                title: decoded,
+            } = decode(&body);
+            assert_eq!(
+                (host, expected_incarnation, repo, decoded),
+                (7, Some(3), "acme/bar".to_owned(), title)
+            );
+        }
+    }
 }
