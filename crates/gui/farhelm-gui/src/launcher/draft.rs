@@ -159,6 +159,11 @@ pub struct AgentChoices {
     pub permission_flags: String,
     /// The wrapper prefix editor's raw text, loaded from the agent type's remembered prefix on an agent switch.
     pub wrapper: String,
+    /// Whether `wrapper` is the user's own choice: typed or cleared by hand, set by a launch template, or restored with
+    /// a Clone's launch. A remembered prefix an agent switch loaded is not, so Save as template offers it unchecked
+    /// (SPEC_impl.md: it "checks it only when the user explicitly changed or cleared it, so a passive remembered value
+    /// does not become a template edit").
+    pub wrapper_explicit: bool,
     /// A retired container choice carried by a session from before containerized sessions were retired. It is kept
     /// only so that launching from it is refused: such a session supports Delete only (SPEC.md, "Retired containerized
     /// sessions"), and dropping the choice would quietly relaunch it as an ordinary session.
@@ -244,6 +249,11 @@ pub struct LaunchDraft {
     pub host: Option<i64>,
     pub folder: Draft<String>,
     pub name: Draft<String>,
+    /// Whether the host is a hand pick ([`Self::choose_host`], which a launch template's host goes through too), rather
+    /// than New's prefill or the source session's host a Clone inherited. Save as template checks the host only after
+    /// one (SPEC.md, "Launch templates": "host only after a hand pick"; "Clone's inherited host and folder are offered
+    /// unchecked"). The folder's and the name's equivalents are their drafts' touched marks.
+    pub host_chosen: bool,
     /// How a launch template set the session name: a base name a managed checkout numbers when taken, or a fixed one
     /// that keeps its spelling (SPEC.md, "Launch templates"). `None` for a name the user typed, or no name at all. Only
     /// template application sets it ([`Self::set_template_name_kind`]), and [`Self::edit_name`] clears it, because
@@ -278,6 +288,7 @@ impl LaunchDraft {
             host,
             folder: Draft::load(folder),
             name: Draft::load(String::new()),
+            host_chosen: false,
             name_kind: None,
         }
     }
@@ -352,6 +363,7 @@ impl LaunchDraft {
             host,
             folder: Draft::load(session.cwd.clone()),
             name: Draft::load(session.title.clone()),
+            host_chosen: false,
             name_kind: None,
         }
     }
@@ -390,6 +402,7 @@ impl LaunchDraft {
                 .map(farhelm_proto::join_permission_flags)
                 .unwrap_or_default(),
             wrapper: joined(selection.wrapper_prefix.as_deref()),
+            wrapper_explicit: true,
             container: selection.container.clone(),
         };
     }
@@ -501,6 +514,7 @@ impl LaunchDraft {
         let switched_agent = before.agent.harness != Some(harness);
         if switched_agent {
             self.agent.wrapper = joined(remembered_wrapper);
+            self.agent.wrapper_explicit = false;
             self.agent.permission_flags = String::new();
         }
         self.tab = Tab::Agent;
@@ -555,8 +569,11 @@ impl LaunchDraft {
         self.agent.permissions_explicit = true;
     }
 
+    /// The wrapper prefix's text, typed or cleared by hand (or set by a launch template): the user's own choice from
+    /// then on ([`AgentChoices::wrapper_explicit`]).
     pub fn edit_wrapper(&mut self, text: String) {
         self.agent.wrapper = text;
+        self.agent.wrapper_explicit = true;
     }
 
     pub fn edit_conversation(&mut self, text: String) {
@@ -711,8 +728,10 @@ impl LaunchDraft {
     /// Choose `host` as the target. `default_folder` is the folder New would seed for it, which replaces the folder
     /// only while the user has not typed or picked one in this draft (SPEC.md, "Working directory": "Changing the host
     /// re-seeds a folder the user has not typed or picked in that draft"). Choosing the host already chosen changes
-    /// nothing, so it cannot re-seed a Clone's folder.
+    /// nothing but [`Self::host_chosen`], so it cannot re-seed a Clone's folder.
     pub fn choose_host(&mut self, host: i64, default_folder: String) {
+        // Picking the host already chosen still makes it the user's own choice, as the old picker did.
+        self.host_chosen = true;
         if self.host == Some(host) {
             return;
         }

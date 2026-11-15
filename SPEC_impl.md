@@ -8210,12 +8210,17 @@ retain their presence-based checks. The helm's `farhelm spawn` keeps the strict 
 
 The launcher's "Save as template" panel shares the snapshot reader used for application, including raw relayed text,
 destination and name. A pure mapping offers only the active tab's values and marks explicit choices separately from
-remembered defaults and Clone's inherited placement. A folder-explicit flag is separate from its raw-text ownership:
-picking a directory retains a raw seed while still pre-checking it. The inline panel removes unchecked fields through
-the editor's field identities, validates through its compatibility rules and `check_template_shape`, and reads the name
-list before the existing last-write-wins PUT. This refuses ordinary collisions, not a concurrent write after the read;
-there is no new endpoint or version check. The parent guards cancellation and session submission while saving, and a
-successful save hands the actual template to the Templates dialog's initial editor state without waiting for its list.
+remembered defaults and Clone's inherited placement. The marks are the launcher draft's own, set by its hand-edit
+methods, which applying a template goes through too: the folder's and the name's touched marks (typing a folder and
+picking one both touch it), whether the host was picked by hand, and whether the permission and the wrapper prefix were
+chosen rather than remembered. The inline panel removes unchecked fields through the editor's field identities,
+validates through its compatibility rules and `check_template_shape`, and checks the name against the templates
+collection the helm pushes before the existing last-write-wins PUT; that collection is the fresh read, since the helm
+pushes every change, and one this window makes before its reply. This refuses ordinary collisions, not a concurrent
+write after the check; there is no new endpoint or version check. The launcher holds its Cancel, Close and Escape while
+the save is in flight and its Launch while the panel is open. A successful save closes the launcher and, unless the user
+moved on while it was out, opens the Templates dialog on the new template from the store, which already holds it when
+the reply arrives.
 
 The wrapper input is a raw shell-style draft beside the agent choices, while `LauncherState` and template snapshots hold
 parsed words. Invalid text remains in the input and prevents a launch or save instead of silently becoming no prefix.
