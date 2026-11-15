@@ -14,8 +14,9 @@
 //!
 //! This file holds the bootstrap of the helm and supervisor and the pre-window refusal path. The rest is split by
 //! concern: `window_state` keeps the saved window frame's format and restore rules, `state` owns the app's private state
-//! file and the atomic write both state files share, `bundle` finds the pieces installed beside the app, and `updater`
-//! keeps an installed app up to date (the words a window shows for its state are `farhelm_gui::update_readout`).
+//! file and the atomic write both state files share, `bundle` finds the pieces installed beside the app, `updater`
+//! keeps an installed app up to date (the words a window shows for its state are `farhelm_gui::update_readout`), and
+//! `sound` plays the status sounds the GUI decides on.
 
 use anyhow::{Context, bail};
 use serde::{Deserialize, Serialize};
@@ -43,6 +44,7 @@ pub mod bundle;
 mod local_host;
 mod reduced_motion;
 mod second_launch;
+mod sound;
 pub mod state;
 mod tab_reach;
 pub mod updater;
@@ -231,8 +233,8 @@ pub fn run() -> anyhow::Result<()> {
         // gets none and shows no update surface.
         updater: updater::start(desktop.state_dir().join(APP_STATE_FILE)).map(updater_host),
         activations,
-        // No platform player yet: the window decides every status sound and plays none of them.
-        player: None,
+        // The platform's status-sound player (`sound`): AppKit on a Mac, PipeWire's `pw-play` on Linux.
+        player: sound::player(),
     });
     // Linux only: GPUI's event loop has returned. Dropping the bootstrap waits for the helm the quit asked to stop.
     tracing::info!("the app quit; waiting for the embedded helm to stop");
