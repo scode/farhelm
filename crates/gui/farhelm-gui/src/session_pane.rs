@@ -185,6 +185,9 @@ impl SessionPane {
             cx.observe_global_in::<LocalState>(window, Self::sync),
             cx.observe_global_in::<Chosen>(window, Self::sync),
         ];
+        // The pane follows the connection alone, never the store: what it mounts depends only on the UI session and
+        // the selection. So it does not use `session::observe_current`, which would replace nothing here and add a
+        // sync on every pushed change, and whose callback gets no window, which every focus move of `sync` needs.
         if let Some(connection) = session::connection(cx) {
             observing.push(cx.observe_in(&connection, window, |pane, _, window, cx| {
                 pane.sync(window, cx)

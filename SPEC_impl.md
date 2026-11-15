@@ -359,15 +359,16 @@ A reset drops the UI's async owners, not just its data. Transient stores, and th
 callbacks, live under one resettable UI-session owner. On reset that owner is dropped and its queued callbacks are
 rejected before the new snapshot is installed. A view that acts on pushed state as it changes, rather than only drawing
 it, must move its store subscription to each new session's store and drop the old one, so it neither goes on observing a
-retired store nor misses the store that replaced it. New views do that through the owner's helper
-(`session::observe_current`); the session list and the session pane still do it by hand, keyed on the session
-(`PerSession`). The one survivor the UI keeps itself is the selected session, by id, if the new snapshot still has it;
-it lives in a small foundation of its own outside the UI-session owner (`crates/gui/farhelm-gui/src/local_state.rs`,
-owned paths in `docs/gpui/foundation-ownership.md`), which is not a device-local preferences store and has no room for
-one. The window itself, its size included, is not part of the UI session and is untouched. The settings the old app kept
-per device (appearance, sidebar width, host rail, status sounds, terminal text size) become helm preferences in the new
-app, so they return with the new snapshot like the rest of the helm's state (maintainer decision, 2026-11-13). SPEC.md
-no longer calls the sidebar width or appearance per device; it still calls the others per device until the changes that
+retired store nor misses the store that replaced it. Views do that through the owner's helper
+(`session::observe_current`): the session list follows the store through it and keeps the rest of its per-session state
+in `PerSession`. The session pane never follows the store; it follows only the connection, keyed on the session through
+`PerSession`. The one survivor the UI keeps itself is the selected session, by id, if the new snapshot still has it; it
+lives in a small foundation of its own outside the UI-session owner (`crates/gui/farhelm-gui/src/local_state.rs`, owned
+paths in `docs/gpui/foundation-ownership.md`), which is not a device-local preferences store and has no room for one.
+The window itself, its size included, is not part of the UI session and is untouched. The settings the old app kept per
+device (appearance, sidebar width, host rail, status sounds, terminal text size) become helm preferences in the new app,
+so they return with the new snapshot like the rest of the helm's state (maintainer decision, 2026-11-13). SPEC.md no
+longer calls the sidebar width or appearance per device; it still calls the others per device until the changes that
 move them. The store fed by the channel holds only helm state. Half-typed drafts do not survive, and neither do open
 dialogs and menus: going inert closes every layer through the layer manager (`layers::close_all`). Menus would close
 anyway with the ground they are anchored to, but a dialog closes only when its opener or its subject says so, and one
