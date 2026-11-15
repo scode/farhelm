@@ -12,8 +12,9 @@
 //!
 //! - **The prefix** ([`begin`], the main view's handler of `BeginSequence`) arms a sequence with a copy of the ⚡ mark
 //!   and number keys as the store holds them, unless a dialog keeps the keyboard or the window is inert. Text fields
-//!   never see it arrive: they keep the chord (`actions.rs`, `TEXT_FIELD_KEYS`, and GPUI Kit's own Cut on a Mac), while
-//!   a focused terminal hands it on, since it is an app shortcut there.
+//!   keep the chord (`actions.rs`, `TEXT_FIELD_KEYS`, and GPUI Kit's own Cut on a Mac), except the launcher's with
+//!   nothing selected, which dispatch the prefix's action themselves (`launcher::view::launcher_input`), while a
+//!   focused terminal hands it on, since it is an app shortcut there.
 //! - **The capture.** While armed, the actions module's key capture slot hands every key-down here first, ahead of the
 //!   terminal, the bindings and the number-key rows. [`classify`] sorts it: sequence keys feed the model and stop there;
 //!   Escape and a second prefix end the sequence and stop there; Enter ends it and resolves it; anything else ends it
@@ -32,11 +33,6 @@
 //! - **Inside the launcher**, when it is the dialog holding the keyboard (`launcher::entry::open_launcher`), the prefix
 //!   arms the launcher's form of the sequence: the pill says "apply" and sits at the bottom of the main area, and Enter
 //!   applies the queue to the launcher's draft or shows the refusal there, opening nothing.
-//!
-//! NOTE: The launcher's text fields keep the prefix whatever their selection (on a Mac GPUI Kit's own Cut takes it, on
-//! Linux the text-field row in `actions.rs`), so inside the launcher a sequence begins only from a control that is not
-//! a text field. SPEC.md has an unselected launcher field accept the prefix; that needs Kit's Cut caught in the capture
-//! phase for those fields only, which is not built.
 //!
 //! NOTE: Input-method text is not refused while armed. A composition's committed text (a CJK input source, a dead key's
 //! accent, a Wayland commit of several characters) reaches the focused element's input handler without a key-down, so

@@ -31,7 +31,7 @@ use gpui::{
 
 use super::changed::Changed;
 use super::{Launcher, choices::status_line, row};
-use crate::components::{HoverHelp, OptionRow, Role, TextInput, Vertical};
+use crate::components::{HoverHelp, OptionRow, Role, Vertical};
 use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::{Field, Mode, harness_label};
@@ -293,7 +293,7 @@ impl Launcher {
             None => "Choose a harness".to_owned(),
         };
         let weak = cx.weak_entity();
-        let field = TextInput::new(
+        let field = super::launcher_input(
             "launcher-model",
             &self.model_input,
             "Model",

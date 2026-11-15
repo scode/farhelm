@@ -863,7 +863,7 @@ fn a_shortcut_refusal_shows_over_a_press_reason(cx: &mut TestAppContext) {
 /// SPEC.md: "In the session launcher, Enter instead applies the queued templates to the current draft without
 /// launching; each completed sequence is one refusal unit, and the pill says 'apply' instead of 'launch'", and an
 /// unbound key "shows a refusal beneath the search box without changing the draft". Specified: with New open and focus
-/// moved to the host button (a launcher text field keeps the prefix), the prefix arms the "Apply sequence:" pill;
+/// moved to the host button, the prefix arms the "Apply sequence:" pill;
 /// `partial` and Enter put its folder in the draft and send nothing; `zzz` and Enter show "No template matches"; the
 /// unbound key 9 and Enter show "No template is bound to key 9" and open no Templates.
 #[gpui::test]

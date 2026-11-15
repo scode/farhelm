@@ -32,7 +32,7 @@ use gpui::{
 };
 
 use super::Launcher;
-use crate::components::{HoverHelp, OptionRow, Role, TextInput, Vertical};
+use crate::components::{HoverHelp, OptionRow, Role, Vertical};
 use crate::focus::{self, Mark};
 use crate::launcher::draft::{Field, Mode, Tab};
 use crate::launcher::search::{Inputs, Results, Row, search};
@@ -295,7 +295,7 @@ impl Launcher {
         let tracker = anchor.track();
         self.search_box.anchor = Some(anchor.clone());
         let weak = cx.weak_entity();
-        let field = TextInput::new(
+        let field = super::launcher_input(
             "launcher-search",
             &self.search,
             SEARCH_LABEL,
