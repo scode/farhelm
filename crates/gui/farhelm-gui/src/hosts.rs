@@ -56,6 +56,10 @@
 //! [`status::always_update`] and [`status::retry_auto_update`]. A warning lasts until Hosts opens, so the sidebar calls
 //! [`HostsPanel::shown`] wherever it shows the panel, as it calls [`HostsPanel::hidden`] wherever it hides it.
 //!
+//! [`progress_card`] makes the progress card of a host's running setup, Update or uninstall ([`progress::card`]): the
+//! hover card SPEC.md gives the Hosts row's inline status and the attention list's working rows alike. Nothing draws it
+//! yet: wiring it as their hover waits for a form of card help that makes the card as the tooltip shows.
+//!
 //! How a host is named and marked, here and in every other area that shows a host, is [`identity`].
 //!
 //! ## What it shows
@@ -78,7 +82,7 @@
 //!
 //! A host with a setup, an Update or an uninstall running, or its requests out, shows the run's inline status on a line
 //! of its own under its name in place of the phase words and the inline Update, and an open row shows the run's steps
-//! under its details ([`progress`], which also keeps the one fact the panel holds about a host: when it first saw the
+//! under its details ([`progress`], which also keeps the one fact the UI holds about a host's run: when it first saw the
 //! run, and whether the user folded it). A running setup or uninstall opens its row; a running Update leaves it
 //! folded, and its failure opens it like any failure.
 //!
@@ -113,6 +117,7 @@ pub(crate) mod uninstall;
 pub(crate) mod update;
 
 pub use menu::open_menu;
+pub use progress::card::{ProgressCard, progress_card};
 pub use settings::open_settings;
 // The launcher's YOLO question sends exactly what the host settings' "Start YOLO sessions without asking" switch
 // sends.
@@ -220,21 +225,20 @@ pub struct HostsPanel {
     _removal_lines: Subscription,
     /// The same for the uninstall module's removal notice, which shows at the top of the panel.
     _uninstall_notice: Subscription,
-    /// What the panel keeps about the hosts' runs ([`Runs`]), for the current UI session only: a reset starts it over.
+    /// The panel's hold on the ticker ([`Runs`]), for the current UI session only: a reset lets go of it.
     runs: PerSession<Runs>,
-    /// Keeps `runs` up to date with every change of the current store, whether or not the panel is drawn, so a run's
-    /// clock starts when it is first pushed even while Hosts is closed, and starts it over on every change of UI
-    /// session, a reset's included.
+    /// Keeps what the UI keeps about each host's run ([`progress::follow_current`]) up to date with every change of the
+    /// current store, whether or not the panel is drawn, so a run's clock starts when it is first pushed even while
+    /// Hosts is closed, and starts it over on every change of UI session, a reset's included.
     _following: session::ObservingCurrent,
 }
 
-/// What the panel keeps about the hosts' runs for one UI session, all of it dropped with that session: a reset starts
-/// the fold and the elapsed time over, as the old app's reload did, and lets go of the pulse and the one-second clock,
-/// which the next draw takes again if it needs them.
+/// The panel's hold on the ticker for one UI session, dropped with that session: a reset lets go of the pulse and the
+/// one-second clock, which the next draw takes again if it needs them. What the UI keeps about each run (its first
+/// sight and fold, [`progress::Seen`]) is not here but in `progress`'s app global, since the attention list's progress
+/// card counts the same elapsed time.
 #[derive(Default)]
 struct Runs {
-    /// Each host's run as the panel saw it ([`progress::Seen`]), by host id.
-    seen: HashMap<i64, progress::Seen>,
     /// The shared pulse's ticks, held exactly while the panel is drawn in an active window and a row shows a run in
     /// progress (a setup or an Update, pending or running).
     pulse: Option<ticker::Pulsing>,
@@ -261,24 +265,16 @@ impl HostsPanel {
         }
     }
 
-    /// Record what the current store's host progress says about each host's run ([`progress::follow`]), now. Reaching
-    /// the runs through [`PerSession::current`] here, on every change of the connection, is also what drops them, the
-    /// pulse and the clock included, as soon as a reset replaces the UI session, whether or not the panel is drawn. The
-    /// rail's state ([`status::follow`]) and the uninstall's removal notice ([`uninstall::follow`]) follow the same
-    /// changes from here.
+    /// Record what the current store's host progress says about each host's run ([`progress::follow_current`]), now.
+    /// Reaching the panel's ticker hold through [`PerSession::current`] here, on every change of the connection, is
+    /// also what drops the pulse and the clock as soon as a reset replaces the UI session, whether or not the panel is
+    /// drawn. The rail's state ([`status::follow`]) and the uninstall's removal notice ([`uninstall::follow`]) follow
+    /// the same changes from here.
     fn follow_runs(&mut self, cx: &mut Context<Self>) {
         status::follow(cx);
         uninstall::follow(cx);
-        let now = ticker::wall_now(cx);
-        let runs = &mut self.runs.current(cx).seen;
-        let Some(store) = session::current_store(cx) else {
-            return;
-        };
-        progress::follow(
-            runs,
-            store.read(cx).collections().ordered::<ProvisioningView>(),
-            now,
-        );
+        self.runs.current(cx);
+        progress::follow_current(cx);
     }
 
     /// The sidebar stopped drawing the panel (Sessions shows instead): drop the pulse and the one-second clock. Only a
@@ -313,7 +309,7 @@ impl HostsPanel {
     /// Fold `host`'s run `run_id`, as its Collapse does: the row closes unless something else holds it open, and the
     /// inline status stays.
     fn fold(&mut self, host: i64, run_id: &str, cx: &mut Context<Self>) {
-        progress::fold(&mut self.runs.current(cx).seen, host, run_id);
+        progress::fold_current(host, run_id, cx);
         cx.notify();
     }
 
@@ -400,9 +396,8 @@ impl Render for HostsPanel {
         let mut toggles = self.toggles(window, cx);
         let operations = session::current_operations(cx);
         let now = ticker::wall_now(cx);
-        // Copied out for the frame: the rows borrow the store, and `current` needs the panel mutably. A handful of
-        // entries at most, one per host with a run.
-        let seen = self.runs.current(cx).seen.clone();
+        // Copied out for the frame: the rows borrow the store. A handful of entries at most, one per host with a run.
+        let seen = progress::seen_now(cx);
         // The running pulse's opacity now, which every row's setup dot and running step share.
         let pulse = pulse_opacity(
             self.runs
