@@ -12,8 +12,9 @@ use farhelm_proto::ui_channel::{
     Collection, CollectionChanges, CollectionState, KeyedEntry, PREFERENCES_KEY, Preferences,
 };
 use gpui::{
-    Context, FocusHandle, IntoElement, ParentElement as _, Render, Styled as _, TestAppContext,
-    Toggled, VisualTestContext, Window, WindowAppearance, div, px, size,
+    AppContext as _, Context, Entity, FocusHandle, Global, IntoElement, ParentElement as _, Render,
+    Styled as _, TestAppContext, Toggled, VisualTestContext, WeakEntity, Window, WindowAppearance,
+    div, px, size,
 };
 use serde_json::{Value, json};
 
@@ -74,6 +75,7 @@ fn section_button(section: Section) -> &'static str {
         Section::Hosts => "settings-section-hosts",
         Section::Appearance => "settings-section-appearance",
         Section::Terminal => "settings-section-terminal",
+        Section::Checkouts => "settings-section-checkouts",
         Section::AgentTrust => "settings-section-agent-trust",
     }
 }
@@ -210,11 +212,12 @@ fn the_gear_opens_settings_at_sessions_with_focus_on_its_first_switch(cx: &mut T
     );
 }
 
-/// SPEC.md lists every section, but this build has only Sessions, Appearance, Hosts, Terminal and Agent trust; listing
-/// a section with nothing behind it would offer a button that shows an empty pane. The list follows SPEC.md's order
-/// ("Sessions, Appearance, Hosts, Recipes, Tensorlake, Containers, Credentials, Terminal, Checkouts, Agent trust ..."),
-/// and the button of the shown section is the pressed one. Specified: the section list holds exactly the Sessions,
-/// Appearance, Hosts, Terminal and Agent trust buttons, in that order, Sessions pressed and the others not.
+/// SPEC.md lists every section, but this build has only Sessions, Appearance, Hosts, Terminal, Checkouts and Agent
+/// trust; listing a section with nothing behind it would offer a button that shows an empty pane. The list follows
+/// SPEC.md's order ("Sessions, Appearance, Hosts, Recipes, Tensorlake, Containers, Credentials, Terminal, Checkouts,
+/// Agent trust ..."), and the button of the shown section is the pressed one. Specified: the section list holds exactly
+/// the Sessions, Appearance, Hosts, Terminal, Checkouts and Agent trust buttons, in that order, Sessions pressed and
+/// the others not.
 #[gpui::test]
 fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
     let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
@@ -242,6 +245,7 @@ fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
             ("Appearance".to_string(), Some(Toggled::False)),
             ("Hosts".to_string(), Some(Toggled::False)),
             ("Terminal".to_string(), Some(Toggled::False)),
+            ("Checkouts".to_string(), Some(Toggled::False)),
             ("Agent trust".to_string(), Some(Toggled::False)),
         ]
     );
@@ -1154,8 +1158,8 @@ fn the_agent_builds_start_hook_wins_over_the_stored_appearance(cx: &mut TestAppC
 
 // ---- Agent trust ---------------------------------------------------------------------------------------------------
 
-/// The trust reads the window sent since the last call, as (id, path), all GETs.
-fn trust_reads(helm: &mut FakeHelm) -> Vec<(u64, String)> {
+/// The reads the window sent since the last call, as (id, path), all GETs.
+fn sent_reads(helm: &mut FakeHelm) -> Vec<(u64, String)> {
     sent(helm)
         .into_iter()
         .map(|command| {
@@ -1196,7 +1200,7 @@ fn show_agent_trust(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<(u64
     assert_eq!(sent(helm), [], "the premise: Sessions reads nothing");
     click(cx, "settings-section-agent-trust");
     assert_eq!(heading(cx).as_deref(), Some("Agent trust"));
-    trust_reads(helm)
+    sent_reads(helm)
 }
 
 /// The trust switches live behind routes the helm does not push, so the section reads them once when it is shown, and
@@ -1238,7 +1242,7 @@ fn open_trust_at(
         super::open_at_agent_trust(agent, gear, &mark, window, cx);
     });
     settle(cx);
-    let reads = trust_reads(helm);
+    let reads = sent_reads(helm);
     answer_trust(helm, &reads, [false; 4], cx);
     assert_eq!(
         focused_id(cx).as_deref(),
@@ -1412,7 +1416,7 @@ fn the_trust_hint_entry_point_focuses_its_agents_switch_once_known(cx: &mut Test
         dialog_holds_focus(cx),
         "the dialog itself holds focus while the reads are out"
     );
-    let reads = trust_reads(&mut helm);
+    let reads = sent_reads(&mut helm);
     answer_trust(&mut helm, &reads, [false; 4], cx);
     assert_eq!(focused_id(cx).as_deref(), Some(TrustAgent::Pi.id()));
     keys(cx, "escape");
@@ -1455,7 +1459,7 @@ fn a_trust_read_that_answers_after_the_user_moved_on_moves_no_focus(cx: &mut Tes
         dialog_holds_focus(cx),
         "the premise: the dialog waits for the read"
     );
-    let reads = trust_reads(&mut helm);
+    let reads = sent_reads(&mut helm);
     keys(cx, "tab");
     let moved_to = focused_id(cx);
     assert!(
@@ -1490,7 +1494,7 @@ fn a_click_that_leaves_focus_on_the_dialog_still_stops_the_trust_handover(cx: &m
         super::open_at_agent_trust(TrustAgent::Codex, &gear, &mark, window, cx);
     });
     settle(cx);
-    let reads = trust_reads(&mut helm);
+    let reads = sent_reads(&mut helm);
     click(cx, "settings-heading");
     assert!(
         dialog_holds_focus(cx),
@@ -1514,4 +1518,576 @@ fn trust_agents_are_listed_at_their_own_numbers() {
     for (place, agent) in TrustAgent::ALL.iter().enumerate() {
         assert_eq!(agent.index(), place, "{agent:?}");
     }
+}
+
+// ---- Checkouts -----------------------------------------------------------------------------------------------------
+
+/// The Settings dialog opened last, for the tests that read a checkout field's text: GPUI Kit's field reports no
+/// accessible value, so the frame cannot tell it. Set by `open_dialog` in test builds only.
+pub(super) struct Opened(pub(super) WeakEntity<super::SettingsDialog>);
+
+impl Global for Opened {}
+
+/// Which of Checkouts' two text fields.
+#[derive(Clone, Copy)]
+enum Field {
+    Folder,
+    PostClone,
+}
+
+impl Field {
+    /// The field's selector, which a click focuses it through.
+    fn selector(self) -> &'static str {
+        match self {
+            Field::Folder => "checkout-folder",
+            Field::PostClone => "checkout-post-clone",
+        }
+    }
+
+    fn save(self) -> &'static str {
+        match self {
+            Field::Folder => "checkout-folder-save",
+            Field::PostClone => "checkout-post-clone-save",
+        }
+    }
+
+    fn path(self) -> &'static str {
+        match self {
+            Field::Folder => "/api/checkout-root",
+            Field::PostClone => "/api/checkout-post-clone",
+        }
+    }
+}
+
+/// The open dialog's Checkouts field `field`.
+fn entity(cx: &mut VisualTestContext, field: Field) -> Entity<super::CheckoutField> {
+    cx.update(|_, cx| {
+        let dialog = cx
+            .try_global::<Opened>()
+            .and_then(|opened| opened.0.upgrade());
+        let dialog = dialog.expect("the premise: Settings is open");
+        let fields = dialog.read(cx).checkout_fields.as_ref();
+        let fields = fields.expect("the premise: Checkouts was shown");
+        match field {
+            Field::Folder => fields.folder.clone(),
+            Field::PostClone => fields.post_clone.clone(),
+        }
+    })
+}
+
+/// The text in the open dialog's Checkouts field.
+fn text(cx: &mut VisualTestContext, field: Field) -> String {
+    let entity = entity(cx, field);
+    cx.update(|_, cx| entity.read(cx).text(cx))
+}
+
+/// Click `field`, check that the click put focus in it (so the keys that follow reach it, whether or not it takes
+/// them), and type `typed` into it.
+fn type_into(cx: &mut VisualTestContext, field: Field, typed: &str) {
+    click(cx, field.selector());
+    let entity = entity(cx, field);
+    let focused = cx.update(|window, cx| entity.read(cx).focused(window, cx));
+    assert!(focused, "the premise: the click put focus in the field");
+    cx.simulate_input(typed);
+    test_support::check(cx);
+}
+
+/// The reads Checkouts sends when first shown, by route: the folder's, the command's and the spare switch's.
+const CHECKOUT_READS: [&str; 3] = [
+    "/api/checkout-root",
+    "/api/checkout-post-clone",
+    "/api/checkout-spare",
+];
+
+/// Open Settings, show Checkouts and answer its three reads with `root`, `command` and `spare`.
+fn show_checkouts(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    root: Value,
+    command: Value,
+    spare: bool,
+) {
+    open_settings(cx);
+    click(cx, section_button(Section::Checkouts));
+    let reads = sent_reads(helm);
+    let paths: Vec<&str> = reads.iter().map(|(_, path)| path.as_str()).collect();
+    assert_eq!(
+        paths, CHECKOUT_READS,
+        "the premise: Checkouts read its routes"
+    );
+    helm.reply(reads[0].0, 200, Some(json!({ "root": root })));
+    helm.reply(reads[1].0, 200, Some(json!({ "command": command })));
+    helm.reply(reads[2].0, 200, Some(json!({ "enabled": spare })));
+    settle(cx);
+}
+
+/// The one command sent since the last call, which must be a `PUT` of `path`: its id and body.
+fn one_put(helm: &mut FakeHelm, path: &str) -> (u64, Value) {
+    let sent = sent(helm);
+    assert_eq!(sent.len(), 1, "one command was sent: {sent:?}");
+    assert_eq!((sent[0].method, sent[0].path.as_str()), (Method::Put, path));
+    (sent[0].id, sent[0].body.clone().unwrap_or_default())
+}
+
+/// The accessible name of what is drawn under `id`, if anything is.
+fn label_of(cx: &mut VisualTestContext, id: &str) -> Option<String> {
+    frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(id))
+        .and_then(|node| node.label.map(|label| label.to_string()))
+}
+
+/// These routes are helm configuration the helm does not push, so the section reads them once when it is first shown.
+/// Until a read answers, the empty field must not be taken for the stored value: a Save then would clear the folder or
+/// command (the old "stays locked until its initial read completes"), and the switch would claim a choice nobody read.
+/// An untouched Save must write nothing, or it would put the value read at opening back over a change the command line
+/// made since. Specified: Sessions reads nothing; showing Checkouts sends one GET each to the folder, command and spare
+/// routes; before they answer, typing changes neither field and Save, Use default's absence aside, and the switch send
+/// nothing; once answered, the fields show the stored folder and the explicitly disabled command as empty, the switch
+/// shows off, an untouched Save sends nothing, and showing Hosts and Checkouts again reads nothing more.
+#[gpui::test]
+fn checkouts_reads_its_routes_once_and_stays_locked_until_they_answer(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    open_settings(cx);
+    assert_eq!(sent(&mut helm), [], "the premise: Sessions reads nothing");
+    click(cx, section_button(Section::Checkouts));
+    assert_eq!(heading(cx).as_deref(), Some("Checkouts"));
+    let reads = sent_reads(&mut helm);
+    let paths: Vec<&str> = reads.iter().map(|(_, path)| path.as_str()).collect();
+    assert_eq!(paths, CHECKOUT_READS);
+
+    type_into(cx, Field::Folder, "typed early");
+    type_into(cx, Field::PostClone, "typed early");
+    assert_eq!(text(cx, Field::Folder), "", "read-only until read");
+    assert_eq!(text(cx, Field::PostClone), "", "read-only until read");
+    click(cx, Field::Folder.save());
+    click(cx, Field::PostClone.save());
+    click(cx, super::checkouts::SPARE_ID);
+    assert_eq!(sent(&mut helm), [], "nothing saves before the reads answer");
+
+    helm.reply(reads[0].0, 200, Some(json!({ "root": "~/stored" })));
+    helm.reply(reads[1].0, 200, Some(json!({ "command": "" })));
+    helm.reply(reads[2].0, 200, Some(json!({ "enabled": false })));
+    settle(cx);
+    assert_eq!(text(cx, Field::Folder), "~/stored");
+    assert_eq!(
+        text(cx, Field::PostClone),
+        "",
+        "a disabled command shows empty"
+    );
+    assert_eq!(switch_on(cx, super::checkouts::SPARE_ID), Some(false));
+    click(cx, Field::Folder.save());
+    click(cx, Field::PostClone.save());
+    assert_eq!(sent(&mut helm), [], "an untouched Save writes nothing");
+    click(cx, section_button(Section::Hosts));
+    click(cx, section_button(Section::Checkouts));
+    assert_eq!(sent(&mut helm), [], "read once per opening");
+}
+
+/// SPEC.md: "Settings saves each field explicitly ... and clears it when an all-whitespace field is saved"; the old
+/// field also trimmed the folder it sent, and read the route again after a save so the field showed what the helm
+/// stored rather than what was typed. The save is work under the preference row's key like every Settings save.
+/// Specified: typing "  ~/edited  " and Save sends `PUT /api/checkout-root` with `{"root": "~/edited"}` while the
+/// preference row's key holds a save, Save reads "Saving…" and the field takes no typing; the helm's done reply sends
+/// one GET of the route and shows "Checkout folder saved", and its answer shows "~/edited"; typing hides the saved
+/// line; emptying the field and Save sends `{"root": null}`.
+#[gpui::test]
+fn the_folder_saves_an_edited_draft_trimmed_and_reads_it_back(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_checkouts(&mut helm, cx, Value::Null, Value::Null, true);
+    type_into(cx, Field::Folder, "  ~/edited  ");
+    click(cx, Field::Folder.save());
+    let (id, body) = one_put(&mut helm, Field::Folder.path());
+    assert_eq!(body, json!({ "root": "~/edited" }));
+    assert_eq!(preference_work(cx), Some(Work::Save));
+    assert_eq!(
+        label_of(cx, Field::Folder.save()).as_deref(),
+        Some("Saving…")
+    );
+    // Typed into the field itself (Save holds focus after its click). The field is read-only, and the draft would put
+    // back an edit that got in anyway, so this pins the visible rule, not which of the two guards held.
+    type_into(cx, Field::Folder, "x");
+    assert_eq!(
+        text(cx, Field::Folder),
+        "  ~/edited  ",
+        "read-only while saving"
+    );
+
+    helm.reply(id, 204, None);
+    settle(cx);
+    let reads = sent_reads(&mut helm);
+    assert_eq!(reads.len(), 1, "one read back: {reads:?}");
+    assert_eq!(reads[0].1, Field::Folder.path());
+    assert!(drawn(cx, "checkout-folder-saved"));
+    helm.reply(reads[0].0, 200, Some(json!({ "root": "~/edited" })));
+    settle(cx);
+    assert_eq!(text(cx, Field::Folder), "~/edited");
+    assert_eq!(
+        label_of(cx, "checkout-folder-saved").as_deref(),
+        Some("Checkout folder saved")
+    );
+
+    type_into(cx, Field::Folder, "/x");
+    assert!(
+        !drawn(cx, "checkout-folder-saved"),
+        "an edit hides the line"
+    );
+    let erase = vec!["backspace"; text(cx, Field::Folder).chars().count()].join(" ");
+    keys(cx, &erase);
+    assert_eq!(
+        text(cx, Field::Folder),
+        "",
+        "the premise: the field is empty"
+    );
+    click(cx, Field::Folder.save());
+    let (_, body) = one_put(&mut helm, Field::Folder.path());
+    assert_eq!(body, json!({ "root": null }), "an empty folder clears it");
+}
+
+/// SPEC.md: "Settings ... shows a refused value's reason", and a refused draft "stays editable"; "Switching sections
+/// preserves unsaved fields, outcome lines and pending saves". The helm validates the folder's shape only, so its
+/// refusal is the only check the user gets. Specified: a typed relative folder refused with the helm's words keeps its
+/// text, shows those words as an alert, reads nothing back, and keeps both through showing Sessions and Checkouts
+/// again; Save then sends the draft again.
+#[gpui::test]
+fn a_refused_folder_keeps_its_draft_and_reason_across_sections(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_checkouts(&mut helm, cx, Value::Null, Value::Null, true);
+    type_into(cx, Field::Folder, "relative-folder");
+    click(cx, Field::Folder.save());
+    let (id, _) = one_put(&mut helm, Field::Folder.path());
+    let reason = "fixture: not the relative path 'relative-folder'";
+    helm.reply(id, 400, Some(json!(reason)));
+    settle(cx);
+    assert_eq!(sent(&mut helm), [], "a refusal reads nothing back");
+    for _ in 0..2 {
+        assert_eq!(text(cx, Field::Folder), "relative-folder");
+        assert_eq!(
+            label_of(cx, "checkout-folder-error").as_deref(),
+            Some(reason)
+        );
+        click(cx, section_button(Section::Sessions));
+        click(cx, section_button(Section::Checkouts));
+    }
+    click(cx, Field::Folder.save());
+    let (_, body) = one_put(&mut helm, Field::Folder.path());
+    assert_eq!(body, json!({ "root": "relative-folder" }));
+}
+
+/// SPEC.md: "The command field preserves all other spacing and newlines", only "an all-whitespace field" clears it,
+/// and Enter in the multi-line field types a line break rather than saving. A command is executable text, so a client
+/// that trimmed it or dropped a line would change what runs in every new checkout. Specified: a command typed as two
+/// lines with leading and trailing spaces (Enter between them) is sent verbatim in `PUT /api/checkout-post-clone`, and
+/// the helm's done reply reads the route back and shows "Post-clone command saved"; in a later opening, a field of
+/// spaces and a line break sends `{"command": null}`.
+#[gpui::test]
+fn the_post_clone_command_keeps_its_spacing_and_only_all_whitespace_clears_it(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_checkouts(&mut helm, cx, Value::Null, Value::Null, true);
+    type_into(cx, Field::PostClone, "  printf 'first'");
+    keys(cx, "enter");
+    cx.simulate_input("printf 'second'  ");
+    let chosen = "  printf 'first'\nprintf 'second'  ";
+    assert_eq!(text(cx, Field::PostClone), chosen);
+    click(cx, Field::PostClone.save());
+    let (id, body) = one_put(&mut helm, Field::PostClone.path());
+    assert_eq!(body, json!({ "command": chosen }));
+    helm.reply(id, 204, None);
+    settle(cx);
+    let reads = sent_reads(&mut helm);
+    assert_eq!(reads.len(), 1, "one read back: {reads:?}");
+    helm.reply(reads[0].0, 200, Some(json!({ "command": chosen })));
+    settle(cx);
+    assert_eq!(
+        label_of(cx, "checkout-post-clone-saved").as_deref(),
+        Some("Post-clone command saved")
+    );
+
+    keys(cx, "escape");
+    show_checkouts(&mut helm, cx, Value::Null, Value::Null, true);
+    type_into(cx, Field::PostClone, "  ");
+    keys(cx, "enter");
+    cx.simulate_input(" ");
+    assert_eq!(text(cx, Field::PostClone), "  \n ", "the premise");
+    click(cx, Field::PostClone.save());
+    let (_, body) = one_put(&mut helm, Field::PostClone.path());
+    assert_eq!(body, json!({ "command": null }));
+}
+
+/// The old field refused to save over a stored carriage return, because a browser's text area turned it into a line
+/// feed before the draft saw it; GPUI Kit's multi-line field keeps it, so this port saves such a command instead (a
+/// recorded deviation). This pins the premise that makes that safe: an edit keeps every carriage return the helm
+/// stored. Specified: a stored `printf 'one\r\ntwo'` shows exactly, and after typing " # edited" into it, Save sends a
+/// command that is the stored one with " # edited" inserted somewhere.
+#[gpui::test]
+fn a_stored_carriage_return_survives_an_edit(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let stored = "printf 'one\r\ntwo'";
+    show_checkouts(&mut helm, cx, Value::Null, json!(stored), true);
+    assert_eq!(text(cx, Field::PostClone), stored);
+    type_into(cx, Field::PostClone, " # edited");
+    click(cx, Field::PostClone.save());
+    let (_, body) = one_put(&mut helm, Field::PostClone.path());
+    let sent = body["command"].as_str().unwrap_or_default().to_owned();
+    assert!(sent.contains(" # edited"), "{sent:?}");
+    assert_eq!(sent.replacen(" # edited", "", 1), stored);
+}
+
+/// SPEC_impl.md, "Work that finishes later": an explicit save is the operation store's work and outlives the dialog
+/// (the old "a pending checkout folder save survives closing settings"). Specified: a folder save in flight when Escape
+/// closes Settings still holds the preference row's key; the helm's reply frees it with nothing more sent, since no
+/// field is left to read the route back for.
+#[gpui::test]
+fn a_folder_save_in_flight_goes_on_after_the_dialog_closes(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_checkouts(&mut helm, cx, Value::Null, Value::Null, true);
+    type_into(cx, Field::Folder, "~/survives-close");
+    click(cx, Field::Folder.save());
+    let (id, _) = one_put(&mut helm, Field::Folder.path());
+    keys(cx, "escape");
+    assert!(!any_open(cx), "the premise: Settings closed");
+    assert_eq!(preference_work(cx), Some(Work::Save));
+    helm.reply(id, 204, None);
+    settle(cx);
+    assert_eq!(preference_work(cx), None);
+    assert_eq!(sent(&mut helm), []);
+}
+
+/// The spare switch follows Agent trust's rules: a failed read never counts as off, a flip saves at once through its
+/// own route, and a refusal restores the stored choice with the helm's reason (the old "prepared checkout settings
+/// preserve saved choices across reads, refusals and close"). SPEC.md also has the help link "the full earlier-clone
+/// caveats". Specified: a refused read leaves the switch taking no click, with "Could not save or read prepared
+/// checkout settings:" and the helm's words; in a new opening, read on, the documentation link is drawn as a link; a
+/// click sends `PUT /api/checkout-spare` with `{"enabled": false}` under the preference row's key and shows off while
+/// it is in flight; the helm's refusal shows on again with the reason; the next click, done, shows off.
+#[gpui::test]
+fn the_spare_switch_saves_through_its_route_and_a_refusal_restores_it(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    open_settings(cx);
+    click(cx, section_button(Section::Checkouts));
+    let reads = sent_reads(&mut helm);
+    let paths: Vec<&str> = reads.iter().map(|(_, path)| path.as_str()).collect();
+    assert_eq!(
+        paths, CHECKOUT_READS,
+        "the premise: Checkouts read its routes"
+    );
+    helm.reply(reads[0].0, 200, Some(json!({ "root": null })));
+    helm.reply(reads[1].0, 200, Some(json!({ "command": null })));
+    helm.reply(reads[2].0, 503, Some(json!("fixture spare read refused")));
+    settle(cx);
+    click(cx, super::checkouts::SPARE_ID);
+    assert_eq!(sent(&mut helm), [], "no toggle over an unknown choice");
+    assert_eq!(
+        label_of(cx, super::checkouts::SPARE_ERROR_ID).as_deref(),
+        Some("Could not save or read prepared checkout settings: fixture spare read refused")
+    );
+
+    keys(cx, "escape");
+    show_checkouts(&mut helm, cx, Value::Null, Value::Null, true);
+    let link = frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(super::checkouts::SPARE_DOCS_ID))
+        .map(|node| (node.role, node.label.map(|label| label.to_string())));
+    assert_eq!(
+        link,
+        Some((
+            Some(Role::Link),
+            Some("How prepared checkouts differ from a fresh clone ↗".to_owned())
+        ))
+    );
+    click(cx, super::checkouts::SPARE_ID);
+    let (id, body) = one_put(&mut helm, "/api/checkout-spare");
+    assert_eq!(body, json!({ "enabled": false }));
+    assert_eq!(preference_work(cx), Some(Work::Save));
+    assert_eq!(
+        switch_on(cx, super::checkouts::SPARE_ID),
+        Some(false),
+        "pending"
+    );
+    helm.reply(id, 503, Some(json!("fixture spare save refused")));
+    settle(cx);
+    assert_eq!(
+        switch_on(cx, super::checkouts::SPARE_ID),
+        Some(true),
+        "restored"
+    );
+    assert_eq!(
+        label_of(cx, super::checkouts::SPARE_ERROR_ID).as_deref(),
+        Some("Could not save or read prepared checkout settings: fixture spare save refused")
+    );
+    click(cx, super::checkouts::SPARE_ID);
+    let (id, _) = one_put(&mut helm, "/api/checkout-spare");
+    helm.reply(id, 204, None);
+    settle(cx);
+    assert_eq!(
+        switch_on(cx, super::checkouts::SPARE_ID),
+        Some(false),
+        "saved"
+    );
+}
+
+/// A root view drawing one host-scoped folder field, as the host settings dialog is to (SPEC.md, "Topology").
+struct HostFolder {
+    root: root::Attachment,
+    field: Entity<super::CheckoutField>,
+    /// How many times the field raised [`super::Saved`], as the launcher's refresh would see it.
+    saved: usize,
+    _saved: gpui::Subscription,
+}
+
+impl Render for HostFolder {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let content = div().size_full().p(px(20.)).child(self.field.clone());
+        root::wrap(content, &self.root, window, cx)
+    }
+}
+
+/// The shared folder field is also the host settings dialog's (SPEC.md, "Topology": "An empty folder uses the default
+/// from Settings → Checkouts, shown as a placeholder; Use default clears a saved override"), and that dialog is built
+/// later on this interface, so the host scope is pinned here. A host's folder is its own work key, so it never waits
+/// on a Settings save. Specified: a field over host 2 reads `GET /api/hosts/2/checkout-root`; with an override of
+/// "/srv/own" and a default of "~/def" it shows the override and offers Use default; Use default sends
+/// `{"root": null}` to that route under the host's key; the done reply reads the route back, and the answer (no
+/// override) empties the field, shows "Default: ~/def" as its placeholder and takes Use default away. The field raises
+/// `Saved` once for that done save (the launcher's hook to refresh what depends on the folder), and not for a later
+/// save the helm refuses.
+#[gpui::test]
+fn a_host_folder_shows_the_default_as_placeholder_and_use_default_clears_it(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, _connection) = started(cx);
+    helm.connect(vec![preferences_state(&Preferences::default())]);
+    cx.run_until_parked();
+    let (view, cx) = test_support::open_view(cx, |window, cx| {
+        let field = cx.new(|cx| {
+            super::CheckoutField::folder(
+                super::FolderScope::Host("2".to_owned()),
+                "Fixture note",
+                window,
+                cx,
+            )
+        });
+        let saved = cx.subscribe(&field, |host: &mut HostFolder, _, _: &super::Saved, _| {
+            host.saved += 1;
+        });
+        HostFolder {
+            root: root::attach(window, cx),
+            field,
+            saved: 0,
+            _saved: saved,
+        }
+    });
+    let saved = |cx: &mut VisualTestContext| cx.update(|_, cx| view.read(cx).saved);
+    let path = "/api/hosts/2/checkout-root";
+    let reads = sent_reads(&mut helm);
+    assert_eq!(reads.len(), 1, "one read: {reads:?}");
+    assert_eq!(reads[0].1, path);
+    helm.reply(
+        reads[0].0,
+        200,
+        Some(json!({ "root": "/srv/own", "default": "~/def" })),
+    );
+    settle(cx);
+    let shown =
+        |cx: &mut VisualTestContext| cx.update(|_, cx| view.read(cx).field.read(cx).text(cx));
+    assert_eq!(shown(cx), "/srv/own");
+
+    click(cx, "checkout-folder-use-default");
+    let (id, body) = one_put(&mut helm, path);
+    assert_eq!(body, json!({ "root": null }));
+    let host_work = cx.update(|_, cx| {
+        session::current_operations(cx)
+            .and_then(|operations| operations.read(cx).in_flight(&OpKey::host("2")))
+    });
+    assert_eq!(host_work, Some(Work::Save));
+    assert_eq!(preference_work(cx), None, "not the preference row's key");
+    assert_eq!(saved(cx), 0, "nothing saved yet");
+    helm.reply(id, 204, None);
+    settle(cx);
+    assert_eq!(saved(cx), 1, "the done save raised Saved");
+    let reads = sent_reads(&mut helm);
+    assert_eq!(reads.len(), 1, "one read back: {reads:?}");
+    helm.reply(
+        reads[0].0,
+        200,
+        Some(json!({ "root": null, "default": "~/def" })),
+    );
+    settle(cx);
+    assert_eq!(shown(cx), "");
+    assert!(painted(cx).contains("Default: ~/def"), "{}", painted(cx));
+    assert!(!drawn(cx, "checkout-folder-use-default"));
+
+    click(cx, "checkout-folder");
+    let focused = cx.update(|window, cx| view.read(cx).field.read(cx).focused(window, cx));
+    assert!(focused, "the premise: the click put focus in the field");
+    cx.simulate_input("relative");
+    click(cx, "checkout-folder-save");
+    let (id, _) = one_put(&mut helm, path);
+    helm.reply(id, 400, Some(json!("fixture refusal")));
+    settle(cx);
+    assert_eq!(saved(cx), 1, "a refused save raises nothing");
+}
+
+/// Both old fields offered Retry when their read failed, and a failed read must never pass for an empty value: Save
+/// then would clear the folder. Specified: the folder's read refused, the field shows the helm's words as an alert, has
+/// Retry and no Save, and takes no typing; Retry sends exactly one GET of the route; its answer shows the stored
+/// folder, takes Retry away, brings Save back and makes the field editable.
+#[gpui::test]
+fn a_failed_folder_read_shows_its_reason_and_retry_reads_again(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    open_settings(cx);
+    click(cx, section_button(Section::Checkouts));
+    let first = sent_reads(&mut helm);
+    let paths: Vec<&str> = first.iter().map(|(_, path)| path.as_str()).collect();
+    assert_eq!(
+        paths, CHECKOUT_READS,
+        "the premise: Checkouts read its routes"
+    );
+    helm.reply(first[0].0, 503, Some(json!("fixture folder read refused")));
+    helm.reply(first[1].0, 200, Some(json!({ "command": null })));
+    helm.reply(first[2].0, 200, Some(json!({ "enabled": true })));
+    settle(cx);
+    assert_eq!(
+        label_of(cx, "checkout-folder-error").as_deref(),
+        Some("fixture folder read refused")
+    );
+    assert!(drawn(cx, "checkout-folder-retry"));
+    assert!(!drawn(cx, Field::Folder.save()), "Retry takes Save's place");
+    type_into(cx, Field::Folder, "typed");
+    assert_eq!(text(cx, Field::Folder), "", "still read-only");
+
+    click(cx, "checkout-folder-retry");
+    let again = sent_reads(&mut helm);
+    let paths: Vec<&str> = again.iter().map(|(_, path)| path.as_str()).collect();
+    assert_eq!(paths, [Field::Folder.path()], "Retry reads the route once");
+    helm.reply(again[0].0, 200, Some(json!({ "root": "~/stored" })));
+    settle(cx);
+    assert_eq!(text(cx, Field::Folder), "~/stored");
+    assert!(!drawn(cx, "checkout-folder-retry"));
+    assert!(!drawn(cx, "checkout-folder-error"));
+    assert!(drawn(cx, Field::Folder.save()));
+    type_into(cx, Field::Folder, "/more");
+    assert_eq!(text(cx, Field::Folder), "~/stored/more", "editable now");
+}
+
+/// SPEC.md: "Switching sections preserves unsaved fields", and closing discards them (the dialog's module docs). A
+/// draft that a section switch dropped would lose what the user typed; one that outlived the dialog would show text the
+/// helm does not hold. Specified: a command typed but neither saved nor refused is still there after showing Sessions
+/// and Checkouts again, with nothing sent; after Escape and a new opening, the field shows the stored command.
+#[gpui::test]
+fn an_unsaved_draft_survives_a_section_switch_and_goes_with_the_dialog(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_checkouts(&mut helm, cx, Value::Null, json!("stored"), true);
+    type_into(cx, Field::PostClone, " typed");
+    let draft = text(cx, Field::PostClone);
+    assert_ne!(draft, "stored", "the premise: the field holds a draft");
+    click(cx, section_button(Section::Sessions));
+    click(cx, section_button(Section::Checkouts));
+    assert_eq!(text(cx, Field::PostClone), draft);
+    assert_eq!(sent(&mut helm), [], "nothing was saved");
+    keys(cx, "escape");
+    show_checkouts(&mut helm, cx, Value::Null, json!("stored"), true);
+    assert_eq!(text(cx, Field::PostClone), "stored");
 }

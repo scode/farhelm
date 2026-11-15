@@ -50,6 +50,8 @@
 //! stroke, as the old one's did not. So is the Agent trust section glyph (`ActionGlyph::AgentTrust`).
 //!
 //! So is the Add glyph (`ActionGlyph::Add`, a plus), on the host rail's Add host, in the same box and stroke.
+//!
+//! The Checkouts section glyph is the old app's `FolderIcon`, in its own 12-unit box with the same 1.2 stroke.
 
 use std::borrow::Cow;
 
@@ -176,6 +178,8 @@ pub enum Icon {
     /// The same bolt filled: the template that holds the quick-launch mark. The outline is drawn too, so the two
     /// bolts are the same size, as SPEC.md wants ("at the same size").
     BoltFilled,
+    /// A folder: the Settings dialog's Checkouts section (the old app's `FolderIcon`, its 12-pixel box kept).
+    Folder,
 }
 
 impl Icon {
@@ -226,6 +230,7 @@ impl Icon {
         Icon::Templates,
         Icon::Bolt,
         Icon::BoltFilled,
+        Icon::Folder,
     ];
 }
 
@@ -275,6 +280,7 @@ impl Icon {
             Icon::Templates => "icons/templates.svg",
             Icon::Bolt => "icons/bolt.svg",
             Icon::BoltFilled => "icons/bolt-filled.svg",
+            Icon::Folder => "icons/folder.svg",
         }
     }
 }
@@ -334,6 +340,7 @@ impl Assets {
             "icons/appearance.svg" => Some(include_bytes!("../assets/icons/appearance.svg")),
             "icons/terminal.svg" => Some(include_bytes!("../assets/icons/terminal.svg")),
             "icons/agent-trust.svg" => Some(include_bytes!("../assets/icons/agent-trust.svg")),
+            "icons/folder.svg" => Some(include_bytes!("../assets/icons/folder.svg")),
             WORDMARK_DARK => Some(include_bytes!(
                 "../../../../packaging/farhelm-desktop/wordmark-dark.svg"
             )),

@@ -26,18 +26,17 @@
 //!   the hint band reads too, so those switches are ordinary Settings switches ([`super::choices::Choice`]) drawn here.
 //!   The trust routes also answer with the dismissal; the section ignores it and reads the store, which stays current.
 
-use farhelm_helm_client::{ApiPath, Method, PathError};
+use farhelm_helm_client::{ApiPath, PathError};
 use gpui::{
-    AnyElement, App, Div, FocusHandle, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, Role, StatefulInteractiveElement as _, Styled as _, Window, div,
-    prelude::FluentBuilder as _, px,
+    AnyElement, App, Div, FocusHandle, FontWeight, IntoElement, ParentElement as _, Role,
+    Styled as _, Window, div, prelude::FluentBuilder as _, px,
 };
 
-use super::choices::{self, Choice, HELP_LINE_HEIGHT, LABEL_LINE_HEIGHT, LABEL_TEXT};
+use super::choices::{self, Choice, LABEL_LINE_HEIGHT, LABEL_TEXT};
+use super::configured::{self, Configured};
 use crate::components::{Checkbox, HoverHelp};
-use crate::drafts::Draft;
-use crate::host_text::{HostSentence, HostText};
-use crate::operations::{Command, Work};
+use crate::host_text::HostText;
+use crate::operations::Command;
 use crate::theme::{self, metrics};
 
 /// `.checkout-claude-trust`'s gap between its rows.
@@ -209,85 +208,27 @@ impl TrustAgent {
 
     /// `PUT` of the trust route with `{enabled}`.
     pub(super) fn command(self, enabled: bool) -> Result<Command, PathError> {
-        let path = self.path()?;
-        let shown = format!("PUT {}", path.as_str());
-        Ok(Command::new(
-            Work::Save,
-            Method::Put,
-            path,
-            Some(serde_json::json!({ "enabled": enabled })),
-            shown,
-        ))
+        configured::enabled_command(self.path(), enabled)
     }
 
-    /// Read the trust route; `on_read` gets whether the agent's trust is on, or why the helm did not say. A path that
-    /// does not build is a failed read too, so the switch never waits on a read that was not sent. `on_read` runs once
-    /// whenever a request was sent (or the path failed), and never without a UI session, which leaves nothing waiting:
-    /// Settings does not open without a session, and a reset closes it. Whenever it runs, it runs on its own, after the
-    /// update that called this has returned, as [`crate::operations::read`]'s answers do: the caller is the dialog's
-    /// own update, and `on_read` updates the dialog.
+    /// Read the trust route; `on_read` gets whether the agent's trust is on, or why the helm did not say
+    /// ([`configured::read_enabled`]). The caller is the dialog's own update, and `on_read` updates the dialog, which
+    /// [`super::choices::read_route`]'s contract makes safe.
     pub(super) fn read(
         self,
         cx: &mut App,
         on_read: impl FnOnce(Result<bool, HostText>, &mut App) + 'static,
     ) {
-        let path = match self.path() {
-            Ok(path) => path,
-            Err(error) => {
-                let reason = HostText::from_host(error.to_string());
-                cx.defer(move |cx| on_read(Err(reason), cx));
-                return;
-            }
-        };
-        let shown = format!("GET {}", path.as_str());
-        crate::operations::read::<TrustReply>(path, shown, cx, |reply, cx| {
-            on_read(reply.map(|reply| reply.enabled), cx)
-        });
+        configured::read_enabled(self.path(), cx, on_read);
     }
-}
-
-/// The part of a trust route's answer the section uses (it also carries the hint's dismissal; see the module docs).
-#[derive(serde::Deserialize)]
-struct TrustReply {
-    enabled: bool,
-}
-
-/// What the section knows of one agent's trust choice.
-#[derive(Clone, Debug, PartialEq)]
-pub(super) enum Known {
-    /// The read has not answered.
-    Reading,
-    /// The helm's choice: read when the section opened, or saved since.
-    Read(bool),
-    /// The read failed, with the helm's reason.
-    Unreadable(HostText),
 }
 
 /// One agent's trust switch in the open dialog.
 pub(super) struct Trust {
     pub(super) agent: TrustAgent,
-    pub(super) known: Known,
-    /// The value being saved and the last refusal; its loaded value never reaches the screen.
-    pub(super) draft: Draft<bool>,
+    pub(super) state: Configured,
     /// The switch's focus handle, which the dialog keeps so the trust hint's entry point can put focus on it.
     pub(super) focus: FocusHandle,
-}
-
-impl Trust {
-    /// The value the switch shows: the one being saved while its save is in flight, the known choice otherwise, and
-    /// off (with the switch unavailable) while nothing is known.
-    fn shown(&self) -> bool {
-        if self.draft.is_saving() {
-            *self.draft.value()
-        } else {
-            self.known == Known::Read(true)
-        }
-    }
-
-    /// Whether the switch takes a toggle: only once the choice is known.
-    pub(super) fn available(&self) -> bool {
-        matches!(self.known, Known::Read(_))
-    }
 }
 
 /// One agent's block: its trust switch, its help (and Claude's caution box), its hint switch, and the failure lines.
@@ -312,37 +253,17 @@ pub(super) fn block(
                 Role::Switch,
             )
             .switch()
-            .checked(trust.shown())
-            .disabled(!trust.available())
+            .checked(trust.state.shown())
+            .disabled(!trust.state.available())
             .focus(&trust.focus)
             .on_toggle(on_toggle),
         );
-    // The old line said "Could not save or read {name} trust settings" with the helm's words after it, whichever of
-    // the two failed; a refused save is the newer news, so it wins over a failed read.
-    let failure = trust
-        .draft
-        .refusal()
-        .or(match &trust.known {
-            Known::Unreadable(reason) => Some(reason),
-            Known::Reading | Known::Read(_) => None,
-        })
-        .map(|reason| {
-            let sentence = HostSentence::new(agent.error_id())
-                .text(format!(
-                    "Could not save or read {} trust settings: ",
-                    agent.name()
-                ))
-                .host(reason);
-            div()
-                .id(agent.error_id())
-                .debug_selector(|| agent.error_id().to_owned())
-                .role(Role::Alert)
-                .aria_label(sentence.accessible_name())
-                .text_size(metrics::TEXT_SM)
-                .line_height(px(HELP_LINE_HEIGHT))
-                .text_color(theme::color(palette.danger))
-                .child(sentence)
-        });
+    let failure = configured::failure(
+        agent.error_id(),
+        format!("Could not save or read {} trust settings: ", agent.name()),
+        &trust.state,
+        cx,
+    );
     div()
         .flex()
         .flex_col()

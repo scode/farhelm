@@ -648,7 +648,7 @@
     },
     {
       "golden": "settings-sessions",
-      "title": "Settings as the gear opens it, at Sessions (only Sessions, Appearance, Hosts, Terminal and Agent trust are listed so far)",
+      "title": "Settings as the gear opens it, at Sessions (only Sessions, Appearance, Hosts, Terminal, Checkouts and Agent trust are listed so far)",
       "reference": "settings-sessions"
     },
     {
@@ -665,6 +665,11 @@
       "golden": "settings-terminal",
       "title": "Settings at Terminal, the default link choice chosen",
       "reference": "settings-terminal"
+    },
+    {
+      "golden": "settings-checkouts",
+      "title": "Settings at Checkouts, no default folder or post-clone command, a checkout kept ready",
+      "reference": "settings-checkouts"
     },
     {
       "golden": "settings-agent-trust",
