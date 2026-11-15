@@ -133,17 +133,22 @@ Extension points: reported, the whole directory. An area may add, without a requ
   it was, as a compositor's title buttons do, through `Button::keeps_focus_on_press` and
   `IconButton::keeps_focus_on_press`, on Linux only, while Tab still reaches them (decided with the migration's
   orchestrator on 2026-11-14);
-- or an additive builder method on an existing control, built the way its siblings are.
+- or an additive builder method on an existing control, built the way its siblings are;
+- or keyboard scrolling for a dialog's notices region that holds a question, through `DialogFrame::notices_stop` and a
+  label: the region is a stop of its own whenever it holds no tab stop, as a body given `DialogFrame::scroll_stop` is,
+  and Page Up, Page Down, Home and End scroll it from a control inside it (`scroll_from_controls`), as the old Trash
+  dialog's global confirmation was scrolled around its focused answer. It is the one region whose controls' keys scroll
+  it; any other region taking keys from a control inside it is a request.
 
 A drawing-only shared piece (no input, no focus, nothing to name) belongs in the layer too and is exempt from the label,
 hover help and role rule, decided by the migration's orchestrator on 2026-11-14: `pulse.rs` (`pulse_opacity`),
 `menu_separator.rs` (`menu_separator`) and `spinner.rs` (`Spinner` and `spinner_icon`) are three.
 
-`HoverHelp`, `with_hover_help`, `activate_on_enter_or_space`, `activate_on_click`, `enter_choice`, `on_enter_choice` and
-`scroll_stop` in `components/mod.rs` are the layer's rules: a change to them is a request. An element that fades in as
-it appears is drawn through `components::entrance`, from the area's own code, and `components/transition.rs` (tested in
-`components/tests/transition.rs`), the one owner of one-shot transitions, is a rule too: a change to it, a new
-transition included, is a request.
+`HoverHelp`, `with_hover_help`, `activate_on_enter_or_space`, `activate_on_click`, `enter_choice`, `on_enter_choice`,
+`scroll_stop` and `scroll_from_controls` in `components/mod.rs` are the layer's rules: a change to them is a request. An
+element that fades in as it appears is drawn through `components::entrance`, from the area's own code, and
+`components/transition.rs` (tested in `components/tests/transition.rs`), the one owner of one-shot transitions, is a
+rule too: a change to it, a new transition included, is a request.
 
 Lint exceptions: 1: GPUI's `with_animation` in `components::transition::one_shot`, the one-shot transitions the ticker's
 ten ticks a second cannot draw (SPEC_impl.md, "Animation time: the ticker"; the migration's orchestrator approved this
@@ -357,6 +362,12 @@ Lint exceptions: none.
 Extension points: reported: a view drawn inside the main view's ground, and the ground's layout around it (the overlay
 is not drawn here: `root::wrap` draws it after the ground).
 
+The main view also holds an owner it never draws, made in `MainView::new` and kept for the window's life: the
+`_start_dialogs` field, the window-start dialogs' owner (`welcome::StartDialogs`), which decides when the Welcome card
+and the first batch of announcements open. Such a field is reported wiring too, the same way: an area's owner that must
+live as long as the window, made where the main view makes its other parts, in the order its docs need (this one after
+the session pane, so the selected session's terminal is home before a card opens over it).
+
 Lint exceptions: none.
 
 ### Harness marks
@@ -388,7 +399,9 @@ Extension points: reported:
   numbered with two digits after the last, because the steps run in name order against one app run and unittest sorts
   names as strings (`test_10_` before `test_1_`); each area's steps seed and use sessions of their own, set up the open
   session and focus they depend on, and never touch a session another area's steps seed or use (the script's module docs
-  say how).
+  say how). One step needs a window start of its own and so starts and stops a second app run beside the shared one:
+  step 53, the other-dialogs area's Welcome card opened by a window start that asks for it. The script's module docs
+  give the pattern such a step follows (its run directory, `--no-build`, and a `stop` in a `finally`).
 
 The Rust side (`agent.rs`, and `agent_startup.rs`, which also holds the guard that refuses the `agent` feature in
 optimized builds) has none. The `agent` feature itself is the bridge's too but is declared in Bootstrap's manifest: a

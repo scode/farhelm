@@ -1,6 +1,9 @@
 //! Tests of the dialog frame: a long body scrolls with the answers in view, a frame too tall for the window scrolls as
 //! a whole, the answers wrap in a narrow window, the header's Close comes first in Tab's order, and a body given a
-//! scroll stop has it whenever it holds nothing to focus, and scrolls by keyboard through it.
+//! scroll stop has it whenever it holds nothing to focus, and scrolls by keyboard through it. Notices given a stop have
+//! it on the same rule, between the body and the answers in Tab's order, scroll through it, and scroll on Page Up, Page
+//! Down, Home and End from an answer inside them (and from nowhere else), which keeps its other keys; notices without
+//! the opt-in take no keys.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -381,4 +384,238 @@ fn the_scroll_keys_scroll_a_dialog_body_through_its_stop(cx: &mut TestAppContext
         "the premise: Tab put focus on the body's stop"
     );
     each_scroll_key_scrolls(cx, "line-0");
+}
+
+/// A Trash-like dialog under `trash`: a body holding one archive's Delete (`entry`); notices holding a question of
+/// `count` lines (`line-0` on) and then its Cancel (`q-cancel`) and Delete permanently (`q-submit`, counting its
+/// presses in `submitted`), usable while `usable` holds, with the notices given the stop "Global checkout deletion
+/// confirmation" when `opt_in` holds (and drawn as plain notices otherwise); and a Close answer (`close`) in the
+/// answers' row.
+fn trash_question(
+    count: usize,
+    usable: bool,
+    opt_in: bool,
+    submitted: Rc<Cell<usize>>,
+) -> DialogFrame {
+    let button = |id: &'static str, label: &'static str| {
+        Button::new(id, label, HoverHelp::tooltip(label), Role::Button).tier(Tier::Neutral)
+    };
+    let body = div()
+        .child(button("entry", "Delete"))
+        .child("One archived checkout");
+    let question = div()
+        .child(lines(count, "Warning line"))
+        .child(button("q-cancel", "Cancel").disabled(!usable))
+        .child(
+            button("q-submit", "Delete permanently")
+                .disabled(!usable)
+                .on_click(move |_, _, _| submitted.set(submitted.get() + 1)),
+        );
+    let frame =
+        DialogFrame::new("trash", "Trash", body, vec![button("close", "Close")]).notices(question);
+    if opt_in {
+        frame.notices_stop("Global checkout deletion confirmation")
+    } else {
+        frame
+    }
+}
+
+/// Whether the notices' stop is drawn: an element with the region role named "Global checkout deletion confirmation".
+fn notices_stop_drawn(cx: &mut VisualTestContext) -> bool {
+    role_and_name(cx, "trash-notices-stop")
+        == (
+            Some(Role::Region),
+            Some("Global checkout deletion confirmation".into()),
+        )
+}
+
+/// Why this matters: the old Trash dialog drew its global Delete all question in the same scroll region as a dialog's
+/// body, which became a named tab stop whenever none of the question's answers could take focus, so the warning stayed
+/// keyboard-scrollable while a deletion was in flight (SPEC.md, "Reaching everything by keyboard"). With an answer
+/// usable it was no stop, and Tab went straight to the answers.
+///
+/// Specified, in a dialog with a control in its body, a question in its notices and a Close answer: while the
+/// question's answers are usable there is no stop, and Tab goes from the body's control to Cancel, Delete permanently
+/// and Close; once both answers are disabled (one redraw, with focus on Close), Shift+Tab from Close reaches the
+/// notices' stop, a region named by its label, and Shift+Tab again the body's control, so the stop sits between them,
+/// where the old region sat between the body and the footer.
+#[gpui::test]
+fn the_notices_stop_sits_between_the_body_and_the_answers_while_no_answer_takes_focus(
+    cx: &mut TestAppContext,
+) {
+    let usable = Rc::new(Cell::new(true));
+    let drawn = usable.clone();
+    let cx = open(cx, move |_, _| {
+        trash_question(3, drawn.get(), true, Rc::default()).into_any_element()
+    });
+    cx.simulate_resize(size(px(720.), px(400.)));
+    cx.run_until_parked();
+    check(cx);
+    assert!(
+        !notices_stop_drawn(cx),
+        "notices holding usable answers have no stop"
+    );
+    for (step, expected) in ["entry", "q-cancel", "q-submit", "close"]
+        .into_iter()
+        .enumerate()
+    {
+        keys(cx, "tab");
+        assert_eq!(
+            focused_id(cx).as_deref(),
+            Some(expected),
+            "Tab {} reached {expected}",
+            step + 1
+        );
+    }
+
+    usable.set(false);
+    redraw(cx);
+    // Shift+Tab before anything else draws: the role check below draws a frame of its own, which would show a stop
+    // that never asked for one.
+    keys(cx, "shift-tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("trash-notices-stop"),
+        "Shift+Tab from Close reached the notices' stop"
+    );
+    assert!(notices_stop_drawn(cx), "a region named by its label");
+    keys(cx, "shift-tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("entry"),
+        "and the body's control comes before it"
+    );
+}
+
+/// Why this matters: a stop the keys do not scroll leaves the question's warning as unreadable as no stop at all. The
+/// keys are the shared scroll stop's; this pins that the notices' stop is wired to the notices' own scroll, not to the
+/// body's or the card's.
+///
+/// Specified: with focus on the stop of notices that overflow by several pages (their answers disabled), every scroll
+/// key moves the notices' content (each_scroll_key_scrolls).
+#[gpui::test]
+fn the_scroll_keys_scroll_the_notices_through_their_stop(cx: &mut TestAppContext) {
+    let cx = open(cx, move |_, _| {
+        trash_question(80, false, true, Rc::default()).into_any_element()
+    });
+    cx.simulate_resize(size(px(720.), px(400.)));
+    cx.run_until_parked();
+    check(cx);
+    keys(cx, "tab tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("trash-notices-stop"),
+        "the premise: the second Tab put focus on the notices' stop"
+    );
+    each_scroll_key_scrolls(cx, "line-0");
+}
+
+/// Why this matters: this is how a keyboard user gets back to a question's heading and the line naming what it deletes
+/// once they sit above view (the Trash dialog's global Delete all question at the minimum window): focus starts on an
+/// answer, the region is no stop then, and in the old app the browser scrolled the region around the focused answer.
+/// The arrows and Space must stay the answer's, as the scroll stop leaves a control's keys to it (Space pressing the
+/// button), so only the keys a button has no use for scroll.
+///
+/// Specified, in notices whose question overflows them and whose answers are usable, with Tab on Delete permanently
+/// (which scrolls the notices to show it): Down, Space and Up leave the notices where they are, and Space presses the
+/// button once; Page Up scrolls them back toward the start and Home to it; Page Down scrolls them forward again and End
+/// to where Tab left them, the end; focus stays on the answer throughout, and the notices have no stop. Then, with
+/// focus on Close in the answers' row, outside the notices, Page Up and Home leave them where they are: the keys come
+/// only from a control inside the notices, not from anywhere in the dialog.
+#[gpui::test]
+fn page_keys_scroll_the_notices_from_an_answer_inside_them(cx: &mut TestAppContext) {
+    let submitted = Rc::new(Cell::new(0));
+    let count = submitted.clone();
+    let cx = open(cx, move |_, _| {
+        trash_question(40, true, true, count.clone()).into_any_element()
+    });
+    cx.simulate_resize(size(px(720.), px(400.)));
+    cx.run_until_parked();
+    check(cx);
+    let start = bounds(cx, "line-0").top();
+    keys(cx, "tab tab tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("q-submit"),
+        "the premise: Delete permanently holds focus"
+    );
+    let revealed = bounds(cx, "line-0").top();
+    assert!(
+        revealed < start,
+        "the premise: the question overflows, so reaching its answer scrolled it"
+    );
+    let top = |cx: &mut VisualTestContext, key: &str| {
+        keys(cx, key);
+        bounds(cx, "line-0").top()
+    };
+
+    assert_eq!(
+        top(cx, "down space up"),
+        revealed,
+        "the answer's keys moved nothing"
+    );
+    assert_eq!(submitted.get(), 1, "Space pressed the answer");
+    let paged_up = top(cx, "pageup");
+    assert!(paged_up > revealed, "Page Up scrolled back: {paged_up:?}");
+    assert_eq!(top(cx, "home"), start, "Home scrolled to the start");
+    let paged_down = top(cx, "pagedown");
+    assert!(
+        paged_down < start,
+        "Page Down scrolled forward: {paged_down:?}"
+    );
+    assert_eq!(top(cx, "end"), revealed, "End scrolled to the end");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("q-submit"),
+        "focus stayed on the answer"
+    );
+    assert!(!notices_stop_drawn(cx), "and the notices have no stop");
+
+    keys(cx, "tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("close"),
+        "the premise: Close, outside the notices, holds focus"
+    );
+    assert_eq!(
+        top(cx, "pageup home"),
+        revealed,
+        "keys from outside the notices moved nothing"
+    );
+}
+
+/// Why this matters: taking keys from a control inside a region is the notices' opt-in, not a property of every
+/// notices region (SPEC_impl.md, "The component layer and theme": no other region takes keys from a control inside
+/// it). The launcher's notices, for one, do not opt in.
+///
+/// Specified, in the same overflowing question drawn through plain notices (no `notices_stop`), with Tab on Delete
+/// permanently (which scrolls the notices to show it): Page Up and Home leave the notices where they are, and the
+/// notices have no stop.
+#[gpui::test]
+fn notices_without_the_opt_in_take_no_keys_from_their_answers(cx: &mut TestAppContext) {
+    let cx = open(cx, move |_, _| {
+        trash_question(40, true, false, Rc::default()).into_any_element()
+    });
+    cx.simulate_resize(size(px(720.), px(400.)));
+    cx.run_until_parked();
+    check(cx);
+    let start = bounds(cx, "line-0").top();
+    keys(cx, "tab tab tab");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("q-submit"),
+        "the premise: Delete permanently holds focus"
+    );
+    let revealed = bounds(cx, "line-0").top();
+    assert!(
+        revealed < start,
+        "the premise: the question overflows, so reaching its answer scrolled it"
+    );
+    keys(cx, "pageup home");
+    assert_eq!(
+        bounds(cx, "line-0").top(),
+        revealed,
+        "plain notices took no keys from their answer"
+    );
+    assert!(!notices_stop_drawn(cx), "and have no stop");
 }
