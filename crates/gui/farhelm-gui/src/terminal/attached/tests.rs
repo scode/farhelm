@@ -2131,6 +2131,253 @@ fn the_link_choice_decides_who_gets_a_click_on_a_link(cx: &mut TestAppContext) {
     );
 }
 
+// ---- A program's hyperlinks ----------------------------------------------------------------------------------------
+
+impl Harness<'_> {
+    /// Attach a screen whose first row is `text`, all of it a program's hyperlink (OSC 8) to `uri`.
+    fn attach_hyperlink(&mut self, text: &str, uri: &str) {
+        let asked = self.fake().attach();
+        let mut replay = screen(asked.cols, asked.rows, "", serde_json::Value::Null);
+        replay[2] = serde_json::from_value(serde_json::json!({
+            "t":"rows",
+            "rows":[[0,{"w":false,"r":[[0,text.chars().count(),text,[0,-1,-1],0]]}]],
+            "links":[["1",uri]]
+        }))
+        .unwrap();
+        for message in replay {
+            self.fake().output(message);
+        }
+        self.fake().replay_complete();
+        settle(self.cx);
+    }
+
+    /// Rest the pointer on `at` and let the destination display open (it opens after the frame that saw the hover).
+    fn rest_on(&mut self, at: Point<Pixels>) {
+        self.cx.simulate_mouse_move(at, None, Modifiers::none());
+        settle(self.cx);
+        redraw(self.cx);
+    }
+
+    /// Whether the destination display is drawn, and whether in its loud mismatch form.
+    fn disclosure_shown(&mut self) -> (bool, bool) {
+        (
+            self.cx.debug_bounds("terminal-link-disclosure").is_some(),
+            self.cx
+                .debug_bounds("terminal-link-disclosure-warning")
+                .is_some(),
+        )
+    }
+}
+
+/// A program's hyperlink can underline text that differs from where it goes, so resting the pointer on it shows its
+/// real destination first, next to the pointer, and a click opens it while that display is shown (SPEC.md's links
+/// paragraph). Moving off closes the display.
+#[gpui::test]
+fn a_program_hyperlink_shows_its_destination_and_opens_on_a_click(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_hyperlink("click here", "https://example.com/page");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let (on, off) = (h.at_cell(2, 0), h.at_cell(15, 0));
+    h.rest_on(on);
+    assert_eq!(h.disclosure_shown(), (true, false), "the ordinary display");
+    h.click_at(on);
+    assert_eq!(
+        h.cx.opened_url().as_deref(),
+        Some("https://example.com/page")
+    );
+    h.rest_on(off);
+    assert_eq!(h.disclosure_shown(), (false, false), "moving off closes it");
+}
+
+/// When a hyperlink's text is itself a web address naming somewhere else, the display becomes the loud warning that
+/// shows the text beside the real target: the lookalike defence of SPEC.md's links paragraph.
+#[gpui::test]
+fn a_lookalike_hyperlink_shows_the_warning(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_hyperlink("https://bank.example/", "https://evil.example/");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let on = h.at_cell(4, 0);
+    h.rest_on(on);
+    assert_eq!(h.disclosure_shown(), (true, true));
+}
+
+/// The display is the whole safeguard: a click on a program's hyperlink whose display was not fully visible when last
+/// drawn is refused, opens nothing, and says why at the top of the terminal until the next press there (the old app's
+/// refusal). A program with mouse reporting on hears nothing of a press on the link Farhelm keeps for itself.
+#[gpui::test]
+fn a_click_whose_destination_is_not_fully_visible_is_refused(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_hyperlink("click here", "https://example.com/page");
+    h.fake().output(mouse_mode("click"));
+    settle(h.cx);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let on = h.at_cell(2, 0);
+    h.rest_on(on);
+    assert_eq!(
+        h.disclosure_shown(),
+        (true, false),
+        "the premise: the display is shown"
+    );
+    // As if the display had run past the window's bottom edge when it was last drawn.
+    h.cx.update(|_, cx| {
+        let shown = owner.read(cx).disclosure.as_ref().unwrap().drawn.clone();
+        let (bounds, window) = shown.get().unwrap();
+        shown.set(Some((
+            Bounds::new(point(bounds.origin.x, window.height - px(4.)), bounds.size),
+            window,
+        )));
+    });
+    h.cx.simulate_mouse_down(on, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_up(on, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(h.cx.opened_url(), None, "nothing opens");
+    assert!(
+        h.cx.debug_bounds("terminal-link-refusal").is_some(),
+        "the refusal says why"
+    );
+    assert_eq!(
+        h.disclosure_shown(),
+        (false, false),
+        "and is not covered by the display"
+    );
+    assert_eq!(h.sent(), [], "the program heard nothing of the press");
+    let off = h.at_cell(15, 0);
+    h.cx.simulate_mouse_down(off, MouseButton::Left, Modifiers::alt());
+    h.cx.simulate_mouse_up(off, MouseButton::Left, Modifiers::alt());
+    settle(h.cx);
+    assert!(
+        h.cx.debug_bounds("terminal-link-refusal").is_none(),
+        "the next press clears it"
+    );
+}
+
+/// The display follows the pointer from one hyperlink row to the next (each row of a wrapped hyperlink is its own link
+/// to the grid model), and survives a click: the press closes the popover, as any press outside one does, and it comes
+/// back while the pointer rests, so a second click opens too. Once, moving between rows closed both displays and every
+/// click after was refused.
+#[gpui::test]
+fn the_display_follows_wrapped_rows_and_returns_after_a_click(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let asked = h.fake().attach();
+    let mut replay = screen(asked.cols, asked.rows, "", serde_json::Value::Null);
+    replay[2] = serde_json::from_value(serde_json::json!({
+        "t":"rows",
+        "rows":[
+            [0,{"w":true,"r":[[0,10,"first half",[0,-1,-1],0]]}],
+            [1,{"w":false,"r":[[0,11,"second half",[0,-1,-1],0]]}]
+        ],
+        "links":[["1","https://example.com/wrapped"]]
+    }))
+    .unwrap();
+    for message in replay {
+        h.fake().output(message);
+    }
+    h.fake().replay_complete();
+    settle(h.cx);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let (row0, row1) = (h.at_cell(2, 0), h.at_cell(2, 1));
+    h.rest_on(row0);
+    assert_eq!(h.disclosure_shown(), (true, false));
+    h.rest_on(row1);
+    assert_eq!(
+        h.disclosure_shown(),
+        (true, false),
+        "the next row has a display too"
+    );
+    h.cx.simulate_mouse_down(row1, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_up(row1, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    redraw(h.cx);
+    assert_eq!(
+        h.cx.opened_url().as_deref(),
+        Some("https://example.com/wrapped")
+    );
+    assert_eq!(
+        h.disclosure_shown(),
+        (true, false),
+        "the display is back while the pointer rests"
+    );
+    // The test platform keeps only the last address opened, and this is the same one, so the second click shows it
+    // opened by not being refused: a refused click is the only outcome here that does not open.
+    h.cx.simulate_mouse_down(row1, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_up(row1, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert!(
+        h.cx.debug_bounds("terminal-link-refusal").is_none(),
+        "a second click opens too"
+    );
+}
+
+/// The refusal's advice has to work: after a refused click, hovering again (moving off the link and back) brings the
+/// display back and a click then opens. Until the pointer moves, the display stays away, so it does not sit over the
+/// explanation, which a press elsewhere then clears. Once, a refusal kept every display away until the next press, so
+/// hovering again showed nothing and the next click was refused too.
+#[gpui::test]
+fn hovering_again_after_a_refusal_shows_the_display_and_a_click_opens(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_hyperlink("click here", "https://example.com/page");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let (on, off) = (h.at_cell(2, 0), h.at_cell(15, 0));
+    h.rest_on(on);
+    h.cx.update(|_, cx| {
+        let shown = owner.read(cx).disclosure.as_ref().unwrap().drawn.clone();
+        let (bounds, window) = shown.get().unwrap();
+        shown.set(Some((
+            Bounds::new(point(bounds.origin.x, window.height - px(4.)), bounds.size),
+            window,
+        )));
+    });
+    h.click_at(on);
+    assert_eq!(h.cx.opened_url(), None, "the premise: the click is refused");
+    redraw(h.cx);
+    assert_eq!(
+        h.disclosure_shown(),
+        (false, false),
+        "no display while the pointer stays put"
+    );
+    h.rest_on(off);
+    h.rest_on(on);
+    assert_eq!(
+        h.disclosure_shown(),
+        (true, false),
+        "hovering again shows the display"
+    );
+    h.click_at(on);
+    assert_eq!(
+        h.cx.opened_url().as_deref(),
+        Some("https://example.com/page"),
+        "and a click opens"
+    );
+}
+
+/// A program's hyperlink that is not a web address (a `file://` link, as `ls --hyperlink` prints) opens nothing and
+/// has no display; a click on it must not claim the display was hidden.
+#[gpui::test]
+fn a_click_on_a_file_hyperlink_says_nothing(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_hyperlink("notes.txt", "file:///home/user/notes.txt");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let on = h.at_cell(2, 0);
+    h.rest_on(on);
+    assert_eq!(
+        h.hovered().as_deref(),
+        Some("file:///home/user/notes.txt"),
+        "the premise: it is a link"
+    );
+    h.click_at(on);
+    assert_eq!(h.cx.opened_url(), None);
+    assert!(
+        h.cx.debug_bounds("terminal-link-refusal").is_none(),
+        "no refusal"
+    );
+}
+
 // ---- Mouse reporting -----------------------------------------------------------------------------------------------
 
 /// A mouse report as the terminal sends it, with no modifier held.

@@ -37,6 +37,10 @@ pub struct LinkDisclosure {
     pub target: String,
     /// Escaped address-shaped program text requiring the loud mismatch warning.
     pub claimed: Option<String>,
+    /// The same text unescaped (trimmed, and shortened like `claimed` but counted before escaping), for a UI that
+    /// escapes host-supplied text itself: the desktop app draws it through its host-text element, which would escape
+    /// `claimed` a second time.
+    pub claimed_text: Option<String>,
 }
 
 /// Judge lookalike punctuation only at the claim gate. Feeding the normalized
@@ -162,6 +166,7 @@ impl GridModel {
             host: target[url::Position::BeforeHost..url::Position::AfterPort].into(),
             target: shortened(target.as_str()),
             claimed: warning.map(|text| shortened(&visible(text.trim_matches(is_js_space)))),
+            claimed_text: warning.map(|text| shortened(text.trim_matches(is_js_space))),
         })
     }
 

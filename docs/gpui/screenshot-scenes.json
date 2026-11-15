@@ -458,6 +458,85 @@
           "spam-line-100"
         ]
       ]
+    },
+    {
+      "id": "app-terminal-link-lookalike",
+      "title": "A program's hyperlink whose text names another address, hovered: the loud destination warning beside the pointer",
+      "reference": null,
+      "mockup": false,
+      "start": [
+        "--sessions",
+        "1"
+      ],
+      "steps": [
+        [
+          "click",
+          "text:Fixture 1"
+        ],
+        [
+          "terminal-text",
+          "--wait",
+          "FAKE-AGENT READY"
+        ],
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "type",
+          "--keys",
+          "]8;;https://evil.example/"
+        ],
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "type",
+          "--keys",
+          "\\"
+        ],
+        [
+          "type",
+          "--keys",
+          "https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/ https://bank.example/"
+        ],
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "type",
+          "--keys",
+          "]8;;"
+        ],
+        [
+          "press",
+          "escape"
+        ],
+        [
+          "type",
+          "--keys",
+          "\\"
+        ],
+        [
+          "press",
+          "enter"
+        ],
+        [
+          "terminal-text",
+          "--wait",
+          "echo:"
+        ],
+        [
+          "hover",
+          "text:Recently active"
+        ],
+        [
+          "hover",
+          "id:terminal-grid"
+        ]
+      ]
     }
   ],
   "foundation_goldens": [

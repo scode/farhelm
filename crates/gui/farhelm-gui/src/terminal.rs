@@ -19,6 +19,7 @@
 //! replay, and what the pane says while the stream is not live.
 
 pub mod attached;
+mod disclosure;
 mod style;
 #[cfg(test)]
 mod tests;
@@ -565,6 +566,15 @@ impl TerminalView {
     /// still the link its press was on.
     pub fn link_at(&self, position: Position) -> Option<TerminalLink> {
         self.model.link_at(position)
+    }
+
+    /// What the destination display of `link` shows, as the grid model judges it now; `None` for a link that is not a
+    /// web address.
+    pub fn link_disclosure(
+        &self,
+        link: &TerminalLink,
+    ) -> Option<farhelm_grid_model::LinkDisclosure> {
+        self.model.link_disclosure(link)
     }
 
     /// The pointer now rests on view cell `cell`, (column, row) of what is shown (`None`: off the screen); redraws

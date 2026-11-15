@@ -164,13 +164,14 @@ fn open_returning(
 
 /// The Rename shortcut ([`crate::actions::RenameSession`]): open the editor for the open session, which in this app is
 /// the selected one (the module docs' NOTE says which selected session it cannot rename yet). With no session selected,
-/// or while any dialog or menu is open (SPEC.md: "A visible modal keeps keyboard ownership"), it does nothing. The main
+/// or while a dialog or menu holds the keyboard (SPEC.md: "A visible modal keeps keyboard ownership"; a popover that
+/// never takes focus, such as a terminal link's destination display, is not one), it does nothing. The main
 /// view calls it for the action wherever focus is, the terminal included, and the action is taken either way, as
 /// `ONCE_PER_PRESS` requires.
 pub(crate) fn open_for_selected(window: &mut Window, cx: &mut App) {
     // A key pressed inside a layer reaches the main view's handler too, since `root::wrap` draws the overlay inside the
     // main view's ground; this is what keeps the modal rule there.
-    if layers::any_open(window, cx) {
+    if layers::focus_layer_open(window, cx) {
         return;
     }
     let Some(key) = local_state::selected(cx) else {
