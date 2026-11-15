@@ -1,6 +1,6 @@
 //! A plain Replace that the helm refused because the source's host asks before YOLO launches: the launcher's YOLO
-//! question, drawn where that Replace was asked (the source's row, or the open session's header), and the Replace again
-//! with consent once the user confirms.
+//! question, drawn where that Replace was asked (the source's row, or the open session's header or interrupted card),
+//! and the Replace again with consent once the user confirms.
 //!
 //! SPEC.md, "Creation", the YOLO paragraph: the GUI answers that refusal "with a prominent confirmation, shown with the
 //! control or surface that started the launch and scrolled into view", and "a plain Replace's question, which arrives
@@ -14,7 +14,8 @@
 //!   the question is asked, since the question says it instead; any other refusal shows on the row as before
 //!   ([`super::outcome`]). A refusal whose source the store no longer holds asks nothing and keeps the record.
 //! - **Where.** The question belongs to the surface the Replace was asked from ([`Surface`]): the row draws it under
-//!   its lines, the header below its top row, or the source's row while the source is not the open session ([`shown`]).
+//!   its lines, the header below its top row, the interrupted card inside the card (the header's place while the card
+//!   is gone), or the source's row while the source is not the open session ([`shown`]).
 //!   One question per session, since a session has one Replace in flight at most; a later plain Replace of the session
 //!   replaces it. The question is kept here rather than by the row or the header, because the reply settles from the
 //!   operation store, with neither view at hand, and the virtualized row is rebuilt on every frame.
@@ -67,15 +68,17 @@ use crate::theme::{self, metrics};
 const REVEAL_FRAMES: u8 = 2;
 
 /// Where a plain Replace was asked, which is where its YOLO question shows.
-///
-/// NOTE: The interrupted card's Replace (the status-cards piece) is a third surface: it adds a variant here, asks
-/// through `super::replace::begin` and `confirm` as the header does, and draws [`shown`] for its variant on the card.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Surface {
     /// The source's row, from its menu's Replace.
     Row,
     /// The open session's header, from its Replace button.
     Header,
+    /// The open session's interrupted card (`session_pane/card.rs`), from its Replace button. The card stands in the
+    /// open session's pane as the header does, so its question shows where the header's would ([`shown`]): in the card
+    /// while the card shows, below the top row once it does not (the session recovered meanwhile), and at the row while
+    /// the session is not open.
+    Card,
 }
 
 /// One session's YOLO question: where it shows, the question, and how many more frames the list scrolls its row into
@@ -153,17 +156,19 @@ fn update(cx: &mut App, change: impl FnOnce(&mut Questions)) {
 }
 
 /// `key`'s question for drawing on `surface`, if it shows there: where it was asked, except that a question asked from
-/// the header shows at the source's row while the source is not the open session, since the header is drawn only for
-/// the open session and the question must never be shown nowhere (SPEC.md: "A failure or partial result appears on
-/// the source session's row"). So a question shows in exactly one place, and only while it is open, so a surface's
-/// spacing around it goes with it.
+/// the header or the interrupted card shows at the source's row while the source is not the open session, since both
+/// are drawn only for the open session and the question must never be shown nowhere (SPEC.md: "A failure or partial
+/// result appears on the source session's row"). The header and the card are one place, the open session's pane,
+/// which draws the question in the card while it shows the card and below the top row otherwise, never both. So a
+/// question shows in exactly one place, and only while it is open, so a surface's spacing around it goes with it.
 pub(crate) fn shown(key: &str, surface: Surface, cx: &App) -> Option<Inline<YoloAsk>> {
     let asked = asked(key, cx)?;
     let open = local_state::selected(cx).as_deref() == Some(key);
     let here = match (asked.surface, surface) {
-        (Surface::Row, Surface::Row) | (Surface::Header, Surface::Header) => true,
-        (Surface::Header, Surface::Row) => !open,
-        (Surface::Row, Surface::Header) => false,
+        (Surface::Row, Surface::Row) => true,
+        (Surface::Row, Surface::Header | Surface::Card) => false,
+        (Surface::Header | Surface::Card, Surface::Row) => !open,
+        (Surface::Header | Surface::Card, Surface::Header | Surface::Card) => true,
     };
     (here && asked.question.is_open(cx)).then(|| asked.question.clone())
 }

@@ -998,6 +998,11 @@
       "reference": null
     },
     {
+      "golden": "session-interrupted-card",
+      "title": "The interrupted card in place of an interrupted session's terminal: Restart and Replace for a session that can resume, Replace alone and why for one whose conversation was never captured (compared with the old stylesheet; there is no reference picture)",
+      "reference": null
+    },
+    {
       "golden": "session-details-bar",
       "title": "The open session's details bar under its terminal: running on the local host, waiting, exited with a stop annotation, interrupted, a launch failure cut short, unclassified (no badge), no host name and no managed checkout, and stale (title and host only), each with its checkout mark and copy fields, then the running one in a narrow pane",
       "reference": "main-running-session"

@@ -24,10 +24,11 @@
 //! - **A long wait says so, as Replace's does.** After two seconds the open session's header shows "Restarting on
 //!   <host>… <n> s" ([`super::outcome`]'s clock, shared with Replace's).
 //! - **A refusal stays on the session** as "Restart: <the helm's words>", in the operation store's slot for the session,
-//!   for as long as [`super::outcome`] says. A success says nothing: the pushed list shows the session running again.
+//!   for as long as [`super::outcome`] says. A success says nothing: the pushed list shows the session running again,
+//!   once the host's next listing reaches the helm (the interrupted card bridges that gap).
 //!
 //! The decisions live in [`begin`] and [`confirm`], functions of a session's row, so another surface (the interrupted
-//! card, a later piece) can ask the same question and send the same request.
+//! card, `session_pane/card.rs`) can ask the same question and send the same request.
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::session_requests::RestartSessionBody;
@@ -38,7 +39,7 @@ use serde_json::json;
 
 use super::{menu, outcome};
 use crate::components::{HoverHelp, Tier};
-use crate::operations::{Command, OpKey, Work};
+use crate::operations::{Command, OpKey, Outcome, Work};
 use crate::prompt::{Answer, Question};
 use crate::session;
 
@@ -102,11 +103,12 @@ pub(crate) fn offer_continuation(
 
 /// Whether a restart resumes the conversation, and why not when it cannot, as one clause without its period. Every
 /// unavailable clause names Replace, since SPEC.md makes Replace the way such a session starts over. No "Restart is
-/// unavailable" here: the accessible name says so, and the hover help joins the two.
-fn offer_clause(offer: RestartOffer, kind: AgentKind, ended: bool) -> String {
+/// unavailable" here: the accessible name says so, and the hover help joins the two. The interrupted card's text
+/// (`session_pane/card.rs`) is built from the same clause, so the card and the hover help cannot drift apart.
+pub(crate) fn offer_clause(offer: RestartOffer, kind: AgentKind, ended: bool) -> String {
     match offer {
         RestartOffer::Resume => "restarting resumes this session's own conversation".to_owned(),
-        RestartOffer::NotCaptured => not_captured_clause(kind, ended),
+        RestartOffer::NotCaptured => not_captured_clause(kind, ended, REPLACE_STARTS_OVER),
         RestartOffer::NoConversationReporting => {
             "Farhelm has no conversation reporting for this session's agent, so Replace starts it over"
                 .to_owned()
@@ -118,28 +120,32 @@ fn offer_clause(offer: RestartOffer, kind: AgentKind, ended: bool) -> String {
     }
 }
 
-/// What an uncaptured conversation means for a session of `kind`. While the agent may still report, it says, naming
-/// the agent, when Restart normally becomes available (the agent kind's own timing, the one source of those facts);
-/// once the agent has ended that would be false, so it says the conversation was never captured. A kind that names no
-/// agent gets the same shape with no per-agent claim.
-fn not_captured_clause(kind: AgentKind, ended: bool) -> String {
-    const START_OVER: &str = "Replace starts the session over";
+/// How an uncaptured conversation's explanation says the session can start over, on every surface that offers plain
+/// Replace.
+pub(crate) const REPLACE_STARTS_OVER: &str = "Replace starts the session over";
+
+/// What an uncaptured conversation means for a session of `kind`, ending in `start_over`, the way the surface offers to
+/// start the session over ([`REPLACE_STARTS_OVER`], or the interrupted card's Replace with for a legacy launch). While
+/// the agent may still report, it says, naming the agent, when Restart normally becomes available (the agent kind's own
+/// timing, the one source of those facts); once the agent has ended that would be false, so it says the conversation
+/// was never captured. A kind that names no agent gets the same shape with no per-agent claim.
+pub(crate) fn not_captured_clause(kind: AgentKind, ended: bool, start_over: &str) -> String {
     let readiness = kind
         .display_name()
         .zip(kind.restart_readiness())
         .map(|(name, readiness)| (name, readiness.clause(ReadinessWording::ToTheUser)));
     match (readiness, ended) {
         (Some((name, timing)), false) => format!(
-            "for {name} sessions, Restart becomes available {timing}; until then, {START_OVER}"
+            "for {name} sessions, Restart becomes available {timing}; until then, {start_over}"
         ),
         (None, false) => format!(
-            "Restart becomes available once Farhelm captures this session's conversation; until then, {START_OVER}"
+            "Restart becomes available once Farhelm captures this session's conversation; until then, {start_over}"
         ),
         (Some((name, _)), true) => format!(
-            "Farhelm never captured this {name} session's conversation, so Restart can't resume it; {START_OVER}"
+            "Farhelm never captured this {name} session's conversation, so Restart can't resume it; {start_over}"
         ),
         (None, true) => format!(
-            "Farhelm never captured this session's conversation, so Restart can't resume it; {START_OVER}"
+            "Farhelm never captured this session's conversation, so Restart can't resume it; {start_over}"
         ),
     }
 }
@@ -280,11 +286,18 @@ pub(crate) fn send(key: &str, stop_if_running: bool, cx: &mut App) {
         tracing::warn!("a session key that cannot be a path segment was not restarted");
         return;
     };
-    // Nothing to do once it settles: a refusal is the operation store's to keep, and a success moves no focus and
-    // opens nothing, since the pushed list shows the session running again and the terminal follows the restarted
-    // agent through its own stream.
+    // A refusal is the operation store's to keep, and a success moves no focus and opens nothing: the terminal follows
+    // the restarted agent through its own stream. A success marks the session restarted for its interrupted card, since
+    // the helm may still list it as Interrupted until its host's next listing (`session_pane/card.rs`). Every success
+    // is marked, interrupted or not: the mark of a session listed as anything but Interrupted is dropped at once, so
+    // it is harmless, and this completion has no row to tell the two apart.
+    let restarted = key.to_owned();
     let started = operations.update(cx, |operations, cx| {
-        operations.start(&OpKey::session(key), command, cx, |_, _| {})
+        operations.start(&OpKey::session(key), command, cx, move |settled, cx| {
+            if matches!(settled.outcome, Outcome::Done(_)) {
+                crate::session_pane::card::restarted(&restarted, cx);
+            }
+        })
     });
     match started {
         Ok(()) => outcome::start_clock(key, Work::Restart, cx),
