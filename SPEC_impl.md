@@ -320,16 +320,19 @@ Each is read through its GET route: sessions keyed by their served id, templates
 id, hosts by registry id; preferences and the announcement queue travel as one entry each; host progress is
 `GET /api/provisioning`, every run this helm process retains, keyed by host id (a host with no run is absent, not idle);
 recipes are `GET /api/tensorlake/recipes`, keyed by name, and recipe places `GET /api/recipe-places`, keyed by recipe
-and place (`RecipePlaceView::key`). Their entry types live in `farhelm-proto` beside the channel's. The snapshot sent
-when a channel opens never waits on a remote host. Every other read (directory browse, repository lists, the trash list,
-launch history, file stat) is an ordinary GET command whose reply body is the result. Data the old GUI polled stays a
-query that the GUI issues again; it does not become a replicated collection. There are two exceptions, both for work
-whose progress Settings follows while it runs: the Podman check's readiness, which rides each local and ssh host's entry
-so its start and end reach the GUI (see "Podman places, creation and images"), and the recipe catalog and recipe places,
-so a recipe build's steps reach Settings → Recipes as they move (decided by the migration's orchestrator on 2026-11-15).
-A pushed read must start nothing, because it runs after every bump; that is why `/api/environment-places`, whose read
-schedules Podman checks, stays a query. Neither recipe collection follows the clock: a prepared artifact that passes its
-freshness window reads stale at the next re-read, not when it passes.
+and place (`RecipePlaceView::key`). Their entry types live in `farhelm-proto` beside the channel's. The pushed
+preferences supersede the old client's reread of shared preferences before an automatic pick: the GUI picks from the
+preferences as last pushed, since the helm pushes them together with the session changes that prompt a pick (decided by
+the migration's orchestrator on 2026-11-15). The snapshot sent when a channel opens never waits on a remote host. Every
+other read (directory browse, repository lists, the trash list, launch history, file stat) is an ordinary GET command
+whose reply body is the result. Data the old GUI polled stays a query that the GUI issues again; it does not become a
+replicated collection. There are two exceptions, both for work whose progress Settings follows while it runs: the Podman
+check's readiness, which rides each local and ssh host's entry so its start and end reach the GUI (see "Podman places,
+creation and images"), and the recipe catalog and recipe places, so a recipe build's steps reach Settings → Recipes as
+they move (decided by the migration's orchestrator on 2026-11-15). A pushed read must start nothing, because it runs
+after every bump; that is why `/api/environment-places`, whose read schedules Podman checks, stays a query. Neither
+recipe collection follows the clock: a prepared artifact that passes its freshness window reads stale at the next
+re-read, not when it passes.
 
 The session list is a query. Its filter, sort and cap are this channel's state, set by a command, and the helm keeps
 serving the filtered, capped view with its `total`, `matching` and `truncated` counts. A channel starts unfiltered, in

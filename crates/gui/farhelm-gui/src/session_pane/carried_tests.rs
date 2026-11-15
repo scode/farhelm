@@ -3,7 +3,7 @@
 //! (`session_list::filters`, "The query names the open session"). The list must not draw or count it, and the pane must
 //! work on it as on a listed session: its terminal stays, the header's actions ask and send about it, the details bar
 //! names it, and the Rename shortcut renames it. Once it is deleted, by this window or elsewhere, the selection moves
-//! on, filtered listing or not.
+//! on, filtered listing or not; an absence the helm says its host's cap cut away keeps it open.
 //!
 //! The window is the real main view over the helm client's fake, which plays the helm's side: the test pushes what the
 //! helm would push for each query and answers every command itself. The fixtures are the rail's: sessions a and b on
@@ -12,6 +12,7 @@
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
+use farhelm_proto::ui_channel::CollectionMeta;
 use gpui::{TestAppContext, VisualTestContext};
 use serde_json::json;
 
@@ -361,4 +362,53 @@ fn a_carried_session_deleted_elsewhere_moves_the_selection_on(cx: &mut TestAppCo
         sent_queries(&mut fake),
         [json!({ "status": "running", "selected": "b" })]
     );
+}
+
+/// The contrast to `a_carried_session_deleted_elsewhere_moves_the_selection_on`: each host lists only its newest 500
+/// sessions, so an old open session on a host past its cap is in neither a filtered listing nor the helm's read of it
+/// alone, although it exists. With a host filter naming another host, the listing was read whole and its counts say
+/// nothing about the open session's host, so the helm marks the absence itself (`CollectionMeta::selected_cut`), and
+/// the window must take that as no proof (`session_list::selection::absent_while_named`'s NOTE). Before the mark, the
+/// window moved on from a session that still existed. Specified, with a on host 2 and b on host 3, and host 3 chosen
+/// on the rail (`{"host": 3, "selected": "a"}`) and the helm carrying a (the details bar names it): a push that lists b
+/// alone, carries nothing, removes a from the store (the details bar draws nothing) and says the open session's read
+/// was cut keeps a open, and the window sends nothing, neither the query again nor a new selection.
+#[gpui::test]
+fn a_carried_session_cut_away_on_its_own_host_stays_open(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_a(cx, session("a").host(2), session("b").host(3));
+    test_support::click(cx, "host-rail-host-3");
+    let (query, body) = one_query(&mut fake);
+    assert_eq!(body, json!({ "host": 3, "selected": "a" }));
+    fake.push(change(carrying(filtered(&["b"], 2, 1), "a"), &[], &[]));
+    fake.reply(query.id, 204, None);
+    settle(cx);
+    assert_eq!(
+        selected(cx).as_deref(),
+        Some("a"),
+        "the premise: a is open while host 3 is chosen"
+    );
+    assert_eq!(
+        test_support::label(cx, TITLE_ID).as_deref(),
+        Some("a"),
+        "the premise: the helm carries a, so the details bar names it"
+    );
+
+    let cut = CollectionMeta {
+        selected_cut: true,
+        ..filtered(&["b"], 2, 1)
+    };
+    fake.push(change(cut, &[], &["a"]));
+    settle(cx);
+    // The details bar draws nothing for a session the store holds no row for, so this shows the push landed.
+    assert_eq!(
+        test_support::label(cx, TITLE_ID),
+        None,
+        "the push removed a's row"
+    );
+    assert_eq!(
+        selected(cx).as_deref(),
+        Some("a"),
+        "an absence cut away is no proof"
+    );
+    assert_eq!(sent(&mut fake), [], "nothing was sent");
 }

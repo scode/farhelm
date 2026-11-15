@@ -34,8 +34,8 @@
 //! **What filtering leaves alone.** Hiding the open session changes neither the selection nor its terminal: a filtered
 //! listing proves nothing about the sessions it leaves out (`session::listing_proves_gone`), and the helm keeps pushing
 //! the hidden open session's current state, so the pane goes on naming it. The one thing a filtered listing does prove
-//! is that the open session itself is gone, once the query it answers named that session and the listing is not cut
-//! ([`Choice::serves_named`]).
+//! is that the open session itself is gone, once the query it answers named that session and the helm says no cap cut
+//! the session away, neither the listing's nor the one on the session's own host ([`Choice::serves_named`]).
 //! Ended sessions show only under All, which is the helm's doing: its status filter matches the status word exactly, so
 //! Idle never lists an exited session.
 //!
@@ -276,10 +276,11 @@ impl Choice {
     }
 
     /// Whether the helm now serves a query that names `key` as the open session, with no later query on its way. Then
-    /// every listing it pushes holds `key`, listed or carried, for as long as that session exists (SPEC_impl.md, "What
-    /// is pushed, and how changes are found"), so an available listing without it shows the session gone, filtered or
-    /// not (SPEC.md's exception to "Existing removal detection", decided by the maintainer on 2026-11-15). A cut
-    /// listing still proves nothing (`selection::absent_while_named`'s NOTE).
+    /// every listing it pushes holds `key`, listed or carried, for as long as that session exists and its host's list
+    /// reaches it (SPEC_impl.md, "What is pushed, and how changes are found"), so an available listing without it shows
+    /// the session gone, filtered or not (SPEC.md's exception to "Existing removal detection", decided by the
+    /// maintainer on 2026-11-15). A cut listing, or one the helm marks as cut at the session's own host, still proves
+    /// nothing (`selection::absent_while_named`'s NOTE).
     ///
     /// NOTE: Both halves are needed. The query last sent is not enough: until the helm accepts a query naming a session
     /// the user just opened (a quick-switcher pick the filters hide, say), its listings need not hold that session, and
