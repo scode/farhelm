@@ -938,6 +938,11 @@
       "reference": "host-add-dialog"
     },
     {
+      "golden": "host-add-dialog-agent",
+      "title": "The Add host dialog as an agent's host add request opens it: who asked and what Add approves above the fields, which hold the requested destination and alias (the old app had no screen of it; the reference is the ordinary dialog)",
+      "reference": "host-add-dialog"
+    },
+    {
       "golden": "hosts-shown-with-a-host-chosen",
       "title": "Host management shown with a host chosen: the panel in place of the list, Hosts pressed at the rail's foot, and the chosen avatar in the quieter look",
       "reference": "hosts-panel"

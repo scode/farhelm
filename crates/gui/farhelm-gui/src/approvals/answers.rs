@@ -57,6 +57,15 @@ impl Arming {
         self.armed
     }
 
+    /// An answer bar already armed, for a screenshot scene, which cannot let the pause run out.
+    #[cfg(test)]
+    pub fn armed_for_scene() -> Self {
+        Arming {
+            armed: true,
+            ..Arming::default()
+        }
+    }
+
     /// The region now shows `waiting` (ids, oldest first) with `expanded` expanded. A change disarms the buttons and
     /// starts a new pause; the same presentation again changes nothing. Call it from the update that changed what is
     /// shown (a store change, a header chosen), never while drawing: a notify requested while drawing is dropped.
@@ -130,6 +139,27 @@ pub fn send(
     arming: &Entity<Arming>,
     cx: &mut App,
 ) -> Result<Sent, NotStarted> {
+    let always = matches!(
+        answer,
+        ApprovalAnswer::AlwaysAllow | ApprovalAnswer::AlwaysAllowOwnHost
+    );
+    start(id, answer, host_add, arming, cx, move |settled, cx| {
+        settle(always, settled, cx);
+    })
+}
+
+/// Send `answer` to the request `id` unless the answer bar is paused, under the request's own key, and hand its reply
+/// to `on_settled` alone: what [`send`] does for a card, without the late notice. The Add host dialog answers an agent's
+/// host add through it and decides itself what each reply shows ([`super::host_add`]). Refuses with
+/// [`NotStarted::Busy`] while an answer to the request is in flight, whichever surface sent it.
+pub fn start(
+    id: &str,
+    answer: ApprovalAnswer,
+    host_add: Option<String>,
+    arming: &Entity<Arming>,
+    cx: &mut App,
+    on_settled: impl FnOnce(&Settled, &mut App) + 'static,
+) -> Result<Sent, NotStarted> {
     if !arming.read(cx).armed() {
         return Ok(Sent::Paused);
     }
@@ -137,15 +167,8 @@ pub fn send(
     let Some(operations) = crate::session::current_operations(cx) else {
         return Err(NotStarted::Retired);
     };
-    let id = id.to_owned();
-    let always = matches!(
-        answer,
-        ApprovalAnswer::AlwaysAllow | ApprovalAnswer::AlwaysAllowOwnHost
-    );
     operations.update(cx, |operations, cx| {
-        operations.start(&OpKey::approval(&id), command, cx, move |settled, cx| {
-            settle(always, settled, cx);
-        })
+        operations.start(&OpKey::approval(id), command, cx, on_settled)
     })?;
     Ok(Sent::Sent)
 }
@@ -158,9 +181,15 @@ fn settle(always: bool, settled: &Settled, cx: &mut App) {
     if refusal.status != GONE {
         return;
     }
+    post_late(always, cx);
+}
+
+/// Post the late-answer notice, in its Always-allow form after an Always allow, replacing the other form if it shows.
+/// The Add host dialog posts it too when its own Allow was late, since it closes then ([`super::host_add`]).
+pub(super) fn post_late(always: bool, cx: &mut App) {
     notices::withdraw(Notice::LateAnswer { always: !always }, cx);
     notices::post(Notice::LateAnswer { always }, cx);
 }
 
 /// The helm's status for an answer to a request that no longer waits.
-const GONE: u16 = 410;
+pub(super) const GONE: u16 = 410;

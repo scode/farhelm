@@ -190,7 +190,8 @@ impl Card {
 }
 
 impl Requester {
-    fn of(host: &str, session: &ApprovalSession) -> Self {
+    /// The From line's parts for a request from `host` by `session`.
+    pub(super) fn of(host: &str, session: &ApprovalSession) -> Self {
         Requester {
             host: HostText::from_host(host),
             title: session.title.as_deref().map(HostText::from_host),

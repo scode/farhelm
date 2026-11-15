@@ -7,17 +7,21 @@
 //! sends the user's answer back, so nothing a card does can let a request through that the helm did not hold for it.
 //!
 //! Built so far: [`model`], what a card shows and offers for every request kind, decided without a window;
-//! [`answers`], sending an answer, the answer bar's 700 ms pause and a late answer's notice; and [`card`], the expanded
-//! card drawn from the model. The region that places the cards and lists the other waiting requests comes in its own
-//! change.
+//! [`answers`], sending an answer, the answer bar's 700 ms pause and a late answer's notice; [`card`], the expanded
+//! card drawn from the model; and [`host_add`], what the ordinary Add host dialog holds for an agent's host add, which a
+//! card answers through that dialog. The region that places the cards and lists the other waiting requests comes in its
+//! own change.
 
 pub mod answers;
 pub mod card;
+pub mod host_add;
 pub mod model;
 
 #[cfg(test)]
 mod answers_tests;
 #[cfg(test)]
 mod card_tests;
+#[cfg(test)]
+mod host_add_tests;
 #[cfg(test)]
 mod model_tests;
