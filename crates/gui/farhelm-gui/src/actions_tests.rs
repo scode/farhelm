@@ -26,11 +26,11 @@ use gpui::{
 
 use crate::actions::{
     CONTEXT, Captured, DecreaseTerminalTextSize, DeleteSession, HideApp, HideOtherApps,
-    IncreaseTerminalTextSize, KeyOwner, MAC_MENU_CHORDS, MinimizeWindow, PHYSICAL_KEYS,
+    IncreaseTerminalTextSize, KeyOwner, MAC_MENU_CHORDS, MinimizeWindow, NewSession, PHYSICAL_KEYS,
     PhysicalKey, QuickSwitcher, Quit, RenameSession, ShowKeyboardShortcuts, TERMINAL_CONTEXT,
     TERMINAL_KEYS, TEXT_INPUT_CONTEXT, THIS_PLATFORM, TemplateNumberKey, ToggleFullScreen,
-    arm_key_capture, disarm_key_capture, key_capture_armed, owner_on, physical_key_at, physical_on,
-    terminal_key_owner,
+    arm_key_capture, disarm_key_capture, key_capture_armed, new_session_binding, owner_on,
+    physical_key_at, physical_on, terminal_key_owner,
 };
 use crate::components::{Button, HoverHelp, Role, TextInput, TextInputState};
 use crate::focus::{self, OnPress};
@@ -65,6 +65,7 @@ impl Render for Scene {
         let received = self.received.clone();
         let probes = self.probes.clone();
         let (deletes, renames, switchers) = (self.ran.clone(), self.ran.clone(), self.ran.clone());
+        let news = self.ran.clone();
         let (shortcuts, bigger, smaller, numbers) = (
             self.ran.clone(),
             self.ran.clone(),
@@ -82,6 +83,7 @@ impl Render for Scene {
             .on_action(move |action: &QuickSwitcher, _, _| {
                 switchers.borrow_mut().push(action.name())
             })
+            .on_action(move |action: &NewSession, _, _| news.borrow_mut().push(action.name()))
             .on_action(move |action: &ShowKeyboardShortcuts, _, _| {
                 shortcuts.borrow_mut().push(action.name())
             })
@@ -1713,4 +1715,38 @@ fn a_cancel_lets_the_key_go_on_even_after_the_handler_stopped_propagation(cx: &m
         "the arrow it cancelled on reached the terminal"
     );
     assert!(!opened.capture_armed(), "the cancel disarmed the slot");
+}
+
+/// SPEC.md, "Desktop window chrome": "Cmd+N in the Mac desktop app opens New ..., even from a focused terminal"; the
+/// Linux app has no New shortcut. The binding is made on macOS only, where these tests do not run, so its chord and
+/// action are checked as data, spelled out here rather than read from `actions.rs`, and the binding itself is bound by
+/// hand to check that a held Cmd+N opens New once (the orchestrator decided on 2026-11-14 that a held opening shortcut
+/// acts once per press). Specified: the binding is Cmd+N to `NewSession` in Farhelm's context; Cmd+N is an app
+/// shortcut in a focused terminal on a Mac and is listed for no Linux chord; holding it runs `NewSession` once.
+#[gpui::test]
+fn cmd_n_opens_new_on_the_mac_only_and_once_per_press(cx: &mut TestAppContext) {
+    let binding = new_session_binding();
+    assert_eq!(binding.action().name(), NewSession.name());
+    let chords: Vec<&Keystroke> = binding.keystrokes().iter().map(|key| key.inner()).collect();
+    assert_eq!(chords, [&parse("cmd-n")]);
+    assert_eq!(
+        owner_on(Platform::Mac, &down(parse("cmd-n"))),
+        KeyOwner::App,
+        "Cmd+N is an app shortcut in a focused terminal on a Mac"
+    );
+    let row = TERMINAL_KEYS
+        .iter()
+        .find(|row| row.what == "open New")
+        .expect("New has a row in the terminal's table");
+    assert_eq!((row.mac, row.linux), (Some("cmd-n"), None));
+    let mut opened = open(cx);
+    opened
+        .cx
+        .update(|_, cx| cx.bind_keys([new_session_binding()]));
+    opened.hold("cmd-n");
+    assert_eq!(
+        opened.runs_of(NewSession.name()),
+        1,
+        "a held Cmd+N ran New once"
+    );
 }

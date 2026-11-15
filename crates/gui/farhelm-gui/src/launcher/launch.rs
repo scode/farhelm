@@ -25,12 +25,11 @@
 //! brings it back.
 //!
 //! NOTE: Not built yet, each with the piece that brings it: the pending pill and the "Started" pill that report a
-//! launch while the launcher is hidden; New and Cmd+N, which are refused while a launch is pending, and which bring a
-//! waiting refused launcher back instead of a fresh one; refusing Launch while one of this window's host-registry
-//! changes (a host being added or set up) is in flight, the launcher's half of SPEC.md's "Launches and changes to the
-//! host registry still exclude each other"; the YOLO question a refusal can carry; and showing the host's timeout reply
-//! without "Not launched.", since the create may still happen. The last two wait on the operation store telling such
-//! replies apart from other refusals.
+//! launch while the launcher is hidden; refusing Launch while one of this window's host-registry changes (a host being
+//! added or set up) is in flight, the launcher's half of SPEC.md's "Launches and changes to the host registry still
+//! exclude each other"; the YOLO question a refusal can carry; and showing the host's timeout reply without "Not
+//! launched.", since the create may still happen. The last two wait on the operation store telling such replies apart
+//! from other refusals.
 
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::SessionInfo;
@@ -101,9 +100,28 @@ fn waiting(launcher: &Entity<Launcher>, cx: &mut App) -> Option<Waiting> {
     })
 }
 
-/// Put `held` in the slot for the current UI session, or empty it.
+/// Whether a launch's create is out in the current UI session: New and the other ways of starting a launch are refused
+/// meanwhile (SPEC.md: "The same launcher remains busy and cannot accept a second launch or be replaced with another
+/// draft").
+pub(super) fn pending(cx: &mut App) -> bool {
+    let Some(slot) = cx.try_global::<Slot>().map(|slot| slot.0.clone()) else {
+        return false;
+    };
+    slot.update(cx, |slot, cx| {
+        slot.held
+            .current(cx)
+            .as_ref()
+            .is_some_and(|held| held.waiting == Waiting::Reply)
+    })
+}
+
+/// Put `held` in the slot for the current UI session, or empty it, and notify: a surface drawing New's trigger reads
+/// [`super::entry::new_available`] while it draws, and redraws when the slot it read changes.
 fn hold(held: Option<Held>, cx: &mut App) {
-    slot(cx).update(cx, |slot, cx| *slot.held.current(cx) = held);
+    slot(cx).update(cx, |slot, cx| {
+        *slot.held.current(cx) = held;
+        cx.notify();
+    });
 }
 
 /// Send `body`, the draft's create, for `launcher` (the open launcher in `window`) through the operation store, and
