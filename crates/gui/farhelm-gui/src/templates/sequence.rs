@@ -301,9 +301,10 @@ pub enum Outcome {
     Refused(Refusal),
 }
 
-/// Why a sequence was refused. The fields hold raw names and words.
+/// Why a template shortcut was refused: a sequence's refusals from [`Sequence::enter`], the same ones for a single
+/// shortcut's reference (`super::dispatch`), and a failed template read. The fields hold raw names and words.
 ///
-/// Where it is shown depends on where the sequence was typed (SPEC.md). Outside the launcher, [`Refusal::hint`] says
+/// Where it is shown depends on where the shortcut was pressed (SPEC.md). Outside the launcher, [`Refusal::hint`] says
 /// whether it opens Templates with a binding hint, and otherwise New opens showing [`Refusal::sentence`]. Inside the
 /// launcher nothing opens and [`Refusal::launcher_sentence`] is shown beneath search.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -321,6 +322,9 @@ pub enum Refusal {
     Missing(String),
     /// A number key or ⚡ was shown unbound: the first such reference in the queue.
     Unbound(Binding),
+    /// The helm reports it could not read its templates, in these words: nothing can be resolved. The sequence model
+    /// never finds this itself; the dispatcher refuses every shortcut with it while the store says so.
+    Unavailable(String),
 }
 
 /// The unbound number key or ⚡ a refusal is about, and whether the sequence held it alone, which decides the
@@ -356,7 +360,10 @@ impl Refusal {
                 reference: Reference::Mark,
                 ..
             }) => Some(Hint::QuickLaunch),
-            Refusal::UnknownWord(_) | Refusal::AmbiguousWord { .. } | Refusal::Missing(_) => None,
+            Refusal::UnknownWord(_)
+            | Refusal::AmbiguousWord { .. }
+            | Refusal::Missing(_)
+            | Refusal::Unavailable(_) => None,
         }
     }
 
@@ -366,6 +373,7 @@ impl Refusal {
     /// - `No template matches "word"`
     /// - `Template word "word" is ambiguous: one, two`
     /// - `Template name is no longer available`
+    /// - `Couldn't prepare quick launch: error`
     ///
     /// An unbound reference never reaches New: it opens Templates instead ([`Refusal::hint`]). Should a caller ask
     /// anyway, it gets the launcher's wording for it.
@@ -394,6 +402,9 @@ impl Refusal {
                 words(" is no longer available"),
             ],
             Refusal::Unbound(binding) => unbound_sentence(binding),
+            Refusal::Unavailable(error) => {
+                vec![words("Couldn't prepare quick launch: "), host(error)]
+            }
         }
     }
 
@@ -402,11 +413,12 @@ impl Refusal {
     /// captured template is gone always gets the sentence about the sequence, alone or not: the old app turned every
     /// bound key in a sequence into its template's name before the launcher saw it, so only an unbound reference ever
     /// reached the launcher's by-name wording, and saying "No template is marked ⚡" while ⚡ is still set would be
-    /// false.
+    /// false. A failed template read is the old launcher's "Couldn't load templates:" with the helm's words.
     pub fn launcher_sentence(&self) -> Vec<Part> {
         match self {
             Refusal::Unbound(binding) => unbound_sentence(binding),
             Refusal::Missing(_) => vec![words(SEQUENCE_UNBOUND_OR_MISSING)],
+            Refusal::Unavailable(error) => vec![words("Couldn't load templates: "), host(error)],
             Refusal::UnknownWord(_) | Refusal::AmbiguousWord { .. } => self.sentence(),
         }
     }

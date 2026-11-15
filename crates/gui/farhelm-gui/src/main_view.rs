@@ -31,7 +31,8 @@
 //! module from a terminal, a row or empty space; the templates module refuses it while a dialog keeps the keyboard. The
 //! main pane is what its pill is centered over ([`crate::templates::armed`]): the view draws an anchor there in every
 //! connected state, session open or not, so a pill shown on it stays put when a session opens or closes. The ground also
-//! draws the sequence's one window-wide press watcher, since a click anywhere cancels it.
+//! draws the sequence's one window-wide press watcher, since a click anywhere cancels it. The ⚡ chord ([`QuickLaunch`])
+//! is handled on the ground for the same reason, and the templates module's dispatcher decides what it does.
 //!
 //! The main view also keeps the owner of the dialogs SPEC.md opens by themselves when the window starts or resets, the
 //! Welcome card and the first batch of announcements ([`welcome::StartDialogs`]), for the window's life; it is made
@@ -48,7 +49,7 @@ use gpui::{
     Window, div,
 };
 
-use crate::actions::BeginSequence;
+use crate::actions::{BeginSequence, QuickLaunch};
 use crate::actions::{DeleteSession, NewSession, QuickSwitcher, RenameSession};
 use crate::components::{Banner, Button, HoverHelp, Role, Tier};
 use crate::desktop::linux_title_bar;
@@ -257,6 +258,9 @@ impl Render for MainView {
                     crate::terminal::text_size::step(-1, cx);
                 }
             })
+            // Taken whatever the quick launch does with it, as a once-per-press shortcut's handler must be
+            // (`actions.rs`); the dispatcher decides whether it may act here at all.
+            .on_action(|_: &QuickLaunch, window, cx| templates::quick_launch(window, cx))
             .size_full()
             .flex()
             .flex_col()

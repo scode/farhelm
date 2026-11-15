@@ -27,10 +27,10 @@ use gpui::{
 use crate::actions::{
     CONTEXT, Captured, DecreaseTerminalTextSize, DeleteSession, HideApp, HideOtherApps,
     IncreaseTerminalTextSize, KeyOwner, MAC_MENU_CHORDS, MinimizeWindow, NewSession, PHYSICAL_KEYS,
-    PhysicalKey, QuickSwitcher, Quit, RenameSession, ShowKeyboardShortcuts, TERMINAL_CONTEXT,
-    TERMINAL_KEYS, TEXT_INPUT_CONTEXT, THIS_PLATFORM, TemplateNumberKey, ToggleFullScreen,
-    arm_key_capture, disarm_key_capture, key_capture_armed, new_session_binding, owner_on,
-    physical_key_at, physical_on, terminal_key_owner,
+    PhysicalKey, QuickLaunch, QuickSwitcher, Quit, RenameSession, ShowKeyboardShortcuts,
+    TERMINAL_CONTEXT, TERMINAL_KEYS, TEXT_INPUT_CONTEXT, THIS_PLATFORM, TemplateNumberKey,
+    ToggleFullScreen, arm_key_capture, disarm_key_capture, key_capture_armed, new_session_binding,
+    owner_on, physical_key_at, physical_on, terminal_key_owner,
 };
 use crate::components::{Button, HoverHelp, Role, TextInput, TextInputState};
 use crate::focus::{self, OnPress};
@@ -66,6 +66,7 @@ impl Render for Scene {
         let probes = self.probes.clone();
         let (deletes, renames, switchers) = (self.ran.clone(), self.ran.clone(), self.ran.clone());
         let news = self.ran.clone();
+        let quick_launches = self.ran.clone();
         let (shortcuts, bigger, smaller, numbers) = (
             self.ran.clone(),
             self.ran.clone(),
@@ -84,6 +85,9 @@ impl Render for Scene {
                 switchers.borrow_mut().push(action.name())
             })
             .on_action(move |action: &NewSession, _, _| news.borrow_mut().push(action.name()))
+            .on_action(move |action: &QuickLaunch, _, _| {
+                quick_launches.borrow_mut().push(action.name())
+            })
             .on_action(move |action: &ShowKeyboardShortcuts, _, _| {
                 shortcuts.borrow_mut().push(action.name())
             })
@@ -1748,5 +1752,34 @@ fn cmd_n_opens_new_on_the_mac_only_and_once_per_press(cx: &mut TestAppContext) {
         opened.runs_of(NewSession.name()),
         1,
         "a held Cmd+N ran New once"
+    );
+}
+
+/// SPEC.md, "Quick launch": the ⚡ chord is Cmd+P on a Mac and Ctrl+Shift+P elsewhere, it works from a focused terminal,
+/// and "A held chord starts only once; the chord never reaches the terminal". A chord that leaked would type into the
+/// agent, and one that repeated would start a session per repeat. Specified: the chord, spelled out here, runs
+/// `QuickLaunch` from a focused terminal without reaching it, and held for two repeats runs it once more.
+#[gpui::test]
+fn the_quick_launch_chord_runs_once_per_press_from_a_terminal(cx: &mut TestAppContext) {
+    let chord = match THIS_PLATFORM {
+        Platform::Mac => "cmd-p",
+        Platform::Linux => "ctrl-shift-p",
+    };
+    let mut opened = open(cx);
+    opened.focus_terminal();
+    assert!(
+        !opened.reaches_terminal(chord),
+        "the chord never reaches the terminal"
+    );
+    assert_eq!(
+        opened.runs_of(QuickLaunch.name()),
+        1,
+        "a press ran QuickLaunch"
+    );
+    opened.hold(chord);
+    assert_eq!(
+        opened.runs_of(QuickLaunch.name()),
+        2,
+        "a held chord ran it once more"
     );
 }

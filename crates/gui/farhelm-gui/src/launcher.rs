@@ -5,8 +5,11 @@
 //! Built in pieces. So far:
 //!
 //! - [`draft`]: what the launcher holds, and every edit to it, with no GPUI types.
-//! - [`entry`]: the entry points other surfaces call to open New and Clone, and what they need to draw their triggers.
-//! - [`launch`]: a submitted New or Clone, from the press of Launch to what its reply opens or brings back.
+//! - [`entry`]: the entry points other surfaces call to open New and Clone, and what they need to draw their triggers;
+//!   and a quick launch's: New's prefill as a draft (`new_prefill`), New opened with a banner or a refusal
+//!   (`open_with`), and the open launcher a shortcut applies to (`open_launcher`).
+//! - [`launch`]: a submitted New or Clone, from the press of Launch to what its reply opens or brings back, and a quick
+//!   launch held while it is prepared out of sight (`view::prepare_unseen`), before it is started or shown.
 //! - `pill`: the progress pill and the "Started" report a hidden launcher leaves at the bottom of the window.
 //! - `model`: the model field's rules (which catalog rows it lists, what Enter in it means), with no GPUI types.
 //!   The Templates editor's model suggestions are its rows for one agent type.
@@ -55,6 +58,6 @@ mod replace_with_tests;
 #[cfg(test)]
 mod request_tests;
 #[cfg(test)]
-mod view_tests;
+pub(crate) mod view_tests;
 #[cfg(test)]
 mod yolo_tests;

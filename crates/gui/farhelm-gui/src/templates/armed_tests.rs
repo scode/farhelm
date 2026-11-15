@@ -536,8 +536,8 @@ fn a_press_or_the_window_going_inactive_cancels(cx: &mut TestAppContext) {
     assert_ended(&mut main, "after the window went inactive");
 }
 
-/// SPEC.md: other visible dialogs keep the keyboard, and opening one cancels. The launcher counts as such a dialog until
-/// it can say it is open (the module docs' NOTE). Specified: with a dialog open the prefix arms nothing; a dialog that
+/// SPEC.md: other visible dialogs keep the keyboard, and opening one cancels (the launcher is the one dialog the prefix
+/// works in, tested in `dispatch_tests`). Specified: with a dialog open the prefix arms nothing; a dialog that
 /// opens while a sequence is armed ends it at the next key, and the sequence does not take that key.
 #[gpui::test]
 fn a_dialog_keeps_the_keyboard_from_the_prefix_and_an_armed_sequence(cx: &mut TestAppContext) {
@@ -639,19 +639,21 @@ fn bindings_are_copied_when_the_prefix_starts(cx: &mut TestAppContext) {
 }
 
 /// SPEC.md: "Enter with nothing queued cancels without opening anything", and Enter ends the sequence whatever it then
-/// does; what a resolved sequence launches waits for the quick-launch dispatcher. Specified: Enter on an empty sequence
-/// and on a resolved one each end it, open no layer, send the helm nothing and never reach the program.
+/// does. Specified: Enter on an empty sequence ends it, opens no layer, sends the helm nothing and never reaches the
+/// program; Enter on a resolved one ends it too and never reaches the program (what it then launches or opens is the
+/// dispatcher's, tested in `dispatch_tests`).
 #[gpui::test]
-fn enter_ends_the_sequence_and_opens_nothing_without_an_unbound_key(cx: &mut TestAppContext) {
+fn enter_ends_the_sequence(cx: &mut TestAppContext) {
     let mut main = open_main(cx, true);
     main.helm.commands();
-    for typed in ["enter", "1 w e b enter"] {
-        main.arm();
-        keys(main.cx, typed);
-        assert_ended(&mut main, typed);
-        assert!(!test_support::any_open(main.cx), "{typed}: nothing opened");
-    }
+    main.arm();
+    keys(main.cx, "enter");
+    assert_ended(&mut main, "an empty sequence");
+    assert!(!test_support::any_open(main.cx), "nothing opened");
     assert!(main.helm.commands().is_empty(), "the helm was sent nothing");
+    main.arm();
+    keys(main.cx, "1 w e b enter");
+    assert_ended(&mut main, "a resolved sequence");
     assert_eq!(main.program_input(), 0, "Enter never reached the program");
 }
 
@@ -686,8 +688,9 @@ fn a_reset_disarms_the_sequence(cx: &mut TestAppContext) {
 }
 
 /// Inside the launcher the pill says "apply" and sits at the bottom of the main area so it does not cover the launcher
-/// (SPEC.md). Nothing arms that form yet (the module docs' NOTE), so its view is shown directly. Specified: the launcher
-/// form's pill paints "Apply sequence:" and "Enter apply", with its bottom edge 14 pixels above the anchor's.
+/// (SPEC.md). Its view is shown directly here, so its place can be measured against a known area; arming it from the
+/// launcher is tested in `dispatch_tests`. Specified: the launcher form's pill paints "Apply sequence:" and "Enter
+/// apply", with its bottom edge 14 pixels above the anchor's.
 #[gpui::test]
 fn the_launcher_form_says_apply_and_sits_at_the_bottom(cx: &mut TestAppContext) {
     let out: Rc<RefCell<Option<Anchor>>> = Rc::new(RefCell::new(None));

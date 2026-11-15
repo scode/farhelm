@@ -20,9 +20,10 @@
 //!   the same launcher comes back with the helm's words in that alert if the helm refuses. Replace with also says
 //!   beside it what replacing stops while the source has anything alive. Its accessible name keeps the
 //!   operation and its target, as the old one did.
-//! - **Reads.** The model catalog is read when the launcher opens (`GET /api/launch-catalog`), and again on Retry
-//!   after a failed read. Hosts, sessions and the remembered permission are read from the store while drawing, and the
-//!   remembered wrapper prefixes when an agent type is chosen.
+//! - **Reads.** The model catalog is read when the launcher opens (`GET /api/launch-catalog`), including a quick
+//!   launch's prepared out of sight ([`prepare_unseen`]), and again on Retry after a failed read. A template batch that
+//!   arrives while the read is out waits for it ([`Launcher::apply_batch`]). Hosts, sessions and the remembered
+//!   permission are read from the store while drawing, and the remembered wrapper prefixes when an agent type is chosen.
 //!
 //! NOTE: Not built yet, each with the piece that brings it: sending a Restart with (until then a press of a complete
 //! draft there does nothing); marking the folder field when the helm refuses the folder; Restart with's
@@ -44,12 +45,13 @@ use farhelm_proto::{
     DeleteGuard, LaunchHarness, LaunchPermission, SessionLaunch, split_wrapper_prefix,
 };
 use gpui::{
-    AnyElement, App, AppContext as _, ClickEvent, Context, Div, ElementId, Entity, FontWeight,
-    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString, Stateful,
-    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, px, svg,
+    AnyElement, AnyWindowHandle, App, AppContext as _, ClickEvent, Context, Div, ElementId, Entity,
+    FontWeight, Global, InteractiveElement as _, IntoElement, ParentElement as _, Render,
+    SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity,
+    Window, div, px, svg,
 };
 
-use super::draft::{Field, LaunchDraft, Mode, Tab, harness_label, remembered_permission};
+use super::draft::{Catalog, Field, LaunchDraft, Mode, Tab, harness_label, remembered_permission};
 use super::launch::{self, Request};
 use super::request::{Target, capitalized};
 use super::words::agent_note;
@@ -105,15 +107,17 @@ const SOURCE_BUSY: &str = "Wait for this session's other operation to finish";
 /// Restart starts on Cancel"; the search box comes later, and until then its place is the first field's). Closing
 /// returns focus to whatever held it when the launcher opened.
 pub fn open(draft: LaunchDraft, mark: &Mark, window: &mut Window, cx: &mut App) -> Option<LayerId> {
-    open_noted(draft, None, mark, window, cx)
+    open_noted(draft, None, None, mark, window, cx)
 }
 
 /// [`open`], with `host_note` said under the Host row until the user picks a host: why an opening did not keep the host
-/// its source names (Clone's, as the old launcher's `.create-session-host-note` said it). Something else an opening
-/// has to say (a banner, a refusal) belongs beside the note, as another argument here.
+/// its source names (Clone's, as the old launcher's `.create-session-host-note` said it); and `note`, if any, said in
+/// the notices region from the first frame until the draft is next edited or Launch is pressed: a quick launch's
+/// banner or refusal (`super::entry::open_with`).
 pub(in crate::launcher) fn open_noted(
     draft: LaunchDraft,
     host_note: Option<&'static str>,
+    note: Option<Note>,
     mark: &Mark,
     window: &mut Window,
     cx: &mut App,
@@ -122,6 +126,7 @@ pub(in crate::launcher) fn open_noted(
     let launcher = cx.new(|cx| {
         let mut launcher = Launcher::new(draft, &store, window, cx);
         launcher.host_picker.note = host_note;
+        launcher.note = note;
         launcher
     });
     let layer = show(&launcher, mark, window, cx)?;
@@ -132,9 +137,10 @@ pub(in crate::launcher) fn open_noted(
 }
 
 /// Draw `launcher` as the launcher's dialog, on top of everything in `window`: a new launcher from [`open`], or one a
-/// submit hid, brought back with its draft (`launch`). Refused, returning `None`, as [`open`] is: if the user moved on
-/// since `mark`, or with no UI session. The layer holds the launcher from then on, and closing it drops the launcher
-/// unless something else holds it too.
+/// submit hid, brought back with its draft (`launch`), or a quick launch's never drawn before ([`prepare_unseen`]),
+/// which stops being one never shown here. Refused, returning `None`, as [`open`] is: if the user moved on since
+/// `mark`, or with no UI session. The layer holds the launcher from then on, and closing it drops the launcher unless
+/// something else holds it too.
 pub(super) fn show(
     launcher: &Entity<Launcher>,
     mark: &Mark,
@@ -143,6 +149,7 @@ pub(super) fn show(
 ) -> Option<LayerId> {
     session::current_store(cx)?;
     let start = launcher.read(cx).start_focus(cx);
+    let container = cx.focus_handle();
     let weak = launcher.downgrade();
     // Enter on the dialog itself (after a click on its empty space) presses the main action.
     let dismissing = weak.clone();
@@ -152,7 +159,7 @@ pub(super) fn show(
     let layer = layers::open_dialog(
         Dialog {
             view: launcher.clone().into(),
-            container: cx.focus_handle(),
+            container: container.clone(),
             start,
             subject: None,
             main_action: Some(main_action),
@@ -183,32 +190,187 @@ pub(super) fn show(
         launcher.layer = Some(layer);
         // A launch the helm refused for YOLO comes back with its question, asked now that it can open in place.
         launcher.ask_pending_yolo(mark, window, cx);
+        launcher.quick_launch_unseen = false;
+    });
+    cx.set_global(Shown {
+        launcher: launcher.downgrade(),
+        container,
     });
     Some(layer)
+}
+
+/// The launcher drawn last ([`show`]), weakly, with its dialog's container: what `super::entry::open_launcher` answers
+/// from, checking the container against the layer stack. One app-wide slot, which assumes one launcher window, as the
+/// desktop app has: a launcher shown in another window would take it. It is never cleared by hand, so after a close it
+/// keeps a dead focus handle, which no layer stack holds and so never matches.
+pub(super) struct Shown {
+    pub(super) launcher: WeakEntity<Launcher>,
+    pub(super) container: gpui::FocusHandle,
+}
+
+impl Global for Shown {}
+
+/// What the launcher says in its notices region for a quick launch that did not start, or a template shortcut that
+/// changed nothing, until the draft is next edited. The words are the caller's, as a host sentence, so template names
+/// in them are drawn escaped.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Note {
+    /// A prominent banner: a quick launch's templates need more choices before they can launch (SPEC.md, "Quick
+    /// launch" and "Quick-launch sequences"). The old `.partial-template-banner` look.
+    Banner(HostSentence),
+    /// Why a quick launch opened New instead of launching (its sentence starting "Not launched."), or why a template
+    /// shortcut changed nothing in this open launcher, in the place of the composer search's refusals until that search
+    /// exists. Drawn as its own alert at the top of the notices region, above a press's reason, the helm's words or the
+    /// YOLO question, which it never hides, and cleared by the next press of Launch as by an edit.
+    Refusal(HostSentence),
+}
+
+/// What a quick launch prepared out of sight ([`prepare_unseen`]) does once its templates are applied.
+pub enum Prepared {
+    /// Start it, as a press of Launch would, still without drawing the launcher, with `notice` under the agent choices
+    /// for when it comes back. If the draft's own check refuses it before anything is sent, the launcher is shown with
+    /// that reason, as after a press.
+    Launch { notice: Option<String> },
+    /// Show the launcher saying `note`, with `notice` under the agent choices: the templates need more choices, or
+    /// did not apply.
+    Show { note: Note, notice: Option<String> },
+}
+
+/// Prepare a quick launch out of sight, from the handler of the shortcut's press: make the launcher on `draft` (New's
+/// prefill), hold it in the launch slot while it reads its model catalog, then let `finish` apply the templates to its
+/// draft against that catalog and say what happens next ([`Prepared`]). SPEC.md, "Quick launch": a shortcut "starts it
+/// directly ... without showing the launcher on success", through "exactly New's defaults and ordinary launch path".
+///
+/// The catalog read is the launcher's own, and the template rules need it (a model-only template picks the one agent
+/// type that offers its model; a model the chosen agent type does not offer is refused). While it runs, the slot holds
+/// the launcher as being prepared, so New, the other shortcuts and the sequence prefix treat the launcher as busy.
+/// The launcher stays marked as a quick launch never shown ([`Launcher::quick_launch_unseen`]) until it is first drawn.
+/// `mark` is the press: the launch's completion counts from it ("Quick launches use their dispatch as that answer"),
+/// and a launcher shown after the user moved on waits behind a notice instead. A read that fails leaves the catalog
+/// unread, as it does for a launcher opened by hand, and preparation goes on; a read that cannot be sent at all empties
+/// the slot again, so New is not held up. The second half waits on the launcher itself ([`Launcher::after_catalog`]),
+/// so the slot is the launcher's only owner and a reset drops the read and the launcher with it.
+///
+/// Refused, returning `false`, without a UI session, while a dialog or menu holds the keyboard (an open launcher is
+/// not in the slot, so a second one would go live beside it), or while a quick launch may not start
+/// (`super::entry::quick_launch_available`: the slot holds a launcher already, or a host change is in flight).
+pub fn prepare_unseen(
+    draft: LaunchDraft,
+    mark: Mark,
+    finish: impl FnOnce(&mut LaunchDraft, Catalog<'_>, &App) -> Prepared + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) -> bool {
+    let Some(store) = session::current_store(cx) else {
+        return false;
+    };
+    if layers::focus_layer_open(window, cx) || !super::entry::quick_launch_available(cx) {
+        return false;
+    }
+    let handle = window.window_handle();
+    let launcher = cx.new(|cx| {
+        let mut launcher = Launcher::new(draft, &store, window, cx);
+        launcher.quick_launch_unseen = true;
+        launcher.after_catalog = Some(Box::new(move |launcher: Entity<Launcher>, cx: &mut App| {
+            prepared(launcher, mark, finish, handle, cx)
+        }));
+        launcher
+    });
+    launch::preparing(launcher.clone(), cx);
+    if !read_catalog(launcher.downgrade(), cx) {
+        launch::abandon_prepared(&launcher, cx);
+    }
+    true
+}
+
+/// [`prepare_unseen`]'s second half, once the catalog read answered: apply, then start or show.
+fn prepared(
+    launcher: Entity<Launcher>,
+    mark: Mark,
+    finish: impl FnOnce(&mut LaunchDraft, Catalog<'_>, &App) -> Prepared,
+    window: AnyWindowHandle,
+    cx: &mut App,
+) {
+    if !launch::still_preparing(&launcher, cx) {
+        return;
+    }
+    let _ = cx.update_window(window, |_, window, cx| {
+        launcher.update(cx, |launcher, cx| {
+            let next = finish(&mut launcher.draft, launcher.catalog.as_deref(), cx);
+            // The fields were made from New's bare prefill; whatever happens next, a launcher that is drawn later (now,
+            // or after the helm refuses the launch) must show the draft it holds.
+            launcher.sync_fields(window, cx);
+            match next {
+                Prepared::Launch { notice } => {
+                    launcher.notice = notice;
+                    launcher.submit(false, mark, window, cx);
+                }
+                Prepared::Show { note, notice } => {
+                    launcher.note = Some(note);
+                    launcher.notice = notice;
+                    cx.notify();
+                }
+            }
+        })
+    });
+    // A launch that went out moved the launcher to waiting for its reply; anything else comes back to be seen.
+    launch::reveal_prepared(launcher, window, mark, cx);
 }
 
 /// Read the release's model catalog for `launcher`. A failed read leaves it unread, which refuses no choice (the
 /// draft's rule for an unread catalog), and says why beside a Retry, which reads it again (the old launcher's
 /// "Model catalog unavailable", so a failed read never makes the user reopen the launcher and lose its draft).
-fn read_catalog(launcher: WeakEntity<Launcher>, cx: &mut App) {
+///
+/// Once it answers, either way, the template batches that waited for it are applied in the order they arrived, and
+/// then the launcher's [`Launcher::after_catalog`] runs (a quick launch's preparation). The callback holds the
+/// launcher weakly, as `operations::send` asks. Returns whether the read was sent; it is not without a UI session, or
+/// if the constant path ever failed to build.
+fn read_catalog(launcher: WeakEntity<Launcher>, cx: &mut App) -> bool {
     let Ok(path) = ApiPath::api(&["launch-catalog"]) else {
-        return;
+        return false;
     };
     operations::read::<Vec<LaunchCatalogModel>>(
         path,
         "GET /api/launch-catalog",
         cx,
         move |answer, cx| {
-            let _ = launcher.update(cx, |launcher, cx| {
-                match answer {
-                    Ok(catalog) => launcher.catalog = Some(catalog),
-                    Err(error) => launcher.catalog_error = Some(error),
-                }
-                cx.notify();
-            });
+            let waited = launcher
+                .update(cx, |launcher, cx| {
+                    match answer {
+                        Ok(catalog) => launcher.catalog = Some(catalog),
+                        Err(error) => launcher.catalog_error = Some(error),
+                    }
+                    cx.notify();
+                    std::mem::take(&mut launcher.waiting_batches)
+                })
+                .unwrap_or_default();
+            for (window, batch) in waited {
+                let _ = cx.update_window(window, |_, window, cx| {
+                    let _ =
+                        launcher.update(cx, |launcher, cx| launcher.apply_now(batch, window, cx));
+                });
+            }
+            let Some(launcher) = launcher.upgrade() else {
+                return;
+            };
+            let after = launcher.update(cx, |launcher, _| launcher.after_catalog.take());
+            if let Some(after) = after {
+                after(launcher, cx);
+            }
         },
-    );
+    )
 }
+
+/// What a launcher prepared out of sight does once its catalog read has answered ([`Launcher::after_catalog`]).
+type AfterCatalog = Box<dyn FnOnce(Entity<Launcher>, &mut App)>;
+
+/// One template batch for [`Launcher::apply_batch`]: the edits it makes to the draft against the catalog, reading the
+/// store through the `App` it is given, and the notice it leaves under the agent choices, or the refusal to show
+/// instead.
+type Batch = Box<dyn FnOnce(&mut LaunchDraft, Catalog<'_>, &App) -> BatchResult>;
+
+/// What a [`Batch`] did: the agent choices' notice (`Some(None)` clears it, `None` leaves it), or its refusal.
+type BatchResult = Result<Option<Option<String>>, HostSentence>;
 
 /// The open launcher. See the module docs.
 pub(crate) struct Launcher {
@@ -253,6 +415,21 @@ pub(crate) struct Launcher {
     /// The YOLO question for a launch the helm refused because its host asks first, from the refusal until it is
     /// answered or the draft changes (`yolo_question`).
     yolo: Option<yolo_question::YoloState>,
+    /// Set while this launcher is a quick launch's that has never been drawn ([`prepare_unseen`]), and cleared for good
+    /// the first time it is ([`show`]). The success path reads it to hand the new session to naming (SPEC.md, "Quick
+    /// launch": only "When New was never shown"), which is the templates work's next piece.
+    pub(super) quick_launch_unseen: bool,
+    /// What the notices region says for a quick launch or a template shortcut ([`Note`]), until the next edit.
+    note: Option<Note>,
+    /// Template batches that arrived while the catalog read was out, with the window each was pressed in, applied in
+    /// order once it answers ([`Launcher::apply_batch`]). A plain queue, with no fence: the read answers once, and a
+    /// reset drops the launcher with it. A press of Launch that sends its create drops what is still waiting, since those
+    /// batches spoke of the draft just launched and must not edit it while its create is out.
+    waiting_batches: Vec<(AnyWindowHandle, Batch)>,
+    /// A quick launch's second half, set by [`prepare_unseen`] and taken and run by its catalog read's callback once
+    /// the batches have gone (`prepared`): kept here rather than in the callback so the launch slot stays the hidden
+    /// launcher's only owner.
+    pub(super) after_catalog: Option<AfterCatalog>,
     _fields: Vec<Subscription>,
 }
 
@@ -414,6 +591,10 @@ impl Launcher {
             cancel_focus: cx.focus_handle().tab_stop(true),
             layer: None,
             yolo: None,
+            quick_launch_unseen: false,
+            note: None,
+            waiting_batches: Vec::new(),
+            after_catalog: None,
             _fields: fields,
         }
     }
@@ -449,7 +630,57 @@ impl Launcher {
         self.refused = None;
         // A YOLO question asks about the launch that was sent; once the draft changes, it would answer for another.
         self.yolo = None;
+        // A quick launch's banner or refusal speaks of the draft as it opened, a shortcut's refusal of the press before.
+        self.note = None;
         cx.notify();
+    }
+
+    /// Apply one batch of template edits to the draft (one shortcut press or one completed sequence: SPEC.md, "Each
+    /// completed sequence is one refusal unit"). `edit` makes the edits through the draft's own hand-edit methods
+    /// (`crate::templates::apply`), given the catalog as read and the `App` to read the store from (a batch that waited
+    /// for the catalog reads it then, not at the press), and returns the notice the agent choices show afterwards
+    /// (`Some(None)` clears it, `None` leaves it), or the refusal to show instead, having changed nothing.
+    ///
+    /// An applied batch is an edit like any other: the text fields are put back in step with the draft and whatever the
+    /// launcher was saying goes. A refused one changes nothing but what it says. Focus stays where it is, so a press
+    /// never moves the user out of the field they are in; a control the edits remove hands focus on through the focus
+    /// coordinator, as any control that goes away does. Nothing happens while the YOLO question's host write is out,
+    /// when the launcher holds still.
+    ///
+    /// While the catalog read is out the batch waits for it, behind any batch already waiting, since the template rules
+    /// need the catalog (the old app held shortcut batches while its catalog loaded, too).
+    pub(crate) fn apply_batch(
+        &mut self,
+        edit: impl FnOnce(&mut LaunchDraft, Catalog<'_>, &App) -> BatchResult + 'static,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.yolo_in_flight(cx) {
+            return;
+        }
+        if self.catalog.is_none() && self.catalog_error.is_none() {
+            self.waiting_batches
+                .push((window.window_handle(), Box::new(edit)));
+            return;
+        }
+        self.apply_now(Box::new(edit), window, cx);
+    }
+
+    /// [`Launcher::apply_batch`] with the catalog answered.
+    fn apply_now(&mut self, edit: Batch, window: &mut Window, cx: &mut Context<Self>) {
+        match edit(&mut self.draft, self.catalog.as_deref(), cx) {
+            Ok(notice) => {
+                if let Some(notice) = notice {
+                    self.notice = notice;
+                }
+                self.sync_fields(window, cx);
+                self.changed(cx);
+            }
+            Err(refusal) => {
+                self.note = Some(Note::Refusal(refusal));
+                cx.notify();
+            }
+        }
     }
 
     /// The helm refused this launcher's launch (`refused`): show the refusal the operation store keeps under its key
@@ -471,8 +702,9 @@ impl Launcher {
             .map(|failure| failure.message.clone())
     }
 
-    /// Put the text fields the draft can change on its own back in step with it (after Reset choices, say). A field
-    /// already showing the draft's value is left alone, so its caret and selection stay where they were.
+    /// Put the text fields the draft can change on its own back in step with it (after Reset choices, or a template
+    /// batch, which can set the name, the command and its resume command too). A field already showing the draft's
+    /// value is left alone, so its caret and selection stay where they were.
     fn sync_fields(&self, window: &mut Window, cx: &mut Context<Self>) {
         let pairs = [
             (&self.wrapper, self.draft.agent.wrapper.clone()),
@@ -480,6 +712,9 @@ impl Launcher {
             (&self.folder, self.draft.folder.value().clone()),
             (&self.prompt, self.draft.prompt.clone()),
             (&self.flags, self.draft.agent.permission_flags.clone()),
+            (&self.name, self.draft.name.value().clone()),
+            (&self.command, self.draft.command.command.clone()),
+            (&self.resume, self.draft.command.resume.clone()),
         ];
         for (state, value) in pairs {
             if state.text(cx).as_ref() != value {
@@ -624,6 +859,8 @@ impl Launcher {
     ) {
         self.refused = None;
         self.yolo = None;
+        // A press speaks for itself: a quick launch's or a shortcut's refusal said before it would hide its reason.
+        self.note = None;
         let hosts = self.hosts(cx);
         let target = Target {
             hosts: &hosts,
@@ -664,10 +901,12 @@ impl Launcher {
             cx.notify();
             return;
         };
-        if launch::start(cx.entity(), request, host, mark, window, cx)
-            && let Some(layer) = self.layer.take()
-        {
-            layers::close(layer, window, cx);
+        if launch::start(cx.entity(), request, host, mark, window, cx) {
+            // Template batches still waiting for the catalog spoke of the draft just sent.
+            self.waiting_batches.clear();
+            if let Some(layer) = self.layer.take() {
+                layers::close(layer, window, cx);
+            }
         }
     }
 
@@ -1533,47 +1772,32 @@ impl Render for Launcher {
             ),
             _ => None,
         };
-        let alert = alert.map(|sentence| {
-            let text = sentence.accessible_name();
-            // `.launch-composer-refusal-alert`: a bordered alert with a warning sign, the lead before the reason, in
-            // the warning colors (red is kept for danger in the launcher).
-            div()
-                .id("launcher-refusal")
-                .debug_selector(|| "launcher-refusal".into())
-                .role(Role::Alert)
-                .aria_label(text)
-                .flex()
-                .items_start()
-                .gap(px(8.))
-                .py(px(8.))
-                .px(px(10.))
-                .border_1()
-                .border_color(theme::color(palette.warn_border))
-                .rounded(metrics::RADIUS_MD)
-                .bg(theme::color(palette.warn_bg_dim))
-                .text_size(metrics::TEXT_MD)
-                .text_color(theme::color(palette.warn_bright))
-                .child(div().flex_none().child("⚠"))
-                .child(div().min_w_0().child(sentence))
-        });
+        let alert = alert.map(|sentence| refusal_alert("launcher-refusal", sentence, palette));
         // What a press of Launch has to say, in the old footer's order: Replace with's warning about its source first,
         // then the YOLO question while it is up, else the refusal. The warning comes first so that a tall question,
         // which scrolls in the notices region, cannot push it out of sight: the question's answers launch with the
-        // warning's guard, so the warning must be on screen at that click.
+        // warning's guard, so the warning must be on screen at that click. This launcher's note (a quick launch's
+        // banner or refusal, a shortcut's refusal) comes right after the warning, as its own element: it answers what
+        // the user did last, and the question or alert below it still shows.
         let warning = self.replace_warning_line(palette, cx);
+        let note = self.note_element(palette);
         let question = self.yolo_inline().cloned();
-        let notices = (warning.is_some() || question.is_some() || alert.is_some()).then(|| {
-            let last = match question {
-                Some(question) => Some(question.into_any_element()),
-                None => alert.map(IntoElement::into_any_element),
-            };
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(6.))
-                .children(warning)
-                .children(last)
-        });
+        let notices =
+            (warning.is_some() || note.is_some() || question.is_some() || alert.is_some()).then(
+                || {
+                    let last = match question {
+                        Some(question) => Some(question.into_any_element()),
+                        None => alert,
+                    };
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(6.))
+                        .children(warning)
+                        .children(note)
+                        .children(last)
+                },
+            );
 
         let mut answers = vec![
             Button::new(
@@ -1651,6 +1875,62 @@ impl Render for Launcher {
         }
         frame
     }
+}
+
+impl Launcher {
+    /// This launcher's note ([`Note`]) as drawn at the top of the notices region: a refusal as its own refusal alert,
+    /// a banner in the old `.partial-template-banner` look (a warning-colored edge on the left, the raised background
+    /// and the ordinary ink, the words in bold).
+    fn note_element(&self, palette: &theme::Palette) -> Option<AnyElement> {
+        let sentence = match self.note.as_ref()? {
+            Note::Refusal(sentence) => {
+                return Some(refusal_alert("launcher-note", sentence.clone(), palette));
+            }
+            Note::Banner(sentence) => sentence,
+        };
+        Some(
+            div()
+                .id("launcher-banner")
+                .debug_selector(|| "launcher-banner".into())
+                .role(Role::Alert)
+                .aria_label(sentence.accessible_name())
+                .py(px(14.))
+                .px(px(16.))
+                .border_l(px(3.))
+                .border_color(theme::color(palette.warn))
+                .rounded(metrics::RADIUS_MD)
+                .bg(theme::color(palette.bg_2))
+                .text_color(theme::color(palette.fg_0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(sentence.clone())
+                .into_any_element(),
+        )
+    }
+}
+
+/// `.launch-composer-refusal-alert` under `id`, saying `sentence`: a bordered alert with a warning sign, in the warning
+/// colors (red is kept for danger in the launcher). The press's reason and the helm's words use it, and so does a
+/// refusal note above them.
+fn refusal_alert(id: &'static str, sentence: HostSentence, palette: &theme::Palette) -> AnyElement {
+    div()
+        .id(id)
+        .debug_selector(move || id.into())
+        .role(Role::Alert)
+        .aria_label(sentence.accessible_name())
+        .flex()
+        .items_start()
+        .gap(px(8.))
+        .py(px(8.))
+        .px(px(10.))
+        .border_1()
+        .border_color(theme::color(palette.warn_border))
+        .rounded(metrics::RADIUS_MD)
+        .bg(theme::color(palette.warn_bg_dim))
+        .text_size(metrics::TEXT_MD)
+        .text_color(theme::color(palette.warn_bright))
+        .child(div().flex_none().child("⚠"))
+        .child(div().min_w_0().child(sentence))
+        .into_any_element()
 }
 
 /// A registered host's name in the launcher (the footer, the host picker's button and list): its display name, with its phase in parentheses while it is not connected
