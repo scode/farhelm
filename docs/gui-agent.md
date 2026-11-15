@@ -43,7 +43,12 @@ the app's appearance setting, and a value the app cannot parse makes it refuse t
 window's start dialogs open: the Welcome card, which a helm that has not seen it opens at window start, and the
 announcement batch after it. Without the option `start` keeps them closed for the run (another agent-build variable the
 same file reads), because every run's helm is fresh and the card would otherwise sit over the app and take the run's
-first click or key; nothing is marked seen. `--scripted-hosts` gives the app fake SSH hosts (see "Scripted hosts"). It
+first click or key; nothing is marked seen. `--scripted-hosts` gives the app fake SSH hosts (see "Scripted hosts").
+`--payload-dir DIR` is for a run that sets up or updates a real remote host: it hands the app's embedded helm a
+directory of staged `farhelm` payloads (`farhelm-<target>.tar.gz`, as `scripts/devbuild-mac.sh` stages them) to install
+from, as `FARHELM_HELM_PAYLOAD_DIR`, which every build of the app reads. A debug build has no release to download
+payloads from, and `start` keeps the caller's own `FARHELM_*` variables out of the app, so this option is the way to
+pass it in. DIR must be absolute and an existing directory; `start` refuses anything else before it creates the run. It
 builds with whatever `CARGO_TARGET_DIR` you set. If `start` fails or is interrupted, run `stop` anyway: it releases
 whatever `start` had already taken, the lock included.
 
