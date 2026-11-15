@@ -697,14 +697,15 @@ systemd or SSH substrate ran.
   bridge or `FARHELM_*` variables; on Linux the run's own compositor and lavapipe; the run's state directory and
   supervisor program, and the window size and appearance a run asks for), the seeding requests (a `--fleet` kind's
   replay shape, its transcript fitting a narrow terminal, and only the waiting kind declaring an agent type), the wait
-  for a fleet's statuses, `terminal-text --wait` asking again until its text shows, that a recorded pid whose start time
-  no longer matches is never signalled (from /proc on Linux, `ps` on macOS, in the C locale and UTC), and the `--lock`
-  rules: held until the holder is stopped, kept by `stop` while part of the run may still be running, given up by a
-  holder whose `start` was killed while it waited, and a lock path that cannot be opened failing at once. Seconds;
-  starts and builds nothing; runs on Linux and macOS. The harness itself is a tool, not a gate: an end-to-end run
-  (`start`, then `stop`) builds the app and needs `mutter`, `dbus-run-session` and lavapipe on Linux, or a logged-in GUI
-  session of the same user on a Mac. Run the tests when the script changes, and an end-to-end run when the script, the
-  bridge's wiring in `farhelm-gui` or `farhelm-desktop`, or the app's startup changes.
+  for a fleet's statuses, `terminal-text --wait` asking again until its text shows, a helm reply without a body read as
+  none, that a recorded pid whose start time no longer matches is never signalled (from /proc on Linux, `ps` on macOS,
+  in the C locale and UTC), and the `--lock` rules: held until the holder is stopped, kept by `stop` while part of the
+  run may still be running, given up by a holder whose `start` was killed while it waited, and a lock path that cannot
+  be opened failing at once. Seconds; starts and builds nothing; runs on Linux and macOS. The harness itself is a tool,
+  not a gate: an end-to-end run (`start`, then `stop`) builds the app and needs `mutter`, `dbus-run-session` and
+  lavapipe on Linux, or a logged-in GUI session of the same user on a Mac. Run the tests when the script changes, and an
+  end-to-end run when the script, the bridge's wiring in `farhelm-gui` or `farhelm-desktop`, or the app's startup
+  changes.
 - `python3 -B scripts/test-gui-screenshot-batch.py` — the page `scripts/gui-screenshot-batch.py` builds to compare the
   GPUI app with the old app's reference pictures (`docs/gpui/screenshot-batch.md`): unported reference scenes say "not
   yet ported" and pictures the batch did not take say "not captured in this batch", mockups are labelled, a capture sits
@@ -749,15 +750,17 @@ systemd or SSH substrate ran.
   gear; and a click on the rail's Add host opens the Add host dialog, and Escape closes it with focus back on Add host;
   and on two sessions of its own, replayed to hold a running and an idle screen, the status segments' Running and Idle
   each list only the session in that status, with the helm's count of its sessions in that status against the fleet as
-  "N of M", and All lists both again with the plain count. A failed run keeps its run directory under `/tmp` for its
-  logs. An interrupted one (Ctrl-C, or SIGTERM from the recorder) still stops its app run, for which the recorder's
-  `--termination-grace` leaves it time. Under 30 seconds on a build worker with the app already built (4 and 18 s
-  measured, 23 s once the seen toggle's step was added); it builds the app first unless given `--no-build`. Needs what
-  `gui-agent.py start` needs (`mutter`, `dbus-run-session` and lavapipe on Linux, or a logged-in GUI session of the same
-  user on a Mac). CI does not run it. Run it when the app's session list, row menu, session header, Delete, Rename,
-  Stop, Restart, Replace, Mark read and Mark unread, quick switcher, host rail (Add host among its entries) and its foot
-  (Hosts and the Settings gear), status segments, sidebar width or divider, terminal attach, paste, text input or
-  scrollback, the bridge's wiring, the app's startup or `scripts/gui-agent.py` change.
+  "N of M", and All lists both again with the plain count; and on three fake SSH hosts of its own, a host menu's Remove
+  asks and Cancel keeps the host, while Remove, the permanent answer and then Remove without asking make the helm forget
+  each. A failed run keeps its run directory under `/tmp` for its logs. An interrupted one (Ctrl-C, or SIGTERM from the
+  recorder) still stops its app run, for which the recorder's `--termination-grace` leaves it time. Under 30 seconds on
+  a build worker with the app already built (4 and 18 s measured, 23 s once the seen toggle's step was added); it builds
+  the app first unless given `--no-build`. Needs what `gui-agent.py start` needs (`mutter`, `dbus-run-session` and
+  lavapipe on Linux, or a logged-in GUI session of the same user on a Mac). CI does not run it. Run it when the app's
+  session list, row menu, session header, Delete, Rename, Stop, Restart, Replace, Mark read and Mark unread, quick
+  switcher, host rail (Add host among its entries) and its foot (Hosts and the Settings gear), status segments, host
+  menu and Remove host, sidebar width or divider, terminal attach, paste, text input or scrollback, the bridge's wiring,
+  the app's startup or `scripts/gui-agent.py` change.
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh` — the curl-installer is POSIX
   `sh` run unread on a fresh machine (`curl | sh`), so a syntax slip or a shellcheck-catchable bug in it gets caught
   before the slower Rust-side asset-table parity test in `assets.rs` would notice. `test-install-sh.sh` is bash, not

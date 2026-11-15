@@ -56,7 +56,7 @@ use gpui::{
 use super::{SessionList, delete, outcome, replace, seen, selection, status, stop};
 use crate::actions::RENAME_SESSION_SHORTCUT_NAME;
 use crate::assets::Icon;
-use crate::components::{HoverHelp, IconButton, MenuItem, Role, Tier};
+use crate::components::{HoverHelp, IconButton, MenuItem, Role, Tier, menu_separator};
 use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId, Popover, Subject};
@@ -547,26 +547,15 @@ impl Render for RowMenu {
                     .flex_col()
                     .child(rename)
                     .children(seen_item)
-                    .child(separator(cx))
+                    .child(menu_separator(cx))
                     .child(replace)
-                    .child(separator(cx))
+                    .child(menu_separator(cx))
                     .child(stop)
-                    .child(separator(cx))
+                    .child(menu_separator(cx))
                     .child(delete),
             )
             .children(outcome::menu_line(&self.key, cx))
     }
-}
-
-/// A hairline between two of the menu's groups: the old `.menu-separator` inside the row menu's items, one pixel of
-/// `--border-dim` inset 10 pixels from the panel's sides with 4 pixels above and below. Drawing only: it is no command,
-/// takes no focus, and the arrow keys pass over it.
-fn separator(cx: &App) -> impl IntoElement {
-    div()
-        .h(px(1.))
-        .my(px(4.))
-        .mx(px(10.))
-        .bg(theme::color(theme::palette(cx).border_dim))
 }
 
 /// The menu's header, `.menu-header`: the session's title, then its agent and status on one line, above a hairline.

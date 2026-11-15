@@ -1,5 +1,6 @@
 //! Tests of a host's actions menu as the Hosts panel opens it: what it offers on a remote host and on the helm's own
-//! machine, what its greyed Update does (nothing), Settings waiting for the host's own work, and where focus goes.
+//! machine, what its greyed Update does (nothing), Settings and Remove waiting for the host's own work, which hosts
+//! offer Remove, and where focus goes.
 //!
 //! The panel runs over the helm client's fake with the reference screens' three hosts (the local host as 1,
 //! `build-box` as 2, `gpu-1` as 3), and the menu is opened by clicking a row's toggle. Every step ends in one of the
@@ -8,7 +9,9 @@
 use farhelm_helm_client::{ApiPath, Method};
 use gpui::{DriverNode, Role, TestAppContext, VisualTestContext, px, size};
 
-use crate::hosts::tests::{hosts, open_panel, open_panel_in_column, reference_hosts};
+use crate::hosts::tests::{
+    connected, host, hosts, open_panel, open_panel_in_column, reference_hosts,
+};
 use crate::layers;
 use crate::operations::{Command, OpKey, Work};
 use crate::session;
@@ -57,13 +60,14 @@ fn any_open(cx: &mut VisualTestContext) -> bool {
     cx.update(|window, cx| layers::any_open(window, cx))
 }
 
-/// Why this matters: the menu is how a user reaches a host's settings, and what it lists must be what the offers rule
-/// says for that host, so a remote host shows no command this build cannot carry out yet. Its header names the host and
-/// where it is, and focus starts on its first command, as the old menu's did. Specified: a click on `build-box`'s toggle
-/// opens the menu beside it, named "Host actions for build-box", its header reading "dev@build-box · Farhelm
-/// 0.0.0-unreleased", with Settings alone (no Update) holding focus; Escape closes it with focus on the toggle.
+/// Why this matters: the menu is how a user reaches a host's settings and removes it, and what it lists must be what the
+/// offers rule says for that host, so a remote host shows no command this build cannot carry out yet. Its header names
+/// the host and where it is, and focus starts on its first command, as the old menu's did. Specified: a click on
+/// `build-box`'s toggle opens the menu beside it, named "Host actions for build-box", its header reading
+/// "dev@build-box · Farhelm 0.0.0-unreleased", with Settings holding focus, then Remove ("Forget this host"), and no
+/// Update; Escape closes it with focus on the toggle. (That Remove acts is `hosts::remove`'s tests'.)
 #[gpui::test]
-fn a_remote_hosts_toggle_opens_a_menu_offering_settings(cx: &mut TestAppContext) {
+fn a_remote_hosts_toggle_opens_a_menu_offering_settings_and_remove(cx: &mut TestAppContext) {
     let (_helm, cx) = open_hosts(cx);
     assert_eq!(
         label(&frame(cx), "host-menu-toggle-2"),
@@ -84,6 +88,16 @@ fn a_remote_hosts_toggle_opens_a_menu_offering_settings(cx: &mut TestAppContext)
     assert_eq!(
         (settings.role, settings.label.map(|label| label.to_string())),
         (Some(Role::MenuItem), Some("Settings".to_owned()))
+    );
+    let remove = node(&nodes, "host-menu-remove").expect("Remove is offered");
+    assert_eq!(
+        (remove.role, remove.label.map(|label| label.to_string())),
+        (Some(Role::MenuItem), Some("Remove".to_owned()))
+    );
+    assert!(painted(&nodes).contains("Forget this host"));
+    assert!(
+        bounds(cx, "host-menu-remove").origin.y > bounds(cx, "host-menu-settings").origin.y,
+        "Remove comes after Settings"
     );
     assert!(node(&nodes, "host-menu-update").is_none(), "no Update yet");
     assert_eq!(focused_id(cx).as_deref(), Some("host-menu-settings"));
@@ -156,6 +170,10 @@ fn the_local_hosts_greyed_update_says_why_and_sends_nothing(cx: &mut TestAppCont
     );
     assert!(node(&nodes, "host-menu-update").is_some());
     assert!(node(&nodes, "host-menu-settings").is_some());
+    assert!(
+        node(&nodes, "host-menu-remove").is_none(),
+        "the helm's own machine is never removed"
+    );
     assert!(painted(&nodes).contains("Run the installer again to update this machine"));
     assert_eq!(focused_id(cx).as_deref(), Some("host-menu-update"));
 
@@ -167,9 +185,10 @@ fn the_local_hosts_greyed_update_says_why_and_sends_nothing(cx: &mut TestAppCont
 
 /// Why this matters: a host's settings must not change under its own work in flight (an Update's plan, a save), as the
 /// old menu held Settings unavailable then (`provisioning.spec.ts`, "Update planning keeps only its own Settings
-/// unavailable"); another host's work must not hold it. Specified: while a save is in flight on `build-box`, its menu's
-/// Settings opens nothing and the menu stays; `gpu-1`'s Settings opens its dialog meanwhile; once the save is answered,
-/// `build-box`'s Settings opens its dialog.
+/// unavailable"), and the old menu held Remove unavailable while the host was busy too; another host's work must not
+/// hold them. Specified: while a save is in flight on `build-box`, its menu's Remove and Settings each do nothing when
+/// clicked (no question, no dialog, nothing sent), the menu staying; `gpu-1`'s Settings opens its dialog meanwhile;
+/// once the save is answered, `build-box`'s Settings opens its dialog.
 #[gpui::test]
 fn settings_waits_for_the_hosts_own_work_in_flight(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_hosts(cx);
@@ -193,6 +212,9 @@ fn settings_waits_for_the_hosts_own_work_in_flight(cx: &mut TestAppContext) {
     assert_eq!(sent.len(), 1, "the premise: work on build-box is in flight");
 
     click(cx, "host-menu-toggle-2");
+    click(cx, "host-menu-remove");
+    assert!(node(&frame(cx), "prompt").is_none(), "no question");
+    assert!(helm.commands().is_empty(), "nothing sent");
     click(cx, "host-menu-settings");
     assert!(node(&frame(cx), "host-settings").is_none(), "no dialog");
     assert!(node(&frame(cx), "host-menu").is_some(), "the menu stayed");
@@ -214,4 +236,24 @@ fn settings_waits_for_the_hosts_own_work_in_flight(cx: &mut TestAppContext) {
         node(&frame(cx), "host-settings").is_some(),
         "build-box's opened"
     );
+}
+
+/// Why this matters: removing a Tensorlake sandbox's host deletes the sandbox, its files and its sessions (SPEC.md,
+/// "Topology": the panel calls that Delete sandbox, and it always asks); that command is not ported yet, so the menu must
+/// not offer the ordinary Remove in its place, whose question promises the host keeps running. Specified: a connected
+/// Tensorlake host's menu offers Settings and no Remove.
+#[gpui::test]
+fn a_sandbox_hosts_menu_offers_no_remove(cx: &mut TestAppContext) {
+    let mut listed = reference_hosts();
+    listed.push(host(4, "tensorlake", connected()));
+    let (_helm, _, cx) = open_panel_in_column(cx, vec![hosts(&listed)]);
+    cx.simulate_resize(size(px(1600.), px(1000.)));
+    test_support::settle(cx);
+    click(cx, "host-menu-toggle-4");
+    let nodes = frame(cx);
+    assert!(
+        node(&nodes, "host-menu-settings").is_some(),
+        "the premise: its menu opened"
+    );
+    assert!(node(&nodes, "host-menu-remove").is_none());
 }

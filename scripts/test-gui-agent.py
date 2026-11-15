@@ -1,5 +1,6 @@
 """The parts of gui-agent.py that decide what a run may touch: its paths, the app's environment, the seeding requests
-and the processes `stop` signals; and the waits scenes rely on (a seeded fleet's statuses, `terminal-text --wait`).
+and the processes `stop` signals; the waits scenes rely on (a seeded fleet's statuses, `terminal-text --wait`); and how
+a request to the app's helm reads its reply.
 
 These start no compositor and build nothing; the process tests start only `sleep` and Python children of their own. The
 end-to-end run is the check that the pieces work together (docs/gui-agent.md); these pin the rules that keep a run from
@@ -8,6 +9,7 @@ a state directory that defaults to a real installation's, or a recorded pid that
 """
 
 import fcntl
+import http.server
 import importlib.util
 import json
 import os
@@ -17,6 +19,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 
@@ -603,6 +606,54 @@ class TerminalTextTest(unittest.TestCase):
         self.assertEqual((status, out), (1, ""))
         self.assertIn("does not show 'echo:x'", err)
         self.assertIn("FAKE-AGENT READY", err)
+
+
+class HelmRequestTest(unittest.TestCase):
+    """`helm_request` is how the smoke test and the screenshot batch talk to the app's embedded helm, with the credential
+    the app wrote to `helm.json`. Some routes answer without a body (a preference write answers 204), and decoding that
+    as JSON raised, which broke a smoke step's cleanup."""
+
+    def serve(self, status: int, body: bytes):
+        """A helm stand-in on a loopback port of its own that answers every request with `status` and `body`, recording
+        each request's method, path and Authorization header; a run directory whose `helm.json` points at it."""
+        seen = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def answer(self):
+                length = int(self.headers.get("Content-Length") or 0)
+                self.rfile.read(length)
+                seen.append((self.command, self.path, self.headers.get("Authorization")))
+                self.send_response(status)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            do_GET = do_PUT = answer
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        run = pathlib.Path(tempfile.mkdtemp(prefix="gui-agent-helm-"))
+        self.addCleanup(shutil.rmtree, run)
+        (run / "helm.json").write_text(
+            json.dumps({"api_base": f"http://127.0.0.1:{server.server_address[1]}", "credential": "secret"})
+        )
+        return run, seen
+
+    def test_a_reply_without_a_body_is_none(self):
+        """A 204 with no body gives None rather than a decoding error, and the request carries the credential."""
+        run, seen = self.serve(204, b"")
+        self.assertIsNone(gui_agent.helm_request(run, "PUT", "/api/preferences", {"field": True}))
+        self.assertEqual(seen, [("PUT", "/api/preferences", "Bearer secret")])
+
+    def test_a_reply_with_a_body_is_decoded(self):
+        """A reply with a JSON body gives the decoded value."""
+        run, _ = self.serve(200, b'{"hosts": []}')
+        self.assertEqual(gui_agent.helm_request(run, "GET", "/api/hosts"), {"hosts": []})
 
 
 class CommandLineTest(unittest.TestCase):

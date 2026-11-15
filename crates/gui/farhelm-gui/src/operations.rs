@@ -125,6 +125,10 @@ pub enum Work {
     /// clear error, so nothing replaces a create on the wire. Restart with and Replace with act on their source session
     /// and run as its [`Work::Restart`] and [`Work::Replace`] instead.
     Launch,
+    /// A host's removal from the registry (`DELETE /api/hosts/{id}`), under the host's key: the helm forgets the entry
+    /// and leaves the host's supervisor and sessions running (`hosts::remove`). Not supersedable: a second Remove of the
+    /// same host waits for the first to settle.
+    RemoveHost,
 }
 
 /// What a piece of work acts on: the key the store files it under, one request at a time per key. Opaque, and built
