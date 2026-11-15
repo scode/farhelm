@@ -277,6 +277,78 @@ fn the_warning_goes_with_its_request(cx: &mut TestAppContext) {
     assert!(helm.commands().is_empty(), "nothing was saved or answered");
 }
 
+/// A press while the tunnel warning is already up must not stack a second, identical warning over it, and while
+/// another dialog holds focus the warning would cover what the user is in; the press is refused with a reason
+/// instead, as the card's Add host is. Specified: a press asks the warning; a second press reports
+/// [`Pressed::AnotherDialog`], whose reason names another dialog, and opens nothing more (one Cancel leaves no layer
+/// open) and sends nothing; with another dialog open, a press reports the same and opens no warning. With consent
+/// recorded the press opens nothing, so it goes out over a dialog: the answer is sent.
+#[gpui::test]
+fn a_press_that_would_stack_a_warning_over_a_dialog_is_refused(cx: &mut TestAppContext) {
+    let (mut helm, cx, arming, _tunnels) = fixture(cx, false);
+    let (pressed, _) = press(cx, &arming);
+    assert_eq!(pressed, Pressed::Asking, "premise: the warning is up");
+    let (again, _) = press(cx, &arming);
+    assert_eq!(again, Pressed::AnotherDialog);
+    assert!(
+        again
+            .reason()
+            .is_some_and(|words| words.starts_with("Another dialog is open.")),
+        "the card says why"
+    );
+    click(cx, "prompt-cancel");
+    assert!(!any_open(cx), "one Cancel closed the only warning");
+    assert!(helm.commands().is_empty(), "nothing was sent");
+
+    let inside = cx.update(|_, cx| cx.focus_handle().tab_stop(true));
+    test_support::open_dialog(cx, vec![("dialog-control", inside.clone())], &inside);
+    let (over, _) = press(cx, &arming);
+    assert_eq!(
+        over,
+        Pressed::AnotherDialog,
+        "no warning over another dialog"
+    );
+    let raised = cx.update(|window, cx| crate::layers::top_is_above_approval_region(window, cx));
+    assert!(
+        !raised,
+        "the dialog is still the top layer: no warning opened over it"
+    );
+    assert!(helm.commands().is_empty(), "nothing was sent");
+}
+
+/// The warning closes on Allow before its consent save comes back, so a press in between would pass every other
+/// check and ask a second warning for a consent already being saved. Specified: after Allow, with the save not yet
+/// answered, a press reports [`Pressed::Nothing`] and opens nothing; once the save is taken, the one answer goes out.
+#[gpui::test]
+fn a_press_while_the_consent_is_being_saved_asks_nothing(cx: &mut TestAppContext) {
+    let (mut helm, cx, arming, _tunnels) = fixture(cx, false);
+    let (pressed, _) = press(cx, &arming);
+    assert_eq!(pressed, Pressed::Asking, "premise: the warning is up");
+    click(cx, "prompt-confirm");
+    let (save, _) = one_command(&mut helm, Method::Put, "/api/preferences");
+    assert!(!any_open(cx), "premise: Allow closed the warning");
+    let (again, _) = press(cx, &arming);
+    assert_eq!(again, Pressed::Nothing);
+    assert!(!any_open(cx), "no second warning");
+    helm.reply(save, 204, None);
+    settle(cx);
+    let (_, body) = one_command(&mut helm, Method::Post, &answer_path());
+    assert_eq!(body, json!({ "answer": "tunnel_and_open" }));
+}
+
+/// With consent recorded, Tunnel and open opens nothing, so a dialog being open does not stop it: cards stay
+/// answerable over dialogs (SPEC.md). Specified: with consent and a dialog open, the press is sent.
+#[gpui::test]
+fn with_consent_a_press_over_a_dialog_is_sent(cx: &mut TestAppContext) {
+    let (mut helm, cx, arming, _tunnels) = fixture(cx, true);
+    let inside = cx.update(|_, cx| cx.focus_handle().tab_stop(true));
+    test_support::open_dialog(cx, vec![("dialog-control", inside.clone())], &inside);
+    let (pressed, _) = press(cx, &arming);
+    assert_eq!(pressed, Pressed::Sent);
+    let (_, body) = one_command(&mut helm, Method::Post, &answer_path());
+    assert_eq!(body, json!({ "answer": "tunnel_and_open" }));
+}
+
 /// The answer bar's pause holds Tunnel and open too: a press aimed at a card that just changed does nothing, not even
 /// the warning. Specified: during a pause, the press reports [`Pressed::Nothing`], opens nothing and sends nothing.
 #[gpui::test]

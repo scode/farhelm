@@ -374,6 +374,7 @@ impl Region {
             }
             (_, ApprovalAnswer::TunnelAndOpen) => {
                 let region = cx.weak_entity();
+                let refused_id = id.clone();
                 let pressed = tunnel::tunnel_and_open(
                     approval,
                     &self.arming,
@@ -382,13 +383,21 @@ impl Region {
                     cx,
                     move |reason, cx| {
                         let _ = region.update(cx, |region, cx| {
-                            region.refused = Some((id, reason));
+                            region.refused = Some((refused_id, reason));
                             cx.notify();
                         });
                     },
                 );
-                if let Err(not_started) = pressed {
-                    tracing::debug!(?not_started, "Tunnel and open not started");
+                match pressed {
+                    // The app's own words, drawn as text on the card's refusal line like the helm's.
+                    Ok(pressed) => {
+                        if let Some(words) = pressed.reason() {
+                            self.refused = Some((id, HostText::from_host(words)));
+                        }
+                    }
+                    Err(not_started) => {
+                        tracing::debug!(?not_started, "Tunnel and open not started")
+                    }
                 }
             }
             (_, answer) => {
