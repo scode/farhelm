@@ -316,9 +316,6 @@ pub struct AttachedTerminal {
     /// Whether the terminal is drawn dimmed and takes no input and no focus ([`AttachedTerminal::set_inert`]): set by
     /// the session view while a status card stands over the terminal, as the unreachable-host card does.
     inert: bool,
-    /// The cell of the last mouse report sent, where the releases [`AttachedTerminal::release_reported_buttons`]
-    /// synthesizes are placed.
-    last_report_cell: Option<(u16, u16)>,
     /// The host identity color the thin frame around the terminal is drawn in, while the shared **Color terminal
     /// frames by host** preference is on; `None` while it is off or the session's host is not known. Kept by the store
     /// observer ([`AttachedTerminal::follow_store`]), which redraws only when it changes, so the terminal is not redrawn
@@ -442,7 +439,6 @@ impl AttachedTerminal {
             paste: None,
             _session: subscriptions,
             inert: false,
-            last_report_cell: None,
             frame: None,
             _tunnels: tunnel_watch,
             _tunnel_reads: tunnel_reads,
@@ -467,9 +463,11 @@ impl AttachedTerminal {
     /// context, so Tab and Escape are the window's, not the program's), and nothing the user types, commits or pastes
     /// is sent; its pane is no Tab stop, its cursor is drawn as unfocused, the platform's text input is not handed to
     /// it, the status line's Take control and the tunnel notice, which Tab could still reach under the veil, are not
-    /// drawn, and neither is the refused-click line. Going inert ends whatever was under way: a press the program's
-    /// mouse reporting took gets its release, a selection drag or a press on a link is dropped, and a paste still
-    /// reading the clipboard is not sent.
+    /// drawn, and neither is the refused-click line. Going inert ends whatever was under way: a selection drag or a press
+    /// on a link is dropped, and a paste still reading the clipboard is not sent. Going inert sends no release for a
+    /// press the program's mouse reporting took (the old app sent none either, and the card this serves stands over a
+    /// terminal whose stream is down, where nothing could be sent); a real release while inert is dropped like other
+    /// input, and one after the terminal is usable again reaches the program.
     ///
     /// It moves no focus itself. The caller, which puts the card up, moves focus off the terminal (to the card, or
     /// home) and makes something else home while it stays inert, through the focus coordinator; otherwise focus rests
@@ -480,7 +478,6 @@ impl AttachedTerminal {
             return;
         }
         if inert {
-            self.release_reported_buttons();
             self.select = None;
             self.link_press = None;
             // Dropping the task drops the paste still reading the clipboard, and the earlier ones it waits on, as
@@ -2157,28 +2154,6 @@ impl AttachedTerminal {
         cx.notify();
     }
 
-    /// Tell the program that every button its mouse reporting holds came up, where the pointer was last seen, and
-    /// forget them: a terminal going inert sees no more releases, and a program left mid-drag would stay so. Sent past
-    /// [`AttachedTerminal::send_user`]'s inert guard, since this runs as the terminal goes inert.
-    fn release_reported_buttons(&mut self) {
-        let held = std::mem::take(&mut self.reporting);
-        let (Some(attachment), true) = (self.attachment, held != 0) else {
-            return;
-        };
-        let (x, y) = self.last_report_cell.unwrap_or((0, 0));
-        let releases: Vec<GridInput> = (0..3_i8)
-            .filter(|button| held & (1 << button) != 0)
-            .map(|button| GridInput::Mouse {
-                kind: MouseEventKind::Up,
-                button,
-                x,
-                y,
-                mods: 0,
-            })
-            .collect();
-        self.send(attachment, releases);
-    }
-
     /// Whether the terminal is inert ([`AttachedTerminal::set_inert`]), for tests.
     #[cfg(test)]
     pub(crate) fn is_inert(&self) -> bool {
@@ -2496,7 +2471,9 @@ impl AttachedTerminal {
         if !mode_reports(mode, kind, button) {
             return;
         }
-        let (true, Some(attachment)) = (self.is_live(), self.attachment) else {
+        // An inert terminal sends no reports: checked before the deduper, which must only hear reports that are sent,
+        // or a move dropped while inert would suppress the same move once the terminal is usable again.
+        let (true, false, Some(attachment)) = (self.is_live(), self.inert, self.attachment) else {
             return;
         };
         let Some((x, y)) = self.cell_at(position, cx) else {
@@ -2513,7 +2490,6 @@ impl AttachedTerminal {
             y,
             mods,
         };
-        self.last_report_cell = Some((x, y));
         self.send_user(attachment, vec![report], cx);
     }
 
