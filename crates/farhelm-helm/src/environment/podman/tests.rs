@@ -735,19 +735,26 @@ async fn incomplete_session_rows_are_listed_and_refuse_rowless_cleanup() {
 async fn shared_admission_joins_lazy_work_and_deletion_waits_for_its_boundary() {
     let (_directory, provider, _commands, place) = fixture().await;
     let builds = provider.0.builds.clone();
+    let events = Arc::new(crate::feed::FleetEvents::new());
     let (entered, at_boundary) = tokio::sync::oneshot::channel();
     let (release, released) = tokio::sync::oneshot::channel();
     let first = builds
-        .start_podman("dev", place, false, move |_, cancel| async move {
-            entered.send(cancel.clone()).unwrap();
-            released.await.unwrap();
-            check(&cancel)?;
-            panic!("deletion must cancel before another command begins")
-        })
+        .start_podman(
+            "dev",
+            place,
+            false,
+            events.clone(),
+            move |_, cancel| async move {
+                entered.send(cancel.clone()).unwrap();
+                released.await.unwrap();
+                check(&cancel)?;
+                panic!("deletion must cancel before another command begins")
+            },
+        )
         .unwrap();
     let cancelled = at_boundary.await.unwrap();
     let joined = builds
-        .start_podman("dev", place, false, |_, _| async {
+        .start_podman("dev", place, false, events.clone(), |_, _| async {
             panic!("joined work must not start another task")
         })
         .unwrap();
@@ -757,7 +764,7 @@ async fn shared_admission_joins_lazy_work_and_deletion_waits_for_its_boundary() 
     );
     assert!(
         builds
-            .start_podman("dev", place, true, |_, _| async {
+            .start_podman("dev", place, true, events.clone(), |_, _| async {
                 panic!("Rebuild cannot join a lazy task")
             })
             .is_err()
@@ -766,7 +773,7 @@ async fn shared_admission_joins_lazy_work_and_deletion_waits_for_its_boundary() 
     assert!(builds.lock_podman_use("dev", place).await.is_err());
     assert!(
         builds
-            .start_podman("dev", place, false, |_, _| async {
+            .start_podman("dev", place, false, events.clone(), |_, _| async {
                 panic!("deletion excludes new work")
             })
             .is_err()

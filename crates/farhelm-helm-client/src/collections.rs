@@ -4,14 +4,14 @@
 //! its collection holds. An entry that does not decode breaks the channel like any other protocol violation, so the
 //! GUI only ever sees typed state and has no decode error to handle in a view.
 //!
-//! Every collection (sessions, hosts, preferences, approvals, templates, notices, announcements, host progress) then
-//! goes through the same three operations: install a snapshot, upsert or remove entries by key, and replace the
-//! metadata (availability, order, counts). There is no per-collection code path to drift. Every entry arrives with its
-//! key ([`KeyedEntry`]), the one the helm diffed it by, and that is the key it is filed under, so applying a change
-//! never derives a key from an entry. Looking an entry up by a typed id ([`Collections::get`]) still needs the helm's
-//! spelling of that key (a host's numeric id as a string, for example), which `farhelm-proto` spells where a view needs
-//! it (`HostView::key`). The per-collection facts are which type an entry decodes as and which [`PushedEntry`] variant
-//! carries it, and both live in exhaustive matches here.
+//! Every collection (sessions, hosts, preferences, approvals, templates, notices, announcements, host progress,
+//! recipes, recipe places) then goes through the same three operations: install a snapshot, upsert or remove entries by
+//! key, and replace the metadata (availability, order, counts). There is no per-collection code path to drift. Every
+//! entry arrives with its key ([`KeyedEntry`]), the one the helm diffed it by, and that is the key it is filed under,
+//! so applying a change never derives a key from an entry. Looking an entry up by a typed id ([`Collections::get`])
+//! still needs the helm's spelling of that key (a host's numeric id as a string, for example), which `farhelm-proto`
+//! spells where a view needs it (`HostView::key`). The per-collection facts are which type an entry decodes as and
+//! which [`PushedEntry`] variant carries it, and both live in exhaustive matches here.
 //!
 //! [`Collections`] is the one copy of this state. Views read it through [`Collections::ordered`] and
 //! [`Collections::get`], which hand out references; a view that kept its own copy of an entry would be a second
@@ -30,6 +30,7 @@ use farhelm_proto::approvals::PendingApproval;
 use farhelm_proto::launcher::LaunchTemplate;
 use farhelm_proto::notices::Notice;
 use farhelm_proto::provisioning::ProvisioningView;
+use farhelm_proto::recipes::{RecipePlaceView, RecipeView};
 use farhelm_proto::ui_channel::{
     Collection, CollectionChanges, CollectionMeta, CollectionState, HostView, KeyedEntry,
     Preferences, SessionRow,
@@ -51,6 +52,8 @@ pub enum PushedEntry {
     Notice(Notice),
     Announcements(AnnouncementQueue),
     HostProgress(ProvisioningView),
+    Recipe(RecipeView),
+    RecipePlace(RecipePlaceView),
 }
 
 /// An entry type that has its own pushed collection, so a reader can name the type and get the collection with it.
@@ -142,6 +145,27 @@ impl Pushed for ProvisioningView {
     }
 }
 
+impl Pushed for RecipeView {
+    const COLLECTION: Collection = Collection::Recipes;
+    fn from_entry(entry: &PushedEntry) -> Option<&Self> {
+        match entry {
+            PushedEntry::Recipe(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+/// Looked up by `RecipePlaceView::key(recipe, place)`, the helm's spelling of this collection's keys.
+impl Pushed for RecipePlaceView {
+    const COLLECTION: Collection = Collection::RecipePlaces;
+    fn from_entry(entry: &PushedEntry) -> Option<&Self> {
+        match entry {
+            PushedEntry::RecipePlace(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Decoding (done by the channel, once per message)
 // ---------------------------------------------------------------------------
@@ -207,6 +231,8 @@ fn decode_entries(
             Collection::Notices => |value| typed(value, PushedEntry::Notice),
             Collection::Announcements => |value| typed(value, PushedEntry::Announcements),
             Collection::HostProgress => |value| typed(value, PushedEntry::HostProgress),
+            Collection::Recipes => |value| typed(value, PushedEntry::Recipe),
+            Collection::RecipePlaces => |value| typed(value, PushedEntry::RecipePlace),
         };
     entries
         .into_iter()
