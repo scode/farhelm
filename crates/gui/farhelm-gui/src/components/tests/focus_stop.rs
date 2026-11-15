@@ -1,6 +1,6 @@
 //! Tests of the focus stop (`components::focus_stop`, the layer's rule under every scroll stop): a handle its caller
-//! owns can hold focus before the stop is first drawn, the stop is in Tab order with its role and name and shows its
-//! ring only for the keyboard, and it takes none of a scroll stop's keys.
+//! owns can be home before the stop is first drawn and takes focus once it is, the stop is in Tab order with its role
+//! and name and shows its ring only for the keyboard, and it takes none of a scroll stop's keys.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -21,10 +21,15 @@ use super::role_and_name;
 /// does, would have no handle to make home then, which is why the focus stop takes its caller's. The ring belongs to
 /// the keyboard (the old `:focus-visible`), so focus that came to rest there without a key press draws none.
 ///
-/// Specified: a caller's handle made home while the stop is not drawn holds focus; once the stop is drawn with that
-/// handle, the stop is the focused element, with no ring, since no key was pressed.
+/// Focus itself waits for the first frame: focus on a handle the frame does not draw takes no keys, so the coordinator
+/// gives an undrawn home none.
+///
+/// Specified: a caller's handle made home while the stop is not drawn does not hold focus yet; once the stop is drawn
+/// with that handle, the stop is the focused element, with no ring, since no key was pressed.
 #[gpui::test]
-fn a_callers_handle_holds_focus_before_the_stop_is_first_drawn(cx: &mut TestAppContext) {
+fn a_callers_handle_made_home_before_the_stop_is_drawn_takes_focus_once_it_is(
+    cx: &mut TestAppContext,
+) {
     let home = cx.update(|cx| cx.focus_handle().tab_stop(true));
     let shown = Rc::new(Cell::new(false));
     let (drawn, show) = (home.clone(), shown.clone());
@@ -41,7 +46,10 @@ fn a_callers_handle_holds_focus_before_the_stop_is_first_drawn(cx: &mut TestAppC
         cx.debug_bounds("card").is_none(),
         "the premise: the stop is not drawn yet"
     );
-    assert!(focused(cx, &home), "the caller's handle holds focus");
+    assert!(
+        !focused(cx, &home),
+        "the caller's handle is home but holds no focus while undrawn"
+    );
 
     shown.set(true);
     redraw(cx);
