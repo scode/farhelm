@@ -130,6 +130,17 @@ fn open_settings(cx: &mut VisualTestContext) {
     assert!(any_open(cx), "the premise: the gear opened Settings");
 }
 
+/// The dialog frame's scrolling body, by the selector the frame gives it (`<frame id>-body`). Its drawn bounds are the
+/// part of the section the user can see: everything else in the body is scrolled out of them.
+const DIALOG_BODY: &str = "settings-body";
+
+/// Whether the element drawn under `selector` lies wholly inside, top to bottom, the element drawn under `region`: a
+/// control in a scrolling region shows whole only when this holds.
+fn shows_whole(cx: &mut VisualTestContext, selector: &'static str, region: &'static str) -> bool {
+    let (inner, outer) = (bounds(cx, selector), bounds(cx, region));
+    inner.top() >= outer.top() && inner.bottom() <= outer.bottom()
+}
+
 fn any_open(cx: &mut VisualTestContext) -> bool {
     cx.update(|window, cx| layers::any_open(window, cx))
 }
@@ -334,7 +345,7 @@ fn a_switch_tab_reaches_below_the_fold_scrolls_into_view(cx: &mut TestAppContext
     cx.simulate_resize(size(px(1000.), px(400.)));
     settle(cx);
     open_settings(cx);
-    let body = bounds(cx, "settings-body");
+    let body = bounds(cx, DIALOG_BODY);
     assert!(
         bounds(cx, frames).bottom() > body.bottom(),
         "the premise: the last switch is below the fold"
@@ -345,10 +356,11 @@ fn a_switch_tab_reaches_below_the_fold_scrolls_into_view(cx: &mut TestAppContext
         Some(frames),
         "the premise: Tab reached it"
     );
-    let (switch, body) = (bounds(cx, frames), bounds(cx, "settings-body"));
     assert!(
-        switch.top() >= body.top() && switch.bottom() <= body.bottom(),
-        "the switch {switch:?} is inside the body's visible part {body:?}"
+        shows_whole(cx, frames, DIALOG_BODY),
+        "the switch {:?} is inside the body's visible part {:?}",
+        bounds(cx, frames),
+        bounds(cx, DIALOG_BODY)
     );
 }
 
@@ -1391,14 +1403,17 @@ fn the_hint_switches_are_the_shared_dismissals_inverted(cx: &mut TestAppContext)
     assert_eq!(switch_on(cx, Choice::ShowMuseTrustHint.id()), Some(false));
 }
 
-/// A trust hint's "Settings and caveats" opens Agent trust at its agent's switch (SPEC.md: "Trust hints instead open
-/// agent trust at the relevant switch"), but the switch cannot hold focus until its read answers. Pi's read is
-/// answered last, so a handover keyed on the wrong agent would focus an earlier switch and take focus off the dialog,
-/// and Pi's switch would never get it. The switch is not scrolled into view yet (a recorded deviation), so this checks
-/// focus only. Closing returns focus to the hint's button, which Settings names as its return target, as the gear's
+/// A trust hint's "Settings and caveats" opens Agent trust at its agent's switch and brings it into view (SPEC.md:
+/// "Trust hints instead open agent trust at the relevant switch and scroll its block into view"), but the switch cannot
+/// hold focus until its read answers. Pi is the case that needs both halves: its read is answered last, so a handover
+/// keyed on the wrong agent would focus an earlier switch, and its switch is the last in the section, below the fold
+/// when the dialog opens, so a move that did not scroll would leave focus on a switch the user cannot see, where a
+/// Space meant to scroll would turn Pi's trust on unseen. SPEC.md's block is checked as the switch only (a recorded
+/// deviation). Closing returns focus to the hint's button, which Settings names as its return target, as the gear's
 /// entry point does. Specified: opened for Pi from a button that does not hold focus, Settings shows Agent trust with
-/// the dialog itself holding focus; once the reads answer, Pi's switch holds focus; Escape then closes Settings and
-/// focus goes to the button.
+/// the dialog itself holding focus and Pi's switch not wholly inside the visible part of the dialog's body; once the
+/// reads answer, Pi's switch holds focus and lies wholly inside it; Escape then closes Settings and focus goes to the
+/// button.
 #[gpui::test]
 fn the_trust_hint_entry_point_focuses_its_agents_switch_once_known(cx: &mut TestAppContext) {
     let (mut helm, cx, gear) = open_rail(cx, &Preferences::default());
@@ -1416,9 +1431,21 @@ fn the_trust_hint_entry_point_focuses_its_agents_switch_once_known(cx: &mut Test
         dialog_holds_focus(cx),
         "the dialog itself holds focus while the reads are out"
     );
+    assert!(
+        !shows_whole(cx, TrustAgent::Pi.id(), DIALOG_BODY),
+        "the premise: Pi's switch starts out of view: {:?} in {:?}",
+        bounds(cx, TrustAgent::Pi.id()),
+        bounds(cx, DIALOG_BODY)
+    );
     let reads = sent_reads(&mut helm);
     answer_trust(&mut helm, &reads, [false; 4], cx);
     assert_eq!(focused_id(cx).as_deref(), Some(TrustAgent::Pi.id()));
+    assert!(
+        shows_whole(cx, TrustAgent::Pi.id(), DIALOG_BODY),
+        "the move scrolled Pi's switch into view: {:?} in {:?}",
+        bounds(cx, TrustAgent::Pi.id()),
+        bounds(cx, DIALOG_BODY)
+    );
     keys(cx, "escape");
     assert!(!any_open(cx), "the premise: Escape closed Settings");
     assert!(
