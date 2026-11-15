@@ -304,7 +304,7 @@ pub(super) fn creates(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<Fa
 }
 
 /// Press the ⚡ chord once.
-fn chord(cx: &mut VisualTestContext) {
+pub(super) fn chord(cx: &mut VisualTestContext) {
     keys(cx, QUICK_LAUNCH_CHORD);
 }
 

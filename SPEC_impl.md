@@ -8142,13 +8142,17 @@ same path as New's button, with its refusal; the launcher's check, catalog, host
 a draft its own check refuses is shown at once with that reason. That fold lives in the protocol crate and also judges a
 single template for ⚡ marking, its hints, and agent writes. Only the active kind counts: Agent needs an agent, Command
 a nonblank command, and omitted kind starts on Agent. A launcher started unseen is marked as a quick launch never shown
-until it is first drawn, which is the fact quick-launch naming reads; from the submit on, the outcome is the launcher's,
-and the dispatcher watches no reply. Templates and bindings are read from the store at the press, and the hosts,
-remembered wrapper prefixes and default folders when the batch applies; the catalog is the one read a press waits for;
-there is no snapshot of the keyboard context or of the modal epoch: GPUI handles presses in order on one thread, a shown
-launcher's moved-on rule decides whether a prepared launch opens anything, and the UI channel's ordering keeps a launch
-from overtaking a template save sent before it. A launcher prepared out of sight shown after the user moved on waits
-behind the launch notice, as a refused launch does.
+until it is first drawn, which is the fact quick-launch naming reads: when the launcher's success opens the session (the
+user had not moved on) and that mark still stands, the launcher hands the session to `templates::name_quick_launched`,
+which opens the sidebar's Rename editor over it in naming mode (`session_list::rename::open_naming`: the name selected,
+an unchanged save kept without a request, focus to the new terminal however it closes) unless the helm's
+`name_session_on_quick_launch` is false. From the submit on, the outcome is the launcher's, and the dispatcher watches
+no reply. Templates and bindings are read from the store at the press, and the hosts, remembered wrapper prefixes and
+default folders when the batch applies; the catalog is the one read a press waits for; there is no snapshot of the
+keyboard context or of the modal epoch: GPUI handles presses in order on one thread, a shown launcher's moved-on rule
+decides whether a prepared launch opens anything, and the UI channel's ordering keeps a launch from overtaking a
+template save sent before it. A launcher prepared out of sight shown after the user moved on waits behind the launch
+notice, as a refused launch does.
 
 One row search (`templates/rows.rs`) is what the quick switcher's templates section, the launcher's `tl:` search and the
 Cmd+J list will call; none of them draws rows yet. It matches a lowercased substring of the name, in the helm's order,
