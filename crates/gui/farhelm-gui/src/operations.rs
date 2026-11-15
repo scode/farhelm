@@ -172,6 +172,13 @@ pub enum Work {
     /// showed: the helm records that identity for the entry, resets the host's five permissions to asking and
     /// connects again (`hosts::remedies`). Not supersedable. It changes the registry's entry for the host.
     AdoptHost,
+    /// The session's Pin to top or Unpin (`PUT /api/sessions/{id}/pin`), from its row's menu (`session_list::pins`),
+    /// on the session's own key like Mark read, so its other actions are unavailable while it runs. Not supersedable.
+    Pin,
+    /// The session's Move up or Move down among the pins (`PUT /api/sessions/{id}/pin-order`), from its row's menu, on
+    /// the session's own key. Apart from [`Work::Pin`] because the old app named the two refusals differently ("Pin:"
+    /// and "Move pin:"). Not supersedable: each press names the neighbor it was drawn with.
+    MovePin,
 }
 
 /// The two halves of SPEC.md's "Launches and changes to the host registry still exclude each other". Each side refuses
@@ -222,6 +229,8 @@ impl Work {
             Work::TabClose => false,
             Work::RetryHost => false,
             Work::AdoptHost => false,
+            Work::Pin => false,
+            Work::MovePin => false,
         }
     }
 
@@ -255,6 +264,8 @@ impl Work {
             Work::TabClose => false,
             Work::RetryHost => false,
             Work::AdoptHost => true,
+            Work::Pin => false,
+            Work::MovePin => false,
         }
     }
 }

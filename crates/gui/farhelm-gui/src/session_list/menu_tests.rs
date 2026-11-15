@@ -167,9 +167,9 @@ pub(super) fn click_at(at: Point<Pixels>) -> [PlatformInput; 2] {
 /// click rule, where the click leaves the button unfocused, so only the menu naming its button as the return target
 /// brings focus back there. Specified: clicking b's menu button opens the menu below the button with focus on its first
 /// command, Rename, its header names b and says "Codex · Running", a is still the open session and nothing is sent;
-/// Tab moves through Mark unread (b reads seen), Clone, Replace with…, Replace, Stop and Delete, in the old menu's
-/// order (the separators between their groups take no focus), and then wraps to Rename, staying in the menu; Escape
-/// closes the menu and focus is on b's button.
+/// Tab moves through Mark unread (b reads seen), Pin to top, Clone, Replace with…, Replace, Stop and Delete, in the old
+/// menu's order (the separators between their groups take no focus), and then wraps to Rename, staying in the menu;
+/// Escape closes the menu and focus is on b's button.
 #[gpui::test]
 fn the_menu_opens_below_its_button_holds_focus_and_leaves_the_selection(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
@@ -200,6 +200,7 @@ fn the_menu_opens_below_its_button_holds_focus_and_leaves_the_selection(cx: &mut
 
     for next in [
         "session-menu-seen",
+        "session-menu-pin",
         "session-menu-clone",
         "session-menu-replace-with",
         "session-menu-replace",

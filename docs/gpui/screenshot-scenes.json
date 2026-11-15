@@ -1112,6 +1112,11 @@
       "reference": "empty-fleet"
     },
     {
+      "golden": "session-list-pinned",
+      "title": "The session list with a pinned run: two pins in their shared order, the open one among them, their glyphs, and the heavier separator before the unpinned rows",
+      "reference": null
+    },
+    {
       "golden": "session-row-menu",
       "title": "A session row's actions menu, open below its button",
       "reference": "session-row-menu"

@@ -14,10 +14,10 @@
 //!   that could not close a tab, a Replace whose source's Delete reported something), which the operation's completion
 //!   records there with [`crate::operations::Operations::note`]. The store keeps either until the key's next start or
 //!   a reset, whoever starts that work, so an editor or a later header needs no call here. Both are drawn alike, in the
-//!   refusal style, as the old app's one error slot drew them. A Stop, Replace, Restart or seen-toggle line carries its
-//!   operation's name in front of the words, as that slot did, and a Rename or Delete refusal shows the words alone, as
-//!   before. The open session's header shows the same line below its top row ([`pane_line`]), as the old header's
-//!   error lines did.
+//!   refusal style, as the old app's one error slot drew them. A Stop, Replace, Restart, seen-toggle, pin or move line
+//!   carries its operation's name in front of the words, as that slot did, and a Rename or Delete refusal shows the
+//!   words alone, as before. The open session's header shows the same line below its top row ([`pane_line`]), as the
+//!   old header's error lines did.
 //! - **The wait clock is the ticker's, never a timer of its own.** One clock serves Replace and Restart, the two
 //!   requests SPEC.md gives this line, and a session has at most one, since it has at most one request in flight. A
 //!   [`ticker::after`] deadline shows the line two seconds after the request; from then the line counts the whole
@@ -56,10 +56,10 @@ pub(crate) const PROGRESS_SHOWS_AFTER: Duration = Duration::from_secs(2);
 // ---- The words -------------------------------------------------------------------------------------------------------
 
 /// The name a line about `work` carries in front of the host's words on the row, as the old app's error slot did:
-/// "Stop: ", "Replace: " and "Restart: ", for a refusal and a notice alike, and "Seen: " for a refused Mark read or Mark
-/// unread (the old app's `seen_toggle_report`). A Rename or a Delete refusal shows the words alone, as it did before
-/// Stop and Replace came, and a save belongs to an editor, which shows its own refusal. Exhaustive, so a new kind of
-/// work decides.
+/// "Stop: ", "Replace: " and "Restart: ", for a refusal and a notice alike, "Seen: " for a refused Mark read or Mark
+/// unread (the old app's `seen_toggle_report`), and "Pin: " and "Move pin: " for a refused pin and move. A Rename or a
+/// Delete refusal shows the words alone, as it did before Stop and Replace came, and a save belongs to an editor, which
+/// shows its own refusal. Exhaustive, so a new kind of work decides.
 fn prefix(work: Work) -> Option<&'static str> {
     match work {
         Work::Stop => Some("Stop: "),
@@ -69,6 +69,10 @@ fn prefix(work: Work) -> Option<&'static str> {
         // The old app's tab error line ("Open tab: " and the supervisor's words: a vanished folder, a shell that died
         // at once). A new tab is the session's own work, so its refusal shows where the session's others do.
         Work::TabOpen => Some("Open tab: "),
+        // The old app's pin lines (`on_pin` and `on_move_pin` in `list/view.rs`): a pin's and a move's refusals are
+        // told apart by their names.
+        Work::Pin => Some("Pin: "),
+        Work::MovePin => Some("Move pin: "),
         // A probe, a setup, a host's removal, Update and uninstall are host work, never on a session's key, so no row
         // line ever names them; tunnel work has a key of its own, a launch is the launcher's, on a launch key, and an
         // approval answer is on its request's key, whose card shows its refusal. A tab's close is on the tab's key,
@@ -200,7 +204,9 @@ fn waiting(work: Work) -> Option<(&'static str, &'static str)> {
         | Work::AdoptHost
         | Work::TrashDelete
         | Work::TabOpen
-        | Work::TabClose => None,
+        | Work::TabClose
+        | Work::Pin
+        | Work::MovePin => None,
     }
 }
 
@@ -430,15 +436,18 @@ mod tests {
         }
     }
 
-    /// The old app's error slot named the operation for Stop, Replace, Restart and a manual seen toggle ("Stop: …",
-    /// "Replace: …", "Restart: …", "Seen: …"), and the ported Delete and Rename refusals have always shown the helm's
-    /// words alone. Specified: Stop, Replace, Restart and Seen carry their name and a colon, the others nothing.
+    /// The old app's error slot named the operation for Stop, Replace, Restart, a manual seen toggle, a pin and a move
+    /// ("Stop: …", "Replace: …", "Restart: …", "Seen: …", "Pin: …", "Move pin: …"), and the ported Delete and Rename
+    /// refusals have always shown the helm's words alone. Specified: those six carry their name and a colon, the others
+    /// nothing.
     #[test]
-    fn only_stop_replace_restart_and_seen_lines_carry_their_name() {
+    fn only_stop_replace_restart_seen_and_pin_lines_carry_their_name() {
         assert_eq!(prefix(Work::Stop), Some("Stop: "));
         assert_eq!(prefix(Work::Replace), Some("Replace: "));
         assert_eq!(prefix(Work::Seen), Some("Seen: "));
         assert_eq!(prefix(Work::Restart), Some("Restart: "));
+        assert_eq!(prefix(Work::Pin), Some("Pin: "));
+        assert_eq!(prefix(Work::MovePin), Some("Move pin: "));
         for work in [
             Work::Rename,
             Work::Save,

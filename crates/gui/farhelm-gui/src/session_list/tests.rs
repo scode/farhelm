@@ -40,9 +40,10 @@ pub(crate) const TEST_NOW: i64 = 1_751_414_398;
 /// One session as the helm would push it: the helm's pinned list fixture with the fields these tests are about
 /// replaced. Defaults: titled by its key, running, created and last active at 100, seen at 100 (so nothing is new), in
 /// `/home/user/src/<key>`, with no annotation, on a connected host the fixture names `buildbox`, launched as the
-/// fixture's Codex agent launch in YOLO with no status-line evidence, and with no notifications (the helm fixture's row
-/// carries a resolved one, which would give every row a bell; a test that wants one names it). The screenshot goldens
-/// build their fleet from it too.
+/// fixture's Codex agent launch in YOLO with no status-line evidence, with no notifications (the helm fixture's row
+/// carries a resolved one, which would give every row a bell; a test that wants one names it), and unpinned (the helm
+/// fixture's row is pinned, which would group every row first and draw a pin on each; a test that wants one names its
+/// position). The screenshot goldens build their fleet from it too.
 #[derive(Clone)]
 pub(crate) struct Fixture {
     pub(crate) key: &'static str,
@@ -74,6 +75,8 @@ pub(crate) struct Fixture {
     working_copy: Option<Value>,
     /// Whether the session's launch provenance (`github_repo`) is cleared; else the helm fixture's, `octo/widgets`.
     no_launch_repository: bool,
+    /// The session's shared pin position when it is pinned; `None` for an unpinned row.
+    pin: Option<i64>,
 }
 
 pub(crate) fn session(key: &'static str) -> Fixture {
@@ -96,6 +99,7 @@ pub(crate) fn session(key: &'static str) -> Fixture {
         invocation: None,
         working_copy: None,
         no_launch_repository: false,
+        pin: None,
     }
 }
 
@@ -181,6 +185,11 @@ impl Fixture {
         self.no_launch_repository = true;
         self
     }
+    /// The session pinned at the shared manual position `position`.
+    pub(crate) fn pinned(mut self, position: i64) -> Self {
+        self.pin = Some(position);
+        self
+    }
 
     pub(crate) fn entry(&self) -> KeyedEntry {
         let mut entry = session_entry(self.key);
@@ -221,6 +230,8 @@ impl Fixture {
         if let Some(working_copy) = &self.working_copy {
             value["working_copy"] = working_copy.clone();
         }
+        value["pinned"] = json!(self.pin.is_some());
+        value["pin_position"] = json!(self.pin);
         if self.no_launch_repository {
             value["github_repo"] = Value::Null;
         }
@@ -355,7 +366,7 @@ pub(crate) fn selected(cx: &mut VisualTestContext) -> Option<String> {
 }
 
 /// The keys of the rows drawn, top to bottom.
-fn row_order(nodes: &[DriverNode]) -> Vec<String> {
+pub(crate) fn row_order(nodes: &[DriverNode]) -> Vec<String> {
     let mut rows: Vec<_> = nodes
         .iter()
         .filter(|node| node.role == Some(Role::Button))
