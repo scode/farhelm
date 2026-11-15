@@ -31,8 +31,7 @@ use gpui::{
 use super::changed::Changed;
 use super::{LABEL_COLUMN, LABEL_GAP, Launcher, row};
 use crate::components::{
-    Button, CustomFlags, HoverHelp, RadioGroup, RadioOption, Role, Select, SelectOption, TextInput,
-    Tier,
+    Button, CustomFlags, HoverHelp, RadioGroup, RadioOption, Role, Select, SelectOption, Tier,
 };
 use crate::focus::{self, Mark};
 use crate::launcher::draft::{Edit, Field, Mode, RestartBaseline, harness_label};
@@ -402,7 +401,7 @@ impl Launcher {
         let field = row(
             "launcher-flags-row",
             "Permission flags",
-            TextInput::new(
+            super::launcher_input(
                 "launcher-flags",
                 &self.flags,
                 "Permission flags",

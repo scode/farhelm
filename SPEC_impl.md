@@ -8183,12 +8183,16 @@ or generation fence is needed. The prefix is an action bound in the app's key co
 Linux through a `NoAction` row in GPUI Kit's input context, on a Mac through Kit's own Cut binding), a focused terminal
 hands it on as an app shortcut, and the prefix is refused while a dialog other than the launcher holds the keyboard, and
 while the launcher is busy with a launch or a host change. Under the launcher it arms the launcher's form, whose pill
-says "apply" and sits at the bottom of the main area; the launcher's text fields keep the chord whatever their
-selection, since catching GPUI Kit's Cut for an unselected launcher field is not built. While armed, the actions
-module's key capture slot hands every key-down to the sequence ahead of the terminal, the bindings and the physical-key
-rows (`templates/armed.rs`): a printable character with nothing but Shift held, a bare main-row digit by physical key
-with the character it prints, the number and ⚡ chords, Space, Tab and Backspace feed the model; Escape and a second
-prefix cancel and are consumed; anything else, including a keypad digit and a key that types nothing (a dead key, a key
+says "apply" and sits at the bottom of the main area. The launcher's text fields begin it too when nothing is selected
+(`TextInput::on_unselected_prefix`, which every launcher field uses): on a Mac the field catches GPUI Kit's Cut action
+in the capture phase and takes it only with no selection, so a selection still cuts, and a Cut from the Edit menu with
+nothing selected begins a sequence as Cmd+X would; on Linux, where the chord is not Cut and Kit binds it to nothing, the
+field takes the chord's key-down with no selection and otherwise leaves it to the field. Either way the field dispatches
+the prefix's action, which reaches the main view as from any other control. While armed, the actions module's key
+capture slot hands every key-down to the sequence ahead of the terminal, the bindings and the physical-key rows
+(`templates/armed.rs`): a printable character with nothing but Shift held, a bare main-row digit by physical key with
+the character it prints, the number and ⚡ chords, Space, Tab and Backspace feed the model; Escape and a second prefix
+cancel and are consumed; anything else, including a keypad digit and a key that types nothing (a dead key, a key
 mid-composition), cancels and goes on to its normal target. Held repeats of a sequence key are taken and add nothing. A
 press anywhere in the window (one window-wide listener), the window going inactive, a reset (the slot's reset callback)
 and, at the next key, a dialog that opened since the prefix also cancel. Input-method text that arrives without a

@@ -80,17 +80,34 @@
 //! typing stays in the field) takes them with [`TextInput::on_vertical`], which catches Kit's two actions on their way
 //! down to the field, before Kit's own handler runs, and hands them to the field's owner instead. Kit's action types
 //! stay inside this module, as its event type does.
+//!
+//! ## The sequence prefix
+//!
+//! A text field keeps the quick-launch sequence prefix, Cmd+X on a Mac and Ctrl+Shift+X on Linux, as its own key
+//! (`crate::actions`, `TEXT_FIELD_KEYS`), except that SPEC.md has the session launcher's fields begin a sequence with
+//! it when nothing is selected ("In the launcher's own text fields it starts a sequence only when no text is selected;
+//! with a selection it keeps Cut"). [`TextInput::on_unselected_prefix`] is that exception, for the launcher's fields
+//! alone. On a Mac the chord is Kit's Cut binding, so the field catches Kit's Cut action on its way down, before Kit's
+//! handler runs, and takes it only when nothing is selected; with a selection Kit cuts as usual. A Cut from the Edit
+//! menu is the same action, so with nothing selected it begins a sequence too, as its Cmd+X would. On Linux the chord
+//! is not Cut (that is Ctrl+X, which this leaves alone) and Kit binds it to nothing, so the field takes the chord's
+//! key-down instead, again only with nothing selected; with a selection the chord keeps a field's ordinary meaning,
+//! which in Kit's fields is none.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use farhelm_input_mapping::Platform;
 use gpui::{
     App, AppContext as _, Context, ElementId, Entity, FocusHandle, Focusable as _,
     InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, SharedString, Styled,
     Subscription, Window, div, prelude::FluentBuilder as _,
 };
+use gpui::{KeybindingKeystroke, Keystroke};
+
+use crate::actions::THIS_PLATFORM;
 use gpui_component::input::{
-    Enter, Input, InputEvent, InputState, MoveDown, MoveUp, Textarea, TextareaState,
+    Cut, Enter, Input, InputEvent, InputState, MoveDown, MoveUp, Textarea, TextareaState,
 };
 
 use super::HoverHelp;
@@ -262,6 +279,15 @@ impl TextInputState {
         }
     }
 
+    /// Whether the field has no text selected (its caret alone), for a key whose meaning turns on that
+    /// ([`TextInput::on_unselected_prefix`]).
+    pub(crate) fn selection_empty(&self, cx: &App) -> bool {
+        match &self.0 {
+            Field::Line(input) => input.read(cx).selected_range().is_empty(),
+            Field::Row(area) | Field::Area(area) => area.read(cx).selected_range().is_empty(),
+        }
+    }
+
     /// The current text.
     pub fn text(&self, cx: &App) -> SharedString {
         match &self.0 {
@@ -424,7 +450,13 @@ pub struct TextInput {
     height: Option<Pixels>,
     /// Drawn with the warning outline ([`TextInput::invalid`]).
     invalid: bool,
+    /// What the sequence prefix does in this field with nothing selected, and by which platform's rule, if anything
+    /// ([`TextInput::on_unselected_prefix`]).
+    on_unselected_prefix: Option<(Platform, PrefixHandler)>,
 }
+
+/// What a field runs for the sequence prefix with nothing selected ([`TextInput::on_unselected_prefix`]).
+type PrefixHandler = Rc<dyn Fn(&mut Window, &mut App)>;
 
 /// What a field hands Up and Down to ([`TextInput::on_vertical`]).
 type VerticalHandler = Rc<dyn Fn(Vertical, &mut Window, &mut App)>;
@@ -487,6 +519,7 @@ impl TextInput {
             monospace: false,
             height: None,
             invalid: false,
+            on_unselected_prefix: None,
         }
     }
 
@@ -515,6 +548,24 @@ impl TextInput {
     /// editable and the feature decides what the value blocks.
     pub fn invalid(mut self, invalid: bool) -> Self {
         self.invalid = invalid;
+        self
+    }
+
+    /// Run `handler` instead of the field's own handling when the sequence prefix is pressed in the field with nothing
+    /// selected, and stop the key there (the module docs, "The sequence prefix"); with a selection the field keeps the
+    /// chord. For the session launcher's fields only, whose prefix begins a sequence: every other field keeps it.
+    pub fn on_unselected_prefix(self, handler: impl Fn(&mut Window, &mut App) + 'static) -> Self {
+        self.on_unselected_prefix_on(THIS_PLATFORM, handler)
+    }
+
+    /// [`TextInput::on_unselected_prefix`] by `platform`'s rule rather than this build's, so that both platforms' rules
+    /// can be tested on either: on a Mac Kit's Cut action, on Linux the prefix chord's key-down.
+    pub(crate) fn on_unselected_prefix_on(
+        mut self,
+        platform: Platform,
+        handler: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_unselected_prefix = Some((platform, Rc::new(handler)));
         self
     }
 
@@ -551,6 +602,39 @@ impl RenderOnce for TextInput {
                 held.set(Some(event.is_held));
             }
         });
+        // The sequence prefix with nothing selected (the module docs, "The sequence prefix"). On a Mac it is Kit's
+        // Cut, caught in the capture phase, on its way down to the field, so Kit's own Cut handler never sees one taken
+        // here.
+        // On Linux it is a key-down listener, because the do-nothing binding for that chord in Kit's text-field context
+        // (`actions.rs`, `TEXT_FIELD_KEYS`) hides the app's binding, so no action arrives, while key listeners still
+        // see the key.
+        let wrapper = match self.on_unselected_prefix {
+            Some((Platform::Mac, handler)) => {
+                let state = self.state.clone();
+                wrapper.capture_action(move |_: &Cut, window, cx| {
+                    if state.selection_empty(cx) {
+                        cx.stop_propagation();
+                        handler(window, cx);
+                    }
+                })
+            }
+            Some((Platform::Linux, handler)) => {
+                let state = self.state.clone();
+                let chord = Keystroke::parse(crate::actions::SEQUENCE_PREFIX_LINUX)
+                    .map(KeybindingKeystroke::from_keystroke)
+                    .ok();
+                wrapper.capture_key_down(move |event, window, cx| {
+                    let pressed = chord
+                        .as_ref()
+                        .is_some_and(|chord| event.keystroke.should_match(chord));
+                    if pressed && state.selection_empty(cx) {
+                        cx.stop_propagation();
+                        handler(window, cx);
+                    }
+                })
+            }
+            None => wrapper,
+        };
         // Caught on the way down, in the capture phase, because Kit's own handler on the field consumes both actions
         // and stops them there (the module docs, "Up and Down").
         let wrapper = match self.on_vertical {

@@ -1,5 +1,6 @@
 //! Tests of the text input: the events it reports to its owner, the growing box, the field that keeps line breaks,
-//! whether an Enter was a held repeat, and the Up and Down keys it hands to the owner of the list beside it.
+//! whether an Enter was a held repeat, the Up and Down keys it hands to the owner of the list beside it, and the
+//! sequence prefix a launcher field takes with nothing selected, by each platform's rule.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -545,6 +546,122 @@ fn up_and_down_reach_the_fields_owner_and_leave_the_field_alone(cx: &mut TestApp
         cx.update(|window, cx| state.focus_handle(cx).is_focused(window)),
         "the field kept focus"
     );
+}
+
+// ---- The sequence prefix --------------------------------------------------------------------------------------------
+
+/// Open a field drawn with [`TextInput::on_unselected_prefix_on`] by `platform`'s rule, holding `ab`, focused, with the
+/// caret at its end and nothing selected; returns its state and how many times its handler ran.
+fn prefix_field(
+    cx: &mut TestAppContext,
+    platform: farhelm_input_mapping::Platform,
+) -> (
+    &mut VisualTestContext,
+    TextInputState,
+    Rc<std::cell::Cell<usize>>,
+) {
+    let begun = Rc::new(std::cell::Cell::new(0));
+    let kept: Rc<RefCell<Option<TextInputState>>> = Rc::default();
+    let (counted, made) = (begun.clone(), kept.clone());
+    let cx = open(cx, move |window, cx| {
+        let state = made
+            .borrow_mut()
+            .get_or_insert_with(|| TextInputState::new(window, cx))
+            .clone();
+        let counted = counted.clone();
+        div()
+            .debug_selector(|| "prefix-box".into())
+            .w(px(200.))
+            .child(
+                TextInput::new(
+                    "field",
+                    &state,
+                    "Folder",
+                    HoverHelp::tooltip("A launcher field"),
+                )
+                .on_unselected_prefix_on(platform, move |_, _| counted.set(counted.get() + 1)),
+            )
+            .into_any_element()
+    });
+    let state = kept.borrow().clone().expect("the field was drawn");
+    click(cx, "prefix-box");
+    keys(cx, "a b");
+    (cx, state, begun)
+}
+
+/// Send Kit's Cut to the focused field, as Cmd+X or the Edit menu does on a Mac.
+fn cut(cx: &mut VisualTestContext) {
+    cx.update(|window, cx| {
+        window.dispatch_action(crate::components::EditCommand::Cut.action(), cx)
+    });
+    redraw(cx);
+}
+
+/// Whether `state` has nothing selected.
+fn nothing_selected(cx: &mut VisualTestContext, state: &TextInputState) -> bool {
+    cx.update(|_, cx| state.selection_empty(cx))
+}
+
+/// The text `state` holds.
+fn text_of(cx: &mut VisualTestContext, state: &TextInputState) -> String {
+    cx.update(|_, cx| state.text(cx).to_string())
+}
+
+/// SPEC.md: a launcher text field "starts a sequence only when no text is selected; with a selection it keeps Cut". On
+/// a Mac the prefix is Cmd+X, Kit's Cut, so the rule must hold at Kit's Cut action, which this build's own keys cannot
+/// reach on Linux. Specified, by the Mac rule: with nothing selected, Kit's Cut runs the handler once and leaves `ab`;
+/// with the text selected (Select All), Cut cuts it and the handler does not run.
+#[gpui::test]
+fn by_the_mac_rule_cut_with_nothing_selected_runs_the_handler_and_with_a_selection_cuts(
+    cx: &mut TestAppContext,
+) {
+    let (cx, state, begun) = prefix_field(cx, farhelm_input_mapping::Platform::Mac);
+    assert!(
+        nothing_selected(cx, &state),
+        "the premise: nothing is selected"
+    );
+    cut(cx);
+    assert_eq!(begun.get(), 1, "Cut with nothing selected ran the handler");
+    assert_eq!(text_of(cx, &state), "ab", "and cut nothing");
+
+    keys(cx, SELECT_ALL);
+    assert!(
+        !nothing_selected(cx, &state),
+        "the premise: Select All selected the text"
+    );
+    cut(cx);
+    assert_eq!(begun.get(), 1, "Cut with a selection did not run it");
+    assert_eq!(text_of(cx, &state), "", "and cut the text");
+}
+
+/// On Linux the prefix is Ctrl+Shift+X, not Cut, so Kit's Cut (Ctrl+X) must keep its meaning whatever is selected, and
+/// the chord with a selection keeps the field's own meaning, which in Kit's fields is none. Specified, by the Linux
+/// rule: with nothing selected, Kit's Cut runs nothing and the prefix chord runs the handler once, the text staying
+/// `ab`; with the text selected, the chord runs nothing and leaves the text and its selection.
+#[gpui::test]
+fn by_the_linux_rule_only_the_chord_runs_the_handler_and_only_with_nothing_selected(
+    cx: &mut TestAppContext,
+) {
+    let (cx, state, begun) = prefix_field(cx, farhelm_input_mapping::Platform::Linux);
+    cut(cx);
+    assert_eq!(begun.get(), 0, "Kit's Cut is not the prefix here");
+    keys(cx, crate::actions::SEQUENCE_PREFIX_LINUX);
+    assert_eq!(
+        begun.get(),
+        1,
+        "the chord with nothing selected ran the handler"
+    );
+    assert_eq!(text_of(cx, &state), "ab");
+
+    keys(cx, SELECT_ALL);
+    assert!(
+        !nothing_selected(cx, &state),
+        "the premise: Select All selected the text"
+    );
+    keys(cx, crate::actions::SEQUENCE_PREFIX_LINUX);
+    assert_eq!(begun.get(), 1, "the chord with a selection ran nothing");
+    assert_eq!(text_of(cx, &state), "ab", "and left the text");
+    assert!(!nothing_selected(cx, &state), "and its selection");
 }
 
 // ---- One subscriber per state ---------------------------------------------------------------------------------------

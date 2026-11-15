@@ -1699,3 +1699,87 @@ fn enter_on_the_commands_agent_type_and_resume_presses_launch(cx: &mut TestAppCo
         "and left Resume as it was"
     );
 }
+
+/// Whether the quick-launch sequence's pill in its launcher form ("Apply sequence:") is drawn: the sign a sequence was
+/// armed from the launcher.
+fn sequence_armed(cx: &mut VisualTestContext) -> bool {
+    crate::session_list::tests::painted(&test_support::frame(cx))
+        .iter()
+        .any(|line| line.contains("Apply sequence:"))
+}
+
+/// SPEC.md, "Quick-launch sequences": "In the launcher's own text fields it starts a sequence only when no text is
+/// selected; with a selection it keeps Cut", while every other text field keeps the chord
+/// (`templates::armed_tests::a_text_field_keeps_the_prefix`). The user composes a launch in these fields, so a prefix a
+/// field swallowed would leave sequences out of reach there. Specified: with New open on `~`, `abc` typed in the search
+/// box, where focus starts, and nothing selected there, the prefix arms the launcher's form of the sequence and leaves
+/// the query `abc`; Escape ends it. With focus moved to the folder field, the prefix arms the sequence again and leaves
+/// the folder `~`, focus still in the field; Escape ends it; Select All selects the whole folder, and then the prefix
+/// arms nothing, and leaves `~` on Linux (GPUI Kit binds that chord to nothing) or cuts it on a Mac (Cmd+X is Cut
+/// there).
+#[gpui::test]
+fn the_prefix_in_a_launcher_field_begins_a_sequence_only_with_nothing_selected(
+    cx: &mut TestAppContext,
+) {
+    let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    cx.simulate_input("abc");
+    settle(cx);
+    let query = |cx: &mut VisualTestContext| {
+        read(cx, |launcher, _, cx| launcher.search.text(cx).to_string())
+    };
+    assert_eq!(
+        query(cx),
+        "abc",
+        "the premise: the search box, where focus starts, holds the query"
+    );
+    assert!(
+        read(cx, |launcher, _, cx| launcher.search.selection_empty(cx)),
+        "the premise: nothing is selected in it"
+    );
+    keys(cx, crate::actions::SEQUENCE_PREFIX_CHORD);
+    assert!(
+        sequence_armed(cx),
+        "the prefix in the search box armed a sequence"
+    );
+    assert_eq!(query(cx), "abc", "and left the query");
+    keys(cx, "escape");
+    assert!(!sequence_armed(cx), "the premise: Escape ended it");
+
+    test_support::click(cx, "launcher-folder-row");
+    assert!(
+        focused(cx, Field::Folder),
+        "the premise: the folder field holds focus"
+    );
+    keys(cx, crate::actions::SEQUENCE_PREFIX_CHORD);
+    assert!(sequence_armed(cx), "the prefix armed a sequence");
+    assert_eq!(
+        draft(cx).folder.value(),
+        "~",
+        "the field's text is unchanged"
+    );
+    assert!(focused(cx, Field::Folder), "focus stayed in the field");
+    keys(cx, "escape");
+    assert!(!sequence_armed(cx), "the premise: Escape ended it");
+
+    let select_all = if cfg!(target_os = "macos") {
+        "cmd-a"
+    } else {
+        "ctrl-a"
+    };
+    keys(cx, select_all);
+    assert!(
+        read(cx, |launcher, _, cx| !launcher.folder.selection_empty(cx)),
+        "the premise: Select All selected the folder"
+    );
+    keys(cx, crate::actions::SEQUENCE_PREFIX_CHORD);
+    assert!(
+        !sequence_armed(cx),
+        "with a selection the prefix armed nothing"
+    );
+    let kept = if cfg!(target_os = "macos") { "" } else { "~" };
+    assert_eq!(
+        draft(cx).folder.value(),
+        kept,
+        "and the field kept its chord"
+    );
+}

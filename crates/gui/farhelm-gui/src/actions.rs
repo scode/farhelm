@@ -274,7 +274,8 @@ actions!(
         NewSession,
         /// Begin a quick-launch sequence, which takes every key until Enter, Escape or a cancel (SPEC.md,
         /// "Quick-launch sequences": Cmd+X on a Mac, Ctrl+Shift+X on Linux, also from a focused terminal; a text field
-        /// keeps the chord, `TEXT_FIELD_KEYS`). Runs once per press (`ONCE_PER_PRESS`).
+        /// keeps the chord, `TEXT_FIELD_KEYS`, except the launcher's with nothing selected, which dispatch this
+        /// themselves, `TextInput::on_unselected_prefix`). Runs once per press (`ONCE_PER_PRESS`).
         BeginSequence,
         /// Quick launch the template marked ⚡, or apply it to an open launcher's draft (SPEC.md, "Quick launch": Cmd+P on
         /// a Mac, Ctrl+Shift+P on Linux, the operating system's chord, also from a focused terminal). Runs once per press
@@ -396,7 +397,8 @@ pub fn install(cx: &mut App) {
         KeyBinding::new(QUICK_SWITCHER_CHORD, QuickSwitcher, Some(CONTEXT)),
         // SPEC.md, "Quick-launch sequences". The main view hands it to the templates module, which arms the sequence;
         // it works from a focused terminal because its `TERMINAL_KEYS` row is an app shortcut, and a text field keeps
-        // it (`TEXT_FIELD_KEYS`, and on a Mac GPUI Kit's own Cut).
+        // it (`TEXT_FIELD_KEYS`, and on a Mac GPUI Kit's own Cut), except a launcher field with nothing selected, which
+        // dispatches the action itself (`TextInput::on_unselected_prefix`).
         KeyBinding::new(SEQUENCE_PREFIX_CHORD, BeginSequence, Some(CONTEXT)),
         // SPEC.md, "Quick launch". The main view hands it to the templates module's quick-launch dispatcher; it works
         // from a focused terminal because its `TERMINAL_KEYS` row is an app shortcut.

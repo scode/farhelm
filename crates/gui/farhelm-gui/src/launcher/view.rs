@@ -1255,6 +1255,23 @@ fn on_launcher(
     }
 }
 
+/// A text field of the launcher's, as [`TextInput::new`] makes one, where the quick-launch sequence prefix pressed with
+/// nothing selected begins a sequence (SPEC.md, "Quick-launch sequences": "In the launcher's own text fields it
+/// starts a sequence only when no text is selected; with a selection it keeps Cut";
+/// [`TextInput::on_unselected_prefix`]). The prefix's own action is dispatched from the field, so it reaches the main
+/// view's handler as the chord does from any control that is not a text field, and arms the launcher's form of the
+/// sequence, which applies to this draft. Every field the launcher draws is made here, so none keeps the prefix.
+pub(super) fn launcher_input(
+    id: impl Into<SharedString>,
+    state: &TextInputState,
+    label: impl Into<SharedString>,
+    help: HoverHelp,
+) -> TextInput {
+    TextInput::new(id, state, label, help).on_unselected_prefix(|window, cx| {
+        window.dispatch_action(Box::new(crate::actions::BeginSequence), cx)
+    })
+}
+
 /// One labelled row: the label in the left column, its control beside it (`.launch-composer-row`). `selector` names the
 /// row for tests, which find a field by where it is drawn.
 fn row(
@@ -1581,7 +1598,7 @@ impl Launcher {
                 row(
                     "launcher-conversation-row",
                     label,
-                    TextInput::new(
+                    launcher_input(
                         "launcher-conversation",
                         &self.conversation,
                         label,
@@ -1622,7 +1639,7 @@ impl Launcher {
                 row(
                     "launcher-prompt-row",
                     "Initial prompt",
-                    TextInput::new(
+                    launcher_input(
                         "launcher-prompt",
                         &self.prompt,
                         "Initial prompt",
@@ -1668,7 +1685,7 @@ impl Launcher {
             row(
                 "launcher-wrapper-row",
                 "Wrapper prefix",
-                TextInput::new(
+                launcher_input(
                     "launcher-wrapper",
                     &self.wrapper,
                     "Wrapper prefix",
@@ -1771,7 +1788,7 @@ impl Launcher {
             row(
                 "launcher-command-row",
                 "Agent command",
-                TextInput::new(
+                launcher_input(
                     "launcher-command",
                     &self.command,
                     "Agent command",
@@ -1921,7 +1938,7 @@ impl Launcher {
                     row(
                         "launcher-resume-command-row",
                         "Resume command",
-                        TextInput::new(
+                        launcher_input(
                             "launcher-resume-command",
                             &self.resume,
                             "Resume command",
@@ -1984,7 +2001,7 @@ impl Render for Launcher {
             div()
                 .relative()
                 .child(
-                    TextInput::new(
+                    launcher_input(
                         "launcher-folder",
                         &self.folder,
                         "Folder",
@@ -2012,7 +2029,7 @@ impl Render for Launcher {
             row(
                 "launcher-name-row",
                 "Name (optional)",
-                TextInput::new(
+                launcher_input(
                     "launcher-name",
                     &self.name,
                     "Name (optional)",
