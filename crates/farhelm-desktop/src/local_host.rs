@@ -33,7 +33,8 @@ pub(crate) async fn decode_hosts(resp: reqwest::Response) -> Result<Vec<HostView
 /// Show a host-supplied value (a peer's build string, say) the way the desktop app shows all host text,
 /// `farhelm_proto::text::escaped`: every presentation-unsafe character written as `<U+XXXX>` and a literal `<U+` the
 /// peer wrote escaped so it cannot pose as one. An empty or whitespace-only value is named rather than shown as
-/// nothing. Ported from the old UI's `peer.rs`, which did not escape a literal `<U+`.
+/// nothing. The GUI crate's `update_readout` keeps a copy (`shown_build`), since it cannot call into this crate; change
+/// the two together. Ported from the old UI's `peer.rs`, which did not escape a literal `<U+`.
 pub(crate) fn display_peer(raw: &str) -> String {
     if raw.is_empty() {
         return "(empty)".to_string();
@@ -110,8 +111,8 @@ pub(crate) mod tests {
     const HOST_LIST_JSON: &str = include_str!("../../farhelm-helm/http-contract/host-list.json");
 
     /// Startup must decode the listing the helm really serves, or the desktop app refuses to start against its own
-    /// helm. Decoding the helm's pinned contract fixture (rather than rows this test serialized itself) means a helm-side
-    /// change to the shape fails here as well as in the helm's contract test.
+    /// helm. Decoding the helm's pinned contract fixture (rather than rows this test serialized itself) means a
+    /// helm-side change to the shape fails here as well as in the helm's contract test.
     #[farhelm_testtrace::test]
     fn the_helms_pinned_listing_decodes_with_its_local_row() {
         let hosts = serde_json::from_str::<HostListing>(HOST_LIST_JSON)
@@ -257,7 +258,8 @@ pub(crate) mod tests {
         assert_eq!(display_peer("\u{202E}"), "<U+202E>");
     }
 
-    /// Why this matters: a peer's build string reaches the startup alert and the update readout raw, so a literal
+    /// Why this matters: a peer's build string reaches the startup alert through this function (and the update readout
+    /// through its copy, `farhelm_gui::update_readout`'s `shown_build`), so a literal
     /// `<U+202E>` in it would read as an escape the app made, hiding whether the value held a real override; and an
     /// identity's display, which escapes its own `<`, must not escape its escapes a second time.
     ///

@@ -109,7 +109,7 @@ const EXPECT_ENV: &str = "FARHELM_INSTALL_EXPECT";
 
 // ===== What the updater publishes ==========================================
 
-use crate::update_readout::Activity;
+use farhelm_gui::update_readout::Activity;
 
 /// The updater's whole published state.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -553,7 +553,7 @@ pub(crate) struct Deps {
 /// tree. `update_ready` turns the readout red with an up-arrow (SPEC.md
 /// "Installation and updates"). Activity also drives the inline progress and
 /// outcome, whose expiry belongs to the component; the hover wording persists.
-pub fn readout(state: &UpdaterState) -> crate::update_readout::Readout {
+pub fn readout(state: &UpdaterState) -> farhelm_gui::update_readout::Readout {
     let mut readout = activity_readout(state);
     let mut warnings = Vec::new();
     if let Some(reason) = state.advisories.reason(&state.running) {
@@ -590,7 +590,7 @@ pub fn readout(state: &UpdaterState) -> crate::update_readout::Readout {
                 readout.tooltip
             ),
         };
-        return crate::update_readout::Readout {
+        return farhelm_gui::update_readout::Readout {
             needs_reinstall: true,
             tooltip: lead,
             ..readout
@@ -609,7 +609,7 @@ pub fn readout(state: &UpdaterState) -> crate::update_readout::Readout {
     };
     // Shown whatever the updater is doing: this app can no longer update
     // itself, and nothing else on screen would say so.
-    crate::update_readout::Readout {
+    farhelm_gui::update_readout::Readout {
         needs_reinstall: true,
         // The notice leads, and the command goes last with nothing after
         // it, because the user retypes it from a hover: trailing
@@ -627,7 +627,7 @@ pub fn readout(state: &UpdaterState) -> crate::update_readout::Readout {
 /// Checking and installing describe current work; an idle or up-to-date answer
 /// yields to the installed-version restart advice. The reinstall notice wraps
 /// this result without losing that activity or changing the readiness marker.
-fn activity_readout(state: &UpdaterState) -> crate::update_readout::Readout {
+fn activity_readout(state: &UpdaterState) -> farhelm_gui::update_readout::Readout {
     let ready = state.update_ready();
     let installed = state.installed.as_deref().unwrap_or_default();
     let ready_text = format!(
@@ -661,9 +661,9 @@ fn activity_readout(state: &UpdaterState) -> crate::update_readout::Readout {
             "This is Farhelm {}. Check for updates to refresh release information.",
             state.running
         ),
-        Activity::Idle => crate::update_readout::idle_tooltip(&state.running, true),
+        Activity::Idle => farhelm_gui::update_readout::idle_tooltip(&state.running, true),
     };
-    crate::update_readout::Readout {
+    farhelm_gui::update_readout::Readout {
         update_ready: ready,
         needs_reinstall: false,
         withdrawn: false,
@@ -3268,7 +3268,7 @@ mod tests {
         rig.engine.wake_once();
         let failure = rig.published();
         assert!(matches!(failure.activity, Activity::Failed(_)));
-        let mut feedback = crate::update_readout::InlineFeedback::default();
+        let mut feedback = farhelm_gui::update_readout::InlineFeedback::default();
         feedback.observe(&failure.activity, failure.notice_id);
         feedback.dismiss(&failure.activity, failure.notice_id);
         let dismissed = feedback.clone();
@@ -3297,7 +3297,7 @@ mod tests {
                 .contains("did not say which release")
         );
         feedback.observe(&later.activity, later.notice_id);
-        let mut fresh = crate::update_readout::InlineFeedback::default();
+        let mut fresh = farhelm_gui::update_readout::InlineFeedback::default();
         fresh.observe(&later.activity, later.notice_id);
         assert_eq!(feedback, fresh, "the later notice has no old suppression");
         // Expired/dismissed old callbacks cannot hide this newly shown result.
@@ -3360,7 +3360,7 @@ mod tests {
         assert_eq!(request, automatic.notice_id + 1);
         let manual_failure = rig.published();
         assert!(matches!(manual_failure.activity, Activity::Failed(_)));
-        let mut feedback = crate::update_readout::InlineFeedback::default();
+        let mut feedback = farhelm_gui::update_readout::InlineFeedback::default();
         feedback.observe(&manual_failure.activity, manual_failure.notice_id);
         feedback.dismiss(&manual_failure.activity, manual_failure.notice_id);
         let dismissed = feedback.clone();
@@ -3665,7 +3665,7 @@ mod tests {
         let first = rig.published();
         assert!(matches!(first.activity, Activity::Failed(_)));
         assert_eq!(*rig.streak.lock().unwrap(), None);
-        let mut feedback = crate::update_readout::InlineFeedback::default();
+        let mut feedback = farhelm_gui::update_readout::InlineFeedback::default();
         feedback.observe(&first.activity, first.notice_id);
         feedback.dismiss(&first.activity, first.notice_id);
         rig.advance(CHECK_INTERVAL);
@@ -3674,7 +3674,7 @@ mod tests {
         assert_eq!(second.activity, first.activity);
         assert_eq!(second.notice_id, first.notice_id + 1);
         feedback.observe(&second.activity, second.notice_id);
-        let mut fresh = crate::update_readout::InlineFeedback::default();
+        let mut fresh = farhelm_gui::update_readout::InlineFeedback::default();
         fresh.observe(&second.activity, second.notice_id);
         assert_eq!(feedback, fresh, "the equal later notice is shown again");
         let installed = Arc::clone(&rig.installed);
@@ -3958,9 +3958,9 @@ mod tests {
         assert_eq!(installed.activity, Activity::Idle);
         assert!(installed.update_ready());
         assert!(installed.user_update_ready);
-        assert!(crate::update_readout::announce_update_ready(&readout(
-            &installed
-        )));
+        assert!(farhelm_gui::update_readout::announce_update_ready(
+            &readout(&installed)
+        ));
 
         rig.shared.check_now();
         assert!(!rig.published().user_update_ready);
@@ -3977,9 +3977,9 @@ mod tests {
         assert!(failed.update_ready());
         assert!(matches!(failed.activity, Activity::Failed(_)));
         assert!(!failed.user_update_ready);
-        assert!(!crate::update_readout::announce_update_ready(&readout(
-            &failed
-        )));
+        assert!(!farhelm_gui::update_readout::announce_update_ready(
+            &readout(&failed)
+        ));
     }
 
     /// An automatic or terminal installation can make the readout red without
@@ -4041,9 +4041,9 @@ mod tests {
             let recovered = rig.published();
             assert!(recovered.update_ready());
             assert!(!recovered.user_update_ready);
-            assert!(!crate::update_readout::announce_update_ready(&readout(
-                &recovered
-            )));
+            assert!(!farhelm_gui::update_readout::announce_update_ready(
+                &readout(&recovered)
+            ));
             assert_eq!(recovered.notice_id, completed.notice_id);
             assert_eq!(recovered.activity, completed.activity);
             assert_eq!(
@@ -4355,7 +4355,7 @@ mod tests {
                 assert!(shown.tooltip.ends_with(REINSTALL_COMMAND));
                 assert_eq!(shown.update_ready, installed == "1.2.0");
                 assert_eq!(
-                    crate::update_readout::readout_marks(&shown).len(),
+                    farhelm_gui::update_readout::readout_marks(&shown).len(),
                     if installed == "1.2.0" { 2 } else { 1 }
                 );
                 if installed == "1.1.0" {
@@ -4550,7 +4550,7 @@ mod tests {
     /// reinstall warning must not erase progress, failure, or either glyph.
     #[farhelm_testtrace::test]
     fn inline_activity_survives_the_readouts_warning_and_update_markers() {
-        use crate::update_readout::{InlineStatus, inline_status};
+        use farhelm_gui::update_readout::{InlineStatus, inline_status};
 
         for ready in [false, true] {
             for warning in [false, true] {

@@ -42,6 +42,8 @@
 //! - [`templates`]: launch templates and what launches from them (applying templates to the launcher's draft, so far).
 //! - [`desktop`]: the desktop integration: the menu bar, quitting when the main window closes, the window's saved
 //!   frame, its title band and decorations, and the open-source notices.
+//! - [`update_readout`]: the desktop updater's state as the words and marks the version readout shows, pure so its
+//!   rules are tested without a window.
 //!
 //! Still to come, each under its own module: the rest of actions and keys.
 //!
@@ -86,6 +88,7 @@ pub mod templates;
 pub mod terminal;
 pub mod theme;
 pub mod ticker;
+pub mod update_readout;
 
 /// The license notices for the code this crate links from `farhelm-grid-model` and `farhelm-input-mapping`, verbatim.
 ///
