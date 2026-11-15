@@ -22,9 +22,9 @@
 //! The Add host dialog is [`add::open`], which the host rail's Add host and the heading's add button (`+`) call, each
 //! naming itself as where closing the dialog returns focus. A new host without Farhelm goes on to the setup
 //! confirmation and the setup's submission ([`setup`]); a setup the helm refused after the user moved on from it shows
-//! at the top of the panel, since it has no row. Add host, a setup's submission, a row's Re-run and Remove refuse to
-//! start while a session launch is in flight ([`launch_in_flight`]), as the old app refused a host change during a
-//! launch.
+//! at the top of the panel, since it has no row. Add host, a setup's submission, a row's Re-run, Remove, Update and
+//! Update all refuse to start while a session launch is in flight ([`launch_in_flight`]), as the old app refused a host
+//! change during a launch.
 //!
 //! SSH help ("SSH needs 2FA?"), the commands that start a host's two shared SSH connections by hand, is
 //! [`ssh_help::open`], the entry point for the ? menu's "SSH needs 2FA?" (drawn once the area that owns the ? menu
@@ -34,18 +34,24 @@
 //! ([`remove`]). A refused removal shows under its row, like any refused work on a host; a Remove that was not started
 //! at all (the host busy, a session launch in flight) says so at the top of the panel.
 //!
+//! A remote host's Update ([`update`]) is sent the same way from the menu's Update and its rerun of a failed one, from
+//! a row's inline `↑ Update` and, for every host whose Update is available, from the heading's Update all. A refused
+//! Update plan opens the host refusal dialog ([`refusal`]) if the user has not moved on since the press. The attention
+//! list's Update rows will call [`update::start`] and [`update::start_all`] too.
+//!
 //! How a host is named and marked, here and in every other area that shows a host, is [`identity`].
 //!
 //! ## What it shows
 //!
-//! A heading band with the host count ("Hosts 3", read out as "3 hosts"), the Details switch and the add button, then
-//! one row per host in the registry's order, session-owned hosts included (SPEC.md: they "participate in ordinary host
-//! management"). A row is the host's identity mark, its name (the alias, else the helm's display name, "Local (this
-//! machine)" for the local host under the registry's own name; the destination behind an alias shows in the details),
-//! its phase dot and words ([`identity::phase`]), and the ⋯ toggle that opens its actions menu. Under it, while the row
-//! is open, the details: the destination behind an alias, what the helm knows about the phase (for a connected host its
-//! version, identity and session count) and the remedy where waiting will not help. The last refusal of work on the
-//! host shows under the row whether it is open or not.
+//! A heading band with the host count ("Hosts 3", read out as "3 hosts"), the Details switch, Update all (unavailable
+//! while no host's Update is) and the add button, then one row per host in the registry's order, session-owned hosts
+//! included (SPEC.md: they "participate in ordinary host management"). A row is the host's identity mark, its name (the
+//! alias, else the helm's display name, "Local (this machine)" for the local host under the registry's own name; the
+//! destination behind an alias shows in the details), its phase dot and words ([`identity::phase`]) with the inline
+//! `↑ Update` after them for a host on an older build whose Update is available, and the ⋯ toggle that opens its
+//! actions menu. Under it, while the row is open, the details: the destination behind an alias, what the helm knows
+//! about the phase (for a connected host its version, identity and session count) and the remedy where waiting will not
+//! help. The last refusal of work on the host shows under the row whether it is open or not.
 //!
 //! A row is open while the Details switch is on, or while the row opens itself ([`disclosed`]): a setup is running on
 //! it that the user has not folded, its last provisioning run failed, the last work on it was refused, or it is the
@@ -53,9 +59,11 @@
 //! not saved anywhere (SPEC.md: "its unpersisted details switch"). The old app turned the switch on for a failed local
 //! setup; the port opens that row instead.
 //!
-//! A host with a setup running, or a rerun of its setup out, shows the run's inline status on a line of its own under
-//! its name in place of the phase words, and an open row shows the run's steps under its details ([`progress`], which
-//! also keeps the one fact the panel holds about a host: when it first saw the run, and whether the user folded it).
+//! A host with a setup or an Update running, or its setup's rerun or its Update's requests out, shows the run's inline
+//! status on a line of its own under its name in place of the phase words and the inline Update, and an open row shows
+//! the run's steps under its details ([`progress`], which also keeps the one fact the panel holds about a host: when it
+//! first saw the run, and whether the user folded it). A running setup opens its row; a running Update leaves it
+//! folded, and its failure opens it like any failure.
 //!
 //! A host list never read says "Loading hosts…"; a failed first read says so in red; a failed refresh keeps the rows it
 //! had and says above them that they are the last state read. The panel never invents a host.
@@ -65,22 +73,18 @@
 //! so it never reads as a phantom unreachable host (SPEC.md, "Topology"). It offers no install ([`offers`]). The old
 //! app also probed the machine for the helm's `farhelm helm setup` handoff; the migration's settings-and-hosts area
 //! decided on 2026-11-14 that the row shows the pushed remedy instead, and no probe is planned.
-//!
-//! ## Not drawn yet
-//!
-//! NOTE: Each arrives with the piece of the port that gives it something to do: Update all in the heading, the inline
-//! `↑ Update` button, and Update's progress. Until Update all arrives, the free space it took in the old heading goes
-//! to the two automatic margins, so Details sits further from the count than in the old app.
 
 pub mod add;
 pub(crate) mod identity;
 mod menu;
 pub(crate) mod offers;
 pub(crate) mod progress;
+pub(crate) mod refusal;
 pub(crate) mod remove;
 mod settings;
 pub(crate) mod setup;
 pub mod ssh_help;
+pub(crate) mod update;
 
 pub use menu::open_menu;
 pub use settings::open_settings;
@@ -99,7 +103,7 @@ use gpui::{
 };
 
 use crate::assets::Icon;
-use crate::components::{Checkbox, HoverHelp, IconButton, StatusMark, Tier, pulse_opacity};
+use crate::components::{Button, Checkbox, HoverHelp, IconButton, StatusMark, Tier, pulse_opacity};
 use crate::focus::Mark;
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId};
@@ -120,12 +124,15 @@ const HEADING_GAP: f32 = 8.;
 const ADD_SIZE: f32 = 24.;
 
 /// What a host registry change refuses with while a session launch is in flight ([`launch_in_flight`]), after the name
-/// of the action that was not started ("Add host: ", or "Set up <host>: ", "Re-run <host>: ", "Remove <host>: " on the
-/// Hosts panel's line, "Destination: " in the host settings): the old app's form for an action refused while another
-/// runs ("<action>: not started, another operation is in progress; try again", `list/lifecycle.rs` at the reference
-/// commit), naming the launch.
+/// of the action that was not started ("Add host: ", or "Set up <host>: ", "Re-run <host>: ", "Remove <host>: ",
+/// "Update <host>: ", "Update all: " on the Hosts panel's line, "Destination: " in the host settings): the old app's
+/// form for an action refused while another runs ("<action>: not started, another operation is in progress; try again",
+/// `list/lifecycle.rs` at the reference commit), naming the launch.
 pub(crate) const LAUNCH_IN_FLIGHT: &str =
     "not started, a session launch is in progress; try again when it finishes";
+
+/// `.hosts-heading-actions`'s gap between Update all and the add button.
+const ACTIONS_GAP: f32 = 4.;
 
 /// `.hosts-heading .host-count`'s `gap: 1ch`: the width of a digit at the label's 13 pixels.
 const COUNT_GAP: f32 = 7.;
@@ -325,6 +332,8 @@ struct RowInput<'a> {
     refusal: Option<&'a Failure>,
     seen: Option<&'a progress::Seen>,
     status: Option<progress::Status>,
+    /// Whether the host's Update is available ([`update::available`]), which the inline Update needs.
+    updatable: bool,
 }
 
 impl Render for HostsPanel {
@@ -354,6 +363,8 @@ impl Render for HostsPanel {
         let mut drawn: Vec<AnyElement> = Vec::new();
         // `None` until the hosts collection arrived: the count is not known yet.
         let mut count = None;
+        // Whether any host's Update is available now, which makes Update all available.
+        let mut any_updatable = false;
         if let Some(store) = session::current_store(cx) {
             let collections = store.read(cx).collections();
             if let Some(meta) = collections.meta(Collection::Hosts) {
@@ -389,6 +400,8 @@ impl Render for HostsPanel {
                         let in_flight: Option<Work> =
                             operations.and_then(|operations| operations.in_flight(&op_key));
                         let status = progress::status(progress, seen, in_flight, now);
+                        let available = update::available(host, progress, in_flight.is_some());
+                        any_updatable |= available;
                         pulsing |= status.is_some();
                         if let Some(progress::Status::Running { elapsed, .. }) = &status {
                             let due = progress::next_second(*elapsed);
@@ -400,6 +413,7 @@ impl Render for HostsPanel {
                             refusal: operations.and_then(|operations| operations.failure(&op_key)),
                             seen,
                             status,
+                            updatable: available,
                         };
                         self.row(
                             &input,
@@ -415,6 +429,32 @@ impl Render for HostsPanel {
         }
 
         self.keep_time(pulsing, next_second, window, cx);
+        // `.hosts-heading-actions`: Update all at the heading's end, the free room split around the Details switch, as
+        // both carried `margin-left: auto`.
+        let update_all = Button::new(
+            "hosts-update-all",
+            "Update all",
+            HoverHelp::tooltip("Update all: update every remote host that has an update available"),
+            Role::Button,
+        )
+        .tier(Tier::Neutral)
+        .compact()
+        .disabled(!any_updatable)
+        .on_click(|_, window, cx| {
+            // Every host the registry lists at the press; `update::start_all` decides there which of them it updates.
+            let mark = Mark::take(cx);
+            let listed: Vec<i64> = session::current_store(cx)
+                .map(|store| {
+                    let collections = store.read(cx).collections();
+                    collections
+                        .ordered::<HostView>()
+                        .iter()
+                        .map(|host| host.id)
+                        .collect()
+                })
+                .unwrap_or_default();
+            update::start_all(&listed, mark, window, cx);
+        });
         let heading = div()
             .flex()
             .flex_row()
@@ -443,10 +483,19 @@ impl Render for HostsPanel {
                     }),
                 ),
             )
-            // The old actions group's automatic margin (`.hosts-heading-actions`), beside the switch's, as the old
-            // sheet gave both: the two share the heading's free space, and the button keeps the trailing edge. A
-            // button takes no margin of its own, so this holder carries it.
-            .child(div().ml_auto().child(add_button(&self.add_focus)));
+            // The old actions group (`.hosts-heading-actions`): Update all and the add button at the heading's end, 4
+            // pixels apart, its automatic margin beside the switch's, as the old sheet gave both, so the two share the
+            // heading's free space. A button takes no margin of its own, so this holder carries it.
+            .child(
+                div()
+                    .ml_auto()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(ACTIONS_GAP))
+                    .child(update_all)
+                    .child(add_button(&self.add_focus)),
+            );
         let status = match (status, count) {
             (Some((words, error)), _) => Some(
                 div()
@@ -639,7 +688,14 @@ impl HostsPanel {
                     .min_w_0()
                     .child(progress::status_mark(id, status, pulse, palette)),
             ),
-            None => main.child(line.child(phase_status(host, palette)).children(toggle)),
+            None => {
+                let opener = self.toggles.get(&id).map(|(_, focus)| focus.clone());
+                main.child(
+                    line.child(phase_status(host, palette))
+                        .children(update::button(host, input.updatable, opener))
+                        .children(toggle),
+                )
+            }
         };
         let lines: Vec<AnyElement> = if open {
             phase::detail_lines(host, twin)
@@ -762,35 +818,15 @@ fn add_button(focus: &FocusHandle) -> AnyElement {
 }
 
 /// Whether a session launch is in flight anywhere in the operation store: what a host registry change from this module
-/// (Add host's probe, a setup's submission, a row's Re-run, a host's removal) refuses to start during. The old app
-/// refused a host change during a launch and the reverse, through one page-wide token; the migration's orchestrator
-/// decided on 2026-11-14 that each side refuses its own action instead, with a reason, while the other's work is in
-/// flight in the operation store. `false` in an inert window, which has no store and starts nothing anyway.
+/// (Add host's probe, a setup's submission, a row's Re-run, a host's removal, a host's Update and Update all) refuses
+/// to start during. The old app refused a host change during a launch and the reverse, through one page-wide token; the
+/// migration's orchestrator decided on 2026-11-14 that each side refuses its own action instead, with a reason, while
+/// the other's work is in flight in the operation store. What counts as a launch is the operation store's to say
+/// ([`Work::creates_a_session`]: the launcher's New and Clone, and a session's Restart and Replace). `false` in an inert
+/// window, which has no store and starts nothing anyway.
 pub(crate) fn launch_in_flight(cx: &App) -> bool {
     session::current_operations(cx)
-        .is_some_and(|operations| operations.read(cx).any_in_flight(creates_a_session))
-}
-
-/// Whether `work` creates a session on a host, which is what "a launch in flight" means for a host registry change:
-/// the launcher's New and Clone, and a session's Restart and Replace, each of which starts a session on its host
-/// (decided by the migration's orchestrator on 2026-11-14). Exhaustive with no catch-all, so a new kind of work must
-/// decide whether it counts. An answer to an agent's approval card does not count even when it allows a launch: the
-/// helm runs what was approved, as the orchestrator decided on 2026-11-14.
-fn creates_a_session(work: Work) -> bool {
-    match work {
-        Work::Launch | Work::Restart | Work::Replace => true,
-        Work::Rename
-        | Work::Delete(_)
-        | Work::Save
-        | Work::Stop
-        | Work::Seen
-        | Work::Probe
-        | Work::Setup
-        | Work::TunnelOpen
-        | Work::TunnelClose
-        | Work::RemoveHost
-        | Work::Answer => false,
-    }
+        .is_some_and(|operations| operations.read(cx).any_in_flight(Work::creates_a_session))
 }
 
 /// A host's identity mark in its row: its chosen shape and color at 12 pixels, a status named "Local" or "Remote" for

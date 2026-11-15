@@ -153,10 +153,18 @@ pub(crate) fn hover(state: &HostStateView) -> SharedString {
 
 // ---- Detail lines ----------------------------------------------------------------------------------------------------
 
-/// A value the helm pushed for this host (an error, a build, an identity), taken as host text where the detail lines
-/// and the hover read it.
+/// A value the helm pushed for this host (an error, a build), taken as host text where the detail lines and the hover
+/// read it.
 fn pushed(value: &str) -> HostText {
     HostText::from_host(value)
+}
+
+/// An install id the helm pushed for this host, in the identity spelling ([`HostText::identity`]): every space and
+/// other non-ASCII or look-alike character written out, so two ids the user compares (recorded against reported, this
+/// entry's against its twin's) never look alike, as SPEC.md asks of identities and the old app's `display_identity`
+/// did.
+fn install_id(value: &str) -> HostText {
+    HostText::identity(value)
 }
 
 /// What a detail line is, which decides its ink: what the helm knows in the quiet ink, what to do in the ordinary one.
@@ -253,7 +261,7 @@ fn evidence(
         } => {
             let line = line.text("Farhelm ").mono(&pushed(build_version));
             let line = match identity {
-                Some(identity) => line.text("; identity ").mono(&pushed(identity)),
+                Some(identity) => line.text("; identity ").mono(&install_id(identity)),
                 None => line.text("; no identity reported"),
             };
             let line = line.text("; ");
@@ -280,18 +288,18 @@ fn evidence(
             .text(")"),
         HostStateView::IdentityMismatch { recorded, reported } => line
             .text("Recorded as install ")
-            .host(&pushed(recorded))
+            .host(&install_id(recorded))
             .text("; the destination now reports ")
-            .host(&pushed(reported))
+            .host(&install_id(reported))
             .text(", so nothing is connected until this is decided"),
         HostStateView::IdentityUnverified { recorded } => line
             .text(
                 "The host answered without an identity, so this helm cannot confirm it is still the install \
                  recorded as ",
             )
-            .host(&pushed(recorded)),
+            .host(&install_id(recorded)),
         HostStateView::Duplicate { twin: id, identity } => {
-            let line = line.text("This entry reaches install ").host(&pushed(identity));
+            let line = line.text("This entry reaches install ").host(&install_id(identity));
             let line = match twin(*id) {
                 Some(name) => line
                     .text(", which the entry ")

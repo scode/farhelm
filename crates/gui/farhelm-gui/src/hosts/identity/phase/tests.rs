@@ -471,3 +471,50 @@ fn environment_times_read_as_utc_stamps() {
         )]
     );
 }
+
+/// Why this matters: SPEC.md has identities shown so that two different ones never look alike, and the detail lines are
+/// where the user compares a recorded install id with the one a host now reports, or with its twin's; the old app
+/// spelled them with `display_identity`. A space or a look-alike letter drawn as itself would make "id 1" and "id 1 "
+/// read the same. Specified: in the connected line, the mismatch, the unverified and the duplicate lines, an install id
+/// holding a space, a trailing space and a Cyrillic look-alike letter is spelled with `<U+XXXX>` for each, while an
+/// ordinary id reads as itself.
+#[test]
+fn install_ids_are_spelled_so_two_ids_never_look_alike() {
+    let spelled = "id<U+0020>1<U+0020>";
+    let tricky = "id 1 ";
+    let connected = lines_of(HostStateView::Connected {
+        identity: Some(tricky.into()),
+        build_version: "0.16.0".into(),
+        old_version: false,
+        newer_version: false,
+        refresh: RefreshView::Ok { sessions: 0 },
+    });
+    assert!(
+        connected[0].1.contains(&format!("identity {spelled};")),
+        "{connected:?}"
+    );
+    let mismatch = lines_of(HostStateView::IdentityMismatch {
+        recorded: "id-1".into(),
+        reported: "\u{0456}d-1".into(),
+    });
+    assert!(
+        mismatch[0]
+            .1
+            .starts_with("Recorded as install id-1; the destination now reports <U+0456>d-1,"),
+        "{mismatch:?}"
+    );
+    let unverified = lines_of(HostStateView::IdentityUnverified {
+        recorded: tricky.into(),
+    });
+    assert!(unverified[0].1.ends_with(spelled), "{unverified:?}");
+    let duplicate = lines_of(HostStateView::Duplicate {
+        twin: 3,
+        identity: tricky.into(),
+    });
+    assert!(
+        duplicate[0]
+            .1
+            .starts_with(&format!("This entry reaches install {spelled},")),
+        "{duplicate:?}"
+    );
+}

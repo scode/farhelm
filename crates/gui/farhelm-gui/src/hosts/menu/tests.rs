@@ -55,14 +55,15 @@ fn painted(nodes: &[DriverNode]) -> String {
         .join(" ")
 }
 
-/// Why this matters: the menu is how a user reaches a host's settings and removes it, and what it lists must be what the
-/// offers rule says for that host, so a remote host shows no command this build cannot carry out yet. Its header names
-/// the host and where it is, and focus starts on its first command, as the old menu's did. Specified: a click on
-/// `build-box`'s toggle opens the menu beside it, named "Host actions for build-box", its header reading
-/// "dev@build-box · Farhelm 0.0.0-unreleased", with Settings holding focus, then Remove ("Forget this host"), and no
-/// Update; Escape closes it with focus on the toggle. (That Remove acts is `hosts::remove`'s tests'.)
+/// Why this matters: the menu is how a user reaches a host's settings, updates it and removes it, and what it lists must
+/// be what the offers rule says for that host, so a remote host shows no command this build cannot carry out yet. Its
+/// header names the host and where it is, and focus starts on its first command that can act, as the old menu's did.
+/// Specified: a click on `build-box`'s toggle opens the menu beside it, named "Host actions for build-box", its header
+/// reading "dev@build-box · Farhelm 0.0.0-unreleased", offering Update, which holds focus, then Settings, then Remove
+/// ("Forget this host"); Escape closes it with focus on the toggle. (That Update and Remove act is `hosts::update`'s and
+/// `hosts::remove`'s tests'.)
 #[gpui::test]
-fn a_remote_hosts_toggle_opens_a_menu_offering_settings_and_remove(cx: &mut TestAppContext) {
+fn a_remote_hosts_toggle_opens_a_menu_offering_update_settings_and_remove(cx: &mut TestAppContext) {
     let (_helm, cx) = open_hosts(cx);
     assert_eq!(
         label(&frame(cx), "host-menu-toggle-2"),
@@ -94,8 +95,16 @@ fn a_remote_hosts_toggle_opens_a_menu_offering_settings_and_remove(cx: &mut Test
         bounds(cx, "host-menu-remove").origin.y > bounds(cx, "host-menu-settings").origin.y,
         "Remove comes after Settings"
     );
-    assert!(node(&nodes, "host-menu-update").is_none(), "no Update yet");
-    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-settings"));
+    let update = node(&nodes, "host-menu-update").expect("Update is offered");
+    assert_eq!(
+        (update.role, update.label.map(|label| label.to_string())),
+        (Some(Role::MenuItem), Some("Update".to_owned()))
+    );
+    assert!(
+        bounds(cx, "host-menu-update").origin.y < bounds(cx, "host-menu-settings").origin.y,
+        "Update comes before Settings"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-update"));
 
     keys(cx, "escape");
     assert!(!any_open(cx), "Escape closed it");

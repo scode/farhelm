@@ -20,9 +20,9 @@
 //! - Uninstall, Suspend, Resume and Delete sandbox come with their own pieces of the port, and are not offered here.
 //!
 //! The host menu ([`super::menu`]) renders only what this says; the rules are tested here, without a window. The menu
-//! draws the rerun of a failed setup on an SSH host ([`HostKind::reruns_setup`]), Settings, Remove on a host whose
-//! removal only forgets it ([`Offers::remove`]) and the helm's own machine's greyed Update so far. The rerun of a failed
-//! Update and the live Update are decided here already and drawn by the pieces of the port that send them.
+//! draws the rerun of a failed setup on an SSH host ([`HostKind::reruns_setup`]), the rerun of a failed Update, Update
+//! (live, or greyed on the helm's own machine), Settings, and Remove on a host whose removal only forgets it
+//! ([`Offers::remove`]); the inline Update and Update all ask the same offer (`super::update::available`).
 
 use farhelm_proto::http::LOCAL_SUPERVISOR_NOT_RUNNING;
 use farhelm_proto::provisioning::{ProvisioningOperation, ProvisioningView, RunStatus};

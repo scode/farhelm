@@ -9,28 +9,32 @@
 //! with the look of the `.host-update-*` and `.provisioning-*` rules in `app.css`, all at reference commit `24bc0580`.
 //! Here's the TLDR of its rules:
 //!
-//! - **Only setup runs are drawn so far** ([`shown`]). Update's and Uninstall's runs come with their pieces of the port,
-//!   which also decide which of these rules they share (SPEC.md keeps the row folded while an Update runs).
+//! - **Setup and Update runs are drawn** ([`shown`], [`Run`]). Uninstall's come with its piece of the port.
 //! - **The inline status** ([`status`]): "Setting up", the completed-step count over the step count, the current step
-//!   (the first running one, by the helm's own name for it) and the elapsed time, beside a pulsing amber dot. While a
-//!   rerun's probe or its confirmed setup is out and no run shows yet, "Setting up…".
-//! - **The step list** ([`run_section`]) shows under an open row for any retained setup run, running, failed or
-//!   completed, as the old panel did: each step's number, check or cross on a rail, its name and its result word, and
+//!   (the first running one, by the helm's own name for it) and the elapsed time, beside a pulsing amber dot. An
+//!   Update's says the same without the visible verb ("Updating" is read out, not drawn), as the old label kept
+//!   Update's narrower. While a rerun's probe or its confirmed setup is out and no run shows yet, "Setting up…"; while
+//!   an Update's plan or its confirming request is out, "Updating…" (SPEC.md: "`Updating…` until a progress snapshot
+//!   is available").
+//! - **The step list** ([`run_section`]) shows under an open row for any retained setup or Update run, running, failed
+//!   or completed, as the old panel did: each step's number, check or cross on a rail, its name and its result word, and
 //!   the step's and the run's messages, which carry the helm's reason for a failure.
 //! - **Disclosure** ([`opens_row`]): a running setup opens its row by itself until the user folds that run with
 //!   Collapse; success closes it again, and a failure keeps it open whatever the fold said (the Hosts panel's
-//!   `disclosed` adds the failure rule for every kind of run).
+//!   `disclosed` adds the failure rule for every kind of run). A running Update never opens its row (SPEC.md: "While an
+//!   update is running, its host row stays folded"), so it offers no Collapse.
 //! - **What the UI keeps** ([`Seen`]): per host, the run it last saw running, when it first saw it, and the fold. The
 //!   helm's progress carries no timestamps, so the elapsed time counts from when this UI session first saw the run
 //!   running, as the old app counted from its own first sight (a reload started it over; here a reset does). The
 //!   settings-and-hosts goal (M2.9) caps what the panel holds to the fold; the time it first saw a run is the one
 //!   other fact, because SPEC.md asks for an elapsed time measured by the client and nothing else can give one.
 //!
-//! Time comes from the ticker. The running marker and the inline dot pulse on the shared pulse
-//! ([`crate::ticker::pulse`], held by the panel only while its window is active), still under reduced motion. The
-//! elapsed time is read from [`crate::ticker::wall_now`] whenever the panel draws, and the panel arms a one-second
-//! [`crate::ticker::after`] deadline while a run shows, because the pulse stops under reduced motion and in an inactive
-//! window while the clock must still count, and the ticker's [`crate::ticker::Clock`] notifies only every 30 seconds.
+//! Time comes from the ticker, one clock for every row whatever its run. The running marker and the inline dot pulse on
+//! the shared pulse ([`crate::ticker::pulse`], held by the panel only while its window is active), still under reduced
+//! motion. The elapsed time is read from [`crate::ticker::wall_now`] whenever the panel draws, and the panel arms a
+//! one-second [`crate::ticker::after`] deadline while a run shows, because the pulse stops under reduced motion and in
+//! an inactive window while the clock must still count, and the ticker's [`crate::ticker::Clock`] notifies only every
+//! 30 seconds.
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -115,16 +119,62 @@ pub(crate) fn fold(seen: &mut HashMap<i64, Seen>, host: i64, run_id: &str) {
 
 // ---- Which runs show, and what they open ----------------------------------------------------------------------------
 
-/// The host's retained run, if it is one a row draws: a setup run with a run id (the helm's idle view has none). The
-/// module docs say why only setup.
-pub(crate) fn shown(run: Option<&ProvisioningView>) -> Option<&ProvisioningView> {
-    run.filter(|run| run.run_id.is_some() && run.operation == Some(ProvisioningOperation::Add))
+/// The kinds of run a row draws, which decide its words: the helm's setup (`add`) and Update operations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Run {
+    Setup,
+    Update,
 }
 
-/// Whether `run` is a shown run going on now that the user has not folded (by `seen`): such a run opens its row by
-/// itself.
+impl Run {
+    /// The kind of a run of `operation`, or `None` for one no row draws yet (an uninstall) or a run without one.
+    fn of(operation: Option<ProvisioningOperation>) -> Option<Run> {
+        match operation? {
+            ProvisioningOperation::Add => Some(Run::Setup),
+            ProvisioningOperation::Update => Some(Run::Update),
+            ProvisioningOperation::Uninstall => None,
+        }
+    }
+
+    /// The verb the inline status reads out ("Setting up: 1 of 3 steps done").
+    fn verb(self) -> &'static str {
+        match self {
+            Run::Setup => "Setting up",
+            Run::Update => "Updating",
+        }
+    }
+
+    /// The step list's accessible name.
+    fn steps(self) -> &'static str {
+        match self {
+            Run::Setup => "Setup steps",
+            Run::Update => "Update steps",
+        }
+    }
+
+    /// The step list's title (the old "<operation> provisioning").
+    fn title(self) -> &'static str {
+        match self {
+            Run::Setup => "Setup provisioning",
+            Run::Update => "Update provisioning",
+        }
+    }
+}
+
+/// The host's retained run, if it is one a row draws: a setup or Update run with a run id (the helm's idle view has
+/// none).
+pub(crate) fn shown(run: Option<&ProvisioningView>) -> Option<&ProvisioningView> {
+    run.filter(|run| run.run_id.is_some() && Run::of(run.operation).is_some())
+}
+
+/// Whether `run` is a setup going on now that the user has not folded (by `seen`): such a run opens its row by itself.
+/// An Update never does (the module docs).
 pub(crate) fn opens_row(run: Option<&ProvisioningView>, seen: Option<&Seen>) -> bool {
-    shown(run).is_some_and(|run| run.status == RunStatus::Running && !folded(run, seen))
+    shown(run).is_some_and(|run| {
+        Run::of(run.operation) == Some(Run::Setup)
+            && run.status == RunStatus::Running
+            && !folded(run, seen)
+    })
 }
 
 /// Whether the user folded this very run.
@@ -137,12 +187,13 @@ fn folded(run: &ProvisioningView, seen: Option<&Seen>) -> bool {
 /// What a row's inline status says, in place of its phase words.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Status {
-    /// Work on the host is out (a rerun's probe, or its confirmed setup before the helm accepts it) and no run shows
-    /// yet: "Setting up…" alone.
-    Pending,
-    /// A setup run shows: how many steps are done of how many, its current step, and how long since this UI first saw
-    /// it running.
+    /// Work on the host is out (a rerun's probe or its confirmed setup, an Update's plan or its confirming request,
+    /// before the helm accepts it) and no run shows yet: "Setting up…" or "Updating…" alone.
+    Pending(Run),
+    /// A run shows: how many steps are done of how many, its current step, and how long since this UI first saw it
+    /// running.
     Running {
+        run: Run,
         done: usize,
         total: usize,
         current: Option<HostText>,
@@ -160,7 +211,10 @@ pub(crate) fn status(
     in_flight: Option<Work>,
     now: SystemTime,
 ) -> Option<Status> {
-    if let Some(run) = shown(run).filter(|run| run.status == RunStatus::Running) {
+    if let Some((kind, run)) = shown(run)
+        .filter(|run| run.status == RunStatus::Running)
+        .and_then(|run| Some((Run::of(run.operation)?, run)))
+    {
         let done = run
             .steps
             .iter()
@@ -175,15 +229,18 @@ pub(crate) fn status(
             .filter(|kept| run.run_id.as_deref() == Some(kept.run_id.as_str()))
             .map_or(now, |kept| kept.since);
         return Some(Status::Running {
+            run: kind,
             done,
             total: run.steps.len(),
             current,
             elapsed: now.duration_since(since).unwrap_or_default(),
         });
     }
-    in_flight
-        .filter(|work| matches!(work, Work::Probe | Work::Setup))
-        .map(|_| Status::Pending)
+    match in_flight? {
+        Work::Probe | Work::Setup => Some(Status::Pending(Run::Setup)),
+        Work::UpdateHost => Some(Status::Pending(Run::Update)),
+        _ => None,
+    }
 }
 
 /// An elapsed time as the old status showed it: `m:ss`, or `h:mm:ss` from an hour on, never capped.
@@ -205,7 +262,9 @@ pub(crate) fn next_second(elapsed: Duration) -> Duration {
 
 /// Host `id`'s inline status (`.host-update-running`): drawn under `host-status-<id>` like the phase words it replaces,
 /// as a status named for its count and step and whose hover says the same at length (the step name is cut short
-/// on screen, as the old label's was; the old hover card is not ported). The dot is at `pulse`'s opacity.
+/// on screen, as the old label's was; the old hover card is not ported). The dot is at `pulse`'s opacity. A setup draws
+/// its verb before the count; an Update does not, though its name and hover still start with it, as the old label
+/// drew "Setting up" and "Uninstalling" but left Update's visible label at the count (`.host-update-verb`).
 pub(crate) fn status_mark(id: i64, status: &Status, pulse: f32, palette: &Palette) -> AnyElement {
     let dot = div()
         .flex_none()
@@ -223,21 +282,29 @@ pub(crate) fn status_mark(id: i64, status: &Status, pulse: f32, palette: &Palett
         .child(dot);
     let sentence = HostSentence::new(SharedString::from(format!("host-progress-{id}")));
     let (line, sentence) = match status {
-        Status::Pending => (line.child("Setting up…"), sentence.text("Setting up…")),
+        Status::Pending(run) => {
+            let words = format!("{}…", run.verb());
+            (line.child(words.clone()), sentence.text(words))
+        }
         Status::Running {
+            run,
             done,
             total,
             current,
             elapsed,
         } => {
             let count = format!("{done}/{total}");
-            let sentence = sentence.text(format!("Setting up: {done} of {total} steps done"));
+            let sentence = sentence.text(format!("{}: {done} of {total} steps done", run.verb()));
             let sentence = match current {
                 Some(step) => sentence.text(", now ").host(step),
                 None => sentence,
             };
+            let verb = match run {
+                Run::Setup => Some(div().flex_none().child(run.verb())),
+                Run::Update => None,
+            };
             let line = line
-                .child(div().flex_none().child("Setting up"))
+                .children(verb)
                 .child(div().flex_none().child(count))
                 .children(
                     current
@@ -331,8 +398,9 @@ fn look(status: &StepStatus, palette: &Palette) -> Look {
 }
 
 /// Host `id`'s retained `run` under its open row (`.provisioning-run` inside `.provisioning-panel`): "Setup
-/// provisioning" and the run's state, Collapse at the right when `collapse` is given (the user may fold a running run
-/// the row opened for), then every step and the run's own message. The running step's ring is at `pulse`'s opacity.
+/// provisioning" or "Update provisioning" and the run's state, Collapse at the right when `collapse` is given (the user
+/// may fold a running run the row opened for), then every step and the run's own message. The running step's ring is at
+/// `pulse`'s opacity.
 ///
 /// Drawn under `host-run-<id>`; each step is a list item named "<step>: <result>" under `host-step-<id>-<n>`, its
 /// message under `host-step-<id>-<n>-message`, and the run's message under `host-run-message-<id>`, which is how the
@@ -349,7 +417,9 @@ pub(crate) fn run_section(
         RunStatus::Completed => ("Completed", palette.fg_1),
         RunStatus::Failed => ("Failed", palette.danger_strong),
     };
-    let title = "Setup provisioning";
+    // A run no row draws never gets here ([`shown`]); were one to, it would read as a setup rather than draw nothing.
+    let kind = Run::of(run.operation).unwrap_or(Run::Setup);
+    let title = kind.title();
     let header = div()
         .id(SharedString::from(format!("host-run-title-{id}")))
         .role(Role::Heading)
@@ -397,7 +467,7 @@ pub(crate) fn run_section(
             div()
                 .id(SharedString::from(format!("host-steps-{id}")))
                 .role(Role::List)
-                .aria_label("Setup steps")
+                .aria_label(kind.steps())
                 .flex()
                 .flex_col()
                 .mt(px(4.))

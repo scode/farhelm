@@ -350,16 +350,24 @@ fn refuse_during_launch(offer: Offer, window: AnyWindowHandle, cx: &mut App) {
     });
 }
 
-/// The Hosts panel's line for a setup or rerun not started during a launch, empty: what [`not_started`] shows.
+/// Clear the Hosts panel's line about work not started during a launch ([`not_started`]): work of the kind it was about
+/// has started since.
+pub(super) fn forget_not_started(cx: &mut App) {
+    show(cx, |lines| lines.not_started = None);
+}
+
+/// The Hosts panel's line for a setup or a setup's rerun not started during a launch, empty: what [`not_started`]
+/// shows. Update's line has its own id (`super::update`).
 fn not_started_line() -> HostSentence {
     HostSentence::new("hosts-setup-not-started")
 }
 
-/// Show `line` ([`not_started_line`] and the refusal) on the Hosts panel's line, saying a setup or rerun was not
-/// started because a session launch is in flight, until the next setup or rerun starts, Add host opens, or the UI
-/// session resets. The refusal is the app's own, of work that never started, so it is no record of the operation
-/// store, whose records are the helm's answers to work it was sent.
-fn not_started(line: HostSentence, cx: &mut App) {
+/// Show `line` ([`not_started_line`] and the refusal) on the Hosts panel's line, saying a setup, rerun or Update was not
+/// started because a session launch is in flight, until the next setup, rerun or Update starts, Add host opens, or the
+/// UI session resets. The refusal is the app's own, of work that never started, so it is no record of the operation
+/// store, whose records are the helm's answers to work it was sent. Visible to the hosts module for Update's own line
+/// (`super::update`), which carries its own id.
+pub(super) fn not_started(line: HostSentence, cx: &mut App) {
     let Some(store) = session::current_operations(cx).map(|operations| operations.entity_id())
     else {
         return;
@@ -510,8 +518,8 @@ fn stop_asking(cx: &mut App) {
 /// What the Hosts panel's line shows: a setup refused after the user moved on from it, by its host-add key (the words
 /// are the operation store's record under that key, so a reset, which empties the store, takes them away), and a
 /// refused permanent answer's words, copied, because Settings' saves share the preference row's key and its record
-/// would show their refusals too, and a setup or rerun not started during a launch. Each stays until Add host opens
-/// again or the next one of its kind starts. The panel redraws when it changes ([`observe_panel_lines`]).
+/// would show their refusals too, and a setup, rerun or Update not started during a launch. Each stays until Add host
+/// opens again or the next one of its kind starts. The panel redraws when it changes ([`observe_panel_lines`]).
 ///
 /// The copied words carry the entity id of the operation store they came from, and show only while that is the current
 /// store: a reset drops everything that came from the helm (SPEC_impl.md, "One failure path: the reset"), and a new
@@ -520,8 +528,8 @@ fn stop_asking(cx: &mut App) {
 struct PanelLines {
     setup: Option<OpKey>,
     stop_asking: Option<(EntityId, HostText)>,
-    /// A setup or rerun the app did not start because a session launch was in flight ([`not_started`]), with the id of
-    /// the store current then.
+    /// A setup, rerun or Update the app did not start because a session launch was in flight ([`not_started`]), with the
+    /// id of the store current then.
     not_started: Option<(EntityId, HostSentence)>,
 }
 
@@ -547,8 +555,8 @@ pub(crate) fn forget_panel_lines(cx: &mut App) {
     });
 }
 
-/// The Hosts panel's line, as sentences under their own ids: a setup refused after the user moved on from it, a setup
-/// or rerun not started during a launch, and a refused permanent answer, while it was refused by the current UI
+/// The Hosts panel's line, as sentences under their own ids: a setup refused after the user moved on from it, a setup,
+/// rerun or Update not started during a launch, and a refused permanent answer, while it was refused by the current UI
 /// session's helm and the preference it tried to turn on is still off (once on, the refusal no longer matters). Each of
 /// the last two only while it came from the current UI session's store. Empty when there is none.
 pub(crate) fn panel_lines(cx: &App) -> Vec<HostSentence> {
