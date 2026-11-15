@@ -264,10 +264,11 @@ fn send_delete(key: &str, guard: DeleteGuard, cx: &mut App) {
     let deleted = key.to_owned();
     let started = operations.update(cx, |operations, cx| {
         operations.start(&OpKey::session(key), command, cx, move |settled, cx| {
-            if let Outcome::Done(_) = settled.outcome {
+            if let Outcome::Done(reply) = &settled.outcome {
                 cx.update_default_global::<DeletedHere, _>(|here, cx| {
                     here.0.current(cx).insert(deleted);
                 });
+                crate::trash::cue::archived(reply.as_ref(), cx);
             }
         })
     });

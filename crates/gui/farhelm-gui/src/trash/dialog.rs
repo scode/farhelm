@@ -408,7 +408,7 @@ impl Render for TrashDialog {
             .text_size(metrics::TEXT_TITLE)
             .font_weight(FontWeight::SEMIBOLD)
             .text_color(ink)
-            .child(super::can(snapshot.summary().0, false, 0., ink))
+            .child(super::can(snapshot.summary().0, false, 0., 0., ink))
             .child("Trash");
         let close = Button::new(
             "trash-close",
