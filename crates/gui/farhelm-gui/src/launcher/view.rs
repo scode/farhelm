@@ -36,6 +36,7 @@
 //! `host_picker`, Restart with's "● Changed" markers `changed`.
 
 use std::rc::Rc;
+use std::time::Duration;
 
 use farhelm_helm_client::ApiPath;
 use farhelm_proto::launcher::LaunchCatalogModel;
@@ -71,7 +72,7 @@ use crate::permission::words::{effort_label, permission_display};
 use crate::session_list::replace;
 use crate::store::HelmStore;
 use crate::theme::{self, metrics};
-use crate::{operations, session};
+use crate::{operations, session, ticker};
 use changed::Changed;
 
 mod changed;
@@ -221,7 +222,8 @@ impl Global for Shown {}
 #[derive(Clone, Debug, PartialEq)]
 pub enum Note {
     /// A prominent banner: a quick launch's templates need more choices before they can launch (SPEC.md, "Quick
-    /// launch" and "Quick-launch sequences"). The old `.partial-template-banner` look.
+    /// launch" and "Quick-launch sequences"). The old `.partial-template-banner` look. It also goes on its own
+    /// [`BANNER_SHOWS_FOR`] after the templates applied, as the old banner did whatever its origin.
     Banner(HostSentence),
     /// Why a quick launch opened New instead of launching (its sentence starting "Not launched."), or why a template
     /// shortcut changed nothing in this open launcher, in the place of the composer search's refusals until that search
@@ -229,6 +231,10 @@ pub enum Note {
     /// YOLO question, which it never hides, and cleared by the next press of Launch as by an edit.
     Refusal(HostSentence),
 }
+
+/// How long a quick launch's banner stays once its templates applied, unless an edit takes it away first: the old
+/// launcher's six seconds, which SPEC.md gives as "about six seconds".
+pub(crate) const BANNER_SHOWS_FOR: Duration = Duration::from_secs(6);
 
 /// What a quick launch prepared out of sight ([`prepare_unseen`]) does once its templates are applied.
 pub enum Prepared {
@@ -311,6 +317,9 @@ fn prepared(
                     launcher.submit(false, mark, window, cx);
                 }
                 Prepared::Show { note, notice } => {
+                    if matches!(note, Note::Banner(_)) {
+                        launcher.schedule_banner_expiry(cx);
+                    }
                     launcher.note = Some(note);
                     launcher.notice = notice;
                     cx.notify();
@@ -424,8 +433,12 @@ pub(crate) struct Launcher {
     /// the first time it is ([`show`]). The success path reads it to hand the new session to naming (SPEC.md, "Quick
     /// launch": only "When New was never shown"), which is the templates work's next piece.
     pub(super) quick_launch_unseen: bool,
-    /// What the notices region says for a quick launch or a template shortcut ([`Note`]), until the next edit.
+    /// What the notices region says for a quick launch or a template shortcut ([`Note`]), until the next edit, or for a
+    /// banner until [`Launcher::banner_expiry`] if that comes first.
     note: Option<Note>,
+    /// When a quick launch's banner goes on its own ([`BANNER_SHOWS_FOR`] after its templates applied). Dropped with
+    /// the launcher; an edit that takes the banner away first leaves it to find nothing to clear.
+    banner_expiry: Option<ticker::Deadline>,
     /// Template batches that arrived while the catalog read was out, with the window each was pressed in, applied in
     /// order once it answers ([`Launcher::apply_batch`]). A plain queue, with no fence: the read answers once, and a
     /// reset drops the launcher with it. A press of Launch that sends its create drops what is still waiting, since those
@@ -585,6 +598,7 @@ impl Launcher {
             yolo: None,
             quick_launch_unseen: false,
             note: None,
+            banner_expiry: None,
             waiting_batches: Vec::new(),
             after_catalog: None,
             _fields: fields,
@@ -625,6 +639,22 @@ impl Launcher {
         // A quick launch's banner or refusal speaks of the draft as it opened, a shortcut's refusal of the press before.
         self.note = None;
         cx.notify();
+    }
+
+    /// Take a quick launch's banner away [`BANNER_SHOWS_FOR`] from now, unless an edit has already (SPEC.md, "Template
+    /// number shortcuts": "The banner expires about six seconds after application finishes, or when the user starts
+    /// editing"). Called once the templates applied, so a slow catalog read does not spend the time the banner is
+    /// there to be read in. A refusal note never expires: it says why nothing launched, and stays until an edit.
+    fn schedule_banner_expiry(&mut self, cx: &mut Context<Self>) {
+        let launcher = cx.weak_entity();
+        self.banner_expiry = Some(ticker::after(BANNER_SHOWS_FOR, cx, move |cx| {
+            let _ = launcher.update(cx, |launcher, cx| {
+                if matches!(launcher.note, Some(Note::Banner(_))) {
+                    launcher.note = None;
+                    cx.notify();
+                }
+            });
+        }));
     }
 
     /// Apply one batch of template edits to the draft (one shortcut press or one completed sequence: SPEC.md, "Each
