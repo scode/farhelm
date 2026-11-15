@@ -19,6 +19,8 @@
 //!   the reset"); [`store`]: the one copy of what the helm pushed, which views read when they draw;
 //!   [`local_state`]: the selected session's id, the one piece of window state that survives a reset.
 //! - [`session_list`]: the sidebar's session list and the selection rules; [`session_pane`]: the pane beside it.
+//! - [`approvals`]: agent approval cards, the requests an agent's `farhelm` command waits on until the user answers.
+//! - [`environment_ui`]: the GUI's words for each disposable-environment provider, one exhaustive answer per provider.
 //! - [`settings`]: the Settings dialog the host rail's gear opens, with its sections.
 //! - [`hosts`]: host management, the Hosts panel the sidebar swaps in for its session list, and the per-host rules
 //!   (which actions a host offers).
@@ -62,12 +64,14 @@ pub mod actions;
 // starts with the defaults. Ordinary test runs, which never turn on the `agent` feature, cover the rest. The module
 // also holds the guard that refuses the `agent` feature in optimized builds, so it must stay unconditional.
 pub mod agent_startup;
+pub mod approvals;
 pub mod assets;
 pub mod bootstrap;
 pub mod cache;
 pub mod components;
 pub mod desktop;
 pub mod drafts;
+pub mod environment_ui;
 pub mod focus;
 pub mod harness;
 pub mod host_text;
