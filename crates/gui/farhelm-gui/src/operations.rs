@@ -45,10 +45,11 @@
 //! callback, is dropped, as are the recorded failures. A completion that was already on its way reaches nobody, and
 //! the generic connection-lost notice is the only report (SPEC_impl.md, "One failure path: the reset").
 //!
-//! Extension points (`docs/gpui/foundation-ownership.md`): a [`Work`] variant for a new kind of work. The commands
-//! themselves are built where their feature lives, with [`Command::new`], keeping today's API semantics for their
-//! route (the session list builds its Rename and Delete): this module holds the store, not a catalog of routes. A
-//! new kind of key ([`OpKey`]) is a change here.
+//! Extension points (`docs/gpui/foundation-ownership.md`): a [`Work`] variant for a new kind of work, which also
+//! decides whether it creates a session and whether it changes the host registry ([`Work::creates_a_session`],
+//! [`Work::changes_host_registry`]). The commands themselves are built where their feature lives, with
+//! [`Command::new`], keeping today's API semantics for their route (the session list builds its Rename and Delete):
+//! this module holds the store, not a catalog of routes. A new kind of key ([`OpKey`]) is a change here.
 //!
 //! Not everything sent to the helm is an operation. A read (a GET) changes nothing on the helm, and some writes (a
 //! remembered preference, the automatic seen mark, the host rail's session query) need nothing the store keeps for an
@@ -136,6 +137,74 @@ pub enum Work {
     /// ([`OpKey::approval`]). Not supersedable: the first answer pressed wins, and a second waits for it to settle
     /// (SPEC.md, "Agent-spawned sessions").
     Answer,
+}
+
+/// The two halves of SPEC.md's "Launches and changes to the host registry still exclude each other". Each side refuses
+/// its own action, with a reason, while the other side's work is in flight anywhere in the store (one of these methods
+/// passed to [`Operations::any_in_flight`]); there is no shared lock (decided by the migration's orchestrator,
+/// 2026-11-14).
+///
+/// Both sets live here, rather than as a match in each area that refuses, because they are one cross-area fact: two
+/// hand-kept copies drift apart when a new kind of work arrives. Areas ask these methods whether work creates a session
+/// or changes the host registry, rather than keeping their own match over kinds of work for either. Other questions
+/// about work are not these sets and keep their own matches (the session list's check for a Delete in flight, a row's
+/// wording per kind of work).
+///
+/// Both matches are exhaustive, so a new [`Work`] variant decides both in the same change that adds it. They keep one
+/// arm per line so that a new variant's arms are pure additions, which the file's `append-only` extension rule admits
+/// (`docs/gpui/foundation-ownership.md`); grouped arms (`A | B => false`) would turn each addition into a changed line
+/// the path check refuses. A PR that adds a variant pins its two answers in its own area's tests:
+/// `operations_tests.rs` is not an extension point, and its table covers only the kinds of work that existed when
+/// these methods were added.
+impl Work {
+    /// Whether this work creates a session on a host: what "a launch in flight" means to the host registry's side,
+    /// which refuses a host's removal while one is out, and is to refuse Add host and a host's destination save the
+    /// same way (neither built yet). The launcher's New and Clone create one, and so do a session's Restart and
+    /// Replace, which run as their source session's work rather than as [`Work::Launch`]. An answer to an agent's
+    /// approval card does not, even when it allows a launch: the helm runs what was approved (decided by the
+    /// migration's orchestrator, 2026-11-14).
+    pub fn creates_a_session(self) -> bool {
+        match self {
+            Work::Rename => false,
+            Work::Delete(_) => false,
+            Work::Save => false,
+            Work::Stop => false,
+            Work::Replace => true,
+            Work::Seen => false,
+            Work::Restart => true,
+            Work::Probe => false,
+            Work::Setup => false,
+            Work::TunnelOpen => false,
+            Work::TunnelClose => false,
+            Work::Launch => true,
+            Work::RemoveHost => false,
+            Work::Answer => false,
+        }
+    }
+
+    /// Whether this work changes the host registry: what "host registry work in flight" means to the launcher, which
+    /// refuses a launch while one is out. A probe registers a supervisor that answers, a setup
+    /// registers its new host, and a Remove forgets one. A host's destination save is not on the list: launches do not
+    /// refuse during it, though it refuses during a launch (decided by the migration's orchestrator, 2026-11-14). It is
+    /// [`Work::Save`] anyway, one kind for every editor's save.
+    pub fn changes_host_registry(self) -> bool {
+        match self {
+            Work::Rename => false,
+            Work::Delete(_) => false,
+            Work::Save => false,
+            Work::Stop => false,
+            Work::Replace => false,
+            Work::Seen => false,
+            Work::Restart => false,
+            Work::Probe => true,
+            Work::Setup => true,
+            Work::TunnelOpen => false,
+            Work::TunnelClose => false,
+            Work::Launch => false,
+            Work::RemoveHost => true,
+            Work::Answer => false,
+        }
+    }
 }
 
 /// What a piece of work acts on: the key the store files it under, one request at a time per key. Opaque, and built

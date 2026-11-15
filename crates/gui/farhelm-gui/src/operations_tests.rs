@@ -1726,3 +1726,48 @@ fn a_read_sends_a_get_and_hands_back_the_answer_unless_a_reset_drops_it(cx: &mut
         "the read the reset dropped never called back"
     );
 }
+
+// ---- Classifying work ----------------------------------------------------------------------------------------------
+
+/// The kinds of work the operation store defined when the two classifications were added, each with what it is decided
+/// to be: whether it creates a session, then whether it changes the host registry. One Delete stands for all its
+/// guards, since the guard never changes either answer. A kind of work added later is pinned in its own area's tests,
+/// not here (this file is not an extension point). A slice, so its type carries no length to edit.
+const CLASSIFIED: &[(Work, bool, bool)] = &[
+    (Work::Rename, false, false),
+    (Work::Delete(DeleteGuard::Unconditional), false, false),
+    (Work::Save, false, false),
+    (Work::Stop, false, false),
+    (Work::Replace, true, false),
+    (Work::Seen, false, false),
+    (Work::Restart, true, false),
+    (Work::Probe, false, true),
+    (Work::Setup, false, true),
+    (Work::TunnelOpen, false, false),
+    (Work::TunnelClose, false, false),
+    (Work::Launch, true, false),
+    (Work::RemoveHost, false, true),
+    (Work::Answer, false, false),
+];
+
+/// The host registry's side refuses a Remove while a session is being created anywhere (and is to refuse Add host and
+/// a host's destination save), and is to read "being created" from this method alone, so one flipped arm silently lets
+/// a host go mid-launch or blocks it for nothing. Specified: of the kinds of work in the table, New and Clone
+/// (`Launch`), `Restart` and `Replace` create a session, and no other does.
+#[test]
+fn work_that_creates_a_session_is_launch_restart_and_replace() {
+    for &(work, creates, _) in CLASSIFIED {
+        assert_eq!(work.creates_a_session(), creates, "{work:?}");
+    }
+}
+
+/// The launcher refuses a launch while the host registry is changing, reading "changing" from this method alone,
+/// so one flipped arm lets a launch race a registry change or blocks it for nothing. Specified: of the kinds of work in
+/// the table, a host `Probe`, a host `Setup` and a `RemoveHost` change the registry, and no other does, a host's
+/// destination `Save` included (launches do not refuse during it).
+#[test]
+fn work_that_changes_the_host_registry_is_probe_setup_and_remove_host() {
+    for &(work, _, changes) in CLASSIFIED {
+        assert_eq!(work.changes_host_registry(), changes, "{work:?}");
+    }
+}
