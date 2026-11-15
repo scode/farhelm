@@ -5,16 +5,16 @@
 //! an attached terminal's exit line and status line, the scrim a pending Delete puts over the open session's terminal,
 //! the open session's details bar (every status and host it draws differently, and a narrow one), the session list (a
 //! fleet of every status a row draws, the open row on a host the helm cannot reach, an empty fleet, a row's open menu,
-//! a row's Delete question, and a pending and a refused Delete), the Rename editor, the select closed and open, the
-//! YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer, the Settings dialog at
-//! Sessions, at Appearance, at Hosts, at Terminal and at Agent trust, the Hosts panel (closed, with Details, with a
-//! host failing to connect, with a host's setup running and failed, with outdated hosts' inline Update, and with a
-//! host's Update running), the Add host dialog and the setup confirmation it leads to, a host's actions menu, the host
-//! settings dialog at its top and scrolled to its end, the host refusal dialog for a refused Update, the version
-//! readout while an updater runs (the check button at rest, lit, warned and focused; work in progress; a check's
-//! outcomes; the update-menu toggle; its open menu; and the reinstall hover), the title bar the Linux window draws for
-//! itself (ordinary and maximized), and the Open-Source Notices window over a short fixture, in both appearances,
-//! compared pixel for pixel.
+//! a row's Delete question, and a pending and a refused Delete), the Rename editor, the Send feedback dialog (as it
+//! opens, and with a remembered contact), the select closed and open, the YOLO confirmation drawn inline in a
+//! launcher's body with its outlined permanent answer, the Settings dialog at Sessions, at Appearance, at Hosts, at
+//! Terminal and at Agent trust, the Hosts panel (closed, with Details, with a host failing to connect, with a host's
+//! setup running and failed, with outdated hosts' inline Update, and with a host's Update running), the Add host dialog
+//! and the setup confirmation it leads to, a host's actions menu, the host settings dialog at its top and scrolled to
+//! its end, the host refusal dialog for a refused Update, the version readout while an updater runs (the check button
+//! at rest, lit, warned and focused; work in progress; a check's outcomes; the update-menu toggle; its open menu; and
+//! the reinstall hover), the title bar the Linux window draws for itself (ordinary and maximized), and the Open-Source
+//! Notices window over a short fixture, in both appearances, compared pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
@@ -66,7 +66,9 @@ use crate::session;
 use crate::session_list::SessionList;
 use crate::session_list::filters::Status;
 use crate::session_list::host_rail::tests::{hosts, local, remote};
-use crate::session_list::tests::{Fixture, TEST_NOW, listing, preferences, session};
+use crate::session_list::tests::{
+    Fixture, TEST_NOW, listing, preferences, preferences_state, session,
+};
 use crate::terminal::attached::{AttachedTerminal, OpenStream, TerminalTarget};
 use crate::terminal::{CellMetrics, CursorPhase, TerminalView, TextSize};
 use crate::test_support;
@@ -81,7 +83,7 @@ use farhelm_helm_client::terminal::AttachmentLease;
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
 use farhelm_proto::ui_channel::{
     ANNOUNCEMENTS_KEY, Availability, Collection, CollectionChanges, CollectionMeta,
-    CollectionState, HostView, KeyedEntry, ListCounts, PREFERENCES_KEY,
+    CollectionState, HostView, KeyedEntry, ListCounts, PREFERENCES_KEY, Preferences,
 };
 
 /// How many frames a scene may take to settle before the test gives up: icons decode on the background executor, so
@@ -2257,6 +2259,54 @@ fn announcements_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut 
     keep.push(Box::new(watch));
 }
 
+/// The Send feedback dialog as the Help menu opens it (reference `feedback-dialog`), over a preference row
+/// remembering `contact`: focus in the empty message, the contact field holding `contact`, and, when it is not empty,
+/// Re-use checked under it; then what is sent with it, the footer's note, Cancel and Send, unavailable while the
+/// message is empty. The opener is the scene's ring handle, which stands in for the `?` button. The fake and the
+/// connection are kept for the scene's life, like the Rename editor's.
+fn feedback_dialog_scene(
+    state: &SceneState,
+    contact: Option<&str>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    helm.connect(vec![preferences_state(Preferences {
+        feedback_contact: contact.map(str::to_owned),
+        ..Preferences::default()
+    })]);
+    // The dialog seeds its contact from the store, which the snapshot reaches after this setup returns: open once the
+    // connection has a UI session, and only once.
+    let handle = window.window_handle();
+    let opener = state.ring.clone();
+    let opened = std::cell::Cell::new(false);
+    let watch = cx.observe(&connection, move |connection, cx| {
+        if opened.get() || connection.read(cx).session().is_none() {
+            return;
+        }
+        opened.set(true);
+        let _ = handle.update(cx, |_, window, cx| {
+            let mark = Mark::take(cx);
+            crate::feedback::open(&opener, &mark, window, cx);
+        });
+    });
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    keep.push(Box::new(watch));
+}
+
+/// [`feedback_dialog_scene`] as the dialog first opens with nothing remembered (reference `feedback-dialog`).
+fn feedback_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    feedback_dialog_scene(state, None, window, cx);
+}
+
+/// [`feedback_dialog_scene`] with a remembered contact, so Re-use for future feedback shows, checked.
+fn feedback_dialog_reuse_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    feedback_dialog_scene(state, Some("you@example.test"), window, cx);
+}
+
 /// The Settings dialog over the fake helm's preference row, opened at `section` as the gear opens it (references
 /// `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-terminal`, `settings-checkouts`,
 /// `settings-agent-trust` and `settings-notifications`): focus on the section's first switch (on the dialog itself at
@@ -3708,6 +3758,18 @@ static SCENES: &[Scene] = &[
         size: (560., 320.),
         draw: empty,
         setup: rename_dialog_setup,
+    },
+    Scene {
+        name: "feedback-dialog",
+        size: (600., 580.),
+        draw: empty,
+        setup: feedback_dialog_setup,
+    },
+    Scene {
+        name: "feedback-dialog-reuse",
+        size: (600., 620.),
+        draw: empty,
+        setup: feedback_dialog_reuse_setup,
     },
     Scene {
         name: "host-filter-empty",

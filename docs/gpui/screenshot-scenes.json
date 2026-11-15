@@ -629,6 +629,32 @@
           "Farhelm guides and feedback"
         ]
       ]
+    },
+    {
+      "id": "app-feedback-dialog",
+      "title": "Send feedback chosen from the Help menu: the feedback dialog as it opens",
+      "reference": "feedback-dialog",
+      "mockup": false,
+      "steps": [
+        [
+          "click",
+          "id:app-help-toggle"
+        ],
+        [
+          "wait",
+          "--text",
+          "Farhelm guides and feedback"
+        ],
+        [
+          "click",
+          "id:help-menu-send-feedback"
+        ],
+        [
+          "wait",
+          "--text",
+          "Nothing is sent until you press Send"
+        ]
+      ]
     }
   ],
   "foundation_goldens": [
@@ -831,6 +857,16 @@
       "golden": "rename-dialog",
       "title": "The Rename editor as it opens: the current title, the field holding it with focus, Cancel and Save",
       "reference": "rename-dialog"
+    },
+    {
+      "golden": "feedback-dialog",
+      "title": "The Send feedback dialog as it opens: the empty message with focus, the contact, what is sent with it, Cancel and Send",
+      "reference": "feedback-dialog"
+    },
+    {
+      "golden": "feedback-dialog-reuse",
+      "title": "The Send feedback dialog over a remembered contact, with Re-use for future feedback checked",
+      "reference": "feedback-dialog"
     },
     {
       "golden": "host-filter-empty",
@@ -1180,7 +1216,7 @@
     },
     {
       "id": "feedback-dialog",
-      "ported": false
+      "ported": true
     },
     {
       "id": "row-delete-confirmation",

@@ -142,6 +142,10 @@ pub enum Work {
     /// (202) once it has started the run whose progress it pushes (`hosts::update`). Not supersedable: the plan is
     /// one-use, and a second Update of the same host waits for the first to settle.
     UpdateHost,
+    /// A feedback submission (`POST /api/feedback`), from the Send feedback dialog, on the feedback key
+    /// ([`OpKey::feedback`]). Not supersedable: the dialog sends once per press and keeps itself open until the send
+    /// settles, so no second send can be waiting behind it.
+    SendFeedback,
 }
 
 /// The two halves of SPEC.md's "Launches and changes to the host registry still exclude each other". Each side refuses
@@ -185,6 +189,7 @@ impl Work {
             Work::RemoveHost => false,
             Work::Answer => false,
             Work::UpdateHost => false,
+            Work::SendFeedback => false,
         }
     }
 
@@ -211,6 +216,7 @@ impl Work {
             Work::RemoveHost => true,
             Work::Answer => false,
             Work::UpdateHost => true,
+            Work::SendFeedback => false,
         }
     }
 }
@@ -237,6 +243,8 @@ enum Key {
     Tunnels(String),
     /// An agent's approval request, by the id the helm gave it.
     Approval(String),
+    /// The Send feedback dialog's one submission at a time ([`OpKey::feedback`]).
+    Feedback,
 }
 
 impl OpKey {
@@ -286,6 +294,12 @@ impl OpKey {
     /// for the request's card to show.
     pub fn approval(id: &str) -> OpKey {
         OpKey(Key::Approval(id.to_owned()))
+    }
+
+    /// The one feedback send: the Send feedback dialog's submission (`crate::feedback`). One key for every send,
+    /// because the dialog is modal and stays open while its send is out, so there is never a second one to keep apart.
+    pub fn feedback() -> OpKey {
+        OpKey(Key::Feedback)
     }
 }
 

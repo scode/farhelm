@@ -80,6 +80,7 @@ fn prefix(work: Work) -> Option<&'static str> {
         | Work::TunnelClose
         | Work::Launch
         | Work::RemoveHost
+        | Work::SendFeedback
         | Work::Answer
         | Work::UpdateHost => None,
     }
@@ -184,6 +185,7 @@ fn waiting(work: Work) -> Option<(&'static str, &'static str)> {
         | Work::TunnelClose
         | Work::Launch
         | Work::RemoveHost
+        | Work::SendFeedback
         | Work::Answer
         | Work::UpdateHost => None,
     }

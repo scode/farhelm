@@ -12,10 +12,10 @@
 //!   items, 246 pixels wide, `Anchor::beside`), and names the `?` button as where closing returns focus, so Escape and
 //!   every item leave focus there, also on macOS, where the click that opened the menu left the button unfocused.
 //! - **An item closes the menu first, then acts.** A link item opens its page in the system browser through
-//!   `cx.open_url`, the opener the app's other docs links use; SSH needs 2FA? opens SSH help
-//!   ([`crate::hosts::ssh_help::open`]) with the `?` button as its opener, so closing it returns focus to the button,
-//!   as the old app returned focus to its Help toggle; Check for updates asks the updater
-//!   ([`crate::desktop::updates::check_now`]).
+//!   `cx.open_url`, the opener the app's other docs links use; Send feedback and SSH needs 2FA? open their dialogs
+//!   ([`crate::feedback::open`], [`crate::hosts::ssh_help::open`]) with the `?` button as their opener, so closing
+//!   either returns focus to the button, as the old app returned focus to its Help toggle; Check for updates asks the
+//!   updater ([`crate::desktop::updates::check_now`]).
 //! - **Conditional items.** Check for updates is drawn only while an updater runs ([`crate::desktop::updates::runs`]),
 //!   last, as SPEC.md says. On Linux, which has no menu bar, the menu also offers Open-Source Notices, which dispatches
 //!   the same action as the Mac app menu's item (the maintainer decided on 2026-11-13 that the notices live in that
@@ -25,8 +25,8 @@
 //!   queue's history is not empty, read when the menu draws) and opens that history
 //!   ([`crate::announcements::open_history`]) with the `?` button as its opener.
 //!
-//! NOTE: Not drawn yet, each waiting for its own surface: Send feedback, Keyboard shortcuts and Welcome. Each joins
-//! [`items`] in the old order when its dialog lands; a menu item whose dialog does not exist would open nothing.
+//! NOTE: Not drawn yet, each waiting for its own surface: Keyboard shortcuts and Welcome. Each joins [`items`] in the
+//! old order when its dialog lands; a menu item whose dialog does not exist would open nothing.
 //!
 //! NOTE: Deviations from the old flyout, both from the layer manager's one beside placement (its `Placement::Beside`
 //! docs record the shared clamp): the old Help menu hung from its toggle's bottom edge and kept at least 8 pixels from
@@ -64,8 +64,9 @@ const GLYPH: f32 = 16.;
 /// The docs site Documentation opens (SPEC.md, "Feedback").
 const DOCS_URL: &str = "https://farhelm.io/docs/";
 
-/// The project's Discord invite, shared with the README and the website's header (SPEC.md, "Feedback").
-const DISCORD_URL: &str = "https://discord.gg/G3bukxTjXR";
+/// The project's Discord invite, shared with the README and the website's header (SPEC.md, "Feedback"), and with the
+/// feedback dialog's own Chat on Discord link, which SPEC.md has open the same invite.
+pub(crate) const DISCORD_URL: &str = "https://discord.gg/G3bukxTjXR";
 
 /// The general release notes page Release notes opens, whether or not an update is waiting (SPEC.md, "Feedback").
 const RELEASE_NOTES_URL: &str = "https://farhelm.io/docs/release-notes/";
@@ -73,6 +74,8 @@ const RELEASE_NOTES_URL: &str = "https://farhelm.io/docs/release-notes/";
 /// One item the Help menu can offer. The order of [`items`] is the menu's; the variants are listed in it too.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Item {
+    /// The Send feedback dialog, a private message to the maintainer.
+    SendFeedback,
     ChatOnDiscord,
     Documentation,
     /// Always offered, even when no installed update waits for a restart.
@@ -91,6 +94,7 @@ impl Item {
     /// The item's label, which is also its accessible name.
     fn label(self) -> &'static str {
         match self {
+            Item::SendFeedback => "Send feedback",
             Item::ChatOnDiscord => "Chat on Discord",
             Item::Documentation => "Documentation",
             Item::ReleaseNotes => "Release notes",
@@ -104,6 +108,7 @@ impl Item {
     /// The description line under the label, the old `BarMenuItem::description`.
     fn description(self) -> &'static str {
         match self {
+            Item::SendFeedback => "Privately, to Farhelm's maintainer",
             Item::ChatOnDiscord => "Opens Farhelm's Discord in your browser",
             Item::Documentation => "Opens farhelm.io/docs in your browser",
             Item::ReleaseNotes => "Opens the release notes in your browser",
@@ -118,6 +123,9 @@ impl Item {
     /// every bar menu item one, although a described item may go without (see `MenuItem`'s module docs).
     fn help(self) -> &'static str {
         match self {
+            Item::SendFeedback => {
+                "Send feedback: a private message to Farhelm's maintainer, not a public issue"
+            }
             Item::ChatOnDiscord => {
                 "Chat on Discord: open Farhelm's Discord in your browser, to talk with the maintainer and other users in the open"
             }
@@ -145,6 +153,7 @@ impl Item {
     /// The item's decorative glyph, the old `BarMenuItem::glyph`.
     fn icon(self) -> Icon {
         match self {
+            Item::SendFeedback => Icon::Feedback,
             Item::ChatOnDiscord => Icon::External,
             Item::Documentation | Item::ReleaseNotes | Item::OpenSourceNotices => Icon::Document,
             Item::Announcements => Icon::Info,
@@ -156,6 +165,7 @@ impl Item {
     /// The item's element id: `help-menu-` and its label's words.
     fn id(self) -> &'static str {
         match self {
+            Item::SendFeedback => "help-menu-send-feedback",
             Item::ChatOnDiscord => "help-menu-discord",
             Item::Documentation => "help-menu-documentation",
             Item::ReleaseNotes => "help-menu-release-notes",
@@ -167,12 +177,17 @@ impl Item {
     }
 }
 
-/// The items the menu offers, in order: the fixed ones in SPEC.md's order, with Announcements directly after Release
-/// notes once this helm has shown one (`announced`), then Check for updates when an updater runs (`updater`), then
-/// Open-Source Notices on Linux (`linux`). Parameters rather than lookups, so the order is tested for every combination
-/// on any platform.
+/// The items the menu offers, in order: the fixed ones in SPEC.md's order, Send feedback first, with Announcements
+/// directly after Release notes once this helm has shown one (`announced`), then Check for updates when an updater runs
+/// (`updater`), then Open-Source Notices on Linux (`linux`). Parameters rather than lookups, so the order is tested for
+/// every combination on any platform.
 fn items(updater: bool, announced: bool, linux: bool) -> Vec<Item> {
-    let mut items = vec![Item::ChatOnDiscord, Item::Documentation, Item::ReleaseNotes];
+    let mut items = vec![
+        Item::SendFeedback,
+        Item::ChatOnDiscord,
+        Item::Documentation,
+        Item::ReleaseNotes,
+    ];
     if announced {
         items.push(Item::Announcements);
     }
@@ -189,9 +204,9 @@ fn items(updater: bool, announced: bool, linux: bool) -> Vec<Item> {
 /// The `?` button's hover help, naming what the menu offers, as the old toggle's did.
 fn button_help(updater: bool) -> &'static str {
     if updater {
-        "Help: open the documentation or release notes, chat on Discord, get SSH 2FA help, or check for updates"
+        "Help: send feedback, open the documentation or release notes, chat on Discord, get SSH 2FA help, or check for updates"
     } else {
-        "Help: open the documentation or release notes, chat on Discord, or get SSH 2FA help"
+        "Help: send feedback, open the documentation or release notes, chat on Discord, or get SSH 2FA help"
     }
 }
 
@@ -328,6 +343,9 @@ impl HelpMenu {
         // The button may be gone with its window; then there is no menu to close.
         let _ = button.update(cx, |button, cx| button.close_menu(window, cx));
         match item {
+            Item::SendFeedback => {
+                let _ = crate::feedback::open(opener, mark, window, cx);
+            }
             Item::ChatOnDiscord => cx.open_url(DISCORD_URL),
             Item::Documentation => cx.open_url(DOCS_URL),
             Item::ReleaseNotes => cx.open_url(RELEASE_NOTES_URL),
