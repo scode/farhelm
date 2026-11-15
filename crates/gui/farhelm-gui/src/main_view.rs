@@ -27,6 +27,10 @@
 //! appearance ... an explicit choice overrides it"); the theme module decides how a choice and the system resolve to
 //! a palette.
 //!
+//! The Keyboard shortcuts overview's chord ([`ShowKeyboardShortcuts`]) is handled on the ground like the session
+//! shortcuts and the switcher's above, and the overview refuses it while a layer holds the keyboard as they do
+//! ([`crate::shortcuts`]).
+//!
 //! The quick-launch sequence's prefix ([`BeginSequence`]) is handled on the ground too, so it reaches the templates
 //! module from a terminal, a row or empty space; the templates module refuses it while a dialog keeps the keyboard. The
 //! main pane is what its pill is centered over ([`crate::templates::armed`]): the view draws an anchor there in every
@@ -49,7 +53,7 @@ use gpui::{
     Window, div,
 };
 
-use crate::actions::{BeginSequence, QuickLaunch};
+use crate::actions::{BeginSequence, QuickLaunch, ShowKeyboardShortcuts};
 use crate::actions::{DeleteSession, NewSession, QuickSwitcher, RenameSession};
 use crate::components::{Banner, Button, HoverHelp, Role, Tier};
 use crate::desktop::linux_title_bar;
@@ -241,6 +245,12 @@ impl Render for MainView {
             // leaves the Hosts panel for Sessions, as the heading's New and the switcher's row do.
             .on_action(move |_: &NewSession, window, cx| {
                 session_list::open_new(&new_list, None, window, cx);
+            })
+            // Taken whatever the overview does with it, as a once-per-press shortcut's handler must be (`actions.rs`).
+            // The interceptor dispatches the physical-key row to the focused element, a terminal or a dialog's control
+            // included, so it bubbles up to here like the bound shortcuts above.
+            .on_action(|_: &ShowKeyboardShortcuts, window, cx| {
+                crate::shortcuts::open_from_chord(window, cx)
             })
             // Taken whatever the sequence does with it, as a once-per-press shortcut's handler must be (`actions.rs`).
             .on_action(cx.listener(|main, _: &BeginSequence, window, cx| {
