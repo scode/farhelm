@@ -13,11 +13,11 @@
 //!   the listing proves it gone ([`crate::session::listing_proves_gone`], the rule a confirmation about a session uses
 //!   too); a truncated, filtered or unavailable listing keeps it, or a passing read failure would close what the user
 //!   had open. Two more things prove it, both with the store holding no row for it. The helm serves a query that names
-//!   it, so an available listing that is filtered but not cut would carry it while it exists ([`absent_while_named`];
-//!   SPEC.md's exception to "Existing removal detection", decided by the maintainer on 2026-11-15): that is how a hidden
-//!   open session deleted in another window or from the command line is noticed. Or this window's own Delete of it
-//!   succeeded (`delete`'s "This window's own Delete is evidence"). When it is proven gone, the automatic choice picks
-//!   the next one, never the one that just went.
+//!   it, so an available listing without it proves it gone, filtered or not, unless the helm says a host's cap cut it
+//!   away ([`absent_while_named`]; SPEC.md's exception to "Existing removal detection", decided by the maintainer on
+//!   2026-11-15): that is how a hidden open session deleted in another window or from the command line is noticed. Or
+//!   this window's own Delete of it succeeded (`delete`'s "This window's own Delete is evidence"). When it is proven
+//!   gone, the automatic choice picks the next one, never the one that just went.
 //! - **Choosing tells the helm, once.** Every accepted choice, a click or automatic, is written as the `last_selected`
 //!   preference, from which the helm also keeps its visit history. Choosing the session that is already open writes
 //!   nothing.
@@ -85,16 +85,19 @@ pub(crate) fn listed(collections: &Collections) -> Vec<Listed<'_>> {
 
 /// Whether `collections` prove the open session `key` gone although its listing may be filtered: the helm serves a
 /// query naming `key` (`serves_named`, from [`super::filters::Choice::serves_named`], which says when that holds), so
-/// every listing it pushes carries the session while it exists, and the listing is available, not cut, and holds no
-/// row for it. A failed read, or no listing yet, proves nothing, as for [`crate::session::listing_proves_gone`].
+/// every listing it pushes carries the session while it exists and its host's list reaches it, and the listing is
+/// available, cut neither as a whole nor where the session's own host lists it, and holds no row for it. A failed
+/// read, or no listing yet, proves nothing, as for [`crate::session::listing_proves_gone`].
 ///
-/// NOTE: A cut listing proves nothing, whatever the query names. The helm carries the named session from what its
-/// hosts' listings hold, and each host cuts its own listing at its cap (500 sessions, newest first), so an old open
-/// session on a host past its cap is carried by no listing although it exists, and the cut is what says so. One case
-/// still slips through: under a host filter, a host other than the chosen one that is past its cap does not mark the
-/// listing cut, so an old open session on that host reads as deleted. Closing that needs the helm to stop counting a
-/// cut host's empty answer for one session as "no such session"; until then it is a known gap (the parity file has
-/// it).
+/// NOTE: An absence the helm says was cut away proves nothing, whatever the query names. Each host cuts its own list
+/// at its cap (500 sessions, newest first), so an old open session on a host past its cap is carried by no listing
+/// although it exists. Two marks say so, and either keeps the session open. The listing's own `truncated` count covers
+/// a listing that read the session's host and was cut there. `CollectionMeta::selected_cut` covers the rest: the
+/// helm's read of the open session alone found nothing and was cut at its own host's cap, which is what happens under
+/// a host filter naming another host, where the listing itself was read whole and its counts say nothing about the
+/// open session's host. Without that second mark, such an old session would read as deleted and the window would move
+/// on from a session that still exists (the risk the maintainer's decision of 2026-11-15, that a listing without the
+/// carried session proves it deleted, brought with it).
 ///
 /// It is the list's rule only. A layer about a session ([`crate::session::Subject::session`]) and Rename's
 /// unavailability keep the complete-listing rule, since they cannot see the query: a Rename editor open on a hidden
@@ -104,6 +107,7 @@ pub(crate) fn absent_while_named(collections: &Collections, key: &str, serves_na
         && collections.meta(Collection::Sessions).is_some_and(|meta| {
             meta.availability == Availability::Available
                 && meta.counts.as_ref().is_none_or(|counts| !counts.truncated)
+                && !meta.selected_cut
         })
         && collections.get::<SessionRow>(key).is_none()
 }

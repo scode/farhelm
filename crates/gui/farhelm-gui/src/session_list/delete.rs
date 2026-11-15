@@ -31,15 +31,15 @@
 //! with nothing alive, as SPEC.md's header Delete does.
 //!
 //! **This window's own Delete is evidence.** The selection rules drop a selected session once a complete, unfiltered
-//! listing proves it gone (`session::listing_proves_gone`), or once an available, uncut listing without it answers a
-//! query that named it (`selection::absent_while_named`), which is how the open session a filter hides is found
-//! deleted, here or elsewhere. A Delete this window sent that the helm did ([`deleted_here`]), with the session gone
-//! from the store, counts as proof too, whatever query the helm serves. It is what proves a filtered listing's loss of
-//! a session that the query in force does not name: a later query is in flight (the user chose a filter while the
-//! Delete was on its way), or the helm refused the query naming it (`filters`' `Choice::named`). Without it the pane
-//! would stay on the deleted session until the next reply, or the next query. A Rename editor or a question about a
-//! hidden session deleted by another client still stays open, since a layer keeps the complete-listing rule, and the
-//! helm refuses what it then sends.
+//! listing proves it gone (`session::listing_proves_gone`), or once an available listing without it answers a query
+//! that named it, with no cap having cut it away (`selection::absent_while_named`), which is how the open session a
+//! filter hides is found deleted, here or elsewhere. A Delete this window sent that the helm did ([`deleted_here`]),
+//! with the session gone from the store, counts as proof too, whatever query the helm serves. It is what proves a
+//! filtered listing's loss of a session that the query in force does not name: a later query is in flight (the user
+//! chose a filter while the Delete was on its way), or the helm refused the query naming it (`filters`'
+//! `Choice::named`). Without it the pane would stay on the deleted session until the next reply, or the next query. A
+//! Rename editor or a question about a hidden session deleted by another client still stays open, since a layer keeps
+//! the complete-listing rule, and the helm refuses what it then sends.
 
 use std::collections::HashSet;
 
