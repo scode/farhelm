@@ -34,7 +34,8 @@
 //!   that list: a successful Rename closes its editor either way, as the field's docs say.
 //! - A refusal is reported where its subject is shown: [`Operations::failure`] keeps the helm's words until the next
 //!   operation on that key starts (SPEC.md, for sessions: "A failure or partial result appears on the source
-//!   session's row"). A partial result goes in the same place ([`Operations::note`]). Nothing here retries.
+//!   session's row"). A partial result goes in the same place ([`Operations::note`]). Nothing here retries. A feature
+//!   that showed a refusal somewhere else, such as a dialog, forgets the record ([`Operations::forget`]).
 //! - A refusal is more than words. Its completion gets a [`Refusal`]: the words, the reply's status and the helm-only
 //!   markers the reply carried ([`HelmMarker`]), so a feature tells a refusal it answers (a YOLO launch to confirm, a
 //!   host busy with another operation, a timeout whose work goes on) from one it only shows, without reading the
@@ -552,8 +553,9 @@ impl Operations {
         self.in_flight.values().any(|running| matches(running.work))
     }
 
-    /// The last refusal or partial result of work on `key`, until the next operation on it starts. A key whose subject
-    /// is gone (a deleted session) keeps its entry until the UI session resets; nothing draws it, since nothing asks.
+    /// The last refusal or partial result of work on `key`, until the next operation on it starts or a feature forgets
+    /// it ([`Operations::forget`]). A key whose subject is gone (a deleted session) keeps its entry until the UI
+    /// session resets; nothing draws it, since nothing asks.
     pub fn failure(&self, key: &OpKey) -> Option<&Failure> {
         self.failures.get(key)
     }
@@ -562,10 +564,12 @@ impl Operations {
     /// answers, unless a reset retires the store first. Call it from the handler of the user's action: that is when the
     /// moved-on mark is taken.
     ///
-    /// Starting clears the key's previous failure, which is the only thing that clears it (the old app's rule:
-    /// a row's error stays until the retry that supersedes it). `on_settled` runs after the store has recorded the
-    /// outcome and notified, outside the store's update, so it may read the store. It is never called for a command
-    /// the reset lost.
+    /// Starting clears the key's previous failure (the old app's rule: a row's error stays until the retry that
+    /// supersedes it); short of a reset, the only other way it goes is [`Operations::forget`], from a feature that
+    /// showed it elsewhere.
+    ///
+    /// `on_settled` runs after the store has recorded the outcome and notified, outside the store's update, so it may
+    /// read the store. It is never called for a command the reset lost.
     pub fn start(
         &mut self,
         key: &OpKey,
@@ -641,9 +645,10 @@ impl Operations {
     }
 
     /// Record a partial result of `work` on `key` in the place a refusal goes ([`Operations::failure`]), with the same
-    /// lifetime: the key's next [`Operations::start`] or a reset clears it. For work the helm accepted that still left
-    /// something for the user to read: a Stop whose host could not close a tab, a Replace whose removal of its source
-    /// reported something. It replaces whatever the key held. A retired store records nothing.
+    /// lifetime: the key's next [`Operations::start`], a [`Operations::forget`] or a reset clears it. For work the helm
+    /// accepted that still left something for the user to read: a Stop whose host could not close a tab, a Replace
+    /// whose removal of its source reported something. It replaces whatever the key held. A retired store records
+    /// nothing.
     ///
     /// Call it from the completion of the work it reports: a note recorded while newer work runs on the key would
     /// outlive that work, since a successful finish does not clear the slot.
@@ -659,6 +664,25 @@ impl Operations {
         }
         self.failures.insert(key.clone(), Failure { work, message });
         cx.notify();
+    }
+
+    /// Drop the refusal or partial result recorded on `key`, for a feature that has already shown it somewhere else,
+    /// such as a dialog, so that it does not also stay where the store's record is drawn (a host's row, say) and
+    /// report the one refusal twice. Notifies only when there was a record to drop: forgetting a key that has none,
+    /// which includes every key of a retired store, changes nothing and redraws nothing.
+    ///
+    /// Forgetting is never needed for cleanup, since the key's next [`Operations::start`] clears its failure anyway.
+    /// Forget only a refusal the feature did show. One that arrived after the user moved on
+    /// ([`Settled::user_moved_on`]) opened no dialog, so the record is the one place it is shown and must stay. Call it
+    /// from the completion that showed the refusal, while the record is still that refusal's: called later, it could
+    /// drop the refusal of newer work on the key, which nothing else would show.
+    ///
+    /// Nothing in flight changes: work out on `key` keeps its busy state and its completion, and a refusal it settles
+    /// with is recorded as usual.
+    pub fn forget(&mut self, key: &OpKey, cx: &mut Context<Operations>) {
+        if self.failures.remove(key).is_some() {
+            cx.notify();
+        }
     }
 
     /// The reset retired this store's UI session: drop every waiting task and recorded failure, and start nothing
