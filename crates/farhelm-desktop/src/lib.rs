@@ -167,6 +167,12 @@ pub fn run() -> anyhow::Result<()> {
         eprintln!("farhelm-desktop: Farhelm is already open; asked it to bring its window forward");
         return Ok(());
     }
+    // Checked only now, after the hand-over above: a hand-over needs no display, so a launch from a shell that has no
+    // Wayland session (an SSH login, a tmux server started before the graphical login) still brings the open window
+    // forward. Before this point nothing has started, which is all the refusal needs.
+    if let Some(refusal) = missing_wayland(|name| std::env::var_os(name)) {
+        refuse_and_exit(&refusal);
+    }
     let mut desktop = match DesktopBootstrap::start() {
         Ok(desktop) => desktop,
         Err(error) => refuse_and_exit(&format!("farhelm-desktop: {error:#}")),
@@ -275,6 +281,31 @@ fn readout_feed(
         })
     });
     (first, next)
+}
+
+/// Why this launch must refuse for want of a Wayland session, or `None` when it has one (or is not on Linux).
+///
+/// The Linux app draws only through Wayland: shipped builds compile GPUI's Wayland backend alone, and without a
+/// Wayland display GPUI starts headless, where opening the window succeeds and draws nothing. An X11-only session would
+/// then get the embedded helm and the local supervisor started behind a window nobody can see, and no word of why. So
+/// the app refuses before it starts anything, through the startup refusal path, with a line that says what it needs
+/// (settled by the GPUI migration's coordinator on 2026-11-13: an X11 session without Wayland gets a clear message).
+/// On Linux that path writes only to stderr, so the line reaches a terminal or the journal, not a launcher's user.
+///
+/// Only a non-empty `WAYLAND_DISPLAY` counts, because that is the only thing GPUI picks Wayland by (`select_backend`
+/// in vendor/gpui-pre-linux/src/linux/display_connection.rs); an inherited `WAYLAND_SOCKET` alone is dropped unused
+/// when GPUI starts headless. `env` reads an environment variable, passed in so tests never change the process's
+/// environment.
+fn missing_wayland(env: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<String> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    let display = env("WAYLAND_DISPLAY").is_some_and(|value| !value.is_empty());
+    (!display).then(|| {
+        "farhelm-desktop: the desktop app needs a Wayland session, and this one has none (WAYLAND_DISPLAY is not \
+         set or empty); an X11 session without Wayland is not supported"
+            .to_string()
+    })
 }
 
 /// Whether a second launch hands over to the app already open (`second_launch`): only on Linux. On the Mac, Launch
@@ -1642,9 +1673,48 @@ fn native_refusal_commands(message: &str) -> Vec<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use std::io::Read as _;
     use std::net::TcpListener;
     use std::time::Instant;
+
+    /// An X11-only Linux session must get a clear refusal rather than an app that starts its helm and supervisor behind
+    /// a window that never shows. Specified: on Linux, without a non-empty `WAYLAND_DISPLAY` the launch refuses with a
+    /// line naming Wayland and X11, also when only `WAYLAND_SOCKET` is set; with one it goes on; elsewhere it never
+    /// refuses for this.
+    #[farhelm_testtrace::test]
+    fn a_linux_launch_without_wayland_refuses_with_a_clear_line() {
+        let with = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| std::ffi::OsString::from(value))
+            }
+        };
+        let none = missing_wayland(with(&[("DISPLAY", ":0")]));
+        let empty = missing_wayland(with(&[("WAYLAND_DISPLAY", "")]));
+        let display = missing_wayland(with(&[("WAYLAND_DISPLAY", "wayland-1")]));
+        let socket = missing_wayland(with(&[("WAYLAND_SOCKET", "3")]));
+        if cfg!(target_os = "linux") {
+            let refusal = none.unwrap_or_default();
+            assert!(refusal.starts_with("farhelm-desktop: "), "{refusal}");
+            assert!(
+                refusal.contains("Wayland") && refusal.contains("X11"),
+                "{refusal}"
+            );
+            assert!(empty.is_some(), "an empty WAYLAND_DISPLAY is no display");
+            // GPUI picks Wayland by `WAYLAND_DISPLAY` alone (`select_backend`) and starts headless without it, dropping
+            // an inherited socket unused, so a socket alone is the same silent start the refusal exists to prevent.
+            assert!(
+                socket.is_some(),
+                "WAYLAND_SOCKET alone does not make GPUI use Wayland"
+            );
+        } else {
+            assert_eq!((none, empty, socket), (None, None, None));
+        }
+        assert_eq!(display, None);
+    }
 
     /// The window shows the updater's latest readout through this feed, so a feed that re-reported one change forever
     /// would spin the window, and one that missed a change would hide an update. It is polled by GPUI's executor, with
