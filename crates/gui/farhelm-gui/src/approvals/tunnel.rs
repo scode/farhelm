@@ -13,6 +13,12 @@
 //! vanished. Once the helm took the answer, the terminal's views of the asking session read their tunnels again
 //! ([`tunnels::opened_elsewhere`]), since the tunnel was opened outside the terminal.
 //!
+//! A press that would ask the warning while a dialog already holds focus, the warning itself included, is refused
+//! with a reason on the card ([`Pressed::reason`]), as the card's Add host is: a second press while the warning was up
+//! opened a second, identical warning over the first. The migration's orchestrator asked for the refusal on
+//! 2026-11-15, once the warning drew above the cards. With consent recorded the press opens nothing, so it still
+//! answers over any dialog.
+//!
 //! Offered only in the Mac app: the platform is a value ([`offer`]), not a `cfg`, so Linux tests cover both card
 //! shapes.
 
@@ -24,7 +30,7 @@ use super::answers::{self, Arming};
 use super::model::TunnelOffer;
 use crate::focus::Mark;
 use crate::host_text::HostText;
-use crate::layers::Subject;
+use crate::layers::{self, Subject};
 use crate::operations::{NotStarted, OpKey, Outcome};
 use crate::session;
 use crate::terminal::tunnels;
@@ -44,9 +50,25 @@ pub enum Pressed {
     Sent,
     /// The tunnel warning is up; the answer goes out on its Allow.
     Asking,
-    /// Nothing: the answer bar was paused, an answer to the request was already on its way while the warning would
-    /// have been asked, or the user moved on since the press.
+    /// Nothing: the answer bar was paused, an answer to the request or a save of the preferences (an earlier warning's
+    /// consent among them) was already on its way while the warning would have been asked, or the user moved on since
+    /// the press.
     Nothing,
+    /// The warning would have been asked, but a dialog holds focus (a tunnel warning already up, or another dialog):
+    /// the card says so ([`Pressed::reason`]) and the request keeps waiting.
+    AnotherDialog,
+}
+
+impl Pressed {
+    /// What the card's refusal line says, in the app's words, or `None` when there is nothing to say.
+    pub fn reason(self) -> Option<&'static str> {
+        match self {
+            Pressed::AnotherDialog => Some(
+                "Another dialog is open. Close it, then press this request's Tunnel and open again.",
+            ),
+            Pressed::Sent | Pressed::Asking | Pressed::Nothing => None,
+        }
+    }
 }
 
 /// Tunnel and open on `approval`'s card: with the shared tunnel consent recorded, send the answer now; otherwise ask
@@ -55,7 +77,8 @@ pub enum Pressed {
 /// the card's ordinary outcomes (the helm's refusal on the request's key, a late answer's notice).
 ///
 /// Cancel, Escape or closing the warning send nothing, and the request keeps waiting on its card. The warning closes
-/// by itself when the request stops waiting.
+/// by itself when the request stops waiting. A press that would ask the warning while a dialog holds focus opens
+/// nothing and reports [`Pressed::AnotherDialog`].
 pub fn tunnel_and_open(
     approval: &PendingApproval,
     arming: &Entity<Arming>,
@@ -77,6 +100,16 @@ pub fn tunnel_and_open(
     // No warning over an answer already on its way: it would only end in a refusal of the second answer.
     if answering(&id, cx) {
         return Ok(Pressed::Nothing);
+    }
+    // An earlier warning's Allow closes the warning before its consent save comes back: until it does, a press would
+    // pass every other check and ask a second warning. SPEC_impl.md keeps an accepted warning's claim until its save
+    // finishes; the save runs under the preferences' key, so any preferences save holds the press for its short while.
+    if saving_preferences(cx) {
+        return Ok(Pressed::Nothing);
+    }
+    // A dialog holding focus is what the user is in; the warning would stack over it, or over itself.
+    if layers::focus_layer_open(window, cx) {
+        return Ok(Pressed::AnotherDialog);
     }
     let subject = request_subject(&id, cx);
     let asked =
@@ -134,6 +167,16 @@ fn waiting(id: &str, cx: &App) -> bool {
             .read(cx)
             .collections()
             .get::<PendingApproval>(id)
+            .is_some()
+    })
+}
+
+/// Whether a save of the preferences is in flight, the tunnel consent's among them.
+fn saving_preferences(cx: &App) -> bool {
+    session::current_operations(cx).is_some_and(|operations| {
+        operations
+            .read(cx)
+            .in_flight(&OpKey::preferences())
             .is_some()
     })
 }
