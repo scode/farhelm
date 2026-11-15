@@ -33,6 +33,7 @@ use gpui::{
 };
 use gpui_component::Root;
 
+use super::{linux_title_bar, title_band};
 use crate::theme::{self, metrics};
 use crate::{assets, bootstrap, render_count, root};
 
@@ -112,8 +113,14 @@ fn min_size() -> Size<Pixels> {
 /// An ordinary window with the platform's own title bar (the title band is the main window's alone), centered on the
 /// primary display at a size that shows the full column, and never higher than that display.
 pub(crate) fn options(cx: &App) -> WindowOptions {
-    let min = min_size();
+    let mut min = min_size();
     let mut wanted = size(min.width + px(24.), px(640.));
+    // On Linux GPUI Kit's frame and, where the compositor draws none, the window's own title bar take room inside the
+    // window, so both sizes allow for them and the text keeps its column (`linux_title_bar`).
+    if cfg!(target_os = "linux") {
+        min = min + linux_title_bar::minimum_allowance();
+        wanted = wanted + linux_title_bar::opening_allowance();
+    }
     if let Some(display) = cx.primary_display() {
         wanted.height = wanted.height.min(display.bounds().size.height);
     }
@@ -175,6 +182,8 @@ fn expand_tabs(line: &str) -> String {
 struct NoticesView {
     lines: Rc<[SharedString]>,
     root: root::Attachment,
+    /// Redraws the window when the compositor's answer about decorations changes (`linux_title_bar`).
+    _decorations: gpui::Subscription,
 }
 
 impl NoticesView {
@@ -182,6 +191,7 @@ impl NoticesView {
         NoticesView {
             lines,
             root: root::attach(window, cx),
+            _decorations: linux_title_bar::follow_decorations(window),
         }
     }
 }
@@ -211,18 +221,30 @@ impl Render for NoticesView {
         .py(PAD);
         let ground = div()
             .size_full()
+            .flex()
+            .flex_col()
             .bg(theme::color(palette.bg_0))
             .text_color(theme::color(palette.fg_0))
             .font_family(assets::TERMINAL_FONT)
             .text_size(metrics::TEXT_SM)
+            // The Linux window's own title bar, where the compositor draws none (`linux_title_bar`), in the interface
+            // face like every bar.
+            .children(
+                linux_title_bar::bar("notices-title-bar", TITLE, "Close this window", window, cx)
+                    .map(|bar| div().font_family(assets::UI_FONT).child(bar)),
+            )
             .child(
                 div()
                     .id("open-source-notices")
                     .role(Role::Region)
                     .aria_label(TITLE)
-                    .size_full()
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
                     .child(list),
-            );
+            )
+            // The bar's drag starts from this window's own press watcher, as the main window's band does.
+            .child(title_band::watch_presses());
         root::wrap(ground, &self.root, window, cx)
     }
 }

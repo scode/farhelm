@@ -35,13 +35,13 @@ session per kind, in order: `basic`, `running`, `waiting`, `idle` or `exited`; s
 (reuse the binaries already in the target directory), `--lock FILE` (hold an exclusive lock on FILE from before the
 build until `stop`; see "On a Mac"), `--window-size WxH` (the window's first size, still fitted to the screen; on Linux
 it must fit Mutter's monitor, and it includes the frame GPUI Kit draws inside the window there, a 20-pixel black shadow
-margin and a 1-pixel border on every side, which `screenshot` captures too) and `--appearance light|dark` (start in that
-palette whatever the system's appearance). The last two are test hooks of agent builds, passed to the app as environment
-variables that `crates/gui/farhelm-gui/src/agent_startup.rs` reads, so a screenshot batch can capture each theme and
-size; they are not the app's appearance setting, and a value the app cannot parse makes it refuse to start.
-`--scripted-hosts` gives the app fake SSH hosts (see "Scripted hosts"). It builds with whatever `CARGO_TARGET_DIR` you
-set. If `start` fails or is interrupted, run `stop` anyway: it releases whatever `start` had already taken, the lock
-included.
+margin and a 1-pixel border on every side, and the 34-pixel title bar the window draws for itself under Mutter, which
+`screenshot` captures too) and `--appearance light|dark` (start in that palette whatever the system's appearance). The
+last two are test hooks of agent builds, passed to the app as environment variables that
+`crates/gui/farhelm-gui/src/agent_startup.rs` reads, so a screenshot batch can capture each theme and size; they are not
+the app's appearance setting, and a value the app cannot parse makes it refuse to start. `--scripted-hosts` gives the
+app fake SSH hosts (see "Scripted hosts"). It builds with whatever `CARGO_TARGET_DIR` you set. If `start` fails or is
+interrupted, run `stop` anyway: it releases whatever `start` had already taken, the lock included.
 
 To compare the app with the old app's reference pictures, `scripts/gui-screenshot-batch.py` drives these same commands
 over a fixed scene list and writes one browsable page (`docs/gpui/screenshot-batch.md`). `scripts/gui-e2e-smoke.py` is a

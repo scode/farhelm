@@ -933,8 +933,9 @@ fn a_double_click_zooms_only_when_both_presses_were_on_the_same_rows_background(
 
 /// The band needs the window to give it the title bar: on macOS the window opens with a transparent title bar, the
 /// traffic lights at 12 by 16 points (vertically centered in the 48-point band, where the old app put them) and the
-/// app owning the drag, since the band's rows do the dragging. Elsewhere the options keep GPUI's defaults, and in
-/// every build inactive windows still draw at full rate (decided by the maintainer on 2026-11-13), which dressing the
+/// app owning the drag, since the band's rows do the dragging. Elsewhere the title bar options keep GPUI's defaults
+/// (the Linux window's own decorations and minimum are `linux_title_bar`'s tests), and in every build inactive windows
+/// still draw at full rate (decided by the maintainer on 2026-11-13), which dressing the
 /// window must not undo.
 #[gpui::test]
 fn the_window_options_give_the_band_the_title_bar_only_on_macos(cx: &mut TestAppContext) {
@@ -1327,6 +1328,18 @@ fn the_notices_window_is_titled_and_fits_its_column() {
         assert!(!titlebar.appears_transparent);
         let min = options.window_min_size.map(|min| f32::from(min.width));
         assert!(min.is_some_and(|width| width >= licenses::COLUMNS as f32 * licenses::CHAR_WIDTH));
+        // On Linux GPUI Kit's frame and the window's own title bar take room inside the window, so its minimum allows
+        // for both; elsewhere it is the text's own.
+        let text_min = gpui::size(
+            gpui::px(licenses::COLUMNS as f32 * licenses::CHAR_WIDTH + 32.),
+            gpui::px(240.),
+        );
+        let expected = if cfg!(target_os = "linux") {
+            text_min + crate::desktop::linux_title_bar::minimum_allowance()
+        } else {
+            text_min
+        };
+        assert_eq!(options.window_min_size, Some(expected));
     });
 }
 

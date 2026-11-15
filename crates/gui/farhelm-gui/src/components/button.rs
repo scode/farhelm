@@ -185,6 +185,8 @@ pub struct Button {
     pressed: Option<bool>,
     /// Whether a pressed button wears the quieter look ([`Button::quiet`]).
     quiet: bool,
+    /// Whether a press leaves keyboard focus where it was ([`Button::keeps_focus_on_press`]).
+    keeps_focus: bool,
     /// What the button shows in place of its label's text, when it shows more than words.
     content: Option<AnyElement>,
     /// A fixed square side in place of the tier's padding ([`Button::square`]).
@@ -225,6 +227,7 @@ impl Button {
             expanded: None,
             pressed: None,
             quiet: false,
+            keeps_focus: false,
             content: None,
             side: None,
             on_click: None,
@@ -357,6 +360,18 @@ impl Button {
         handler: impl Fn(&KeyDownEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.on_key = Some(Rc::new(handler));
+        self
+    }
+
+    /// On Linux, a press leaves keyboard focus where it was instead of focusing the button, as the Linux click rule
+    /// otherwise would (the focus coordinator's [`focus::OnPress::Keep`]); Tab still reaches it. For a pointer control
+    /// that stands in for the window system's own, whose clicks never take focus: the Linux window's drawn title bar
+    /// (`desktop::linux_title_bar`; the migration's coordinator granted the exception on 2026-11-14).
+    ///
+    /// Nothing changes on macOS, where a click focuses no button anyway, and where tracking a button as `Keep` would
+    /// put it in Tab's order even with the system's Keyboard navigation setting off.
+    pub fn keeps_focus_on_press(mut self) -> Self {
+        self.keeps_focus = cfg!(target_os = "linux");
         self
     }
 
@@ -778,7 +793,12 @@ impl RenderOnce for Button {
         }
         let button = super::with_hover_help(button, &self.id, &self.help, true, window, cx);
         let button = if enabled {
-            let button = focus::track(button, &focus, focus::OnPress::Control);
+            let on_press = if self.keeps_focus {
+                focus::OnPress::Keep
+            } else {
+                focus::OnPress::Control
+            };
+            let button = focus::track(button, &focus, on_press);
             // Registered before the activation below, so the owner's handler sees each key first.
             match self.on_key {
                 Some(on_key) => {
@@ -855,6 +875,11 @@ impl IconButton {
     /// See [`Button::square`].
     pub fn square(self, side: Pixels) -> Self {
         IconButton(self.0.square(side))
+    }
+
+    /// See [`Button::keeps_focus_on_press`].
+    pub fn keeps_focus_on_press(self) -> Self {
+        IconButton(self.0.keeps_focus_on_press())
     }
 }
 
