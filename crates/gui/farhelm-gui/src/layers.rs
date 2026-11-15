@@ -68,8 +68,12 @@
 //!   its place in Tab order is kept, since GPUI paints every overlay, and so orders its controls, after the whole page.
 //! - **One tooltip at a time**, owned by the control that showed it (see [`TooltipOwner`]). It says the app's own
 //!   words, or a host sentence when the help names a host value, drawn through host text's element ([`ShownTooltip`]).
-//!   Help in paragraphs ([`Help::Paragraphs`]) is drawn wider and never cut short, as the old app drew it. The
-//!   [`tooltip`] submodule holds it, and says when it shows and goes.
+//!   Help in paragraphs ([`Help::Paragraphs`]) is drawn wider and never cut short, as the old app drew it, and card
+//!   help ([`Help::card`]) draws a view of the caller's at a fixed width. The [`tooltip`] submodule holds it, and says
+//!   when it shows and goes. Ordinary help sits at the pointer; help a control asks to have beside the sidebar
+//!   ([`Hint::beside`]: SPEC.md's session-row hovers and host progress card) sits 6 pixels past the edge the sidebar
+//!   draws ([`beside_edge`]), centered on its control, with a notch pointing back at it and a ring on it, or against
+//!   the control without either in a window too narrow for that. The [`beside`] submodule has the numbers.
 //! - **The innermost help wins** when a control with hover help sits inside another with its own (a session row's
 //!   marks inside the row); [`hover_began`], "Nested hover help", explains the rule and how it is decided.
 //! - **Two pill slots that are not layers** ([`show_pill`], [`show_launch_pill`]). They are the things a feature draws
@@ -152,18 +156,22 @@ use crate::focus::{self, Mark};
 use crate::theme::{self, metrics};
 use crate::ticker;
 
+mod beside;
+#[cfg(test)]
+mod beside_tests;
 mod tooltip;
 #[cfg(test)]
 mod tooltip_tests;
 
+pub use beside::beside_edge;
 // The tooltip's public items, at the paths every caller has always used (`layers::hover_began` and the like).
 #[cfg(test)]
 pub(crate) use tooltip::show_tooltip_at;
 pub use tooltip::{
-    HOVER_DELAY, Help, ShownTooltip, TooltipOwner, help_drawn, hover_began, hover_ended,
-    hover_moved, pointer_pressed, shown_tooltip,
+    BesideCues, BesideTarget, DrawnRing, HOVER_DELAY, Help, Hint, ShownTooltip, TooltipOwner,
+    TooltipSide, help_drawn, hover_began, hover_ended, hover_moved, pointer_pressed, shown_tooltip,
 };
-use tooltip::{Hovered, tooltip_card};
+use tooltip::{Hovered, POINTER_OFFSET, tooltip_card};
 
 // ---- Per-window state ------------------------------------------------------------------------------------------------
 
@@ -189,6 +197,8 @@ pub struct LayerStack {
     /// as the pill is, so that nothing that walks the layers for focus, Escape or "is anything open" counts it.
     region: Option<Region>,
     tooltip: Option<ShownTooltip>,
+    /// The edge help placed beside the sidebar sits against, as the sidebar last drew it ([`beside_edge`]).
+    beside_edge: Option<Anchor>,
     /// Takes the tooltip down when its owner is released; replaced with each new tooltip.
     tooltip_release: Option<Subscription>,
     /// The tooltip waiting out its hover delay: its owner, and the deadline that shows it. Dropping it cancels.
@@ -327,6 +337,7 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
         next_pill_id: 0,
         region: None,
         tooltip: None,
+        beside_edge: None,
         tooltip_release: None,
         pending_tooltip: None,
         warm: false,
@@ -464,8 +475,9 @@ impl Anchor {
     }
 
     /// A zero-cost child that records where the anchor element is drawn, every frame, before any overlay is placed. The
-    /// anchor element must be positioned (`relative()`) so the tracker covers it.
-    pub fn track(&self) -> impl IntoElement {
+    /// anchor element must be positioned (`relative()`) so the tracker covers it. It borrows nothing from the anchor,
+    /// so a function that made the anchor may return its tracker ([`beside_edge`] does).
+    pub fn track(&self) -> impl IntoElement + use<> {
         let bounds = self.bounds.clone();
         // Pinned to the element's corner: an absolute child without insets would sit wherever it falls in the flow,
         // after the element's other children, and record the wrong place.
@@ -1804,12 +1816,31 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
         overlay = overlay.child(gpui::deferred(placed).with_priority(pill_depth));
     }
     if let Some(shown) = &stack.tooltip {
-        // Offset like a native tooltip so the pointer never covers the text.
-        let at = point(shown.at.x + px(8.), shown.at.y + px(16.));
-        let placed = gpui::anchored()
-            .position(at)
-            .snap_to_window()
-            .child(tooltip_card(shown, window, cx));
+        let card = tooltip_card(shown, window, cx);
+        // An edge's bounds turn `None` only once a frame has ended without drawing it, so asking here gives the same
+        // answer as asking while the frame is laid out, but in the very first frame the sidebar is drawn, before any
+        // row in it can be hovered.
+        let edge = stack
+            .beside_edge
+            .clone()
+            .filter(|edge| edge.drawn_bounds().is_some());
+        let placed = match (&shown.beside, edge) {
+            // Help beside the sidebar decides its place as the frame is laid out ([`beside::PlacedBeside`]).
+            (Some(target), Some(edge)) => {
+                beside::PlacedBeside::new(shown, target, edge, card, palette).into_any_element()
+            }
+            // Offset like a native tooltip so the pointer never covers the text. Help that asks for beside placement
+            // comes here while no sidebar edge is drawn, and says so.
+            _ => {
+                shown.side.set(TooltipSide::Pointer);
+                shown.ring.set(None);
+                gpui::anchored()
+                    .position(shown.at + POINTER_OFFSET)
+                    .snap_to_window()
+                    .child(card)
+                    .into_any_element()
+            }
+        };
         overlay = overlay.child(gpui::deferred(placed).with_priority(tooltip_depth));
     }
     Some(overlay.into_any_element())

@@ -1,6 +1,7 @@
 //! Headless screenshot goldens: one per component, per dialog frame and per overlay kind (tooltip, once more with help
-//! in paragraphs, popover, the prompt over its veil, once more with a summary that names a host value, once more with a
-//! feature-drawn body, a header tile and a footer note, and the prompt anchored to a row's menu button), the keyboard
+//! in paragraphs, once more beside a sidebar with its notch and ring, popover, the prompt over its veil, once more with
+//! a summary that names a host value, once more with a feature-drawn body, a header tile and a footer note, and the
+//! prompt anchored to a row's menu button), the keyboard
 //! focus ring, host-supplied text over its spoofing corpus, the notice banner, the terminal's styles and cursor shapes,
 //! an attached terminal's exit line and status line, the scrim a pending Delete puts over the open session's terminal,
 //! the interrupted card in its place (with Restart and Replace, and with Replace alone), the open session's details bar
@@ -119,6 +120,8 @@ struct SceneState {
     growing: [TextInputState; 2],
     tooltip_owner: Entity<TooltipOwner>,
     anchor: Rc<RefCell<Option<Anchor>>>,
+    /// The tracker of the control the beside tooltip scene shows its help for, recorded when the scene draws.
+    beside: Rc<RefCell<Option<layers::BesideTarget>>>,
     ring: FocusHandle,
     terminals: Rc<RefCell<Vec<Entity<TerminalView>>>>,
     attached: Rc<RefCell<Vec<Entity<AttachedTerminal>>>>,
@@ -619,8 +622,73 @@ fn tooltip_paragraphs(_: &SceneState, _: &mut Window, _: &mut App) -> AnyElement
 fn tooltip_paragraphs_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     layers::show_tooltip_at(
         &state.tooltip_owner,
-        layers::Help::Paragraphs(guarded_codex_help()),
+        layers::Help::Paragraphs(guarded_codex_help()).into(),
         point(px(40.), px(30.)),
+        window,
+        cx,
+    );
+}
+
+/// The beside tooltip scene's help: a session row's status, the short help a row's marks show beside the sidebar.
+const BESIDE_HELP: &str = "Idle since 10:42. Click the dot to mark it read.";
+
+/// A sidebar column holding one session-row-like control, which the setup shows beside help for: the card 6 pixels
+/// past the column's edge, the notch pointing back at the control and the accent ring just inside it. The control
+/// tracks its own bounds through a tracker the scene keeps, as a control's hover help does for itself.
+fn tooltip_beside(state: &SceneState, window: &mut Window, cx: &mut App) -> AnyElement {
+    let palette = theme::palette(cx);
+    let target = layers::BesideTarget::for_control("beside-target", window, cx);
+    state.beside.replace(Some(target.clone()));
+    let row = div()
+        .relative()
+        .mx(px(8.))
+        .px(px(8.))
+        .h(px(30.))
+        .flex()
+        .items_center()
+        .rounded(theme::metrics::RADIUS_MD)
+        .child("Fixture 1")
+        .child(target.track());
+    let sidebar = div()
+        .w(px(200.))
+        .h_full()
+        .flex()
+        .flex_col()
+        .justify_center()
+        .bg(theme::color(palette.bg_1))
+        .border_r_1()
+        .border_color(theme::color(palette.border))
+        .text_color(theme::color(palette.fg_0))
+        .child(row);
+    // The edge goes on a box around the bordered column, so the help is measured from outside its border.
+    let outer = div()
+        .relative()
+        .h_full()
+        .child(sidebar)
+        .child(layers::beside_edge(window, cx));
+    // Wide enough that the card fits beside the column: a narrower scene shows the fallback above the row instead.
+    div()
+        .w(px(576.))
+        .h(px(136.))
+        .flex()
+        .child(outer)
+        .into_any_element()
+}
+
+/// Show the row's help beside the sidebar as if the pointer had come to rest on it.
+fn tooltip_beside_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let Some(target) = state.beside.borrow().clone() else {
+        return;
+    };
+    let cues = layers::BesideCues {
+        on_fill: false,
+        radius: theme::metrics::RADIUS_MD,
+    };
+    let hint = layers::Hint::beside(BESIDE_HELP.into(), cues, &target);
+    layers::show_tooltip_at(
+        &state.tooltip_owner,
+        hint,
+        point(px(60.), px(80.)),
         window,
         cx,
     );
@@ -4447,7 +4515,7 @@ fn version_readout_tooltip_setup(state: &SceneState, window: &mut Window, cx: &m
     let words = update_readout::view::check_help(&reinstall_tooltip());
     layers::show_tooltip_at(
         &state.tooltip_owner,
-        layers::Help::Line(host_text::Line::App(words.into())),
+        layers::Help::Line(host_text::Line::App(words.into())).into(),
         point(px(330.), px(32.)),
         window,
         cx,
@@ -4518,6 +4586,12 @@ static SCENES: &[Scene] = &[
         size: (520., 320.),
         draw: tooltip_paragraphs,
         setup: tooltip_paragraphs_setup,
+    },
+    Scene {
+        name: "tooltip-beside",
+        size: (600., 160.),
+        draw: tooltip_beside,
+        setup: tooltip_beside_setup,
     },
     Scene {
         name: "focus-ring",
@@ -5434,6 +5508,7 @@ fn component_goldens() -> anyhow::Result<()> {
                         ],
                         tooltip_owner: cx.new(|_| TooltipOwner),
                         anchor: Rc::new(RefCell::new(None)),
+                        beside: Rc::new(RefCell::new(None)),
                         ring: cx.focus_handle().tab_stop(true),
                         terminals: Rc::new(RefCell::new(Vec::new())),
                         attached: Rc::new(RefCell::new(Vec::new())),

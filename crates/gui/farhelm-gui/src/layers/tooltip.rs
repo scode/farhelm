@@ -6,6 +6,10 @@
 //! [`super::overlay`] draws its card on the top rung of the parent module's z-order ladder. Everything public here is
 //! re-exported from [`crate::layers`], which is the path callers use.
 //!
+//! Help comes in three forms ([`Help`]: a line, paragraphs, a card holding a view) and in two placements: ordinary
+//! help at the pointer, and help a control asks to have beside the sidebar ([`Hint::beside`], placed by
+//! [`super::beside`]).
+//!
 //! A tooltip waits [`HOVER_DELAY`] (the old app's 300 ms) before it shows, through a ticker deadline, and shows at once
 //! when another tooltip is showing or one went away less than that long ago, so a user scanning a row of icons does
 //! not wait at each. Escape, a press of any mouse button on a control with help ([`pointer_pressed`]) or a layer
@@ -18,13 +22,18 @@
 //! key press and then a pointer move bring the help back; a press on a control right after a key press, or a click
 //! whose pointer moves while the button is held, brings the help back after the delay once the button is released (GPUI
 //! ends the control's hover during either and begins it again after); and after a press on a row, a visit to one of its
-//! marks and back shows the row's help again. Still to come here: the tooltip's pointer notch and the target ring on
-//! its control (both follow element anchoring for tooltips). Until then a tooltip sits below and right of where the
-//! pointer was, and a pointer moving inside a control does not restart the wait.
+//! marks and back shows the row's help again. Still to come here: anchoring ordinary help to its control, above it as
+//! the old app placed it. Until then ordinary help sits below and right of where the pointer was, and a pointer moving
+//! inside a control does not restart the wait. Help that asks to sit beside the sidebar (a session row's, the host
+//! progress card) is already placed against its control, with the old notch and ring ([`super::beside`]).
+
+use std::cell::Cell;
+use std::rc::Rc;
 
 use gpui::{
-    App, ElementId, Entity, EntityId, ParentElement, Pixels, Point, SharedString, Styled,
-    Subscription, WeakEntity, Window, div, px,
+    AnyView, App, Bounds, ElementId, Entity, EntityId, Hsla, InteractiveElement as _, IntoElement,
+    ParentElement, Pixels, Point, SharedString, Styled, Subscription, WeakEntity, Window, div,
+    point, px,
 };
 
 use super::{LayerStack, menu_shadow, stack};
@@ -40,7 +49,7 @@ pub(super) struct Hovered {
     /// control's help may show long after its hover began (the pointer returning from a mark onto its row), and by then
     /// the control may say something else: a session row's help follows the session's status, and the frame that takes
     /// a stopped session's live dot away also changes its row's help.
-    help: Help,
+    help: Hint,
     /// Drops the entry, and settles again, when the control is gone: no hover-leave fires for a control that simply
     /// stops being drawn, and the control around it, still under the pointer, should then have its help back.
     _release: Subscription,
@@ -67,7 +76,7 @@ impl TooltipOwner {
     }
 }
 
-/// What a tooltip says, in one of the two forms the old app drew hover help in. Controls hand it over through
+/// What a tooltip says, in one of the three forms the old app drew hover help in. Controls hand it over through
 /// [`crate::components::HoverHelp`], which picks the form.
 ///
 /// Short help is one [`Line`] on a card at most 280 pixels wide and cut at eight lines (`.farhelm-tooltip`,
@@ -78,6 +87,10 @@ impl TooltipOwner {
 /// clamp, its text `white-space: pre-line` so a blank line set paragraphs apart (`app.css` lines 1919-1926). It kept
 /// the short card's padding and its `max-height: calc(100vh - 8px)`, so a paragraph card taller than the window is
 /// clipped at the window, not at a line count.
+///
+/// A third form, the card ([`Help::card`]), carries a view of the caller's own on a card of fixed width: the old
+/// session row's summary card (`data-kind="card"`, `app.css` lines 1932-1938: `width: min(310px, 100vw - 8px)`, no
+/// padding, no clamp), which shared the other forms' fill, border, radius, shadow and height cap.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Help {
     /// Short help: the app's words, or a sentence naming host values.
@@ -85,13 +98,62 @@ pub enum Help {
     /// Paragraph help: each sentence a paragraph of its own, drawn one below the other with a blank line's gap
     /// between them, on the wider card, never clamped.
     Paragraphs(Vec<HostSentence>),
+    /// Rich help: the caller's view on a card of fixed width, with the caller's words for assistive technology.
+    Card(Card),
+}
+
+/// The card form of hover help ([`Help::card`]): a view drawn on the tooltip's card at a fixed width.
+///
+/// Two cards are the same help when they draw the same view entity at the same width with the same words: the view's
+/// own state decides what it draws, so comparing its entity is what tells a control's help apart from frame to frame
+/// ([`help_drawn`]).
+#[derive(Clone)]
+pub struct Card {
+    /// The card's width, kept 8 pixels inside a narrower window (the old `min(310px, 100vw - 8px)`).
+    width: Pixels,
+    view: AnyView,
+    /// What the card says, as assistive technology reads it ([`Help::accessible_text`]): a line, so that a host value
+    /// in it (the session's title and host, in the summary) is escaped as in every other form.
+    text: Line,
+}
+
+impl PartialEq for Card {
+    fn eq(&self, other: &Self) -> bool {
+        self.width == other.width
+            && self.view.entity_id() == other.view.entity_id()
+            && self.text == other.text
+    }
+}
+
+impl Eq for Card {}
+
+impl std::fmt::Debug for Card {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Card")
+            .field("width", &self.width)
+            .field("view", &self.view.entity_id())
+            .field("text", &self.text)
+            .finish()
+    }
 }
 
 impl Help {
+    /// Card help: `view` drawn on the tooltip's card, `width` wide (less where the window is narrower), with no
+    /// padding and no line clamp, cut only at the window's height less 8 pixels as every form is. `text` is what
+    /// assistive technology reads for it, since a view has no words of its own to read; it names host values only as
+    /// a host sentence, whose accessible text escapes them.
+    pub fn card(width: Pixels, view: impl Into<AnyView>, text: impl Into<Line>) -> Help {
+        Help::Card(Card {
+            width,
+            view: view.into(),
+            text: text.into(),
+        })
+    }
+
     /// The help as one string, as assistive technology reads it: for a line, its [`Line::accessible_text`]; for
     /// paragraphs, every paragraph's [`HostSentence::accessible_name`], separated by a blank line as the old app's
-    /// one description string separated them. Each host value is escaped. For a control's accessible description and
-    /// [`ShownTooltip::text`]; never for display.
+    /// one description string separated them; for a card, its line's accessible text. Each host value is escaped. For
+    /// a control's accessible description and [`ShownTooltip::text`]; never for display.
     pub fn accessible_text(&self) -> SharedString {
         match self {
             Help::Line(line) => line.accessible_text(),
@@ -101,8 +163,139 @@ impl Help {
                 .collect::<Vec<_>>()
                 .join("\n\n")
                 .into(),
+            Help::Card(card) => card.text.accessible_text(),
         }
     }
+}
+
+/// What a control asks of help placed beside the sidebar ([`Hint::beside`]): the ring's color and its corners. The
+/// ring is the old `.tooltip-target-ring` (`app.css` lines 1899-1917): an accent line 1 pixel inside the control's
+/// bounds, or the on-fill color in a selected row, which already wears the accent fill. Its corners are the
+/// control's own (the old ring was an inset shadow, which follows the element's radius), so a round status dot
+/// passes half its size.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BesideCues {
+    /// Draw the ring in the on-fill color rather than the accent.
+    pub on_fill: bool,
+    /// The ring's corner radius: the control's own.
+    pub radius: Pixels,
+}
+
+/// Hover help as a control hands it to the layer manager: what it says, and for help that sits beside the sidebar,
+/// where the control is drawn and the cues it asks for. Ordinary help (a [`Help`] or a string, converted) shows at
+/// the pointer. [`crate::components::with_hover_help`] makes these for every control, from its
+/// [`crate::components::HoverHelp`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Hint {
+    help: Help,
+    beside: Option<Beside>,
+}
+
+impl Hint {
+    /// Help placed beside the sidebar's edge, centered on `target`, the control's own element, which must draw
+    /// `target`'s tracker ([`BesideTarget::track`]) so its bounds are this frame's when the tooltip is placed. The
+    /// module docs of [`super::beside`] give the placement and when it falls back.
+    pub fn beside(help: Help, cues: BesideCues, target: &BesideTarget) -> Hint {
+        Hint {
+            help,
+            beside: Some(Beside {
+                cues,
+                target: target.0.clone(),
+            }),
+        }
+    }
+}
+
+/// Where a control that asks for beside help was last drawn, as its tracker recorded it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct Drawn {
+    /// The control's bounds inside its border, unclipped: what the help is centered on and the ring drawn at.
+    pub(super) bounds: Bounds<Pixels>,
+    /// The clip in force where the control is drawn (its scrolling list's, say), which the ring is drawn inside, as the
+    /// old ring, an inset shadow on the control, was clipped with it.
+    pub(super) clip: Bounds<Pixels>,
+}
+
+/// The tracker of a control that asks for beside help: where it is drawn and the clip around it, recorded in every
+/// frame as the frame is prepared, before the overlay places the help. [`crate::components::with_hover_help`] makes and
+/// draws it for every control whose help asks for beside placement.
+#[derive(Clone)]
+pub struct BesideTarget(Rc<Cell<Option<Drawn>>>);
+
+impl BesideTarget {
+    /// The tracker of the control being rendered under `key`, kept for as long as the control is drawn in consecutive
+    /// frames (GPUI's keyed element state). `key` must differ from the control's own element id.
+    pub fn for_control(
+        key: impl Into<ElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> BesideTarget {
+        window
+            .use_keyed_state(key, cx, |_, _| BesideTarget(Rc::new(Cell::new(None))))
+            .read(cx)
+            .clone()
+    }
+
+    /// A zero-cost child that records the control's bounds and the clip in force there, as [`super::Anchor::track`]
+    /// records an anchor's. It covers the box inside the control's border.
+    pub fn track(&self) -> impl IntoElement + use<> {
+        let drawn = self.0.clone();
+        let record = move |bounds, window: &mut Window, _: &mut App| {
+            let clip = window.content_mask().bounds;
+            drawn.set(Some(Drawn { bounds, clip }));
+        };
+        // Pinned to the control's corner, for the reason `Anchor::track` is.
+        gpui::canvas(record, |_, _, _, _| {})
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full()
+    }
+}
+
+/// Ordinary help, shown at the pointer.
+impl From<Help> for Hint {
+    fn from(help: Help) -> Self {
+        Hint { help, beside: None }
+    }
+}
+
+/// Ordinary short help in the app's own words, so a caller with a plain string writes `"Save it".into()`.
+impl From<&'static str> for Hint {
+    fn from(words: &'static str) -> Self {
+        Help::from(words).into()
+    }
+}
+
+/// The beside half of a [`Hint`]: the cues, and where the target control was last drawn, written by its tracker.
+#[derive(Clone, Debug)]
+pub(super) struct Beside {
+    pub(super) cues: BesideCues,
+    pub(super) target: Rc<Cell<Option<Drawn>>>,
+}
+
+/// The same target is the same tracker, not one that happens to be drawn at the same place.
+impl PartialEq for Beside {
+    fn eq(&self, other: &Self) -> bool {
+        self.cues == other.cues && Rc::ptr_eq(&self.target, &other.target)
+    }
+}
+
+impl Eq for Beside {}
+
+/// Where the showing tooltip was placed in the last frame drawn ([`ShownTooltip::side`]): the old box's `data-side`,
+/// plus the pointer placement that ordinary help uses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TooltipSide {
+    /// Below and right of where the pointer was: all ordinary help, and help asking for beside placement while no
+    /// sidebar edge is drawn.
+    Pointer,
+    /// Beside the sidebar, with the notch and the ring (the old `"right"`).
+    Beside,
+    /// Above its control: beside placement's fallback in a window too narrow for it.
+    Above,
+    /// Below its control: the same fallback, with no room above.
+    Below,
 }
 
 /// Short help in the app's own words, so a caller with a plain string writes `"Save it".into()`.
@@ -126,8 +319,47 @@ pub struct ShownTooltip {
     /// The help the card draws. Host values reach a tooltip only as host sentences (a [`Line::Sentence`], or the
     /// paragraphs of [`Help::Paragraphs`]), whose host parts are drawn by host text's own element, escaped and each in
     /// a text element of its own (SPEC_impl.md, "Host-supplied text"); a [`Line::App`] is Farhelm's own wording.
-    help: Help,
+    pub(super) help: Help,
+    /// Where the control is drawn and the cues it asked for, for help placed beside the sidebar; `None` for help at
+    /// the pointer.
+    pub(super) beside: Option<Beside>,
+    /// Where the overlay placed it in the last frame: written as that frame is laid out, so it is shared with every
+    /// clone ([`ShownTooltip::side`]).
+    pub(super) side: Rc<Cell<TooltipSide>>,
+    /// The ring the last frame painted, written as it is painted ([`ShownTooltip::ring`]).
+    pub(super) ring: Rc<Cell<Option<DrawnRing>>>,
 }
+
+impl ShownTooltip {
+    /// Where the tooltip sits, as the last frame drawn placed it, for tests (the bridge does not read it yet). Help
+    /// shown before any frame placed it reads [`TooltipSide::Pointer`].
+    pub fn side(&self) -> TooltipSide {
+        self.side.get()
+    }
+
+    /// The ring around the control as the last frame painted it, or `None` when it painted none (help not beside the
+    /// sidebar). Read from the very quad painted, so a test sees the color, corners and clip the user sees.
+    pub fn ring(&self) -> Option<DrawnRing> {
+        self.ring.get()
+    }
+}
+
+/// The ring a frame painted around the control of help beside the sidebar ([`ShownTooltip::ring`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DrawnRing {
+    /// Its bounds: the control's, inside its border. The line is 1 pixel wide, inside them.
+    pub bounds: Bounds<Pixels>,
+    /// The clip it was painted in: the window's, narrowed to the clip in force where the control is drawn.
+    pub clip: Bounds<Pixels>,
+    /// The line's color: the accent, or on-fill for a control in a selected row.
+    pub color: Hsla,
+    /// Its corners' radius: the control's own, as its help gave it.
+    pub radius: Pixels,
+}
+
+/// How far below and right of the pointer help at the pointer starts, like a native tooltip, so the pointer never
+/// covers the text.
+pub(super) const POINTER_OFFSET: Point<Pixels> = point(px(8.), px(16.));
 
 /// The pointer came onto the control `owner`, whose hover help is `help`. This is the hover listener's half of the
 /// tooltip rule, which [`crate::components::with_hover_help`] wires on every control, beside [`hover_moved`] and
@@ -156,7 +388,7 @@ pub struct ShownTooltip {
 /// ([`LayerStack::hovered`]), newest hover first, which is right for a frame's news and for a pointer that crossed
 /// into a control from the one around it. On a pointer move it takes GPUI's order instead: each hovered control's move
 /// listener ([`hover_moved`]) runs on every move, last drawn first, so the order they ran in is exact.
-pub fn hover_began(owner: &Entity<TooltipOwner>, help: Help, window: &mut Window, cx: &mut App) {
+pub fn hover_began(owner: &Entity<TooltipOwner>, help: Hint, window: &mut Window, cx: &mut App) {
     let Some(stack) = stack(window, cx) else {
         return;
     };
@@ -203,7 +435,7 @@ pub fn hover_moved(owner: &Entity<TooltipOwner>, window: &mut Window, cx: &mut A
 /// it, so a tooltip of it that begins later says what the control says then (see [`Hovered::help`]). It redraws
 /// nothing: a tooltip already waiting or showing keeps the words it began with. Called while the control renders, so a
 /// cached view's controls refresh exactly when they re-render, which is when their help can change.
-pub fn help_drawn(owner: &Entity<TooltipOwner>, help: &Help, window: &mut Window, cx: &mut App) {
+pub fn help_drawn(owner: &Entity<TooltipOwner>, help: &Hint, window: &mut Window, cx: &mut App) {
     let Some(stack) = stack(window, cx) else {
         return;
     };
@@ -305,7 +537,7 @@ fn settle_hover(window: &mut Window, cx: &mut App) {
 
 /// Start `owner`'s tooltip, now that its help is the one the pointer calls for: after [`HOVER_DELAY`], or at once
 /// while another tooltip is showing or has only just gone. Either way it replaces any other tooltip, shown or waiting.
-fn begin_tooltip(owner: &Entity<TooltipOwner>, help: Help, window: &mut Window, cx: &mut App) {
+fn begin_tooltip(owner: &Entity<TooltipOwner>, help: Hint, window: &mut Window, cx: &mut App) {
     let at = window.mouse_position();
     let Some(stack) = stack(window, cx) else {
         return;
@@ -373,11 +605,12 @@ fn end_tooltip(stack: &Entity<LayerStack>, previous: Option<EntityId>, cx: &mut 
     }
 }
 
-/// [`hover_began`]'s tooltip shown at once, with the hover beginning at a fixed point, for the screenshot goldens.
+/// [`hover_began`]'s tooltip shown at once, with the hover beginning at a fixed point, for the screenshot goldens and
+/// tests: any help, beside help included.
 #[cfg(test)]
 pub(crate) fn show_tooltip_at(
     owner: &Entity<TooltipOwner>,
-    help: Help,
+    help: Hint,
     at: Point<Pixels>,
     window: &mut Window,
     cx: &mut App,
@@ -389,7 +622,7 @@ pub(crate) fn show_tooltip_at(
 /// is always its `help`'s accessible text.
 fn show_tooltip_from(
     owner: &Entity<TooltipOwner>,
-    help: Help,
+    hint: Hint,
     at: Point<Pixels>,
     window: &mut Window,
     cx: &mut App,
@@ -402,9 +635,12 @@ fn show_tooltip_from(
         stack.pending_tooltip = None;
         stack.tooltip = Some(ShownTooltip {
             owner: owner_id,
-            text: help.accessible_text(),
+            text: hint.help.accessible_text(),
             at,
-            help,
+            help: hint.help,
+            beside: hint.beside,
+            side: Rc::new(Cell::new(TooltipSide::Pointer)),
+            ring: Rc::new(Cell::new(None)),
         });
         // The tooltip closes when its control is gone, though no hover-leave ever fires for a control that simply
         // stops being drawn (a dialog closing on Enter, a deleted row).
@@ -457,22 +693,19 @@ pub fn shown_tooltip(window: &Window, cx: &App) -> Option<ShownTooltip> {
 }
 
 /// The tooltip's card, styled as the old `.farhelm-tooltip`: short help cut at eight lines inside the 280-pixel cap,
-/// paragraph help one paragraph below the other inside the 440-pixel cap and never cut ([`Help`]).
+/// paragraph help one paragraph below the other inside the 440-pixel cap and never cut, card help its caller's view at
+/// its fixed width with no padding ([`Help`]). Every form shares the fill, border, radius, shadow and height cap.
 pub(super) fn tooltip_card(shown: &ShownTooltip, window: &Window, cx: &App) -> gpui::Div {
     let palette = theme::palette(cx);
     let (pad_y, pad_x) = metrics::TOOLTIP_PAD;
     let viewport = window.viewport_size();
-    // `max-width: min(280px, 100vw - 8px)` (440 for paragraphs) and `max-height: 100vh - 8px`, as the old tooltip.
-    let cap = match shown.help {
-        Help::Line(_) => metrics::TOOLTIP_MAX_WIDTH,
-        Help::Paragraphs(_) => metrics::TOOLTIP_PARAGRAPHS_MAX_WIDTH,
-    };
+    // Every form keeps 8 pixels inside the window: `max-width: min(280px, 100vw - 8px)` (440 for paragraphs, a fixed
+    // `width: min(310px, 100vw - 8px)` for the summary card) and `max-height: 100vh - 8px`, as the old tooltip.
+    let room = viewport.width - px(8.);
     let card = div()
-        .max_w(cap.min(viewport.width - px(8.)))
+        .debug_selector(|| "tooltip-card".into())
         .max_h(viewport.height - px(8.))
         .overflow_hidden()
-        .py(pad_y)
-        .px(pad_x)
         .bg(theme::color(palette.bg_2))
         .text_color(theme::color(palette.fg_0))
         .border_1()
@@ -484,14 +717,21 @@ pub(super) fn tooltip_card(shown: &ShownTooltip, window: &Window, cx: &App) -> g
     // The help itself, not its accessible text: a sentence draws each host value through host text's element.
     match &shown.help {
         Help::Line(line) => card
+            .max_w(metrics::TOOLTIP_MAX_WIDTH.min(room))
+            .py(pad_y)
+            .px(pad_x)
             .line_clamp(metrics::TOOLTIP_MAX_LINES)
             .child(line.clone()),
         // No clamp here: the clamp is a text style every paragraph would inherit, and it would cut each one at eight
         // lines, which is exactly what this form exists to avoid (a guarded launch's closing caveat).
         Help::Paragraphs(paragraphs) => card
+            .max_w(metrics::TOOLTIP_PARAGRAPHS_MAX_WIDTH.min(room))
+            .py(pad_y)
+            .px(pad_x)
             .flex()
             .flex_col()
             .gap(metrics::TOOLTIP_PARAGRAPH_GAP)
             .children(paragraphs.iter().cloned()),
+        Help::Card(form) => card.w(form.width.min(room)).child(form.view.clone()),
     }
 }

@@ -89,14 +89,14 @@ pub use transition::{ENTRANCE, entrance};
 use std::rc::Rc;
 
 use gpui::{
-    App, ClickEvent, Div, ElementId, FocusHandle, InteractiveElement, KeyDownEvent,
-    ParentElement as _, Pixels, ScrollHandle, SharedString, Stateful, StatefulInteractiveElement,
+    AnyView, App, ClickEvent, Div, ElementId, FocusHandle, InteractiveElement, KeyDownEvent,
+    ParentElement, Pixels, ScrollHandle, SharedString, Stateful, StatefulInteractiveElement,
     Styled as _, Window, div, point, prelude::FluentBuilder as _, px,
 };
 
 use crate::focus;
 use crate::host_text::{HostSentence, Line};
-use crate::layers::{self, Help, TooltipOwner};
+use crate::layers::{self, BesideCues, BesideTarget, Help, Hint, TooltipOwner};
 use crate::theme;
 
 /// What a control says when the user hovers it or asks assistive technology about it.
@@ -111,14 +111,27 @@ use crate::theme;
 /// agent mark's and the permission shield's, which runs past the short tooltip's eight lines). A host value goes in
 /// only as a sentence. Help formatted from [`HostText::raw`](crate::host_text::HostText::raw) would reach the screen
 /// unescaped and with its direction unisolated, which SPEC_impl.md, "Host-supplied text", rules out; `tooltip` takes
-/// any string, so that is held by review rather than by the type, as for a dialog's title.
+/// any string, so that is held by review rather than by the type, as for a dialog's title. Rich help that is not
+/// words, the session row's summary card, is a view of the caller's on a card of fixed width ([`HoverHelp::card`]).
+///
+/// Any form can ask to sit beside the sidebar rather than at the pointer ([`HoverHelp::beside`]), as SPEC.md has every
+/// session-row hover and the host progress card do.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HoverHelp(Help);
+pub struct HoverHelp {
+    help: Help,
+    /// The cues of help placed beside the sidebar; `None` for help at the pointer.
+    beside: Option<BesideCues>,
+}
 
 impl HoverHelp {
+    /// Help at the pointer in the given form.
+    fn of(help: Help) -> Self {
+        HoverHelp { help, beside: None }
+    }
+
     /// Help shown as a tooltip, in the app's own words.
     pub fn tooltip(text: impl Into<SharedString>) -> Self {
-        HoverHelp(Help::Line(Line::App(text.into())))
+        HoverHelp::of(Help::Line(Line::App(text.into())))
     }
 
     /// Help that names host values: `sentence` mixes the app's words with them, and the tooltip draws it as a
@@ -127,7 +140,7 @@ impl HoverHelp {
     /// assistive technology reads for host text everywhere else. Inside the tooltip the sentence is one labelled node
     /// under the id it was made with, as a [`HostSentence`] is wherever it is drawn.
     pub fn sentence(sentence: HostSentence) -> Self {
-        HoverHelp(Help::Line(Line::Sentence(sentence)))
+        HoverHelp::of(Help::Line(Line::Sentence(sentence)))
     }
 
     /// Help in paragraphs, one per sentence, for help whose closing sentences must stay visible (the agent mark's and
@@ -151,13 +164,57 @@ impl HoverHelp {
     /// ]);
     /// ```
     pub fn paragraphs(paragraphs: impl IntoIterator<Item = HostSentence>) -> Self {
-        HoverHelp(Help::Paragraphs(paragraphs.into_iter().collect()))
+        HoverHelp::of(Help::Paragraphs(paragraphs.into_iter().collect()))
+    }
+
+    /// Help that is a view of the caller's on a card `width` wide (less in a narrower window), with no padding and no
+    /// line clamp: the session row's summary card, which the old app drew at `min(310px, 100vw - 8px)`
+    /// ([`Help::card`]). `text` is the control's accessible description and what the tooltip reports
+    /// ([`layers::ShownTooltip::text`]), since the view has no words to read; it should say what the card shows. It is
+    /// a line, so the session's title or host goes in as a host sentence, escaped as in any other help.
+    ///
+    /// The view is drawn only by the tooltip, only while the card shows, and drawn again whenever the overlay is. Never
+    /// also draw the same entity inline: two places drawing one view in a frame share its element state. Hand the same
+    /// entity every frame, so the help stays the same while the control is unchanged.
+    pub fn card(width: Pixels, view: impl Into<AnyView>, text: impl Into<Line>) -> Self {
+        HoverHelp::of(Help::card(width, view, text))
+    }
+
+    /// This help, placed beside the sidebar: 6 pixels past the edge the sidebar draws ([`layers::beside_edge`]),
+    /// centered on this control, with a notch pointing back at it and a ring just inside its bounds, or against the
+    /// control without either cue in a window too narrow for that (`layers/beside.rs` has the numbers). It is for
+    /// SPEC.md's session-row hovers and host progress card, and nothing else. The control needs nothing more: its
+    /// bounds are recorded as part of wiring its help ([`with_hover_help`]). The ring takes the accent and square
+    /// corners unless [`HoverHelp::ring_on_fill`] or [`HoverHelp::ring_radius`] say otherwise.
+    ///
+    /// The control must be drawn inside the sidebar column that draws the edge. The old app checked that itself (its
+    /// target had to be inside `.app-sidebar`, or it got the ordinary placement); here the help is placed against the
+    /// edge wherever the control is, so a control elsewhere would get a card at the sidebar's edge, away from it.
+    pub fn beside(mut self) -> Self {
+        self.beside.get_or_insert_default();
+        self
+    }
+
+    /// Beside help ([`HoverHelp::beside`], which this implies) whose ring takes the on-fill color: for a control in a
+    /// selected row, which already wears the accent fill, as the old ring did under `.session-row.selected`.
+    pub fn ring_on_fill(mut self) -> Self {
+        self.beside.get_or_insert_default().on_fill = true;
+        self
+    }
+
+    /// Beside help ([`HoverHelp::beside`], which this implies) whose ring has the control's own corner radius: half
+    /// the size of a round status dot, the control's radius for a rounded button. The default is 0, square corners,
+    /// where the old inset-shadow ring followed the control's corners by itself, so a rounded control passes its
+    /// radius.
+    pub fn ring_radius(mut self, radius: Pixels) -> Self {
+        self.beside.get_or_insert_default().radius = radius;
+        self
     }
 
     /// The control's accessible description: the help as one string, with every host value escaped
     /// ([`Help::accessible_text`]). Private to the component layer, like the help itself.
     fn description(&self) -> SharedString {
-        self.0.accessible_text()
+        self.help.accessible_text()
     }
 }
 
@@ -183,7 +240,11 @@ impl HoverHelp {
 /// The move listener makes every control with help a mouse listener in GPUI's driver record, which the test bridge
 /// reads: in its snapshots a status mark is an interactive entry, and a row button holding marks lists them under it
 /// rather than being a leaf.
-pub(crate) fn with_hover_help<E: StatefulInteractiveElement>(
+///
+/// Help placed beside the sidebar ([`HoverHelp::beside`]) is placed against the control's own bounds, so for it this
+/// also adds a zero-cost child that records them in every frame ([`BesideTarget::track`]); that is why the element must
+/// take children. Help at the pointer adds nothing.
+pub(crate) fn with_hover_help<E: StatefulInteractiveElement + ParentElement>(
     element: E,
     id: &SharedString,
     help: &HoverHelp,
@@ -201,8 +262,19 @@ pub(crate) fn with_hover_help<E: StatefulInteractiveElement>(
     } else {
         element
     };
-    layers::help_drawn(&owner, &help.0, window, cx);
-    let help = help.0.clone();
+    let (element, help) = match help.beside {
+        Some(cues) => {
+            let target = BesideTarget::for_control(
+                ElementId::Name(format!("{id}-tooltip-target").into()),
+                window,
+                cx,
+            );
+            let hint = Hint::beside(help.help.clone(), cues, &target);
+            (element.child(target.track()), hint)
+        }
+        None => (element, Hint::from(help.help.clone())),
+    };
+    layers::help_drawn(&owner, &help, window, cx);
     let moved = owner.clone();
     element
         .on_hover(move |hovered, window, cx| {
@@ -371,10 +443,10 @@ const LINE_STEP: Pixels = px(40.);
 /// stop's Page Up, Page Down and Space.
 const PAGE_SHARE: f32 = 0.875;
 
-/// Where a focus stop draws its ring ([`focus_stop`], and so every scroll stop): `inset_x` from the stop's padding box at
-/// its sides and `inset_y` at its top and bottom (negative to cover a border, or to reach past the stop), with corners
-/// of `radius`. The two differ only for a dialog's notices, whose ring reaches out to the card's sides as the old
-/// full-width region's did ([`DialogFrame::notices_stop`]).
+/// Where a focus stop draws its ring ([`focus_stop`], and so every scroll stop): `inset_x` from the stop's padding box
+/// at its sides and `inset_y` at its top and bottom (negative to cover a border, or to reach past the stop), with
+/// corners of `radius`. The two differ only for a dialog's notices, whose ring reaches out to the card's sides as the
+/// old full-width region's did ([`DialogFrame::notices_stop`]).
 pub(crate) struct Ring {
     pub(crate) inset_x: Pixels,
     pub(crate) inset_y: Pixels,
@@ -395,10 +467,10 @@ pub(crate) struct Ring {
 /// nothing focusable (SPEC.md, "Reaching everything by keyboard"), whose handle is its own.
 ///
 /// It makes nothing focusable but `focus` and draws nothing focusable inside the stop. Controls the caller draws inside
-/// it (the card's buttons) keep their own stops, which come after it in Tab order, since GPUI orders Tab by paint order,
-/// and their own keys, since it takes none; its ring shows only while the stop itself holds focus. Like a scroll stop it
-/// counts as a text field for Tab reach (`focus::OnPress::Focus`, which also has a press of any mouse button on the
-/// stop's own space focus it), and it draws no hover help: the caller adds its own if it wants one.
+/// it (the card's buttons) keep their own stops, which come after it in Tab order, since GPUI orders Tab by paint
+/// order, and their own keys, since it takes none; its ring shows only while the stop itself holds focus. Like a scroll
+/// stop it counts as a text field for Tab reach (`focus::OnPress::Focus`, which also has a press of any mouse button on
+/// the stop's own space focus it), and it draws no hover help: the caller adds its own if it wants one.
 #[allow(
     clippy::too_many_arguments,
     reason = "one stop's parts, each drawn once; a struct would only repeat them"
