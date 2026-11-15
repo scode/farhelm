@@ -13,15 +13,10 @@
 //! only the rows' heights, which come from the line height.
 
 use farhelm_helm_client::Method;
-use farhelm_helm_client::fake::terminal::{FakeTerminal, FakeTerminalRequest};
-use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
-use farhelm_helm_client::terminal::TerminalAttach;
-use farhelm_proto::grid::GridOutput;
+use farhelm_helm_client::fake::FakeCommand;
 use farhelm_proto::ui_channel::{CollectionState, SESSION_QUERY_PATH, SessionRow};
 use gpui::{DriverNode, Entity, Global, TestAppContext, VisualTestContext, WeakEntity};
 use serde_json::{Value, json};
-use std::cell::RefCell;
-use std::rc::Rc;
 
 use super::{
     CAP_NOTICE, NEW_ROW_HELP, NEW_ROW_ID, QuickSwitcher, Read, Selected, mark_positions,
@@ -31,7 +26,6 @@ use crate::actions::QUICK_SWITCHER_CHORD;
 use crate::launcher::launch_tests::{HostChange, start_host_change};
 use crate::layers;
 use crate::local_state;
-use crate::main_view::MainView;
 use crate::session_list::host_rail::tests::{
     filtered, hosts, hover_help, local, node, pressed, remote, texts_within,
 };
@@ -39,7 +33,7 @@ use crate::session_list::tests::{
     Fixture, change, launcher_drawn, listing, painted, preferences, selected, session,
 };
 use crate::test_support::{
-    self, any_open, click, focused_id, frame, keys, settle, started, terminal_focused,
+    self, any_open, click, focused_id, frame, keys, open_main, settle, terminal_focused,
 };
 
 /// The switcher [`super::open`] opened last, recorded in test builds only, so a test can read its state.
@@ -176,15 +170,8 @@ fn marks_are_found_on_the_shown_spelling_of_a_matched_value() {
 
 // ---- The window ----------------------------------------------------------------------------------------------------
 
-/// Every fake terminal the connection handed out, in the order the pane opened them.
-type Terminals = Rc<RefCell<Vec<FakeTerminal>>>;
-
-/// The real main view over the fake helm, and the fake terminals it opened.
-struct Main<'a> {
-    cx: &'a mut VisualTestContext,
-    helm: FakeHelm,
-    terminals: Terminals,
-}
+/// The real main view over the fake helm ([`test_support::MainWindow`]), with this module's steps.
+type Main<'a> = test_support::MainWindow<'a>;
 
 /// Sessions a, b and c, in that order, with a the last visited, so a is open at startup.
 fn fleet() -> Vec<CollectionState> {
@@ -195,31 +182,6 @@ fn fleet() -> Vec<CollectionState> {
         ),
         preferences(&["a"], None),
     ]
-}
-
-/// The main view connected to the fake helm with `snapshot`, its connection handing out fake terminals, open in an
-/// active window and checked once settled.
-fn open_main(cx: &mut TestAppContext, snapshot: Vec<CollectionState>) -> Main<'_> {
-    let (mut helm, connection) = started(cx);
-    let terminals: Terminals = Rc::default();
-    let record = terminals.clone();
-    cx.update(|cx| {
-        connection.update(cx, |connection, _| {
-            connection.serve_terminals(move |attach: TerminalAttach| {
-                let (terminal, handle, events) = FakeTerminal::open(&attach);
-                record.borrow_mut().push(terminal);
-                (handle, events)
-            })
-        })
-    });
-    helm.connect(snapshot);
-    cx.run_until_parked();
-    let (_, cx) = test_support::open_view(cx, MainView::new);
-    Main {
-        cx,
-        helm,
-        terminals,
-    }
 }
 
 impl Main<'_> {
@@ -258,43 +220,6 @@ impl Main<'_> {
         );
         settle(self.cx);
     }
-
-    /// The first terminal the pane opened attaches and replays a complete screen, so it goes live and takes input.
-    fn first_terminal_live(&mut self) {
-        {
-            let mut terminals = self.terminals.borrow_mut();
-            let terminal = &mut terminals[0];
-            let asked = terminal.attach();
-            for message in screen(asked.cols, asked.rows) {
-                terminal.output(message);
-            }
-            terminal.replay_complete();
-        }
-        settle(self.cx);
-    }
-
-    /// The input requests the first terminal received since the last call.
-    fn first_terminal_input(&mut self) -> usize {
-        self.terminals.borrow_mut()[0]
-            .received()
-            .into_iter()
-            .filter(|request| matches!(request, FakeTerminalRequest::Input { .. }))
-            .count()
-    }
-}
-
-/// A complete first screen of `cols` by `rows`, as the supervisor replays one.
-fn screen(cols: u16, rows: u16) -> Vec<GridOutput> {
-    [
-        json!({"t":"hello","cols":cols,"rows":rows,"history_cap":0}),
-        json!({"t":"state","mouse":"off","focus":false,"alt_screen":false,
-            "default_fg":null,"default_bg":null,"history_trimmed":false,"exit":null}),
-        json!({"t":"frame","rev":1,"cols":cols,"rows":rows,
-            "cursor":{"x":0,"y":0,"visible":true,"shape":"block","blink":false}}),
-    ]
-    .into_iter()
-    .map(|json| serde_json::from_value(json).unwrap())
-    .collect()
 }
 
 /// The switcher opened last, which must still be open.
@@ -367,18 +292,13 @@ fn the_chord_from_a_terminal_opens_the_switcher_and_never_reaches_the_program(
     cx: &mut TestAppContext,
 ) {
     let mut main = open_main(cx, fleet());
-    main.first_terminal_live();
-    assert!(
-        terminal_focused(main.cx),
-        "the premise: a's terminal has focus"
-    );
-    main.first_terminal_input();
+    main.terminal_live();
 
     main.open_switcher();
     assert!(any_open(main.cx));
     assert!(field_focused(main.cx), "focus starts in the search field");
     assert_eq!(
-        main.first_terminal_input(),
+        main.program_input(),
         0,
         "the chord never reached the program"
     );
@@ -413,7 +333,7 @@ fn link_screen(main: &mut Main<'_>) -> gpui::Point<gpui::Pixels> {
         let rows: Vec<Value> = (0..asked.rows)
             .map(|y| json!([y, {"w":false,"r":[[0,asked.cols,text,[0,-1,-1],0]]}]))
             .collect();
-        let mut replay = screen(asked.cols, asked.rows);
+        let mut replay = test_support::blank_screen(asked.cols, asked.rows);
         replay.insert(
             2,
             serde_json::from_value(
@@ -1253,11 +1173,7 @@ fn loading_keeps_the_new_row_from_the_keys_and_a_failed_read_leaves_it_usable(
 #[gpui::test]
 fn enter_on_the_new_row_opens_new_named_and_closing_it_returns_focus(cx: &mut TestAppContext) {
     let mut main = open_main(cx, fleet());
-    main.first_terminal_live();
-    assert!(
-        terminal_focused(main.cx),
-        "the premise: a's terminal has focus"
-    );
+    main.terminal_live();
     let read = main.open_switcher();
     main.answer(read, &[session("a"), session("b"), session("c")], false);
     set_query(main.cx, "  nightly  ");
@@ -1325,11 +1241,7 @@ fn a_click_on_the_new_row_opens_new_and_returns_from_the_hosts_panel(cx: &mut Te
 #[gpui::test]
 fn a_refused_new_closes_the_switcher_and_returns_focus(cx: &mut TestAppContext) {
     let mut main = open_main(cx, fleet());
-    main.first_terminal_live();
-    assert!(
-        terminal_focused(main.cx),
-        "the premise: a's terminal has focus"
-    );
+    main.terminal_live();
     let read = main.open_switcher();
     main.answer(read, &[session("a")], false);
     // Started once the switcher is open: opening answers every other command the window sent, which would settle it.

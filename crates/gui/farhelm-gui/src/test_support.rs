@@ -36,7 +36,9 @@ use std::time::Duration;
 
 use farhelm_helm_client::collections::decode_state;
 use farhelm_helm_client::fake::FakeHelm;
+use farhelm_helm_client::fake::terminal::{FakeTerminal, FakeTerminalRequest};
 use farhelm_helm_client::{ChannelState, PushedState};
+use farhelm_proto::grid::GridOutput;
 use farhelm_proto::ui_channel::{
     Availability, Collection, CollectionMeta, CollectionState, KeyedEntry,
 };
@@ -50,6 +52,7 @@ use gpui_component::Root;
 use crate::components::{Button, HoverHelp, Role, Tier};
 use crate::focus::Mark;
 use crate::layers::{Anchor, Dialog, LayerId, Popover};
+use crate::main_view::MainView;
 use crate::prompt::{Answer, Question};
 use crate::session::{self, Connection, UiSession};
 use crate::{assets, bootstrap, focus, layers, render_count, root};
@@ -585,6 +588,110 @@ pub(crate) fn one_command(
     (sent[0].id, sent[0].body.clone().unwrap_or_default())
 }
 
+/// The real main view over the fake helm, in an active window, with the helm's side of every terminal stream its pane
+/// opened. Made by [`open_main`]; [`MainWindow::terminal_live`] gives it a live, focused terminal, the starting point of
+/// a test about a key pressed from the terminal (a chord that must open something and never reach the program).
+///
+/// A test module adds steps of its own as inherent methods in its own file (`impl MainWindow<'_>`, usually through a
+/// local `type Main<'a> = MainWindow<'a>`), so its call sites read `main.step()`. NOTE: Those methods share one
+/// namespace across the crate: two modules that pick the same name fail to compile, and the later one renames its own.
+pub(crate) struct MainWindow<'a> {
+    /// The window's context, for the step helpers.
+    pub(crate) cx: &'a mut VisualTestContext,
+    /// The helm's side of the channel: the commands the window sent, and the replies and pushes the test makes.
+    pub(crate) helm: FakeHelm,
+    /// The helm's side of each terminal stream the pane opened, in the order it opened them. The first is the terminal
+    /// of the session open at startup.
+    pub(crate) terminals: Rc<RefCell<Vec<FakeTerminal>>>,
+}
+
+/// The main view connected to the fake helm with `snapshot` (the app bootstrapped as for real, through [`started`]),
+/// its connection serving fake terminal streams, open in an active window and checked once settled.
+///
+/// On return the channel is connected with `snapshot` taken in. If the snapshot's preferences open a session (the last
+/// visited), its pane has opened that session's terminal stream, recorded first in `terminals`, which is still
+/// attaching: no socket is open and nothing is replayed. Focus is wherever the main view puts it at startup, which with
+/// a session open is that terminal. Nothing else is assumed about the snapshot, so a test of the
+/// state before the preferences arrive passes a snapshot without them.
+pub(crate) fn open_main(cx: &mut TestAppContext, snapshot: Vec<CollectionState>) -> MainWindow<'_> {
+    let (mut helm, connection) = started(cx);
+    let terminals: Rc<RefCell<Vec<FakeTerminal>>> = Rc::default();
+    let record = terminals.clone();
+    cx.update(|cx| {
+        connection.update(cx, |connection, _| {
+            connection.serve_terminals(move |attach| {
+                let (terminal, handle, events) = FakeTerminal::open(&attach);
+                record.borrow_mut().push(terminal);
+                (handle, events)
+            })
+        })
+    });
+    helm.connect(snapshot);
+    cx.run_until_parked();
+    let (_, cx) = open_view(cx, MainView::new);
+    MainWindow {
+        cx,
+        helm,
+        terminals,
+    }
+}
+
+impl MainWindow<'_> {
+    /// Bring the first terminal the pane opened live: its socket opens, it replays a [`blank_screen`] at the size its
+    /// attach asked for and ends the replay, and the window settles.
+    ///
+    /// On return the attachment is live, so input the terminal sends is delivered; the terminal holds focus, which is
+    /// asserted here because every caller's test rests on it; and [`MainWindow::program_input`] counts from this point
+    /// (whatever the terminal sent before is taken). Panics when the pane opened no terminal or focus is elsewhere.
+    pub(crate) fn terminal_live(&mut self) {
+        {
+            let mut terminals = self.terminals.borrow_mut();
+            let Some(terminal) = terminals.first_mut() else {
+                panic!("the premise: the pane opened a terminal");
+            };
+            let asked = terminal.attach();
+            for message in blank_screen(asked.cols, asked.rows) {
+                terminal.output(message);
+            }
+            terminal.replay_complete();
+        }
+        settle(self.cx);
+        assert!(
+            terminal_focused(self.cx),
+            "the premise: the open session's terminal has focus"
+        );
+        self.program_input();
+    }
+
+    /// How many input requests the first terminal the pane opened sent its program since the last call (or since
+    /// [`MainWindow::terminal_live`]), delivered or not: a key the app should have kept counts even when the stream
+    /// dropped it. Takes everything else the terminal sent too (a resize, a take-control), which it does not count.
+    pub(crate) fn program_input(&mut self) -> usize {
+        self.terminals.borrow_mut()[0]
+            .received()
+            .into_iter()
+            .filter(|request| matches!(request, FakeTerminalRequest::Input { .. }))
+            .count()
+    }
+}
+
+/// A complete first screen of `cols` by `rows` with nothing on it, as the supervisor replays one to a new attachment:
+/// the stream's hello (no history), the terminal's modes (no mouse or focus reporting, the main screen, nothing trimmed,
+/// no exit) and one frame with a visible, steady block cursor at the top left. A test that needs text on the screen
+/// inserts its `rows` message before the frame.
+pub(crate) fn blank_screen(cols: u16, rows: u16) -> Vec<GridOutput> {
+    [
+        serde_json::json!({"t":"hello","cols":cols,"rows":rows,"history_cap":0}),
+        serde_json::json!({"t":"state","mouse":"off","focus":false,"alt_screen":false,
+            "default_fg":null,"default_bg":null,"history_trimmed":false,"exit":null}),
+        serde_json::json!({"t":"frame","rev":1,"cols":cols,"rows":rows,
+            "cursor":{"x":0,"y":0,"visible":true,"shape":"block","blink":false}}),
+    ]
+    .into_iter()
+    .map(|message| serde_json::from_value(message).unwrap())
+    .collect()
+}
+
 /// Tests of the shared helpers above, one per helper, appended with it.
 mod shared_helper_tests {
     use gpui::{IntoElement as _, ParentElement as _, TestAppContext, div};
@@ -755,6 +862,70 @@ mod shared_helper_tests {
             answered.get(),
             "the id is the command's: its reply reached the send"
         );
+    }
+
+    /// Why this matters: the tests of the chords that work from a focused terminal (the quick switcher's, the launch
+    /// sequence's prefix) start here and read "never reached the program" off the input count. A terminal that is not
+    /// live sends its program nothing, so a helper that left it attaching would make every zero vacuous, and one that
+    /// left it unfocused, or miscounted, would let a leaking chord pass. Specified: over sessions a and b with a the
+    /// last visited, the pane opens one terminal, focused while it attaches; once live it still has focus and nothing
+    /// is counted; a typed letter is delivered as one input request, counted once, and the next count is zero.
+    #[gpui::test]
+    fn open_main_and_terminal_live_give_a_focused_terminal_that_takes_input(
+        cx: &mut TestAppContext,
+    ) {
+        use farhelm_helm_client::fake::terminal::FakeTerminalRequest;
+        use farhelm_proto::ui_channel::{
+            Collection, CollectionState, KeyedEntry, ListCounts, PREFERENCES_KEY, Preferences,
+        };
+
+        // Built from this file's own fixtures, so the harness's test depends on no area's: the helm's session rows
+        // under ids a and b with complete counts, and preferences with a last visited, which opens a at startup.
+        let mut listing = super::sessions(&["a", "b"]);
+        for entry in &mut listing.entries {
+            entry.value["id"] = serde_json::json!(entry.key);
+        }
+        listing.meta.counts = Some(ListCounts {
+            total: 2,
+            matching: None,
+            truncated: false,
+        });
+        let preferences = Preferences {
+            visit_history: vec!["a".to_owned()],
+            // A helm that has shown the Welcome card, which would otherwise open over the main view and could take
+            // focus from the terminal this test needs focused (`crate::welcome`).
+            welcome_seen: Some(true),
+            ..Preferences::default()
+        };
+        let preferences = CollectionState {
+            collection: Collection::Preferences,
+            meta: super::meta(&[PREFERENCES_KEY]),
+            entries: vec![KeyedEntry {
+                key: PREFERENCES_KEY.into(),
+                value: serde_json::to_value(preferences).unwrap(),
+            }],
+        };
+        let mut main = super::open_main(cx, vec![listing, preferences]);
+        assert_eq!(main.terminals.borrow().len(), 1, "a's terminal alone");
+        assert!(terminal_focused(main.cx), "focused while it attaches");
+        main.terminal_live();
+        assert!(terminal_focused(main.cx), "focused once live");
+        assert_eq!(main.program_input(), 0, "nothing counted yet");
+        keys(main.cx, "x");
+        let sent = main.terminals.borrow_mut()[0].received();
+        assert!(
+            matches!(
+                sent.as_slice(),
+                [FakeTerminalRequest::Input {
+                    delivered: true,
+                    ..
+                }]
+            ),
+            "the letter was delivered: {sent:?}"
+        );
+        keys(main.cx, "y");
+        assert_eq!(main.program_input(), 1, "one letter, one request");
+        assert_eq!(main.program_input(), 0, "counted since the last call");
     }
 }
 
