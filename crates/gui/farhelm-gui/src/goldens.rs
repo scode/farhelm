@@ -2168,6 +2168,35 @@ fn host_add_setup_plan_setup(state: &SceneState, window: &mut Window, cx: &mut A
     keep.push(Box::new(watch));
 }
 
+/// The removal confirmation for the reference screens' `build-box` (reference `host-remove-confirmation`), as its menu's
+/// Remove opens it: the host's mark, name, phase and build, its destination and what removal keeps, the footer note and
+/// the three answers, focus on Remove. The question opens once the connection has a UI session, whose store the
+/// snapshot made, as the setup confirmation's scene does; the fake, the connection and the watch are kept for the
+/// scene's life.
+fn host_remove_confirmation_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    helm.connect(vec![crate::hosts::tests::hosts(
+        &crate::hosts::tests::reference_hosts(),
+    )]);
+    let handle = window.window_handle();
+    let opened = std::cell::Cell::new(false);
+    let watch = cx.observe(&connection, move |connection, cx| {
+        if opened.get() || connection.read(cx).session().is_none() {
+            return;
+        }
+        opened.set(true);
+        let _ = handle.update(cx, |_, window, cx| {
+            let mark = Mark::take(cx);
+            let _ = crate::hosts::remove::ask(2, &mark, window, cx);
+        });
+    });
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    keep.push(Box::new(watch));
+}
+
 /// Make the Hosts panel over a fake helm holding `listed` hosts, with Details on when `details` is; the scene draws it
 /// through [`hosts_panels`]. The fake, the connection and the panel are kept for the scene's life.
 fn hosts_panel_scene(state: &SceneState, listed: &[HostView], details: bool, cx: &mut App) {
@@ -2373,7 +2402,7 @@ fn take_pending(state: &SceneState) -> bool {
 }
 
 /// The reference screens' hosts in the Hosts panel, then `build-box`'s menu opened from its toggle (reference
-/// `host-menu`): the header naming it, its destination and build, and Settings, its one command so far, highlighted.
+/// `host-menu`): the header naming it, its destination and build, Settings highlighted, and Remove behind a separator.
 /// The menu opens through [`host_menu_scene`] once the toggle has been drawn.
 fn host_menu_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     hosts_panel_scene(state, &crate::hosts::tests::reference_hosts(), false, cx);
@@ -2837,6 +2866,12 @@ static SCENES: &[Scene] = &[
         size: (364., 924.),
         draw: tall_hosts_panels,
         setup: host_setup_failed_hosts_panel_setup,
+    },
+    Scene {
+        name: "host-remove-confirmation",
+        size: (560., 480.),
+        draw: empty,
+        setup: host_remove_confirmation_setup,
     },
 ];
 

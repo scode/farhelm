@@ -171,7 +171,7 @@ pub fn open_settings(
 
 /// Whether the registry proves host `key` gone: a hosts list read whole that no longer lists it. A failed refresh keeps
 /// the hosts it had and proves nothing.
-fn gone(store: &HelmStore, key: &str) -> bool {
+pub(super) fn gone(store: &HelmStore, key: &str) -> bool {
     let collections = store.collections();
     collections
         .meta(Collection::Hosts)

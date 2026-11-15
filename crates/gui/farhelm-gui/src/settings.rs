@@ -260,6 +260,13 @@ pub(crate) fn skip_host_setup_command()
     Choice::SkipHostSetupConfirmation.command(true)
 }
 
+/// `PUT /api/preferences` turning "Remove hosts without asking" on, exactly as its switch here saves it: for the host
+/// removal confirmation's permanent answer, which sets the same preference.
+pub(crate) fn skip_host_remove_command()
+-> Result<crate::operations::Command, farhelm_helm_client::PathError> {
+    Choice::SkipHostRemoveConfirmation.command(true)
+}
+
 /// The helm's preference row, if it pushed one.
 fn preferences(collections: &farhelm_helm_client::Collections) -> Option<&Preferences> {
     collections.get::<Preferences>(PREFERENCES_KEY)

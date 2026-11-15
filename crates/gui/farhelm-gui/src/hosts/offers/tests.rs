@@ -262,8 +262,9 @@ fn the_local_host_without_a_supervisor_offers_no_install() {
 /// Why this matters: a host kind a newer helm adds must not be offered verbs this build cannot vouch for, and each
 /// known kind's decisions are made in one exhaustive place. Specified: an unrecognized kind is offered Settings alone,
 /// even with a failed run, draws no locality and has no appearance to choose; SSH, Tensorlake and Podman hosts are
-/// removable and remote, the local host is neither; only an SSH host's settings edit its destination, and every known
-/// kind's settings choose its appearance.
+/// remote and the local host is local; only an SSH host is offered Remove, since only its removal merely forgets it (a
+/// sandbox's or a container's deletes the machine, a different command, and the helm's own machine is never removed);
+/// only an SSH host's settings edit its destination; and every known kind's settings choose its appearance.
 #[test]
 fn each_kind_decides_its_own_offers() {
     let failed = run(9, ProvisioningOperation::Add, RunStatus::Failed);
@@ -281,16 +282,22 @@ fn each_kind_decides_its_own_offers() {
     assert_eq!(HostKind::Unrecognized.locality(), None);
     assert!(!HostKind::Unrecognized.supports_appearance());
     assert!(!HostKind::Unrecognized.edits_destination());
-    for (kind, removable, locality, edits_destination) in [
+    assert!(!HostKind::Unrecognized.removal_only_forgets());
+    for (kind, forgets, locality, edits_destination) in [
         ("local", false, Locality::Local, false),
         ("ssh", true, Locality::Remote, true),
-        ("tensorlake", true, Locality::Remote, false),
-        ("podman", true, Locality::Remote, false),
+        ("tensorlake", false, Locality::Remote, false),
+        ("podman", false, Locality::Remote, false),
     ] {
         let view: HostView = host(3, kind, connected());
         assert_eq!(
+            HostKind::of(&view).removal_only_forgets(),
+            forgets,
+            "{kind}"
+        );
+        assert_eq!(
             offers(&view, None, false).remove.is_some(),
-            removable,
+            forgets,
             "{kind}"
         );
         assert_eq!(HostKind::of(&view).locality(), Some(locality), "{kind}");

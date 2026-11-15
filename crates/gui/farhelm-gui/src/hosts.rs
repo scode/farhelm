@@ -27,6 +27,10 @@
 //! [`ssh_help::open`], the entry point for the ? menu's "SSH needs 2FA?" (drawn once the area that owns the ? menu
 //! lands); Add host opens it for the destination typed there.
 //!
+//! The menu's Remove asks the removal confirmation, or with "Remove hosts without asking" on goes ahead at once
+//! ([`remove`]). A refused removal shows under its row, like any refused work on a host; a Remove that was not started
+//! at all (the host busy, a session launch in flight) says so at the top of the panel.
+//!
 //! How a host is named and marked, here and in every other area that shows a host, is [`identity`].
 //!
 //! ## What it shows
@@ -69,6 +73,7 @@ pub(crate) mod identity;
 mod menu;
 pub(crate) mod offers;
 pub(crate) mod progress;
+pub(crate) mod remove;
 mod settings;
 pub(crate) mod setup;
 pub mod ssh_help;
@@ -159,6 +164,8 @@ pub struct HostsPanel {
     /// Redraws the panel when its top line changes (a setup refused after the user moved on, a refused "don't ask
     /// again"): that line lives in a global of the setup module, which notifies no view by itself.
     _lines: Subscription,
+    /// The same for the removal module's lines (a Remove that was not started, a refused "don't ask again").
+    _removal_lines: Subscription,
     /// What the panel keeps about the hosts' runs ([`Runs`]), for the current UI session only: a reset starts it over.
     runs: PerSession<Runs>,
     /// Keeps `runs` up to date with every change of the current store, whether or not the panel is drawn, so a run's
@@ -193,6 +200,7 @@ impl HostsPanel {
             _lines: setup::observe_panel_lines(cx),
             runs: PerSession::default(),
             _following: session::observe_current(cx, |panel: &mut Self, cx| panel.follow_runs(cx)),
+            _removal_lines: remove::observe_panel_lines(cx),
         }
     }
 
@@ -449,8 +457,11 @@ impl Render for HostsPanel {
             (None, Some(_)) => None,
         };
         // A setup refused after the user moved on from it, and a refused "don't ask again": no row exists for a host
-        // the helm did not add, and the question that asked has closed, so they show here (`setup::panel_lines`).
-        let refused_setup = setup::panel_lines(cx).into_iter().map(|line| {
+        // the helm did not add, and the question that asked has closed, so they show here (`setup::panel_lines`). A
+        // Remove that was not started shows here too, for now (`remove::panel_lines`).
+        let refused_setup = setup::panel_lines(cx).into_iter();
+        let refused_removal = remove::panel_lines(cx).into_iter();
+        let refused = refused_setup.chain(refused_removal).map(|line| {
             div()
                 .py(px(4.))
                 .px(px(10.))
@@ -470,7 +481,7 @@ impl Render for HostsPanel {
             .min_h_0()
             .child(heading)
             .children(status)
-            .children(refused_setup)
+            .children(refused)
             .child(
                 div()
                     .id("host-list")

@@ -10,11 +10,12 @@ switcher; 34, the session list's Stop and Replace from a row's menu; 35, the sid
 Mark read and Mark unread; 37, the sidebar's resize divider; 38, Restart from the open session's header; 39, the
 host rail's foot, Hosts and the Settings gear; 40, the settings-and-hosts area's scripted host setup; 41, the host
 rail's Add host; 42, the session list's status segments; 43, the settings-and-hosts area's setup progress, failure
-and rerun in the Hosts panel). The behavior itself is specified and tested in process
-(`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`); nothing
-here checks layout or wording beyond the names it clicks. A menu's commands are clicked by their ids
-(`id:session-menu-delete`), not their labels: the open session's header has buttons with the same names (Stop, Replace,
-Delete), and a `text:` target picks the first match in drawing order, which is the header's.
+and rerun in the Hosts panel; 44, the settings-and-hosts area's Remove host). The behavior itself is specified and
+tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`,
+`terminal/attached/tests.rs`, `hosts/`); nothing here checks layout or wording beyond the names it clicks. A menu's
+commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open session's header has buttons
+with the same names (Stop, Replace, Delete), and a `text:` target picks the first match in drawing order, which is the
+header's.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -108,6 +109,10 @@ HOSTS_PANEL = '"Host management"'
 # The Add host dialog's header summary: text only the open dialog draws, so waiting for it (or for it to go) tells
 # whether the dialog is open.
 ADD_HOST_SUMMARY = "An SSH destination this helm can reach"
+
+# The removal confirmation's explanation: text only the open question draws, so waiting for it (or for it to go) tells
+# whether the question is open.
+REMOVE_EXPLANATION = "Farhelm will forget this host."
 
 # What every step's name must look like (the module docs say why); `main` checks it before starting the app.
 STEP_NAME = re.compile(r"test_\d\d_")
@@ -863,6 +868,95 @@ class Smoke(unittest.TestCase):
         eventually(shows("idle", [idle], [running]), "Idle listing the idle session and its count")
         self.ok("click", "id:session-status-All")
         eventually(shows(None, [running, idle], []), "All listing both sessions and the plain count")
+
+    # ---- The settings-and-hosts area's Remove host (44), on hosts of its own ----------------------------------------
+
+    def test_44_the_host_menus_remove_forgets_fake_hosts(self) -> None:
+        """Removing a host is the one host action that only forgets an entry (SPEC.md, "Topology"), and its question,
+        its permanent answer and removal without asking each lead the real app to the helm's own route. The step adds
+        three fake SSH hosts of its own through the helm's API (made-up `.example` destinations, which the helm lists
+        as unreachable), touches no session, and leaves "Remove hosts without asking" as it found it. Specified: once
+        the Hosts panel draws all three rows, with the preference off, a host's menu Remove opens the question and
+        Cancel closes it with the host still listed and focus on its row's menu toggle; Remove on the question makes the
+        helm stop listing it; "Remove, don't ask again" makes the helm stop listing the second and store the preference
+        on; and then the third's menu Remove opens no question and the helm stops listing it. The question's explanation
+        is the oracle for open and closed, since only the open question draws it. Hosts the step added and did not
+        remove are removed again at its end."""
+        tag = uuid.uuid4().hex[:8]
+        names = [f"remove-{n}-{tag}.example" for n in (1, 2, 3)]
+        ids = [gui_agent.helm_request(RUN, "POST", "/api/hosts", {"ssh": name})["id"] for name in names]
+        previous = gui_agent.helm_request(RUN, "GET", "/api/preferences").get("skip_host_remove_confirmation")
+
+        def listed() -> set[int]:
+            """The ids of every host the helm lists."""
+            return {row["id"] for row in gui_agent.helm_request(RUN, "GET", "/api/hosts")["hosts"]}
+
+        def remove_from_menu(host: int) -> None:
+            """Open `host`'s row menu from its toggle and choose Remove."""
+            self.ok("click", f"id:host-menu-toggle-{host}")
+            self.ok("click", "id:host-menu-remove")
+
+        try:
+            gui_agent.helm_request(RUN, "PUT", "/api/preferences", {"skip_host_remove_confirmation": False})
+            if HOSTS_PANEL not in self.ok("snapshot"):
+                self.ok("click", "id:hosts-panel-toggle")
+                eventually(lambda: HOSTS_PANEL in self.ok("snapshot"), "the Hosts panel showing")
+            # The hosts reach the window through a push, so the premise is that all three rows' toggles are drawn.
+            eventually(
+                lambda: all(f'"Host actions for {name}"' in self.ok("snapshot", "-i") for name in names),
+                "the three hosts' rows drawn",
+            )
+            first, second, third = ids
+
+            remove_from_menu(first)
+            self.ok("wait", "--text", REMOVE_EXPLANATION)
+            self.ok("click", "id:prompt-cancel")
+            self.ok("wait", "--gone", REMOVE_EXPLANATION)
+            self.assertIn(first, listed(), "Cancel kept the host")
+            self.assertRegex(
+                self.ok("snapshot", "-i"),
+                rf'button "Host actions for {re.escape(names[0])}" \[focused\]',
+                "focus is back on the row's menu toggle",
+            )
+
+            remove_from_menu(first)
+            self.ok("wait", "--text", REMOVE_EXPLANATION)
+            self.ok("click", "id:prompt-confirm")
+            self.ok("wait", "--gone", REMOVE_EXPLANATION)
+            eventually(lambda: first not in listed(), "the helm forgetting the first host")
+
+            remove_from_menu(second)
+            self.ok("wait", "--text", REMOVE_EXPLANATION)
+            self.ok("click", "id:prompt-alternative-0")
+            self.ok("wait", "--gone", REMOVE_EXPLANATION)
+            eventually(lambda: second not in listed(), "the helm forgetting the second host")
+            eventually(
+                lambda: gui_agent.helm_request(RUN, "GET", "/api/preferences").get("skip_host_remove_confirmation"),
+                "the helm storing Remove hosts without asking",
+            )
+
+            remove_from_menu(third)
+            eventually(lambda: third not in listed(), "the helm forgetting the third host without a question")
+            self.assertNotIn(REMOVE_EXPLANATION, self.ok("snapshot"), "no question opened")
+        finally:
+            # Whether the step is already failing: then its own error is the report, and the cleanup must not replace
+            # it with an error of its own.
+            failing = sys.exc_info()[0] is not None
+            try:
+                gui_agent.helm_request(RUN, "PUT", "/api/preferences", {"skip_host_remove_confirmation": previous})
+                for host in set(ids) & listed():
+                    gui_agent.helm_request(RUN, "DELETE", f"/api/hosts/{host}")
+                # Escape only when this step left its question or a host menu open: otherwise focus is in the selected
+                # session's terminal, which belongs to another area's step, and Escape would reach its program.
+                snapshot = self.ok("snapshot")
+                if REMOVE_EXPLANATION in snapshot or "Forget this host" in snapshot:
+                    agent("press", "escape")
+                if HOSTS_PANEL in self.ok("snapshot"):
+                    self.ok("click", "id:hosts-panel-toggle")
+            except (AssertionError, urllib.error.HTTPError) as error:
+                if not failing:
+                    raise
+                print(f"gui-e2e-smoke: step 44's cleanup failed: {error}", file=sys.stderr)
 
 
 # The receiver for the large-paste step: once the step types `copy`, it writes its payload file to the clipboard with
