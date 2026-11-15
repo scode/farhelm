@@ -228,6 +228,23 @@ impl LaunchDraft {
             .then_some(self.conversation.as_str())
     }
 
+    /// Whether the YOLO question's "Start guarded session instead" would still change anything: in Restart with, a
+    /// guarded launch equal to the stored one is no edit, and a restart then has nothing to send (SPEC.md, "Creation":
+    /// the guarded answer is offered "for Restart with only when the result still differs from the stored launch"; the
+    /// old draft's `restart_guarded_changes`). Every other mode starts something new, so the answer always changes it.
+    pub fn guarded_still_changes(&self) -> bool {
+        let Mode::RestartWith(restart) = &self.mode else {
+            return true;
+        };
+        // A named conversation is a change of its own, which a guarded restart keeps (the old rule counted it too).
+        if self.active_conversation().is_some() {
+            return true;
+        }
+        let mut guarded = self.clone();
+        guarded.choose_permissions(Some(LaunchPermission::Guarded));
+        guarded.restart_edit().as_ref() != Some(&restart.baseline)
+    }
+
     /// Restart with's edit, in the baseline's own shape, for comparing with the baseline and for the request.
     fn restart_edit(&self) -> Option<RestartBaseline> {
         let Mode::RestartWith(restart) = &self.mode else {

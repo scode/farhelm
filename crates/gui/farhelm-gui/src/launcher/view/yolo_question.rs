@@ -25,8 +25,8 @@
 //! The sidebar's plain Replace asks the same question through `launcher::entry::ask_yolo_for_replace`, with its own
 //! retry and no guarded answer; an [`Owner`] is what differs between the two.
 //!
-//! NOTE: Restart with's question (offering guarded only when the result still differs from the stored launch) comes
-//! with Restart with.
+//! Restart with asks the launcher's question too, offering the guarded answer only while a guarded restart would still
+//! change something ([`crate::launcher::draft::LaunchDraft::guarded_still_changes`]).
 
 use farhelm_proto::ui_channel::HostView;
 use farhelm_proto::{LaunchPermission, LaunchSelection, SessionLaunch};
@@ -139,7 +139,8 @@ impl Launcher {
                 host,
                 host_name,
                 reason,
-                guarded: reason.offers_guarded(selection.as_ref()),
+                guarded: reason.offers_guarded(selection.as_ref())
+                    && self.draft.guarded_still_changes(),
             },
             inline: None,
         });

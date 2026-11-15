@@ -58,6 +58,8 @@ mod replace_with_tests;
 #[cfg(test)]
 mod request_tests;
 #[cfg(test)]
+mod restart_with_tests;
+#[cfg(test)]
 pub(crate) mod view_tests;
 #[cfg(test)]
 mod yolo_tests;
