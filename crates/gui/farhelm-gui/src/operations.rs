@@ -43,9 +43,12 @@
 //! route (the session list builds its Rename and Delete): this module holds the store, not a catalog of routes. A
 //! new kind of key ([`OpKey`]) is a change here.
 //!
-//! Reads are not operations: a GET changes nothing on the helm, so it has no key, no busy state and no recorded refusal.
-//! [`read`] sends one through the live UI session and words its refusal exactly as the store words an operation's, so
-//! a read and a save that fail on the same helm say so in the same way; the feature shows the result itself.
+//! Not everything sent to the helm is an operation. A read (a GET) changes nothing on the helm, and some writes (a
+//! remembered preference, the automatic seen mark, the host rail's session query) need nothing the store keeps for an
+//! operation: nothing draws them busy and no refusal of theirs is recorded on a key. [`send`] sends such a command
+//! through the live UI session and words its refusal exactly as the store words an operation's, so a write, a read and
+//! a save that fail on the same helm say so in the same way; [`read`] is a [`send`] of a GET plus a decode. The
+//! caller decides what, if anything, to show from the result.
 
 use std::collections::HashMap;
 
@@ -251,7 +254,8 @@ impl Outcome {
 }
 
 /// The words of a refusal: the helm's own (a plain string, trimmed, or the JSON it sent), or, when it sent none, which
-/// command got which status, as the old app's `api::refusal_text` did. One wording for operations and reads alike.
+/// command got which status, as the old app's `api::refusal_text` did. One wording for operations and for commands
+/// without a key ([`send`], [`read`]) alike.
 fn refusal(body: Option<Value>, status: u16, shown: &str) -> HostText {
     let words = match body {
         Some(Value::String(text)) => text.trim().to_owned(),
@@ -265,33 +269,40 @@ fn refusal(body: Option<Value>, status: u16, shown: &str) -> HostText {
     }
 }
 
-// ---- Reads ----------------------------------------------------------------------------------------------------------
+// ---- Commands without a key: writes nobody shows, and reads ----------------------------------------------------------
 
-/// Read `path` with a plain GET through the live UI session, and hand `on_read` the reply decoded as `T`, or why there
-/// is none, worded for the user. Returns whether it was sent: `false` while there is no UI session (before the first
-/// connect, or between a reset and the next), and then `on_read` never runs.
+/// Send `method` on `path` with `body` through the live UI session, as no operation, and hand `then` the body of the
+/// helm's answer, or why there is none, worded for the user. Returns whether it was sent: `false` while there is no UI
+/// session (before the first connect, or between a reset and the next), and then `then` never runs.
 ///
-/// Only for what the helm does not push. Pushed state (sessions, hosts, templates, the preferences) is read from the
-/// store while drawing, never fetched: a fetched copy would go stale the moment the next push lands.
+/// For a command that is not work on a key: nothing draws it busy, nothing competing is refused while it runs, and
+/// the store records no refusal for it (a remembered preference, the automatic seen mark, the host rail's session
+/// query). The caller decides what, if anything, to show from `then`: one write only logs a failure, the rail shows
+/// its refusal, the sidebar's width write ends the hold that keeps its width on screen. Work that needs a busy state
+/// or a refusal kept on its subject until the next try is an operation on a key instead ([`Operations::start`]), and
+/// a read of what the helm does not push is [`read`].
 ///
-/// `shown` names the read in a refusal without words, as [`Command::new`]'s does (`GET /api/sessions`, with any
-/// internal id hidden). A refusal is worded exactly as an operation's ([`Outcome::Refused`]); a reply that does not
-/// decode as `T`, or has no body, says so, naming `shown`. Every 2xx counts as an answer.
+/// `shown` names the command in a refusal without words, as [`Command::new`]'s does (`PUT /api/preferences`, with any
+/// internal id hidden). A refusal is worded exactly as an operation's ([`Outcome::Refused`]). Every 2xx counts as an
+/// answer, a 202 included, since nothing here waits for long work's result, and the answer is the reply's body as sent
+/// (`None` for a reply without one). A command the channel lost says so, though that cannot arrive in practice: the
+/// reset that follows drops the wait first.
 ///
-/// `on_read` runs on its own, after the UI session's update that received the reply has returned, so it may read the
-/// store, start an operation or send another read; called inside that update, any of those would update or read the
-/// UI session again and panic. It is told nothing about whether the user moved on: a reader that may move focus or
-/// open something takes its own [`Mark`] when it sends the read and asks [`focus::has_moved_on`] when the answer
-/// comes.
+/// `then` runs on its own, after the UI session's update that received the reply has returned, so it may read the
+/// store, start an operation or send again; called inside that update, any of those would update or read the UI
+/// session again and panic. It is told nothing about whether the user moved on: a caller that may move focus or open
+/// something takes its own [`Mark`] when it sends and asks [`focus::has_moved_on`] when the answer comes.
 ///
-/// The wait belongs to the UI session: a reset retires it and drops the wait, so `on_read` never runs for a read sent
-/// before a reset. Nothing holds the reader: `on_read` should hold its view weakly, so that a reply after the view
-/// closed reaches nobody.
-pub fn read<T: DeserializeOwned + 'static>(
+/// The wait belongs to the UI session: a reset retires it and drops the wait, so `then` never runs for a command sent
+/// before a reset. Nothing holds the caller: `then` should hold its view weakly, so that a reply after the view closed
+/// reaches nobody.
+pub fn send(
+    method: Method,
     path: ApiPath,
+    body: Option<Value>,
     shown: impl Into<String>,
     cx: &mut App,
-    on_read: impl FnOnce(Result<T, HostText>, &mut App) + 'static,
+    then: impl FnOnce(Result<Option<Value>, HostText>, &mut App) + 'static,
 ) -> bool {
     let Some(current) = crate::session::connection(cx).and_then(|c| c.read(cx).session().cloned())
     else {
@@ -299,25 +310,57 @@ pub fn read<T: DeserializeOwned + 'static>(
     };
     let shown = shown.into();
     current.update(cx, |current, cx| {
-        current.command(Method::Get, path, None, cx, move |_, result, cx| {
-            let answer = decode(result, &shown);
-            cx.defer(move |cx| on_read(answer, cx));
+        current.command(method, path, body, cx, move |_, result, cx| {
+            let answered = answer(result, &shown);
+            cx.defer(move |cx| then(answered, cx));
         });
     });
     true
 }
 
-/// What the reply to the read shown as `shown` says, decoded as `T`. Split from [`read`] so the wording is tested
-/// without a channel.
-pub(crate) fn decode<T: DeserializeOwned>(
+/// What the reply to the command shown as `shown` says, as [`send`] hands it on: the body of any 2xx, or the refusal
+/// in the store's words ([`refusal`]). Split from [`send`] so the wording is tested without a channel.
+pub(crate) fn answer(
     result: Result<Reply, CommandError>,
     shown: &str,
-) -> Result<T, HostText> {
+) -> Result<Option<Value>, HostText> {
     let reply = result.map_err(|error| HostText::from_host(error.to_string()))?;
-    if !(200..300).contains(&reply.status) {
-        return Err(refusal(reply.body, reply.status, shown));
+    if (200..300).contains(&reply.status) {
+        Ok(reply.body)
+    } else {
+        Err(refusal(reply.body, reply.status, shown))
     }
-    match reply.body.map(serde_json::from_value::<T>) {
+}
+
+/// Read `path` with a plain GET through the live UI session, and hand `on_read` the reply decoded as `T`, or why there
+/// is none, worded for the user. A [`send`] of the GET plus a decode, so everything [`send`] says about when it sends,
+/// when its callback runs, a reset and a refusal's words holds here too. Returns whether it was sent.
+///
+/// Only for what the helm does not push. Pushed state (sessions, hosts, templates, the preferences) is read from the
+/// store while drawing, never fetched: a fetched copy would go stale the moment the next push lands.
+///
+/// `shown` names the read in a refusal without words (`GET /api/sessions`, with any internal id hidden). A reply that
+/// does not decode as `T`, or has no body, says so, naming `shown`.
+pub fn read<T: DeserializeOwned + 'static>(
+    path: ApiPath,
+    shown: impl Into<String>,
+    cx: &mut App,
+    on_read: impl FnOnce(Result<T, HostText>, &mut App) + 'static,
+) -> bool {
+    let shown = shown.into();
+    let named = shown.clone();
+    send(Method::Get, path, None, shown, cx, move |answer, cx| {
+        on_read(decode(answer, &named), cx)
+    })
+}
+
+/// What [`send`]'s answer to the read shown as `shown` says, decoded as `T`: a refusal passes through as it is, and a
+/// missing or misshapen body says so. Split from [`read`] so the wording is tested without a channel.
+pub(crate) fn decode<T: DeserializeOwned>(
+    answer: Result<Option<Value>, HostText>,
+    shown: &str,
+) -> Result<T, HostText> {
+    match answer?.map(serde_json::from_value::<T>) {
         Some(Ok(value)) => Ok(value),
         Some(Err(error)) => Err(HostText::from_host(format!(
             "the helm's answer to {shown} could not be read: {error}"

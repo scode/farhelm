@@ -1231,6 +1231,173 @@ fn a_bound_growing_box_mirrors_line_breaks_and_follows_pushes_until_touched(
     );
 }
 
+// ---- Commands without a key: writes nobody shows, and reads ----------------------------------------------------------
+
+/// A write whose result no control shows (a remembered preference, the automatic seen mark) goes around the store,
+/// and before `operations::send` existed each such caller worded its refusal with its own copy of the store's rule,
+/// which drifts the moment either side changes. Specified, without a channel: any 2xx (a 202's and a body-less 204's
+/// included) hands on the reply's body as sent; a refusal is the helm's words trimmed, or the JSON it sent, or, with no
+/// words, the command as `shown` names it and the status, the store's wording (`Outcome::Refused`); a lost command
+/// says so.
+#[test]
+fn a_keyless_sends_answer_is_its_body_and_its_refusal_is_worded_as_an_operations() {
+    use farhelm_helm_client::CommandError;
+    use farhelm_proto::ui_channel::Reply;
+
+    let answered = |status, body| {
+        let reply = Ok(Reply {
+            id: 0,
+            status,
+            body,
+        });
+        operations::answer(reply, "PUT /api/x")
+    };
+    assert_eq!(
+        answered(200, Some(json!({ "a": 1 }))),
+        Ok(Some(json!({ "a": 1 })))
+    );
+    assert_eq!(
+        answered(202, Some(json!("later"))),
+        Ok(Some(json!("later")))
+    );
+    assert_eq!(answered(204, None), Ok(None));
+    let refused = |words: &str| Err(HostText::from_host(words));
+    assert_eq!(
+        answered(400, Some(json!(" not here "))),
+        refused("not here")
+    );
+    assert_eq!(
+        answered(409, Some(json!({ "error": "busy" }))),
+        refused(r#"{"error":"busy"}"#)
+    );
+    assert_eq!(answered(404, None), refused("PUT /api/x: 404"));
+    assert_eq!(answered(500, Some(json!(" "))), refused("PUT /api/x: 500"));
+    assert_eq!(
+        operations::answer(Err(CommandError::Reset), "PUT /api/x"),
+        refused("the connection to the helm is resetting")
+    );
+}
+
+/// The point of the keyless send is that a write around the store and an operation through it say the helm's reason
+/// the same way, so the test compares the two on the wire rather than against a copy of the rule. Specified: with no
+/// UI session `operations::send` sends nothing and says so; with one it sends the caller's method, path and body; a
+/// 200's body reaches its callback, which may read the store; a refusal without words, and one with untrimmed words,
+/// reach it in exactly the words an operation refused with the same reply records on its key; and a send made before
+/// the channel breaks never calls back.
+#[gpui::test]
+fn a_keyless_send_hands_back_the_body_or_the_refusal_an_operation_would_record(
+    cx: &mut TestAppContext,
+) {
+    /// Each answer, and whether the store could be read from the callback that received it.
+    type Answers = Rc<RefCell<Vec<(Result<Option<serde_json::Value>, HostText>, bool)>>>;
+    let send = |answers: &Answers, cx: &mut TestAppContext| {
+        let answers = answers.clone();
+        cx.update(move |cx| {
+            let path = ApiPath::api(&["example"]).unwrap();
+            let body = Some(json!({ "width": 240 }));
+            operations::send(
+                Method::Put,
+                path,
+                body,
+                "PUT /api/example",
+                cx,
+                move |answer, cx| {
+                    let store_read = session::current_store(cx).is_some_and(|store| {
+                        let _ = store.read(cx).collections();
+                        true
+                    });
+                    answers.borrow_mut().push((answer, store_read))
+                },
+            )
+        })
+    };
+    let answers = Answers::default();
+    assert!(!send(&answers, cx), "with no connection, nothing is sent");
+    let (mut fake, _connection) = connected(&["a"], cx);
+
+    assert!(
+        send(&answers, cx),
+        "the premise: a live UI session sends it"
+    );
+    cx.run_until_parked();
+    let sent = fake.commands();
+    let shown: Vec<_> = sent
+        .iter()
+        .map(|sent| (sent.method, sent.path.as_str(), sent.body.clone()))
+        .collect();
+    assert_eq!(
+        shown,
+        vec![(Method::Put, "/api/example", Some(json!({ "width": 240 })))]
+    );
+    fake.reply(sent[0].id, 200, Some(json!({ "sidebar_width": 240 })));
+    cx.run_until_parked();
+    assert_eq!(
+        *answers.borrow(),
+        vec![(Ok(Some(json!({ "sidebar_width": 240 }))), true)],
+        "the body arrived, and its callback read the store"
+    );
+
+    // The same two refusals, once to a keyless send and once to an operation: the words must match.
+    let operations = operations(cx);
+    let delivered = Delivered::default();
+    for (status, body) in [
+        (409, None),
+        (400, Some(json!("  titles may not be empty "))),
+    ] {
+        answers.borrow_mut().clear();
+        assert!(send(&answers, cx), "the premise: the send is sent");
+        start(
+            &operations,
+            ("a", rename("a", "x")),
+            "rename",
+            &delivered,
+            cx,
+        )
+        .unwrap();
+        cx.run_until_parked();
+        let sent = fake.commands();
+        assert_eq!(sent.len(), 2, "the premise: both commands reached the helm");
+        for command in &sent {
+            fake.reply(command.id, status, body.clone());
+        }
+        cx.run_until_parked();
+        let recorded = cx.update(|cx| {
+            operations
+                .read(cx)
+                .failure(&OpKey::session("a"))
+                .map(|failure| failure.message.clone())
+        });
+        let Some(recorded) = recorded else {
+            panic!("the premise: the operation's refusal is recorded on its key");
+        };
+        let words = |shown: &str| {
+            recorded
+                .raw()
+                .replace("POST /api/sessions/[session]/rename", shown)
+        };
+        assert_eq!(
+            *answers.borrow(),
+            vec![(Err(HostText::from_host(words("PUT /api/example"))), true)],
+            "a {status} reached the send in the operation's words, naming the send"
+        );
+    }
+
+    assert!(send(&answers, cx), "the premise: the last send is sent");
+    cx.run_until_parked();
+    assert_eq!(
+        fake.commands().len(),
+        1,
+        "the premise: the last send reached the helm"
+    );
+    answers.borrow_mut().clear();
+    fake.break_channel();
+    cx.run_until_parked();
+    assert!(
+        answers.borrow().is_empty(),
+        "the send the reset dropped never called back"
+    );
+}
+
 // ---- Reads ----------------------------------------------------------------------------------------------------------
 
 /// Every read a feature makes (the quick switcher's listing, the launcher's and Settings' lookups) shows a failure in
@@ -1250,7 +1417,7 @@ fn a_reads_answer_decodes_and_its_refusal_is_worded_as_an_operations() {
             status,
             body,
         });
-        operations::decode::<Vec<String>>(reply, "GET /api/x")
+        operations::decode::<Vec<String>>(operations::answer(reply, "GET /api/x"), "GET /api/x")
     };
     let words = vec!["a".to_owned(), "b".to_owned()];
     assert_eq!(decoded(200, Some(json!(["a", "b"]))), Ok(words.clone()));
@@ -1274,7 +1441,10 @@ fn a_reads_answer_decodes_and_its_refusal_is_worded_as_an_operations() {
         refused("the helm sent no answer to GET /api/x")
     );
     assert_eq!(
-        operations::decode::<Vec<String>>(Err(CommandError::Reset), "GET /api/x"),
+        operations::decode::<Vec<String>>(
+            operations::answer(Err(CommandError::Reset), "GET /api/x"),
+            "GET /api/x"
+        ),
         refused("the connection to the helm is resetting")
     );
 }
