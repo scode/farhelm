@@ -833,7 +833,7 @@ fn a_press_puts_a_controls_help_away_while_the_pointer_rests_on_it(cx: &mut Test
     assert_eq!(tooltip(cx).as_deref(), Some("Give it a new title"));
 }
 
-/// The value the host-sentence help test below names: a direction override, markup-like text and a newline, which
+/// The value the host-sentence help tests below name: a direction override, markup-like text and a newline, which
 /// would reverse, pose as formatting or forge a second line if they reached the tooltip raw.
 const SPOOFED_HOST: &str = "a\u{202E}<b>\n";
 
@@ -915,6 +915,70 @@ fn help_naming_a_host_value_draws_it_escaped_in_the_tooltip(cx: &mut TestAppCont
     assert!(
         unsafe_text.is_empty(),
         "no raw hidden character was painted: {unsafe_text:?}"
+    );
+}
+
+/// Paragraph help is the agent mark's and the permission shield's form (SPEC.md, "Session list"), whose whole text is
+/// also what a screen reader hears for those marks; a description that kept only the first paragraph would drop the
+/// permission's meaning and the stored command, and a tooltip that merged the paragraphs into one node would read as
+/// a run-on. How the paragraphs are laid out (wider, unclamped, a blank line apart) is pinned with the real text
+/// system in `layers_tests.rs`. Specified: hovering a control whose help is `HoverHelp::paragraphs` shows, after the
+/// hover delay, every paragraph in the tooltip as a `Label` node of its own under its sentence's id, named with its
+/// host values escaped, in the order given; the tooltip's text and the control's description are every paragraph's
+/// accessible text, a blank line between each.
+#[gpui::test]
+fn help_in_paragraphs_shows_every_paragraph_and_describes_the_control_with_all_of_them(
+    cx: &mut TestAppContext,
+) {
+    let help = || {
+        HoverHelp::paragraphs([
+            HostSentence::new("agent-help-mode").text("Codex — Guarded · Codex sandboxed auto"),
+            HostSentence::new("agent-help-caveat").text("Your own allow rules can loosen it."),
+            HostSentence::new("agent-help-command")
+                .text("Launched with: ")
+                .mono(&HostText::from_host(SPOOFED_HOST)),
+        ])
+    };
+    let names = [
+        "Codex — Guarded · Codex sandboxed auto".to_owned(),
+        "Your own allow rules can loosen it.".to_owned(),
+        format!("Launched with: {SPOOFED_HOST_SHOWN}"),
+    ];
+    let whole = names.join("\n\n");
+    assert_eq!(
+        help().description().as_ref(),
+        whole,
+        "the description the control is given is every paragraph, a blank line apart"
+    );
+
+    let cx = open(cx, move |_, _| {
+        Button::new("agent", "Agent", help(), Role::Button).into_any_element()
+    });
+    let at = center(cx, "agent");
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    wait_hover_delay(cx);
+    assert_eq!(tooltip(cx).as_deref(), Some(whole.as_str()));
+
+    let nodes = frame(cx);
+    let drawn: Vec<usize> = ["agent-help-mode", "agent-help-caveat", "agent-help-command"]
+        .iter()
+        .map(|id| {
+            match nodes
+                .iter()
+                .position(|node| node.element_id.as_deref() == Some(*id))
+            {
+                Some(index) => index,
+                None => panic!("the tooltip drew no paragraph {id}"),
+            }
+        })
+        .collect();
+    for (index, name) in drawn.iter().zip(&names) {
+        assert_eq!(nodes[*index].role, Some(Role::Label));
+        assert_eq!(nodes[*index].label.as_deref(), Some(name.as_str()));
+    }
+    assert!(
+        drawn.windows(2).all(|pair| pair[0] < pair[1]),
+        "the paragraphs are drawn in the order given: {drawn:?}"
     );
 }
 

@@ -63,7 +63,7 @@ use gpui::{
 };
 
 use crate::host_text::{HostSentence, Line};
-use crate::layers::{self, TooltipOwner};
+use crate::layers::{self, Help, TooltipOwner};
 
 /// What a control says when the user hovers it or asks assistive technology about it.
 ///
@@ -72,18 +72,19 @@ use crate::layers::{self, TooltipOwner};
 /// description line) count that text as its hover help instead. That form is not built: [`MenuItem`], the first control
 /// to draw such a description, takes a tooltip as well and makes its description line its accessible description.
 ///
-/// Help is the app's own wording ([`HoverHelp::tooltip`]) or a sentence that names host values beside it
-/// ([`HoverHelp::sentence`], for help such as the agent mark's and the permission shield's). A host value goes in only
-/// the second way. Help formatted from [`HostText::raw`](crate::host_text::HostText::raw) would reach the screen
+/// Help is the app's own wording ([`HoverHelp::tooltip`]), a sentence that names host values beside it
+/// ([`HoverHelp::sentence`]), or several such sentences as paragraphs ([`HoverHelp::paragraphs`], for help such as the
+/// agent mark's and the permission shield's, which runs past the short tooltip's eight lines). A host value goes in
+/// only as a sentence. Help formatted from [`HostText::raw`](crate::host_text::HostText::raw) would reach the screen
 /// unescaped and with its direction unisolated, which SPEC_impl.md, "Host-supplied text", rules out; `tooltip` takes
 /// any string, so that is held by review rather than by the type, as for a dialog's title.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HoverHelp(Line);
+pub struct HoverHelp(Help);
 
 impl HoverHelp {
     /// Help shown as a tooltip, in the app's own words.
     pub fn tooltip(text: impl Into<SharedString>) -> Self {
-        HoverHelp(Line::App(text.into()))
+        HoverHelp(Help::Line(Line::App(text.into())))
     }
 
     /// Help that names host values: `sentence` mixes the app's words with them, and the tooltip draws it as a
@@ -92,11 +93,35 @@ impl HoverHelp {
     /// assistive technology reads for host text everywhere else. Inside the tooltip the sentence is one labelled node
     /// under the id it was made with, as a [`HostSentence`] is wherever it is drawn.
     pub fn sentence(sentence: HostSentence) -> Self {
-        HoverHelp(Line::Sentence(sentence))
+        HoverHelp(Help::Line(Line::Sentence(sentence)))
+    }
+
+    /// Help in paragraphs, one per sentence, for help whose closing sentences must stay visible (the agent mark's and
+    /// the permission shield's, as SPEC.md's "Session list" describes them: the agent, what its permission means and
+    /// the caveat after it, the stored command). The tooltip is the old app's paragraph help: up to 440 pixels wide
+    /// rather than 280, a blank line's gap between paragraphs, and no eight-line cut ([`Help::Paragraphs`] has the
+    /// old values and where they come from).
+    ///
+    /// Each paragraph is drawn as a [`HostSentence`] is anywhere: one labelled node under its own id, host values
+    /// escaped, so the ids must differ from each other. An app-only paragraph is a sentence with only
+    /// [`HostSentence::text`] parts. A line break inside a paragraph is drawn as one only in a paragraph of the app's
+    /// own words: a sentence lays its parts out as one wrapping row, so a break before a host part would leave that
+    /// part beside the first line rather than on a line of its own; give such a part its own paragraph. The control's
+    /// accessible description is every paragraph's accessible name, a blank line between them
+    /// ([`Help::accessible_text`]), so assistive technology hears the whole help.
+    ///
+    /// ```ignore
+    /// let help = HoverHelp::paragraphs([
+    ///     HostSentence::new("agent-help-mode").text("Codex — Guarded · Codex sandboxed auto"),
+    ///     HostSentence::new("agent-help-command").text("Launched with: ").mono(&command),
+    /// ]);
+    /// ```
+    pub fn paragraphs(paragraphs: impl IntoIterator<Item = HostSentence>) -> Self {
+        HoverHelp(Help::Paragraphs(paragraphs.into_iter().collect()))
     }
 
     /// The control's accessible description: the help as one string, with every host value escaped
-    /// ([`Line::accessible_text`]). Private to the component layer, like the help itself.
+    /// ([`Help::accessible_text`]). Private to the component layer, like the help itself.
     fn description(&self) -> SharedString {
         self.0.accessible_text()
     }
@@ -105,7 +130,7 @@ impl HoverHelp {
 /// Give `element`, the control drawn under `id`, its hover help: the tooltip the layer manager shows while the pointer
 /// is over it, owned by this control so it closes when the control is gone, and the help as the control's accessible
 /// description where the element can carry one ([`HoverHelp::description`]: for help naming a host value, the
-/// sentence's text with each host value escaped).
+/// sentence's text with each host value escaped, and for paragraphs, every paragraph's).
 ///
 /// Every control wires its help through here, and nothing else can: the help's text is private to this module, so a
 /// control that skipped this would never read its own help, and the unused field fails the build (`-D warnings`). That

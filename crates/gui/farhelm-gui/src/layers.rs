@@ -50,6 +50,7 @@
 //!   focus, which such a popover never is.
 //! - **One tooltip at a time**, owned by the control that showed it (see [`TooltipOwner`]). It says the app's own
 //!   words, or a host sentence when the help names a host value, drawn through host text's element ([`ShownTooltip`]).
+//!   Help in paragraphs ([`Help::Paragraphs`]) is drawn wider and never cut short, as the old app drew it.
 //! - **The innermost help wins** when a control with hover help sits inside another with its own (a session row's
 //!   marks inside the row); [`hover_began`], "Nested hover help", explains the rule and how it is decided.
 //! - **One pill, drawn above every layer and under the tooltip, that is not a layer** ([`show_pill`]). It is the one
@@ -101,7 +102,7 @@ use gpui::{
 use crate::actions;
 use crate::bootstrap::{installed, installed_mut};
 use crate::focus::{self, Mark};
-use crate::host_text::Line;
+use crate::host_text::{HostSentence, Line};
 use crate::theme::{self, metrics};
 use crate::ticker;
 
@@ -151,7 +152,7 @@ struct Hovered {
     /// control's help may show long after its hover began (the pointer returning from a mark onto its row), and by then
     /// the control may say something else: a session row's help follows the session's status, and the frame that takes
     /// a stopped session's live dot away also changes its row's help.
-    help: Line,
+    help: Help,
     /// Drops the entry, and settles again, when the control is gone: no hover-leave fires for a control that simply
     /// stops being drawn, and the control around it, still under the pointer, should then have its help back.
     _release: Subscription,
@@ -1007,21 +1008,66 @@ impl TooltipOwner {
     }
 }
 
+/// What a tooltip says, in one of the two forms the old app drew hover help in. Controls hand it over through
+/// [`crate::components::HoverHelp`], which picks the form.
+///
+/// Short help is one [`Line`] on a card at most 280 pixels wide and cut at eight lines (`.farhelm-tooltip`,
+/// `crates/farhelm-ui/assets/app.css` lines 1854-1877 at reference commit `24bc0580`). Paragraph help is for help
+/// whose last sentence matters as much as its first (the agent mark's and the permission shield's: the agent, what its
+/// permission means and the caveat that closes it, then the stored command): the old app marked such a control with
+/// `data-tooltip-paragraphs` (`tooltip.js` lines 444-445), and its card was at most 440 pixels wide with no line
+/// clamp, its text `white-space: pre-line` so a blank line set paragraphs apart (`app.css` lines 1919-1926). It kept
+/// the short card's padding and its `max-height: calc(100vh - 8px)`, so a paragraph card taller than the window is
+/// clipped at the window, not at a line count.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Help {
+    /// Short help: the app's words, or a sentence naming host values.
+    Line(Line),
+    /// Paragraph help: each sentence a paragraph of its own, drawn one below the other with a blank line's gap
+    /// between them, on the wider card, never clamped.
+    Paragraphs(Vec<HostSentence>),
+}
+
+impl Help {
+    /// The help as one string, as assistive technology reads it: for a line, its [`Line::accessible_text`]; for
+    /// paragraphs, every paragraph's [`HostSentence::accessible_name`], separated by a blank line as the old app's
+    /// one description string separated them. Each host value is escaped. For a control's accessible description and
+    /// [`ShownTooltip::text`]; never for display.
+    pub fn accessible_text(&self) -> SharedString {
+        match self {
+            Help::Line(line) => line.accessible_text(),
+            Help::Paragraphs(paragraphs) => paragraphs
+                .iter()
+                .map(|paragraph| paragraph.accessible_name().to_string())
+                .collect::<Vec<_>>()
+                .join("\n\n")
+                .into(),
+        }
+    }
+}
+
+/// Short help in the app's own words, so a caller with a plain string writes `"Save it".into()`.
+impl From<&'static str> for Help {
+    fn from(words: &'static str) -> Self {
+        Help::Line(words.into())
+    }
+}
+
 /// The hover help currently showing, if any. At most one tooltip shows at a time, which is what the old app did too.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShownTooltip {
     /// Which control asked for it, so only that control can take it down again.
     pub owner: EntityId,
     /// What the tooltip says, as one string, for tests and the bridge's snapshot: the app's wording, or for help that
-    /// names a host value the sentence's accessible text, each host value escaped ([`Line::accessible_text`]). The
+    /// names a host value the sentence's accessible text, each host value escaped ([`Help::accessible_text`]). The
     /// card never draws it; it draws `help`.
     pub text: SharedString,
     /// Where the pointer was when the hover began, in window coordinates.
     pub at: Point<Pixels>,
-    /// The help the card draws. Host values reach a tooltip only through this form, a [`Line::Sentence`], whose host
-    /// parts are drawn by host text's own element, escaped and each in a text element of its own (SPEC_impl.md,
-    /// "Host-supplied text"); a [`Line::App`] is Farhelm's own wording.
-    help: Line,
+    /// The help the card draws. Host values reach a tooltip only as host sentences (a [`Line::Sentence`], or the
+    /// paragraphs of [`Help::Paragraphs`]), whose host parts are drawn by host text's own element, escaped and each in
+    /// a text element of its own (SPEC_impl.md, "Host-supplied text"); a [`Line::App`] is Farhelm's own wording.
+    help: Help,
 }
 
 /// The pointer came onto the control `owner`, whose hover help is `help`. This is the hover listener's half of the
@@ -1030,8 +1076,8 @@ pub struct ShownTooltip {
 /// listener about the event ([`settle_hover`]). When it is this control's, it shows after [`HOVER_DELAY`] at the
 /// pointer's position, or at once while another tooltip is showing or has only just gone.
 ///
-/// A host value reaches a tooltip only as part of a [`Line::Sentence`]. The app's own wording is a [`Line::App`], which
-/// a caller makes from a plain string with `.into()`.
+/// A host value reaches a tooltip only as part of a host sentence ([`Help`]). The app's own wording is a
+/// [`Line::App`], which a caller makes from a plain string with `.into()`.
 ///
 /// # Nested hover help
 ///
@@ -1051,7 +1097,7 @@ pub struct ShownTooltip {
 /// ([`LayerStack::hovered`]), newest hover first, which is right for a frame's news and for a pointer that crossed
 /// into a control from the one around it. On a pointer move it takes GPUI's order instead: each hovered control's move
 /// listener ([`hover_moved`]) runs on every move, last drawn first, so the order they ran in is exact.
-pub fn hover_began(owner: &Entity<TooltipOwner>, help: Line, window: &mut Window, cx: &mut App) {
+pub fn hover_began(owner: &Entity<TooltipOwner>, help: Help, window: &mut Window, cx: &mut App) {
     let Some(stack) = stack(window, cx) else {
         return;
     };
@@ -1098,7 +1144,7 @@ pub fn hover_moved(owner: &Entity<TooltipOwner>, window: &mut Window, cx: &mut A
 /// it, so a tooltip of it that begins later says what the control says then (see [`Hovered::help`]). It redraws
 /// nothing: a tooltip already waiting or showing keeps the words it began with. Called while the control renders, so a
 /// cached view's controls refresh exactly when they re-render, which is when their help can change.
-pub fn help_drawn(owner: &Entity<TooltipOwner>, help: &Line, window: &mut Window, cx: &mut App) {
+pub fn help_drawn(owner: &Entity<TooltipOwner>, help: &Help, window: &mut Window, cx: &mut App) {
     let Some(stack) = stack(window, cx) else {
         return;
     };
@@ -1200,7 +1246,7 @@ fn settle_hover(window: &mut Window, cx: &mut App) {
 
 /// Start `owner`'s tooltip, now that its help is the one the pointer calls for: after [`HOVER_DELAY`], or at once
 /// while another tooltip is showing or has only just gone. Either way it replaces any other tooltip, shown or waiting.
-fn begin_tooltip(owner: &Entity<TooltipOwner>, help: Line, window: &mut Window, cx: &mut App) {
+fn begin_tooltip(owner: &Entity<TooltipOwner>, help: Help, window: &mut Window, cx: &mut App) {
     let at = window.mouse_position();
     let Some(stack) = stack(window, cx) else {
         return;
@@ -1272,7 +1318,7 @@ fn end_tooltip(stack: &Entity<LayerStack>, previous: Option<EntityId>, cx: &mut 
 #[cfg(test)]
 pub(crate) fn show_tooltip_at(
     owner: &Entity<TooltipOwner>,
-    help: Line,
+    help: Help,
     at: Point<Pixels>,
     window: &mut Window,
     cx: &mut App,
@@ -1284,7 +1330,7 @@ pub(crate) fn show_tooltip_at(
 /// is always its `help`'s accessible text.
 fn show_tooltip_from(
     owner: &Entity<TooltipOwner>,
-    help: Line,
+    help: Help,
     at: Point<Pixels>,
     window: &mut Window,
     cx: &mut App,
@@ -1613,15 +1659,19 @@ pub fn overlay(window: &Window, cx: &App) -> Option<AnyElement> {
     Some(overlay.into_any_element())
 }
 
-/// The tooltip's card, styled as the old `.farhelm-tooltip`.
+/// The tooltip's card, styled as the old `.farhelm-tooltip`: short help cut at eight lines inside the 280-pixel cap,
+/// paragraph help one paragraph below the other inside the 440-pixel cap and never cut ([`Help`]).
 fn tooltip_card(shown: &ShownTooltip, window: &Window, cx: &App) -> gpui::Div {
     let palette = theme::palette(cx);
     let (pad_y, pad_x) = metrics::TOOLTIP_PAD;
     let viewport = window.viewport_size();
-    // `max-width: min(280px, 100vw - 8px)` and `max-height: 100vh - 8px`, as the old tooltip.
-    let max_width = metrics::TOOLTIP_MAX_WIDTH.min(viewport.width - px(8.));
-    div()
-        .max_w(max_width)
+    // `max-width: min(280px, 100vw - 8px)` (440 for paragraphs) and `max-height: 100vh - 8px`, as the old tooltip.
+    let cap = match shown.help {
+        Help::Line(_) => metrics::TOOLTIP_MAX_WIDTH,
+        Help::Paragraphs(_) => metrics::TOOLTIP_PARAGRAPHS_MAX_WIDTH,
+    };
+    let card = div()
+        .max_w(cap.min(viewport.width - px(8.)))
         .max_h(viewport.height - px(8.))
         .overflow_hidden()
         .py(pad_y)
@@ -1633,10 +1683,20 @@ fn tooltip_card(shown: &ShownTooltip, window: &Window, cx: &App) -> gpui::Div {
         .rounded(metrics::RADIUS_MD)
         .shadow(menu_shadow(palette))
         .text_size(metrics::TEXT_SM)
-        .line_height(metrics::TOOLTIP_LINE_HEIGHT)
-        .line_clamp(metrics::TOOLTIP_MAX_LINES)
-        // The help itself, not its accessible text: a sentence draws each host value through host text's element.
-        .child(shown.help.clone())
+        .line_height(metrics::TOOLTIP_LINE_HEIGHT);
+    // The help itself, not its accessible text: a sentence draws each host value through host text's element.
+    match &shown.help {
+        Help::Line(line) => card
+            .line_clamp(metrics::TOOLTIP_MAX_LINES)
+            .child(line.clone()),
+        // No clamp here: the clamp is a text style every paragraph would inherit, and it would cut each one at eight
+        // lines, which is exactly what this form exists to avoid (a guarded launch's closing caveat).
+        Help::Paragraphs(paragraphs) => card
+            .flex()
+            .flex_col()
+            .gap(metrics::TOOLTIP_PARAGRAPH_GAP)
+            .children(paragraphs.iter().cloned()),
+    }
 }
 
 /// `--shadow-menu`: `0 6px 18px` in the token's color, shared by menus, popovers and tooltips.
