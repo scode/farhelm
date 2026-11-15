@@ -546,3 +546,146 @@ fn up_and_down_reach_the_fields_owner_and_leave_the_field_alone(cx: &mut TestApp
         "the field kept focus"
     );
 }
+
+// ---- One subscriber per state ---------------------------------------------------------------------------------------
+
+/// Why this matters: a state's subscriptions share the record of the last reported text, so a second subscriber never
+/// hears of an edit, and nothing on screen shows it. Both Credentials editors once watched a field their draft already
+/// watched, and an error and a pending file read that an edit should have cleared stayed; two reviews found it only by
+/// reading the code. The debug build the tests run in has to fail instead.
+///
+/// Specified: two subscriptions to one state made in one update, the second through a clone, as an editor and its draft
+/// made theirs, fail a debug build once GPUI activates them, saying that a state takes one subscriber.
+#[cfg(debug_assertions)]
+#[gpui::test]
+#[should_panic(
+    expected = "the field already has a subscription, and a state takes one subscriber, since a second never hears of \
+                an edit"
+)]
+fn a_second_subscriber_while_the_first_is_kept_fails_a_debug_build(cx: &mut TestAppContext) {
+    let cx = open(cx, |_, _| div().into_any_element());
+    let events = Rc::new(RefCell::new(Vec::new()));
+    // Both are handed out of the update, so they are still kept when it returns and GPUI activates them.
+    let _kept = cx.update(|window, cx| {
+        let mut second = None;
+        let field = cx.new(|cx| {
+            // `Field::new` subscribes and keeps that first subscription in the field.
+            let field = Field::new(&events, window, cx);
+            second = Some(
+                field
+                    .state
+                    .clone()
+                    .subscribe(window, cx, |_: &mut Field, _, _, _| {}),
+            );
+            field
+        });
+        (field, second)
+    });
+}
+
+/// Replace `field`'s subscription by plain assignment, as a view rebuilding its watch would, with one that records into
+/// `into` instead of the field's own record.
+fn resubscribe(
+    cx: &mut VisualTestContext,
+    field: &gpui::Entity<Field>,
+    into: &Rc<RefCell<Vec<TextInputEvent>>>,
+) {
+    let into = into.clone();
+    cx.update(|window, cx| {
+        field.update(cx, |field, cx| {
+            field._events = field
+                .state
+                .subscribe(window, cx, move |_: &mut Field, event, _, _| {
+                    into.borrow_mut().push(event)
+                });
+        })
+    });
+    check(cx);
+}
+
+/// Why this matters: the check above must catch only the case that starves a subscriber. Replacing a subscription by
+/// assignment is the ordinary way to rebuild a watch, and the old one is dropped before GPUI activates the new one, so
+/// the two never both receive an event; failing it would forbid that.
+///
+/// Specified: assigning a new subscription over a field's kept one does not panic, twice in a row; after each, the next
+/// edit reaches the newest one once and the earlier ones not at all.
+#[gpui::test]
+fn replacing_a_subscription_by_assignment_is_allowed_and_the_replacement_hears_edits(
+    cx: &mut TestAppContext,
+) {
+    let (cx, fields) = open_fields(cx, &[("line", TextInputState::new)]);
+    let field = &fields[0];
+    click(cx, "line");
+    keys(cx, "a");
+    assert_eq!(
+        take(cx, field),
+        ("a".into(), vec![TextInputEvent::Changed]),
+        "the premise: the first subscription reports edits"
+    );
+
+    // Twice, so that a second replacement, which the next test relies on, is shown not to panic or starve either.
+    let first = Rc::new(RefCell::new(Vec::new()));
+    resubscribe(cx, field, &first);
+    keys(cx, "b");
+    assert_eq!(
+        take(cx, field),
+        ("ab".into(), vec![]),
+        "the original subscription heard nothing"
+    );
+    assert_eq!(
+        first.borrow_mut().drain(..).collect::<Vec<_>>(),
+        [TextInputEvent::Changed],
+        "the first replacement reports the edit"
+    );
+
+    let second = Rc::new(RefCell::new(Vec::new()));
+    resubscribe(cx, field, &second);
+    keys(cx, "c");
+    assert_eq!(
+        take(cx, field),
+        ("abc".into(), vec![]),
+        "the original subscription still heard nothing"
+    );
+    assert_eq!(
+        *first.borrow(),
+        [],
+        "the first replacement heard nothing once replaced"
+    );
+    assert_eq!(
+        *second.borrow(),
+        [TextInputEvent::Changed],
+        "the second replacement reports the edit"
+    );
+}
+
+/// Why this matters: a replacement drops the old subscription while the new one is already counted, and bookkeeping
+/// that lost track there would let the next second subscriber starve unnoticed. The panic also has to name the call
+/// that subscribed twice, not the text input's own code, or finding the culprit takes a backtrace.
+///
+/// Specified: after two replacements by assignment, a further subscription kept beside the field's fails a debug build,
+/// and the panic names that call's site in this file.
+#[cfg(debug_assertions)]
+#[gpui::test]
+#[should_panic(
+    expected = "TextInputState::subscribe at crates/gui/farhelm-gui/src/components/tests/text_input.rs:"
+)]
+fn a_second_subscriber_after_replacements_still_fails_and_names_its_caller(
+    cx: &mut TestAppContext,
+) {
+    let (cx, fields) = open_fields(cx, &[("line", TextInputState::new)]);
+    let field = &fields[0];
+    let replacement = Rc::new(RefCell::new(Vec::new()));
+    // Twice, because a count that went wrong in one replacement could show only at the next; the test above shows
+    // that both replacements pass, so the panic expected here can only come from the subscription below.
+    resubscribe(cx, field, &replacement);
+    resubscribe(cx, field, &replacement);
+    // Handed out of the update, so it is still kept beside the field's when GPUI activates it.
+    let _second = cx.update(|window, cx| {
+        field.update(cx, |field, cx| {
+            field
+                .state
+                .clone()
+                .subscribe(window, cx, |_: &mut Field, _, _, _| {})
+        })
+    });
+}

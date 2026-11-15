@@ -12,7 +12,8 @@
 //! ([`TextInputEvent::Changed`], which a draft mirrors) and Enter ([`TextInputEvent::Submitted`], which saves). Kit's
 //! own event type stays behind this module, so the rest of the app never matches on Kit's variants. Every kind of field
 //! reports edits the same way and is drawn by the same [`TextInput`]; only the growing box reports no Enter. Each Enter
-//! says whether it was a held key's repeat (the section "A held Enter" below).
+//! says whether it was a held key's repeat (the section "A held Enter" below). A state takes one subscriber at a time,
+//! which debug builds check ([`TextInputState::subscribe`] says why).
 //!
 //! ## Line breaks
 //!
@@ -149,13 +150,15 @@ pub(crate) const GROWING_MAX_ROWS: usize = 12;
 /// against, whether the field is read-only ([`TextInputState::set_read_only`]), and the held flag of the last Enter
 /// key-down that passed [`TextInput`] and no submission has read yet (the module docs, "A held Enter"). An Enter that
 /// submits nothing, such as Alt+Enter, leaves its flag there until the next Enter key-down overwrites it or a
-/// submission reads or clears it.
+/// submission reads or clears it. They also share how many of the state's subscriptions are kept, since a state takes
+/// only one at a time ([`TextInputState::subscribe`]).
 #[derive(Clone)]
 pub struct TextInputState(
     Field,
     Rc<RefCell<SharedString>>,
     Rc<Cell<bool>>,
     Rc<Cell<Option<bool>>>,
+    Rc<Cell<usize>>,
 );
 
 impl TextInputState {
@@ -184,6 +187,7 @@ impl TextInputState {
             Rc::new(RefCell::new(SharedString::default())),
             Rc::new(Cell::new(false)),
             Rc::new(Cell::new(None)),
+            Rc::new(Cell::new(0)),
         )
     }
 
@@ -205,6 +209,7 @@ impl TextInputState {
             Rc::new(RefCell::new(SharedString::default())),
             Rc::new(Cell::new(false)),
             Rc::new(Cell::new(None)),
+            Rc::new(Cell::new(0)),
         )
     }
 
@@ -224,6 +229,7 @@ impl TextInputState {
             Rc::new(RefCell::new(SharedString::default())),
             Rc::new(Cell::new(false)),
             Rc::new(Cell::new(None)),
+            Rc::new(Cell::new(0)),
         )
     }
 
@@ -302,14 +308,30 @@ impl TextInputState {
     /// Call `on_event` for what happens in this input, for as long as the returned subscription is kept: the view that
     /// owns the state keeps it beside the state. Focus changes are not reported; the focus coordinator owns focus.
     ///
-    /// Subscribe once per state. Subscriptions share the record of the last reported text, so a second one would miss
-    /// the changes the first had already reported.
+    /// One subscriber per state, clones included, at a time. Subscriptions share the record of the last reported text
+    /// and the last Enter's held flag, so the first one takes every edit and a second never hears of one (and reads
+    /// every Enter as not held). Nothing on screen shows that: both Credentials editors once watched a field whose
+    /// [`crate::drafts::DraftInput`] already held its subscription, and an error and a pending file read that an edit
+    /// should have cleared stayed. A field a draft owns is watched through the draft.
+    ///
+    /// Debug builds panic, naming the call that subscribed second, when a new subscription becomes active while another
+    /// to the same state is still kept. GPUI activates a subscription only once the outermost update that made it has
+    /// returned, so replacing one by assignment (`self.events = state.subscribe(..)`) is fine: the old one is dropped
+    /// by then. A detached subscription counts as kept for the rest of the state's life, even after its view is gone,
+    /// so detaching is not for a field another view will watch later.
+    #[track_caller]
     pub fn subscribe<V: 'static>(
         &self,
         window: &mut Window,
         cx: &mut Context<V>,
         on_event: impl Fn(&mut V, TextInputEvent, &mut Window, &mut Context<V>) + 'static,
     ) -> Subscription {
+        let kept = self.4.clone();
+        // How many others were kept as this one was made.
+        let others = kept.get();
+        kept.set(others + 1);
+        #[cfg(debug_assertions)]
+        let caller = std::panic::Location::caller();
         let last = self.1.clone();
         let held = self.3.clone();
         // Kit emits its Enter event in a growing box too, after typing the line break; there it is an edit, not a
@@ -342,7 +364,7 @@ impl TextInputState {
             };
             on_event(view, event, window, cx);
         };
-        match &self.0 {
+        let events = match &self.0 {
             Field::Line(input) => cx.subscribe_in(
                 input,
                 window,
@@ -357,7 +379,27 @@ impl TextInputState {
                     report(view, event, area.read(cx).value(), window, cx)
                 },
             ),
+        };
+        // Checked when GPUI activates the new subscription rather than now: activation is a deferred effect queued
+        // just above (`App::new_subscription`), and effects run in order, so this runs right after it. Checked any
+        // earlier, a replacement by assignment would still count the subscription it replaces, which is dropped only
+        // once this call returns. Only a subscription made while another was kept can fail, so of two the later one
+        // does, and the panic names the call that subscribed second even when both were made in one update.
+        #[cfg(debug_assertions)]
+        {
+            let kept = kept.clone();
+            cx.defer(move |_| {
+                assert!(
+                    others == 0 || kept.get() <= 1,
+                    "TextInputState::subscribe at {caller}: the field already has a subscription, and a state takes \
+                     one subscriber, since a second never hears of an edit. Keep one subscription, or watch a field \
+                     a DraftInput owns through the draft"
+                )
+            });
         }
+        // Counted down when the caller drops the subscription handed back, which also drops the callback. A detached
+        // subscription is never counted down, although GPUI drops its callback once its view is released.
+        Subscription::join(events, Subscription::new(move || kept.set(kept.get() - 1)))
     }
 }
 
