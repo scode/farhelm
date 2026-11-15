@@ -25,6 +25,7 @@
 mod button;
 mod checkbox;
 mod copy_button;
+mod copy_field;
 mod custom_flags;
 mod dialog;
 mod divider;

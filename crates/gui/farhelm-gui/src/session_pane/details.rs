@@ -1,11 +1,9 @@
 //! The open session's details bar: the slim row under its terminal that names the session, with its status, title,
-//! host and age, in that order.
+//! host, age, managed-checkout mark, directory and command line, in that order.
 //!
 //! SPEC.md, "Terminal experience": "The bottom bar is about one tab-strip row high and shows, in order, status, session
 //! name, host, age, the managed-checkout branch mark when present, directory, and command line." Ported from the old
-//! app's `.session-details` (`session_view.rs` and `app.css` at the reference commit). This is the bar's first half:
-//! the managed-checkout mark, the directory and command copy buttons and their hidden-characters warning are a later
-//! piece of this area, and the bar draws no placeholder for them.
+//! app's `.session-details` (`session_view.rs` and `app.css` at the reference commit).
 //!
 //! Here's the TLDR of the rules:
 //!
@@ -26,27 +24,56 @@
 //!   title and the host name shrink as the old bar's flex items did (`flex: 0 1 auto; min-width: 0`, GPUI's default
 //!   shrink with the minimum taken off), so each gives up width in proportion to its own: a long title gives up the
 //!   most, and in a narrow pane the title and the host are cut together, as the old narrow screens show. Each ends in an
-//!   ellipsis when cut, with its whole value as hover help.
-//! - **Nothing here takes focus yet.** The bar is drawn after the terminal, so the copy buttons that come with the next
-//!   piece will follow the top row and the terminal in Tab's order, as SPEC.md asks; today the bar has no stop at all.
+//!   ellipsis when cut, with its whole value as hover help. The copy fields give way before any of them, as SPEC.md
+//!   says ("ellipsize before the session name or host when the bar runs out of room"): the two sit in one box that
+//!   starts from nothing and takes only the room the other parts leave ([`copy_fields`]), so the title and the host
+//!   are cut only once the fields have nothing left to give. The old bar's `flex: 0 3 auto` alone did not do that:
+//!   flex shrinking is weighted by width, so beside a long command the old title was cut too.
+//! - **The directory and the command line copy themselves.** Each is a [`CopyField`]: the value drawn as itself in the
+//!   monospace face, and a click copies the raw recorded value and says "✓ Copied" for a moment. The directory is
+//!   shown with a personal home folded to `~`, as the session list folds it ([`abbreviate_home`]), except when the
+//!   folded-away account segment holds a presentation-unsafe character: the fold would then hide the escape of a
+//!   character the copy holds. Hover help, accessible description and the copied bytes keep the raw value, as
+//!   "{value} — click to copy" with the value escaped. A value that would show nothing shows the old marker instead
+//!   (`(empty)`, or `(whitespace only: N characters)`; [`placeholder`]), so neither field is ever an unnamed sliver of
+//!   a button.
+//! - **A copy that holds hidden characters says so above the bar.** When the bytes a click copied hold a character
+//!   the screen shows escaped (`<U+202E>`, a line break), the clipboard does not hold what the field reads like, and a
+//!   command pasted into a shell runs the clipboard's version. So while that click's confirmation shows, a warning
+//!   opens upward from the bar, outside the fields, which shrink and could clip it: "⚠ The copied command contains
+//!   hidden characters, displayed as <U+…>" ("folder" for the directory). It warns rather than refusing, since a
+//!   command may hold a line break on purpose. What it says is decided for the bytes copied, so a change of the
+//!   session's values during the confirmation changes neither the warning nor the clipboard.
+//! - **A managed checkout is marked.** A session with a working copy shows the branch glyph after its age, named
+//!   "Managed checkout of {repo}", with the old mark's whole explanation as hover help and description: where the
+//!   checkout is, the session's own folder when it differs, and what happens to the checkout when its last session is
+//!   deleted.
+//! - **Keyboard order.** The bar is drawn after the terminal, so its two copy fields follow the top row and the
+//!   terminal in Tab's order, as SPEC.md asks. Nothing else in the bar takes focus.
 //!
 //! What the bar shows is decided by [`Details::of`], a pure function of the session's row, the registry and the clock,
-//! so tests read it without a window; [`bar`] only lays it out. The pane reads the row from the store by key, so the bar
+//! so tests read it without a window; [`bar`] only lays it out. The one thing it keeps is the copy fields'
+//! confirmations ([`Copies`]), which the pane holds for its open session and drops with it, as the old view's keyed
+//! remount dropped its own. The pane reads the row from the store by key, so the bar
 //! names the open session also while a filter or the list's cap hides it from the list: the session query names the
 //! open session, and the helm keeps it in the pushed collection then (`session_list::filters`, "The query names the
 //! open session"). The bar never takes the title from the filtered listing. With no row in the store at all (before the
 //! helm answers the query naming a newly opened session, say), the pane draws no bar.
 
 use farhelm_helm_client::Collections;
-use farhelm_proto::ui_channel::SessionRow;
+use farhelm_proto::ui_channel::{HostView, SessionRow};
 use gpui::{
-    App, Div, FontWeight, InteractiveElement as _, IntoElement, ParentElement, Pixels,
-    SharedString, Stateful, Styled, div, prelude::FluentBuilder as _, px,
+    App, AppContext as _, Div, Entity, FontWeight, InteractiveElement as _, IntoElement,
+    ParentElement, Pixels, SharedString, StatefulInteractiveElement as _, Styled, div,
+    prelude::FluentBuilder as _, px, relative, svg,
 };
 
-use crate::components::{HoverHelp, Role, StatusMark};
+use crate::assets::Icon;
+use crate::components::{CopyFeedback, CopyField, HoverHelp, Role, StatusMark};
 use crate::host_text::{self, HostSentence, HostText, Line};
 use crate::hosts::identity;
+use crate::layers;
+use crate::session_list::abbreviate_home;
 use crate::session_list::age::{self, Age};
 use crate::session_list::row_marks::{self, HostMark, Locality};
 use crate::session_list::status::{self, EndedWords, Live};
@@ -66,6 +93,14 @@ pub(crate) const HOST_MARK_ID: &str = "session-details-host";
 pub(crate) const HOST_NAME_ID: &str = "session-details-host-name";
 /// The age's id.
 pub(crate) const AGE_ID: &str = "session-details-age";
+/// The managed-checkout mark's id.
+pub(crate) const CHECKOUT_ID: &str = "session-details-checkout";
+/// The directory's copy field's id.
+pub(crate) const DIRECTORY_ID: &str = "session-details-directory";
+/// The command line's copy field's id.
+pub(crate) const COMMAND_ID: &str = "session-details-command";
+/// The hidden-characters warning's id.
+pub(crate) const WARNING_ID: &str = "session-details-copy-warning";
 
 /// `.session-details`'s `min-height`, the same as the top row's.
 const MIN_HEIGHT: f32 = 30.;
@@ -76,6 +111,11 @@ const PAD_X: f32 = 10.;
 const GAP: f32 = 10.;
 /// `.session-details-host`'s gap between the host mark and the name.
 const HOST_GAP: f32 = 5.;
+/// The branch glyph's side (`.managed-checkout-glyph`).
+const CHECKOUT_GLYPH: f32 = 12.;
+/// `.copy-warning`'s padding, vertical then horizontal, and its gap above the bar (`bottom: calc(100% + 4px)`).
+const WARNING_PAD: (f32, f32) = (6., 8.);
+const WARNING_GAP: f32 = 4.;
 
 /// The advance of the bundled interface face's `0`, in ems: 1292 of Inter's 2048 units per em
 /// (`assets/fonts/Inter-Regular.ttf`'s `hmtx` entry for the glyph). A CSS `ch` is this width.
@@ -91,6 +131,13 @@ fn badge_max_width() -> Pixels {
     metrics::TEXT_SM * (32. * ZERO_ADVANCE_EM) + px(2. * BADGE_PAD_X)
 }
 
+/// The hidden-characters warning's widest: `.copy-warning`'s `60ch` at its 12-pixel text. The old cap was the smaller of
+/// that and 80% of the window's width; here the warning is held inside the bar's own width instead (see [`warning`]),
+/// which is never wider than the window.
+fn warning_max_width() -> Pixels {
+    metrics::TEXT_SM * (60. * ZERO_ADVANCE_EM)
+}
+
 /// What the bar shows for one session, decided from its row, the registry and the viewer's clock. See the module
 /// docs for the rules each field follows.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -102,6 +149,44 @@ pub(crate) struct Details {
     pub(crate) host: Option<Host>,
     /// The age, or `None` for a stale session, one with no stamp, or a viewer clock that cannot be used.
     pub(crate) age: Option<Age>,
+    /// The managed checkout, or `None` for a session without one.
+    pub(crate) checkout: Option<Checkout>,
+    /// The working directory's copy field.
+    pub(crate) directory: CopyValue,
+    /// The command line's copy field.
+    pub(crate) command: CopyValue,
+}
+
+/// A copy field's two forms of one recorded value: what it draws and what a click copies.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CopyValue {
+    /// What the field draws: the directory with its home folded to `~` where that hides nothing
+    /// ([`directory_label`]), or the command line as recorded.
+    pub(crate) shown: HostText,
+    /// The value as the session recorded it: what a click copies, and what the hover help and description name.
+    pub(crate) raw: HostText,
+    /// What the field draws and is named instead of `shown` when that would show nothing ([`placeholder`]).
+    pub(crate) placeholder: Option<SharedString>,
+}
+
+/// A managed checkout as the bar's mark explains it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Checkout {
+    /// The repository, `owner/name`.
+    pub(crate) repo: HostText,
+    /// The checkout folder's canonical path.
+    pub(crate) path: HostText,
+    /// The session's own folder, when it differs byte for byte from the checkout's path (a subdirectory, or the same
+    /// folder spelled through a symlink), so the explanation does not let the checkout's path stand for it.
+    pub(crate) folder: Option<HostText>,
+    /// Whether the session runs in a disposable environment it owns, where Delete discards the checkout rather than
+    /// moving it to the trash. The old app asked whether the session's host was session-owned and of a provider kind
+    /// (`HostKind::environment_provider`); this asks whether it is session-owned and the helm describes its environment
+    /// (`HostView::environment`), which the helm fills in only for a provider kind's host (from its sandbox's or
+    /// container's binding; never for the local host or an SSH host), so no provider is named here, as AGENTS.md's
+    /// provider rule asks. The two differ only for a provider host whose binding is missing, which reads as an
+    /// ordinary checkout.
+    pub(crate) in_environment: bool,
 }
 
 /// The badge: a live mark, or an ended status's words.
@@ -144,11 +229,23 @@ impl Details {
         } else {
             age::of(row.info.effective_activity(), now)
         };
+        let cwd = row.info.cwd.as_str();
+        let checkout = row.info.working_copy.as_ref().map(|copy| Checkout {
+            repo: HostText::from_host(format!("{}/{}", copy.repo.owner, copy.repo.name)),
+            path: HostText::from_host(copy.canonical_path.as_str()),
+            folder: (cwd != copy.canonical_path).then(|| HostText::from_host(cwd)),
+            in_environment: collections
+                .get::<HostView>(&HostView::key(row.host))
+                .is_some_and(|host| host.is_session_owned && host.environment.is_some()),
+        });
         Details {
             status,
             title: HostText::from_host(row.info.title.as_str()),
             host,
             age,
+            checkout,
+            directory: CopyValue::new(directory_label(cwd), cwd),
+            command: CopyValue::new(row.info.invocation.clone(), &row.info.invocation),
         }
     }
 
@@ -159,11 +256,95 @@ impl Details {
     }
 }
 
-/// The bar for `details`, a running mark drawn at pulse step `pulse` ([`crate::ticker::Pulsing::step`]). Drawn by the
-/// pane on every frame, uncached, like the top row; the screenshot goldens draw it on its own.
-pub(crate) fn bar(details: Details, pulse: u64, cx: &App) -> Stateful<Div> {
+/// `cwd` as the directory field shows it: a personal home folded to `~` as the session list folds it
+/// ([`abbreviate_home`]), unless the fold would remove a presentation-unsafe character. Then the path is shown whole, so
+/// abbreviating it cannot hide the escaped spelling of a character the copy holds (the old bar's `directory_label`).
+pub(crate) fn directory_label(cwd: &str) -> String {
+    let hidden = |text: &str| {
+        text.chars()
+            .filter(|ch| farhelm_proto::text::is_presentation_unsafe(*ch))
+            .count()
+    };
+    let folded = abbreviate_home(cwd);
+    if hidden(&folded) == hidden(cwd) {
+        folded
+    } else {
+        cwd.to_owned()
+    }
+}
+
+impl CopyValue {
+    /// A field showing `shown` (or its marker, when it would show nothing) and copying `raw`.
+    fn new(shown: String, raw: &str) -> Self {
+        CopyValue {
+            placeholder: placeholder(&shown),
+            shown: HostText::from_host(shown),
+            raw: HostText::from_host(raw),
+        }
+    }
+}
+
+/// The app's words for a value that would show nothing: `(empty)` for an empty one, `(whitespace only: N
+/// characters)` for one of ordinary blanks alone; `None` for anything else. The old app's `display_peer` markers, which
+/// its directory field showed. A presentation-unsafe blank (a line break) shows as its escape, so it counts as
+/// something shown. The old command field had no marker and showed an empty command as nothing at all; here it takes
+/// the same markers, since a button that shows and is named with nothing is no use to anyone.
+pub(crate) fn placeholder(shown: &str) -> Option<SharedString> {
+    if shown.is_empty() {
+        return Some("(empty)".into());
+    }
+    shown
+        .chars()
+        .all(|ch| ch.is_whitespace() && !farhelm_proto::text::is_presentation_unsafe(ch))
+        .then(|| format!("(whitespace only: {} characters)", shown.chars().count()).into())
+}
+
+/// The open session's copy fields' confirmations, the one state the bar keeps. The pane makes one with each terminal it
+/// mounts and drops it with that terminal, so a confirmation never outlives its session's selection: choosing another
+/// session and coming back starts with neither field confirming.
+#[derive(Clone)]
+pub(crate) struct Copies {
+    directory: Entity<CopyFeedback>,
+    command: Entity<CopyFeedback>,
+}
+
+impl Copies {
+    /// Two fields at rest.
+    pub(crate) fn new(cx: &mut App) -> Self {
+        Copies {
+            directory: cx.new(|_| CopyFeedback::default()),
+            command: cx.new(|_| CopyFeedback::default()),
+        }
+    }
+
+    /// The command field's confirmation, for a screenshot scene that shows one without a click.
+    #[cfg(test)]
+    pub(crate) fn command(&self) -> &Entity<CopyFeedback> {
+        &self.command
+    }
+
+    /// The hidden-characters warning to show now, if any: for the directory's confirmed click first, as the old bar
+    /// chose, then the command's. Read while drawing, so the bar redraws when either confirmation changes.
+    pub(crate) fn warning(&self, cx: &App) -> Option<&'static str> {
+        if self.directory.read(cx).copied_hidden() {
+            Some("⚠ The copied folder contains hidden characters, displayed as <U+…>")
+        } else if self.command.read(cx).copied_hidden() {
+            Some("⚠ The copied command contains hidden characters, displayed as <U+…>")
+        } else {
+            None
+        }
+    }
+}
+
+/// The bar for `details`, its copy fields confirming as `copies` records, a running mark drawn at pulse step `pulse`
+/// ([`crate::ticker::Pulsing::step`]). Drawn by the pane on every frame, uncached, like the top row; the screenshot
+/// goldens draw it on its own.
+///
+/// The bar itself clips what does not fit, so it is wrapped in a box that does not: the hidden-characters warning hangs
+/// above the bar from that box, over the bottom of the terminal, where the bar's clip cannot reach it.
+pub(crate) fn bar(details: Details, copies: &Copies, pulse: u64, cx: &App) -> Div {
     let palette = theme::palette(cx);
-    div()
+    let row = div()
         .id(BAR_ID)
         .debug_selector(|| BAR_ID.into())
         .flex()
@@ -183,6 +364,130 @@ pub(crate) fn bar(details: Details, pulse: u64, cx: &App) -> Stateful<Div> {
         .child(title(&details.title, palette))
         .children(details.host.map(|host| host_part(host, palette)))
         .children(details.age.map(age_part))
+        .children(
+            details
+                .checkout
+                .map(|checkout| checkout_mark(checkout, palette)),
+        )
+        .child(copy_fields(details.directory, details.command, copies));
+    div()
+        .relative()
+        .flex_none()
+        .child(row)
+        .children(copies.warning(cx).map(|text| warning(text, palette)))
+}
+
+/// The managed-checkout mark: the branch glyph in the quiet ink, which never shrinks, named for the repository, with the
+/// old mark's explanation as its hover help and description (`ManagedCheckoutMark` in `icons.rs` at the reference
+/// commit, which said each host value escaped and kept the session's own folder in view when it was not the checkout's).
+fn checkout_mark(checkout: Checkout, palette: &Palette) -> Div {
+    let name = HostSentence::new(CHECKOUT_ID)
+        .text("Managed checkout of ")
+        .host(&checkout.repo)
+        .accessible_name();
+    let mut help = HostSentence::new(format!("{CHECKOUT_ID}-help"))
+        .text("Managed checkout of ")
+        .host(&checkout.repo)
+        .text(" at ")
+        .host(&checkout.path)
+        .text(".");
+    if let Some(folder) = &checkout.folder {
+        help = help.text(" Session folder: ").host(folder).text(".");
+    }
+    help = help.text(if checkout.in_environment {
+        " Delete discards this checkout with its session, without moving it to the trash, unless another session still \
+         uses it. Deleting the environment's last session, or the whole environment, permanently removes every checkout \
+         and unpushed change in it."
+    } else {
+        " Farhelm made the checkout folder for its first session. When the last session using it is deleted, the \
+         checkout moves to the trash."
+    });
+    div().flex_none().child(
+        StatusMark::new(
+            CHECKOUT_ID,
+            name,
+            HoverHelp::sentence(help),
+            Role::Label,
+            "",
+        )
+        .content(
+            div().flex().items_center().child(
+                svg()
+                    .path(Icon::Branch.path())
+                    .size(px(CHECKOUT_GLYPH))
+                    .text_color(theme::color(palette.fg_1)),
+            ),
+        ),
+    )
+}
+
+/// The two copy fields in one box that starts from nothing and grows into whatever width the bar's other parts leave
+/// (`flex: 1 1 0`, with no minimum), so the fields are what gives way first and the title and host keep their width
+/// while the fields have any (SPEC.md). Inside the box each field still takes its value's width and the two shrink as
+/// the old fields did (three times an ordinary item's), which only decides how the box's width is split between them.
+/// The box adds no width the bar has to find, since it asks for none, and with room to spare it fills the rest of the
+/// bar while the fields stay at their values' width at its left, as the old fields sat after the age.
+fn copy_fields(directory: CopyValue, command: CopyValue, copies: &Copies) -> Div {
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .flex_1()
+        .min_w_0()
+        .gap(px(GAP))
+        .child(copy_field(DIRECTORY_ID, directory, &copies.directory))
+        .child(copy_field(COMMAND_ID, command, &copies.command))
+}
+
+/// One of the bar's copy fields under `id`, for `value`, its confirmation kept in `feedback`.
+fn copy_field(id: &'static str, value: CopyValue, feedback: &Entity<CopyFeedback>) -> CopyField {
+    // A placeholder names the field in place of this label (`CopyField::placeholder`).
+    let label = HostSentence::new(id).host(&value.shown).accessible_name();
+    let help = HostSentence::new(format!("{id}-help"))
+        .host(&value.raw)
+        .text(" — click to copy");
+    CopyField::new(
+        id,
+        label,
+        HoverHelp::sentence(help),
+        &value.shown,
+        value.raw.raw().to_owned(),
+        feedback,
+    )
+    .placeholder(value.placeholder)
+}
+
+/// The hidden-characters warning, opening upward from the bar 10 pixels in from its left edge, as the old
+/// `.copy-warning` did: the raised ground, the bright ink at 12 pixels, the menu shadow, wrapping rather than clipping.
+/// It is held inside the bar's width (10 pixels clear of either edge) where the old one was capped at 80% of the window
+/// (a recorded deviation), so it stays inside the pane and the window however long it is. It takes no input: it has no
+/// listener, so GPUI gives it no hitbox, and the terminal under it keeps every press.
+fn warning(text: &'static str, palette: &Palette) -> Div {
+    div()
+        .absolute()
+        .left(px(PAD_X))
+        .right(px(PAD_X))
+        .bottom(relative(1.))
+        .pb(px(WARNING_GAP))
+        .flex()
+        .flex_row()
+        .child(
+            div()
+                .id(WARNING_ID)
+                .debug_selector(|| WARNING_ID.into())
+                .role(Role::Status)
+                .aria_label(text)
+                .min_w_0()
+                .max_w(warning_max_width())
+                .py(px(WARNING_PAD.0))
+                .px(px(WARNING_PAD.1))
+                .bg(theme::color(palette.bg_2))
+                .text_color(theme::color(palette.fg_bright))
+                .text_size(metrics::TEXT_SM)
+                .rounded(metrics::RADIUS_MD)
+                .shadow(layers::menu_shadow(palette))
+                .child(text),
+        )
 }
 
 /// The status badge. A live status is the row's mark alone, which never shrinks, named by its word and helped by it

@@ -67,6 +67,11 @@ pub(crate) struct Fixture {
     notifications: Option<(Value, u64)>,
     /// How many terminal tabs the row lists (`tab-0`, `tab-1`, ...); none unless a test asks.
     tabs: usize,
+    /// The command line as the session recorded it, when the test names one; else the helm fixture's.
+    invocation: Option<String>,
+    /// The session's managed checkout in the helm's wire form (`null` for none), when the test names one; else the
+    /// helm fixture's, a checkout of `octo/widgets`.
+    working_copy: Option<Value>,
 }
 
 pub(crate) fn session(key: &'static str) -> Fixture {
@@ -86,6 +91,8 @@ pub(crate) fn session(key: &'static str) -> Fixture {
         screen_yolo: false,
         notifications: None,
         tabs: 0,
+        invocation: None,
+        working_copy: None,
     }
 }
 
@@ -154,6 +161,16 @@ impl Fixture {
         self.notifications = Some((notifications, read_through));
         self
     }
+    /// The session with `invocation` as its recorded command line (display only: its launch is unchanged).
+    pub(crate) fn invocation(mut self, invocation: &str) -> Self {
+        self.invocation = Some(invocation.to_owned());
+        self
+    }
+    /// The session with no managed checkout (the helm fixture's row has one).
+    pub(crate) fn unmanaged(mut self) -> Self {
+        self.working_copy = Some(Value::Null);
+        self
+    }
 
     pub(crate) fn entry(&self) -> KeyedEntry {
         let mut entry = session_entry(self.key);
@@ -188,6 +205,12 @@ impl Fixture {
                 .map(|tab| json!({ "id": format!("tab-{tab}") }))
                 .collect::<Vec<_>>()
         );
+        if let Some(invocation) = &self.invocation {
+            value["invocation"] = json!(invocation);
+        }
+        if let Some(working_copy) = &self.working_copy {
+            value["working_copy"] = working_copy.clone();
+        }
         entry
     }
 

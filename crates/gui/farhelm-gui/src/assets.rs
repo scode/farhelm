@@ -83,6 +83,10 @@
 //!
 //! The Lock, the Credentials section's glyph, is the old app's `ActionGlyph::Lock`, in the 14-unit action box with the
 //! 1.2 stroke.
+//!
+//! The Clipboard is a new drawing, in the 14-unit action box with the 1.2 stroke: the old details bar's copy fields
+//! wrote the clipboard emoji (U+1F4CB) in text, which the bundled faces do not have and which would take the system's
+//! color emoji rather than the field's ink.
 
 use std::borrow::Cow;
 
@@ -299,6 +303,9 @@ pub enum Icon {
     Uninstall,
     /// A padlock: the Settings dialog's Credentials section (the old app's `ActionGlyph::Lock`).
     Lock,
+    /// A clipboard: the details bar's copy fields show it under the pointer and keyboard focus (the old clipboard
+    /// emoji).
+    Clipboard,
 }
 
 impl Icon {
@@ -386,6 +393,7 @@ impl Icon {
         Icon::TrashFull,
         Icon::Uninstall,
         Icon::Lock,
+        Icon::Clipboard,
     ];
 }
 
@@ -472,6 +480,7 @@ impl Icon {
             Icon::TrashFull => "icons/trash-full.svg",
             Icon::Uninstall => "icons/uninstall.svg",
             Icon::Lock => "icons/lock.svg",
+            Icon::Clipboard => "icons/clipboard.svg",
         }
     }
 }
@@ -595,6 +604,7 @@ impl Assets {
             "icons/adjust.svg" => Some(include_bytes!("../assets/icons/adjust.svg")),
             "icons/info.svg" => Some(include_bytes!("../assets/icons/info.svg")),
             "icons/feedback.svg" => Some(include_bytes!("../assets/icons/feedback.svg")),
+            "icons/clipboard.svg" => Some(include_bytes!("../assets/icons/clipboard.svg")),
             _ => None,
         }
     }

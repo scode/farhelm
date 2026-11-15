@@ -3,7 +3,8 @@
 //! feature-drawn body, a header tile and a footer note, and the prompt anchored to a row's menu button), the keyboard
 //! focus ring, host-supplied text over its spoofing corpus, the notice banner, the terminal's styles and cursor shapes,
 //! an attached terminal's exit line and status line, the scrim a pending Delete puts over the open session's terminal,
-//! the open session's details bar (every status and host it draws differently, and a narrow one), the session list (a
+//! the open session's details bar (every status and host it draws differently, and a narrow one, and once more with a
+//! copy confirmed and its hidden-characters warning), the session list (a
 //! fleet of every status a row draws, the open row on a host the helm cannot reach, an empty fleet, a row's open menu,
 //! a row's notification list, a row's Delete question, and a pending and a refused Delete), the Rename editor, the
 //! Send feedback dialog (as it opens, and with a remembered contact), the select closed and open, the YOLO confirmation
@@ -1754,7 +1755,11 @@ fn terminal_delete_scrim(state: &SceneState, _: &mut Window, cx: &mut App) -> An
 /// an ellipsis at the badge's widest, a session nothing has classified (no badge, its age kept), one whose helm sent no
 /// host name (no host), and one on a host the helm cannot reach (its title and host only). A host the bar cannot place
 /// (no mark) needs a host list that was never read, which this scene's registry rules out; the details tests pin it.
-/// The fake and its connection are kept for the scene's life.
+/// Every session has the helm fixture's managed checkout but the one without a host name, so one bar shows no branch
+/// mark, and a short command line but the exited one. The copy fields give up their width before the title and host
+/// do (SPEC.md): a crowded bar shows them cut or not at all while its title and host are whole, and only a bar whose
+/// title and host alone do not fit (the exited one's, the launch failure's) cuts those. The fake, its connection and
+/// the bars' (idle) copy confirmations are kept for the scene's life.
 fn session_details_bar_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
@@ -1764,6 +1769,7 @@ fn session_details_bar_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
             .status(state)
             .activity(TEST_NOW - ago)
             .seen(Some(TEST_NOW - ago))
+            .invocation("claude --model opus")
     };
     let state_of = |state: &str| serde_json::json!({ "state": state });
     let rows = [
@@ -1779,7 +1785,8 @@ fn session_details_bar_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
             3 * 3_600,
         )
         .annotation("stopped by user")
-        .host_name("deploy@buildbox.example.invalid"),
+        .host_name("deploy@buildbox.example.invalid")
+        .invocation("codex -m gpt-5 -c 'model_reasoning_effort=high' --yolo"),
         row(
             "h",
             "Migrate the auth tokens",
@@ -1805,7 +1812,8 @@ fn session_details_bar_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
             state_of("idle"),
             9 * 86_400,
         )
-        .host_name(""),
+        .host_name("")
+        .unmanaged(),
         row(
             "g",
             "Benchmark on the bench box",
@@ -1825,19 +1833,30 @@ fn session_details_bar_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
             remote(3, "bench@bench.example.invalid"),
         ]),
     ]);
+    let copies = crate::session_pane::details::Copies::new(cx);
     let mut keep = state.keep.borrow_mut();
     keep.push(Box::new(helm));
     keep.push(Box::new(connection));
+    keep.push(Box::new(copies));
+}
+
+/// The copy confirmations a details bar scene's setup kept, or `None` before the setup has run (the scene then draws
+/// nothing, as it does before its store exists).
+fn kept_copies(state: &SceneState) -> Option<crate::session_pane::details::Copies> {
+    state.keep.borrow().iter().find_map(|kept| {
+        kept.downcast_ref::<crate::session_pane::details::Copies>()
+            .cloned()
+    })
 }
 
 /// The bars of [`session_details_bar_setup`]'s sessions in listing order, one under another at a main pane's width,
 /// then the running one again in a pane too narrow for it, where its title and host are cut together. Each is drawn
 /// from the store as the pane draws it, the running mark on the pulse's first (full) step.
-fn session_details_bars(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+fn session_details_bars(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
     use crate::session_pane::details::{Details, bar};
     use farhelm_proto::ui_channel::SessionRow;
     let now = crate::session_list::age::seconds(ticker::wall_now(cx));
-    let Some(store) = session::current_store(cx) else {
+    let (Some(copies), Some(store)) = (kept_copies(state), session::current_store(cx)) else {
         return div().into_any_element();
     };
     let collections = store.read(cx).collections();
@@ -1857,9 +1876,58 @@ fn session_details_bars(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElem
         .children(
             shown
                 .into_iter()
-                .map(|details| div().w(px(620.)).child(bar(details, 0, cx))),
+                .map(|details| div().w(px(620.)).child(bar(details, &copies, 0, cx))),
         )
-        .children(narrow.map(|details| div().w(px(300.)).child(bar(details, 0, cx))))
+        .children(narrow.map(|details| div().w(px(300.)).child(bar(details, &copies, 0, cx))))
+        .into_any_element()
+}
+
+/// The command line a copy-warning scene's session recorded: a right-to-left override and a line break inside an
+/// ordinary command, the old bar's hidden-characters case (`header.spec.ts`, "details copy shows escaped peer text").
+const HIDDEN_COMMAND: &str = "codex --prompt \u{202E}abc\n# tail";
+
+/// One running session on the local host whose command line holds hidden characters, its command field confirming a
+/// click that copied them (as a click would leave it, without one: the scene's clock never moves, so the confirmation
+/// holds). The fake, its connection and the confirmations are kept for the scene's life.
+fn session_details_copy_warning_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    let row = session("a")
+        .title("Refactor the API client")
+        .activity(TEST_NOW - 120)
+        .seen(Some(TEST_NOW - 120))
+        .host(1)
+        .host_name(crate::hosts::identity::LOCAL_NAME)
+        .cwd("/home/user/src/widgets")
+        .invocation(HIDDEN_COMMAND);
+    helm.connect(vec![listing(&["a"], &[row]), hosts(&[local()])]);
+    let copies = crate::session_pane::details::Copies::new(cx);
+    copies
+        .command()
+        .update(cx, |feedback, cx| feedback.confirm(HIDDEN_COMMAND, cx));
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    keep.push(Box::new(copies));
+}
+
+/// [`session_details_copy_warning_setup`]'s bar at a main pane's width, with room above it for the warning it opens
+/// upward: the command field reads "✓ Copied" and the warning names the command.
+fn session_details_copy_warning(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    use crate::session_pane::details::{Details, bar};
+    use farhelm_proto::ui_channel::SessionRow;
+    let now = crate::session_list::age::seconds(ticker::wall_now(cx));
+    let (Some(copies), Some(store)) = (kept_copies(state), session::current_store(cx)) else {
+        return div().into_any_element();
+    };
+    let collections = store.read(cx).collections();
+    let shown = collections
+        .get::<SessionRow>("a")
+        .map(|row| Details::of(row, collections, now));
+    div()
+        .w(px(620.))
+        .pt(px(48.))
+        .children(shown.map(|details| bar(details, &copies, 0, cx)))
         .into_any_element()
 }
 
@@ -4057,6 +4125,12 @@ static SCENES: &[Scene] = &[
         size: (644., 368.),
         draw: session_details_bars,
         setup: session_details_bar_setup,
+    },
+    Scene {
+        name: "session-details-copy-warning",
+        size: (644., 102.),
+        draw: session_details_copy_warning,
+        setup: session_details_copy_warning_setup,
     },
     Scene {
         name: "session-list",
