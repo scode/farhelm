@@ -772,7 +772,9 @@ the caller decides what, if anything, to show. The read helper is that send plus
 read or a keyless send like any other. Where an area says that a start was refused because its key already has work in
 flight, it gives one shared reason (`NotStarted::BUSY_REASON`) after a lead-in of its own that names what did not happen
 ("Not saved:", "Not started:"), as the migration's orchestrator decided on 2026-11-14, so that a refused save never
-reads as a start that did not happen.
+reads as a start that did not happen. The shared reason is for busy lines with no old-app wording to port: a line that
+ports the old app's words verbatim keeps them (the terminal's "Another tunnel action is still waiting", for one), as the
+migration's orchestrator decided the same day.
 
 Whether a kind of work creates a session, and whether it changes the host registry, is answered by the kind of work
 itself (`Work::creates_a_session`, `Work::changes_host_registry`), each an exhaustive classification that a new kind of
