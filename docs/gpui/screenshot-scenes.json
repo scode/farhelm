@@ -697,6 +697,11 @@
       "reference": null
     },
     {
+      "golden": "session-details-bar",
+      "title": "The open session's details bar under its terminal: running on the local host, waiting, exited with a stop annotation, interrupted, a launch failure cut short, unclassified (no badge), no host name, and stale (title and host only), then the running one in a narrow pane",
+      "reference": "main-running-session"
+    },
+    {
       "golden": "session-list",
       "title": "The session list: every status a row draws, with the open session selected",
       "reference": "main-running-session"

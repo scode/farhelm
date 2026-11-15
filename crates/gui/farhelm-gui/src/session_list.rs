@@ -103,7 +103,7 @@
 //! control), compact rows, marking, pins, the row menu's other commands, and the rail's host status, the foot's
 //! controls other than Hosts and Settings, Add host and expansion.
 
-mod age;
+pub(crate) mod age;
 pub(crate) mod delete;
 pub(crate) mod filters;
 pub(crate) mod host_rail;
@@ -114,10 +114,10 @@ pub(crate) mod rename;
 pub(crate) mod replace;
 pub(crate) mod restart;
 mod row;
-mod row_marks;
+pub(crate) mod row_marks;
 pub(crate) mod seen;
 pub(crate) mod selection;
-mod status;
+pub(crate) mod status;
 pub(crate) mod stop;
 
 #[cfg(test)]
