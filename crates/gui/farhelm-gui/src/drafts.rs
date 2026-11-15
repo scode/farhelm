@@ -187,6 +187,9 @@ impl DraftInput {
     /// A field showing `value` (the raw value from the store) over a draft of it, untouched. `field` reaches this
     /// within the editor `V`; `on_submit` runs when the user presses Enter in the field (an editor's Save, usually),
     /// which never happens in a growing box, where Enter types a line break.
+    ///
+    /// The draft owns `input`'s one subscription ([`TextInputState::subscribe`]): the editor must not subscribe to
+    /// `input` or a clone of it, and follows the user's edits through [`DraftInput::draft`] instead.
     pub fn new<V: 'static>(
         value: &str,
         input: TextInputState,
@@ -213,7 +216,7 @@ impl DraftInput {
         &self.draft
     }
 
-    /// The field's state, for the editor to draw.
+    /// The field's state, for the editor to draw. The draft owns its subscription; the editor never subscribes to it.
     pub fn input(&self) -> &TextInputState {
         &self.input
     }
