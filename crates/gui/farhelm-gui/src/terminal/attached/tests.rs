@@ -547,6 +547,276 @@ fn a_new_size_is_sent_once(cx: &mut TestAppContext) {
     );
 }
 
+/// The pane owns the program's size (SPEC.md, "Terminal experience": "the PTY resizes to that client"), so a first
+/// screen that arrives at another size than the pane fits (an attach-time resize the supervisor clamped or lost) must
+/// be corrected, once, or the program keeps drawing for a grid the pane does not show. Specified: the attach asks for
+/// the fitted size; when its replay says hello at two columns fewer, the owner sends one resize to the fitted size, and
+/// a later redraw sends nothing more; after a dropped link, the reconnect's first screen at the wrong size gets one
+/// resize again, and so does the first screen of a Take control after another window took the session over (the
+/// likeliest wrong size: that window resized the program to its own pane).
+#[gpui::test]
+fn a_first_screen_at_another_size_is_resized_once(cx: &mut TestAppContext) {
+    let h = harness(cx);
+    let asked = h.fake().attach();
+    assert_eq!(
+        (asked.cols, asked.rows),
+        FITTED,
+        "the premise: the attach asks for the fit"
+    );
+    for message in screen(FITTED.0 - 2, FITTED.1, "narrow", serde_json::Value::Null) {
+        h.fake().output(message);
+    }
+    h.fake().replay_complete();
+    settle(h.cx);
+    assert_eq!(
+        h.fake().received(),
+        [FakeTerminalRequest::Resize {
+            cols: FITTED.0,
+            rows: FITTED.1
+        }]
+    );
+    redraw(h.cx);
+    assert_eq!(h.fake().received(), [], "once");
+
+    // A reconnect is a new attach: its first screen at the wrong size is corrected too.
+    h.fake().drop_link();
+    settle(h.cx);
+    h.fake().attach();
+    for message in screen(FITTED.0 - 2, FITTED.1, "narrow", serde_json::Value::Null) {
+        h.fake().output(message);
+    }
+    h.fake().replay_complete();
+    settle(h.cx);
+    assert_eq!(
+        h.fake().received(),
+        [FakeTerminalRequest::Resize {
+            cols: FITTED.0,
+            rows: FITTED.1
+        }],
+        "and after a reconnect"
+    );
+
+    // Take control never passes through a reconnect, and the attach before it already sent its correction.
+    h.fake().detach(Some(DetachCode::TakenOver), "taken over");
+    settle(h.cx);
+    let owner = h.owner.clone();
+    h.cx.update(|_, cx| owner.update(cx, |owner, cx| owner.take_control(cx)));
+    settle(h.cx);
+    h.fake().attach();
+    for message in screen(FITTED.0 + 3, FITTED.1, "wide", serde_json::Value::Null) {
+        h.fake().output(message);
+    }
+    h.fake().replay_complete();
+    settle(h.cx);
+    assert_eq!(
+        h.fake().received(),
+        [
+            FakeTerminalRequest::TakeControl,
+            FakeTerminalRequest::Resize {
+                cols: FITTED.0,
+                rows: FITTED.1
+            }
+        ],
+        "and after Take control"
+    );
+}
+
+/// What the bundled font measures at 13 points, 0.6 and 1.32 times the size (the terminal module's cell test pins
+/// that). Its 7.8-pixel advance is no whole number of pixels, which is where a fit that depended on the size it fitted
+/// before could round a column differently; the old grid-fit test used the same advance for that reason.
+fn thirteen_points() -> CellMetrics {
+    CellMetrics::new(7.8, 17.16, 13.).unwrap()
+}
+
+/// The pane, at the origin, that leaves the grid `room` pixels for its columns and `height` for its rows: the room
+/// plus the scrollbar's column, and the padding on each side.
+fn pane_for(room: f32, height: f32) -> Bounds<Pixels> {
+    let width = room + SCROLLBAR_WIDTH + 2. * PANE_PADDING;
+    let pane = gpui::size(px(width), px(height + 2. * PANE_PADDING));
+    Bounds::new(point(px(0.), px(0.)), pane)
+}
+
+/// A new owner of `s1`'s agent terminal at `metrics`, for the harness's UI session, whose opener reports into the
+/// returned slot. It is drawn nowhere: a test fits it by calling `fitted` as the pane does after each frame, which
+/// lets it name a display scale the test window does not have.
+fn undrawn_owner(h: &mut Harness, metrics: CellMetrics) -> (Entity<AttachedTerminal>, Opened) {
+    let connection = h.connection.clone();
+    let slot: Opened = Rc::default();
+    let opened = slot.clone();
+    let owner = h.cx.update(|_, cx| {
+        let session = connection.read(cx).session().cloned().unwrap();
+        let target = TerminalTarget {
+            session: "s1".into(),
+            tab: None,
+            lease: AttachmentLease::new(),
+        };
+        cx.new(|cx| AttachedTerminal::new(&session, target, metrics, opener(slot), cx))
+    });
+    (owner, opened)
+}
+
+/// A new owner of `s1`'s agent terminal at `metrics`, in a window of its own, in a pane of `size` from its very first
+/// frame: what a session switch makes, a fresh terminal in the pane the last one was drawn in. Returns its opener's
+/// slot, the pane's size and the window's context.
+fn owner_window(
+    h: &mut Harness,
+    metrics: CellMetrics,
+    size: (f32, f32),
+) -> (Opened, Rc<Cell<(f32, f32)>>, VisualTestContext) {
+    let connection = h.connection.clone();
+    let slot: Opened = Rc::default();
+    let opened = slot.clone();
+    let (pane, mut window) = test_support::another_window(h.cx, |window, cx| {
+        let session = connection.read(cx).session().cloned().unwrap();
+        let target = TerminalTarget {
+            session: "s1".into(),
+            tab: None,
+            lease: AttachmentLease::new(),
+        };
+        let owner = cx.new(|cx| AttachedTerminal::new(&session, target, metrics, opener(slot), cx));
+        let pane = Pane::new(owner, None, window, cx);
+        pane.size.set(size);
+        pane
+    });
+    let size = window.update(|_, cx| pane.read(cx).size.clone());
+    (opened, size, window)
+}
+
+/// The resizes `opened`'s fake stream received since the last look, as sizes.
+fn resizes(opened: &Opened) -> Vec<(u16, u16)> {
+    let mut opened = opened.borrow_mut();
+    let fake = &mut opened.as_mut().expect("the owner opened a stream").0;
+    let received = fake.received().into_iter();
+    received
+        .filter_map(|request| match request {
+            FakeTerminalRequest::Resize { cols, rows } => Some((cols, rows)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The size `opened`'s stream was opened at.
+fn opened_at(opened: &Opened) -> (u16, u16) {
+    let asked = opened
+        .borrow()
+        .as_ref()
+        .expect("the owner opened a stream")
+        .1;
+    (asked.cols, asked.rows)
+}
+
+/// The same pane must give the program the same size however the pane got there: the old app once fitted from its
+/// current size, so with a fractional advance a pane that grew by two pixels kept 84 columns where a fresh mount of it
+/// fitted 83, and the program's size depended on the window's history. GPUI's fit reads only the pane, the cell and
+/// the scale, so this is a fence against reintroducing that.
+///
+/// Specified: at 13 points (a 7.8-pixel advance) and scale 1.5, an owner fitted to rooms of 800x500, 653x400 and
+/// 655x402 in turn opens at 102x28 and sends one resize, to exactly the size a fresh owner opens at for 655x402, which
+/// is 83 columns.
+#[gpui::test]
+fn a_resize_history_ends_at_the_size_a_fresh_owner_fits(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let history = [
+        pane_for(800., 500.),
+        pane_for(653., 400.),
+        pane_for(655., 402.),
+    ];
+    let (resized, resized_opened) = undrawn_owner(&mut h, thirteen_points());
+    for pane in history {
+        h.cx.update(|_, cx| resized.update(cx, |owner, cx| owner.fitted(pane, 1.5, cx)));
+    }
+    let (fresh, fresh_opened) = undrawn_owner(&mut h, thirteen_points());
+    h.cx.update(|_, cx| fresh.update(cx, |owner, cx| owner.fitted(history[2], 1.5, cx)));
+    settle(h.cx);
+    let fresh_size = opened_at(&fresh_opened);
+    assert_eq!(fresh_size.0, 83, "the premise: 655 pixels hold 83 columns");
+    assert_eq!(
+        opened_at(&resized_opened),
+        (102, 28),
+        "the premise: the history starts elsewhere"
+    );
+    assert_eq!(resizes(&resized_opened), [fresh_size]);
+}
+
+/// The fit is the old app's documented formula at every text size and display scale, with the bundled font's real
+/// measurements: a fit that drifted at one size or scale would give the program another size than the old app did
+/// only for the users at that zoom or on that display. The formula is restated here from the old grid-fit test rather
+/// than taken from the code, so a change to either shows up.
+///
+/// Specified: for every text size from 9 to 28 points at scales 1, 1.5 and 2, a room of 987.6 by 595.3 pixels (no
+/// round multiple of any cell, and fractions the fit must drop) fits `floor((987 - 14) / w)` columns and
+/// `floor(595 / h)` rows, clamped to 2x1 and 1000x1000, where the measured character's advance `a` and height `c` give
+/// `w = round(a * s * 80 / s) / 80` and `h = round(ceil(c * s) * 24 / s) / 24` at scale `s`.
+#[test]
+fn the_fit_is_the_documented_formula_at_every_text_size_and_scale() {
+    let mut cx = test_support::headless().unwrap();
+    let (room, height) = (987.6_f32, 595.3_f32);
+    for points in super::super::TextSize::MIN..=super::super::TextSize::MAX {
+        let m = cx
+            .update(|cx| CellMetrics::measure(super::super::TextSize::new(points), cx))
+            .unwrap();
+        let (a, c) = (f64::from(m.char_width), f64::from(m.char_height));
+        for s in [1., 1.5, 2.] {
+            let w = (a * s * 80. / s).round() / 80.;
+            let h = ((c * s).ceil() * 24. / s).round() / 24.;
+            let cols = ((987. - 14.) / w).floor().clamp(2., 1000.) as u16;
+            let rows = (595. / h).floor().clamp(1., 1000.) as u16;
+            assert_eq!(
+                fit(m, room, height, s as f32),
+                Some((cols, rows)),
+                "{points} points at scale {s}"
+            );
+        }
+    }
+}
+
+/// Switching sessions makes a new terminal in the pane the last one was drawn in, and it must ask for the size the
+/// program already has: an attach at another size, or a resize right after one, makes the program redraw, which the
+/// old app's switch test watched for as a quiet program's full-width text and rules moving on a switch back. Run at
+/// 13 points like the old test; a fit that depended on the size fitted before is guarded by
+/// `a_resize_history_ends_at_the_size_a_fresh_owner_fits`, not here.
+///
+/// Specified: a live owner taken through two pane sizes ends at another size than it opened at; after its window
+/// closes, a new owner in a pane of the last size opens its stream at exactly the last size the first one sent, and
+/// through its replay and a redraw sends no resize at all.
+#[gpui::test]
+fn a_fresh_owner_on_the_same_pane_asks_for_the_last_size_and_resizes_nothing(
+    cx: &mut TestAppContext,
+) {
+    let mut h = harness(cx);
+    let (first, first_size, mut first_window) = owner_window(&mut h, thirteen_points(), PANE);
+    let live = |opened: &Opened, window: &mut VisualTestContext| {
+        let asked = opened.borrow_mut().as_mut().unwrap().0.attach();
+        for message in screen(asked.cols, asked.rows, "x", serde_json::Value::Null) {
+            opened.borrow_mut().as_mut().unwrap().0.output(message);
+        }
+        opened.borrow_mut().as_mut().unwrap().0.replay_complete();
+        settle(window);
+    };
+    live(&first, &mut first_window);
+    let history = [(PANE.0 - 117., PANE.1 - 63.), (PANE.0 - 41., PANE.1 - 22.)];
+    for pane in history {
+        first_size.set(pane);
+        redraw(&mut first_window);
+    }
+    let last = *resizes(&first)
+        .last()
+        .expect("the premise: the history resized the program");
+    assert_ne!(
+        last,
+        opened_at(&first),
+        "the premise: the history ends at another size than it began at"
+    );
+    first_window.update(|window, _| window.remove_window());
+    first_window.run_until_parked();
+
+    let (fresh, _, mut fresh_window) = owner_window(&mut h, thirteen_points(), history[1]);
+    assert_eq!(opened_at(&fresh), last);
+    live(&fresh, &mut fresh_window);
+    redraw(&mut fresh_window);
+    assert_eq!(resizes(&fresh), []);
+}
+
 // ---- Delivery ------------------------------------------------------------------------------------------------------
 
 /// Staged replay: a new attachment's replay goes to a view that is not drawn, so the last complete screen stays up

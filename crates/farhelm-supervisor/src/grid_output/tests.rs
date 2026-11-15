@@ -172,6 +172,57 @@ fn non_ascii_cells_are_runs_of_their_own() {
     );
 }
 
+/// An emoji that a variation selector (VS16) makes two cells wide is
+/// replayed two cells wide, and a cursor left right after one stays two
+/// cells after it.
+///
+/// Why: a reconnect's first screen is the supervisor's own copy of the
+/// grid, not the program's output again, so a width that copy got wrong
+/// would put the reattached client's cursor a column off from where the
+/// program thinks it is, and everything the program prints next lands in
+/// the wrong place. The old terminal-unicode e2e test caught this through
+/// a real reconnect. Spec: on a 40x4 screen, `⚠️R✅S✔️T⏭️U`, a line
+/// break, and `P:⚠️` (the cursor left after the emoji), sent as a fresh
+/// attach's first update, give a client the first row as each emoji a
+/// run of width 2 with every letter right after it, the second row as
+/// `P:` then `⚠️` at column 2 with width 2, and the cursor at column 4
+/// of row 1.
+#[test]
+fn a_vs16_emoji_replays_two_cells_wide_with_the_cursor_after_it() {
+    let output =
+        "\u{26a0}\u{fe0f}R\u{2705}S\u{2714}\u{fe0f}T\u{23ed}\u{fe0f}U\r\nP:\u{26a0}\u{fe0f}";
+    let emulator = emulator(40, 4, 100, output.as_bytes());
+    let mut client = started_client(40, 4);
+    let replay = SentScreen::after_hello(40, 4)
+        .update(&screen(&emulator), 0)
+        .unwrap();
+    deliver(&mut client, &replay);
+    let runs = |y: usize| -> Vec<(u16, u16, String)> {
+        client.screen[y]
+            .runs
+            .iter()
+            .map(|run| (run.col, run.width, run.text.clone()))
+            .collect()
+    };
+    let run = |col: u16, width: u16, text: &str| (col, width, text.to_owned());
+    assert_eq!(
+        runs(0),
+        [
+            run(0, 2, "\u{26a0}\u{fe0f}"),
+            run(2, 1, "R"),
+            run(3, 2, "\u{2705}"),
+            run(5, 1, "S"),
+            run(6, 2, "\u{2714}\u{fe0f}"),
+            run(8, 1, "T"),
+            run(9, 2, "\u{23ed}\u{fe0f}"),
+            run(11, 1, "U"),
+        ]
+    );
+    assert_eq!(runs(1), [run(0, 2, "P:"), run(2, 2, "\u{26a0}\u{fe0f}")]);
+    let cursor = client.cursor.unwrap();
+    assert_eq!((cursor.x, cursor.y), (4, 1));
+}
+
 /// A row that wrapped says so, and a tab reads as blank.
 ///
 /// Why: the client joins wrapped rows without a newline when it copies a
