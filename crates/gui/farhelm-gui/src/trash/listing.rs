@@ -3,8 +3,8 @@
 //! window.
 //!
 //! Ported from the old app's `list/trash.rs` at reference commit `24bc0580` (`HostTrash`, `listing_totals`, `space`,
-//! `sidebar_summary`, `entry_target`, `accepted_cleanup` and the tooltip's wording). Two of its parts are not here, on
-//! purpose:
+//! `sidebar_summary`, `target`, `entry_target`, `accepted_cleanup`, the confirmation's and the tooltip's wording). One
+//! of its parts is not here, on purpose, and another is here in a smaller form:
 //!
 //! - **Read generations.** The old page fenced every read with a generation that a delete advanced, so a count read
 //!   before a delete could not put its rows back afterwards. Here commands are answered in the order they were sent
@@ -17,9 +17,10 @@
 //!   pre-delete read that this app happens to see after the delete's own answer is older than the read the delete's
 //!   answer sends, so it is dropped too.
 //! - **Uncertain-outcome bookkeeping.** The old page kept a lost reply's whole frozen selection privately and resolved
-//!   it ID by ID. Only one checkout is deleted at a time here (an entry's own Delete or Retry), so a refusal is a
-//!   [`Notice`] on that one ID, replaced or resolved by the next answer for it. The confirmed bulk deletes that need
-//!   more come with their own piece.
+//!   it ID by ID. Here an answer that was not a cleanup report is one [`Notice`] naming the IDs its delete sent (one
+//!   for an entry's Delete, a host's whole frozen set for a confirmed delete), and a later report shrinks it by the IDs
+//!   it answers, until none is left ([`record_outcome`]). That is the old rule without the private copy: the notice the
+//!   dialog shows is the record.
 
 #[cfg(test)]
 mod tests;
@@ -82,8 +83,9 @@ pub(crate) struct HostTrash {
 /// sent something unreadable). SPEC.md: "Refusals the helm reports remain visible on the next dialog opening".
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Notice {
-    /// The checkout the outcome is about.
-    pub id: String,
+    /// The checkouts the outcome is about: the one a refusal names, or the ones an unconfirmed delete sent that no later
+    /// report has answered yet. Never empty: a notice whose last ID is answered goes.
+    pub ids: Vec<String>,
     /// The folder the host named, when it named one.
     pub path: Option<HostText>,
     /// The host's or the helm's words.
@@ -209,14 +211,90 @@ pub(crate) fn folders(listing: &CheckoutTrashListing) -> Vec<String> {
         .collect()
 }
 
-/// One checkout an entry's Delete or Retry would clean: frozen when it is pressed, with the connection it was listed
-/// on, so the helm refuses it if the host reconnected since (SPEC_impl.md, "Archived-checkout trash": "An immediate
-/// single-entry delete freezes only that checkout's ID and its host incarnation at click time").
+/// What one delete request cleans on one host: the one checkout an entry's Delete or Retry names, or every ID a host
+/// listed when its confirmation opened. Frozen then, with the connection it was listed on, so the helm refuses it if the
+/// host reconnected since (SPEC_impl.md, "Archived-checkout trash": a single-entry delete "freezes only that checkout's
+/// ID and its host incarnation at click time", and "Confirmations freeze deduplicated IDs and observed host
+/// incarnations").
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Target {
     pub host: i64,
     pub incarnation: u64,
-    pub id: String,
+    pub ids: Vec<String>,
+}
+
+/// One host's share of a confirmed delete, frozen when its question opens: what is sent ([`Target`]), and what the
+/// question says about it (the host's name and the listing's totals then). A listing that changes while the question
+/// is up changes neither.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Batch {
+    pub target: Target,
+    pub name: HostText,
+    pub totals: Totals,
+}
+
+/// The confirmation's lines for `batches` (the old `ConfirmBand`'s paragraphs): the checkouts, their size and the hosts
+/// they are on, then the warning that work never committed or pushed is lost; and, when a host listed entries it could
+/// not check, what cleanup does with those. The checkout lines are left out when every batch holds only unchecked
+/// entries.
+///
+/// NOTE: Each old paragraph is two lines here, split where its host names end: a host sentence draws each of its parts
+/// as a block of its own, so the text after a list of hosts started a new line anyway, with its "?" alone at its start.
+/// Recorded in the parity file.
+pub(crate) fn confirmation_text(batches: &[Batch]) -> Vec<HostSentence> {
+    let count: usize = batches.iter().map(|batch| batch.totals.count).sum();
+    let unchecked: usize = batches.iter().map(|batch| batch.totals.unchecked).sum();
+    let bytes = batches
+        .iter()
+        .map(|batch| batch.totals.bytes)
+        .fold(0, u64::saturating_add);
+    let partial = unchecked > 0 || batches.iter().any(|batch| batch.totals.partial);
+    // The hosts in their registry order, each once, joined as the old band joined them.
+    let names = |which: fn(&Totals) -> usize, mut sentence: HostSentence| {
+        let named = batches.iter().filter(|batch| which(&batch.totals) > 0);
+        for (at, batch) in named.enumerate() {
+            if at > 0 {
+                sentence = sentence.text(", ");
+            }
+            sentence = sentence.host(&batch.name);
+        }
+        sentence
+    };
+    let mut lines = Vec::new();
+    if count > 0 {
+        lines.push(
+            names(
+                |totals| totals.count,
+                HostSentence::new("trash-confirm-checkouts").text(format!(
+                    "Delete {count} archived {} ({}) on ",
+                    checkouts(count),
+                    space(bytes, partial)
+                )),
+            )
+            .text("?"),
+        );
+        lines.push(
+            HostSentence::new("trash-confirm-warning")
+                .text("Work in them that was never committed or pushed is lost permanently."),
+        );
+    }
+    if unchecked > 0 {
+        let noun = if unchecked == 1 { "entry" } else { "entries" };
+        lines.push(
+            names(
+                |totals| totals.unchecked,
+                HostSentence::new("trash-confirm-unchecked").text(format!(
+                    "Attempt cleanup of {unchecked} unchecked {noun} on "
+                )),
+            )
+            .text("."),
+        );
+        lines.push(HostSentence::new("trash-confirm-unchecked-rest").text(
+            "Farhelm deletes any of these it can verify when cleanup runs; work in them that was never committed or \
+             pushed is lost permanently. The rest stay in place and may be forgotten from the trash.",
+        ));
+    }
+    lines
 }
 
 /// What a delete's answer was, as the button applies it: the host's cleanup report, or the words of an answer that
@@ -248,11 +326,12 @@ pub(crate) fn accepted_cleanup(state: &mut HostTrash, ids: &[String]) {
     listing.issues.retain(|issue| !ids.contains(&issue.id));
 }
 
-/// Apply a delete's `outcome` for checkout `id` to the host's kept notices: a cleanup report settles every notice of
-/// the IDs it answers (removed, or refused anew) and adds its refusals; any other answer replaces only an earlier
-/// unconfirmed notice of the same checkout. A refusal for another checkout is never settled by this one's answer
-/// (the old `TrashNotice::resolve` and `replace_uncertainty`, narrowed to one ID).
-pub(crate) fn record_outcome(notices: &mut Vec<Notice>, id: &str, outcome: &Outcome) {
+/// Apply the `outcome` of a delete that sent `sent` to the host's kept notices (the old `TrashNotice::resolve` and
+/// `replace_uncertainty`). A cleanup report answers the sent IDs it names, removed or refused anew: each notice loses
+/// those IDs, a notice left with none goes, and the report's refusals are added. Any other answer leaves every notice
+/// but the earlier unconfirmed ones alone, takes the sent IDs out of those (going when none is left), and adds one
+/// unconfirmed notice for all of them. An answer never settles a notice about checkouts it did not send.
+pub(crate) fn record_outcome(notices: &mut Vec<Notice>, sent: &[String], outcome: &Outcome) {
     match outcome {
         Ok(deleted) => {
             let answered: HashSet<&str> = deleted
@@ -260,27 +339,32 @@ pub(crate) fn record_outcome(notices: &mut Vec<Notice>, id: &str, outcome: &Outc
                 .iter()
                 .map(String::as_str)
                 .chain(deleted.issues.iter().map(|issue| issue.id.as_str()))
-                .filter(|answered| *answered == id)
+                .filter(|answered| sent.iter().any(|id| id == answered))
                 .collect();
-            notices.retain(|notice| !answered.contains(notice.id.as_str()));
+            for notice in notices.iter_mut() {
+                notice.ids.retain(|id| !answered.contains(id.as_str()));
+            }
             notices.extend(deleted.issues.iter().map(issue_notice));
         }
         Err(words) => {
-            notices.retain(|notice| !(notice.unconfirmed && notice.id == id));
+            for notice in notices.iter_mut().filter(|notice| notice.unconfirmed) {
+                notice.ids.retain(|id| !sent.contains(id));
+            }
             notices.push(Notice {
-                id: id.to_owned(),
+                ids: sent.to_vec(),
                 path: None,
                 message: words.clone(),
                 unconfirmed: true,
             });
         }
     }
+    notices.retain(|notice| !notice.ids.is_empty());
 }
 
 /// A host's refusal for one checkout as a [`Notice`].
 fn issue_notice(issue: &CheckoutTrashIssue) -> Notice {
     Notice {
-        id: issue.id.clone(),
+        ids: vec![issue.id.clone()],
         path: (!issue.path.is_empty()).then(|| HostText::from_host(issue.path.as_str())),
         message: HostText::from_host(issue.message.as_str()),
         unconfirmed: false,
@@ -346,7 +430,39 @@ impl HostSnapshot {
         (!checkout.removing).then(|| Target {
             host: self.id,
             incarnation: self.incarnation,
-            id: checkout.id.clone(),
+            ids: vec![checkout.id.clone()],
+        })
+    }
+
+    /// This host's share of a confirmed delete now, or `None` while its guards refuse (the old `target`): connected, its
+    /// listing settled and within the batch limit, its own key free, and something listed. Every listed ID goes in,
+    /// each once: the checkouts, then the diagnostic-only records, which cleanup rechecks and may delete once verifiable
+    /// or forget without touching their folders.
+    pub(crate) fn batch(&self) -> Option<Batch> {
+        if !self.connected || self.pending || self.busy {
+            return None;
+        }
+        let listing = self.listed()?;
+        let mut seen = HashSet::new();
+        let ids: Vec<String> = listing
+            .checkouts
+            .iter()
+            .map(|entry| &entry.id)
+            .chain(listing.issues.iter().map(|issue| &issue.id))
+            .filter(|id| seen.insert(id.as_str()))
+            .cloned()
+            .collect();
+        if ids.is_empty() || ids.len() > MAX_SELECTION {
+            return None;
+        }
+        Some(Batch {
+            target: Target {
+                host: self.id,
+                incarnation: self.incarnation,
+                ids,
+            },
+            name: self.name.clone(),
+            totals: totals(listing),
         })
     }
 
@@ -388,6 +504,30 @@ impl Snapshot {
                         .listed()
                         .is_some_and(|listing| selection_size(listing) <= MAX_SELECTION)
             })
+    }
+
+    /// What the global Delete all would delete now, one batch per reachable host holding something, or `None` while it
+    /// must wait (SPEC.md: "The global action skips unreachable hosts and waits until every reachable host can be
+    /// read"): the registry unread, a reachable host's listing not settled or over the batch limit, a reachable host
+    /// holding something whose own key is busy, or nothing anywhere. Unreachable hosts are skipped, never waited for.
+    pub(crate) fn global_batches(&self) -> Option<Vec<Batch>> {
+        if !self.all_ready() {
+            return None;
+        }
+        let mut batches = Vec::new();
+        for host in self.reachable() {
+            match host.batch() {
+                Some(batch) => batches.push(batch),
+                None if host
+                    .listed()
+                    .is_some_and(|listing| selection_size(listing) > 0) =>
+                {
+                    return None;
+                }
+                None => {}
+            }
+        }
+        (!batches.is_empty()).then_some(batches)
     }
 
     /// Whether the can is drawn open, and the words for what it holds (the old `sidebar_summary`): "empty", "3

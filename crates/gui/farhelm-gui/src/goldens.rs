@@ -15,7 +15,8 @@
 //! updater runs (the check button at rest, lit, warned and focused; work in progress; a check's outcomes; the
 //! update-menu toggle; its open menu; and the reinstall hover), the title bar the Linux window draws for itself
 //! (ordinary and maximized), the Open-Source Notices window over a short fixture, and the Trash button empty, full and
-//! freeing space, and the Trash dialog, in both appearances, compared pixel for pixel.
+//! freeing space, and the Trash dialog, alone and asking to delete everything or one host's archives, in both
+//! appearances, compared pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
@@ -4133,6 +4134,18 @@ static SCENES: &[Scene] = &[
         setup: checkout_trash_dialog_setup,
     },
     Scene {
+        name: "checkout-trash-confirm-all",
+        size: (760., 720.),
+        draw: trash_scenes,
+        setup: checkout_trash_confirm_all_setup,
+    },
+    Scene {
+        name: "checkout-trash-confirm-host",
+        size: (760., 720.),
+        draw: trash_scenes,
+        setup: checkout_trash_confirm_host_setup,
+    },
+    Scene {
         name: "session-order-menu",
         size: (420., 418.),
         draw: session_lists_then,
@@ -4267,14 +4280,26 @@ fn trash_reference(host: i64) -> serde_json::Value {
     }
 }
 
+/// How far a trash scene goes once every host has answered.
+#[derive(Clone, Copy)]
+enum TrashOpen {
+    /// The button alone.
+    Button,
+    /// The dialog open.
+    Dialog,
+    /// The dialog open and, once its measured reads are answered too, asking to delete everything on the host (`Some`,
+    /// its "Delete all on") or on every reachable host (`None`, Delete all).
+    Asking(Option<i64>),
+}
+
 /// The reference screens' three hosts, all connected, with a Trash button over them that reads each host's trash and
-/// gets `listing_of(host)` back at once; once every host has answered, the dialog opens when `open` asks for it, its
-/// settle pause off, and its measured reads are answered the same way. The fake, the connection, the button and the
-/// watch that answers are kept for the scene's life.
+/// gets `listing_of(host)` back at once; once every host has answered, the scene goes as far as `open` says, the
+/// dialog's settle pause off, and its measured reads are answered the same way. The fake, the connection, the button and
+/// the watch that answers are kept for the scene's life.
 fn trash_scene(
     state: &SceneState,
     listing_of: fn(i64) -> serde_json::Value,
-    open: bool,
+    open: TrashOpen,
     window: &mut Window,
     cx: &mut App,
 ) {
@@ -4288,7 +4313,12 @@ fn trash_scene(
     let button = cx.new(TrashButton::new);
     let window = window.window_handle();
     let answering = helm.clone();
-    let opened = Cell::new(!open);
+    let opened = Cell::new(matches!(open, TrashOpen::Button));
+    // The question waits for the dialog's own measured reads: a host being read offers nothing to delete.
+    let ask = Cell::new(match open {
+        TrashOpen::Asking(host) => Some(host),
+        TrashOpen::Button | TrashOpen::Dialog => None,
+    });
     let watch = cx.observe(&button, move |button, cx| {
         {
             let mut helm = answering.borrow_mut();
@@ -4301,11 +4331,22 @@ fn trash_scene(
                 helm.reply(read.id, 200, Some(listing_of(host)));
             }
         }
-        if opened.get()
-            || !button
-                .update(cx, |button, cx| button.snapshot(cx))
-                .all_ready()
-        {
+        let ready = button
+            .update(cx, |button, cx| button.snapshot(cx))
+            .all_ready();
+        if opened.get() {
+            if let Some(host) = ask.get().filter(|_| ready) {
+                ask.set(None);
+                let dialog = button.read(cx).dialog_view();
+                let _ = window.update(cx, |_, window, cx| {
+                    if let Some(dialog) = dialog {
+                        dialog.update(cx, |dialog, cx| dialog.ask(host, window, cx));
+                    }
+                });
+            }
+            return;
+        }
+        if !ready {
             return;
         }
         opened.set(true);
@@ -4348,7 +4389,7 @@ fn trash_button_empty_setup(state: &SceneState, window: &mut Window, cx: &mut Ap
     trash_scene(
         state,
         |_| trash_listing("/work", &[], false),
-        false,
+        TrashOpen::Button,
         window,
         cx,
     );
@@ -4357,7 +4398,7 @@ fn trash_button_empty_setup(state: &SceneState, window: &mut Window, cx: &mut Ap
 /// The Trash button over the reference trash (reference `main-running-session`'s header): the open-lid can and its
 /// count, 3.
 fn trash_button_full_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
-    trash_scene(state, trash_reference, false, window, cx);
+    trash_scene(state, trash_reference, TrashOpen::Button, window, cx);
 }
 
 /// The Trash button while this machine frees space, under reduced motion so the picture holds still: the can upside
@@ -4373,18 +4414,37 @@ fn trash_button_emptying_setup(state: &SceneState, window: &mut Window, cx: &mut
             }
             listing
         },
-        false,
+        TrashOpen::Button,
         window,
         cx,
     );
 }
 
 /// The Trash dialog over the reference trash (reference `checkout-trash-dialog`): its title with the open can and the
-/// total, the intro, this machine's two archives and build-box's one with their sizes, repositories, archive times
-/// and Deletes, each host's folder, and the footer's Close, where focus starts; its ring shows only under keyboard
-/// focus, so the picture shows none.
+/// total, the intro, each host's "Delete all on", this machine's two archives and build-box's one with their sizes,
+/// repositories, archive times and Deletes, each host's folder, and the footer's Close, where focus starts (its ring
+/// shows only under keyboard focus, so the picture shows none), and Delete all.
 fn checkout_trash_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
-    trash_scene(state, trash_reference, true, window, cx);
+    trash_scene(state, trash_reference, TrashOpen::Dialog, window, cx);
+}
+
+/// The Trash dialog over the reference trash asking to delete everything: the question in its loud look in the region
+/// above the footer, naming the three checkouts on this machine and build-box with their size and the warning, Cancel
+/// and Delete permanently (where focus is, its ring hidden as on any pointer-opened question).
+fn checkout_trash_confirm_all_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    trash_scene(state, trash_reference, TrashOpen::Asking(None), window, cx);
+}
+
+/// The Trash dialog over the reference trash asking to delete build-box's one archive: the question inside build-box's
+/// card, under its header.
+fn checkout_trash_confirm_host_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    trash_scene(
+        state,
+        trash_reference,
+        TrashOpen::Asking(Some(2)),
+        window,
+        cx,
+    );
 }
 
 /// Draw and capture `window` until two consecutive captures match, at most [`MAX_SETTLE_FRAMES`] times.
