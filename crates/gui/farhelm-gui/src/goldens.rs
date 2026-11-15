@@ -5,17 +5,17 @@
 //! an attached terminal's exit line and status line, the scrim a pending Delete puts over the open session's terminal,
 //! the open session's details bar (every status and host it draws differently, and a narrow one), the session list (a
 //! fleet of every status a row draws, the open row on a host the helm cannot reach, an empty fleet, a row's open menu,
-//! a row's Delete question, and a pending and a refused Delete), the Rename editor, the Send feedback dialog (as it
-//! opens, and with a remembered contact), the select closed and open, the YOLO confirmation drawn inline in a
-//! launcher's body with its outlined permanent answer, the Settings dialog at Sessions, at Appearance, at Hosts, at
-//! Terminal and at Agent trust, the Hosts panel (closed, with Details, with a host failing to connect, with a host's
-//! setup running and failed, with outdated hosts' inline Update, and with a host's Update running), the Add host dialog
-//! and the setup confirmation it leads to, a host's actions menu, the host settings dialog at its top and scrolled to
-//! its end, the host refusal dialog for a refused Update, the version readout while an updater runs (the check button
-//! at rest, lit, warned and focused; work in progress; a check's outcomes; the update-menu toggle; its open menu; and
-//! the reinstall hover), the title bar the Linux window draws for itself (ordinary and maximized), the Open-Source
-//! Notices window over a short fixture, and the Trash button empty, full and freeing space, and the Trash dialog, in
-//! both appearances, compared pixel for pixel.
+//! a row's notification list, a row's Delete question, and a pending and a refused Delete), the Rename editor, the
+//! Send feedback dialog (as it opens, and with a remembered contact), the select closed and open, the YOLO confirmation
+//! drawn inline in a launcher's body with its outlined permanent answer, the Settings dialog at Sessions, at
+//! Appearance, at Hosts, at Terminal and at Agent trust, the Hosts panel (closed, with Details, with a host failing to
+//! connect, with a host's setup running and failed, with outdated hosts' inline Update, and with a host's Update
+//! running), the Add host dialog and the setup confirmation it leads to, a host's actions menu, the host settings dialog
+//! at its top and scrolled to its end, the host refusal dialog for a refused Update, the version readout while an
+//! updater runs (the check button at rest, lit, warned and focused; work in progress; a check's outcomes; the
+//! update-menu toggle; its open menu; and the reinstall hover), the title bar the Linux window draws for itself
+//! (ordinary and maximized), the Open-Source Notices window over a short fixture, and the Trash button empty, full and
+//! freeing space, and the Trash dialog, in both appearances, compared pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
@@ -1993,6 +1993,83 @@ fn session_order_menu_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     );
 }
 
+/// A row's notification list, open beside its bell (no reference: the old app's screenshots have no open bell). The
+/// open row has nothing to tell; the row below has three notifications, newest first: one new since the list was last
+/// opened (the red edge and New), whose text ends with a docs link, one already read, and one resolved (greyed and
+/// marked Resolved). Its bell is loud, with one unread. The bell is pressed as a click would press it, and the pointer
+/// then leaves for an empty corner, so neither a hover fill nor a tooltip is in the picture ([`press_bell_b`]).
+fn session_bell_list_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    let row = |key, title, ago: i64| {
+        session(key)
+            .title(title)
+            .activity(TEST_NOW - ago)
+            .seen(Some(TEST_NOW - ago))
+    };
+    let notifications = serde_json::json!([
+        {
+            "seq": 7,
+            "at": TEST_NOW - 3 * 60,
+            "text": "Farhelm ended this session's old terminal when it started, so its agent is no longer \
+                     running. Restart starts it again in a new terminal. See \
+                     https://farhelm.io/docs/using/new-terminals/",
+        },
+        {
+            "seq": 6,
+            "at": TEST_NOW - 2 * 3_600,
+            "text": "Farhelm could not add its conversation hook to this launch, so Restart cannot resume it.",
+        },
+        {
+            "seq": 5,
+            "at": TEST_NOW - 26 * 3_600,
+            "text": "When Farhelm checked, Codex's own record of this conversation was missing or no longer \
+                     matched, so Restart stopped offering to resume it.",
+            "resolved": true,
+        },
+    ]);
+    let rows = [
+        row("a", "Refactor the API client", 2 * 60).cwd("/home/user/src/api"),
+        row("b", "Release notes for 0.40", 5 * 60)
+            .cwd("/home/user/src/farhelm")
+            .notifications(notifications, 6),
+        row("c", "Benchmark on the build box", 3 * 3_600).cwd("/home/user/bench"),
+    ];
+    session_list_scene_opening(state, &rows, Some("a"), cx);
+    state.after.set(Some(press_bell_b));
+}
+
+/// How many frames [`press_bell_b`] waits for row `b`'s bell to be drawn before it gives up.
+const BELL_WAIT_FRAMES: usize = 20;
+
+/// Press row `b`'s bell as a click would ([`crate::notices_bell::press_drawn`]), then move the pointer to the empty corner
+/// at the top left (see [`session_bell_list_setup`]). The list's rows are drawn a frame or more after the list itself,
+/// so until a frame has drawn the bell this waits for the next one, asking for it. The wait is bounded: asking for a
+/// frame from here can keep the headless window drawing without the scene's settling ever regaining control (an
+/// unbounded version hung a golden run), so after [`BELL_WAIT_FRAMES`] it gives up and the scene fails on its picture.
+fn press_bell_b(_: &Entity<SessionList>, state: &SceneState, window: &mut Window, cx: &mut App) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    /// Frames waited for the bell in the scene being captured; back to zero once the bell is pressed or the wait is
+    /// given up, so the next capture (the other appearance) waits afresh.
+    static WAITED: AtomicUsize = AtomicUsize::new(0);
+    if !crate::notices_bell::press_drawn("b", window, cx) {
+        if WAITED.fetch_add(1, Ordering::Relaxed) < BELL_WAIT_FRAMES {
+            state.after.set(Some(press_bell_b));
+            window.refresh();
+        } else {
+            WAITED.store(0, Ordering::Relaxed);
+        }
+        return;
+    }
+    WAITED.store(0, Ordering::Relaxed);
+    window.dispatch_event(
+        gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+            position: point(px(2.), px(2.)),
+            pressed_button: None,
+            modifiers: gpui::Modifiers::default(),
+        }),
+        cx,
+    );
+}
+
 /// The waiting row's Delete question, asked from its row as the menu's Delete asks it (reference
 /// `row-delete-confirmation`): its tab, its running agent, its quoted title and its managed checkout. The
 /// `anchored-prompt` golden pins the prompt's own look with made-up wording; this one pins the row's wording and where
@@ -3755,6 +3832,13 @@ static SCENES: &[Scene] = &[
         size: (420., 418.),
         draw: session_lists_then,
         setup: help_menu_setup,
+    },
+    Scene {
+        name: "session-bell-list",
+        // Wide and tall enough for the whole list beside the sidebar, which the scene centres.
+        size: (960., 680.),
+        draw: session_lists_then,
+        setup: session_bell_list_setup,
     },
     Scene {
         name: "row-delete-confirmation",

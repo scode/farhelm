@@ -726,9 +726,10 @@ impl Render for SessionList {
     }
 }
 
-/// Draw the row of `key` for the virtualized list's item callback: its menu button first (its anchor is element state,
-/// so it is made while the row's elements are), then the row from the store as it is now. A session missing from the
-/// store draws nothing; the callback runs in the frame whose listing named it, so that does not happen.
+/// Draw the row of `key` for the virtualized list's item callback: its menu button and its notification bell first
+/// (their anchors are element state, so they are made while the row's elements are), then the row from the store as it
+/// is now. A session missing from the store draws nothing; the callback runs in the frame whose listing named it, so
+/// that does not happen.
 #[allow(
     clippy::too_many_arguments,
     reason = "the item callback's captures, passed through once"
@@ -755,6 +756,7 @@ fn draw_row(
         return div().into_any_element();
     };
     let menu = menu::menu_button(shared, weak, key, &title, selected, window, cx);
+    let bell = crate::notices_bell::bell(key, selected, window, cx);
     let collections = store.read(cx).collections();
     let Some(row) = collections.get::<SessionRow>(key) else {
         return div().into_any_element();
@@ -766,6 +768,7 @@ fn draw_row(
         selected,
         steps,
         menu,
+        bell,
         focus,
         move |_, cx| selection::choose(&open, cx),
         cx,
