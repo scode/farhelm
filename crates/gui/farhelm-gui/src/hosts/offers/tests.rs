@@ -7,7 +7,9 @@ use farhelm_proto::provisioning::{ProvisioningOperation, RunStatus};
 use farhelm_proto::tensorlake::LifecycleDirection;
 use farhelm_proto::ui_channel::{HostStateView, HostView};
 
-use super::{HostKind, Locality, Offers, Rerun, Update, menu_offers, needs_local_setup, offers};
+use super::{
+    HostKind, Locality, Offers, Rerun, Update, adoptable, menu_offers, needs_local_setup, offers,
+};
 use crate::hosts::tests::{connected, host, local_down, run, skew};
 
 /// An idle SSH host's offers: everything an SSH host can be offered, all of it available.
@@ -18,6 +20,8 @@ fn idle_ssh() -> Offers {
         update: Some(Update::Available),
         remove: Some(true),
         uninstall: Some(true),
+        retry: Some(true),
+        adopt: None,
     }
 }
 
@@ -132,6 +136,8 @@ fn work_in_flight_withdraws_update_and_rerun_and_holds_settings_uninstall_and_re
             update: None,
             remove: Some(false),
             uninstall: Some(false),
+            retry: Some(false),
+            adopt: None,
         }
     );
 }
@@ -153,6 +159,8 @@ fn a_running_run_holds_the_host_until_it_ends() {
             update: None,
             remove: Some(false),
             uninstall: Some(false),
+            retry: Some(false),
+            adopt: None,
         }
     );
     let completed = run(2, ProvisioningOperation::Add, RunStatus::Completed);
@@ -230,6 +238,8 @@ fn the_local_hosts_update_is_greyed_and_points_at_the_installer() {
             update: Some(Update::Greyed),
             remove: None,
             uninstall: None,
+            retry: Some(true),
+            adopt: None,
         }
     );
     assert_eq!(
@@ -305,6 +315,8 @@ fn the_local_host_without_a_supervisor_offers_no_install() {
             update: None,
             remove: None,
             uninstall: None,
+            retry: Some(true),
+            adopt: None,
         }
     );
     let transport = HostStateView::Unreachable {
@@ -316,7 +328,8 @@ fn the_local_host_without_a_supervisor_offers_no_install() {
 }
 
 /// Why this matters: a host kind a newer helm adds must not be offered verbs this build cannot vouch for, and each
-/// known kind's decisions are made in one exhaustive place. Specified: an unrecognized kind is offered Settings alone,
+/// known kind's decisions are made in one exhaustive place. Specified: an unrecognized kind is offered Settings and
+/// Retry alone (the helm's retry does not depend on the kind, and the old menu offered it on every row),
 /// even with a failed run, draws no locality and has no appearance to choose; SSH, Tensorlake and Podman hosts are
 /// remote and the local host is local; only an SSH host is offered Remove, since only its removal merely forgets it (a
 /// sandbox's or a container's deletes the machine, a different command, and the helm's own machine is never removed);
@@ -336,6 +349,8 @@ fn each_kind_decides_its_own_offers() {
             update: None,
             remove: None,
             uninstall: None,
+            retry: Some(true),
+            adopt: None,
         }
     );
     assert_eq!(HostKind::Unrecognized.locality(), None);
@@ -372,4 +387,57 @@ fn each_kind_decides_its_own_offers() {
         );
         assert!(HostKind::of(&view).supports_appearance(), "{kind}");
     }
+}
+
+/// Why this matters: Retry and Adopt are the remedies the phase details name ("... then press Retry", "Adopt the
+/// identity the host reports, or fix the destination"), so the menu must offer them exactly where those remedies are
+/// shown, and never Adopt where there is no identity to adopt (the old "identity-unverified-offers-no-adopt": the helm
+/// refuses that verb). Specified: Retry is offered available on an unreachable, a duplicate and a retired host, and on
+/// the local host, never on an environment being deleted or failing its deletion; Adopt is offered only for an identity
+/// mismatch, whose `adoptable` identity is the reported one, raw, and never for an unverified identity; with work in
+/// flight both stay offered but unavailable.
+#[test]
+fn retry_is_offered_in_every_phase_but_deletion_and_adopt_only_for_a_mismatch() {
+    let unreachable = HostStateView::Unreachable {
+        cause: "transport-failure".into(),
+        last_error: "socket closed".into(),
+    };
+    let duplicate = HostStateView::Duplicate {
+        twin: 3,
+        identity: "id-1".into(),
+    };
+    let retired = HostStateView::Retired {
+        reason: String::new(),
+    };
+    for state in [unreachable, duplicate, retired] {
+        let offered = offers(&host(2, "ssh", state.clone()), None, false);
+        assert_eq!(
+            (offered.retry, offered.adopt),
+            (Some(true), None),
+            "{state:?}"
+        );
+    }
+    assert_eq!(
+        offers(&host(1, "local", connected()), None, false).retry,
+        Some(true)
+    );
+    for failure in [None, Some("the provider refused".to_owned())] {
+        let deleting = host(4, "tensorlake", HostStateView::Deleting { failure });
+        assert_eq!(offers(&deleting, None, false).retry, None);
+    }
+
+    let mismatch = HostStateView::IdentityMismatch {
+        recorded: "identity-before".into(),
+        reported: "identity after\u{200b}".into(),
+    };
+    assert_eq!(adoptable(&mismatch), Some("identity after\u{200b}"));
+    let mismatched = host(2, "ssh", mismatch);
+    assert_eq!(offers(&mismatched, None, false).adopt, Some(true));
+    let busy = offers(&mismatched, None, true);
+    assert_eq!((busy.retry, busy.adopt), (Some(false), Some(false)));
+    let unverified = HostStateView::IdentityUnverified {
+        recorded: "identity-before".into(),
+    };
+    assert_eq!(adoptable(&unverified), None);
+    assert_eq!(offers(&host(2, "ssh", unverified), None, false).adopt, None);
 }

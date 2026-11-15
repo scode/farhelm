@@ -1200,7 +1200,7 @@
     },
     {
       "golden": "host-menu",
-      "title": "A host's actions menu beside its row's toggle: the header with its name, destination and build, then Update, highlighted, Settings, and Remove behind a separator",
+      "title": "A host's actions menu beside its row's toggle: the header with its name, destination and build, then Retry, highlighted, Update, Settings, and Uninstall and Remove behind a separator",
       "reference": "host-menu"
     },
     {
