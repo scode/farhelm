@@ -145,6 +145,11 @@ pub enum Tier {
     /// without borrowing a filled tier: the warning amber for an optional update, the strong danger red for a
     /// `required` one (`[data-update-kind="required"]`).
     HostUpdate { required: bool },
+    /// `.approval-waiting`: a waiting agent request's header below the expanded approval card, a full-width row on the
+    /// raised `--bg-2` with the warning amber edge and the larger corner, `padding: 6px 12px`, the control hover fill,
+    /// and the browser's default button text (about 13.3 pixels, as the old header set no size), its content laid out
+    /// from the left by the caller ([`Button::content`]).
+    Waiting,
 }
 
 /// The [`Tier::QuickMark`] box's padding, vertical then horizontal (`.templates-quick-mark`: `10px 5px`).
@@ -174,6 +179,10 @@ const NAV_LINE_HEIGHT: f32 = 16.;
 const ICON_CHOICE_SIZE: f32 = 36.;
 /// The [`Tier::HostUpdate`] box's padding, vertical then horizontal.
 const HOST_UPDATE_PAD: (f32, f32) = (2., 5.);
+/// The [`Tier::Waiting`] row's padding, vertical then horizontal.
+const WAITING_PAD: (f32, f32) = (6., 12.);
+/// The [`Tier::Waiting`] row's text size: a browser's default for a button that sets none (13.333 pixels).
+const WAITING_TEXT: f32 = 13.333;
 /// The [`Tier::ColorChoice`] circle's side and the room around its swatch.
 const COLOR_CHOICE_SIZE: f32 = 26.;
 const COLOR_CHOICE_PAD: f32 = 3.;
@@ -530,6 +539,12 @@ impl Button {
                 palette.fg_0,
             ),
             Tier::Rail => (None, palette.bg_2, None, palette.fg_1),
+            Tier::Waiting => (
+                Some(palette.bg_2),
+                palette.control_hover,
+                Some(palette.warn),
+                palette.fg_0,
+            ),
             Tier::Nav | Tier::TemplateRow => (None, palette.control_hover, None, palette.fg_0),
             Tier::IconChoice => (
                 Some(palette.well),
@@ -619,6 +634,7 @@ impl RenderOnce for Button {
             Tier::Tunnel => (px(TUNNEL_PAD.0), px(TUNNEL_PAD.1)),
             Tier::TemplateRow => (px(TEMPLATE_ROW_PAD.0), px(TEMPLATE_ROW_PAD.1)),
             Tier::HostUpdate { .. } => (px(HOST_UPDATE_PAD.0), px(HOST_UPDATE_PAD.1)),
+            Tier::Waiting => (px(WAITING_PAD.0), px(WAITING_PAD.1)),
             Tier::Ghost
             | Tier::Neutral
             | Tier::Primary
@@ -657,6 +673,7 @@ impl RenderOnce for Button {
             | Tier::ColorChoice
             | Tier::Tunnel
             | Tier::HostUpdate { .. }
+            | Tier::Waiting
             | Tier::RowMenu { on_fill: false } => palette.accent,
         };
         // An icon-only button is otherwise as high as its icon plus its padding and square; the row menu's box is the
@@ -727,10 +744,10 @@ impl RenderOnce for Button {
                     Toggled::False
                 })
             })
-            .rounded(if self.tier == Tier::ColorChoice {
-                px(COLOR_CHOICE_SIZE / 2.)
-            } else {
-                metrics::RADIUS_SM
+            .rounded(match self.tier {
+                Tier::ColorChoice => px(COLOR_CHOICE_SIZE / 2.),
+                Tier::Waiting => metrics::RADIUS_MD,
+                _ => metrics::RADIUS_SM,
             })
             // `.inline-link` and the readout have no edge at all (`border: 0`), so they sit on the text line like the
             // words around them; every other tier keeps the 1-pixel edge.
@@ -759,6 +776,16 @@ impl RenderOnce for Button {
                     .min_w_0()
                     .text_size(metrics::TEXT_MD)
                     .line_height(px(NAV_LINE_HEIGHT))
+            })
+            // The waiting header fills the region's width and lays its content out from the left (`text-align:
+            // left`), at the browser's default button size with its `normal` line height.
+            .when(self.tier == Tier::Waiting, |button| {
+                button
+                    .justify_start()
+                    .w_full()
+                    .min_w_0()
+                    .text_size(px(WAITING_TEXT))
+                    .line_height(px(16.))
             })
             // A template's row fills its row's width and lays its lines out from the left (`text-align: left`); the
             // lines may shrink, so a long name or summary is cut rather than widening the list.
@@ -856,6 +883,7 @@ impl RenderOnce for Button {
                     | Tier::IconChoice
                     | Tier::ColorChoice
                     | Tier::HostUpdate { .. }
+                    | Tier::Waiting
             )
         {
             button = button.opacity(0.5);

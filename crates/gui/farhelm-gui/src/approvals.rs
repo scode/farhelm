@@ -9,13 +9,14 @@
 //! Built so far: [`model`], what a card shows and offers for every request kind, decided without a window;
 //! [`answers`], sending an answer, the answer bar's 700 ms pause and a late answer's notice; [`card`], the expanded
 //! card drawn from the model; [`host_add`], what the ordinary Add host dialog holds for an agent's host add, which a
-//! card answers through that dialog; and [`tunnel`], a link card's Tunnel and open in the Mac app. The region that
-//! places the cards and lists the other waiting requests comes in its own change.
+//! card answers through that dialog; [`tunnel`], a link card's Tunnel and open in the Mac app; and [`region`], which
+//! places the expanded card in the window, over open dialogs, with the other waiting requests listed below it.
 
 pub mod answers;
 pub mod card;
 pub mod host_add;
 pub mod model;
+pub mod region;
 pub mod tunnel;
 
 #[cfg(test)]
@@ -26,5 +27,7 @@ mod card_tests;
 mod host_add_tests;
 #[cfg(test)]
 mod model_tests;
+#[cfg(test)]
+mod region_tests;
 #[cfg(test)]
 mod tunnel_tests;

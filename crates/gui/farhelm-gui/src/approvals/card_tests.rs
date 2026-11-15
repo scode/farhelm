@@ -89,6 +89,8 @@ fn open(cx: &mut TestAppContext, drawn: Rc<RefCell<Drawn>>) -> &mut VisualTestCo
             waiting: 2,
             busy: drawn.busy,
             refusal: drawn.refusal.clone(),
+            measure: None,
+            body_scroll: None,
         };
         card(
             &model,

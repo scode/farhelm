@@ -15,6 +15,7 @@
 //!
 //! The card does not decide what an answer does: each answer button calls the region's `on_answer`, which sends it.
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use farhelm_proto::approvals::ApprovalAnswer;
@@ -52,7 +53,34 @@ pub struct CardState {
     pub busy: bool,
     /// The last answer's refusal, which leaves the request waiting.
     pub refusal: Option<HostText>,
+    /// Where to record the heights of the fixed parts as they are drawn, for the region's placement; `None` where
+    /// nothing places the card (tests, screenshot scenes).
+    pub measure: Option<CardMeasure>,
+    /// The body's scroll state, kept across frames by the region, through which a box Tab reaches below the body's fold
+    /// is scrolled into view ([`crate::focus::scroll_region`]); `None` draws a plain scrolling body.
+    pub body_scroll: Option<gpui::ScrollHandle>,
 }
+
+/// The heights of a card's fixed parts (the header, the From line and the answer bar) as they were last drawn: what
+/// the card needs however far its body gives way. The region places itself from them ([`super::region`]).
+#[derive(Clone, Default)]
+pub struct CardMeasure {
+    header: Rc<Cell<gpui::Pixels>>,
+    from: Rc<Cell<gpui::Pixels>>,
+    answers: Rc<Cell<gpui::Pixels>>,
+}
+
+impl CardMeasure {
+    /// What the card needs with its body at no height: the fixed parts, the card's top padding and border, and the
+    /// gaps between its four rows.
+    pub fn pinned(&self) -> gpui::Pixels {
+        self.header.get() + self.from.get() + self.answers.get() + px(CARD_FRAME)
+    }
+}
+
+/// The card's own frame around its rows: 12 pixels of top padding, three 8-pixel gaps between its four rows, and the
+/// 2-pixel border above and below.
+const CARD_FRAME: f32 = 12. + 3. * 8. + 2. * 2.;
 
 /// What an answer button does when pressed: the region sends the answer.
 pub type OnAnswer = Rc<dyn Fn(ApprovalAnswer, &mut Window, &mut App)>;
@@ -117,6 +145,10 @@ pub fn card(card: &Card, state: &CardState, on_answer: OnAnswer, cx: &App) -> An
         .children(lead)
         .children(refusal)
         .children(notes);
+    let body = match &state.body_scroll {
+        Some(handle) => crate::focus::scroll_region(body, handle).into_any_element(),
+        None => body.into_any_element(),
+    };
     div()
         .id(ElementId::Name(id("card")))
         .role(Role::Group)
@@ -141,11 +173,36 @@ pub fn card(card: &Card, state: &CardState, on_answer: OnAnswer, cx: &App) -> An
         .text_size(BODY_TEXT)
         .line_height(BODY_LINE)
         .text_color(theme::color(palette.fg_0))
-        .child(header(card, state, palette))
-        .child(from_line(card, &card.from, state.width, palette))
+        .child(measured(
+            header(card, state, palette),
+            state.measure.as_ref().map(|measure| measure.header.clone()),
+        ))
+        .child(measured(
+            from_line(card, &card.from, state.width, palette),
+            state.measure.as_ref().map(|measure| measure.from.clone()),
+        ))
         .child(body)
-        .child(answer_bar(card, state, on_answer, palette))
+        .child(measured(
+            answer_bar(card, state, on_answer, palette),
+            state
+                .measure
+                .as_ref()
+                .map(|measure| measure.answers.clone()),
+        ))
         .into_any_element()
+}
+
+/// `part`, its height recorded in `height` as it is drawn when the region measures the card.
+fn measured(part: impl IntoElement, height: Option<Rc<Cell<gpui::Pixels>>>) -> AnyElement {
+    match height {
+        Some(height) => div()
+            .relative()
+            .flex_none()
+            .child(part)
+            .child(super::region::height_tracker(height))
+            .into_any_element(),
+        None => part.into_any_element(),
+    }
 }
 
 // ---- The header and the From line ----------------------------------------------------------------------------------
