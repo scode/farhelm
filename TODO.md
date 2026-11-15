@@ -226,6 +226,29 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   work in 0.39.0 for a plain folder. might just be that we only enabled the behavior for managed checkouts. either way
   it's infuriatingly annoying. let's also test out codex while we're at it.
 
+- **Linux installation and updates for the desktop app.** The GPUI desktop app runs on Linux but has no install story:
+  no package (tarball, .deb, AppImage or Flatpak not chosen), no desktop entry or icon install beyond what a build
+  provides, and no auto-update (the updater runs only in the installed Mac app, so Linux shows no update UI). Decide the
+  package form and architectures, how updates arrive (a self-updater, the package manager, or manual), and write the
+  install docs and SPEC "Installation and updates"' Linux sentences to match. Known Linux issues to settle with it:
+  - No desktop entry or icon is installed, so there is no menu launcher. The app id the entry must match is
+    `org.scode.farhelm.desktop`, the Mac bundle id, reused on Linux until decided otherwise. A second launch brings the
+    open window forward by forwarding its `XDG_ACTIVATION_TOKEN`, so the launcher must pass one for the compositor to
+    allow focus.
+  - A launch without a Wayland display refuses with a line on stderr only (Linux has no native alert on that path), so a
+    launch from a desktop menu in an X11-only session shows nothing. X11 is not supported at all.
+  - No updater and no update UI on Linux: the updater runs only in the installed Mac bundle.
+  - The local supervisor is started detached and outlives the app, as on the Mac; whether an installed Linux app should
+    run it some other way (a systemd user unit, say) is open. SPEC "Topology"'s Linux NOTE says how the Linux app runs
+    and keeps its local supervisor is not specified yet; it needs replacing once this is decided.
+  - Under KDE (KWin draws the title bar) the app is untested: no drawn bar, no GPUI Kit frame margin, the 722 by 596
+    minimum, and drag, resize and close by KWin's own bar.
+  - In a real GNOME session the drawn title bar's drag, double-click maximize and Minimize are untested (headless Mutter
+    has no pointer drag and no visible minimize), and a close the compositor asks for (Alt+F4) reaches the app by
+    another path than the drawn Close button, also untested.
+  - `packaging/farhelm-desktop/dist.toml`'s comment still says Linux users open a browser and that a Linux build would
+    need WebKitGTK.
+
 ### Tensorlake
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
