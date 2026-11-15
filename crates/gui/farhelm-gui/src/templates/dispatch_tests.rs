@@ -1112,3 +1112,102 @@ fn number_keys_apply_to_the_open_launcher(cx: &mut TestAppContext) {
     assert!(creates(&mut helm, cx).is_empty(), "nothing was launched");
     assert!(any_open(cx), "Launch is left to the user");
 }
+
+// ---- Save as template's panel ----------------------------------------------------------------------------------------
+
+/// SPEC.md, "Quick launch": "while saving a template, the chord is consumed without changing the draft", and the old
+/// launcher swallowed the sequence prefix while its Save as template panel was open. A shortcut that edited the draft
+/// underneath the panel would launch later something the user did not see while saving.
+/// Specified: with New open and Save as template's panel open, focus in its name field, the ⚡ chord and number key 1
+/// (both on `partial`) leave the draft without `partial`'s folder and send nothing; with the templates then unavailable,
+/// the chord says nothing either; the sequence prefix's action arms no sequence, from the panel's name field and, after
+/// a click into New's folder field that leaves the panel open, from there.
+#[gpui::test]
+fn template_shortcuts_change_nothing_while_save_as_template_is_open(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, Some("partial"));
+    push(&mut helm, cx, bound(Some("partial"), &[("1", "partial")]));
+    open_new(&mut helm, cx);
+    test_support::click(cx, "launcher-save-template");
+    assert!(panel_open(cx), "the premise: the panel is open");
+    assert!(
+        panel_name_focused(cx),
+        "the premise: focus starts in the panel's name field"
+    );
+    chord(cx);
+    number_key(cx, 1);
+    assert!(creates(&mut helm, cx).is_empty(), "nothing was sent");
+    assert!(!text(cx).contains("/srv/partial"), "the draft is unchanged");
+    push(
+        &mut helm,
+        cx,
+        templates(Availability::Unavailable {
+            error: "busy".into(),
+        }),
+    );
+    chord(cx);
+    assert_eq!(note(cx), None, "an unavailable read is not said either");
+    push(&mut helm, cx, templates(Availability::Available));
+
+    let armed = |cx: &mut VisualTestContext| cx.update(|_, cx| super::armed::is_armed(cx));
+    let begin = |cx: &mut VisualTestContext| {
+        cx.update(|window, cx| window.dispatch_action(Box::new(crate::actions::BeginSequence), cx));
+        settle(cx);
+    };
+    begin(cx);
+    assert!(
+        !armed(cx),
+        "from the panel's name field the prefix arms nothing"
+    );
+    test_support::click(cx, "launcher-folder-row");
+    assert!(
+        crate::launcher::view_tests::focused(cx, crate::launcher::view_tests::Field::Folder),
+        "the premise: the click landed in the folder field"
+    );
+    assert!(panel_open(cx), "the premise: the panel is still open");
+    keys(cx, SEQUENCE_PREFIX_CHORD);
+    begin(cx);
+    assert!(!armed(cx), "nor from New's folder field");
+}
+
+/// Whether Save as template's panel is drawn in the open launcher.
+fn panel_open(cx: &mut VisualTestContext) -> bool {
+    text(cx).contains("Choose which parts of this setup the template keeps")
+}
+
+/// Whether focus is in the open Save as template panel's name field.
+fn panel_name_focused(cx: &mut VisualTestContext) -> bool {
+    crate::launcher::view_tests::read(cx, |launcher, window, cx| {
+        launcher
+            .save_panel_for_tests()
+            .is_some_and(|panel| panel.read(cx).name_focus(cx).is_focused(window))
+    })
+}
+
+/// A press made while the launcher's catalog read is out waits for it; if Save as template's panel opens meanwhile,
+/// the waiting press must not apply when the read answers, or it would edit the draft under the panel after all.
+/// Specified: New opened with its catalog read unanswered, the ⚡ chord on `partial`, then the panel opened; once the
+/// read answers, the draft has no `partial` folder and nothing was sent.
+#[gpui::test]
+fn a_press_waiting_for_the_catalog_is_dropped_when_save_as_template_opens(cx: &mut TestAppContext) {
+    let (mut helm, cx) = window(cx, Some("partial"));
+    assert!(
+        cx.update(launcher::entry::open_new),
+        "the premise: New opened"
+    );
+    settle(cx);
+    chord(cx);
+    assert!(
+        !text(cx).contains("/srv/partial"),
+        "the premise: the press waits for the catalog"
+    );
+    test_support::click(cx, "launcher-save-template");
+    assert!(panel_open(cx), "the premise: the panel is open");
+    assert!(
+        creates(&mut helm, cx).is_empty(),
+        "answering the catalog read sent nothing"
+    );
+    assert!(
+        !text(cx).contains("/srv/partial"),
+        "and the waiting press did not apply"
+    );
+}

@@ -108,6 +108,9 @@ pub fn dispatch(origin: Origin, references: &[Reference], window: &mut Window, c
 /// where [`dispatch`] would do nothing.
 pub(super) fn refused(refusal: &Refusal, window: &mut Window, cx: &mut App) {
     if let Some(launcher) = entry::open_launcher(window, cx) {
+        if launcher.read(cx).save_panel_open() {
+            return;
+        }
         let sentence = sentence(LAUNCHER_REFUSAL, &refusal.launcher_sentence());
         launcher.update(cx, |launcher, cx| {
             launcher.apply_batch(move |_, _, _| Err(sentence), window, cx)
@@ -382,6 +385,11 @@ fn in_launcher(
     window: &mut Window,
     cx: &mut App,
 ) {
+    // SPEC.md, "Quick launch": "while saving a template, the chord is consumed without changing the draft"; Save as
+    // template's panel captures the draft as it stands, so a press while it is open is taken and changes nothing.
+    if launcher.read(cx).save_panel_open() {
+        return;
+    }
     let resolved = resolve(references, &Bindings::current(cx), &stored_templates(cx));
     launcher.update(cx, |launcher, cx| {
         launcher.apply_batch(

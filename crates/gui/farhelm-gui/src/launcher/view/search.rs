@@ -318,7 +318,7 @@ impl Launcher {
         let tracker = anchor.track();
         self.search_box.anchor = Some(anchor.clone());
         let weak = cx.weak_entity();
-        let field = super::launcher_input(
+        let field = self.launcher_input(
             "launcher-search",
             &self.search,
             SEARCH_LABEL,
