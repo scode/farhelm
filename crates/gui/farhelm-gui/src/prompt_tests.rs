@@ -27,8 +27,8 @@ use crate::host_text::{HostSentence, HostText, Line};
 use crate::layers::{self, Anchor, Dialog, LayerId, Subject};
 use crate::prompt::{self, Answer, Presentation, Question};
 use crate::test_support::{
-    Thing, advance, bounds, button, center, check, click, focused, focused_id, frame, handle,
-    is_open, keys, open, question, redraw, settle,
+    Thing, advance, any_open, bounds, button, center, check, click, focused, focused_id, frame,
+    handle, is_open, keys, open, question, redraw, settle,
 };
 
 // ---- The prompt ------------------------------------------------------------------------------------------------------
@@ -1262,7 +1262,7 @@ fn open_launcher(cx: &mut TestAppContext) -> (&mut VisualTestContext, OpenLaunch
 /// What the test question's answers ran, each as "<answer> <frozen value>", in order.
 type Ran = Rc<RefCell<Vec<String>>>;
 
-/// The attempts the permanent answer was handed, oldest first, for the test to settle.
+/// The attempts the test question's fallible answers were handed, oldest first, for the test to settle.
 type Attempts = Rc<RefCell<Vec<prompt::Attempt>>>;
 
 /// SPEC.md's YOLO confirmation as the launcher asks it, with the old app's words: Cancel, the guarded option, the
@@ -1776,13 +1776,17 @@ fn a_failing_answer_keeps_its_question_up_with_the_reason(cx: &mut TestAppContex
     );
 }
 
-/// Why this matters: a layer closes on a press outside it or when its subject goes, which would take the question away
-/// while its answer's work runs on; the work would then finish for a question the user can no longer see. So only an
-/// inline question may carry an answer that can fail, and asking one as a layer must fail at once rather than open.
+/// Why this matters: the YOLO question carries an answer that can fail without the empty-click rule, and it is drawn
+/// loud, which only the inline question draws. Asked anchored, a press outside it would take it away while its
+/// answer's work runs on, and the work would then finish for a question the user can no longer see; asked centered,
+/// a click on its empty space would take focus off the busy answer. Asking it as a layer must fail at once rather than
+/// open.
 ///
-/// Specified: a question with a fallible answer, asked centered or anchored, does not open.
+/// Specified: the YOLO question, asked centered or anchored, does not open.
+/// [`a_question_that_can_fail_opens_as_a_layer_only_centered_with_the_empty_click_rule`] covers the centered questions
+/// that may.
 #[gpui::test]
-fn a_question_with_an_answer_that_can_fail_opens_only_inline(cx: &mut TestAppContext) {
+fn the_yolo_question_does_not_open_as_a_layer(cx: &mut TestAppContext) {
     let (cx, row) = open_row(cx);
     for (kind, presentation) in row.presentations() {
         let (ran, attempts): (Ran, Attempts) = Default::default();
@@ -1801,6 +1805,303 @@ fn a_question_with_an_answer_that_can_fail_opens_only_inline(cx: &mut TestAppCon
         });
         settle(cx);
         assert!(asked.is_none(), "{kind}: it did not open");
+    }
+}
+
+/// Record each run of a fallible answer as "<name> <frozen value>" in `ran`, keeping its attempt in `attempts` for the
+/// test to settle.
+fn attempting(
+    name: &'static str,
+    ran: &Ran,
+    attempts: &Attempts,
+) -> impl Fn(String, prompt::Attempt, &mut Window, &mut gpui::App) + 'static {
+    let (ran, attempts) = (ran.clone(), attempts.clone());
+    move |frozen, attempt, _, _| {
+        ran.borrow_mut().push(format!("{name} {frozen}"));
+        attempts.borrow_mut().push(attempt);
+    }
+}
+
+/// The host remove confirmation's shape, asked centered with a mark taken now: [`question`] "alpha" with the
+/// empty-click rule, its confirming answer ("remove") and one extra answer ("always", the permanent one) both able to
+/// fail, each recording into `ran` and `attempts` ([`attempting`]). `subject`, if given, closes it when gone. Panics if
+/// it did not open.
+fn ask_removal(
+    cx: &mut VisualTestContext,
+    subject: Option<Subject>,
+    ran: &Ran,
+    attempts: &Attempts,
+) -> LayerId {
+    let question = question("alpha")
+        .keeps_focus_on_empty_click()
+        .fallible_alternative(keep_it_answer(), attempting("always", ran, attempts));
+    let confirm = attempting("remove", ran, attempts);
+    let layer = cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        prompt::ask_fallible(question, subject, &mark, confirm, window, cx)
+    });
+    settle(cx);
+    layer.expect("the premise: a centered question with the empty-click rule opened")
+}
+
+/// Why this matters: the host remove confirmation is a centered dialog whose confirming answer sends the removal, and
+/// it ports the old dialog (`HostRemoveDialog` in `crates/farhelm-ui/src/hosts/settings_dialog.rs` at reference commit
+/// `24bc0580`), which stayed up through the helm's answer and showed a refusal inside it. A question that closed on a
+/// stray press or an Escape while the removal was in flight would leave a refusal with nowhere to show, and one that
+/// let Escape through and then reopened would not be the question the user answered. After a refusal the old dialog
+/// sent focus to its Cancel, "so the refusal can be dismissed with Enter or Escape": with focus left on Remove, an
+/// Enter meant to dismiss would send the removal again. And one that stayed up after its removal succeeded would ask
+/// about a removal already done.
+///
+/// Specified, once for each way it ends (Enter, Escape, a dismissal through the layer manager (`layers::dismiss`, which
+/// any Close control routes through), and a retry that succeeds): Enter on the confirming answer runs its action once
+/// and leaves the question open, focus on that answer. While its attempt is in flight, a press on the veil, a press on
+/// the question's empty space, Escape and a dismissal run nothing and leave it open, focus still on the answer. When
+/// the attempt fails, the question stays open with the reason painted inside it (a host value in it escaped), and focus
+/// moves to Cancel. Tab back to the confirming answer and Enter retries, running the action again and clearing the
+/// reason. A retry that succeeds closes the question and returns focus to the opener; one that fails again leaves it
+/// open with focus on Cancel, and Enter, Escape or the dismissal then closes it, returning focus to the opener. Nothing
+/// else runs.
+#[gpui::test]
+fn a_failing_confirming_answer_keeps_a_centered_question_up_with_the_reason(
+    cx: &mut TestAppContext,
+) {
+    let (cx, row) = open_row(cx);
+    let twice = ["remove alpha", "remove alpha"];
+    for ending in ["enter", "escape", "dismiss", "success"] {
+        let (ran, attempts): (Ran, Attempts) = Default::default();
+        click(cx, "opener");
+        let layer = ask_removal(cx, None, &ran, &attempts);
+        let open_on = |cx: &mut VisualTestContext, when: &str, answer: &str| {
+            assert!(is_open(cx, layer), "{ending}, {when}: the question is open");
+            assert_eq!(
+                focused_id(cx).as_deref(),
+                Some(answer),
+                "{ending}, {when}: where focus is"
+            );
+        };
+        let reason_painted = |cx: &mut VisualTestContext| {
+            painted_in_question(cx)
+                .iter()
+                .any(|text| text.contains("build-box<U+202E>"))
+        };
+        open_on(cx, "the premise", "prompt-confirm");
+        keys(cx, "enter");
+        assert_eq!(
+            *ran.borrow(),
+            ["remove alpha"],
+            "{ending}: the answer ran once"
+        );
+        open_on(cx, "in flight", "prompt-confirm");
+
+        let veil = point(px(2.), px(2.));
+        assert!(
+            !bounds(cx, "prompt").contains(&veil),
+            "{ending}, the premise: the press lands on the veil, outside the dialog"
+        );
+        cx.simulate_click(veil, Modifiers::none());
+        check(cx);
+        open_on(cx, "after a press on the veil", "prompt-confirm");
+        // The body's padding is the question's empty space.
+        let body = bounds(cx, "prompt-body");
+        cx.simulate_click(
+            point(body.left() + px(4.), body.top() + px(4.)),
+            Modifiers::none(),
+        );
+        check(cx);
+        open_on(cx, "after a press on its empty space", "prompt-confirm");
+        keys(cx, "escape");
+        cx.update(|window, cx| layers::dismiss(layer, window, cx));
+        settle(cx);
+        assert_eq!(
+            *ran.borrow(),
+            ["remove alpha"],
+            "{ending}: nothing else ran in flight"
+        );
+        assert_eq!(
+            attempts.borrow().len(),
+            1,
+            "{ending}: one attempt is in flight"
+        );
+        open_on(
+            cx,
+            "after Escape and a dismissal in flight",
+            "prompt-confirm",
+        );
+
+        let host = HostText::from_host("build-box\u{202E}");
+        let refusal = || {
+            HostSentence::new("prompt-reason")
+                .text("Farhelm refused to remove ")
+                .host(&host)
+        };
+        settle_attempt(cx, &attempts, Some(refusal()));
+        open_on(cx, "failed", "prompt-cancel");
+        assert!(
+            reason_painted(cx),
+            "{ending}: the reason is painted inside the question, its host value escaped; painted: {:?}",
+            painted_in_question(cx)
+        );
+        // Past the extra answer, back to the confirming one.
+        keys(cx, "tab tab");
+        open_on(cx, "the premise of the retry", "prompt-confirm");
+        keys(cx, "enter");
+        assert_eq!(*ran.borrow(), twice, "{ending}: Enter on it retried");
+        open_on(cx, "retrying", "prompt-confirm");
+        assert!(
+            !reason_painted(cx),
+            "{ending}: the retry cleared the old reason"
+        );
+
+        if ending == "success" {
+            settle_attempt(cx, &attempts, None);
+            assert!(
+                !is_open(cx, layer),
+                "{ending}: the retry's success closed the question"
+            );
+        } else {
+            settle_attempt(cx, &attempts, Some(refusal()));
+            open_on(cx, "failed again", "prompt-cancel");
+            match ending {
+                "enter" => keys(cx, "enter"),
+                "escape" => keys(cx, "escape"),
+                _ => {
+                    cx.update(|window, cx| layers::dismiss(layer, window, cx));
+                    settle(cx);
+                }
+            }
+            assert!(
+                !is_open(cx, layer),
+                "{ending}: after the refusal it closed the question"
+            );
+        }
+        assert!(
+            focused(cx, &row.opener),
+            "{ending}: focus went back to the opener"
+        );
+        assert_eq!(*ran.borrow(), twice, "{ending}: and nothing else ran");
+    }
+}
+
+/// Why this matters: the host remove confirmation closes when the registry stops listing the host, and a successful
+/// removal is exactly that, so its subject can go while its own attempt is still in flight. Holding the question open
+/// then would leave a question about a host that is gone, frozen until an answer that may never come. An extra answer
+/// that can fail (the permanent "Remove, don't ask again") is held the same way as the confirming one, and its refusal
+/// sends focus to Cancel as the confirming answer's does: the old dialog's two answers shared one refusal path.
+///
+/// Specified: on a centered question with the empty-click rule, Enter on the fallible extra answer runs its action once
+/// and leaves the question open, focus on that answer. When that attempt fails, the question stays open with the reason
+/// painted inside it and focus on Cancel. Tab back to the extra answer and Enter runs it again, focus on it. The
+/// subject going then closes it mid-attempt, returning focus to the opener, and the attempt settled afterwards runs
+/// nothing and opens nothing.
+#[gpui::test]
+fn a_centered_extra_answer_refusal_and_its_subject_going_mid_attempt(cx: &mut TestAppContext) {
+    let (cx, row) = open_row(cx);
+    let thing: Entity<Thing> = cx.update(|_, cx| {
+        cx.new(|_| Thing {
+            name: "alpha".into(),
+        })
+    });
+    let (ran, attempts): (Ran, Attempts) = Default::default();
+    click(cx, "opener");
+    let layer = ask_removal(cx, Some(Subject::of(&thing)), &ran, &attempts);
+    keys(cx, "shift-tab enter");
+    assert_eq!(*ran.borrow(), ["always alpha"], "the extra answer ran once");
+    assert!(is_open(cx, layer), "its attempt kept the question open");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("prompt-alternative-0"),
+        "focus stayed on the extra answer"
+    );
+
+    let host = HostText::from_host("build-box\u{202E}");
+    let refusal = HostSentence::new("prompt-reason")
+        .text("Farhelm refused to remove ")
+        .host(&host);
+    settle_attempt(cx, &attempts, Some(refusal));
+    assert!(is_open(cx, layer), "the refusal left the question open");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("prompt-cancel"),
+        "the refusal moved focus to Cancel"
+    );
+    let painted = painted_in_question(cx);
+    assert!(
+        painted
+            .iter()
+            .any(|text| text.contains("build-box<U+202E>")),
+        "the reason is painted inside the question; painted: {painted:?}"
+    );
+    keys(cx, "tab enter");
+    let twice = ["always alpha", "always alpha"];
+    assert_eq!(
+        *ran.borrow(),
+        twice,
+        "Tab back and Enter ran the extra answer again"
+    );
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("prompt-alternative-0"),
+        "focus is on the extra answer for its retry"
+    );
+
+    drop(thing);
+    settle(cx);
+    assert!(
+        !is_open(cx, layer),
+        "the subject going closed it mid-attempt"
+    );
+    assert!(focused(cx, &row.opener), "focus went back to the opener");
+    settle_attempt(cx, &attempts, None);
+    assert_eq!(*ran.borrow(), twice, "the late settling ran nothing");
+    assert!(!any_open(cx), "and opened nothing");
+}
+
+/// Why this matters: the rule for where an answer that can fail is allowed is what keeps such a question from being
+/// taken away mid-attempt. An anchored question closes on a press outside it, which nothing can veto, and a centered
+/// one without the empty-click rule lets a click on its empty space take focus off the busy answer. Without the check a
+/// feature could ask either and lose the refusal it meant to show.
+///
+/// Specified: a question whose confirming answer can fail, asked centered without the empty-click rule, does not open;
+/// a question with the empty-click rule and an extra answer that can fail opens centered but not anchored.
+#[gpui::test]
+fn a_question_that_can_fail_opens_as_a_layer_only_centered_with_the_empty_click_rule(
+    cx: &mut TestAppContext,
+) {
+    let (cx, row) = open_row(cx);
+    let (ran, attempts): (Ran, Attempts) = Default::default();
+    let confirm = attempting("remove", &ran, &attempts);
+    let asked = cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        prompt::ask_fallible(question("alpha"), None, &mark, confirm, window, cx)
+    });
+    settle(cx);
+    assert!(
+        asked.is_none(),
+        "without the empty-click rule it did not open"
+    );
+    for ((kind, presentation), opens) in row.presentations().into_iter().zip([true, false]) {
+        let question = question("alpha")
+            .keeps_focus_on_empty_click()
+            .fallible_alternative(keep_it_answer(), attempting("always", &ran, &attempts));
+        let asked = cx.update(|window, cx| {
+            let mark = Mark::take(cx);
+            prompt::ask_for_test(
+                presentation,
+                question,
+                None,
+                &mark,
+                |_, _, _| {},
+                window,
+                cx,
+            )
+        });
+        settle(cx);
+        assert_eq!(asked.is_some(), opens, "{kind}: whether it opened");
+        if let Some(asked) = asked {
+            cx.update(|window, cx| layers::close(asked.layer, window, cx));
+            settle(cx);
+        }
     }
 }
 
@@ -1831,11 +2132,12 @@ fn with_every_presentation_option(question: Question<String>) -> Question<String
 /// to say so. The debug build the tests run in has to fail instead, naming the option and the call.
 ///
 /// Specified: a centered question carrying every presentation-specific option fails a debug build as it is asked,
-/// naming `prompt::ask` and the loud look only, since the centered question takes all the others.
+/// naming the centered question's calls (`prompt::ask` or `prompt::ask_fallible`) and the loud look only, since the
+/// centered question takes all the others.
 #[cfg(debug_assertions)]
 #[gpui::test]
 #[should_panic(
-    expected = "a question was asked through prompt::ask with Question::loud, which it ignores"
+    expected = "a question was asked through prompt::ask or prompt::ask_fallible with Question::loud, which it ignores"
 )]
 fn a_centered_question_with_an_option_it_ignores_fails_a_debug_build(cx: &mut TestAppContext) {
     let cx = open(cx, |_, _| div().into_any_element());

@@ -22,14 +22,22 @@
 //! wins among, and focus never starts on one. Cancel and Confirm keep their places at the ends, as every question
 //! SPEC.md asks has them.
 //!
-//! Every answer closes the question before its action runs, with one exception: an extra answer whose action can fail
-//! ([`Question::fallible_alternative`]). SPEC.md's YOLO question has one: its "stop asking" answer first changes the
-//! host's setting, and "if changing that setting fails, nothing is started and the confirmation stays up with the
-//! reason". Such an answer keeps the question open while its action is in flight, with every answer frozen (drawn busy,
-//! doing nothing, Escape included), so the first answer still wins. The action settles through the [`Attempt`] it is
-//! handed: success closes the question as any answer does, and failure shows the reason inside the question and arms
-//! the answers again, so the user can pick again. Focus stays on the answer the user pressed throughout, since a busy
-//! button keeps it, and the question never closes and reopens. Only the inline presentation offers it (below).
+//! Every answer closes the question before its action runs, with one exception: an answer whose action can fail, an
+//! extra one ([`Question::fallible_alternative`]) or the confirming one ([`ask_fallible`]). SPEC.md's YOLO question has
+//! an extra one: its "stop asking" answer first changes the host's setting, and "if changing that setting fails,
+//! nothing is started and the confirmation stays up with the reason". The host remove confirmation's Remove is a
+//! confirming one, as the old dialog stayed up through its request and showed the helm's refusal inside it. Such an
+//! answer keeps the question open while its action is in flight, with every answer frozen (drawn busy, doing nothing,
+//! Escape and any other dismissal included), so the first answer still wins. The action settles through the
+//! [`Attempt`] it is handed: success closes the question as any answer does, and failure shows the reason inside the
+//! question and arms the answers again, so the user can pick again. Focus stays on the answer the user pressed while
+//! the attempt runs, since a busy button keeps it, and the question never closes and reopens. After a failure an inline
+//! question leaves focus there. A centered one moves it to Cancel (every question has one), as the old host remove
+//! dialog did after a refusal: Enter or Escape then dismisses the question instead of Enter sending the refused action
+//! again, and a retry is a press on the answer again. An extra answer that can fail
+//! may sit on an inline question or on a centered one built with [`Question::keeps_focus_on_empty_click`]; a confirming
+//! answer that can fail only on the centered one, through [`ask_fallible`] (an inline question's confirming answer runs
+//! once). [`Question::fallible_alternative`] says why.
 //!
 //! A centered question that needs more than lines of text (the host setup confirmation's numbered plan with its Copy
 //! plan button, the host remove confirmation's explanation) carries a body the feature draws ([`Question::body`]), and
@@ -84,7 +92,8 @@
 //! look to the inline one, and the empty-click and Escape-home rules to the two layers. A debug build asserts, as the
 //! question opens, that none is set on a question asked a way that ignores it; a release build ignores it. Otherwise a
 //! question moved from centered to anchored, or a helper that builds one question for both, would lose its body or its
-//! tile with no test failing. The answer that can fail is stricter: a layer refuses it in every build.
+//! tile with no test failing. The answer that can fail is stricter: a question asked a way that may not carry one
+//! refuses to open, in every build.
 //!
 //! NOTE: Two recorded deviations from the old YOLO question's look. The old one drew its last line (the host "asks
 //! before every YOLO launch") in the dimmer `--fg-dim`; here every line is drawn alike, since a question's lines carry
@@ -92,6 +101,11 @@
 //! value ("… stops its actions" / "on" / "Local (this machine) without asking you."), where the old one flowed as one
 //! paragraph: a [`HostSentence`](crate::host_text::HostSentence) draws each part as a whole block of its own. The fix
 //! belongs in `host_text` (one styled text with runs), not here.
+//!
+//! NOTE: A recorded deviation from the old host remove dialog's look. Its refusal sat below the explanation in the
+//! body's ink, and its summary turned into a red "Farhelm refused this action" once there was one. A question's
+//! summary is frozen, so the centered question draws a failed attempt's reason below its body in the inline question's
+//! amber instead.
 
 use std::rc::Rc;
 
@@ -106,7 +120,7 @@ use crate::actions::Dismiss;
 use crate::components::{Button, DialogFrame, HoverHelp, Role, Tier};
 use crate::focus::{self, Mark, ReturnTo};
 use crate::host_text::Line;
-use crate::layers::{self, Anchor, AnchoredDialog, Dialog, LayerId, Subject};
+use crate::layers::{self, Anchor, AnchoredDialog, Dialog, Dismissal, LayerId, Subject};
 use crate::theme::{self, metrics};
 
 /// How wide an anchored question may grow before its lines wrap: the old row menu panel's `max-width: 288px`.
@@ -287,17 +301,29 @@ impl<T: Clone + 'static> Question<T> {
     /// changes the host's setting before it starts anything. Picking it does not close the question. `on_choose` runs
     /// with the frozen value and an [`Attempt`], and the question stays open with every answer frozen until the action
     /// settles that attempt: [`Attempt::succeeded`] closes the question as any answer does, and [`Attempt::failed`]
-    /// shows the reason inside the question and arms the answers again. A retry runs `on_choose` again, with a new
-    /// attempt, which is why it is `Fn`.
+    /// shows the reason inside the question and arms the answers again (centered, it also moves focus to Cancel; see
+    /// the module docs). A retry runs `on_choose` again, with a new attempt, which is why it is `Fn`.
     ///
-    /// While an attempt is unsettled ([`Inline::in_flight`]), the owner must not go away under it: its dismissal hook
-    /// answers [`Dismissal::Stay`](crate::layers::Dismissal::Stay), as an editor whose save is in flight does.
-    /// Otherwise Tab out of the question, then Escape or the header Close, would close the launcher, and the action
-    /// would run on and start a session the user dismissed.
+    /// While an inline question's attempt is unsettled ([`Inline::in_flight`]), its owner must not go away under it:
+    /// the owner's dismissal hook answers [`Dismissal::Stay`](crate::layers::Dismissal::Stay), as an editor whose save
+    /// is in flight does. Otherwise Tab out of the question, then Escape or the header Close, would close the launcher,
+    /// and the action would run on and start a session the user dismissed.
     ///
-    /// Only an inline question ([`ask_inline`]) may carry one: a centered or anchored question with it refuses to open.
-    /// An inline question's owner decides its own dismissal and can refuse it while the action runs; a question shown
-    /// as a layer can also close on a press outside it or when its subject goes, which nothing can veto.
+    /// Only an inline question ([`ask_inline`]) and a centered one built with
+    /// [`Question::keeps_focus_on_empty_click`] may carry one; any other question with one refuses to open. A
+    /// confirming answer that can fail exists only on that centered question, through [`ask_fallible`]: an inline
+    /// question's confirming answer runs once. An inline question's owner decides its own dismissal and can refuse
+    /// it while the action runs. A centered question's veil takes a press without dismissing it, and every dismissal
+    /// (Escape, a control routed through [`layers::dismiss`]) asks the dialog's hook, which the prompt answers with
+    /// [`Dismissal::Stay`](crate::layers::Dismissal::Stay) while an attempt is in flight. The empty-click rule keeps
+    /// focus on the busy answer the user pressed when they click the question's empty space, which otherwise would
+    /// move focus to the question itself. An anchored question closes on a press outside it and when its anchor goes,
+    /// which nothing can veto. The rule was widened from inline-only by the GPUI migration's orchestrator on
+    /// 2026-11-14, for the host remove confirmation.
+    ///
+    /// A centered question still closes mid-attempt when its subject goes or the connection resets, and the attempt's
+    /// settling then does nothing. For the host remove confirmation that close is the success: the registry stops
+    /// listing the host.
     pub fn fallible_alternative(
         mut self,
         answer: Answer,
@@ -410,11 +436,23 @@ impl<T: Clone + 'static> Question<T> {
         self.starts_on_cancel || !self.confirm_enabled
     }
 
+    /// Whether this question may carry an answer whose action can fail when shown as `shown`: inline always, centered
+    /// only with the empty-click rule, anchored never. [`Question::fallible_alternative`] says why; [`ask_inner`]
+    /// refuses to open a layer this answers `false` for.
+    fn may_fail_when(&self, shown: Shown) -> bool {
+        match shown {
+            Shown::Inline => true,
+            Shown::Centered => self.keeps_focus_on_empty_click,
+            Shown::Anchored => false,
+        }
+    }
+
     /// The options set on this question that a question shown as `shown` ignores, by builder name, in the order the
     /// builders are declared: the body, tile, note and width outside the centered question, the loud look outside the
     /// inline one, and inside it the empty-click and Escape rules its owner's dialog keeps. This is the one list of
     /// what each presentation ignores, which [`build`] asserts empty in a debug build (see the module docs). An answer
-    /// that can fail is not here: a layer refuses it outright, in every build ([`ask_inner`]).
+    /// that can fail is not here: a question that may not carry one refuses to open, in every build
+    /// ([`Question::may_fail_when`]).
     fn ignored_by(&self, shown: Shown) -> Vec<&'static str> {
         let (centered, inline) = (shown == Shown::Centered, shown == Shown::Inline);
         [
@@ -441,12 +479,12 @@ impl<T: Clone + 'static> Question<T> {
 /// What a confirming answer does with the frozen value.
 type OnConfirm<T> = Box<dyn FnOnce(T, &mut Window, &mut App)>;
 
-/// What an extra answer does.
+/// What the confirming answer or an extra answer does.
 enum Action<T> {
-    /// Runs once, after the question closed ([`Question::alternative`]).
+    /// Runs once, after the question closed ([`Question::alternative`], [`ask`]).
     Once(OnConfirm<T>),
     /// Runs with the question still open, and again on each retry, until an attempt succeeds
-    /// ([`Question::fallible_alternative`]).
+    /// ([`Question::fallible_alternative`], [`ask_fallible`]).
     Fallible(OnAttempt<T>),
 }
 
@@ -456,14 +494,15 @@ type OnAttempt<T> = Rc<dyn Fn(T, Attempt, &mut Window, &mut App)>;
 /// Settles an [`Attempt`]: `None` for success, the reason for a failure.
 type Settle = Box<dyn FnOnce(Option<Line>, &mut App)>;
 
-/// One run of an answer whose action can fail ([`Question::fallible_alternative`]), which the action settles exactly
-/// once, whenever its work is done. Until then the question stays open with every answer frozen.
+/// One run of an answer whose action can fail ([`Question::fallible_alternative`], [`ask_fallible`]), which the action
+/// settles exactly once, whenever its work is done. Until then the question stays open with every answer frozen.
 ///
 /// Settling takes effect once the update it is called from has returned, so an action may settle at once, from inside
-/// its own call. An attempt settled after the question went (its owner stopped drawing it) does nothing. An attempt
-/// dropped without settling leaves the question frozen until its owner takes it away: an owner whose work can be
-/// cancelled settles the attempt as failed when it is. While it is unsettled, the owner's dismissal hook keeps the
-/// owner open ([`Question::fallible_alternative`]).
+/// its own call. An attempt settled after the question went (its owner stopped drawing it, or its layer closed with
+/// its subject) does nothing. An attempt dropped without settling leaves the question frozen until its owner takes it
+/// away (a centered question: until its subject goes or the connection resets): an owner whose work can be cancelled
+/// settles the attempt as failed when it is. While it is unsettled, an inline question's owner keeps itself open
+/// through its dismissal hook ([`Question::fallible_alternative`]); a centered question holds its own dismissals.
 #[must_use = "an unsettled attempt leaves its question frozen"]
 pub struct Attempt {
     settle: Settle,
@@ -489,9 +528,9 @@ impl Attempt {
         (self.settle)(None, cx);
     }
 
-    /// The action failed: the question stays up showing `reason` and arms its answers again. `reason` may quote a host
-    /// (the helm's refusal): pass it as a [`HostSentence`](crate::host_text::HostSentence), never as a string made
-    /// from the raw value.
+    /// The action failed: the question stays up showing `reason` and arms its answers again, with focus moved to Cancel
+    /// on a centered question (see the module docs). `reason` may quote a host (the helm's refusal): pass it as a
+    /// [`HostSentence`](crate::host_text::HostSentence), never as a string made from the raw value.
     pub fn failed(self, reason: impl Into<Line>, cx: &mut App) {
         (self.settle)(Some(reason.into()), cx);
     }
@@ -500,7 +539,8 @@ impl Attempt {
 /// An open question's view: the frozen question, its answer buttons' focus handles, and the actions not yet run.
 pub struct Prompt<T: 'static> {
     question: Question<T>,
-    on_confirm: Option<OnConfirm<T>>,
+    /// The confirming answer's action, until it runs (a fallible one stays).
+    on_confirm: Option<Action<T>>,
     /// The extra answers' actions, taken out of the question when it opens, each until it runs (a fallible one stays).
     on_alternatives: Vec<Option<Action<T>>>,
     layer: Option<LayerId>,
@@ -536,7 +576,7 @@ impl Shown {
     /// The call that asks a question this way, which is how a feature author knows the presentation: for messages.
     fn asked_through(self) -> &'static str {
         match self {
-            Shown::Centered => "prompt::ask",
+            Shown::Centered => "prompt::ask or prompt::ask_fallible",
             Shown::Anchored => "prompt::ask_anchored",
             Shown::Inline => "prompt::ask_inline",
         }
@@ -553,6 +593,15 @@ enum Which {
 }
 
 impl<T: Clone + 'static> Prompt<T> {
+    /// Where `which`'s action is kept: `None` for Cancel, which has none, and for an index past the extra answers.
+    fn action_of(&mut self, which: Which) -> Option<&mut Option<Action<T>>> {
+        match which {
+            Which::Confirm => Some(&mut self.on_confirm),
+            Which::Alternative(index) => self.on_alternatives.get_mut(index),
+            Which::Cancel => None,
+        }
+    }
+
     /// Run `which`, if no answer has run yet and no attempt is in flight: close the question (returning focus to its
     /// opener), then, for Confirm or an extra answer, hand the frozen value to its action. A fallible answer instead
     /// starts an attempt and leaves the question open, frozen, until the attempt settles.
@@ -563,9 +612,7 @@ impl<T: Clone + 'static> Prompt<T> {
         {
             return;
         }
-        if let Which::Alternative(index) = which
-            && let Some(Some(Action::Fallible(action))) = self.on_alternatives.get(index)
-        {
+        if let Some(Some(Action::Fallible(action))) = self.action_of(which) {
             let action = action.clone();
             self.in_flight = true;
             self.reason = None;
@@ -576,35 +623,56 @@ impl<T: Clone + 'static> Prompt<T> {
         }
         self.answered = true;
         self.close(window, cx);
-        let action = match which {
-            Which::Confirm => self.on_confirm.take(),
-            Which::Alternative(index) => {
-                match self.on_alternatives.get_mut(index).and_then(Option::take) {
-                    Some(Action::Once(action)) => Some(action),
-                    // A fallible answer started its attempt above; an index past the end has no button.
-                    Some(Action::Fallible(_)) | None => None,
-                }
-            }
-            Which::Cancel => None,
+        let action = match self.action_of(which).and_then(Option::take) {
+            Some(Action::Once(action)) => Some(action),
+            // A fallible answer started its attempt above; Cancel and an index past the end have no action.
+            Some(Action::Fallible(_)) | None => None,
         };
         if let Some(action) = action {
             action(self.question.frozen.clone(), window, cx);
         }
     }
 
-    /// The in-flight attempt settled: closed on success (`reason` is `None`), or open again with the reason shown.
+    /// The in-flight attempt settled: closed on success (`reason` is `None`), or open again with the reason shown, and,
+    /// centered, focus on Cancel.
     fn settle(&mut self, reason: Option<Line>, window: &mut Window, cx: &mut Context<Self>) {
         // Only an attempt settles, and only while it is the one in flight: each settles once, and the next can start
         // only after the last has settled.
         self.in_flight = false;
         match reason {
-            Some(reason) => self.reason = Some(reason),
+            Some(reason) => {
+                self.reason = Some(reason);
+                // The old host remove dialog sent focus to its Cancel after a refusal (`focus_remove_refusal` at
+                // reference commit `24bc0580`), "so the refusal can be dismissed with Enter or Escape" rather than
+                // Enter sending the refused action again; the same for either of its answers, and with no condition,
+                // since its answers were disabled during the request. The mark is taken now, not at the press, on
+                // purpose (SPEC_impl.md, "Questions"): a press on the veil or the empty space, or an Escape, during
+                // the attempt counts as moving on, and would cancel the move. The focus coordinator still keeps it
+                // inside the question's layer. An inline question leaves focus on the pressed answer.
+                if self.shown == Shown::Centered {
+                    let cancel = self.cancel_focus.clone();
+                    focus::focus_in_layer(&cancel, &Mark::take(cx), window, cx);
+                }
+            }
             None => {
                 self.answered = true;
                 self.close(window, cx);
             }
         }
         cx.notify();
+    }
+
+    /// Why the last attempt failed, as the inline and centered questions draw it below their text: amber 12-pixel
+    /// text, the old launcher's `.yolo-confirmation-error` (the centered question's look is a recorded deviation; see
+    /// the module docs).
+    fn reason(&self, cx: &App) -> Option<gpui::Div> {
+        let palette = theme::palette(cx);
+        self.reason.clone().map(|reason| {
+            div()
+                .text_size(metrics::TEXT_SM)
+                .text_color(theme::color(palette.warn_bright))
+                .child(reason)
+        })
     }
 
     /// Take the question down: close its layer, or, inline, stop drawing it and return focus to what held it when it
@@ -723,7 +791,8 @@ impl<T: Clone + 'static> Render for Prompt<T> {
             .gap(px(8.))
             .text_color(theme::color(palette.fg_0))
             .children(question.lines.iter().cloned().map(|line| div().child(line)))
-            .children(self.body.clone());
+            .children(self.body.clone())
+            .children(self.reason(cx));
         let mut frame = DialogFrame::new("prompt", question.title.clone(), body, answers);
         if let Some(summary) = &question.summary {
             frame = frame.summary(summary.clone());
@@ -753,12 +822,7 @@ fn inline<T: Clone + 'static>(
     let palette = theme::palette(cx);
     let question = &prompt.question;
     let loud = question.loud;
-    let reason = prompt.reason.clone().map(|reason| {
-        div()
-            .text_size(metrics::TEXT_SM)
-            .text_color(theme::color(palette.warn_bright))
-            .child(reason)
-    });
+    let reason = prompt.reason(cx);
     let element = div()
         .id("prompt")
         .debug_selector(|| "prompt".into())
@@ -927,7 +991,36 @@ pub fn ask<T: Clone + 'static>(
         Presentation::Centered,
         subject,
         mark,
-        on_confirm,
+        Action::Once(Box::new(on_confirm)),
+        window,
+        cx,
+    )
+    .map(|(layer, _)| layer)
+}
+
+/// Ask `question` as a dialog, as [`ask`] does, with a confirming answer whose action can fail: the host remove
+/// confirmation's Remove, which stays up through the helm's answer and shows its refusal. Pressing Confirm leaves the
+/// question open with every answer frozen, and `on_confirm` runs with the frozen value and an [`Attempt`] it settles,
+/// under the rules [`Question::fallible_alternative`] gives an extra answer, which a question asked this way may also
+/// carry. A retry runs `on_confirm` again, with a new attempt.
+///
+/// `question` must be built with [`Question::keeps_focus_on_empty_click`]; without it nothing opens (its
+/// [`Question::fallible_alternative`] says why). Escape and any other dismissal do nothing while an attempt is in
+/// flight; `subject` going still closes the question, and the attempt's settling then does nothing.
+pub fn ask_fallible<T: Clone + 'static>(
+    question: Question<T>,
+    subject: Option<Subject>,
+    mark: &Mark,
+    on_confirm: impl Fn(T, Attempt, &mut Window, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
+    ask_inner(
+        question,
+        Presentation::Centered,
+        subject,
+        mark,
+        Action::Fallible(Rc::new(on_confirm)),
         window,
         cx,
     )
@@ -951,7 +1044,7 @@ pub fn ask_anchored<T: Clone + 'static>(
         Presentation::Anchored(anchor),
         subject,
         mark,
-        on_confirm,
+        Action::Once(Box::new(on_confirm)),
         window,
         cx,
     )
@@ -979,6 +1072,7 @@ pub fn ask_inline<T: Clone + 'static>(
     window: &mut Window,
     cx: &mut App,
 ) -> Inline<T> {
+    let on_confirm = Action::Once(Box::new(on_confirm));
     let (prompt, start) = build(question, Shown::Inline, on_confirm, window, cx);
     let opener = window.focused(cx);
     prompt.update(cx, |prompt, _| {
@@ -1000,39 +1094,55 @@ fn move_for_question(target: &FocusHandle, mark: &Mark, window: &mut Window, cx:
     }
 }
 
-/// [`ask`] or [`ask_anchored`], also handing back the prompt's entity for tests.
+/// [`ask`], [`ask_fallible`] or [`ask_anchored`], also handing back the prompt's entity for tests. Refuses, opening
+/// nothing, a question with an answer that can fail that its presentation may not carry ([`Question::may_fail_when`]).
 fn ask_inner<T: Clone + 'static>(
     question: Question<T>,
     presentation: Presentation,
     subject: Option<Subject>,
     mark: &Mark,
-    on_confirm: impl FnOnce(T, &mut Window, &mut App) + 'static,
+    on_confirm: Action<T>,
     window: &mut Window,
     cx: &mut App,
 ) -> Option<(LayerId, gpui::Entity<Prompt<T>>)> {
-    if question
-        .on_alternatives
-        .iter()
-        .any(|action| matches!(action, Action::Fallible(_)))
-    {
+    let shown = match presentation {
+        Presentation::Centered => Shown::Centered,
+        Presentation::Anchored(_) => Shown::Anchored,
+    };
+    let can_fail = std::iter::once(&on_confirm)
+        .chain(&question.on_alternatives)
+        .any(|action| matches!(action, Action::Fallible(_)));
+    if can_fail && !question.may_fail_when(shown) {
         tracing::error!(
-            "a question with an answer that can fail was asked as a layer; only an inline question may carry one"
+            "a question with an answer that can fail was asked through {}; only an inline question or a centered one \
+             built with Question::keeps_focus_on_empty_click may carry one",
+            shown.asked_through(),
         );
         return None;
     }
     let enabled = question.confirm_enabled;
     let keeps_focus_on_empty_click = question.keeps_focus_on_empty_click;
     let returns_to = question.returns_to.clone();
-    let shown = match presentation {
-        Presentation::Centered => Shown::Centered,
-        Presentation::Anchored(_) => Shown::Anchored,
-    };
     let (prompt, start) = build(question, shown, on_confirm, window, cx);
     let weak = prompt.downgrade();
     let main_action: Option<layers::MainAction> = enabled.then(|| {
+        let weak = weak.clone();
         Rc::new(move |window: &mut Window, cx: &mut App| {
             let _ = weak.update(cx, |prompt, cx| prompt.answer(Which::Confirm, window, cx));
         }) as layers::MainAction
+    });
+    // Every dismissal (Escape, a control routed through `layers::dismiss`) waits while an attempt is in flight, as the
+    // answers do. Only a question that can fail gets the hook: no other is ever in flight, and its dismissals then
+    // read nothing of the prompt.
+    let on_dismiss: layers::DismissHook = Rc::new(move |_, cx| {
+        if weak
+            .upgrade()
+            .is_some_and(|prompt| prompt.read(cx).in_flight)
+        {
+            Dismissal::Stay
+        } else {
+            Dismissal::Close
+        }
     });
     let view = prompt.clone().into();
     let container = cx.focus_handle();
@@ -1046,7 +1156,7 @@ fn ask_inner<T: Clone + 'static>(
                 main_action,
                 keeps_focus_on_empty_click,
                 returns_to,
-                on_dismiss: None,
+                on_dismiss: can_fail.then_some(on_dismiss),
                 placement: layers::DialogPlacement::Centered,
                 dismiss_on_outside_press: false,
             },
@@ -1079,7 +1189,7 @@ fn ask_inner<T: Clone + 'static>(
 fn build<T: Clone + 'static>(
     mut question: Question<T>,
     shown: Shown,
-    on_confirm: impl FnOnce(T, &mut Window, &mut App) + 'static,
+    on_confirm: Action<T>,
     window: &mut Window,
     cx: &mut App,
 ) -> (Entity<Prompt<T>>, FocusHandle) {
@@ -1114,7 +1224,7 @@ fn build<T: Clone + 'static>(
     };
     let prompt = cx.new(|_| Prompt {
         question,
-        on_confirm: Some(Box::new(on_confirm)),
+        on_confirm: Some(on_confirm),
         on_alternatives,
         layer: None,
         shown,
@@ -1147,7 +1257,7 @@ pub(crate) fn ask_for_test<T: Clone + 'static>(
         presentation,
         subject,
         mark,
-        on_confirm,
+        Action::Once(Box::new(on_confirm)),
         window,
         cx,
     )

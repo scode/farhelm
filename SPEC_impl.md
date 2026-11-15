@@ -718,11 +718,23 @@ dialog. It draws plain, or loud as the YOLO confirmation is (decided by the migr
 
 An answer whose action can fail keeps its question open, every answer frozen, until the action reports how it went:
 success closes the question as any answer does, and failure shows the reason inside it and arms the answers again
-(SPEC.md: the YOLO question "stays up with the reason" when stopping to ask fails). Focus stays on that answer
-throughout. While the attempt is unsettled, the owner's dismissal hook keeps the owner open, as an editor whose save is
-in flight stays, so the owner cannot close under the running action. Only an inline question may carry one: its owner
-decides its own dismissal, while a question shown as a layer can also close on a press outside it or its subject going,
-which nothing can veto.
+(SPEC.md: the YOLO question "stays up with the reason" when stopping to ask fails). The host remove confirmation ports
+the old dialog (`HostRemoveDialog` in `crates/farhelm-ui/src/hosts/settings_dialog.rs` at reference commit `24bc0580`),
+which stayed up through its request with the helm's refusal. Focus stays on that answer while the attempt runs. After a
+failure an inline question leaves it there, while a centered one moves it to Cancel, as the old remove dialog did "so
+the refusal can be dismissed with Enter or Escape", rather than Enter sending the refused action again; a retry is a
+press on the answer again. That move takes its mark when the refusal arrives, not at the press, departing on purpose
+from SPEC.md's "Who may move focus": harmless presses during the attempt (the veil, the empty space, Escape) count as
+moving on and would otherwise cancel it, the old dialog moved focus regardless, and the move stays inside the question.
+An extra answer that can fail may sit on an inline question or a centered one that keeps focus on an empty-space click;
+a confirming answer that can fail only on such a centered question (an inline question's confirming answer runs once).
+Any other question with one refuses to open. An inline question's owner keeps itself open while the attempt is unsettled
+through its dismissal hook, as an editor whose save is in flight stays, so the owner cannot close under the running
+action. A centered question's veil takes a press without dismissing it, the prompt's own dismissal hook holds Escape and
+every other dismissal while the attempt is unsettled, and the empty-click rule keeps focus on the busy answer. An
+anchored question closes on a press outside it or its anchor going, which nothing can veto. A centered question still
+closes when its subject goes or the connection resets, mid-attempt too; for the host remove confirmation the subject
+going is the success. The centered case was added by the migration's orchestrator on 2026-11-14.
 
 Enforced by the prompt being the only type that renders answer buttons for a question, and by a generic test, for every
 prompt kind, that changes the confirmation's subject after it opens, then sends its answers (Cancel, Confirm and an
