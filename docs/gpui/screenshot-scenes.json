@@ -1155,7 +1155,7 @@
     },
     {
       "golden": "settings-credentials",
-      "title": "Settings at Credentials: the Not encrypted on disk warning and the three lists with nothing saved (no Tensorlake API key form yet)",
+      "title": "Settings at Credentials: the Not encrypted on disk warning, the Tensorlake API key form with no key saved, and the three lists with nothing saved",
       "reference": "settings-credentials"
     },
     {

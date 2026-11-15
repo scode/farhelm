@@ -1,5 +1,6 @@
 //! Settings → Credentials: the helm's catalog of named secrets (GitHub tokens, agent subscription logins and API
-//! endpoint tokens) in three lists, each credential edited in place with a write-only secret.
+//! endpoint tokens) in three lists, each credential edited in place with a write-only secret, and the Tensorlake API key
+//! form above them.
 //!
 //! SPEC.md, "Session list" (the Credentials paragraphs) and "Security" (the credential catalog stores values
 //! unencrypted); SPEC_impl.md, "Named credential catalog". Ported from the old app's `CredentialsSettings` and
@@ -50,6 +51,7 @@ use gpui::{
 };
 
 use super::choices::{self, LABEL_LINE_HEIGHT, LABEL_TEXT};
+use super::tensorlake_key::TensorlakeKey;
 use crate::components::{Button, HoverHelp, Tier};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
@@ -247,19 +249,25 @@ pub(super) struct Credentials {
     editor: Option<Entity<Editor>>,
     /// The hosts the last done replacement did not reach, until the next editor closes (Back and Cancel included).
     undelivered: Vec<DeliveryFailure>,
+    key: Entity<TensorlakeKey>,
     /// Each list's Add button, by list, where focus goes when an editor closes.
     add: [FocusHandle; 3],
     window: AnyWindowHandle,
 }
 
 impl Credentials {
-    /// The section, reading the catalog now.
-    pub(super) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// The section, reading the catalog now, with `key` as its Tensorlake API key form.
+    pub(super) fn new(
+        key: Entity<TensorlakeKey>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let mut credentials = Credentials {
             catalog: None,
             unreadable: None,
             editor: None,
             undelivered: Vec::new(),
+            key,
             add: [(); 3].map(|_| cx.focus_handle().tab_stop(true)),
             window: window.window_handle(),
         };
@@ -271,6 +279,12 @@ impl Credentials {
     #[cfg(test)]
     pub(super) fn editor(&self) -> Option<Entity<Editor>> {
         self.editor.clone()
+    }
+
+    /// The Tensorlake API key form, for tests that read its typed key: the field is masked.
+    #[cfg(test)]
+    pub(super) fn key(&self) -> Entity<TensorlakeKey> {
+        self.key.clone()
     }
 
     /// Read the catalog; its answer replaces the list (the module docs say why answers cannot cross). The dialog calls
@@ -494,8 +508,8 @@ impl Credentials {
             )
     }
 
-    /// The overview: the delivery failures of the last replacement, the help, the warning and the three lists. The
-    /// warning names the Tensorlake API key, as SPEC.md has it, since the key's form joins it here, above the lists.
+    /// The overview: the delivery failures of the last replacement, the help, the warning, the Tensorlake key form and
+    /// the three lists.
     fn overview(&self, cx: &Context<Self>) -> Vec<AnyElement> {
         let palette = theme::palette(cx);
         let mut parts: Vec<AnyElement> = self
@@ -533,6 +547,7 @@ impl Credentials {
             )
             .into_any_element(),
         );
+        parts.push(self.key.clone().into_any_element());
         if self.catalog.is_none() && self.unreadable.is_none() {
             parts.push(
                 choices::help("Loading credentials…", cx)

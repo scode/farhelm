@@ -2744,10 +2744,10 @@ fn keyboard_shortcuts_dialog_setup(state: &SceneState, window: &mut Window, cx: 
 /// trust, sent as it opens, are answered at once with the trust off and the hint not dismissed, Checkouts' reads as the
 /// reference stack had them: no default folder, no post-clone command, and a checkout kept ready, Notifications' read
 /// of the ntfy settings with the helm's defaults (off, `https://ntfy.sh`, no topic, Default priority, no token),
-/// Credentials' read with an empty catalog, and Containers' reads with the reference's three container hosts, all
-/// ready, and no leftovers; nothing else is answered, so the checks Containers then asks for stay unanswered and the
-/// rows keep the first read's state. The opener is the scene's ring handle, which stands in for the gear. The fake and
-/// the connection are kept for the scene's life, like the Rename editor's.
+/// Credentials' reads with an empty catalog and no Tensorlake key saved, and Containers' reads with the reference's
+/// three container hosts, all ready, and no leftovers; nothing else is answered, so the checks Containers then asks for
+/// stay unanswered and the rows keep the first read's state. The opener is the scene's ring handle, which stands in for
+/// the gear. The fake and the connection are kept for the scene's life, like the Rename editor's.
 fn settings_scene(
     state: &SceneState,
     section: crate::settings::Section,
@@ -2798,6 +2798,9 @@ fn settings_scene(
                         { "place": { "kind": "podman_host", "host": 3 }, "name": "gpu-1", "reason": null, "refreshing": false },
                     ]),
                     "/api/container-orphans" => serde_json::json!([]),
+                    "/api/tensorlake" => serde_json::json!({ "api_key_set": false,
+                        "create_without_asking": false, "helm_tag": "fixture",
+                        "ssh_key": { "state": "not_created" } }),
                     "/api/ntfy-alerts" => {
                         match serde_json::to_value(farhelm_proto::ntfy::Settings::default()) {
                             Ok(defaults) => defaults,
@@ -3042,8 +3045,7 @@ fn settings_hosts_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene(state, crate::settings::Section::Hosts, window, cx);
 }
 
-/// Settings at Credentials, as in the reference but for the Tensorlake API key form, which is not built yet: nothing
-/// saved in any list. Focus starts
+/// Settings at Credentials, as in the reference: nothing saved in any list and no Tensorlake key saved. Focus starts
 /// on the dialog itself, since every control waits for the section's reads.
 fn settings_credentials_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene(state, crate::settings::Section::Credentials, window, cx);
