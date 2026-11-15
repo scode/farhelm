@@ -12,8 +12,9 @@
 //! terminal and for a moment after a scroll, and only when there was something to scroll. A drag keeps it shown.
 //!
 //! NOTE: The old bar faded in over 100 ms and out over 800 ms. This one appears and disappears at once (its owner
-//! hides it 800 ms after the last scroll): an animated fade must stop under reduced motion, and the ticker, which owns
-//! that setting, gives a control no way to ask for it. Recorded as a deviation in the terminal's parity file.
+//! hides it 800 ms after the last scroll). The old fade was a show and hide that reversed midway from wherever it had
+//! got to, which the component layer's one-shot transitions (`transition.rs`) do not do: they only fade an element in
+//! as it appears. Recorded as a deviation in the terminal's parity file.
 //!
 //! It is not a tab stop, and a press on it leaves focus where it was: SPEC.md ("Reaching everything by keyboard") has
 //! the terminal scroll by keyboard with Shift+PageUp and Shift+PageDown, and the old bar's press prevented its default,
