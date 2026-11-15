@@ -722,7 +722,9 @@ for them (a remembered preference, the automatic seen mark, the session list's f
 store's keyless send, which words a refusal the same way and hands the caller the reply's body or its refusal's words;
 the caller decides what, if anything, to show. The read helper is that send plus a decode. A reset drops the wait of a
 read or a keyless send like any other. Where an area says that a start was refused because its key already has work in
-flight, it uses one shared wording (`NotStarted::BUSY_WORDS`) rather than a line of its own.
+flight, it gives one shared reason (`NotStarted::BUSY_REASON`) after a lead-in of its own that names what did not happen
+("Not saved:", "Not started:"), as the migration's orchestrator decided on 2026-11-14, so that a refused save never
+reads as a start that did not happen.
 
 Feature code does not detach tasks. GUI crates do not spawn threads or other runtimes' tasks, sleep, or read the system
 clock; time comes from the ticker and async work from GPUI's executor, which keeps tests deterministic. The runtime that

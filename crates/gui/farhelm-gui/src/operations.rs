@@ -20,7 +20,8 @@
 //!   Delete question belongs to the session list, which keeps the row's menu button inert while its question is open,
 //!   and the Rename editor to its own feature. Work on different keys is independent: each keeps its own completion
 //!   handling until it settles. Where an area says that a start was refused because its key already has work in
-//!   flight, it uses one shared wording ([`NotStarted::BUSY_WORDS`]) rather than a line of its own.
+//!   flight, it gives the shared reason ([`NotStarted::BUSY_REASON`]) after a lead-in of its own ("Not saved:",
+//!   "Not started:") rather than a reason of its own.
 //! - "Latest wins" is not built. It applies only to work that is explicitly supersedable for the same resource (a
 //!   search being retyped), and none of the work here is. The first supersedable work adds it here, as a property of
 //!   its [`Work`] variant, so that no other work can be superseded by accident.
@@ -468,7 +469,7 @@ pub struct Failure {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NotStarted {
     /// The key already has this work in flight. Nothing is queued: the user acts again once it settles. A view that
-    /// says so shows [`NotStarted::BUSY_WORDS`].
+    /// says so gives [`NotStarted::BUSY_REASON`] after its own lead-in.
     Busy(Work),
     /// A reset retired this store, or the window is inert and there is none.
     Retired,
@@ -478,20 +479,23 @@ pub enum NotStarted {
 }
 
 impl NotStarted {
-    /// What a press refused with [`NotStarted::Busy`] says, wherever its key's subject is shown: the store's one
+    /// Why a press refused with [`NotStarted::Busy`] did nothing, wherever its key's subject is shown: the store's one
     /// wording for "another request on this key was still out", as [`Refusal::words`] is its one wording for the helm's
-    /// refusals. An area shows these words rather than wording its own line.
+    /// refusals. An area shows it after a lead-in of its own that names what did not happen, such as "Not saved:" for a
+    /// save or "Not started:" for a start ("Not started: another operation was in progress. Try again."), rather than
+    /// wording its own reason. The store cannot supply the lead-in: [`NotStarted::Busy`] carries the work holding the
+    /// key, not the one refused, and only the feature knows what the press was for.
     ///
     /// Ported from the old app's session row, whose exclusion is the closest to the store's rule (one request per key):
     /// "Stop: not started, another operation is in progress; try again" (`list/lifecycle.rs` at reference commit
-    /// `24bc0580`). Its prefix was the label of the refused action, a word per kind of work that the store does not
-    /// hold ([`NotStarted::Busy`] carries the work holding the key, not the one refused), so the shared words open with
-    /// what happened to the press instead. They are in the past tense because the line stays shown after the key frees
-    /// (until something in the view clears or replaces it), where "is in progress" would go stale; the GPUI Settings
-    /// line chose the same shape for the same reason. Decided by the foundations owner on 2026-11-14 at review.
+    /// `24bc0580`), which also led with what the press was for. The reason is in the past tense because the line stays
+    /// shown after the key frees (until something in the view clears or replaces it), where "is in progress" would go
+    /// stale; the GPUI Settings line chose the same tense for the same reason. The split into an area's lead-in and
+    /// this shared reason was decided by the migration's orchestrator on 2026-11-14, so that a refused save never reads
+    /// as a start that did not happen.
     ///
     /// A plain string, not [`HostText`]: the words are the app's own and quote nothing a host wrote.
-    pub const BUSY_WORDS: &str = "Not started: another operation was in progress. Try again.";
+    pub const BUSY_REASON: &str = "another operation was in progress. Try again.";
 }
 
 /// One operation in flight: what it is, and the task that waits for its reply. Dropping the entry drops the task, and
