@@ -1060,18 +1060,37 @@ fn a_replayed_exit_shows_its_line_with_the_screen(cx: &mut TestAppContext) {
 }
 
 /// A program that exits while the terminal is live sends nothing but a new state; the owner draws the exit line from
-/// that state, so the state alone must redraw it. This is the ordinary end of an agent session, watched.
+/// that state, so the state alone must redraw it. This is the ordinary end of an agent session, watched. The line
+/// belongs to the latest state only: every state is sent whole, so one that carries no exit means none, and the line
+/// goes and the screen drops back into the room it took (the old app's `exit: null` step).
+///
+/// Specified: a live state with an exit draws the exit line and lifts the fitted screen; a later state with
+/// `exit: null` removes the line and the lift.
 #[gpui::test]
 fn a_live_exit_shows_its_line(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.attach_showing("running");
     assert!(h.cx.debug_bounds("terminal-exit").is_none());
-    let exited: GridOutput = serde_json::from_value(serde_json::json!({"t":"state","mouse":"off","focus":false,
-        "alt_screen":false,"default_fg":null,"default_bg":null,"history_trimmed":false,"exit":{"signal":15}}))
-    .unwrap();
-    h.fake().output(exited);
+    let state = |exit: serde_json::Value| -> GridOutput {
+        serde_json::from_value(serde_json::json!({"t":"state","mouse":"off","focus":false,
+            "alt_screen":false,"default_fg":null,"default_bg":null,"history_trimmed":false,"exit":exit}))
+        .unwrap()
+    };
+    h.fake().output(state(serde_json::json!({"signal": 15})));
     settle(h.cx);
     assert!(h.cx.debug_bounds("terminal-exit").is_some());
+    assert!(
+        h.read(|owner, cx| owner.shown_lift(cx)).unwrap() > 0.,
+        "the premise: the exit line lifts the fitted screen"
+    );
+
+    h.fake().output(state(serde_json::Value::Null));
+    settle(h.cx);
+    assert!(
+        h.cx.debug_bounds("terminal-exit").is_none(),
+        "a state without an exit removes the line"
+    );
+    assert_eq!(h.read(|owner, cx| owner.shown_lift(cx)), Some(0.));
 }
 
 /// The screen is lifted by whole rows to fit its room, so the newest rows stay in view: under the status line, which
@@ -1341,6 +1360,31 @@ fn program_keys_are_sent_to_the_live_attachment(cx: &mut TestAppContext) {
     h.attach_showing("again");
     keys(h.cx, "b");
     assert_eq!(h.sent(), [(key("b", 66), true)]);
+}
+
+/// A program that tells Shift+Enter from Enter (an agent prompt taking one as a newline and the other as submit) must
+/// see the Enter typed right after Shift+Enter as plain: a modifier carried from one key to the next would turn every
+/// submit after a newline into another newline (the old app's terminal-keys check that the pty saw `1b 0d 0d`). The
+/// input mapping keeps no state but a composition, so this holds by construction today; the test is the fence for
+/// that.
+///
+/// Specified: in a live, focused terminal, Shift+Enter then Enter send two Enter key messages, the first with Shift
+/// (mods 1) and the second with no modifiers, each in its own write.
+#[gpui::test]
+fn a_plain_enter_after_shift_enter_is_sent_without_shift(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("screen");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    keys(h.cx, "shift-enter enter");
+    let shifted = GridInput::Key {
+        key: "Enter".into(),
+        code: String::new(),
+        kc: 13,
+        mods: 1,
+        mac: THIS_PLATFORM == Platform::Mac,
+    };
+    assert_eq!(h.sent(), [(shifted, true), (key("Enter", 13), true)]);
 }
 
 /// Nothing is sent while the terminal is not live: while it attaches, while its replay arrives (the screen it would
@@ -1773,6 +1817,11 @@ impl Harness<'_> {
         self.cx
             .write_to_clipboard(ClipboardItem::new_string(text.into()));
     }
+
+    /// The shown screen's local selection, if any.
+    fn selection(&mut self) -> Option<Selection> {
+        self.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).selection())
+    }
 }
 
 /// A state message turning the program's mouse reporting `mode` on (or `"off"`).
@@ -1782,6 +1831,15 @@ fn mouse_mode(mode: &str) -> GridOutput {
         "default_fg":null,"default_bg":null,"history_trimmed":false,"exit":null}),
     )
     .unwrap()
+}
+
+/// This platform's modifier that forces a local selection over mouse reporting: Option on a Mac, Shift elsewhere
+/// (SPEC.md's selection paragraph).
+fn forcing() -> Modifiers {
+    match THIS_PLATFORM {
+        Platform::Mac => Modifiers::alt(),
+        Platform::Linux => Modifiers::shift(),
+    }
 }
 
 /// With no mouse reporting a plain drag selects and copies, and every completed selection copies again, even the same
@@ -2211,6 +2269,57 @@ fn under_mouse_reporting_only_the_forcing_modifier_selects(cx: &mut TestAppConte
     );
     h.drag(from, to, forcing);
     assert_eq!(h.clipboard().as_deref(), Some("hello"));
+}
+
+/// A client displaced by a takeover keeps a non-live snapshot (SPEC.md, "Terminal experience"), and a snapshot the
+/// user cannot copy from is only a picture: reading back what the agent printed before another client took over is
+/// the point of keeping it. Nothing may reach the program from it, though, since the session now belongs to the client
+/// that took it. The old app's "a frozen grid sends nothing but still selects and copies", and the selection half of
+/// grid-attach's "a takeover keeps it as a usable snapshot".
+///
+/// Specified: on a screen whose program asked for click reporting, after a detach as taken over (the status line
+/// offering Take control), a key and a plain click send nothing, a drag with the forcing modifier selects and copies
+/// the text it covers, and the snapshot and its Take control stay.
+#[gpui::test]
+fn a_taken_over_snapshot_still_selects_and_copies_and_sends_nothing(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    // The text sits on row 10, below the rows the status line's band lifts out of view once detached.
+    let asked = h.fake().attach();
+    let mut replay = screen(asked.cols, asked.rows, "x", serde_json::Value::Null);
+    replay[2] = serde_json::from_value(serde_json::json!({"t":"rows",
+        "rows":[[10,{"w":false,"r":[[0,11,"hello world",[0,-1,-1]]]}]]}))
+    .unwrap();
+    replay.push(mouse_mode("click"));
+    for message in replay {
+        h.fake().output(message);
+    }
+    h.fake().replay_complete();
+    settle(h.cx);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    h.fake().detach(Some(DetachCode::TakenOver), "taken over");
+    settle(h.cx);
+    assert!(!h.read(|owner, _| owner.is_live()), "the premise: detached");
+    assert!(
+        h.status().is_some_and(|line| line.take_control),
+        "the premise: the snapshot offers Take control"
+    );
+    assert!(h.focused(&owner), "the premise: the terminal kept focus");
+
+    keys(h.cx, "a");
+    let (from, to) = (h.at_cell(0, 10), h.at_cell(5, 10));
+    h.cx.simulate_click(from, Modifiers::none());
+    settle(h.cx);
+    h.set_clipboard("someone else's");
+    h.drag(from, to, forcing());
+    assert_eq!(
+        h.clipboard().as_deref(),
+        Some("hello"),
+        "the forcing modifier selects and copies"
+    );
+    assert_eq!(h.sent(), [], "neither the key nor the click reached anyone");
+    assert!(h.status().is_some_and(|line| line.take_control));
+    assert!(h.text().unwrap().contains("hello world"));
 }
 
 /// A drag held above the screen scrolls back through the history while it stays there, extending the selection with
@@ -4550,6 +4659,136 @@ fn a_reported_press_clears_the_selection_and_a_lost_release_is_reported(cx: &mut
     assert_eq!(h.sent(), [report(Down, 0, (3, 0)), report(Up, 0, (3, 0))]);
 }
 
+/// A press reported to the program is input like a key, so a view scrolled back into the history comes back to the
+/// live screen with it: the program acts on the cell of the screen it drew, and a view left in the history would show
+/// the user something other than what the click acted on. The old app's "a mouse report brings a scrolled-back view to
+/// the bottom and clears the selection, as input does"; the selection half is also the test above's.
+///
+/// Specified: with history scrolled back by the wheel and a selection made while reporting was off, turning click
+/// reporting on leaves the view scrolled back; a click then sends a press and a release at the clicked cell, the view
+/// follows the live screen again, and the selection is gone.
+#[gpui::test]
+fn a_reported_press_brings_a_scrolled_back_view_to_the_live_screen(cx: &mut TestAppContext) {
+    use MouseEventKind::{Down, Up};
+    let mut h = harness(cx);
+    h.attach_with_history(40);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let (from, to) = (h.at_cell(0, 0), h.at_cell(5, 0));
+    h.drag(from, to, Modifiers::none());
+    assert!(
+        h.selection().is_some(),
+        "the premise: something is selected"
+    );
+    h.wheel(1.);
+    h.fake().output(mouse_mode("click"));
+    settle(h.cx);
+    assert!(
+        !h.following(),
+        "the premise: scrolled back, and turning reporting on leaves the view there"
+    );
+    assert_eq!(h.sent(), [], "the premise: nothing sent yet");
+    assert!(
+        h.selection().is_some(),
+        "the premise: the wheel and the mode change left the selection"
+    );
+
+    let at = h.at_cell(2, 1);
+    h.cx.simulate_mouse_down(at, MouseButton::Left, Modifiers::none());
+    h.cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(h.sent(), [report(Down, 0, (2, 1)), report(Up, 0, (2, 1))]);
+    assert!(
+        h.following(),
+        "the report brought the view to the live screen"
+    );
+    assert_eq!(h.selection(), None);
+}
+
+/// Under mouse reporting the wheel on the ordinary screen is the program's, not a scroll through the terminal's own
+/// history: an editor or agent with mouse support scrolls its own content and would otherwise see nothing while the
+/// terminal scrolled lines the program does not know about. The alternate screen's wheel has a test of its own; this is
+/// the primary screen's, where history exists and the wrong owner would visibly scroll it (the wheel step of the old
+/// app's "the mouse reports cells only in the modes the program asked for").
+///
+/// Specified: on the primary screen with 40 history lines and click reporting on, a notch toward older lines and one
+/// toward newer each send one wheel report, buttons 0 and 1, at the cell under the pointer, and the view keeps
+/// following the live screen.
+#[gpui::test]
+fn the_wheel_under_mouse_reporting_is_the_programs_on_the_primary_screen(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_with_history(40);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    h.fake().output(mouse_mode("click"));
+    settle(h.cx);
+    assert!(
+        h.read(|owner, cx| owner.committed.as_ref().unwrap().read(cx).scroll_position())
+            .scrollable(),
+        "the premise: there is history the wheel could scroll"
+    );
+    h.wheel(1.);
+    h.wheel(-1.);
+    let under = h
+        .read(|owner, cx| owner.cell_at(point(px(200.), px(200.)), cx))
+        .unwrap();
+    assert_eq!(
+        h.sent(),
+        [
+            report(MouseEventKind::Wheel, 0, under),
+            report(MouseEventKind::Wheel, 1, under)
+        ]
+    );
+    assert!(h.following(), "the terminal's own history did not scroll");
+}
+
+/// A drag the program follows can leave the terminal and be let go outside it, and the program must still hear where
+/// it went and that it ended: an editor extending a selection to the bottom of its window, or a pane divider being
+/// dragged, would otherwise be left with its button held. Positions outside the grid are reported at its nearest cell,
+/// the old app's clamp. Once released, a move with no button is no longer a drag.
+///
+/// Specified: under drag reporting, a press at cell (1, 0), a move to (4, 2), a move within that cell, a move to a
+/// point below and right of the grid, a release there, and then a move with no button over the grid send exactly a
+/// press at (1, 0), a move at (4, 2), and a move and a release at the grid's last cell.
+#[gpui::test]
+fn a_reported_drag_released_outside_the_grid_ends_at_its_last_cell(cx: &mut TestAppContext) {
+    use MouseEventKind::{Down, Move, Up};
+    let mut h = harness(cx);
+    h.attach_showing("hello world");
+    h.fake().output(mouse_mode("drag"));
+    settle(h.cx);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let (cols, rows) = h.read(|owner, cx| {
+        let view = owner.committed.as_ref().unwrap().read(cx);
+        (view.cols, u16::try_from(view.rows.len()).unwrap())
+    });
+    let last = (cols - 1, rows - 1);
+    let outside = h.at_cell(last.0, last.1) + point(px(300.), px(200.));
+    assert!(
+        outside.x > px(PANE.0) && outside.y > px(PANE.1),
+        "the premise: {outside:?} is outside the terminal's pane"
+    );
+    let none = Modifiers::none();
+    let (a, b, over) = (h.at_cell(1, 0), h.at_cell(4, 2), h.at_cell(2, 2));
+    h.cx.simulate_mouse_down(a, MouseButton::Left, none);
+    h.cx.simulate_mouse_move(b, MouseButton::Left, none);
+    h.cx.simulate_mouse_move(b + point(px(1.), px(0.)), MouseButton::Left, none);
+    h.cx.simulate_mouse_move(outside, MouseButton::Left, none);
+    h.cx.simulate_mouse_up(outside, MouseButton::Left, none);
+    h.cx.simulate_mouse_move(over, None, none);
+    settle(h.cx);
+    assert_eq!(
+        h.sent(),
+        [
+            report(Down, 0, (1, 0)),
+            report(Move, 0, (4, 2)),
+            report(Move, 0, last),
+            report(Up, 0, last)
+        ]
+    );
+}
+
 /// A program's mouse reporting is part of its terminal state, so a reattach that replays a screen with reporting on
 /// brings the reports back at once, without the program having to ask again (the client half of the old app's
 /// `mouse-modes-restored-on-reattach`; that the supervisor's replay carries the mode is the supervisor's to test).
@@ -4639,6 +4878,31 @@ fn a_paste_sends_the_clipboards_text_as_a_paste(cx: &mut TestAppContext) {
     h.cx.dispatch_action(actions::Paste);
     settle(h.cx);
     assert_eq!(h.sent(), [(paste(copied, true), true)], "the action");
+}
+
+/// A paste is input the user sends, like a key, so it clears the local selection: the highlight would otherwise stay
+/// on text the program may already have redrawn, and the next copy would take that stale range (the paste half of the
+/// old app's "typing and pasting clear the selection"; typing is `a_drag_selects_and_copies_and_a_click_does_not`'s).
+///
+/// Specified: with a drag's selection on the screen, a paste sends the clipboard's text as one paste and leaves no
+/// selection.
+#[gpui::test]
+fn a_paste_clears_the_selection(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("hello world");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let (from, to) = (h.at_cell(0, 0), h.at_cell(5, 0));
+    h.drag(from, to, Modifiers::none());
+    assert!(
+        h.selection().is_some(),
+        "the premise: something is selected"
+    );
+    h.set_clipboard("pasted");
+    h.cx.dispatch_action(actions::Paste);
+    settle(h.cx);
+    assert_eq!(h.sent(), [(paste("pasted", true), true)]);
+    assert_eq!(h.selection(), None, "the paste cleared the selection");
 }
 
 /// A paste of more than a megabyte reaches the program whole and in order, as the old app's large-paste test asked
