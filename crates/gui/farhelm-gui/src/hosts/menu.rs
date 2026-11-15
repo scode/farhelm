@@ -162,15 +162,9 @@ pub fn open_menu(
         layer: None,
     });
     let layer = layers::open_popover(
-        Popover {
-            view: menu.clone().into(),
-            container: cx.focus_handle(),
-            start: Some(start),
-            anchor,
+        Popover::menu(menu.clone(), cx.focus_handle(), anchor, start)
             // The toggle, not what held focus before: on macOS the click that opened the menu left it unfocused.
-            returns_to: focus::ReturnTo::Control(opener.clone()),
-            traps_tab: true,
-        },
+            .returns_to(focus::ReturnTo::Control(opener.clone())),
         mark,
         window,
         cx,

@@ -31,7 +31,7 @@ use gpui::{
 
 use super::{Launcher, choices::status_line, row};
 use crate::components::{HoverHelp, OptionRow, Role, TextInput, Vertical};
-use crate::focus::{Mark, ReturnTo};
+use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::{Field, Mode, harness_label};
 use crate::launcher::model::{
@@ -232,14 +232,7 @@ impl Launcher {
         let container = cx.focus_handle();
         let mark = Mark::take(cx);
         self.model_field.layer = layers::open_popover(
-            Popover {
-                view: rows.into(),
-                container,
-                start: None,
-                anchor,
-                returns_to: ReturnTo::Opener,
-                traps_tab: true,
-            },
+            Popover::floating(rows, container, anchor),
             &mark,
             window,
             cx,
