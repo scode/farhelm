@@ -67,8 +67,9 @@ impl Arming {
     }
 
     /// The region now shows `waiting` (ids, oldest first) with `expanded` expanded. A change disarms the buttons and
-    /// starts a new pause; the same presentation again changes nothing. Call it from the update that changed what is
-    /// shown (a store change, a header chosen), never while drawing: a notify requested while drawing is dropped.
+    /// starts a new pause, except to an empty list, which only disarms; the same presentation again changes nothing.
+    /// Call it from the update that changed what is shown (a store change, a header chosen), never while drawing: a
+    /// notify requested while drawing is dropped.
     pub fn observe(
         &mut self,
         waiting: Vec<String>,
@@ -79,8 +80,16 @@ impl Arming {
         if self.shown.as_ref() == Some(&shown) {
             return;
         }
+        let empty = shown.0.is_empty();
         self.shown = Some(shown);
         self.armed = false;
+        if empty {
+            // Nothing is shown, so nothing can be pressed: no pause runs and nothing redraws, so a window with no
+            // request waiting sees no frame from the answer bar. The next request to show starts its pause, being a
+            // change from this.
+            self.deadline = None;
+            return;
+        }
         let arming: WeakEntity<Arming> = cx.weak_entity();
         self.deadline = Some(ticker::after(ARM_DELAY, cx, move |cx| {
             arming
