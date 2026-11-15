@@ -103,6 +103,12 @@ disallowed-methods = [
   { path = "gpui_base::transition", reason = "one-shot transitions go through components::entrance; nothing else in the GUI crates' own code animates through this" },
   { path = "gpui_base::spring", reason = "one-shot transitions go through components::entrance; nothing else in the GUI crates' own code animates through this" },
   { path = "gpui_base::animate_keyframes", reason = "one-shot transitions go through components::entrance; nothing else in the GUI crates' own code animates through this" },
+  # The rest of GPUI Base's motion helpers. Each requests animation frames from inside the dependency, so the
+  # `request_animation_frame` ban above never sees it; `MotionReveal`, an element, is banned as a type below.
+  { path = "gpui_base::transition_with_status", reason = "one-shot transitions go through components::entrance; nothing else in the GUI crates' own code animates through this" },
+  { path = "gpui_base::TransitionState::sample", reason = "one-shot transitions go through components::entrance; nothing else in the GUI crates' own code animates through this" },
+  { path = "gpui_base::Presence::sample", reason = "one-shot transitions go through components::entrance; nothing else in the GUI crates' own code animates through this" },
+  { path = "gpui_base::Sequence::sample", reason = "one-shot transitions go through components::entrance; nothing else in the GUI crates' own code animates through this" },
 
   # Colors come only from theme tokens, which the component layer defines from the old app's stylesheet.
   { path = "gpui::rgb", reason = "colors come from theme tokens in the component layer" },
@@ -169,4 +175,7 @@ disallowed-types = [
   { path = "gpui_base::Toast", reason = "Kit notification; the notice center owns notices" },
   { path = "gpui_base::ToastStack", reason = "Kit notification; the notice center owns notices" },
   { path = "gpui_base::ToastManager", reason = "Kit notification; the notice center owns notices" },
+
+  # Animation time, as in the methods above: GPUI Base's reveal element requests animation frames as it remeasures.
+  { path = "gpui_base::MotionReveal", reason = "one-shot transitions go through components::entrance; nothing else in the GUI crates' own code animates through this" },
 ]

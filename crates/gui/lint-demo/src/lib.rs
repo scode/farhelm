@@ -525,6 +525,45 @@ fn base_animate_keyframes<T: gpui_base::Interpolate + 'static>(
     let _ = gpui_base::animate_keyframes("demo", keyframes, timing, window, cx);
 }
 
+fn base_transition_with_status<T: gpui_base::Interpolate + PartialEq + 'static>(
+    target: T,
+    policy: gpui_base::Transition,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    // expect: disallowed_methods gpui_base::transition_with_status
+    let _ = gpui_base::transition_with_status("demo", target, policy, window, cx);
+}
+
+fn base_transition_state_sample<T: gpui_base::Interpolate + PartialEq + 'static>(
+    state: &gpui_base::TransitionState<T>,
+    target: T,
+    policy: gpui_base::Transition,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    // expect: disallowed_methods gpui_base::TransitionState::sample
+    let _ = state.sample(target, policy, window, cx);
+}
+
+fn base_presence_sample(presence: gpui_base::Presence, window: &mut Window, cx: &mut App) {
+    // expect: disallowed_methods gpui_base::Presence::sample
+    let _ = presence.sample(window, cx);
+}
+
+fn base_sequence_sample<T: gpui_base::Interpolate + PartialEq + 'static>(
+    sequence: gpui_base::Sequence<T>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    // expect: disallowed_methods gpui_base::Sequence::sample
+    let _ = sequence.sample(window, cx);
+}
+
+fn base_motion_reveal(_: gpui_base::MotionReveal) {
+    // expect: disallowed_types gpui_base::MotionReveal
+}
+
 fn hsla_red() {
     // expect: disallowed_methods gpui::Hsla::red
     let _ = gpui::Hsla::red();
