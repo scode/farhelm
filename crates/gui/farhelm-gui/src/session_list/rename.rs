@@ -34,8 +34,8 @@
 //!   listing no longer has the session ([`session::listing_proves_gone`]) it says so and disables Save, keeping the
 //!   draft for the user to copy; a filtered, truncated or failed listing proves nothing and leaves Save enabled.
 //! - **One request per session.** It does not open while the session has work in flight in the operation store (a
-//!   Delete, say), as the old app refused it (`on_rename_start`'s `busy_now`); and a Save while other work started on
-//!   the session is refused by the store.
+//!   Delete, say), as the old app refused it (`on_rename_start`'s `busy_now`), nor while the YOLO question its Replace
+//!   met is open (`super::replace_yolo`); and a Save while other work started on the session is refused by the store.
 //! - **A session the list does not show.** The editor reads the session from the store by key, never from the list,
 //!   and the helm keeps the open session in the store while a filter or the listing cap leaves it out of the list
 //!   (`super::filters`, "The query names the open session"). So the shortcut renames the open session "including when
@@ -112,6 +112,10 @@ fn open_returning(
     let operations = session::current_operations(cx)?;
     if let Some(work) = operations.read(cx).in_flight(&OpKey::session(key)) {
         tracing::debug!(?work, "rename not opened: the session has work in flight");
+        return None;
+    }
+    if super::replace_yolo::open(key, cx) {
+        tracing::debug!("rename not opened: the session's YOLO question is open");
         return None;
     }
     let title = store

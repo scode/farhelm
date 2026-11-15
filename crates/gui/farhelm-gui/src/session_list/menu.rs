@@ -25,15 +25,16 @@
 //! whichever its seen state calls for ([`super::seen`]); a row that offers neither omits the item, so the commands
 //! after it move up. Choosing it closes the menu, which leaves focus on the menu's button, and then sends the request.
 //!
-//! Then come the lifecycle commands in the old menu's groups, each after a separator: Replace ([`super::replace`]), Stop
-//! ([`super::stop`]) and Delete ([`super::delete`]), all three in the danger red. Choosing one closes the menu before
-//! its question opens beside the same button (the old app turned the menu into the question; here the two are separate
-//! layers, one after the other), or before its request goes out when it asks nothing. While that question is open the
-//! button is inert: a click on it neither reopens the menu nor answers the question, and the question's own Cancel,
-//! Escape or a press elsewhere is the way out. While the session has any request in flight, every command here is
-//! unavailable (SPEC.md: "a pending request refuses another lifecycle action"); opening the session stays possible, and
-//! other sessions' menus are untouched. A refusal or a notice from the helm shows inside the menu as well as on the
-//! row, since the open menu covers the row's own copy ([`super::outcome`]).
+//! Then come the lifecycle commands in the old menu's groups, each after a separator: Replace ([`super::replace`]),
+//! Stop ([`super::stop`]) and Delete ([`super::delete`]), all three in the danger red. Choosing one closes the menu
+//! before its question opens beside the same button (the old app turned the menu into the question; here the two are
+//! separate layers, one after the other), or before its request goes out when it asks nothing. While that question is
+//! open the button is inert: a click on it neither reopens the menu nor answers the question, and the question's own
+//! Cancel, Escape or a press elsewhere is the way out. While the session has any request in flight, or the YOLO
+//! question its Replace met is open, every command here is unavailable ([`refused`]; SPEC.md: "an open lifecycle
+//! confirmation or a pending request refuses another lifecycle action"); opening the session stays possible, and other
+//! sessions' menus are untouched. A refusal or a notice from the helm shows inside the menu as well as on the row,
+//! since the open menu covers the row's own copy ([`super::outcome`]).
 //!
 //! NOTE: Clone and Replace with (the launcher's), Pin and the environment commands come with their areas, in the old
 //! order around these, with no placeholder meanwhile; the old row menu had no Restart, which the open session's header
@@ -372,20 +373,29 @@ pub(crate) struct Actionable {
 }
 
 /// `key`'s row, for a lifecycle action the user just asked for (from the row's menu, or the open session's header), or
-/// `None` when nothing may happen: the store holds no row for the session, or it has a request in flight (SPEC.md: "a
-/// pending request refuses another lifecycle action"). The row is read by key, so the open session the helm carries
-/// outside a filtered or cut list is actionable like a listed one.
+/// `None` when nothing may happen: the store holds no row for the session, or its lifecycle commands are refused
+/// ([`refused`]: a request in flight, or its YOLO question open). The row is read by key, so the open session the helm
+/// carries outside a filtered or cut list is actionable like a listed one.
 pub(crate) fn actionable(key: &str, cx: &App) -> Option<Actionable> {
     let store = session::current_store(cx)?;
     let collections = store.read(cx).collections();
     let row = collections.get::<SessionRow>(key).cloned()?;
-    if delete::busy(key, cx) {
+    if refused(key, cx) {
         return None;
     }
     Some(Actionable {
         row,
         skips_questions: skips_questions(collections),
     })
+}
+
+/// Whether `key`'s lifecycle commands (Rename, Replace, Stop and Delete here, and Restart in the open session's header)
+/// are refused now, and drawn unavailable: SPEC.md's "an open lifecycle confirmation or a pending request refuses
+/// another lifecycle action". A request of the session in flight is one ([`delete::busy`]); the YOLO question a Replace
+/// of the session met, while it is open, is the other ([`super::replace_yolo::open`]). The row's and the header's own
+/// questions refuse through their buttons, which are inert while their question is open.
+pub(crate) fn refused(key: &str, cx: &App) -> bool {
+    delete::busy(key, cx) || super::replace_yolo::open(key, cx)
 }
 
 /// Whether the helm-wide **Skip session confirmations** preference is on in `collections`: the lifecycle actions then go
@@ -429,7 +439,7 @@ impl Render for RowMenu {
             return panel;
         };
         let title = HostText::from_host(row.info.title.as_str());
-        let busy = delete::busy(&self.key, cx);
+        let busy = refused(&self.key, cx);
         let open = local_state::selected(cx).as_deref() == Some(self.key.as_str());
         let rename_help = if open {
             format!("Rename: give this session a new title ({RENAME_SESSION_SHORTCUT_NAME})")
