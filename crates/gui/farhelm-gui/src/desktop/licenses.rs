@@ -26,10 +26,10 @@
 use std::rc::Rc;
 
 use gpui::{
-    App, AppContext as _, Bounds, Context, Global, InteractiveElement as _, IntoElement,
-    ParentElement as _, Pixels, Render, Role, SharedString, Size, StatefulInteractiveElement as _,
-    Styled as _, TitlebarOptions, Window, WindowBounds, WindowHandle, WindowOptions, div, px, size,
-    uniform_list,
+    AnyElement, App, AppContext as _, Bounds, Context, Div, Global, InteractiveElement as _,
+    IntoElement, ParentElement as _, Pixels, Render, Role, SharedString, Size,
+    StatefulInteractiveElement as _, Styled as _, TitlebarOptions, Window, WindowBounds,
+    WindowHandle, WindowOptions, div, px, size, uniform_list,
 };
 use gpui_component::Root;
 
@@ -110,11 +110,17 @@ fn min_size() -> Size<Pixels> {
     size(px(COLUMNS as f32 * CHAR_WIDTH) + PAD * 2., px(240.))
 }
 
+/// The width the window opens at, before any Linux frame allowance: the full column with a little room to spare. The
+/// screenshot goldens draw the window's content at this width.
+pub(crate) fn opening_width() -> Pixels {
+    min_size().width + px(24.)
+}
+
 /// An ordinary window with the platform's own title bar (the title band is the main window's alone), centered on the
 /// primary display at a size that shows the full column, and never higher than that display.
 pub(crate) fn options(cx: &App) -> WindowOptions {
     let mut min = min_size();
-    let mut wanted = size(min.width + px(24.), px(640.));
+    let mut wanted = size(opening_width(), px(640.));
     // On Linux GPUI Kit's frame and, where the compositor draws none, the window's own title bar take room inside the
     // window, so both sizes allow for them and the text keeps its column (`linux_title_bar`).
     if cfg!(target_os = "linux") {
@@ -199,52 +205,58 @@ impl NoticesView {
 impl Render for NoticesView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         render_count::record("open-source-notices", cx);
-        let palette = theme::palette(cx);
-        let lines = Rc::clone(&self.lines);
-        let list = uniform_list(
-            "open-source-notices-lines",
-            lines.len(),
-            move |range, _, _| {
-                range
-                    .map(|index| {
-                        div()
-                            .h(LINE_HEIGHT)
-                            .line_height(LINE_HEIGHT)
-                            .whitespace_nowrap()
-                            .child(lines[index].clone())
-                    })
-                    .collect()
-            },
-        )
-        .size_full()
-        .px(PAD)
-        .py(PAD);
-        let ground = div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .bg(theme::color(palette.bg_0))
-            .text_color(theme::color(palette.fg_0))
-            .font_family(assets::TERMINAL_FONT)
-            .text_size(metrics::TEXT_SM)
-            // The Linux window's own title bar, where the compositor draws none (`linux_title_bar`), in the interface
-            // face like every bar.
-            .children(
-                linux_title_bar::bar("notices-title-bar", TITLE, "Close this window", window, cx)
-                    .map(|bar| div().font_family(assets::UI_FONT).child(bar)),
-            )
-            .child(
-                div()
-                    .id("open-source-notices")
-                    .role(Role::Region)
-                    .aria_label(TITLE)
-                    .flex_1()
-                    .min_h_0()
-                    .w_full()
-                    .child(list),
-            )
+        let bar = linux_title_bar::bar("notices-title-bar", TITLE, "Close this window", window, cx);
+        let ground = content(&self.lines, bar, cx)
             // The bar's drag starts from this window's own press watcher, as the main window's band does.
             .child(title_band::watch_presses());
         root::wrap(ground, &self.root, window, cx)
     }
+}
+
+/// What the notices window draws, filling its parent: `bar` (the Linux window's own title bar, where it draws one) over
+/// `lines` as the scrolling list. Apart from the view so that the screenshot goldens can draw the window's look without
+/// opening a second window or attaching a second root to theirs; the window's wiring (its root attachment and its press
+/// watcher) stays in [`NoticesView`].
+pub(crate) fn content(lines: &Rc<[SharedString]>, bar: Option<AnyElement>, cx: &App) -> Div {
+    let palette = theme::palette(cx);
+    let lines = Rc::clone(lines);
+    let list = uniform_list(
+        "open-source-notices-lines",
+        lines.len(),
+        move |range, _, _| {
+            range
+                .map(|index| {
+                    div()
+                        .h(LINE_HEIGHT)
+                        .line_height(LINE_HEIGHT)
+                        .whitespace_nowrap()
+                        .child(lines[index].clone())
+                })
+                .collect()
+        },
+    )
+    .size_full()
+    .px(PAD)
+    .py(PAD);
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .bg(theme::color(palette.bg_0))
+        .text_color(theme::color(palette.fg_0))
+        .font_family(assets::TERMINAL_FONT)
+        .text_size(metrics::TEXT_SM)
+        // The Linux window's own title bar, where the compositor draws none (`linux_title_bar`), in the interface face
+        // like every bar.
+        .children(bar.map(|bar| div().font_family(assets::UI_FONT).child(bar)))
+        .child(
+            div()
+                .id("open-source-notices")
+                .role(Role::Region)
+                .aria_label(TITLE)
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .child(list),
+        )
 }
