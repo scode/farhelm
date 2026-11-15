@@ -184,12 +184,12 @@ pub enum Work {
 /// `operations_tests.rs` is not an extension point, and its table covers only the kinds of work that existed when
 /// these methods were added.
 impl Work {
-    /// Whether this work creates a session on a host: what "a launch in flight" means to the host registry's side,
-    /// which refuses a host's removal while one is out, and is to refuse Add host and a host's destination save the
-    /// same way (neither built yet). The launcher's New and Clone create one, and so do a session's Restart and
-    /// Replace, which run as their source session's work rather than as [`Work::Launch`]. An answer to an agent's
-    /// approval card does not, even when it allows a launch: the helm runs what was approved (decided by the
-    /// migration's orchestrator, 2026-11-14).
+    /// Whether this work creates a session on a host: what "a launch in flight" means to the host registry's side
+    /// (`hosts::launch_in_flight`), which refuses Add host, a new host's setup, a host's Re-run, removal, Update and
+    /// Uninstall, and a host's destination save while one is out. The launcher's New and Clone create one, and so do
+    /// a session's Restart and Replace, which run as their source session's work rather than as [`Work::Launch`]. An
+    /// answer to an agent's approval card does not, even when it allows a launch: the helm runs what was approved
+    /// (decided by the migration's orchestrator, 2026-11-14).
     pub fn creates_a_session(self) -> bool {
         match self {
             Work::Rename => false,
