@@ -306,7 +306,8 @@ this helm process retains, keyed by host id (a host with no run is absent, not i
 `farhelm-proto` beside the channel's. The snapshot sent when a channel opens never waits on a remote host. Every other
 read (directory browse, repository lists, the trash list, launch history, file stat) is an ordinary GET command whose
 reply body is the result. Data the old GUI polled stays a query that the GUI issues again; it does not become a
-replicated collection.
+replicated collection. The one exception is the Podman check's readiness, which rides each local and ssh host's entry so
+its start and end reach the GUI (see "Podman places, creation and images").
 
 The session list is a query. Its filter, sort and cap are this channel's state, set by a command, and the helm keeps
 serving the filtered, capped view with its `total`, `matching` and `truncated` counts. A channel starts unfiltered, in
@@ -5512,7 +5513,10 @@ Launch progress and errors reuse the existing operation surfaces, with no placeh
 Probe only local and ordinary SSH hosts through their base route. Cache timestamped Linux, architecture, absolute Podman
 path and the results of `podman info` and a working transient user scope. Require Podman 4.9.3 or later, rootless,
 cgroup v2 and `cgroupManager: systemd`. Refresh in the background when the launcher opens, keeping unusable hosts with
-their reasons. No synchronous probe fan-out gates opening the launcher.
+their reasons. No synchronous probe fan-out gates opening the launcher. Each local and ssh host's `/api/hosts` entry
+carries the cached check's readiness as `container_check` (checked time, whether a check is running, usable, reason),
+and a check's start and its end bump the fleet feed, so the hosts collection brings both to a connected GUI.
+`/api/environment-places` is not pushed: reading it schedules checks.
 
 Lifecycle commands run on the place host. Wrap `podman run` and `podman start` in `systemd-run --user --scope --collect`
 with a reserved environment name and a per-attempt nonce. This keeps conmon and the container's network helper outside

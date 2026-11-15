@@ -110,6 +110,7 @@ fn session_list_body() -> SessionListBody {
 fn host_list_body() -> serde_json::Value {
     let host = |id: i64, kind: &'static str, state: HostStateView| HostView {
         environment: None,
+        container_check: None,
         id,
         entry_uuid: "11111111-1111-4111-8111-111111111111".to_string(),
         kind: kind.to_string(),
@@ -132,7 +133,7 @@ fn host_list_body() -> serde_json::Value {
         incarnation: 4,
         trash_epoch: 0,
     };
-    let hosts = vec![
+    let mut hosts = vec![
         host(
             1,
             "local",
@@ -256,6 +257,22 @@ fn host_list_body() -> serde_json::Value {
             )
         },
     ];
+    // Hosts that can hold containers carry their Podman check: a passed one
+    // being checked again, and a refused one with its reason, so every field is
+    // set somewhere. The rest leave `container_check` out, as a sandbox or
+    // container host always does.
+    hosts[0].container_check = Some(farhelm_proto::ui_channel::ContainerCheckView {
+        checked_at: Some(1_700_000_200),
+        refreshing: true,
+        usable: true,
+        reason: None,
+    });
+    hosts[1].container_check = Some(farhelm_proto::ui_channel::ContainerCheckView {
+        checked_at: Some(1_700_000_300),
+        refreshing: false,
+        usable: false,
+        reason: Some("Podman is not installed on this host".to_string()),
+    });
     // The route builds its envelope with `json!` rather than a struct
     // (`hosts::list_hosts`); this is the same envelope.
     serde_json::json!({ "hosts": hosts })

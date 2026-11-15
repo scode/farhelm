@@ -777,6 +777,12 @@ pub struct HostView {
     /// Public ownership/placement facts, without execution coordinates.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<crate::EnvironmentHostView>,
+    /// This helm's cached Podman check of a host that can hold containers
+    /// (the local row and ssh rows), so Settings → Containers follows a check
+    /// through the hosts collection instead of polling. Left out of the JSON
+    /// for hosts that cannot hold containers (a sandbox or a container).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub container_check: Option<ContainerCheckView>,
     /// `None` for the local row, always `Some` for an ssh row.
     pub destination: Option<String>,
     /// The stored optional alias, kept distinct from `name` so clients can
@@ -849,6 +855,28 @@ impl HostView {
     pub fn is_local(&self) -> bool {
         self.kind == "local"
     }
+}
+
+/// One host's Podman check as `GET /api/hosts` reports it: the readiness part
+/// of the helm's cached observation, never its executable path or proxy
+/// values. Every field is always present, `null` when unknown.
+///
+/// The cache is process-local, so a helm that has not checked the host since
+/// it started reports `checked_at: null` with `usable: false`; that means "not
+/// checked yet", not "refused", and `reason` stays `null` until a check fails.
+/// Reading this never schedules a check (`GET /api/environment-places` does).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ContainerCheckView {
+    /// When the latest finished check for the host's current address ended,
+    /// in Unix seconds. A retargeted host has no result until checked again.
+    pub checked_at: Option<u64>,
+    /// A check of this host is running now. The previous result, if any,
+    /// stays in the other fields until the running one finishes.
+    pub refreshing: bool,
+    /// The latest finished check passed every prerequisite.
+    pub usable: bool,
+    /// Why the latest finished check failed, in words meant for the user.
+    pub reason: Option<String>,
 }
 
 /// A Tensorlake host's sandbox as `GET /api/hosts` reports it: its name in

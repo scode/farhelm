@@ -300,6 +300,13 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
                         }
                         view
                     }),
+                // Only a host that can hold containers has a check to show.
+                // `.ok()` keeps one row the cache cannot route to from failing
+                // the whole list.
+                container_check: registry
+                    .filter(|row| row.kind.can_host_environments())
+                    .and_then(|row| state.podman_places.view(row).ok())
+                    .map(|view| view.container_check()),
                 name: host_display_name(
                     snapshot.kind,
                     snapshot.destination.as_deref(),

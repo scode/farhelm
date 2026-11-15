@@ -93,6 +93,7 @@ pub(crate) mod tests {
             is_session_owned: false,
             tensorlake: None,
             environment: None,
+            container_check: None,
             destination: None,
             alias: None,
             name: "this machine".to_string(),

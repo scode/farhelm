@@ -1150,6 +1150,9 @@ pub(crate) struct FleetBuilder {
     /// stands one in; `None` leaves the slot empty, so a container row never
     /// dials ("this helm has no Podman provider").
     podman: Option<Arc<dyn crate::environment::EnvironmentProvider>>,
+    /// The commands the helm's Podman check runs, when a test scripts them;
+    /// `None` keeps the production commands.
+    place_commands: Option<Arc<dyn crate::environment::podman_probe::PlaceCommands>>,
 }
 
 impl FleetBuilder {
@@ -1196,6 +1199,15 @@ impl FleetBuilder {
         self.podman = Some(podman);
         self
     }
+    /// Run the helm's Podman checks through `commands`, so a test can hold a
+    /// check mid-flight and choose its result without a real engine.
+    pub(crate) fn place_commands(
+        mut self,
+        commands: Arc<dyn crate::environment::podman_probe::PlaceCommands>,
+    ) -> Self {
+        self.place_commands = Some(commands);
+        self
+    }
     /// A fresh helm.db with only its reserved local row, and a local host
     /// scripted UNREACHABLE.
     ///
@@ -1237,6 +1249,7 @@ impl FleetBuilder {
             tensorlake_shell: None,
             sandboxes: None,
             podman: None,
+            place_commands: None,
         }
     }
 
@@ -1355,6 +1368,10 @@ impl FleetBuilder {
             cfg!(farhelm_release_build),
         )
         .expect("select harness provisioning seams");
+        let sources = match self.place_commands {
+            Some(commands) => sources.with_place_commands(self.store.clone(), commands),
+            None => sources,
+        };
         let cadence = Cadence {
             refresh: self.refresh.unwrap_or(test_cadence().refresh),
             ..test_cadence()

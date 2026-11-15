@@ -545,6 +545,7 @@ struct AppState {
     /// through manager.providers(); injected assemblies may omit this handle.
     podman: Option<Arc<environment::podman::Podman>>,
     /// Place probes are process-local observations and never gate reading Hosts.
+    /// Hosts entries show them, so the constructor points them at the fleet feed.
     podman_places: Arc<environment::podman_probe::PodmanPlaces>,
     /// Acting agent requests waiting for the user's answer (see
     /// `approvals`). A field rather than a global so each helm in a test
@@ -611,8 +612,13 @@ impl AppState {
             store.clone(),
             provisioning.credential_delivery(),
         );
+        // Hosts entries carry the Podman check (`container_check`), so its
+        // changes must reach the feed the hosts collection is re-read on. The
+        // cache predates the manager, so this is the first point both exist.
+        let podman_places = provisioning.credential_delivery().places();
+        podman_places.publish_to(Arc::clone(manager.events()));
         AppState {
-            podman_places: provisioning.credential_delivery().places(),
+            podman_places,
             _automatic_updates: provisioning::AutomaticUpdates::start(&provisioning),
             ntfy: manager.ntfy.clone(),
             // No state directory reaches this seam, so no ssh key and no

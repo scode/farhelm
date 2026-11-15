@@ -494,6 +494,25 @@ impl ProductionProvisioning {
         })
     }
 
+    /// Replace the Podman check's commands with a test's stand-ins, before
+    /// anything else is built from these sources. Delivery is rebuilt around a
+    /// new cache because the cache's commands are fixed at construction, and
+    /// every later reader (Tensorlake, the helm state) takes the cache from
+    /// delivery, so they all share the stand-in one as production shares its.
+    #[cfg(test)]
+    pub(crate) fn with_place_commands(
+        mut self,
+        store: HelmStore,
+        commands: Arc<dyn crate::environment::podman_probe::PlaceCommands>,
+    ) -> Self {
+        self.delivery = CredentialDelivery::with_places(
+            store,
+            Arc::clone(&self.backend),
+            crate::environment::podman_probe::PodmanPlaces::with_commands(commands),
+        );
+        self
+    }
+
     /// Construct preparation before the manager exists, using the transport
     /// and payload policy already selected for this helm. It has no store,
     /// delivery service or manager through which it could configure a host.
