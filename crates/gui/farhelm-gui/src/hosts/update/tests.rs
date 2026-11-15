@@ -438,7 +438,7 @@ fn mixed_hosts() -> Vec<HostView> {
     listed
 }
 
-/// SPEC.md, "Session list": an SSH host with an older build shows "an outlined `↑ Update` button" beside its words, and
+/// SPEC.md, "Session list": a remote host with an older build shows "an outlined `↑ Update` button" beside its words, and
 /// "inline progress replaces it"; the old button moved focus to the row's menu toggle, since the progress takes its
 /// place. Specified: `build-box` (old build) and `gpu-1` (older protocol) draw "Update build-box" and "Update gpu-1";
 /// the local host, a current host and a newer one draw none; pressing `build-box`'s sends its plan request, the button

@@ -9,7 +9,7 @@ use farhelm_proto::provisioning::{
     ProvisioningOperation, ProvisioningView, RunStatus, StepStatus, StepView,
 };
 
-use super::{Run, Seen, Status, clock, fold, follow, next_second, opens_row, shown, status};
+use super::{Run, Seen, Status, clock, fold, follow, opens_row, shown, status};
 use crate::host_text::HostText;
 use crate::hosts::tests::run;
 use crate::operations::Work;
@@ -207,17 +207,13 @@ fn the_inline_status_counts_steps_names_the_current_one_and_times_the_run() {
 }
 
 /// Why this matters: the clock is read at a glance beside a step name, and the old status's `m:ss` grew hours rather
-/// than capping, so a stuck hour-long setup reads as one. The panel redraws when the clock turns over, not on a fixed
-/// beat, so a run seen mid-second does not lag. Specified: 6 seconds read "0:06", 75 "1:15", 3909 "1:05:09"; the next
-/// second of 2.25 s is 750 ms away, and of a whole second a full second.
+/// than capping, so a stuck hour-long setup reads as one. When the panel redraws it is the ticker's one-second clock's
+/// business (`hosts/tests.rs` pins that the count moves on by itself). Specified: 6 seconds read "0:06", 75 "1:15",
+/// 3909 "1:05:09", and a part second is dropped rather than rounded up (2.75 s reads "0:02").
 #[test]
-fn the_clock_reads_minutes_and_seconds_and_turns_over_on_the_second() {
+fn the_clock_reads_minutes_and_seconds_and_grows_hours() {
     assert_eq!(clock(Duration::from_secs(6)), "0:06");
     assert_eq!(clock(Duration::from_secs(75)), "1:15");
     assert_eq!(clock(Duration::from_secs(3_909)), "1:05:09");
-    assert_eq!(
-        next_second(Duration::from_millis(2_250)),
-        Duration::from_millis(750)
-    );
-    assert_eq!(next_second(Duration::from_secs(2)), Duration::from_secs(1));
+    assert_eq!(clock(Duration::from_millis(2_750)), "0:02");
 }

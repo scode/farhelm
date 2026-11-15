@@ -899,12 +899,13 @@ fn panel_renders(cx: &mut VisualTestContext) -> usize {
 }
 
 /// Why this matters: the elapsed time is measured by the client (SPEC.md: "client-measured elapsed time"), and it must
-/// keep counting on its own while nothing else changes, under reduced motion too, where no pulse redraws the panel. The
-/// one-second deadline the panel arms through the ticker is the only thing that redraws it then, so this reads what
-/// the window last drew rather than drawing a frame of its own. Specified: under reduced motion, a setup running when
-/// the panel first sees it reads "0:00"; after 7 seconds on the executor's clock, with nothing pushed, the panel has
-/// redrawn by itself and reads "0:07", and after 63 more, "1:10"; once the run completes, 5 more seconds redraw the
-/// panel not once.
+/// keep counting on its own while nothing else changes, in an inactive window (often still on screen) and under
+/// reduced motion too, where no pulse redraws the panel. The ticker's one-second clock, which the panel holds while a
+/// run's time shows, is the only thing that redraws it then, so this reads what the window last drew rather than
+/// drawing a frame of its own. Specified: in an inactive window under reduced motion, a setup running when the panel
+/// first sees it reads "0:00"; after 7 seconds on the executor's clock, with nothing pushed, the panel has redrawn by
+/// itself and reads "0:07", and after 63 more, "1:10"; once the run completes, the panel lets go of the clock, and 5
+/// more seconds redraw it not once.
 #[gpui::test]
 fn the_elapsed_time_counts_from_when_the_panel_first_saw_the_run(cx: &mut TestAppContext) {
     let running = setup_run(
@@ -923,6 +924,11 @@ fn the_elapsed_time_counts_from_when_the_panel_first_saw_the_run(cx: &mut TestAp
         ],
     );
     cx.update(|_, cx| crate::ticker::set_reduced_motion(true, cx));
+    cx.deactivate_window();
+    assert!(
+        !cx.update(|window, cx| crate::ticker::is_active(window, cx)),
+        "the premise: the window counts as inactive"
+    );
     let first = painted(&frame(cx));
     assert!(first.contains("0:00"), "0:00 is painted: {first}");
     for (wait, clock) in [(7, "0:07"), (63, "1:10")] {
@@ -948,6 +954,53 @@ fn the_elapsed_time_counts_from_when_the_panel_first_saw_the_run(cx: &mut TestAp
     cx.update(|_, cx| crate::render_count::reset(cx));
     test_support::advance(cx, std::time::Duration::from_secs(5));
     assert_eq!(panel_renders(cx), 0, "no clock is left to keep");
+}
+
+/// Why this matters: an Update's inline status shows its elapsed time just as a setup's does, so the panel must hold
+/// the one-second clock for an Update's run too; and since the sidebar keeps its one panel for the window's life, the
+/// panel must let go of that clock when the sidebar hides it through its `hidden` hook, or the clock's loop would keep
+/// waking every second for a panel nobody sees. (That the sidebar calls the hook on every way out of Hosts is pinned by
+/// the pulse tests below.) Specified: under reduced motion, so that no pulse redraws the panel, with host 3's Update
+/// running and its status read out as an Update's, one second on the executor's clock redraws the panel by itself to
+/// read "0:01"; once `hidden` is called, 3 more seconds redraw it not once.
+#[gpui::test]
+fn an_updates_clock_counts_until_the_panel_is_hidden(cx: &mut TestAppContext) {
+    let mut updating = run(3, ProvisioningOperation::Update, RunStatus::Running);
+    updating.steps = vec![
+        crate::hosts::progress::tests::step("Install the farhelm binary", StepStatus::Running),
+        crate::hosts::progress::tests::step("Restart the supervisor", StepStatus::Pending),
+    ];
+    let (_fake, panel, cx) = open_panel(
+        cx,
+        vec![
+            hosts(&reference_hosts()),
+            progress(std::slice::from_ref(&updating)),
+        ],
+    );
+    cx.update(|_, cx| crate::ticker::set_reduced_motion(true, cx));
+    let nodes = frame(cx);
+    assert!(
+        label(&nodes, "host-status-3").starts_with("Updating: 0 of 2 steps done"),
+        "the premise: the row shows the Update's run"
+    );
+
+    cx.update(|_, cx| crate::render_count::reset(cx));
+    test_support::advance(cx, std::time::Duration::from_secs(1));
+    assert!(
+        panel_renders(cx) > 0,
+        "the clock redrew the panel by itself"
+    );
+    let text = last_painted(cx);
+    assert!(text.contains("0:01"), "0:01 is painted: {text}");
+
+    panel.update(cx, |panel, cx| panel.hidden(cx));
+    cx.update(|_, cx| crate::render_count::reset(cx));
+    test_support::advance(cx, std::time::Duration::from_secs(3));
+    assert_eq!(
+        panel_renders(cx),
+        0,
+        "a hidden panel holds no clock to redraw it"
+    );
 }
 
 /// The main window over a fleet with no sessions, `reference_hosts` and `runs` as the host progress, Sessions showing:

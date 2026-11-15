@@ -35,8 +35,8 @@
 //!   stays as it was, as in the old app; one that opened no dialog stays there, under the row, which opens for it. A
 //!   refused confirming request shows under the row only, as the old app kept its one-click Update's submission
 //!   outcomes on the row.
-//! - **The inline button** ([`button`]): on a row whose host (of any kind whose Update is available, as the old app
-//!   drew it, though SPEC.md names SSH hosts) runs an older build ("Old version", amber, optional) or an older protocol
+//! - **The inline button** ([`button`]): on a row whose host (a remote host of any kind whose Update is available, as
+//!   the old app drew it and SPEC.md says) runs an older build ("Old version", amber, optional) or an older protocol
 //!   ("Needs update", red, required) and whose Update is available, the outlined `↑ Update` beside the phase words. Its
 //!   hover names both builds (and both protocols for a skew), says whether updating is optional or required, and that
 //!   clicking installs the helm's version ([`hover`]). Pressing it starts the Update and moves focus to the row's menu
