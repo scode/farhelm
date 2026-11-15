@@ -52,8 +52,7 @@ use gpui::{
 use super::{LABEL_COLUMN, LABEL_GAP, Launcher, choices::status_line, help_line, row};
 use crate::assets::Icon;
 use crate::components::{
-    HoverHelp, OptionRow, RadioGroup, RadioOption, Role, TextInput, TextInputEvent, TextInputState,
-    Vertical,
+    HoverHelp, OptionRow, RadioGroup, RadioOption, Role, TextInputEvent, TextInputState, Vertical,
 };
 use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
@@ -758,7 +757,7 @@ impl Launcher {
         let tracker = anchor.track();
         self.checkout.anchor = Some(anchor.clone());
         let weak = cx.weak_entity();
-        let field = TextInput::new(
+        let field = super::launcher_input(
             "launcher-repository",
             &self.checkout.repository,
             "Repository",
@@ -884,7 +883,7 @@ impl Launcher {
     /// The folder field while a managed checkout is chosen: read-only, showing the preview's path (SPEC.md: "the
     /// composer's folder field shows the current preview's effective path read-only, or a pending or error state").
     pub(super) fn checkout_folder_field(&self) -> AnyElement {
-        TextInput::new(
+        super::launcher_input(
             "launcher-checkout-folder",
             &self.checkout.path,
             "Folder",
