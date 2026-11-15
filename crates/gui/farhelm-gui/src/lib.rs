@@ -58,6 +58,7 @@
 //! - [`trash`]: the session list header's Trash button, the archived-checkout reads behind its count, and the Trash
 //!   dialog it opens.
 //! - [`notices_bell`]: a session row's notification bell and the list of the session's notifications it opens.
+//! - [`rail_notices`]: the notices bell at the top of the host rail's foot and its panel of notices about hosts.
 //! - [`welcome`]: the Welcome card, and the owner of the dialogs a window opens by itself when it starts or resets
 //!   (the card, then the first batch of announcements).
 //!
@@ -100,6 +101,7 @@ pub mod notices_bell;
 pub mod operations;
 pub mod permission;
 pub mod prompt;
+pub mod rail_notices;
 pub mod render_count;
 pub mod root;
 pub mod session;

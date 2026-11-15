@@ -389,6 +389,21 @@ pub(crate) struct Snapshot {
     pub deleting: Option<i64>,
 }
 
+impl Snapshot {
+    /// The checkout `id` on `host` as the notices panel's Retry now would clean it now, or `None` while it may not: the
+    /// registry is read, no trash delete of this window's is in flight (one at a time, as for every entry's Delete),
+    /// and the host's listing shows the checkout stuck under its guards ([`HostSnapshot::retry_target`]).
+    pub(crate) fn retry_target(&self, host: i64, id: &str) -> Option<Target> {
+        if !self.hosts_known || self.delete_in_flight {
+            return None;
+        }
+        self.hosts
+            .iter()
+            .find(|shown| shown.id == host)
+            .and_then(|shown| shown.retry_target(id))
+    }
+}
+
 /// One host in a [`Snapshot`].
 #[derive(Clone, Debug)]
 pub(crate) struct HostSnapshot {
@@ -432,6 +447,20 @@ impl HostSnapshot {
             incarnation: self.incarnation,
             ids: vec![checkout.id.clone()],
         })
+    }
+
+    /// The checkout `id` as the notices panel's Retry now would clean it now, or `None` while it may not (the old
+    /// `retry_target`): the listing comes from a host that reports retained removal records, the checkout is listed with
+    /// a failed cleanup (`stuck`), and the entry's own guards allow it ([`HostSnapshot::entry_target`]). SPEC.md: Retry
+    /// now "is unavailable without a current connected host listing showing that same checkout stuck".
+    pub(crate) fn retry_target(&self, id: &str) -> Option<Target> {
+        let listing = self.listed()?;
+        let stuck = listing.reports_retired
+            && listing
+                .checkouts
+                .iter()
+                .any(|entry| entry.id == id && entry.stuck.is_some());
+        if stuck { self.entry_target(id) } else { None }
     }
 
     /// This host's share of a confirmed delete now, or `None` while its guards refuse (the old `target`): connected, its

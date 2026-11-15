@@ -31,11 +31,13 @@
 //!   listed on. Its answer marks what a capable host accepted as removing, keeps refusals for the dialog, and reads the
 //!   host again.
 //! - **[`TrashButton::open`] is the entry point** for the dialog, with the return target the caller names: the
-//!   button's own press names the button, and the notices bell's Open Trash, when it comes, names its own control.
+//!   button's own press names the button, and the rail notices panel's Open Trash names the rail's bell
+//!   ([`crate::rail_notices`]). That panel's Retry now goes through [`TrashButton::retry`], the dialog's Retry with the
+//!   panel's own availability rule ([`Snapshot::retry_target`]).
 //! - **The archive cue** ([`cue`]): the can wiggles when this window's session Delete moved a checkout into the trash.
 //!
-//! NOTE: Not here yet, with its own piece: the notices bell's Retry now and Open Trash. The old page's read generations
-//! are not ported, and its uncertain-outcome bookkeeping only in a smaller form ([`listing`]'s module docs say why).
+//! NOTE: The old page's read generations are not ported, and its uncertain-outcome bookkeeping only in a smaller form
+//! ([`listing`]'s module docs say why).
 //!
 //! NOTE: Deviations from the old button, both from what the GPUI app does not have: the old button was disabled while
 //! the page's launch-and-registry lock was held, a lock this app does not have (launches here are each on a key of their
@@ -493,6 +495,17 @@ impl TrashButton {
         };
         self.send(target, cx);
         cx.notify();
+    }
+
+    /// Retry the failed cleanup of checkout `id` on `host` from the notices panel, through the same command and guards
+    /// as the dialog's Retry ([`Snapshot::retry_target`] says when it goes ahead); a press the guards refuse does
+    /// nothing. Its answer is applied as any delete's is ([`TrashButton::deleted`]): a refusal is kept for the dialog
+    /// and the panel, and acceptance alone never resolves the notice (the helm resolves it from a later listing).
+    pub(crate) fn retry(&mut self, host: i64, id: &str, cx: &mut Context<Self>) {
+        if let Some(target) = self.snapshot(cx).retry_target(host, id) {
+            self.send(target, cx);
+            cx.notify();
+        }
     }
 
     /// Send a confirmed delete's frozen `batches`, one request per host, each host progressing on its own (SPEC.md:

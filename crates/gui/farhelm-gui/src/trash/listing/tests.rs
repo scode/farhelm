@@ -154,6 +154,42 @@ fn an_entry_delete_selects_one_listed_checkout_only_under_the_hosts_guards() {
     assert_eq!(over.entry_target("a"), None, "over the batch limit");
 }
 
+/// Why this matters: the rail notices panel's Retry now asks the host for another attempt on a checkout whose cleanup
+/// failed, and SPEC.md makes it "unavailable without a current connected host listing showing that same checkout
+/// stuck"; a Retry of a checkout the listing does not show stuck could remove one the user never saw fail. Specified: a
+/// capable listing (`reports_retired`) showing the checkout stuck selects it as an entry's Delete would; the same
+/// checkout not stuck, a listing that does not report retained removals, and the entry's own guards (a host being
+/// read) select nothing.
+#[test]
+fn retry_needs_a_capable_listing_showing_the_checkout_stuck() {
+    let mut stuck = archive("a", None);
+    stuck.stuck = Some(CheckoutTrashStuck {
+        reason: "Permission denied".into(),
+        at: 1_794_591_900,
+    });
+    let listing = |checkout: ArchivedCheckout, capable: bool| CheckoutTrashListing {
+        checkouts: vec![checkout],
+        reports_retired: capable,
+        ..CheckoutTrashListing::default()
+    };
+    let host = shown(2, "build-box", listing(stuck.clone(), true));
+    assert_eq!(host.retry_target("a"), host.entry_target("a"));
+    assert!(host.retry_target("a").is_some());
+    assert_eq!(
+        shown(2, "build-box", listing(archive("a", None), true)).retry_target("a"),
+        None,
+        "not stuck"
+    );
+    assert_eq!(
+        shown(2, "build-box", listing(stuck, false)).retry_target("a"),
+        None,
+        "no retained removal records"
+    );
+    let mut reading = host.clone();
+    reading.pending = true;
+    assert_eq!(reading.retry_target("a"), None, "a read is out");
+}
+
 /// Why this matters: the bulk deletes freeze exactly what the user is shown, and Delete all must neither wait on a
 /// host it cannot reach nor quietly leave out one it can (SPEC.md: "The global action skips unreachable hosts and
 /// waits until every reachable host can be read"). Specified: a host's batch holds its checkouts' and its diagnostics'

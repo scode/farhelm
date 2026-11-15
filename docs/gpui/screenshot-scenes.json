@@ -950,6 +950,21 @@
       "reference": "session-row-menu"
     },
     {
+      "golden": "notices-empty",
+      "title": "The rail's notices panel with nothing in it, open beside the bell at the top of the rail's foot",
+      "reference": "notices-empty"
+    },
+    {
+      "golden": "notices-bell-loud",
+      "title": "The rail's notices bell with one unread notice and its panel closed: filled, red, with its count",
+      "reference": null
+    },
+    {
+      "golden": "notices-alerting",
+      "title": "The rail's notices panel with one unread trash cleanup notice, Retry now unavailable beside Open Trash",
+      "reference": "notices-alerting"
+    },
+    {
       "golden": "help-menu",
       "title": "The Help menu, open beside the host rail foot's ? button",
       "reference": "help-menu"
@@ -1513,11 +1528,11 @@
     },
     {
       "id": "notices-empty",
-      "ported": false
+      "ported": true
     },
     {
       "id": "notices-alerting",
-      "ported": false
+      "ported": true
     },
     {
       "id": "build-skew-banner",
