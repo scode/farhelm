@@ -2,8 +2,10 @@
 //! right (the old `.app-bar`, without the updater's controls, which are the desktop-integration area's).
 //!
 //! Geometry and colors are the old stylesheet's: at least 40 pixels high, 8 by 12 pixels of padding, the sidebar's
-//! `--bg-1` with a `--border-row` hairline under it. The 48 pixels and the room for the window buttons the old app gave
-//! it on macOS come with the macOS title band, so it is 40 pixels on both platforms for now.
+//! `--bg-1` with a `--border-row` hairline under it. In the macOS window it is the app bar half of the window's title
+//! band (`desktop::title_band`): 48 pixels high, with 88 pixels of left padding that keep the traffic lights clear
+//! (none in native fullscreen, which hides them), and a press on its empty background (the wordmark included) drags the
+//! window. The version claims its presses, as text and controls in the band do.
 //!
 //! - **The wordmark** is the brand file itself (`assets::WORDMARK_DARK` or `WORDMARK_LIGHT`, the one for the current
 //!   appearance's ground), drawn 18 pixels high in its own two colors, never shrinking: when the row is narrow the
@@ -18,11 +20,12 @@
 use farhelm_proto::{BUILD_VERSION, is_development_build};
 use gpui::{
     App, InteractiveElement as _, IntoElement, ParentElement, StatefulInteractiveElement as _,
-    Styled, div, img, px,
+    Styled, Window, div, img, prelude::FluentBuilder as _, px,
 };
 
 use crate::assets;
 use crate::components::{HoverHelp, Role, StatusMark};
+use crate::desktop::title_band::{self, Row};
 use crate::theme::{self, Palette};
 
 /// `--sidebar-title-height` off macOS: the row's least height.
@@ -36,16 +39,25 @@ const WORDMARK_HEIGHT: f32 = 18.;
 const WORDMARK_WIDTH: f32 = 284. * WORDMARK_HEIGHT / 72.;
 
 /// The header row.
-pub(super) fn header(cx: &App) -> impl IntoElement {
+pub(super) fn header(window: &Window, cx: &App) -> impl IntoElement {
     let palette = theme::palette(cx);
-    div()
+    let height = if title_band::ON {
+        title_band::HEIGHT
+    } else {
+        px(HEIGHT)
+    };
+    let row = div()
+        .debug_selector(|| "app-bar".into())
         .flex()
         .flex_row()
         .items_center()
         .flex_none()
-        .min_h(px(HEIGHT))
+        .min_h(height)
         .py(px(PAD.0))
         .px(px(PAD.1))
+        .when_some(title_band::traffic_light_room(window), |row, room| {
+            row.pl(room)
+        })
         .bg(theme::color(palette.bg_1))
         .border_b_1()
         .border_color(theme::color(palette.border_row))
@@ -68,18 +80,21 @@ pub(super) fn header(cx: &App) -> impl IntoElement {
                 .flex()
                 .flex_row()
                 .justify_end()
-                .child(
-                    StatusMark::new(
-                        "app-version",
-                        BUILD_VERSION,
-                        HoverHelp::tooltip(version_help(BUILD_VERSION)),
-                        Role::Label,
-                        BUILD_VERSION,
-                    )
-                    .monospace()
-                    .truncate(),
-                ),
-        )
+                .child(title_band::claims_presses(
+                    div().min_w_0().child(
+                        StatusMark::new(
+                            "app-version",
+                            BUILD_VERSION,
+                            HoverHelp::tooltip(version_help(BUILD_VERSION)),
+                            Role::Label,
+                            BUILD_VERSION,
+                        )
+                        .monospace()
+                        .truncate(),
+                    ),
+                )),
+        );
+    title_band::row(row, Row::AppBar)
 }
 
 /// The wordmark file for `palette`'s ground: light letters on a dark ground, dark letters on a light one.

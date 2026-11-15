@@ -539,6 +539,47 @@ fn the_headers_replace_asks_the_rows_question_and_sends_its_guard(cx: &mut TestA
     assert_eq!(answered(&mut fake), [replace("a", false, true)]);
 }
 
+/// In the macOS window the top row is half of the title band, where text keeps its presses (SPEC.md, "Desktop window
+/// chrome"): while a Delete is in flight, a press on the "Deleting…" progress that stands in for the actions must not
+/// drag the window. Pressed through the real row, with the band's decisions recorded instead of performed. macOS only,
+/// where the band exists.
+#[cfg(target_os = "macos")]
+#[gpui::test]
+fn the_delete_progress_in_the_title_band_keeps_its_presses(cx: &mut TestAppContext) {
+    use crate::desktop::title_band::{Decisions, PressAction, Row};
+    let (mut fake, cx) = open_main(cx, snapshot_of(vec![entry(&ended("a"), 0)], false));
+    pending(&mut fake);
+    test_support::click(cx, "session-header-delete");
+    test_support::click(cx, "prompt-confirm");
+    assert!(
+        drawn(cx, "session-header-delete-progress"),
+        "the premise: the progress shows"
+    );
+    let at = test_support::center(cx, "session-header-delete-progress");
+    cx.update(|_, cx| cx.set_global(Decisions::default()));
+    cx.simulate_event(gpui::MouseDownEvent {
+        button: gpui::MouseButton::Left,
+        position: at,
+        modifiers: gpui::Modifiers::none(),
+        click_count: 1,
+        first_mouse: false,
+    });
+    cx.simulate_event(gpui::MouseMoveEvent {
+        position: at + gpui::point(gpui::px(6.), gpui::px(0.)),
+        pressed_button: Some(gpui::MouseButton::Left),
+        modifiers: gpui::Modifiers::none(),
+    });
+    cx.simulate_event(gpui::MouseUpEvent {
+        button: gpui::MouseButton::Left,
+        position: at,
+        modifiers: gpui::Modifiers::none(),
+        click_count: 1,
+    });
+    test_support::settle(cx);
+    let decided = cx.update(|_, cx| cx.default_global::<Decisions>().0.clone());
+    assert_eq!(decided, [(Row::SessionTop, PressAction::None)]);
+}
+
 /// SPEC.md: the header's Delete "asks first in the same anchored way, even for a session that has ended, with the same
 /// consequence text the row's delete prompt shows", while the row deletes such a session unasked; and from the moment
 /// it is committed, "the open session's header shows the same in place of its actions", which come back with a refusal.
