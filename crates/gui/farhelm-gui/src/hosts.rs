@@ -39,6 +39,13 @@
 //! Update plan opens the host refusal dialog ([`refusal`]) if the user has not moved on since the press. The attention
 //! list's Update rows will call [`update::start`] and [`update::start_all`] too.
 //!
+//! What the host rail and the attention list show about each host is [`status`], which draws nothing: the sidebar
+//! reads [`status::host_status`] (the update badge, the work going on and the setup or Update warning) and
+//! [`status::auto_updates_on`] and [`status::auto_update_failed`], redraws on [`status::observe_changes`], and calls
+//! [`update::start`] for one host's Update, [`update::start_all`] for Update all over the hosts it shows,
+//! [`status::always_update`] and [`status::retry_auto_update`]. A warning lasts until Hosts opens, so the sidebar calls
+//! [`HostsPanel::shown`] wherever it shows the panel, as it calls [`HostsPanel::hidden`] wherever it hides it.
+//!
 //! How a host is named and marked, here and in every other area that shows a host, is [`identity`].
 //!
 //! ## What it shows
@@ -90,6 +97,7 @@ pub(crate) mod remove;
 mod settings;
 pub(crate) mod setup;
 pub mod ssh_help;
+pub mod status;
 pub(crate) mod update;
 
 pub use menu::open_menu;
@@ -106,9 +114,9 @@ use std::collections::HashMap;
 use farhelm_proto::provisioning::ProvisioningView;
 use farhelm_proto::ui_channel::{Availability, Collection, HostStateView, HostView};
 use gpui::{
-    AnyElement, App, Context, Div, FocusHandle, FontWeight, InteractiveElement, IntoElement,
-    ParentElement, Render, Role, SharedString, StatefulInteractiveElement, Styled, Subscription,
-    WeakEntity, Window, div, px,
+    AnyElement, App, Context, Div, EntityId, FocusHandle, FontWeight, InteractiveElement,
+    IntoElement, ParentElement, Render, Role, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, WeakEntity, Window, div, px,
 };
 
 use crate::assets::Icon;
@@ -241,6 +249,7 @@ impl HostsPanel {
     /// the runs through [`PerSession::current`] here, on every change of the connection, is also what drops them, the
     /// pulse and the clock included, as soon as a reset replaces the UI session, whether or not the panel is drawn.
     fn follow_runs(&mut self, cx: &mut Context<Self>) {
+        status::follow(cx);
         let now = ticker::wall_now(cx);
         let runs = &mut self.runs.current(cx).seen;
         let Some(store) = session::current_store(cx) else {
@@ -259,10 +268,27 @@ impl HostsPanel {
     /// sees (the ticker's rule: no view holds a pulse while it draws no pulsing mark), and the clock would keep its own
     /// loop waking every second. The sidebar calls it where it hides the panel; a reset needs no call
     /// ([`HostsPanel::follow_runs`]). The next draw takes what it needs again.
-    pub fn hidden(&mut self, cx: &App) {
+    ///
+    /// It also tells the rail's state that Hosts no longer shows, so a setup or Update that fails from now on warns the
+    /// host's rail avatar again ([`status`]). That state keeps its own copy of whether Hosts shows, so every path that
+    /// hides the panel must call this, and every path that shows it [`HostsPanel::shown`]; one that forgets leaves
+    /// warnings raised while Hosts shows, or never acknowledged when it opens.
+    pub fn hidden(&mut self, cx: &mut App) {
         let runs = self.runs.current(cx);
         runs.pulse = None;
         runs.clock = None;
+        status::closed(cx);
+    }
+
+    /// The sidebar started drawing the panel (Hosts shows instead of Sessions): acknowledge every host's setup or
+    /// Update warning, and warn of none while it shows, since the panel's rows show the failure itself (SPEC.md: the
+    /// warning shows "until Hosts is opened"). The sidebar calls it wherever it shows the panel, the attention list's
+    /// Details included, as it calls [`HostsPanel::hidden`] wherever it hides it; a reset needs no call, since what the
+    /// rail's state keeps belongs to one UI session and the sidebar shows Sessions after a reset. Every path that shows
+    /// the panel must call it, a test's or a golden scene's included, since the rail's state keeps its own copy of
+    /// whether Hosts shows.
+    pub fn shown(&mut self, cx: &mut App) {
+        status::opened(cx);
     }
 
     /// Fold `host`'s run `run_id`, as its Collapse does: the row closes unless something else holds it open, and the
@@ -815,6 +841,15 @@ fn add_button(focus: &FocusHandle) -> AnyElement {
         add::open(&opener, &mark, window, cx);
     })
     .into_any_element()
+}
+
+/// The entity id of the current UI session's operation store; `None` while the window is inert. What this module's
+/// app globals (the Hosts panel's lines in [`setup`] and [`remove`], the rail's state in [`status`]) tag what they keep
+/// with, and compare on every read: a reset makes a new operation store, so whatever was kept under the old one stops
+/// showing, as everything from the helm does after a reset. Private to this module and its submodules, which own those
+/// globals.
+fn current_operations_id(cx: &App) -> Option<EntityId> {
+    session::current_operations(cx).map(|operations| operations.entity_id())
 }
 
 /// Whether a session launch is in flight anywhere in the operation store: what a host registry change from this module

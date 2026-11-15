@@ -38,7 +38,8 @@
 //!   state; a plan opens the same confirmation, titled with the host's name and drawn with its mark, or goes out
 //!   without asking under the same preference. The probe's refusal, why setup is manual, and a plan that arrived after
 //!   the user moved on ([`RERUN_MOVED_ON`]) show under the row, the operation store's record under the host's key, as
-//!   does a refused submission: the host already has a row, so nothing reopens.
+//!   does a refused submission: the host already has a row, so nothing reopens. The refusal and the manual setup, and a
+//!   refused submission, also warn the host's rail avatar while Hosts is closed ([`super::status::failed`]).
 //! - **During a launch.** A submission and a rerun refuse to start while a session launch is in flight
 //!   ([`super::launch_in_flight`]), as Add does. A new host's Add host reopens saying so, as for a helm refusal, while
 //!   the user has not moved on, and otherwise the Hosts panel's line says "Add host: not started, …", as it prefixes a
@@ -141,8 +142,10 @@ pub(crate) enum Target {
         from_agent: bool,
     },
     /// A registered host whose failed setup the user runs again from its row: the title names it as its row does, and
-    /// the tile is its own mark. A refusal shows under its row ([`rerun`]).
+    /// the tile is its own mark. A refusal shows under its row ([`rerun`]) and, while Hosts is closed, warns its rail
+    /// avatar ([`super::status::failed`]), which is what `host`, its registry id, is for.
     Registered {
+        host: i64,
         name: HostText,
         icon: HostIcon,
         color: HostColor,
@@ -171,7 +174,9 @@ pub(crate) fn confirm(offer: Offer, window: &mut Window, cx: &mut App) {
             HostText::from_host(destination.as_str()),
             (HostIcon::Cloud, HostColor::Default),
         ),
-        Target::Registered { name, icon, color } => (name.clone(), (*icon, *color)),
+        Target::Registered {
+            name, icon, color, ..
+        } => (name.clone(), (*icon, *color)),
     };
     let title = HostSentence::new("setup-title")
         .text("Set up host · ")
@@ -272,15 +277,19 @@ pub(crate) fn submit(offer: Offer, window: AnyWindowHandle, cx: &mut App) {
     let new = matches!(offer.target, Target::New { .. });
     let started = operations.update(cx, |operations, cx| {
         operations.start(&key, command, cx, move |settled, cx| {
-            // A registered host's refusal needs nothing more: it is the store's record under the host's key, which
-            // its row shows.
+            // A registered host's refusal is the store's record under the host's key, which its row shows; it also
+            // warns the host's rail avatar while Hosts is closed, as any failed setup does.
             // A new host's falls back to the panel's line, which reads the same record under the add's key, which
             // nothing else starts work on.
             if let Outcome::Refused(refusal) = &settled.outcome
                 && !reopen_new(&offer, add::error_line().host(&refusal.words), window, cx)
-                && matches!(offer.target, Target::New { .. })
             {
-                show(cx, |lines| lines.setup = Some(offer.key.clone()));
+                match &offer.target {
+                    Target::New { .. } => show(cx, |lines| lines.setup = Some(offer.key.clone())),
+                    Target::Registered { host, .. } => {
+                        super::status::failed(*host, super::status::Action::Setup, cx);
+                    }
+                }
             }
         })
     });
@@ -373,8 +382,7 @@ fn not_started_line() -> HostSentence {
 /// store, whose records are the helm's answers to work it was sent. Visible to the hosts module for Update's own line
 /// (`super::update`), which carries its own id.
 pub(super) fn not_started(line: HostSentence, cx: &mut App) {
-    let Some(store) = session::current_operations(cx).map(|operations| operations.entity_id())
-    else {
+    let Some(store) = super::current_operations_id(cx) else {
         return;
     };
     show(cx, |lines| lines.not_started = Some((store, line)));
@@ -426,18 +434,25 @@ pub(crate) fn rerun(host: &HostView, mark: Mark, window: &mut Window, cx: &mut A
     };
     let key = OpKey::host(&HostView::key(host.id));
     let target = Target::Registered {
+        host: host.id,
         name: display_name(host),
         icon: host.icon,
         color: host.color,
     };
     let handle = window.window_handle();
     let probed = key.clone();
+    let id = host.id;
     let started = operations.update(cx, |operations, cx| {
         operations.start(&key, command, cx, move |settled, cx| {
             let problem = match add::read_reply(&settled.outcome) {
                 // The pushed hosts and host progress already show what the helm did.
                 Reply::Added => return,
-                Reply::Show(problem) => problem.text(),
+                // A refusal or a manual setup is a failed attempt, which warns the rail while Hosts is closed; a plan
+                // that arrived after the user moved on is not, since nothing was refused and nothing ran.
+                Reply::Show(problem) => {
+                    super::status::failed(id, super::status::Action::Setup, cx);
+                    problem.text()
+                }
                 Reply::Setup {
                     probe_id,
                     confirmation,
@@ -497,8 +512,7 @@ fn stop_asking(cx: &mut App) {
     let started = operations.update(cx, |operations, cx| {
         operations.start(&OpKey::preferences(), command, cx, |settled, cx| {
             if let Outcome::Refused(refusal) = &settled.outcome {
-                let store =
-                    session::current_operations(cx).map(|operations| operations.entity_id());
+                let store = super::current_operations_id(cx);
                 show(cx, |lines| {
                     lines.stop_asking = store.map(|store| (store, refusal.words.clone()))
                 });
@@ -508,7 +522,7 @@ fn stop_asking(cx: &mut App) {
     match started {
         Ok(()) => show(cx, |lines| lines.stop_asking = None),
         Err(NotStarted::Busy(_)) => {
-            let store = session::current_operations(cx).map(|operations| operations.entity_id());
+            let store = super::current_operations_id(cx);
             let words = HostText::from_host(Refused::WORDS);
             show(cx, |lines| {
                 lines.stop_asking = store.map(|store| (store, words))
@@ -577,7 +591,7 @@ pub(crate) fn panel_lines(cx: &App) -> Vec<HostSentence> {
                 .host(&failure.message)
         })
     });
-    let current = session::current_operations(cx).map(|operations| operations.entity_id());
+    let current = super::current_operations_id(cx);
     let stop_asking = lines
         .stop_asking
         .as_ref()
