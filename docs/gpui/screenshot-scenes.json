@@ -883,6 +883,11 @@
       "reference": "help-menu"
     },
     {
+      "golden": "session-bell-list",
+      "title": "A session row's notification list, open beside its bell: a new entry with a docs link, a read one and a resolved one",
+      "reference": null
+    },
+    {
       "golden": "announcements-dialog",
       "title": "The Announcements dialog as Help's history opens it: two shown announcements, one with a detail line and a link (the old dialog was never captured)",
       "reference": null

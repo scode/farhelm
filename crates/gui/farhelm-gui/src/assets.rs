@@ -74,7 +74,10 @@
 //! did, so a highlighted item tints it with one color.
 //!
 //! The Bell is the old app's quiet bell (`BellIcon` with `loud: false`), in its own 12-unit box with the 1.2 stroke and
-//! round caps and joins, unfilled: the Settings dialog's Notifications section.
+//! round caps and joins, unfilled: the Settings dialog's Notifications section, and a session row's bell while
+//! everything in it has been read. The BellFilled is the same drawing with the body filled (`loud: true`), the session
+//! row's bell while something in it is unread: the old app filled it so an unread bell stays obvious to a reader who
+//! cannot tell its red from the quiet grey.
 
 use std::borrow::Cow;
 
@@ -256,11 +259,14 @@ pub enum Icon {
     PermissionOwnSetting,
     /// A question mark: a command from before launch kinds, which carries no YOLO assertion.
     PermissionUnknown,
-    /// A bell, unfilled: the Settings dialog's Notifications section (the old app's quiet `BellIcon`).
+    /// A bell, unfilled: the Settings dialog's Notifications section, and a session row's bell with nothing unread (the
+    /// old app's quiet `BellIcon`).
     Bell,
     /// A branch: the Managed checkout choice of a template's destination, and a trashed checkout's repository in the
     /// Trash dialog (the old app's `BranchIcon`, its 12-pixel box kept).
     Branch,
+    /// The same bell with its body filled: a session row's bell with something unread (the old app's loud `BellIcon`).
+    BellFilled,
     /// A question mark in a circle: the host rail foot's Help button, drawn in the Settings gear's 16-pixel box and
     /// stroke so the two read as a pair (the old app's `HelpIcon`).
     Help,
@@ -356,6 +362,7 @@ impl Icon {
         Icon::PermissionUnknown,
         Icon::Bell,
         Icon::Branch,
+        Icon::BellFilled,
         Icon::Help,
         Icon::External,
         Icon::Adjust,
@@ -438,6 +445,7 @@ impl Icon {
             Icon::PermissionUnknown => "icons/permission-unknown.svg",
             Icon::Bell => "icons/bell.svg",
             Icon::Branch => "icons/branch.svg",
+            Icon::BellFilled => "icons/bell-filled.svg",
             Icon::Help => "icons/help.svg",
             Icon::External => "icons/external.svg",
             Icon::Adjust => "icons/adjust.svg",
@@ -548,6 +556,7 @@ impl Assets {
             "icons/bell.svg" => Some(include_bytes!("../assets/icons/bell.svg")),
             "icons/trash-empty.svg" => Some(include_bytes!("../assets/icons/trash-empty.svg")),
             "icons/trash-full.svg" => Some(include_bytes!("../assets/icons/trash-full.svg")),
+            "icons/bell-filled.svg" => Some(include_bytes!("../assets/icons/bell-filled.svg")),
             WORDMARK_DARK => Some(include_bytes!(
                 "../../../../packaging/farhelm-desktop/wordmark-dark.svg"
             )),

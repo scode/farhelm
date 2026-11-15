@@ -55,6 +55,7 @@
 //! - [`feedback`]: the Send feedback dialog, a private message to the maintainer sent through the helm.
 //! - [`trash`]: the session list header's Trash button, the archived-checkout reads behind its count, and the Trash
 //!   dialog it opens.
+//! - [`notices_bell`]: a session row's notification bell and the list of the session's notifications it opens.
 //!
 //! Still to come, each under its own module: the rest of actions and keys.
 //!
@@ -90,6 +91,7 @@ pub mod local_state;
 pub mod main_view;
 pub mod marks;
 pub mod notices;
+pub mod notices_bell;
 pub mod operations;
 pub mod permission;
 pub mod prompt;

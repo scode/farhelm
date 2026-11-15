@@ -1005,10 +1005,13 @@ outside the ticker, or a view from reading the time without holding a clock hand
 
 Owner: the notice center. It is a code owner, not a new surface.
 
-It is the single place that decides when to post to and withdraw from the existing surfaces: the bell list and notices
-panel, approval cards, banners such as the version-mismatch and outage cards, and chimes. The surfaces look as they do
-today. A new notice is added only where SPEC.md requires one, and each is drawn in an existing style; the generic
-connection-lost notice after a reset was the first.
+It is the single place that decides when to post to and withdraw from approval cards and banners such as the
+version-mismatch and outage cards, and its own generic notices. The surfaces look as they do today. A new notice is
+added only where SPEC.md requires one, and each is drawn in an existing style; the generic connection-lost notice after
+a reset was the first. The session rows' bells with their lists and the rail's notices panel are not its surfaces: they
+draw the notification records the helm keeps and pushes, straight from the store, with no notice-center step, and the
+three status sounds (chimes) are decided by the one sound owner, not here (decided by the migration's orchestrator on
+2026-11-14).
 
 Enforced by the review gate.
 

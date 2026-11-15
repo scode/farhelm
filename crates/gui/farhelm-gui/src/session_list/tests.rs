@@ -40,8 +40,9 @@ pub(crate) const TEST_NOW: i64 = 1_751_414_398;
 /// One session as the helm would push it: the helm's pinned list fixture with the fields these tests are about
 /// replaced. Defaults: titled by its key, running, created and last active at 100, seen at 100 (so nothing is new), in
 /// `/home/user/src/<key>`, with no annotation, on a connected host the fixture names `buildbox`, launched as the
-/// fixture's Codex agent launch in YOLO with no status-line evidence. The screenshot goldens build their fleet from it
-/// too.
+/// fixture's Codex agent launch in YOLO with no status-line evidence, and with no notifications (the helm fixture's row
+/// carries a resolved one, which would give every row a bell; a test that wants one names it). The screenshot goldens
+/// build their fleet from it too.
 #[derive(Clone)]
 pub(crate) struct Fixture {
     pub(crate) key: &'static str,
@@ -61,6 +62,9 @@ pub(crate) struct Fixture {
     launch: Option<Value>,
     /// Whether the supervisor saw the agent's status line in a mode without checks (`screen_yolo`).
     screen_yolo: bool,
+    /// The session's notifications in the helm's wire form and its read mark, when the test names them; else none, and
+    /// a read mark of 0.
+    notifications: Option<(Value, u64)>,
 }
 
 pub(crate) fn session(key: &'static str) -> Fixture {
@@ -78,6 +82,7 @@ pub(crate) fn session(key: &'static str) -> Fixture {
         host_name: None,
         launch: None,
         screen_yolo: false,
+        notifications: None,
     }
 }
 
@@ -134,6 +139,12 @@ impl Fixture {
         self.screen_yolo = true;
         self
     }
+    /// The session with `notifications` (an array of `SessionNotification`s in the helm's wire form) and the helm's read
+    /// mark `read_through`, as the helm lists a session whose row shows a bell.
+    pub(crate) fn notifications(mut self, notifications: Value, read_through: u64) -> Self {
+        self.notifications = Some((notifications, read_through));
+        self
+    }
 
     pub(crate) fn entry(&self) -> KeyedEntry {
         let mut entry = session_entry(self.key);
@@ -157,6 +168,10 @@ impl Fixture {
             value["launch"] = launch.clone();
         }
         value["screen_yolo"] = json!(self.screen_yolo);
+        let (notifications, read_through) =
+            self.notifications.clone().unwrap_or_else(|| (json!([]), 0));
+        value["notifications"] = notifications;
+        value["notifications_read_through"] = json!(read_through);
         entry
     }
 
