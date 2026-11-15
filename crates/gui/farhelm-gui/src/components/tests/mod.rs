@@ -34,6 +34,7 @@ mod option_row;
 mod radio_group;
 mod scrollbar;
 mod select;
+mod sequence_pill;
 mod status_mark;
 mod tab_strip;
 mod text_input;

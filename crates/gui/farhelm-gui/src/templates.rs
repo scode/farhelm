@@ -14,9 +14,11 @@
 //! - [`shortcuts`]: which template holds ⚡ and each number key, and how a change to them is written.
 //! - [`sequence`]: the quick-launch sequence's state, its keys' rules, what its pill shows and what Enter resolves it
 //!   to. No GPUI types.
+//! - [`armed`]: the sequence in the window: the prefix, the key capture, its cancels, the pill and Enter.
 //!
 //! The entry points other areas call are plain functions here: [`open`] for the list header's Templates button, with
-//! [`button_help`] for its hover text, and [`open_with_hint`] for a shortcut that found nothing to launch.
+//! [`button_help`] for its hover text, [`open_with_hint`] for a shortcut that found nothing to launch, and, for the main
+//! view, [`begin_sequence`] for the sequence prefix with [`watch_sequence_presses`] for the press that cancels it.
 //!
 //! Templates, the ⚡ mark and the number keys are read from the store the helm pushes, never with a request per use.
 //! SPEC.md says the shortcuts read "the mark and templates fresh on each use, so an agent's or the command line's
@@ -25,6 +27,7 @@
 //! store is that fresh read.
 
 pub mod apply;
+pub mod armed;
 pub mod dialog;
 pub mod editor;
 pub mod fields;
@@ -34,6 +37,8 @@ pub mod summary;
 
 #[cfg(test)]
 mod apply_tests;
+#[cfg(test)]
+mod armed_tests;
 #[cfg(test)]
 mod dialog_tests;
 #[cfg(test)]
@@ -48,12 +53,12 @@ mod shortcuts_tests;
 mod summary_tests;
 
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
-use gpui::{App, FocusHandle, Window};
+use gpui::{App, FocusHandle, IntoElement, Window};
 
 use crate::components::HoverHelp;
 use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{HostSentence, HostText};
-use crate::layers::LayerId;
+use crate::layers::{Anchor, LayerId};
 use crate::session;
 
 pub use dialog::Hint;
@@ -110,6 +115,19 @@ pub fn open_with_hint(
     cx: &mut App,
 ) -> Option<LayerId> {
     dialog::open(ReturnTo::Opener, Some(hint), mark, window, cx)
+}
+
+/// Begin a quick-launch sequence for the prefix (SPEC.md, "Quick-launch sequences"), its pill centered over `anchor`,
+/// the main pane as last drawn: the main view's handler of `BeginSequence`. Nothing happens while a dialog keeps the
+/// keyboard, while the window is inert, or before the pane was drawn ([`armed::begin`]).
+pub fn begin_sequence(anchor: Option<Anchor>, window: &mut Window, cx: &mut App) {
+    armed::begin(anchor, window, cx);
+}
+
+/// The window-wide press watcher that cancels an armed sequence on a press anywhere in the window, which the main view
+/// draws once ([`armed::watch_presses`]).
+pub fn watch_sequence_presses() -> impl IntoElement {
+    armed::watch_presses()
 }
 
 /// The Templates button's hover help: it advertises the ⚡ chord and the marked template (SPEC.md: "Templates' hover and

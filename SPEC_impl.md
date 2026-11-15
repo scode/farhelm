@@ -7979,35 +7979,27 @@ opening replay's loading or auto-submit predicates, and their acceptance keeps t
 template unmounts the focused control, a deferred check restores the launcher's normal search target only while that
 same launcher is still the sole visible modal. Busy launch and template-save states consume and drop a press.
 
-The shared template-shortcut asset owns the synchronous armed flag, a pure key classifier and the context rule. Rust
-holds the ordered references, unfinished word and optional advisory catalog in app-owned transient context. One hidden
-input carries tagged action JSON from JS through synchronous `oninput`, preserving keystroke order without a second word
-buffer in JS. Printable text, bare digit plus its printed character, number/bolt chords, Space, Tab and Backspace all
-mutate that Rust state. A bare digit extends a nonempty word; otherwise it queues its binding. Chords commit the word
-first, Space commits it alone, and Backspace removes one Unicode scalar only from the unfinished word. Numeric keypad
-digits retain cancellation and pass-through. Tab uses the same match precedence against advisory names and queues a
-unique full name as one typed reference, including a historical spaced name. No catalog or no unique match is a no-op.
-The sidebar's hidden relays mutate that signal synchronously, and the main area renders its non-modal status pill, using
-"apply" while the launcher is open. No storage or general keymap is involved. CSS centers the amber pill in the main
-area, using a fixed 9px downward correction for an open Mac session's taller top bar. Its launcher context keeps the old
-bottom placement. Existing warning tokens provide text, border, fill and a soft halo; a single 200ms fade/scale entrance
-is disabled for reduced motion. Prefix and number modifiers follow the build's Mac-desktop choice; the bolt keeps its
-existing operating-system chord, including Cmd+P in a Mac browser. The shared listener installs after the composition
-guard and before other command listeners, consuming with stopImmediatePropagation because same-window capture listeners
-otherwise still run. Pointer/click, blur, visibility, modal focus and the existing modal-opening hook cancel both state
-owners. A launcher-owned text field admits the prefix only without selected text; other editors keep their usual key
-action. Hidden quick-launch preparation consumes recognized keys without enqueuing a relay. The relays stay mounted and
-enabled across render-delayed armed state. Enter always pairs one press snapshot with one captured batch, including an
-empty batch that drains without opening anything. Starting the prefix independently reads template names alongside
-bindings, with the same sequence generation fence; failed or late advisory reads cannot gate Enter or provide its launch
-definitions. The indicator renders queued chips, the unfinished word and at most five matching candidates below the
-pill. The display cap never limits ambiguity detection, and all visible peer names and refusal text are escaped without
-changing lookup spellings. The indicator publishes its raw binding projection beside the visible names in the same
-render, retaining a hidden projection while idle for rapid input before the first pill render. Physical Enter copies
-that DOM projection into the existing press snapshot; the worker pairs it with the raw reference queue before starting
-the existing generation-fenced quick-launch read. Starting the prefix refreshes shared bindings once; a cancelled or
-superseded sequence cannot publish its late preference read. Enter never refreshes the captured bindings. Missing
-captured names reveal New with its existing named-template refusal, including within multi-template sequences.
+In the GPUI app a sequence is one model with no GPUI types (`templates/sequence.rs`): the ordered references, the
+unfinished word and the sequence's own copy of the ⚡ mark and number keys, taken from the store when the prefix is
+accepted. The pill shows that copy and Enter resolves it, so the two cannot disagree and no press snapshot, hidden relay
+or generation fence is needed. The prefix is an action bound in the app's key context. A text field keeps the chord (on
+Linux through a `NoAction` row in GPUI Kit's input context, on a Mac through Kit's own Cut binding), a focused terminal
+hands it on as an app shortcut, and the prefix is refused while a dialog holds the keyboard, the launcher included until
+the launcher can say it is open. While armed, the actions module's key capture slot hands every key-down to the sequence
+ahead of the terminal, the bindings and the physical-key rows (`templates/armed.rs`): a printable character with nothing
+but Shift held, a bare main-row digit by physical key with the character it prints, the number and ⚡ chords, Space, Tab
+and Backspace feed the model; Escape and a second prefix cancel and are consumed; anything else, including a keypad
+digit and a key that types nothing (a dead key, a key mid-composition), cancels and goes on to its normal target. Held
+repeats of a sequence key are taken and add nothing. A press anywhere in the window (one window-wide listener), the
+window going inactive, a reset (the slot's reset callback) and, at the next key, a dialog that opened since the prefix
+also cancel. Input-method text that arrives without a key-down is not refused yet; that falls to the terminal's input
+handler. The pill is the layer manager's display-only pill, anchored to the main pane in every connected state and drawn
+by the component layer's sequence pill from the old stylesheet's amber tokens and halo, 9 pixels lower in the Mac window
+while a session is open. Its candidates read the store's template names on every draw; Tab and the candidates have none
+while the templates collection is unavailable, and Enter resolves against whatever the store holds. The old 200 ms
+entrance is not drawn, because GPUI's one-shot animations are banned in the GUI crates without a lint exception. Enter
+queues the word, ends the capture and resolves the model: an empty sequence opens nothing, an unbound reference outside
+the launcher opens Templates with its binding hint, and every other outcome waits for the quick-launch dispatcher.
 
 Number bindings accept partial templates; the bolt keeps its runnable-template affordance. A single partial-template key
 passes a number-key banner to New for a prominent alert explaining the prefix. Dispatch carries an explicit origin:
