@@ -25,6 +25,16 @@
 //! whichever its seen state calls for ([`super::seen`]); a row that offers neither omits the item, so the commands
 //! after it move up. Choosing it closes the menu, which leaves focus on the menu's button, and then sends the request.
 //!
+//! After a separator come the launcher's two, Clone and Replace with…, in the old menu's group of "make a new
+//! session from this one" commands, ahead of Replace. Choosing one closes the menu, which leaves focus on its button,
+//! then opens the launcher on the row's session ([`launcher::entry::open_clone`],
+//! [`launcher::entry::open_replace_with`]), which returns focus to the button when it closes. Both are unavailable
+//! while the session's commands are refused (below), and while the launcher cannot open ([`launcher_wait`]: a launch
+//! pending or a host change in flight), when their help and description say why. A press drawn a frame early opens
+//! nothing: the entry points refuse while the launcher cannot open, and the click checks the refusal itself. The old
+//! menu offered no Restart with, which the open session's header offers in its Restart menu
+//! (`session_pane/header.rs`).
+//!
 //! Then come the lifecycle commands in the old menu's groups, each after a separator: Replace ([`super::replace`]),
 //! Stop ([`super::stop`]) and Delete ([`super::delete`]), all three in the danger red. Choosing one closes the menu
 //! before its question opens beside the same button (the old app turned the menu into the question; here the two are
@@ -47,10 +57,10 @@
 //! after keyboard input; the old `:hover` did not), and so that the reveal is one decision the tests can read: the
 //! button's wrapper names it in its debug selector, `session-menu-<key>:shown` or `:hidden`.
 //!
-//! NOTE: Clone and Replace with (the launcher's), Pin and the environment commands come with their areas, in the old
-//! order around these, with no placeholder meanwhile; the old row menu had no Restart, which the open session's header
-//! offers instead (`session_pane/header.rs`). Also not ported: opening the menu with the arrow keys from the closed
-//! button, placing the menu beside the sidebar with a pointer notch (the layer manager places it below its anchor), the
+//! NOTE: Pin and the environment commands come with their areas, in the old order around these, with no placeholder
+//! meanwhile; the old row menu had no Restart, which the open session's header offers instead
+//! (`session_pane/header.rs`). Also not ported: opening the menu with the arrow keys from the closed button, placing
+//! the menu beside the sidebar with a pointer notch (the layer manager places it below its anchor), the
 //! old reveal's 100 ms fade (the button appears and goes at once: a fade per row would need a ticker animation for
 //! each row in motion, which nothing else in the list holds), and its rule that a touch screen always shows the button
 //! (GPUI reports no coarse pointer to ask about).
@@ -73,6 +83,7 @@ use crate::assets::Icon;
 use crate::components::{HoverHelp, IconButton, MenuHeader, MenuItem, Role, Tier, menu_separator};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
+use crate::launcher::entry;
 use crate::layers::{self, Anchor, LayerId, Popover, Subject};
 use crate::operations::{OpKey, Work};
 use crate::prompt::{self, Question};
@@ -87,6 +98,20 @@ const PANEL_WIDTH: f32 = 246.;
 /// The menu button's hover help, the old toggle's `data-tooltip` word for word.
 pub(crate) const ACTIONS_HELP: &str =
     "Session actions: rename, clone, replace, stop, delete and more";
+
+/// Clone's hover help, in the row's menu and on the open session's header: the old header button's tooltip, since the
+/// old menu item had none.
+pub(crate) const CLONE_HELP: &str =
+    "Clone: open the new-session form with these settings; this session keeps running";
+
+/// Replace with's hover help in the row's menu: the old interrupted card's Replace with tooltip, since the old menu
+/// item had none.
+const REPLACE_WITH_HELP: &str =
+    "Replace with: edit the settings, then swap this session for a new one";
+
+/// A launcher entry point a menu item opens on its session ([`entry::open_clone`],
+/// [`entry::open_replace_with`]): it returns whether the launcher opened.
+type LauncherEntry = fn(&str, &mut Window, &mut App) -> bool;
 
 /// The layer a row last opened from its menu button.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -418,11 +443,12 @@ pub(crate) fn actionable(key: &str, cx: &App) -> Option<Actionable> {
     })
 }
 
-/// Whether `key`'s lifecycle commands (Rename, Replace, Stop and Delete here, and Restart in the open session's header)
-/// are refused now, and drawn unavailable: SPEC.md's "an open lifecycle confirmation or a pending request refuses
-/// another lifecycle action". A request of the session in flight is one ([`delete::busy`]); the YOLO question a Replace
-/// of the session met, while it is open, is the other ([`super::replace_yolo::open`]). The row's and the header's own
-/// questions refuse through their buttons, which are inert while their question is open.
+/// Whether `key`'s lifecycle commands (Rename, Clone, Replace with, Replace, Stop and Delete here, and Restart, Restart
+/// with and Clone in the open session's header) are refused now, and drawn unavailable: SPEC.md's "an open lifecycle
+/// confirmation or a pending request refuses another lifecycle action". A request of the session in flight is one
+/// ([`delete::busy`]); the YOLO question a Replace of the session met, while it is open, is the other
+/// ([`super::replace_yolo::open`]). The row's and the header's own questions refuse through their buttons, which are
+/// inert while their question is open.
 pub(crate) fn refused(key: &str, cx: &App) -> bool {
     delete::busy(key, cx) || super::replace_yolo::open(key, cx)
 }
@@ -442,6 +468,22 @@ pub(crate) fn launch_wait(cx: &App) -> Option<&'static str> {
     crate::hosts::host_change_in_flight(cx)
         .then_some(crate::launcher::launch::HOST_CHANGE_IN_FLIGHT)
 }
+
+/// Why the launcher cannot open now, if it cannot ([`entry::new_available`]): a host change in flight
+/// ([`launch_wait`]'s words), or a launch pending ([`LAUNCH_PENDING`]). This menu's Clone and Replace with… and the
+/// header's Clone, Restart with… and Replace with… draw themselves unavailable with it as their hover help and
+/// description, as the plain choices say [`launch_wait`]'s, so a greyed launcher trigger always says why (SPEC.md,
+/// "Terminal experience": the greyed entries' "tooltips and accessible descriptions explain the specific reason").
+pub(crate) fn launcher_wait(cx: &mut App) -> Option<&'static str> {
+    if entry::new_available(cx) {
+        return None;
+    }
+    Some(launch_wait(cx).unwrap_or(LAUNCH_PENDING))
+}
+
+/// [`launcher_wait`]'s words while a launch is pending (the launcher holds one launch at a time). The old app had none:
+/// it never greyed these triggers, and its launcher refused a second opening silently.
+const LAUNCH_PENDING: &str = "Wait for the pending launch to finish";
 
 /// Refuse `key`'s `work` (a Restart or a Replace about to be sent) while a host change is in flight, and say why on
 /// the session: the reason goes in the operation store's slot for the key, which the row, its menu and the header draw
@@ -505,6 +547,8 @@ impl Render for RowMenu {
             .id("session-menu")
             .debug_selector(|| "session-menu".into())
             .w(px(PANEL_WIDTH));
+        // Read before the row, which borrows the store from the context.
+        let launcher_wait = launcher_wait(cx);
         let Some(store) = session::current_store(cx) else {
             return panel;
         };
@@ -576,6 +620,56 @@ impl Render for RowMenu {
         };
         // Replace waits for a host change, its help saying why ([`launch_wait`]).
         let launch_wait = launch_wait(cx);
+        // Clone and Replace with open the launcher on this session. They are unavailable while the session's own
+        // commands are refused, as Rename is, and while the launcher cannot open ([`launcher_wait`]: a launch pending,
+        // a host change in flight), saying why then in place of their help and description.
+        let launcher_busy = busy || launcher_wait.is_some();
+        let launcher_item = |id: &'static str,
+                             icon: Icon,
+                             label: &'static str,
+                             help: &'static str,
+                             description: &'static str,
+                             open: LauncherEntry| {
+            let (list, key) = (self.list.clone(), self.key.clone());
+            MenuItem::new(
+                id,
+                icon,
+                label,
+                HoverHelp::tooltip(launcher_wait.unwrap_or(help)),
+                Role::MenuItem,
+            )
+            .description(launcher_wait.unwrap_or(description))
+            .disabled(launcher_busy)
+            .on_click(move |_, window, cx| {
+                // Closed first, which returns focus to the menu's button: the entry point refuses while a menu is open,
+                // and the launcher returns focus to what held it when it opened.
+                let _ = list.update(cx, |list, cx| list.close_menu(&key, window, cx));
+                // A press drawn a frame before the session's commands were refused: the entry points check only
+                // whether the launcher may open, so the refusal is checked here, as the other commands check it.
+                if actionable(&key, cx).is_none() {
+                    return;
+                }
+                if !open(&key, window, cx) {
+                    tracing::debug!(label, "the launcher refused to open from the row menu");
+                }
+            })
+        };
+        let clone = launcher_item(
+            "session-menu-clone",
+            Icon::Clone,
+            "Clone",
+            CLONE_HELP,
+            "New session, keep this one",
+            entry::open_clone,
+        );
+        let replace_with = launcher_item(
+            "session-menu-replace-with",
+            Icon::Adjust,
+            "Replace with…",
+            REPLACE_WITH_HELP,
+            "Edit settings, then swap",
+            entry::open_replace_with,
+        );
         let replace = lifecycle(
             "session-menu-replace",
             Icon::Replace,
@@ -612,6 +706,9 @@ impl Render for RowMenu {
                     .flex_col()
                     .child(rename)
                     .children(seen_item)
+                    .child(menu_separator(cx))
+                    .child(clone)
+                    .child(replace_with)
                     .child(menu_separator(cx))
                     .child(replace)
                     .child(menu_separator(cx))

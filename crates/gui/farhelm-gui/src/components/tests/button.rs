@@ -1,6 +1,7 @@
 //! Tests of the button: a click and Enter or Space run it once, a disabled one is inert, a busy one keeps focus, its
 //! help and the retired look while ignoring presses, a pressed one reports its state with its label as its name, a
-//! square one keeps its side, and the session list heading's padding lines its title's words up with the band's edge.
+//! square one keeps its side, the session list heading's padding lines its title's words up with the band's edge, and
+//! a split button's muted caret reads retired while it still opens its menu.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -11,7 +12,7 @@ use gpui::{
 };
 
 use crate::assets::Icon;
-use crate::components::{Button, HoverHelp, IconButton, Role, Tier};
+use crate::components::{Button, HoverHelp, IconButton, Role, SplitPart, Tier};
 use crate::test_support::{bounds, center, check, click, frame, keys, open, redraw};
 
 use super::{tooltip, wait_hover_delay};
@@ -281,6 +282,46 @@ fn a_busy_filled_button_takes_the_retired_look_and_an_unfilled_one_keeps_its_own
             button(Tier::Neutral, false).colors(palette),
             retired,
             "a neutral button that is not busy keeps its fill"
+        );
+    }
+}
+
+/// A split button's caret whose menu has nothing that can run must read as unavailable, as the old
+/// `[data-actions-unavailable]` caret did, and yet still open, because its menu is where the reasons are (SPEC.md: "the
+/// menu remains available to inspect reasons"); once open it wears the open look like any toggle. Specified, in both
+/// palettes: a muted neutral caret has the retired fill, edge and ink, with the control hover fill still under the
+/// pointer; an unmuted caret keeps the neutral colors; a muted caret that is open has the same colors as an open caret
+/// that is not muted.
+#[test]
+fn a_muted_caret_reads_retired_until_it_opens() {
+    let caret = |muted: bool, open: bool| {
+        Button::new(
+            "c",
+            "Restart options",
+            HoverHelp::tooltip("A caret"),
+            Role::Button,
+        )
+        .tier(Tier::Neutral)
+        .split(SplitPart::Caret { muted })
+        .expanded(open)
+    };
+    for palette in [&crate::theme::DARK, &crate::theme::LIGHT] {
+        assert_eq!(
+            caret(true, false).colors(palette),
+            (
+                Some(palette.bg_2),
+                palette.control_hover,
+                Some(palette.border_dim),
+                palette.fg_2,
+            )
+        );
+        let neutral = Button::new("n", "N", HoverHelp::tooltip("A button"), Role::Button)
+            .tier(Tier::Neutral)
+            .colors(palette);
+        assert_eq!(caret(false, false).colors(palette), neutral);
+        assert_eq!(
+            caret(true, true).colors(palette),
+            caret(false, true).colors(palette)
         );
     }
 }

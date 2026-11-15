@@ -4,6 +4,9 @@
 //! readout's controls that keep the look of their text, an entry of a navigation list such as Settings' sections, the
 //! two swatches of the host settings' appearance picker, and a Hosts row's outlined inline Update.
 //!
+//! Either part of a split button is a button too ([`Button::split`]): the session header's Restart and Replace, a main
+//! part and a caret joined with no gap, each its own control with its own focus and help.
+//!
 //! A button shows its label's text, or other content in its place ([`Button::content`]: a host's mark, a mark beside a
 //! host's name); the label is its accessible name either way. A button that is one of a set of choices says whether
 //! it is the one in force ([`Button::pressed`]), as the rail's entries do.
@@ -212,6 +215,24 @@ const COMPACT_PAD: (f32, f32) = (2., 8.);
 const COMPACT_GAP: f32 = 4.;
 /// A compact button's icon: `.action-glyph`'s 13 pixels.
 const COMPACT_ICON: f32 = 13.;
+/// A compact split button caret's side padding: `.header-action-caret`'s `padding: 2px 4px`.
+const CARET_PAD_X: f32 = 4.;
+
+/// Which part of a split button a button is ([`Button::split`]): the session header's Restart and Replace, whose main
+/// part performs the ordinary action and whose caret opens a menu of that action and its "with…" variant (SPEC.md,
+/// "Terminal experience"). The two parts are drawn side by side with no gap, the way the old `.header-action-split`
+/// joined them, so each squares the corners where it meets the other.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SplitPart {
+    /// The main part: its right corners are square.
+    Main,
+    /// The caret: its left corners are square, and an icon-only caret in the compact geometry keeps 4 pixels at its
+    /// sides (`.header-action-caret`'s `padding: 2px 4px`) rather than the square an icon-only button gets. `muted`
+    /// draws a neutral caret in the retired look while it is not open, for a menu none of whose choices can run now;
+    /// unlike [`Button::busy`] it still opens its menu, which is where the reasons are (the old
+    /// `[data-actions-unavailable="true"]` rule, a visual state rather than a disabled one).
+    Caret { muted: bool },
+}
 
 /// A button with a visible text label (and optionally a leading icon).
 #[derive(IntoElement)]
@@ -247,6 +268,8 @@ pub struct Button {
     content: Option<AnyElement>,
     /// A fixed square side in place of the tier's padding ([`Button::square`]).
     side: Option<Pixels>,
+    /// The part of a split button this is, if it is one ([`Button::split`]).
+    split: Option<SplitPart>,
     on_click: Option<Handler>,
     /// Keys the owner takes before the button's own Enter and Space ([`Button::on_key_down`]).
     on_key: Option<KeyHandler>,
@@ -287,6 +310,7 @@ impl Button {
             keeps_focus: false,
             content: None,
             side: None,
+            split: None,
             on_click: None,
             on_key: None,
             focus: None,
@@ -414,6 +438,13 @@ impl Button {
         self
     }
 
+    /// Draw the button as one part of a split button (see [`SplitPart`]). The owner lays the two parts out side by side
+    /// with no gap, and each is a control of its own: its own label, hover help, focus and activation.
+    pub fn split(mut self, part: SplitPart) -> Self {
+        self.split = Some(part);
+        self
+    }
+
     /// Keys the owner handles while the button has focus, before the button's own Enter and Space activation: a key
     /// `handler` takes, by stopping its propagation, goes no further, and any other key goes on to the activation and
     /// past it. For a button that opens a list and drives it from the keyboard (the launcher's host picker, whose
@@ -509,6 +540,18 @@ impl Button {
                 palette.accent_fill_hover,
                 None,
                 palette.on_fill,
+            );
+        }
+        // A muted caret reads as retired until its menu opens, and keeps a hover fill, since a press still opens it.
+        if self.expanded != Some(true)
+            && self.tier == Tier::Neutral
+            && self.split == Some(SplitPart::Caret { muted: true })
+        {
+            return (
+                Some(palette.bg_2),
+                palette.control_hover,
+                Some(palette.border_dim),
+                palette.fg_2,
             );
         }
         // After the pressed looks: a button that is both a choice in force and open (the host rail's Hosts while host
@@ -634,6 +677,9 @@ impl RenderOnce for Button {
             _ if self.heading => (px(HEADING_WORDS_PAD.0), px(HEADING_WORDS_PAD.1)),
             Tier::OnBanner => metrics::BANNER_BUTTON_PAD,
             Tier::RowMenu { .. } => (px(0.), px(ROW_MENU_PAD_X)),
+            _ if self.compact && matches!(self.split, Some(SplitPart::Caret { .. })) => {
+                (px(COMPACT_PAD.0), px(CARET_PAD_X))
+            }
             Tier::Ghost | Tier::Neutral | Tier::Primary | Tier::Danger if self.compact => {
                 (px(COMPACT_PAD.0), px(COMPACT_PAD.1))
             }
@@ -707,6 +753,8 @@ impl RenderOnce for Button {
             Tier::IconChoice => (pad_x, Some(px(ICON_CHOICE_SIZE))),
             Tier::ColorChoice => (pad_x, Some(px(COLOR_CHOICE_SIZE))),
             _ if self.show_label || self.content.is_some() => (pad_x, None),
+            // A split button's caret keeps its own side padding, and takes its height from the main part beside it.
+            _ if matches!(self.split, Some(SplitPart::Caret { .. })) => (pad_x, None),
             _ => (pad_y, None),
         };
         // A rail entry, an appearance choice and a button given a side are squares that never give up their width.
@@ -772,6 +820,14 @@ impl RenderOnce for Button {
                 Tier::Waiting => metrics::RADIUS_MD,
                 _ => metrics::RADIUS_SM,
             })
+            // Where a split button's two parts meet, their corners are square.
+            .when(self.split == Some(SplitPart::Main), |button| {
+                button.rounded_tr(px(0.)).rounded_br(px(0.))
+            })
+            .when(
+                matches!(self.split, Some(SplitPart::Caret { .. })),
+                |button| button.rounded_tl(px(0.)).rounded_bl(px(0.)),
+            )
             // `.inline-link` and the readout have no edge at all (`border: 0`), so they sit on the text line like the
             // words around them; every other tier keeps the 1-pixel edge.
             .when(
@@ -1022,6 +1078,24 @@ impl IconButton {
     /// See [`Button::keeps_focus_on_press`].
     pub fn keeps_focus_on_press(self) -> Self {
         IconButton(self.0.keeps_focus_on_press())
+    }
+
+    /// See [`Button::compact`]: the session header's split carets.
+    pub fn compact(self) -> Self {
+        IconButton(self.0.compact())
+    }
+
+    /// See [`Button::split`].
+    pub fn split(self, part: SplitPart) -> Self {
+        IconButton(self.0.split(part))
+    }
+
+    /// See [`Button::on_key_down`]: a caret that opens its menu with Down and Up.
+    pub fn on_key_down(
+        self,
+        handler: impl Fn(&KeyDownEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        IconButton(self.0.on_key_down(handler))
     }
 }
 

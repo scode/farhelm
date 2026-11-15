@@ -92,6 +92,9 @@
 //! `EndedStatusIcon` drawings at the reference commit, and the Stale clock is its `QualifierIcon` for a stale row: all in
 //! its 12-unit box with the 1.2 stroke and round caps and joins, unfilled but for the stopped mark's inner square, which
 //! the old one filled too.
+//!
+//! The Clone glyph (a card in front of another) is the old app's `ActionGlyph::Clone`, in the 14-unit action box with
+//! the 1.2 stroke and round caps and joins.
 
 use std::borrow::Cow;
 
@@ -326,6 +329,9 @@ pub enum Icon {
     /// A clock: a compact row's session whose status is only last-known, its host not connected (the old
     /// `QualifierGlyph::Stale`).
     Stale,
+    /// A card in front of another: start a new session from this one's settings, keeping this one, on the session
+    /// header's Clone and the row menu's Clone (the old app's `ActionGlyph::Clone`).
+    Clone,
 }
 
 impl Icon {
@@ -420,6 +426,7 @@ impl Icon {
         Icon::EndedInterrupted,
         Icon::EndedError,
         Icon::Stale,
+        Icon::Clone,
     ];
 }
 
@@ -513,6 +520,7 @@ impl Icon {
             Icon::EndedInterrupted => "icons/ended-interrupted.svg",
             Icon::EndedError => "icons/ended-error.svg",
             Icon::Stale => "icons/stale.svg",
+            Icon::Clone => "icons/clone.svg",
         }
     }
 }
@@ -645,6 +653,7 @@ impl Assets {
             }
             "icons/ended-error.svg" => Some(include_bytes!("../assets/icons/ended-error.svg")),
             "icons/stale.svg" => Some(include_bytes!("../assets/icons/stale.svg")),
+            "icons/clone.svg" => Some(include_bytes!("../assets/icons/clone.svg")),
             _ => None,
         }
     }

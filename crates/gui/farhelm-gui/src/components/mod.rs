@@ -17,7 +17,9 @@
 //! Some modules here draw no control. Drawing-only pieces such as `pulse`, `menu_separator` and `spinner` have no
 //! input, focus or name, so the label, hover help and role rule does not reach them. `transition`'s [`entrance`] fades
 //! an element in as it appears: it is the one place in the GUI crates' own code where GPUI's animation may be used, for
-//! one-shot transitions only (its module docs say why the ticker cannot draw them and what it keeps).
+//! one-shot transitions only (its module docs say why the ticker cannot draw them and what it keeps). `menu_keys` draws
+//! nothing either: its two key handlers go on a control or panel an owner draws (a menu's toggle, the open menu), whose
+//! label, hover help and role that control carries, so the rule has nothing of its own to reach.
 //!
 //! Two of the layer's rules make a box its caller draws into a keyboard stop rather than drawing a control.
 //! [`focus_stop`] is a tab stop on a focus handle its caller owns, with a role, a name and the keyboard's ring, for a
@@ -37,6 +39,7 @@ mod list_row;
 mod mark_toggle;
 mod menu_header;
 mod menu_item;
+mod menu_keys;
 mod menu_separator;
 mod option_row;
 mod pulse;
@@ -55,7 +58,7 @@ mod transition;
 mod tests;
 
 pub use banner::Banner;
-pub use button::{Button, IconButton, Tier};
+pub use button::{Button, IconButton, SplitPart, Tier};
 pub use checkbox::Checkbox;
 pub use copy_button::copy_button;
 pub use copy_field::{CONFIRMATION, COPIED, CopyFeedback, CopyField};
@@ -68,6 +71,7 @@ pub use list_row::ListRow;
 pub use mark_toggle::MarkToggle;
 pub use menu_header::MenuHeader;
 pub use menu_item::MenuItem;
+pub use menu_keys::{MenuStart, home_end_keys, toggle_arrow_keys};
 pub use menu_separator::menu_separator;
 pub use option_row::OptionRow;
 pub use pulse::pulse_opacity;

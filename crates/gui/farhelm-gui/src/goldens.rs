@@ -4359,7 +4359,9 @@ static SCENES: &[Scene] = &[
     },
     Scene {
         name: "session-row-menu",
-        size: (420., 418.),
+        // The app's minimum window height, so the whole menu shows, Delete last, since Clone and Replace with joined
+        // it.
+        size: (420., 560.),
         draw: session_lists_then,
         setup: session_row_menu_setup,
     },

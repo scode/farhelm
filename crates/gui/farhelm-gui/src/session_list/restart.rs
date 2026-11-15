@@ -76,8 +76,14 @@ pub(crate) fn hover_help(row: &SessionRow) -> String {
 /// What a restart of a session with `status`, `offer` and `kind` does, or why it cannot, as the clause that follows the
 /// accessible name in the hover help: a lead for the two states where the terminal is gone for a reason the user should
 /// hear first (interrupted, never started), the offer's own clause, and for an uncaptured conversation the invitation to
-/// send feedback. Built from authored clauses, so the agent's name and "Restart" keep their case.
-fn offer_continuation(status: &SessionStatus, offer: RestartOffer, kind: AgentKind) -> String {
+/// send feedback. Built from authored clauses, so the agent's name and "Restart" keep their case. The header's Restart
+/// menu shows it, with its first letter raised and no closing period, as its plain Restart's description, as the old
+/// menu showed the same explanation there.
+pub(crate) fn offer_continuation(
+    status: &SessionStatus,
+    offer: RestartOffer,
+    kind: AgentKind,
+) -> String {
     let ended = status.has_ended();
     let offered = offer_clause(offer, kind, ended);
     let note = feedback_note(offer, ended);
