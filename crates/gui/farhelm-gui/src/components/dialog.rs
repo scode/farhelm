@@ -24,7 +24,8 @@
 //! ([`DialogFrame::heading`]), and its title, "Host settings · <name>", stays the dialog's accessible name.
 //! The session launcher's footer had two more parts (`.launch-composer-footer`): a summary of what its main action
 //! would start, beside the answers ([`DialogFrame::footer_lead`]), and a region above them for what a press of an
-//! answer has to say ([`DialogFrame::notices`]).
+//! answer has to say ([`DialogFrame::notices`]). Settings pins the recipe editor's own answers there, as a band ruled
+//! off from its Close ([`DialogFrame::notices_rule`]).
 //! A body whose content may hold nothing focusable can have a tab stop of its own that the keys scroll
 //! ([`DialogFrame::scroll_stop`]; `scroll_box.rs` has the full account). So can the notices region, which also scrolls
 //! on Page Up, Page Down, Home and End from a control inside it ([`DialogFrame::notices_stop`]), for a question whose
@@ -64,6 +65,10 @@ const NOTE_TEXT: f32 = 11.;
 /// the window (`max-height: 24dvh`).
 const NOTICES_MAX_SHARE: f32 = 0.24;
 
+/// `.recipe-editor-sticky-actions`' `padding: 12px 0`: the room between ruled-off notices and their rule
+/// ([`DialogFrame::notices_rule`]).
+const NOTICES_RULE_PAD: f32 = 12.;
+
 /// `.launch-composer-footer-summary`: a footer lead's basis (`flex: 1 1 220px`) before the row wraps the answers.
 const FOOTER_LEAD_BASIS: f32 = 220.;
 
@@ -97,6 +102,7 @@ pub struct DialogFrame {
     fixed_height: Option<Pixels>,
     footer_lead: Option<AnyElement>,
     notices: Option<AnyElement>,
+    notices_rule: bool,
     compact: bool,
     scroll_stop: Option<SharedString>,
     notices_stop: Option<SharedString>,
@@ -130,6 +136,7 @@ impl DialogFrame {
             fixed_height: None,
             footer_lead: None,
             notices: None,
+            notices_rule: false,
             compact: false,
             scroll_stop: None,
             notices_stop: None,
@@ -223,6 +230,16 @@ impl DialogFrame {
     /// keyboard does too once [`Self::notices_stop`] is set.
     pub fn notices(mut self, notices: impl IntoElement) -> Self {
         self.notices = Some(notices.into_any_element());
+        self
+    }
+
+    /// Rule the notices off from the answers' row below them: a line in the dim border color under the notices, 12
+    /// pixels below their content. For notices that are a surface of their own rather than a word about the frame's
+    /// answers: Settings pins the recipe editor's Cancel and Save there, which belong to the editor and not to the
+    /// dialog's Close, and the old app drew them as a band with its own rule (`.recipe-editor-sticky-actions`,
+    /// `border-top: 1px solid var(--border-dim)`) above the footer's. Without notices it draws nothing.
+    pub fn notices_rule(mut self) -> Self {
+        self.notices_rule = true;
         self
     }
 
@@ -476,6 +493,12 @@ impl RenderOnce for DialogFrame {
                 .debug_selector(|| format!("{}-notices", self.id))
                 .max_h(window.viewport_size().height * NOTICES_MAX_SHARE)
                 .overflow_y_scroll()
+                .when(self.notices_rule, |region| {
+                    region
+                        .pb(px(NOTICES_RULE_PAD))
+                        .border_b_1()
+                        .border_color(theme::color(palette.border_dim))
+                })
                 .child(notices);
             let Some(label) = notices_stop else {
                 return focus::scroll_region(region, &scroll).into_any_element();

@@ -9,6 +9,7 @@
 //! module.
 
 use farhelm_proto::ProviderKind;
+use farhelm_proto::recipes::RecipeBase;
 
 /// One provider, seen through the GUI's vocabulary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,6 +85,38 @@ impl ProviderUi {
                 rebuild_help: "Rebuild this recipe at this place; existing environments retain their files",
             }),
         }
+    }
+
+    /// What a build on a base only this provider runs leaves behind, said under the recipe editor's packages. Snapshot
+    /// language must not imply cloud billing for a container image. The old app's words (`ProviderUi::recipe_build_help`
+    /// in `environment_ui.rs` at the reference commit).
+    fn recipe_build_help(self) -> &'static str {
+        match self.0 {
+            ProviderKind::Tensorlake => {
+                "Farhelm then adds Claude Code and Codex with their official installers and takes a snapshot."
+            }
+            ProviderKind::Podman => {
+                "Farhelm then adds Claude Code and Codex with their official installers and saves an image on the \
+                 container host for launches there."
+            }
+        }
+    }
+}
+
+/// The recipe editor's help under its packages for a recipe on `base`: what Farhelm adds and what the build leaves at
+/// each place that can run the base. Managed Ubuntu runs everywhere, so its words name both artifacts; a base only one
+/// provider runs takes that provider's words ([`ProviderUi::recipe_build_help`]). Decided here, with the provider
+/// wording, so the editor names no provider (AGENTS.md, "Code rules"). The old editor's match, at the reference commit.
+pub(crate) fn recipe_build_help(base: &RecipeBase) -> &'static str {
+    match base {
+        RecipeBase::ManagedUbuntu => {
+            "Farhelm then adds Claude Code and Codex with their official installers. On Tensorlake it takes a \
+             snapshot; on a container host it saves an image for launches there."
+        }
+        RecipeBase::TensorlakeImage { .. } | RecipeBase::TensorlakeSnapshot { .. } => {
+            ProviderUi(ProviderKind::Tensorlake).recipe_build_help()
+        }
+        RecipeBase::ContainerImage { .. } => ProviderUi(ProviderKind::Podman).recipe_build_help(),
     }
 }
 
