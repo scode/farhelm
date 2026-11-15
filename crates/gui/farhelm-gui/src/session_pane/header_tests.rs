@@ -41,7 +41,7 @@ use crate::session_list::lifecycle_tests::{
 use crate::session_list::menu_tests::{any_layer, drawn, ended, entry, label_of};
 use crate::session_list::outcome::{self, PROGRESS_SHOWS_AFTER};
 use crate::session_list::tests::{
-    Fixture, change, listing_meta, open_main, painted, selected, session,
+    Fixture, change, launcher_drawn, listing_meta, open_main, painted, selected, session,
 };
 use crate::test_support::{self, focused_id, frame, meta, started};
 use crate::{assets, bootstrap, focus, layers, root};
@@ -185,13 +185,14 @@ fn idle(key: &'static str) -> Fixture {
 
 // ---- The row and its actions ---------------------------------------------------------------------------------------
 
-/// SPEC.md, "Terminal experience": the top row holds, on the right, Stop, Restart, Replace (then Clone, the launcher's)
-/// and Delete, with the terminal area's tabs on the left. Restart is named for its offer, as the old button's
-/// `aria-label` was, because "Restart" alone does not say whether the conversation survives. Specified: the four
-/// buttons are drawn left to right in that order, after the empty tabs region; they paint "Stop", "Restart", "Replace"
-/// and "Delete" and are named "Stop", "Resume conversation", "Replace" and "Delete"; nothing is labelled Clone.
+/// SPEC.md, "Terminal experience": the top row holds, on the right, Stop, Restart, Replace, Clone and Delete, with the
+/// terminal area's tabs on the left. Restart is named for its offer, as the old button's `aria-label` was, because
+/// "Restart" alone does not say whether the conversation survives. Specified: the five buttons are drawn left to right
+/// in that order, after the empty tabs region; they paint "Stop", "Restart", "Replace", "Clone" and "Delete" and are
+/// named "Stop", "Resume conversation", "Replace", "Clone" and "Delete". The carets between them are
+/// `clone_and_the_split_carets_sit_in_the_old_order_with_the_old_words`'s.
 #[gpui::test]
-fn the_row_draws_stop_restart_replace_and_delete_in_the_old_order(cx: &mut TestAppContext) {
+fn the_row_draws_stop_restart_replace_clone_and_delete_in_the_old_order(cx: &mut TestAppContext) {
     let (_fake, cx) = open_main(cx, snapshot_of(vec![entry(&session("a"), 0)], false));
     let nodes = frame(cx);
     let at = |id: &str| {
@@ -218,16 +219,16 @@ fn the_row_draws_stop_restart_replace_and_delete_in_the_old_order(cx: &mut TestA
         .collect();
     assert_eq!(
         names,
-        ["Stop", "Resume conversation", "Replace", "Delete"].map(|name| Some(name.to_owned()))
+        ["Stop", "Resume conversation", "Replace", "Clone", "Delete"]
+            .map(|name| Some(name.to_owned()))
     );
     let painted = painted(&nodes);
-    for label in ["Stop", "Restart", "Replace", "Delete"] {
+    for label in ["Stop", "Restart", "Replace", "Clone", "Delete"] {
         assert!(
             painted.iter().any(|text| text == label),
             "{label} is painted"
         );
     }
-    assert!(!painted.iter().any(|text| text == "Clone"), "no Clone yet");
 }
 
 /// Every control's hover help is the old header's tooltip, the words that tell a mouse user what each one does before
@@ -1110,6 +1111,497 @@ fn the_delete_shortcut_asks_the_headers_question_even_with_nothing_alive(cx: &mu
     assert_eq!(path, "/api/sessions/a?only_if_nothing_alive=true");
 }
 
+// ---- Clone, and the split buttons' carets ---------------------------------------------------------------------------
+
+/// Restart's caret's id.
+const RESTART_CARET: &str = "session-header-restart-options";
+/// Replace's caret's id.
+const REPLACE_CARET: &str = "session-header-replace-options";
+/// Both carets, in the row's order.
+const CARETS: [&str; 2] = [RESTART_CARET, REPLACE_CARET];
+
+/// The accessible name of the launcher's main action, which says what a press does (Launch, Replace, Restart or "Stop
+/// and restart", then the target): how these tests tell Clone, Replace with and Restart with apart.
+fn launch_action(cx: &mut VisualTestContext) -> String {
+    label_of(cx, "launcher-launch").expect("the launcher is drawn")
+}
+
+/// SPEC.md, "Terminal experience": the right of the top row is "Stop, Restart ▾, Replace ▾, Clone and Delete", the two
+/// split buttons each a main part and a caret. The caret is a control of its own, so it needs a name that says whose
+/// options it opens, and every control has hover help (the old caret's and the old header Clone's tooltips, pinned).
+/// Specified: Stop, Restart, Restart's caret, Replace, Replace's caret, Clone and Delete are drawn left to right; each
+/// caret starts where its main part ends and has the same height; the carets are named "Restart options" and "Replace
+/// options" and Clone "Clone", which is painted; the carets' and Clone's hover help.
+#[gpui::test]
+fn clone_and_the_split_carets_sit_in_the_old_order_with_the_old_words(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot_of(vec![entry(&session("a"), 0)], false));
+    pending(&mut fake);
+    let nodes = frame(cx);
+    let at = |id: &str| {
+        nodes
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+            .unwrap_or_else(|| panic!("{id} was drawn"))
+            .clone()
+    };
+    let order = [
+        Action::Stop.id(),
+        Action::Restart.id(),
+        RESTART_CARET,
+        Action::Replace.id(),
+        REPLACE_CARET,
+        Action::Clone.id(),
+        Action::Delete.id(),
+    ];
+    let lefts: Vec<f32> = order
+        .iter()
+        .map(|id| f32::from(at(id).bounds.origin.x))
+        .collect();
+    assert!(
+        lefts.windows(2).all(|pair| pair[0] < pair[1]),
+        "left to right: {lefts:?}"
+    );
+    for (main, caret) in [
+        (Action::Restart.id(), RESTART_CARET),
+        (Action::Replace.id(), REPLACE_CARET),
+    ] {
+        let (main, caret) = (at(main).bounds, at(caret).bounds);
+        assert_eq!(caret.left(), main.right(), "{caret:?} joins {main:?}");
+        assert_eq!(caret.size.height, main.size.height, "one height");
+    }
+    assert_eq!(at(RESTART_CARET).label.as_deref(), Some("Restart options"));
+    assert_eq!(at(REPLACE_CARET).label.as_deref(), Some("Replace options"));
+    assert_eq!(at(Action::Clone.id()).label.as_deref(), Some("Clone"));
+    assert!(painted(&nodes).iter().any(|text| text == "Clone"));
+    assert_eq!(
+        hover(cx, RESTART_CARET).as_deref(),
+        Some("Restart options: use the current settings or edit them first")
+    );
+    assert_eq!(
+        hover(cx, REPLACE_CARET).as_deref(),
+        Some("Replace options: use the current settings or edit them first")
+    );
+    assert_eq!(
+        hover(cx, "session-header-clone").as_deref(),
+        Some("Clone: open the new-session form with these settings; this session keeps running")
+    );
+}
+
+/// SPEC.md: "Split menus follow the app's shared keyboard rules: ... arrows and Home/End move between choices ...
+/// Escape or Tab closes the menu and returns focus to its caret", and the old caret opened its menu with Down and Up.
+/// Tab returning to the caret is these menus' own rule (every other menu keeps Tab inside), so the next Tab goes on to
+/// the row's next control as if the menu had never opened. Specified, under the Linux click rule: a click on Restart's
+/// caret opens the menu below it with focus on Restart, its header saying "Resume a conversation in this session", its
+/// choices named "Restart" and "Restart with…"; Down, Down, Up, Home and End move focus to the variant, the plain
+/// choice, the variant, the plain choice and the variant; Escape closes it with focus on the caret; Up on the closed
+/// caret opens it on the variant; Tab closes it with focus on the caret, and a second Tab moves to Replace; Shift+Tab
+/// comes back to the caret, Enter opens the menu on Restart, and Shift+Tab closes it with focus on the caret again.
+/// Nothing is sent throughout.
+#[gpui::test]
+fn a_caret_menu_walks_its_choices_and_escape_or_tab_returns_to_the_caret(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot_of(vec![entry(&session("a"), 0)], false));
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    pending(&mut fake);
+    let plain = "session-header-restart-options-plain";
+    let with = "session-header-restart-options-with";
+
+    test_support::click(cx, RESTART_CARET);
+    let caret = test_support::bounds(cx, RESTART_CARET);
+    let menu = test_support::bounds(cx, "session-header-restart-options-menu");
+    assert!(
+        menu.top() >= caret.bottom(),
+        "{menu:?} hangs under {caret:?}"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some(plain));
+    assert_eq!(label_of(cx, plain).as_deref(), Some("Restart"));
+    assert_eq!(label_of(cx, with).as_deref(), Some("Restart with…"));
+    assert!(
+        texts(cx)
+            .iter()
+            .any(|text| text == "Resume a conversation in this session")
+    );
+    for (key, target) in [
+        ("down", with),
+        ("down", plain),
+        ("up", with),
+        ("home", plain),
+        ("end", with),
+    ] {
+        test_support::keys(cx, key);
+        assert_eq!(focused_id(cx).as_deref(), Some(target), "after {key}");
+    }
+    test_support::keys(cx, "escape");
+    assert!(!any_layer(cx));
+    assert_eq!(focused_id(cx).as_deref(), Some(RESTART_CARET), "Escape");
+
+    test_support::keys(cx, "up");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some(with),
+        "Up opens on the variant"
+    );
+    test_support::keys(cx, "tab");
+    assert!(!any_layer(cx), "Tab closed the menu");
+    assert_eq!(focused_id(cx).as_deref(), Some(RESTART_CARET), "Tab");
+    test_support::keys(cx, "tab");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-header-replace"));
+
+    test_support::keys(cx, "shift-tab");
+    assert_eq!(focused_id(cx).as_deref(), Some(RESTART_CARET));
+    test_support::keys(cx, "enter");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some(plain),
+        "Enter opens on Restart"
+    );
+    test_support::keys(cx, "shift-tab");
+    assert!(!any_layer(cx));
+    assert_eq!(focused_id(cx).as_deref(), Some(RESTART_CARET), "Shift+Tab");
+    assert_eq!(pending(&mut fake), []);
+}
+
+/// The menu's plain choice is the main part's action, not a copy of it: the same ask-or-send rule, the same question
+/// hung under the main part (the old menu called the same handler), so the two cannot warn about different things.
+/// Specified: on a running session, Restart's caret menu's Restart closes the menu and asks "Still running —
+/// restarting stops the agent and its whole process tree first:" below the Restart button, nothing sent; Cancel
+/// returns focus to the caret (where it was when the question opened); Replace's caret menu's Replace asks below the
+/// Replace button, and Confirm replace sends the Replace.
+#[gpui::test]
+fn a_menus_plain_choice_asks_the_main_parts_question(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot_of(vec![entry(&session("a"), 0)], false));
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    pending(&mut fake);
+    test_support::click(cx, RESTART_CARET);
+    test_support::click(cx, "session-header-restart-options-plain");
+    assert!(
+        !drawn(cx, "session-header-restart-options-menu"),
+        "the menu closed"
+    );
+    assert!(drawn(cx, "prompt"), "Restart asked");
+    let button = test_support::bounds(cx, "session-header-restart");
+    assert!(test_support::bounds(cx, "prompt").top() >= button.bottom());
+    assert!(texts(cx).iter().any(|text| text
+        == "Still running — restarting stops the agent and its whole process tree first:"));
+    assert_eq!(pending(&mut fake), []);
+    test_support::click(cx, "prompt-cancel");
+    assert_eq!(focused_id(cx).as_deref(), Some(RESTART_CARET));
+
+    test_support::click(cx, REPLACE_CARET);
+    test_support::click(cx, "session-header-replace-options-plain");
+    assert!(drawn(cx, "prompt"), "Replace asked");
+    let button = test_support::bounds(cx, "session-header-replace");
+    assert!(test_support::bounds(cx, "prompt").top() >= button.bottom());
+    test_support::click(cx, "prompt-confirm");
+    let [(_, path, _)] = &pending(&mut fake)[..] else {
+        panic!("one Replace was sent");
+    };
+    assert_eq!(path, "/api/sessions/a/replace");
+}
+
+/// The "with…" choices and Clone are the header's ways into the launcher (its Clone, Replace with and Restart with),
+/// and SPEC.md has "Cancelling Restart with returns to that persistent caret"; Clone's launcher returns to Clone.
+/// Specified, under the Linux click rule on a running session: Restart with… closes the menu and opens the launcher in
+/// restart mode (its action "Stop and restart …", the agent being at work); Escape closes it with focus on Restart's
+/// caret; Replace with… opens it in Replace with mode (its action "Replace …"), Escape returning to Replace's caret;
+/// Clone opens it with the session's title in its Name field and the action "Launch …", Escape returning to Clone.
+/// No lifecycle request is sent.
+#[gpui::test]
+fn the_with_choices_and_clone_open_the_launcher_and_return_focus_on_cancel(
+    cx: &mut TestAppContext,
+) {
+    let (mut fake, cx) = open_main(cx, snapshot_of(vec![entry(&session("a"), 0)], false));
+    cx.update(|_, cx| focus::set_click_focuses_controls(true, cx));
+    pending(&mut fake);
+    for (caret, with, verb) in [
+        (
+            RESTART_CARET,
+            "session-header-restart-options-with",
+            "Stop and restart",
+        ),
+        (
+            REPLACE_CARET,
+            "session-header-replace-options-with",
+            "Replace",
+        ),
+    ] {
+        test_support::click(cx, caret);
+        test_support::click(cx, with);
+        assert!(launcher_drawn(cx), "{with} opened the launcher");
+        assert!(!drawn(cx, "session-header-restart-options-menu"));
+        let action = launch_action(cx);
+        assert!(action.starts_with(verb), "{with}: {action}");
+        test_support::keys(cx, "escape");
+        assert!(!any_layer(cx));
+        assert_eq!(focused_id(cx).as_deref(), Some(caret), "{with}");
+    }
+
+    test_support::click(cx, "session-header-clone");
+    assert!(launcher_drawn(cx), "Clone opened the launcher");
+    let action = launch_action(cx);
+    assert!(action.starts_with("Launch"), "{action}");
+    let name: Vec<String> =
+        crate::session_list::host_rail::tests::texts_within(&frame(cx), "launcher-name")
+            .into_iter()
+            .map(|text| text.text.to_string())
+            .collect();
+    assert_eq!(name, ["a"], "the source's title");
+    test_support::keys(cx, "escape");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-header-clone"));
+    assert!(
+        fake.commands().iter().all(|command| !is_lifecycle(command)),
+        "nothing was sent"
+    );
+}
+
+/// SPEC.md: "An unavailable plain Restart does not hide an independently available Restart with; the menu remains
+/// available to inspect reasons", and Restart with stays "visible but greyed out ... with a hover tooltip and
+/// accessible description explaining why". So the caret opens even when nothing in it can run, and each choice keeps
+/// its reason as its description and help. Specified: for a command launch without a resume command, Restart's caret
+/// says "Neither option is available. Open the menu for the reasons."; its menu says "Unavailable for this session",
+/// the plain choice's help is "This command launch did not opt into Resume, so it has no resume command and Replace
+/// starts it over" and the variant's "This command launch has no resume command, so it cannot be restarted; use Replace
+/// with…" (both also painted as descriptions); a click on either leaves the menu open and opens and sends nothing.
+#[gpui::test]
+fn an_unavailable_choice_stays_in_its_menu_with_its_reason(cx: &mut TestAppContext) {
+    let mut row = offering(&session("a"), 0, "no_resume_command", "claude");
+    row.value["launch"] = json!({"kind": "command", "command": "make watch", "yolo": false, "agent": null,
+        "resume": null});
+    let (mut fake, cx) = open_main(cx, snapshot_of(vec![row], false));
+    pending(&mut fake);
+    assert_eq!(
+        hover(cx, RESTART_CARET).as_deref(),
+        Some("Neither option is available. Open the menu for the reasons.")
+    );
+    test_support::click(cx, RESTART_CARET);
+    assert!(
+        texts(cx)
+            .iter()
+            .any(|text| text == "Unavailable for this session")
+    );
+    let plain_reason = "This command launch did not opt into Resume, so it has no resume command and Replace starts \
+                        it over";
+    let with_reason =
+        "This command launch has no resume command, so it cannot be restarted; use Replace with…";
+    let painted = texts(cx);
+    for reason in [plain_reason, with_reason] {
+        assert!(
+            painted.iter().any(|text| text == reason),
+            "{reason} is painted"
+        );
+    }
+    assert_eq!(
+        hover(cx, "session-header-restart-options-plain").as_deref(),
+        Some(plain_reason)
+    );
+    assert_eq!(
+        hover(cx, "session-header-restart-options-with").as_deref(),
+        Some(with_reason)
+    );
+    for choice in [
+        "session-header-restart-options-plain",
+        "session-header-restart-options-with",
+    ] {
+        test_support::click(cx, choice);
+        assert!(
+            drawn(cx, "session-header-restart-options-menu"),
+            "{choice} ignored the click; the menu is still open"
+        );
+        assert!(!launcher_drawn(cx));
+    }
+    assert_eq!(pending(&mut fake), []);
+}
+
+/// Clone and the "with…" choices open the launcher, which SPEC.md keeps from opening while a launch is pending or a
+/// host change runs ("Launches and changes to the host registry still exclude each other"), so they are drawn
+/// unavailable then, as New's button is, and say why: a greyed entry's "tooltips and accessible descriptions explain
+/// the specific reason". Clone keeps its place in Tab's order, as Restart and Replace do while they wait. A host probe
+/// stands in for both causes. Specified: with Add host's probe in flight, the header's Clone is still focusable, its
+/// help is "Wait for the host change to finish", and a click on it opens nothing; Replace's caret still opens its menu,
+/// whose two choices' help is "Wait for the host change to finish" and each of which ignores a click (the menu stays
+/// open, the launcher closed, nothing sent); Restart's menu says the same for Restart with…; once the probe is
+/// answered, Clone's help is its own again and it takes clicks.
+#[gpui::test]
+fn clone_and_the_with_choices_wait_while_a_host_change_runs(cx: &mut TestAppContext) {
+    use crate::launcher::launch_tests::{HostChange, start_host_change};
+    const WAIT: &str = "Wait for the host change to finish";
+    let (mut fake, cx) = open_main(cx, snapshot_of(vec![entry(&session("a"), 0)], false));
+    pending(&mut fake);
+    let path = start_host_change(cx, HostChange::Probe);
+    let probe = fake
+        .commands()
+        .into_iter()
+        .find(|command| command.path == path)
+        .expect("the premise: the probe is in flight")
+        .id;
+    let clone = |cx: &mut VisualTestContext| {
+        frame(cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some("session-header-clone"))
+            .expect("Clone is drawn")
+    };
+    assert!(clone(cx).flags.focusable, "Clone stays keyboard-reachable");
+    assert_eq!(hover(cx, "session-header-clone").as_deref(), Some(WAIT));
+    test_support::click(cx, "session-header-clone");
+    assert!(!launcher_drawn(cx), "a click on Clone opens nothing");
+
+    test_support::click(cx, REPLACE_CARET);
+    assert!(
+        drawn(cx, "session-header-replace-options-menu"),
+        "the caret opens"
+    );
+    for choice in [
+        "session-header-replace-options-plain",
+        "session-header-replace-options-with",
+    ] {
+        assert_eq!(hover(cx, choice).as_deref(), Some(WAIT), "{choice}");
+        test_support::click(cx, choice);
+        assert!(
+            drawn(cx, "session-header-replace-options-menu") && !launcher_drawn(cx),
+            "{choice} ignored the click"
+        );
+    }
+    test_support::keys(cx, "escape");
+    test_support::click(cx, RESTART_CARET);
+    assert_eq!(
+        hover(cx, "session-header-restart-options-with").as_deref(),
+        Some(WAIT)
+    );
+    test_support::keys(cx, "escape");
+    assert!(
+        fake.commands().iter().all(|command| !is_lifecycle(command)),
+        "nothing was sent"
+    );
+
+    fake.reply(probe, 200, Some(json!({})));
+    test_support::settle(cx);
+    let away = test_support::center(cx, TABS_SLOT);
+    cx.simulate_mouse_move(away, None, Modifiers::none());
+    test_support::settle(cx);
+    assert_eq!(
+        hover(cx, "session-header-clone").as_deref(),
+        Some("Clone: open the new-session form with these settings; this session keeps running")
+    );
+    assert!(clone(cx).flags.click, "Clone takes clicks again");
+}
+
+/// The helm's pinned host list as a hosts collection, so a launcher opened from the header has a host to launch on.
+fn hosts_state() -> CollectionState {
+    let hosts: Value = serde_json::from_str(include_str!(
+        "../../../../farhelm-helm/http-contract/host-list.json"
+    ))
+    .unwrap();
+    let entries: Vec<KeyedEntry> = hosts["hosts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|host| KeyedEntry {
+            key: farhelm_proto::ui_channel::HostView::key(host["id"].as_i64().unwrap()),
+            value: host.clone(),
+        })
+        .collect();
+    let keys: Vec<String> = entries.iter().map(|entry| entry.key.clone()).collect();
+    let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+    CollectionState {
+        collection: Collection::Hosts,
+        meta: meta(&keys),
+        entries,
+    }
+}
+
+/// The creates (`POST /api/sessions`) the window sent since the last call, round after round until a round sends
+/// nothing else. Every other command is answered at once, the launcher's catalog read as unavailable, so that no
+/// stored choice is refused for missing from a catalog.
+fn creates(fake: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<FakeCommand> {
+    let mut creates = Vec::new();
+    loop {
+        cx.run_until_parked();
+        let mut answered = false;
+        for command in fake.commands() {
+            if command.path == "/api/sessions" {
+                creates.push(command);
+            } else if command.path.ends_with("launch-catalog") {
+                fake.reply(
+                    command.id,
+                    503,
+                    Some(json!("catalog unavailable in this test")),
+                );
+                answered = true;
+            } else {
+                fake.reply(command.id, 200, None);
+                answered = true;
+            }
+        }
+        test_support::settle(cx);
+        if !answered {
+            return creates;
+        }
+    }
+}
+
+/// The other cause of the launcher's wait: a launch the user has asked for and the helm has not answered. The launcher
+/// holds one launch at a time, so Clone waits for it, and must say so rather than read as ready. Specified: on a
+/// command launch's session with the helm's hosts listed, Clone from the header opens the launcher, and its Launch
+/// sends one create, which stays unanswered; the header's Clone, still focusable, then says "Wait for the pending
+/// launch to finish", and a click on it opens nothing.
+#[gpui::test]
+fn clone_says_why_it_waits_while_a_launch_is_pending(cx: &mut TestAppContext) {
+    let mut row = entry(&session("a"), 0);
+    row.value["launch"] = json!({"kind": "command", "command": "make watch", "yolo": false, "agent": null,
+        "resume": null});
+    let mut snapshot = snapshot_of(vec![row], false);
+    snapshot.push(hosts_state());
+    let (mut fake, cx) = open_main(cx, snapshot);
+    creates(&mut fake, cx);
+    test_support::click(cx, "session-header-clone");
+    assert!(launcher_drawn(cx), "the premise: Clone opened the launcher");
+    assert!(
+        creates(&mut fake, cx).is_empty(),
+        "the premise: opening sends no create"
+    );
+    test_support::click(cx, "launcher-launch");
+    let sent = creates(&mut fake, cx);
+    assert_eq!(
+        sent.len(),
+        1,
+        "the premise: one create is pending (the launcher says {:?})",
+        label_of(cx, "launcher-refusal")
+    );
+    let clone = frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some("session-header-clone"))
+        .expect("Clone is drawn");
+    assert!(clone.flags.focusable, "Clone stays keyboard-reachable");
+    assert_eq!(
+        hover(cx, "session-header-clone").as_deref(),
+        Some("Wait for the pending launch to finish")
+    );
+    test_support::click(cx, "session-header-clone");
+    assert!(!launcher_drawn(cx), "a click on Clone opens nothing");
+}
+
+/// SPEC.md, "Keyboard focus": a menu goes away "when the thing it is about is gone (a deleted session's open menu,
+/// say)". A caret menu is about the open session, and another client or an agent can delete that session while the
+/// menu is open; the next session then opens under the same carets, and a menu left open would act on the wrong
+/// session or show nothing. Specified: with a's Restart caret menu open, a complete listing pushed without a opens b,
+/// and the menu is no longer drawn nor any layer open.
+#[gpui::test]
+fn a_caret_menu_closes_when_its_session_is_deleted_elsewhere(cx: &mut TestAppContext) {
+    let rows = vec![entry(&session("a"), 0), entry(&session("b"), 0)];
+    let (mut fake, cx) = open_main(cx, snapshot_of(rows, false));
+    pending(&mut fake);
+    test_support::click(cx, RESTART_CARET);
+    assert!(
+        drawn(cx, "session-header-restart-options-menu"),
+        "the premise: a's Restart menu is open"
+    );
+    fake.push(change(listing_meta(&["b"], 1, false), &[], &["a"]));
+    test_support::settle(cx);
+    test_support::redraw(cx);
+    assert_eq!(selected(cx).as_deref(), Some("b"), "b opened");
+    assert!(!drawn(cx, "session-header-restart-options-menu"));
+    assert!(!any_layer(cx), "the menu went with its session");
+}
+
 // ---- Layout at the 650-pixel floor -----------------------------------------------------------------------------------
 
 /// The node drawn for `action`'s button in `nodes`; panics, naming what was drawn, when there is none.
@@ -1126,10 +1618,10 @@ fn drawn_node(nodes: &[gpui::DriverNode], action: Action) -> &gpui::DriverNode {
         })
 }
 
-/// Each of the four actions in `nodes` is drawn whole (nothing of it clipped) inside a 650-pixel pane, and all four sit
-/// on one line; so are the text size group's two buttons and readout, which share that line and whose buttons track a
-/// focus handle, so Tab reaches them (SPEC.md names text size first among what must stay whole and reachable at 650
-/// pixels).
+/// Each of the five actions and both split carets in `nodes` is drawn whole (nothing of it clipped) inside a 650-pixel
+/// pane, and all of them sit on one line; so are the text size group's two buttons and readout, which share that line
+/// and whose buttons track a focus handle, so Tab reaches them (SPEC.md names text size first among what must stay
+/// whole and reachable at 650 pixels, and "both parts of each split button" among the rest).
 fn assert_whole_on_one_line(nodes: &[gpui::DriverNode]) {
     use crate::terminal::text_size::{LARGER_ID, READOUT_ID, SMALLER_ID};
     let action_row = drawn_node(nodes, Action::Stop).bounds;
@@ -1157,17 +1649,24 @@ fn assert_whole_on_one_line(nodes: &[gpui::DriverNode]) {
         }
     }
     let mut tops = Vec::new();
-    for action in Action::ALL {
-        let node = drawn_node(nodes, action);
+    let carets = CARETS.map(|id| {
+        nodes
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+            .unwrap_or_else(|| panic!("{id} was drawn"))
+    });
+    let actions = Action::ALL.map(|action| drawn_node(nodes, action));
+    for node in actions.iter().chain(carets.iter()) {
+        let name = node.element_id.as_deref().unwrap_or_default();
         let bounds = node.bounds;
         assert!(
             bounds.size.width > px(0.) && node.visible_bounds == bounds,
-            "{action:?} is drawn whole: {bounds:?}, visible {:?}",
+            "{name} is drawn whole: {bounds:?}, visible {:?}",
             node.visible_bounds
         );
         assert!(
             bounds.origin.x >= px(0.) && bounds.origin.x + bounds.size.width <= px(650.),
-            "{action:?} is inside the pane: {bounds:?}"
+            "{name} is inside the pane: {bounds:?}"
         );
         tops.push(bounds.origin.y);
     }
@@ -1201,12 +1700,12 @@ impl Render for PaneOnly {
 /// and keyboard reachable from a 650px main pane; … Narrower panes may clip the row, which never wraps." Text width
 /// decides this, and the test context's text system gives every character the same width, so this runs with the real
 /// text system and the bundled fonts (laid out, not rendered). Nothing else in the top row competes for its width yet
-/// (the tab strip that will is the terminal area's), so what this pins today is that the four actions fit whole on one
-/// line at 650 pixels; it becomes a real guard once the left region fills. The one thing that could already push them
-/// is a long host name, which a Restart's wait line names: the line sits below the row, so it must not. Specified: in a
-/// 650-pixel pane, with an idle session on a host with a long name, each of the four actions is drawn whole inside the
-/// pane, all on one line, and each tracks a focus handle, so Tab reaches it; once its Restart has waited three seconds
-/// (the wait line drawn), the four are still drawn whole on one line.
+/// (the tab strip that will is the terminal area's), so what this pins today is that the five actions and the two
+/// carets fit whole on one line at 650 pixels; it becomes a real guard once the left region fills. The one thing that
+/// could already push them is a long host name, which a Restart's wait line names: the line sits below the row, so it
+/// must not. Specified: in a 650-pixel pane, with an idle session on a host with a long name, each of the five actions
+/// and both carets is drawn whole inside the pane, all on one line, and each tracks a focus handle, so Tab reaches it;
+/// once its Restart has waited three seconds (the wait line drawn), they are still drawn whole on one line.
 #[test]
 fn every_action_is_whole_and_reachable_in_a_650_pixel_pane() {
     let text_system = Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(
@@ -1261,6 +1760,13 @@ fn every_action_is_whole_and_reachable_in_a_650_pixel_pane() {
         let node = drawn_node(&idle_nodes, action);
         assert!(node.focus.is_some(), "{action:?} tracks a focus handle");
     }
+    for caret in CARETS {
+        let node = idle_nodes
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some(caret))
+            .expect("the caret is drawn");
+        assert!(node.focus.is_some(), "{caret} tracks a focus handle");
+    }
     cx.update_window(window.into(), |_, window, cx| {
         let mark = Mark::take(cx);
         pane.update(cx, |pane, cx| {
@@ -1289,8 +1795,8 @@ fn every_action_is_whole_and_reachable_in_a_650_pixel_pane() {
 /// ports. With the text size group at the start of the actions, the pill at its widest no longer fits beside them, so
 /// it gives up width, down to no less than its floor for a mapping (154 pixels). Specified:
 /// in a 650-pixel pane, with a session on a remote host whose terminal lists one tunnel on a host with a very long
-/// name, each of the four actions is drawn whole inside the pane, all on one line, and the pill is drawn whole inside
-/// the pane too, tracking a focus handle so Tab reaches it.
+/// name, each of the five actions and both carets is drawn whole inside the pane, all on one line, and the pill is
+/// drawn whole inside the pane too, tracking a focus handle so Tab reaches it.
 #[test]
 fn the_tunnel_pill_and_every_action_fit_a_650_pixel_pane() {
     let text_system = Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(

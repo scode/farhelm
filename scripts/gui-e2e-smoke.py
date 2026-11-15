@@ -19,13 +19,13 @@ start that asks for it; 54, the session list's Replace meeting the YOLO question
 cards for agents' requests: Allow, the host-only grant, Deny over the quick switcher, and an agent's host add through
 the Add host dialog; 61, the settings-and-hosts area's host uninstall, its refusal, run and removal notice; 65, the
 other-dialogs area's Keyboard shortcuts overview; 66, the other-dialogs area's rail notices bell and its empty panel;
-67, the session list's Compact; 68, the other-dialogs area's status sound switches in Settings). The behavior itself is
-specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`,
-`terminal/attached/tests.rs`, `hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`, `trash/`, `approvals/`,
-`shortcuts/tests.rs`, `notices_bell/tests.rs`, `sounds/`); nothing here checks layout or wording beyond the names it
-clicks. A menu's commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open session's
-header has buttons with the same names (Stop, Replace, Delete), and a `text:` target picks the first match in drawing
-order, which is the header's.
+67, the session list's Compact; 68, the other-dialogs area's status sound switches in Settings; 69, the session
+header's Replace with… and Clone). The behavior itself is specified and tested in process
+(`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`, `hosts/`,
+`help_menu/tests.rs`, `feedback/tests.rs`, `trash/`, `approvals/`, `shortcuts/tests.rs`, `notices_bell/tests.rs`,
+`sounds/`); nothing here checks layout or wording beyond the names it clicks. A menu's commands are clicked by their
+ids (`id:session-menu-delete`), not their labels: the open session's header has buttons with the same names (Stop,
+Replace, Delete), and a `text:` target picks the first match in drawing order, which is the header's.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -167,6 +167,9 @@ LAUNCHER_SUMMARY = "Start an agent or a command on any host"
 
 # The rail notices panel's summary under its "Notifications" header, drawn only while the panel is open (step 66).
 NOTICES_SUMMARY = "About your hosts and Farhelm"
+
+# The launcher's summary in its Replace with mode, what step 69 waits on to know Replace with… opened it.
+REPLACE_WITH_SUMMARY = "Start a new session, then delete the source"
 
 # A row only the open Keyboard shortcuts overview draws: the oracle for it open and closed (step 65).
 SHORTCUTS_ROW = "Begin launch sequence"
@@ -1980,6 +1983,43 @@ class Smoke(unittest.TestCase):
             )
         self.ok("press", "escape")
         self.ok("wait", "--gone", SETTINGS_SUMMARY)
+
+    # ---- The session header's Replace caret and Clone (69), on a session of its own ---------------------------------
+
+    def test_69_the_headers_replace_with_and_clone_open_the_launcher(self) -> None:
+        """The session header's Replace caret and Clone are the open session's ways into the launcher, which the app
+        opens from the helm's live row of that session. Neither may start or replace a session by being opened.
+        Specified, with this step's own session open (titled with a per-run stamp): a click on Replace's caret opens its
+        menu (its "Start a fresh conversation" header), and a click on its Replace with… opens the launcher in its
+        Replace with mode ("Start a new session, then delete the source"); Escape closes it; a click on the header's
+        Clone opens the launcher with the session's title in its Name field; Escape closes it, and the helm lists the
+        same sessions as before."""
+        stamp = uuid.uuid4().hex[:8]
+        fixtures = json.loads((RUN / "run.json").read_text())["binaries"]["fixtures"]
+        title = f"Header launcher {stamp}"
+        body = gui_agent.seed_body(0, gui_agent.SESSION_CWD, fixtures)
+        body["title"] = title
+        gui_agent.helm_request(RUN, "POST", "/api/sessions", body)
+        self.ok("wait", "--text", title)
+        self.ok("click", f"text:{title}")
+        self.ok("terminal-text", "--wait", "FAKE-AGENT READY")
+        before = set(listed_titles())
+
+        self.ok("click", "id:session-header-replace-options")
+        self.ok("wait", "--text", "Start a fresh conversation")
+        self.ok("click", "id:session-header-replace-options-with")
+        self.ok("wait", "--text", REPLACE_WITH_SUMMARY)
+        self.ok("press", "escape")
+        self.ok("wait", "--gone", REPLACE_WITH_SUMMARY)
+
+        self.ok("click", "id:session-header-clone")
+        self.ok("wait", "--text", LAUNCHER_SUMMARY)
+        self.assertEqual(
+            self.ok("get", "text", "id:launcher-name").strip(), title, "the Name field holds the session's title"
+        )
+        self.ok("press", "escape")
+        self.ok("wait", "--gone", LAUNCHER_SUMMARY)
+        self.assertEqual(set(listed_titles()), before, "nothing was started or replaced")
 
 
 def waiting_approvals() -> list[dict]:

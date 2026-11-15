@@ -167,9 +167,9 @@ pub(super) fn click_at(at: Point<Pixels>) -> [PlatformInput; 2] {
 /// click rule, where the click leaves the button unfocused, so only the menu naming its button as the return target
 /// brings focus back there. Specified: clicking b's menu button opens the menu below the button with focus on its first
 /// command, Rename, its header names b and says "Codex · Running", a is still the open session and nothing is sent;
-/// Tab moves through Mark unread (b reads seen), Replace, Stop and Delete, in the old menu's order (the separators
-/// between their groups take no focus), and then wraps to Rename, staying in the menu; Escape closes the menu and focus
-/// is on b's button.
+/// Tab moves through Mark unread (b reads seen), Clone, Replace with…, Replace, Stop and Delete, in the old menu's
+/// order (the separators between their groups take no focus), and then wraps to Rename, staying in the menu; Escape
+/// closes the menu and focus is on b's button.
 #[gpui::test]
 fn the_menu_opens_below_its_button_holds_focus_and_leaves_the_selection(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
@@ -200,6 +200,8 @@ fn the_menu_opens_below_its_button_holds_focus_and_leaves_the_selection(cx: &mut
 
     for next in [
         "session-menu-seen",
+        "session-menu-clone",
+        "session-menu-replace-with",
         "session-menu-replace",
         "session-menu-stop",
         "session-menu-delete",
@@ -235,6 +237,111 @@ fn a_pushed_removal_of_the_row_closes_its_menu(cx: &mut TestAppContext) {
         cx.update(|window, cx| window.focused(cx).is_some()),
         "focus recovered rather than being left on b's button, which went with its row"
     );
+}
+
+// ---- Clone and Replace with -----------------------------------------------------------------------------------------
+
+/// The accessible name of the launcher's main action ("Launch …", "Replace …"), which says what the open launcher
+/// would do.
+fn launch_action(cx: &mut VisualTestContext) -> String {
+    label_of(cx, "launcher-launch").expect("the launcher is drawn")
+}
+
+/// The row menu is where SPEC.md offers Clone and Replace with for any session, and each must open the launcher on
+/// its own row, not on the open session, and give focus back to the row's button when the launcher closes. Their words
+/// are the old menu items' (labels and descriptions), with hover help from the old header's Clone and the interrupted
+/// card's Replace with, since the old items had none. Specified, with a open: b's menu offers Clone, described "New
+/// session, keep this one", with the help "Clone: open the new-session form with these settings; this session keeps
+/// running", and Replace with…, described "Edit settings, then swap", with the help "Replace with: edit the settings,
+/// then swap this session for a new one"; choosing Clone closes the menu and opens the launcher with b's title in its
+/// Name field and a "Launch" action; Escape closes it with focus on b's button; choosing Replace with… opens it with a
+/// "Replace" action. Opening either sends no Replace and nothing to b's routes.
+#[gpui::test]
+fn the_menus_clone_and_replace_with_open_the_launcher_on_their_row(cx: &mut TestAppContext) {
+    use super::host_rail::tests::{hover_help, texts_within};
+    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
+    assert_eq!(selected(cx).as_deref(), Some("a"), "the premise: a is open");
+    deletes(&mut fake);
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(true, cx));
+
+    test_support::click(cx, "session-menu-b");
+    assert_eq!(label_of(cx, "session-menu-clone").as_deref(), Some("Clone"));
+    assert_eq!(
+        label_of(cx, "session-menu-replace-with").as_deref(),
+        Some("Replace with…")
+    );
+    let painted = painted(&frame(cx));
+    for description in ["New session, keep this one", "Edit settings, then swap"] {
+        assert!(
+            painted.iter().any(|text| text == description),
+            "{description}"
+        );
+    }
+    assert_eq!(
+        hover_help(cx, "session-menu-clone").as_deref(),
+        Some("Clone: open the new-session form with these settings; this session keeps running")
+    );
+    assert_eq!(
+        hover_help(cx, "session-menu-replace-with").as_deref(),
+        Some("Replace with: edit the settings, then swap this session for a new one")
+    );
+
+    test_support::click(cx, "session-menu-clone");
+    assert!(!drawn(cx, "session-menu"), "the menu closed");
+    assert!(drawn(cx, "launcher"), "Clone opened the launcher");
+    let action = launch_action(cx);
+    assert!(action.starts_with("Launch"), "{action}");
+    let name: Vec<String> = texts_within(&frame(cx), "launcher-name")
+        .into_iter()
+        .map(|text| text.text.to_string())
+        .collect();
+    assert_eq!(name, ["b"], "b's title, not the open session's");
+    test_support::keys(cx, "escape");
+    assert!(!any_layer(cx));
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-b"));
+
+    test_support::click(cx, "session-menu-b");
+    test_support::click(cx, "session-menu-replace-with");
+    let action = launch_action(cx);
+    assert!(action.starts_with("Replace"), "{action}");
+    test_support::keys(cx, "escape");
+    assert!(
+        sent(&mut fake)
+            .iter()
+            .all(|(path, _)| !path.ends_with("/replace") && !path.starts_with("/api/sessions/b"))
+    );
+}
+
+/// Clone and Replace with open the launcher, which SPEC.md keeps from opening while a host change runs (or a launch is
+/// pending), so they are drawn unavailable then, as New's button is, and say why, as the menu's plain Replace does.
+/// Specified: with Add host's probe in flight, b's menu draws both with "Wait for the host change to finish" as their
+/// help and painted description, and a click on either leaves the menu open with no launcher.
+#[gpui::test]
+fn the_menus_launcher_commands_wait_while_a_host_change_runs(cx: &mut TestAppContext) {
+    use super::host_rail::tests::hover_help;
+    use crate::launcher::launch_tests::{HostChange, start_host_change};
+    const WAIT: &str = "Wait for the host change to finish";
+    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
+    deletes(&mut fake);
+    let path = start_host_change(cx, HostChange::Probe);
+    assert!(
+        fake.commands().iter().any(|command| command.path == path),
+        "the premise: the probe is in flight"
+    );
+    test_support::click(cx, "session-menu-b");
+    let painted = painted(&frame(cx));
+    assert!(
+        painted.iter().filter(|text| *text == WAIT).count() == 2,
+        "exactly Clone and Replace with… describe the wait: {painted:?}"
+    );
+    for item in ["session-menu-clone", "session-menu-replace-with"] {
+        assert_eq!(hover_help(cx, item).as_deref(), Some(WAIT), "{item}");
+        test_support::click(cx, item);
+        assert!(
+            drawn(cx, "session-menu") && !drawn(cx, "launcher"),
+            "{item} is unavailable: the menu is still open and the launcher closed"
+        );
+    }
 }
 
 // ---- Rename --------------------------------------------------------------------------------------------------------

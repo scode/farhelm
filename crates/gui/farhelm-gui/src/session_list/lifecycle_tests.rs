@@ -389,9 +389,10 @@ fn an_answer_sends_the_preconditions_its_question_was_drawn_from(cx: &mut TestAp
 /// SPEC.md: "A Stop shows a spinner and **Stopping…** on its row", and "Each session excludes its own competing
 /// actions … Opening the session remains possible" while other sessions act normally. Unlike Delete's, a Stop's row
 /// keeps its title, since the session stays. Specified: with a's Stop sent and unanswered, a's row paints "Stopping…"
-/// and its title; in a's menu, Rename, Replace, Stop and Delete each ignore a click (the menu stays open); b's Replace
-/// still asks; a click on a's row opens a; nothing but the opening's preference write and seen mark is sent. Once the
-/// Stop is answered, "Stopping…" is gone and a's Replace asks again.
+/// and its title; in a's menu, Rename, Clone, Replace with…, Replace, Stop and Delete each ignore a click (the menu
+/// stays open; SPEC.md names Clone among what a pending request refuses); b's Replace still asks; a click on a's row
+/// opens a; nothing but the opening's preference write and seen mark is sent. Once the Stop is answered, "Stopping…"
+/// is gone and a's Replace asks again.
 #[gpui::test]
 fn a_pending_stop_shows_beside_the_title_and_refuses_only_its_own_sessions_actions(
     cx: &mut TestAppContext,
@@ -410,6 +411,8 @@ fn a_pending_stop_shows_beside_the_title_and_refuses_only_its_own_sessions_actio
     test_support::click(cx, "session-menu-a");
     for item in [
         "session-menu-rename",
+        "session-menu-clone",
+        "session-menu-replace-with",
         "session-menu-replace",
         "session-menu-stop",
         "session-menu-delete",
@@ -986,9 +989,10 @@ fn the_permanent_answer_writes_the_host_setting_then_replaces_with_consent(
 /// SPEC.md, "Lifecycle operations": "an open lifecycle confirmation or a pending request refuses another lifecycle
 /// action", and the YOLO question is the Replace's confirmation. A Stop or Delete meanwhile would also take the session's
 /// key, so the answer's Replace would be refused and only logged after the question closed. Specified: with a's YOLO
-/// question open in its row, a's menu draws Rename, Replace, Stop and Delete unavailable (a click on each leaves the menu
-/// open), and a click on each of the open session's header's Stop, Restart, Replace and Delete (a is open) asks nothing;
-/// nothing is sent. Once the question is cancelled, a's menu Stop sends a's Stop.
+/// question open in its row, a's menu draws Rename, Clone, Replace with…, Replace, Stop and Delete unavailable (a click
+/// on each leaves the menu open), and a click on each of the open session's header's Stop, Restart and its caret,
+/// Replace and its caret, Clone and Delete (a is open) opens nothing; nothing is sent. Once the question is cancelled,
+/// a's menu Stop sends a's Stop.
 #[gpui::test]
 fn an_open_yolo_question_refuses_the_sessions_other_lifecycle_actions(cx: &mut TestAppContext) {
     let (mut fake, cx, id) = replacing_the_open_session(cx);
@@ -1000,6 +1004,8 @@ fn an_open_yolo_question_refuses_the_sessions_other_lifecycle_actions(cx: &mut T
     test_support::click(cx, "session-menu-a");
     for item in [
         "session-menu-rename",
+        "session-menu-clone",
+        "session-menu-replace-with",
         "session-menu-replace",
         "session-menu-stop",
         "session-menu-delete",
@@ -1015,11 +1021,14 @@ fn an_open_yolo_question_refuses_the_sessions_other_lifecycle_actions(cx: &mut T
     for button in [
         "session-header-stop",
         "session-header-restart",
+        "session-header-restart-options",
         "session-header-replace",
+        "session-header-replace-options",
+        "session-header-clone",
         "session-header-delete",
     ] {
         test_support::click(cx, button);
-        assert!(!any_layer(cx), "{button} asks nothing");
+        assert!(!any_layer(cx), "{button} opens nothing");
     }
     assert!(fake.commands().is_empty(), "nothing was sent");
 
