@@ -10,9 +10,10 @@
 //! with everything on it in the inverse colors ([`Inks`]).
 //!
 //! The first line is the old identity grid's five tracks, drawn as a flex row with the old gaps: the status slot and
-//! the locality slot at their fixed width, the title taking what is left, the agent track (as wide as its marks, and
-//! empty for now), and the age track ([`age_track`]), at least four of the age's characters wide and right-aligned, so
-//! every row's age ends at the same edge and the titles end at the same place whatever the age (up to a thousand days).
+//! the locality slot (the host mark, [`super::row_marks`]) at their fixed width, the title taking what is left, the
+//! agent track (the agent mark and the permission shield, two fixed cells, so it is the same width on every row), and
+//! the age track ([`age_track`]), at least four of the age's characters wide and right-aligned, so every row's age ends
+//! at the same edge and the titles end at the same place whatever the age (up to a thousand days).
 //!
 //! Everything a host wrote (the title, the host's name, the directory, a stop annotation) is host text: escaped, and
 //! each value its own text element, so a direction override in one cannot reorder anything around it.
@@ -25,9 +26,9 @@
 //! Replace that has waited two seconds says so on a line under the row ([`super::replace`]). The refusal of the row's
 //! last request, or the notice its last success left, shows under the row for as long as [`super::outcome`] says.
 //!
-//! NOTE: The locality column is kept empty, at its width, so titles start where they did in the old app, and the agent
-//! track is kept with no width (its gap is the old grid's); the locality, agent and permission marks, compact rows,
-//! the managed checkout's form of the last line, the pin and the notification bell are not ported yet.
+//! NOTE: The locality column keeps its width when a session's host cannot be placed and it draws no mark, so titles
+//! start where they did in the old app. Compact rows, the managed checkout's form of the last line, the pin and the
+//! notification bell are not ported yet.
 
 use farhelm_helm_client::Collections;
 use farhelm_proto::ui_channel::{HostView, SessionRow};
@@ -37,6 +38,7 @@ use gpui::{
     relative,
 };
 
+use super::row_marks::{self, RowMarks};
 use super::selection::Listed;
 use super::status::{self, Badge};
 use super::{age, delete, outcome, replace, stop};
@@ -156,6 +158,7 @@ pub(crate) fn row(
     let title = HostText::from_host(row.info.title.as_str());
     let badge = status::row_badge(row, format!("{id}-status").into());
     let inks = Inks::of(palette, selected, row.stale);
+    let marks = RowMarks::of(row, collections, selected, palette);
     // The row's accessible name is its title, escaped as the screen shows it; its status word joins the hover help,
     // which is also its accessible description.
     let label = HostSentence::new(id.clone()).host(&title).accessible_name();
@@ -188,8 +191,20 @@ pub(crate) fn row(
                     live.map(|live| super::seen::dot(session, live, selected, steps.pulse, cx)),
                 ),
         )
-        // The locality slot, kept at its width for the host mark.
-        .child(div().w(metrics::ROW_SLOT).flex_none())
+        // The locality slot, kept at its width whether or not the session's host can be placed.
+        .child(
+            div()
+                .w(metrics::ROW_SLOT)
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .children(
+                    marks
+                        .host
+                        .map(|mark| row_marks::host_mark(&id, mark, palette)),
+                ),
+        )
         // A pending Stop goes before the title, as the old `.stop-progress` did.
         .children(
             stop::in_flight(session.key, cx)
@@ -210,8 +225,7 @@ pub(crate) fn row(
                 .text_color(theme::color(inks.title))
                 .into_any_element(),
         })
-        // The agent track, kept with no width for the agent and permission marks.
-        .child(div().flex_none())
+        .child(row_marks::agent_track(&id, &marks))
         .child(age_track(
             &id,
             age::of(row.info.effective_activity(), steps.now),

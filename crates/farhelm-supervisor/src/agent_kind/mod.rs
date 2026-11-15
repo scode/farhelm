@@ -83,13 +83,20 @@
 //!   `TrustAgent` in `crates/gui/farhelm-gui/src/settings/agent_trust.rs`,
 //!   whose exhaustive methods hold each trust agent's route, wording, caution
 //!   and hint switch (a harness with no managed-checkout trust setting has no
-//!   variant there, as the helm's `trust_column` refuses it). The rest of the
-//!   GUI's per-harness vocabulary is not ported yet: the harness-to-mark
-//!   mapping and the marks' identity colors, and the per-agent-KIND facts that
-//!   also cover command and legacy launches
-//!   (today the copy instruction the terminal's "this drag did not copy"
-//!   notice offers). Each comes back as an exhaustive per-harness or per-kind
-//!   function in the GUI crates. The Dioxus versions are readable at the GPUI
+//!   variant there, as the helm's `trust_column` refuses it). The session
+//!   row's marks read theirs from `crates/gui/farhelm-gui/src/harness.rs`:
+//!   which mark an agent type and a legacy session's stored kind draw, each
+//!   mark's bundled picture and identity color, the agent's product name, and
+//!   the status-line words for a mode without checks. Only the row reads them
+//!   today; the module sits at the app level because the launcher, the quick
+//!   switcher, templates and Settings are expected to read the same answers
+//!   (the migration's orchestrator placed it there on 2026-11-14). The row's
+//!   permission shield describes an agent launch with the launcher's
+//!   permission help. The rest of the GUI's per-agent-KIND facts that also
+//!   cover command and legacy launches are not ported yet (today the copy
+//!   instruction the terminal's "this drag did not copy" notice offers). Each
+//!   comes back as an exhaustive per-harness or per-kind function in the GUI
+//!   crates. The Dioxus versions are readable at the GPUI
 //!   port's reference commit `24bc0580` (`crates/farhelm-ui/src/launch_composer.rs`,
 //!   `list/row.rs`, `icons.rs`, `list/create_form.rs`, `assets/app.css`, and
 //!   `SessionAgentKind` in `lib.rs`).
