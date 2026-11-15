@@ -417,19 +417,21 @@ rejected before the new snapshot is installed. A view that acts on pushed state 
 it, must move its store subscription to each new session's store and drop the old one, so it neither goes on observing a
 retired store nor misses the store that replaced it. Views do that through the owner's helper
 (`session::observe_current`): the session list follows the store through it and keeps the rest of its per-session state
-in `PerSession`. The session pane never follows the store; it follows only the connection, keyed on the session through
-`PerSession`. The one survivor the UI keeps itself is the selected session, by id, if the new snapshot still has it; it
-lives in a small foundation of its own outside the UI-session owner (`crates/gui/farhelm-gui/src/local_state.rs`, owned
-paths in `docs/gpui/foundation-ownership.md`), which is not a device-local preferences store and has no room for one.
-The window itself, its size included, is not part of the UI session and is untouched. The settings the old app kept per
-device (appearance, sidebar width, host rail, status sounds, terminal text size) become helm preferences in the new app,
-so they return with the new snapshot like the rest of the helm's state (maintainer decision, 2026-11-13). SPEC.md no
-longer calls the sidebar width, appearance, terminal text size or status sounds per device; it still calls the host rail
-per device until the change that moves it. The store fed by the channel holds only helm state. Half-typed drafts do not
-survive, and neither do open dialogs and menus: going inert closes every layer through the layer manager
-(`layers::close_all`). Menus would close anyway with the ground they are anchored to, but a dialog closes only when its
-opener or its subject says so, and one left open would keep its veil over the inert window, taking the clicks and Tab
-presses meant for Take back or Retry. Work the helm accepted continues independently of the reset.
+in `PerSession`. The session pane follows the connection, keyed on the session through `PerSession`, and follows the
+store only for the open session's transitions into and out of its interrupted card (and its host's reachability), which
+decide whether it mounts terminals. The one survivor the UI keeps itself is the selected session, by id, if the new
+snapshot still has it; it lives in a small foundation of its own outside the UI-session owner
+(`crates/gui/farhelm-gui/src/local_state.rs`, owned paths in `docs/gpui/foundation-ownership.md`), which is not a
+device-local preferences store and has no room for one. The window itself, its size included, is not part of the UI
+session and is untouched. The settings the old app kept per device (appearance, sidebar width, host rail, status sounds,
+terminal text size) become helm preferences in the new app, so they return with the new snapshot like the rest of the
+helm's state (maintainer decision, 2026-11-13). SPEC.md no longer calls the sidebar width, appearance, terminal text
+size or status sounds per device; it still calls the host rail per device until the change that moves it. The store fed
+by the channel holds only helm state. Half-typed drafts do not survive, and neither do open dialogs and menus: going
+inert closes every layer through the layer manager (`layers::close_all`). Menus would close anyway with the ground they
+are anchored to, but a dialog closes only when its opener or its subject says so, and one left open would keep its veil
+over the inert window, taking the clicks and Tab presses meant for Take back or Retry. Work the helm accepted continues
+independently of the reset.
 
 What never gets written again on the GUI side: lost-reply reconciliation, retry keys, request fences, outcome-unknown
 reports, and their tests. On the helm side only machinery that existed solely for the old GUI goes; idempotency the

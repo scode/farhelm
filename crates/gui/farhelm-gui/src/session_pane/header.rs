@@ -35,12 +35,13 @@
 //!   ([`crate::components::Button::busy`]).
 //! - **The Delete shortcut** is this Delete (SPEC.md, "Desktop window chrome"): the main view hands it to
 //!   [`SessionPane::header_action`].
-//! - **Exclusion.** While the session has any request in flight, or the YOLO question its Replace met is open, every
-//!   action is unavailable, carets and Clone included, as the row's menu items are (`session_list::menu::refused`), and
-//!   Restart and Replace also wait for a host change (`session_list::menu::launch_wait`). A pending Stop shows its
-//!   spinner and "Stopping…" on the Stop button, and a pending Delete shows its progress in place of the actions until
-//!   it settles (they come back with a refusal). While a question an action asked is open, its button reads as pressed
-//!   and a click on it does nothing; a press anywhere else closes the question unanswered.
+//! - **Exclusion.** While the session has any request in flight, or the YOLO question its Replace met or the
+//!   interrupted card's Replace question is open, every action is unavailable, carets and Clone included, as the row's
+//!   menu items are (`session_list::menu::refused`), and Restart and Replace also wait for a host change
+//!   (`session_list::menu::launch_wait`). A pending Stop shows its spinner and "Stopping…" on the Stop button, and a
+//!   pending Delete shows its progress in place of the actions until it settles (they come back with a refusal).
+//!   While a question an action asked is open, its button reads as pressed and a click on it does nothing; a press
+//!   anywhere else closes the question unanswered.
 //! - **The open session by key.** Each action reads the session's row from the store by key, and the helm keeps the
 //!   open session there even while a filter or the list's cap leaves it out of the list (`session_list::filters`,
 //!   "The query names the open session"), so the actions work on a session the list does not show exactly as on a
@@ -417,7 +418,7 @@ impl SessionPane {
             .mounted
             .current(cx)
             .as_ref()
-            .map(|mounted| mounted.set.clone());
+            .and_then(|mounted| mounted.set.clone());
         let strip = set
             .as_ref()
             .map(|set| crate::terminal::set::TerminalSet::strip(set, window, cx));
@@ -480,7 +481,8 @@ impl SessionPane {
         let shown = Shown {
             row: &row_now,
             skipped,
-            busy: menu::refused(key, cx),
+            // The interrupted card's open Replace question refuses these too, as any open lifecycle question does.
+            busy: menu::refused(key, cx) || self.card_asking(cx),
             launch_wait: menu::launch_wait(cx),
             launcher_wait: menu::launcher_wait(cx),
             stopping: stop::in_flight(key, cx),
@@ -566,9 +568,19 @@ impl SessionPane {
     /// The lines between the top row and the terminal for `key`: a Restart's or Replace's wait once it has lasted two
     /// seconds, then the session's refusal or notice, as the old header's progress and error lines were, then the YOLO
     /// question a Replace from this header met ([`replace_yolo`]). The wait sits below the row, never in it, so a long
-    /// host name cannot push an action out of the 650-pixel floor; the question sits there for the same reason.
-    pub(super) fn header_lines(&self, key: &str, step: u8, cx: &App) -> Vec<AnyElement> {
+    /// host name cannot push an action out of the 650-pixel floor; the question sits there for the same reason. None
+    /// while the session shows its interrupted card (`card`), which draws all three itself, so nothing shows twice.
+    pub(super) fn header_lines(
+        &self,
+        key: &str,
+        step: u8,
+        card: bool,
+        cx: &App,
+    ) -> Vec<AnyElement> {
         let mut lines = Vec::new();
+        if card {
+            return lines;
+        }
         let ink = theme::color(theme::palette(cx).fg_0);
         let row = session::current_store(cx)
             .and_then(|store| store.read(cx).collections().get::<SessionRow>(key).cloned());
@@ -610,7 +622,7 @@ impl SessionPane {
         let Some(key) = self.open_key(cx) else {
             return;
         };
-        if self.header.open_question(window, cx).is_some() {
+        if self.header.open_question(window, cx).is_some() || self.card_asking(cx) {
             return;
         }
         let Some(target) = menu::actionable(&key, cx) else {

@@ -32,8 +32,9 @@
 //!   this Replace like Stop's of its Stop, named by its operation the same way.
 //!
 //! The question, the precondition, the command and the progress line are functions of a session's row, so the open
-//! session's header (`session_pane/header.rs`) asks the same question and sends the same request, and the interrupted
-//! card (a later piece) can too. Each names its [`Surface`], which is where a YOLO question for its Replace shows.
+//! session's header (`session_pane/header.rs`) asks the same question and sends the same request, and so does the
+//! interrupted card (`session_pane/card.rs`), inline and without the quoted title. Each names its [`Surface`], which is
+//! where a YOLO question for its Replace shows.
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::session_requests::ReplaceSessionBody;
@@ -131,14 +132,17 @@ pub(crate) struct Frozen {
 /// The row's Replace question for `row`, filed under `key`, asked on `surface` with `guard`: the consequence, then the
 /// title quoted on a line of its own, as the old row's question had them. Its answer is "Confirm replace" in the danger
 /// tier, and its Cancel says in its help what Cancel keeps, as the old row's did.
+///
+/// On the interrupted card ([`Surface::Card`]) it is the old card's inline question instead: the consequence alone,
+/// since the card stands in the open session's own pane, and no rule for a click on empty space, which SPEC.md says the
+/// card's question does not have yet ("Opening and closing") and which an inline question may not carry.
 pub(crate) fn question(
     key: &str,
     row: &SessionRow,
     guard: DeleteGuard,
     surface: Surface,
 ) -> Question<Frozen> {
-    let title = HostText::from_host(row.info.title.as_str());
-    Question::new(
+    let question = Question::new(
         "Replace confirmation",
         Answer {
             label: "Confirm replace".into(),
@@ -152,18 +156,23 @@ pub(crate) fn question(
         },
     )
     .line(consequence(row))
-    .line(
-        HostSentence::new(SharedString::from(format!("session-replace-title-{key}")))
-            .text("\"")
-            .host(&title)
-            .text("\""),
-    )
     .cancel_answer(Answer {
         label: "Cancel".into(),
         help: HoverHelp::tooltip("Cancel: keep this session as it is"),
         tier: Tier::Neutral,
-    })
-    .keeps_focus_on_empty_click()
+    });
+    if surface == Surface::Card {
+        return question;
+    }
+    let title = HostText::from_host(row.info.title.as_str());
+    question
+        .line(
+            HostSentence::new(SharedString::from(format!("session-replace-title-{key}")))
+                .text("\"")
+                .host(&title)
+                .text("\""),
+        )
+        .keeps_focus_on_empty_click()
 }
 
 /// The session's plain Replace, `POST /api/sessions/{id}/replace`, as the route's shared client body
