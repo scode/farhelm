@@ -520,15 +520,8 @@ fn open_menu(
         layer: None,
     });
     let layer = layers::open_popover(
-        Popover {
-            view: menu.clone().into(),
-            container: cx.focus_handle(),
-            start: Some(restart_focus),
-            anchor,
-            returns_to: focus::ReturnTo::Control(opener.clone()),
-            // A menu keeps Tab inside it, as every menu does.
-            traps_tab: true,
-        },
+        Popover::menu(menu.clone(), cx.focus_handle(), anchor, restart_focus)
+            .returns_to(focus::ReturnTo::Control(opener.clone())),
         mark,
         window,
         cx,

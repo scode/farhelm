@@ -260,17 +260,11 @@ impl HelpButton {
             first,
         });
         self.menu = layers::open_popover(
-            Popover {
-                view: view.into(),
-                container: cx.focus_handle(),
-                start: Some(start),
-                anchor: anchor.beside(),
+            // Tab stays inside the open menu, as the old bar menus kept it (`handle_menu_key`), like the row menus.
+            Popover::menu(view, cx.focus_handle(), anchor.beside(), start)
                 // The button, not what held focus before: on macOS the click that opened the menu left the button
                 // unfocused, and the old menu returned focus to its toggle.
-                returns_to: focus::ReturnTo::Control(self.focus.clone()),
-                // Tab stays inside the open menu, as the old bar menus kept it (`handle_menu_key`), like the row menus.
-                traps_tab: true,
-            },
+                .returns_to(focus::ReturnTo::Control(self.focus.clone())),
             &mark,
             window,
             cx,

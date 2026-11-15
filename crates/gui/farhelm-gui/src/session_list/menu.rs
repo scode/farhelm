@@ -227,17 +227,11 @@ impl SessionList {
             rename_focus: rename_focus.clone(),
         });
         let opened = layers::open_popover(
-            Popover {
-                view: view.into(),
-                container: cx.focus_handle(),
-                // The first command, as the old menu started.
-                start: Some(rename_focus),
-                anchor,
+            // Focus starts on the first command, as the old menu started.
+            Popover::menu(view, cx.focus_handle(), anchor, rename_focus)
                 // The button, not what held focus before: on macOS the click that opened the menu left the button
                 // unfocused, and SPEC.md returns focus to the button when the menu closes.
-                returns_to: focus::ReturnTo::Control(button),
-                traps_tab: true,
-            },
+                .returns_to(focus::ReturnTo::Control(button)),
             &mark,
             window,
             cx,

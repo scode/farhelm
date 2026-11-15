@@ -2263,16 +2263,12 @@ impl AttachedTerminal {
         let drawn = shown.drawn.clone();
         let hint = shown.hint.clone();
         let content = cx.new(|_| super::disclosure::DisclosureView::new(&text, hint, drawn));
-        let popover = Popover {
-            view: content.into(),
-            container: cx.focus_handle(),
-            start: None,
-            anchor,
-            // A display that never takes focus returns none, so this is never used.
-            returns_to: focus::ReturnTo::Opener,
-            traps_tab: true,
-        };
-        layers::open_popover(popover, mark, window, cx)
+        layers::open_popover(
+            Popover::floating(content, cx.focus_handle(), anchor),
+            mark,
+            window,
+            cx,
+        )
     }
 
     /// Whether a click on `link` that starts now may open it, decided at the press, before anything the press does

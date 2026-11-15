@@ -749,16 +749,10 @@ impl TemplatesDialog {
             focus: focus.clone(),
         });
         let opened = layers::open_popover(
-            Popover {
-                view: view.into(),
-                container: cx.focus_handle(),
-                start: Some(focus[start].clone()),
-                anchor,
+            Popover::menu(view, cx.focus_handle(), anchor, focus[start].clone())
                 // The key button, not what held focus before: on macOS the click that opened the menu left the button
                 // unfocused, and the old menu returned focus to its button when it closed.
-                returns_to: ReturnTo::Control(button),
-                traps_tab: true,
-            },
+                .returns_to(ReturnTo::Control(button)),
             &mark,
             window,
             cx,
