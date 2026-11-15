@@ -840,6 +840,16 @@
       "golden": "host-add-setup-plan",
       "title": "The setup confirmation a probe's plan opens: the numbered plan with its paths, Copy plan, the footer note and the three answers",
       "reference": "host-add-setup-plan"
+    },
+    {
+      "golden": "host-setup-running-hosts-panel",
+      "title": "The Hosts panel with Details on and a new host's setup at its first step: the inline status under its name, and the nine steps with the running one ringed amber",
+      "reference": "host-setup-running-hosts-panel"
+    },
+    {
+      "golden": "host-setup-failed-hosts-panel",
+      "title": "The Hosts panel with Details on and a new host's setup failed at its last step: eight steps checked green, the last crossed red with the helm's reason, and the run's message",
+      "reference": "host-setup-failed-hosts-panel"
     }
   ],
   "reference_scenes": [

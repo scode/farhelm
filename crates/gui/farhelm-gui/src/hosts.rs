@@ -40,10 +40,15 @@
 //! identity and session count) and the remedy where waiting will not help. The last refusal of work on the host shows
 //! under the row whether it is open or not.
 //!
-//! A row is open while the Details switch is on, or while the row opens itself ([`disclosed`]): its last provisioning
-//! run failed, the last work on it was refused, or it is the helm's own machine with no supervisor running. The switch
-//! is the user's alone: nothing else turns it on, and it is not saved anywhere (SPEC.md: "its unpersisted details
-//! switch"). The old app turned the switch on for a failed local setup; the port opens that row instead.
+//! A row is open while the Details switch is on, or while the row opens itself ([`disclosed`]): a setup is running on
+//! it that the user has not folded, its last provisioning run failed, the last work on it was refused, or it is the
+//! helm's own machine with no supervisor running. The switch is the user's alone: nothing else turns it on, and it is
+//! not saved anywhere (SPEC.md: "its unpersisted details switch"). The old app turned the switch on for a failed local
+//! setup; the port opens that row instead.
+//!
+//! A host with a setup running, or a rerun of its setup out, shows the run's inline status on a line of its own under
+//! its name in place of the phase words, and an open row shows the run's steps under its details ([`progress`], which
+//! also keeps the one fact the panel holds about a host: when it first saw the run, and whether the user folded it).
 //!
 //! A host list never read says "Loading hosts…"; a failed first read says so in red; a failed refresh keeps the rows it
 //! had and says above them that they are the last state read. The panel never invents a host.
@@ -57,13 +62,13 @@
 //! ## Not drawn yet
 //!
 //! NOTE: Each arrives with the piece of the port that gives it something to do: Update all and the add button in the
-//! heading, the inline `↑ Update` button, setup and Update progress (the inline status, the step list, the one-off
-//! opening of a row for a run and its fold). The heading keeps its old height meanwhile.
+//! heading, the inline `↑ Update` button, and Update's progress. The heading keeps its old height meanwhile.
 
 pub mod add;
 pub(crate) mod identity;
 mod menu;
 pub(crate) mod offers;
+pub(crate) mod progress;
 mod settings;
 pub(crate) mod setup;
 pub mod ssh_help;
@@ -79,19 +84,20 @@ use std::collections::HashMap;
 use farhelm_proto::provisioning::ProvisioningView;
 use farhelm_proto::ui_channel::{Availability, Collection, HostStateView, HostView};
 use gpui::{
-    AnyElement, Context, Div, FocusHandle, FontWeight, InteractiveElement, IntoElement,
+    AnyElement, App, Context, Div, FocusHandle, FontWeight, InteractiveElement, IntoElement,
     ParentElement, Render, Role, SharedString, StatefulInteractiveElement, Styled, Subscription,
-    Window, div, px,
+    WeakEntity, Window, div, px,
 };
 
-use crate::components::{Checkbox, HoverHelp, StatusMark};
+use crate::components::{Checkbox, HoverHelp, StatusMark, pulse_opacity};
 use crate::focus::Mark;
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId};
-use crate::operations::{Failure, OpKey};
+use crate::operations::{Failure, OpKey, Work};
 use crate::render_count;
-use crate::session;
+use crate::session::{self, PerSession};
 use crate::theme::{self, Palette, Token, metrics};
+use crate::ticker;
 use identity::phase::{self, Kind, Tone};
 use identity::{display_name, host_mark};
 use offers::{HostKind, Locality};
@@ -122,6 +128,10 @@ const NAME_FLOOR: f32 = 52.;
 /// `.host-status`'s gap between the dot and the words.
 const STATUS_GAP: f32 = 5.;
 
+/// The gap between a row's name and the inline progress on the line under it (`.host-row-main`'s `row-gap` while it
+/// shows progress).
+const PROGRESS_GAP: f32 = 2.;
+
 /// `.host-detail` and its siblings: their side padding, the pixel above each line, and their line height (the old
 /// `normal` line height of 12-pixel Inter, as the reference screens measure it).
 const DETAIL_PAD_X: f32 = 12.;
@@ -149,6 +159,27 @@ pub struct HostsPanel {
     /// Redraws the panel when its top line changes (a setup refused after the user moved on, a refused "don't ask
     /// again"): that line lives in a global of the setup module, which notifies no view by itself.
     _lines: Subscription,
+    /// What the panel keeps about the hosts' runs ([`Runs`]), for the current UI session only: a reset starts it over.
+    runs: PerSession<Runs>,
+    /// Keeps `runs` up to date with every change of the current store, whether or not the panel is drawn, so a run's
+    /// clock starts when it is first pushed even while Hosts is closed, and starts it over on every change of UI
+    /// session, a reset's included.
+    _following: session::ObservingCurrent,
+}
+
+/// What the panel keeps about the hosts' runs for one UI session, all of it dropped with that session: a reset starts
+/// the fold and the clock over, as the old app's reload did, and lets go of the pulse and the clock's deadline, which
+/// the next draw takes again if it needs them.
+#[derive(Default)]
+struct Runs {
+    /// Each host's run as the panel saw it ([`progress::Seen`]), by host id.
+    seen: HashMap<i64, progress::Seen>,
+    /// The shared pulse's ticks, held exactly while the panel is drawn in an active window and a row shows a setup in
+    /// progress.
+    pulse: Option<ticker::Pulsing>,
+    /// The deadline that redraws the panel when a shown run's elapsed time reaches its next second (`progress`'s module
+    /// docs say why it is a deadline); held only while the panel is drawn and a run shows, and taken when it fires.
+    tick: Option<ticker::Deadline>,
 }
 
 impl HostsPanel {
@@ -160,7 +191,43 @@ impl HostsPanel {
             menu: None,
             toggles: HashMap::new(),
             _lines: setup::observe_panel_lines(cx),
+            runs: PerSession::default(),
+            _following: session::observe_current(cx, |panel: &mut Self, cx| panel.follow_runs(cx)),
         }
+    }
+
+    /// Record what the current store's host progress says about each host's run ([`progress::follow`]), now. Reaching
+    /// the runs through [`PerSession::current`] here, on every change of the connection, is also what drops them, the
+    /// pulse and the deadline included, as soon as a reset replaces the UI session, whether or not the panel is drawn.
+    fn follow_runs(&mut self, cx: &mut Context<Self>) {
+        let now = ticker::wall_now(cx);
+        let runs = &mut self.runs.current(cx).seen;
+        let Some(store) = session::current_store(cx) else {
+            return;
+        };
+        progress::follow(
+            runs,
+            store.read(cx).collections().ordered::<ProvisioningView>(),
+            now,
+        );
+    }
+
+    /// The sidebar stopped drawing the panel (Sessions shows instead): drop the pulse and the clock's deadline. Only a
+    /// drawn panel needs them, and the panel cannot tell it is not drawn, since only drawing runs its code, so without
+    /// this a pulse taken while Hosts showed would keep the ticker's loop waking ten times a second for a panel nobody
+    /// sees (the ticker's rule: no view holds a pulse while it draws no pulsing mark). The sidebar calls it where it
+    /// hides the panel; a reset needs no call ([`HostsPanel::follow_runs`]). The next draw takes what it needs again.
+    pub fn hidden(&mut self, cx: &App) {
+        let runs = self.runs.current(cx);
+        runs.pulse = None;
+        runs.tick = None;
+    }
+
+    /// Fold `host`'s run `run_id`, as its Collapse does: the row closes unless something else holds it open, and the
+    /// inline status stays.
+    fn fold(&mut self, host: i64, run_id: &str, cx: &mut Context<Self>) {
+        progress::fold(&mut self.runs.current(cx).seen, host, run_id);
+        cx.notify();
     }
 
     /// Turn Details on or off, as the switch does.
@@ -204,29 +271,36 @@ impl HostsPanel {
     }
 }
 
-/// Whether `host`'s row is open: the Details switch is on, the host's last provisioning run failed (`progress`), the
-/// last work on the host was refused (`refused`), or the host is the helm's own machine with no supervisor running. The
-/// last three open the row by themselves, so a failure always shows its evidence and remedies, and the local host
-/// without a supervisor shows what to do rather than reading as a phantom unreachable host (SPEC.md, "Topology"). Each
-/// closes it again once it no longer holds: a new run or new work on the host replaces the first two, and a supervisor
-/// starting ends the last.
+/// Whether `host`'s row is open: the Details switch is on, a setup is running on the host that the user has not folded
+/// (`progress`, and what the panel keeps about it, `seen`), the host's last provisioning run failed, the last work on
+/// the host was refused (`refused`), or the host is the helm's own machine with no supervisor running. All but the
+/// switch open the row by themselves: a running setup once, so its steps show as they go (SPEC.md: "the running row
+/// expands once"), a failure always, so it shows its evidence and remedies whatever was folded, and the local host
+/// without a supervisor so it shows what to do rather than reading as a phantom unreachable host (SPEC.md, "Topology").
+/// Each closes it again once it no longer holds: success ends the first, a new run or new work on the host replaces
+/// the next two, and a supervisor starting ends the last.
 pub(crate) fn disclosed(
     details: bool,
     host: &HostView,
     progress: Option<&ProvisioningView>,
+    seen: Option<&progress::Seen>,
     refused: bool,
 ) -> bool {
     details
+        || progress::opens_row(progress, seen)
         || offers::failed_operation(progress).is_some()
         || refused
         || offers::needs_local_setup(host)
 }
 
-/// What one row is drawn from, borrowed from the store and the operation store for the frame being drawn.
+/// What one row is drawn from, borrowed from the store and the operation store for the frame being drawn, with what the
+/// panel keeps about its run and the inline status worked out from them.
 struct RowInput<'a> {
     host: &'a HostView,
     progress: Option<&'a ProvisioningView>,
     refusal: Option<&'a Failure>,
+    seen: Option<&'a progress::Seen>,
+    status: Option<progress::Status>,
 }
 
 impl Render for HostsPanel {
@@ -236,6 +310,22 @@ impl Render for HostsPanel {
         let weak = cx.weak_entity();
         let mut toggles = self.toggles(window, cx);
         let operations = session::current_operations(cx);
+        let now = ticker::wall_now(cx);
+        // Copied out for the frame: the rows borrow the store, and `current` needs the panel mutably. A handful of
+        // entries at most, one per host with a run.
+        let seen = self.runs.current(cx).seen.clone();
+        // The running pulse's opacity now, which every row's setup dot and running step share.
+        let pulse = pulse_opacity(
+            self.runs
+                .current(cx)
+                .pulse
+                .as_ref()
+                .map_or(0, |pulse| pulse.step(cx)),
+            palette.status_pulse_min,
+        );
+        // Whether a row shows setup in progress (for the pulse), and when the soonest shown clock turns over.
+        let mut pulsing = false;
+        let mut next_second: Option<std::time::Duration> = None;
         let mut status = None;
         let mut drawn: Vec<AnyElement> = Vec::new();
         // `None` until the hosts collection arrived: the count is not known yet.
@@ -269,18 +359,38 @@ impl Render for HostsPanel {
                     .iter()
                     .map(|host| {
                         let key = HostView::key(host.id);
+                        let op_key = OpKey::host(&key);
+                        let progress = collections.get::<ProvisioningView>(&key);
+                        let seen = seen.get(&host.id);
+                        let in_flight: Option<Work> =
+                            operations.and_then(|operations| operations.in_flight(&op_key));
+                        let status = progress::status(progress, seen, in_flight, now);
+                        pulsing |= status.is_some();
+                        if let Some(progress::Status::Running { elapsed, .. }) = &status {
+                            let due = progress::next_second(*elapsed);
+                            next_second = Some(next_second.map_or(due, |soonest| soonest.min(due)));
+                        }
                         let input = RowInput {
                             host,
-                            progress: collections.get::<ProvisioningView>(&key),
-                            refusal: operations
-                                .and_then(|operations| operations.failure(&OpKey::host(&key))),
+                            progress,
+                            refusal: operations.and_then(|operations| operations.failure(&op_key)),
+                            seen,
+                            status,
                         };
-                        self.row(&input, &twin, toggles.remove(&host.id), palette)
+                        self.row(
+                            &input,
+                            &twin,
+                            toggles.remove(&host.id),
+                            &weak,
+                            pulse,
+                            palette,
+                        )
                     })
                     .collect();
             }
         }
 
+        self.keep_time(pulsing, next_second, window, cx);
         let heading = div()
             .flex()
             .flex_row()
@@ -375,6 +485,36 @@ impl Render for HostsPanel {
 }
 
 impl HostsPanel {
+    /// Hold the pulse while the window is active and a row shows setup in progress (`pulsing`), and while a run's clock
+    /// shows, a deadline that redraws the panel when the soonest one turns over (`next_second`). The ticker's rule for
+    /// the pulse: never held for a window nobody is looking at, where it would keep the tick loop firing for nothing.
+    fn keep_time(
+        &mut self,
+        pulsing: bool,
+        next_second: Option<std::time::Duration>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let pulses = pulsing && ticker::is_active(window, cx);
+        let runs = self.runs.current(cx);
+        if pulses != runs.pulse.is_some() {
+            runs.pulse = pulses.then(|| ticker::pulse(window, cx));
+        }
+        match next_second {
+            None => runs.tick = None,
+            Some(due) if runs.tick.is_none() => {
+                let panel = cx.weak_entity();
+                runs.tick = Some(ticker::after(due, cx, move |cx| {
+                    let _ = panel.update(cx, |panel, cx| {
+                        panel.runs.current(cx).tick = None;
+                        cx.notify();
+                    });
+                }));
+            }
+            Some(_) => {}
+        }
+    }
+
     /// Every listed host's menu toggle ([`menu::toggle`]), by host id, the one whose menu is open drawn pressed, with
     /// each one's anchor and focus handle recorded for [`HostsPanel::toggle_menu`]. Made before the rows, which borrow
     /// the store, since a toggle's anchor and focus handle are element state.
@@ -409,28 +549,34 @@ impl HostsPanel {
             .collect()
     }
 
-    /// One host's row (`.host-row`): its header line ending in its menu `toggle`, then its details while it is open,
-    /// then the last refusal of work on it, which shows open or not. `twin` names a host by id for a duplicate's
-    /// details.
+    /// One host's row (`.host-row`): its header line ending in its menu `toggle` (with the inline status of a setup in
+    /// progress under it), then its details while it is open, then the last refusal of work on it, which shows open or
+    /// not, then a setup run's steps while it is open. `twin` names a host by id for a duplicate's details; `panel` is
+    /// what a run's Collapse folds it in, and `pulse` the running pulse's opacity for this frame.
     fn row(
         &self,
         input: &RowInput,
         twin: &impl Fn(i64) -> Option<HostText>,
         toggle: Option<AnyElement>,
+        panel: &WeakEntity<HostsPanel>,
+        pulse: f32,
         palette: &Palette,
     ) -> AnyElement {
         let host = input.host;
         let id = host.id;
         let name = display_name(host);
-        let open = disclosed(self.details, host, input.progress, input.refusal.is_some());
-        let main = div()
+        let open = disclosed(
+            self.details,
+            host,
+            input.progress,
+            input.seen,
+            input.refusal.is_some(),
+        );
+        let line = div()
             .flex()
             .flex_row()
             .items_center()
             .gap(px(ROW_GAP))
-            .min_h(px(ROW_HEIGHT))
-            .py(px(ROW_PAD.0))
-            .pl(px(ROW_PAD.1))
             .children(
                 HostKind::of(host)
                     .locality()
@@ -444,9 +590,27 @@ impl HostsPanel {
                     .text_size(metrics::TEXT_MD)
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::color(palette.fg_0)),
-            )
-            .child(phase_status(host, palette))
-            .children(toggle);
+            );
+        let main = div()
+            .flex()
+            .flex_col()
+            .justify_center()
+            .gap(px(PROGRESS_GAP))
+            .min_h(px(ROW_HEIGHT))
+            .py(px(ROW_PAD.0))
+            .pl(px(ROW_PAD.1));
+        // Progress takes a line of its own under the name, lined up with it, so a long step cannot take the name's
+        // place; the toggle stays on the name's line (`.host-row-main:has(.host-status.updating)`).
+        let main = match &input.status {
+            Some(status) => main.child(line.children(toggle)).child(
+                div()
+                    .pl(px(MARK + ROW_GAP))
+                    .pr(px(DETAIL_PAD_X))
+                    .min_w_0()
+                    .child(progress::status_mark(id, status, pulse, palette)),
+            ),
+            None => main.child(line.child(phase_status(host, palette)).children(toggle)),
+        };
         let lines: Vec<AnyElement> = if open {
             phase::detail_lines(host, twin)
                 .into_iter()
@@ -455,6 +619,20 @@ impl HostsPanel {
         } else {
             Vec::new()
         };
+        // The run's steps under an open row, with Collapse while the row is open for the run alone and the user may fold
+        // it (with Details on, the switch holds every row open, so there is nothing to fold).
+        let run = progress::shown(input.progress).filter(|_| open).map(|run| {
+            let collapse = (!self.details && progress::opens_row(Some(run), input.seen))
+                .then(|| run.run_id.clone())
+                .flatten()
+                .map(|run_id| {
+                    let panel = panel.clone();
+                    progress::collapse(id, move |_, cx| {
+                        let _ = panel.update(cx, |panel, cx| panel.fold(id, &run_id, cx));
+                    })
+                });
+            progress::run_section(id, run, collapse, pulse, palette)
+        });
         let refusal = input.refusal.map(|refusal| {
             div()
                 .pt(px(ERROR_PAD_TOP))
@@ -467,12 +645,14 @@ impl HostsPanel {
                 )
         });
         // The lines under the header (`.host-row-details`): the details while the row is open, then the refusal, which
-        // shows open or not. Nothing at all when there is neither, so a closed row is its header alone.
-        let under = (!lines.is_empty() || refusal.is_some()).then(|| {
+        // shows open or not, then the run's steps. Nothing at all when there is none of them, so a closed row is its
+        // header alone.
+        let under = (!lines.is_empty() || refusal.is_some() || run.is_some()).then(|| {
             div()
                 .pb(px(DETAILS_PAD_BOTTOM))
                 .children(lines)
                 .children(refusal)
+                .children(run)
         });
         div()
             .id(SharedString::from(format!("host-row-{id}")))

@@ -130,6 +130,9 @@ impl SessionList {
     fn toggle_hosts(&mut self, mark: &Mark, window: &mut Window, cx: &mut Context<Self>) {
         let current = self.current.current(cx);
         current.hosts_shown = !current.hosts_shown;
+        if !current.hosts_shown {
+            self.hosts_panel.update(cx, |panel, cx| panel.hidden(cx));
+        }
         cx.notify();
         focus::focus_control(&self.hosts_focus, mark, window, cx);
     }

@@ -1,11 +1,12 @@
-//! Tests of setting up a new SSH host over the helm client's fake: the confirmation a probe's plan opens (what it
-//! shows, where focus starts, Copy plan), what each answer sends and under which key, setup without asking, and where
-//! a refused setup shows, before and after the user moved on.
+//! Tests of setting up an SSH host over the helm client's fake: the confirmation a probe's plan opens (what it shows,
+//! where focus starts, Copy plan), what each answer sends and under which key, setup without asking, and where a
+//! refused setup shows, before and after the user moved on; then the rerun of a failed setup from a host's menu.
 //!
-//! They start where the Add host tests leave off, through the same root view and helpers (`hosts/add/tests.rs`): Add
-//! host opened from its rail button, a destination typed, Add pressed, and the fake helm answering the probe with
-//! [`plan_reply`]. Every step ends in one of the shared harness's step helpers, so the focus and layer invariants are
-//! checked after each.
+//! A new host's tests start where the Add host tests leave off, through the same root view and helpers
+//! (`hosts/add/tests.rs`): Add host opened from its rail button, a destination typed, Add pressed, and the fake helm
+//! answering the probe with [`plan_reply`]. The rerun's start from the Hosts panel's harness (`hosts/tests.rs`) with a
+//! host whose setup failed. Every step ends in one of the shared harness's step helpers, so the focus and layer
+//! invariants are checked after each.
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::FakeHelm;
@@ -191,9 +192,11 @@ pub(crate) fn reference_offer(opener: gpui::FocusHandle, mark: crate::focus::Mar
         probe_id: "p-reference".into(),
         confirmation: String::new(),
         steps,
-        destination: "dev@new-box".into(),
-        alias: String::new(),
-        opener,
+        target: super::Target::New {
+            destination: "dev@new-box".into(),
+            alias: String::new(),
+            opener,
+        },
         mark,
     }
 }
@@ -604,4 +607,151 @@ fn a_plan_after_the_user_moved_on_opens_no_confirmation(cx: &mut TestAppContext)
     assert_eq!(label(cx, "prompt"), None, "no setup question");
     assert_eq!(error_line(cx).as_deref(), Some(super::MOVED_ON));
     assert_eq!(helm.commands(), []);
+}
+
+// ---- The rerun -----------------------------------------------------------------------------------------------------
+
+/// The Hosts panel over the reference hosts, `build-box` (host 2) with a failed setup, in a column as the app draws it
+/// and a window as large as the reference screens'; with "Set up new hosts without asking" on when `without_asking` is.
+fn panel_with_a_failed_setup(
+    cx: &mut TestAppContext,
+    without_asking: bool,
+) -> (FakeHelm, &mut VisualTestContext) {
+    use crate::hosts::tests::{hosts, open_panel_in_column, progress, reference_hosts, run};
+    use farhelm_proto::provisioning::{ProvisioningOperation, RunStatus};
+    let mut snapshot = vec![
+        hosts(&reference_hosts()),
+        progress(&[run(2, ProvisioningOperation::Add, RunStatus::Failed)]),
+    ];
+    if without_asking {
+        snapshot.push(preferences(true));
+    }
+    let (helm, _, cx) = open_panel_in_column(cx, snapshot);
+    cx.simulate_resize(gpui::size(gpui::px(1600.), gpui::px(1000.)));
+    settle(cx);
+    (helm, cx)
+}
+
+/// Choose Re-run from `build-box`'s menu and check that it sent its probe; the probe's id.
+fn choose_rerun(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> u64 {
+    click(cx, "host-menu-toggle-2");
+    click(cx, "host-menu-rerun");
+    one_probe(helm).0
+}
+
+/// SPEC.md, "Topology": "an existing entry is set up again from its own row", and the old app's rerun probed "the
+/// registered destination" before asking again; the drive of the first Add host port found no way to try a failed setup
+/// again. The question names the host as its row does, and confirming hands the helm its one-use plan under the host's
+/// own key. Specified: the menu of a host whose setup failed starts on Re-run ("Try the failed setup again"); choosing
+/// it closes the menu and sends `POST /api/hosts/probe` for `dev@build-box` with the recorded install paths (none) and
+/// no new entry, under the host's key, while the row reads "Setting up…"; the plan opens "Set up host · build-box"
+/// with focus on Set up; Set up sends `POST /api/hosts/provision` for `p-1` under the host's key, focus returns to the
+/// row's toggle, and a refusal of it shows under the row with nothing opened.
+#[gpui::test]
+fn re_run_probes_the_registered_destination_and_sets_up_under_the_hosts_key(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx) = panel_with_a_failed_setup(cx, false);
+    click(cx, "host-menu-toggle-2");
+    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-rerun"));
+    assert_eq!(label(cx, "host-menu-rerun").as_deref(), Some("Re-run"));
+    assert!(painted(cx).contains("Try the failed setup again"));
+    click(cx, "host-menu-rerun");
+    assert!(!any_open(cx), "the menu closed");
+    let (probe, body) = one_probe(&mut helm);
+    assert_eq!(
+        body,
+        json!({
+            "target": { "kind": "ssh", "destination": "dev@build-box" },
+            "remote_farhelm": null,
+            "remote_state_dir": null,
+        })
+    );
+    let key = OpKey::host("2");
+    assert_eq!(work(&key, cx), Some(Work::Probe));
+    assert_eq!(label(cx, "host-status-2").as_deref(), Some("Setting up…"));
+
+    helm.reply(probe, 200, Some(plan_reply()));
+    settle(cx);
+    assert_eq!(
+        label(cx, "prompt").as_deref(),
+        Some("Set up host · build-box")
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
+    click(cx, "prompt-confirm");
+    assert!(!any_open(cx), "the question closed");
+    let (setup, body) = one_command(&mut helm, Method::Post, "/api/hosts/provision");
+    assert_eq!(body, json!({ "probe_id": "p-1" }));
+    assert_eq!(work(&key, cx), Some(Work::Setup));
+    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-toggle-2"));
+
+    helm.reply(setup, 409, Some(json!(USED)));
+    settle(cx);
+    assert_eq!(label(cx, "host-error-2").as_deref(), Some(USED));
+    assert!(!any_open(cx), "a rerun's refusal opens nothing");
+}
+
+/// The rerun's probe can find the host is now a manual install, and its answer outlives the menu that asked, so it has
+/// to show where the host is; a refusal of the probe shows there the same way. Specified: a `manual` reply puts its
+/// reason under `build-box`'s row and opens nothing; a second Re-run whose probe the helm refuses replaces it with the
+/// refusal's words.
+#[gpui::test]
+fn a_rerun_that_leads_nowhere_says_why_under_the_row(cx: &mut TestAppContext) {
+    let (mut helm, cx) = panel_with_a_failed_setup(cx, false);
+    let probe = choose_rerun(&mut helm, cx);
+    helm.reply(
+        probe,
+        200,
+        Some(json!({ "result": "manual", "reason": "no systemd user manager" })),
+    );
+    settle(cx);
+    assert_eq!(
+        label(cx, "host-error-2").as_deref(),
+        Some("no systemd user manager")
+    );
+    assert!(!any_open(cx));
+
+    let probe = choose_rerun(&mut helm, cx);
+    helm.reply(probe, 504, Some(json!("the host timed out")));
+    settle(cx);
+    assert_eq!(
+        label(cx, "host-error-2").as_deref(),
+        Some("the host timed out")
+    );
+}
+
+/// "Set up new hosts without asking" covers reruns too (the old app submitted a rerun's plan on the remembered answer).
+/// Specified: with the preference on, the rerun's plan goes straight to `POST /api/hosts/provision` under the host's
+/// key and no question opens.
+#[gpui::test]
+fn with_the_preference_on_a_rerun_sets_up_without_asking(cx: &mut TestAppContext) {
+    let (mut helm, cx) = panel_with_a_failed_setup(cx, true);
+    let probe = choose_rerun(&mut helm, cx);
+    helm.reply(probe, 200, Some(plan_reply()));
+    settle(cx);
+    assert!(!any_open(cx), "no question");
+    let (_, body) = one_command(&mut helm, Method::Post, "/api/hosts/provision");
+    assert_eq!(body, json!({ "probe_id": "p-1" }));
+    assert_eq!(work(&OpKey::host("2"), cx), Some(Work::Setup));
+}
+
+/// SPEC.md, "Keyboard focus": a result that arrives after the user moved on opens nothing over what they are doing
+/// (the goal's "No queue for results that arrive later"). The rerun's plan is such a result, and with nothing to open
+/// its row is where the user learns why nothing happened. Specified: after Re-run, a key press, then the probe's plan:
+/// no question opens, `build-box`'s row says "Farhelm is not running on this host. Choose Re-run again ...", and no
+/// setup is sent.
+#[gpui::test]
+fn a_reruns_plan_after_the_user_moved_on_opens_nothing_and_says_so(cx: &mut TestAppContext) {
+    let (mut helm, cx) = panel_with_a_failed_setup(cx, false);
+    let probe = choose_rerun(&mut helm, cx);
+    keys(cx, "shift-tab");
+    helm.reply(probe, 200, Some(plan_reply()));
+    settle(cx);
+    assert_eq!(label(cx, "prompt"), None, "no setup question");
+    assert!(!any_open(cx));
+    assert_eq!(
+        label(cx, "host-error-2").as_deref(),
+        Some(super::RERUN_MOVED_ON)
+    );
+    assert_eq!(helm.commands(), [], "nothing was provisioned");
 }

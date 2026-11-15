@@ -1,4 +1,5 @@
-//! Setting up a new SSH host: the confirmation that shows the helm's plan, and the submission that starts the run.
+//! Setting up an SSH host: the confirmation that shows the helm's plan, and the submission that starts the run, for a
+//! new host from Add host and for a registered host whose setup failed, from its row's menu ([`rerun`]).
 //!
 //! SPEC.md, "Topology" (remote provisioning: "the panel shows a concrete installation plan ... and proceeds only on
 //! confirmation"). Ported from the old app's `provisioning.rs` (`SetupPlanConfirmation`, `PlanStepList`) and the add
@@ -29,6 +30,13 @@
 //! - **A refused permanent answer.** The setup goes ahead whether or not its preference save succeeds, and the dialog
 //!   that asked has closed, so a refusal of that save shows on the same panel line, "Set up new hosts without asking:"
 //!   and the helm's words, with the same lifetime; it also goes once the preference is on, or after a reset.
+//! - **The rerun of a failed setup** ([`rerun`], the host menu's Re-run) probes the host's registered destination again,
+//!   with the install paths it recorded, under the host's own key, as the old app did ("failed ADD rerun probes the
+//!   registered destination"). A supervisor that answers now is registered as it is and the row follows the pushed
+//!   state; a plan opens the same confirmation, titled with the host's name and drawn with its mark, or goes out
+//!   without asking under the same preference. The probe's refusal, why setup is manual, and a plan that arrived after
+//!   the user moved on ([`RERUN_MOVED_ON`]) show under the row, the operation store's record under the host's key, as
+//!   does a refused submission: the host already has a row, so nothing reopens.
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -36,7 +44,7 @@ pub(crate) mod tests;
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
 use farhelm_proto::provisioning::PlanSteps;
-use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
+use farhelm_proto::ui_channel::{HostView, PREFERENCES_KEY, Preferences};
 use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, Context, EntityId, FocusHandle, FontWeight,
     Global, InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
@@ -44,8 +52,8 @@ use gpui::{
 };
 use serde_json::json;
 
-use super::add;
-use super::identity::host_mark;
+use super::add::{self, Reply};
+use super::identity::{display_name, host_mark};
 use crate::assets;
 use crate::components::{HoverHelp, Tier, copy_button, with_hover_help};
 use crate::focus::{self, Mark};
@@ -62,6 +70,10 @@ const WIDTH: f32 = 560.;
 pub(crate) const MOVED_ON: &str =
     "Farhelm is not running on this host. Press Add again to see what setting it up changes.";
 
+/// What a host's row says when the plan its rerun asked for arrives after the user moved on: [`MOVED_ON`] for the menu.
+pub(crate) const RERUN_MOVED_ON: &str =
+    "Farhelm is not running on this host. Choose Re-run again to see what setting it up changes.";
+
 /// `.provisioning-plan`'s line height: 1.45 at its 12 pixels.
 const PLAN_LINE: f32 = 17.4;
 
@@ -72,11 +84,12 @@ const RAIL: f32 = 24.;
 /// The text size of the numbers, path chips and explanations.
 const SMALL_TEXT: f32 = 11.;
 
-/// A plan the helm offered for a new host, as the confirmation shows it and the submission acts on it: the frozen value
-/// of the question.
+/// A plan the helm offered to set up a host, as the confirmation shows it and the submission acts on it: the frozen
+/// value of the question.
 #[derive(Clone)]
 pub(crate) struct Offer {
-    /// The host-add key the probe ran under, which the submission continues under.
+    /// The key the probe ran under, which the submission continues under: a new host's host-add key, or a registered
+    /// host's own key for a rerun.
     pub(crate) key: OpKey,
     /// The helm's one-use id for the plan it kept; the submission names the plan by it and nothing else.
     pub(crate) probe_id: String,
@@ -84,19 +97,36 @@ pub(crate) struct Offer {
     pub(crate) confirmation: String,
     /// The plan's steps, which the body shows.
     pub(crate) steps: PlanSteps,
-    /// The destination as the probe sent it: the title names it, and a refusal puts it back in Add host.
-    pub(crate) destination: String,
-    /// The alias as typed in Add host (blank for none); a refusal puts it back there. The probe already sent it as the
-    /// new entry's alias, and the helm's kept plan carries it, so the submission does not send it again.
-    pub(crate) alias: String,
-    /// The control that opened Add host, which gets focus back.
-    pub(crate) opener: FocusHandle,
-    /// The mark of the user's action behind the offer: Add's while the confirmation is to open (it opens only through
-    /// it), then the answer's, taken when Set up or the permanent answer is pressed; Add's still when the plan goes out
-    /// without asking. A refusal reopens Add host only through it, so not once the user has moved on since. The
-    /// operation store's own mark is no substitute: on the path without asking, it is taken when the probe's reply
-    /// arrives, which says nothing about what the user did while the probe was out.
+    /// The host the plan is for, which decides the title, the tile and what a refusal does.
+    pub(crate) target: Target,
+    /// The mark of the user's action behind the offer: Add's (or Re-run's) while the confirmation is to open (it opens
+    /// only through it), then the answer's, taken when Set up or the permanent answer is pressed; Add's still when the
+    /// plan goes out without asking. A refusal reopens Add host only through it, so not once the user has moved on
+    /// since. The operation store's own mark is no substitute: on the path without asking, it is taken when the probe's
+    /// reply arrives, which says nothing about what the user did while the probe was out.
     pub(crate) mark: Mark,
+}
+
+/// Which host a plan sets up.
+#[derive(Clone)]
+pub(crate) enum Target {
+    /// A host Add host is adding.
+    New {
+        /// The destination as the probe sent it: the title names it, and a refusal puts it back in Add host.
+        destination: String,
+        /// The alias as typed in Add host (blank for none); a refusal puts it back there. The probe already sent it as
+        /// the new entry's alias, and the helm's kept plan carries it, so the submission does not send it again.
+        alias: String,
+        /// The control that opened Add host, which gets focus back.
+        opener: FocusHandle,
+    },
+    /// A registered host whose failed setup the user runs again from its row: the title names it as its row does, and
+    /// the tile is its own mark. A refusal shows under its row ([`rerun`]).
+    Registered {
+        name: HostText,
+        icon: HostIcon,
+        color: HostColor,
+    },
 }
 
 /// Whether a probe that needs setup asks first: the shared "Set up new hosts without asking" preference is off or the
@@ -116,9 +146,16 @@ pub(crate) fn asks_first(cx: &App) -> bool {
 /// Ask the setup confirmation for `offer` over everything else in `window`, unless the user moved on since its mark.
 pub(crate) fn confirm(offer: Offer, window: &mut Window, cx: &mut App) {
     let mark = offer.mark;
+    let (name, (icon, color)) = match &offer.target {
+        Target::New { destination, .. } => (
+            HostText::from_host(destination.as_str()),
+            (HostIcon::Cloud, HostColor::Default),
+        ),
+        Target::Registered { name, icon, color } => (name.clone(), (*icon, *color)),
+    };
     let title = HostSentence::new("setup-title")
         .text("Set up host · ")
-        .host(&HostText::from_host(offer.destination.as_str()));
+        .host(&name);
     let set_up = Answer {
         label: "Set up".into(),
         help: HoverHelp::tooltip("Set up: set up this host as the plan above describes"),
@@ -152,14 +189,7 @@ pub(crate) fn confirm(offer: Offer, window: &mut Window, cx: &mut App) {
             let body = PlanBody::new(offer);
             cx.new(|_| body)
         })
-        .tile(|_, cx| {
-            host_mark(
-                HostIcon::Cloud,
-                HostColor::Default,
-                px(24.),
-                theme::palette(cx),
-            )
-        })
+        .tile(move |_, cx| host_mark(icon, color, px(24.), theme::palette(cx)))
         .note("Undo \"don't ask again\" with the gear at the foot of the navigation rail")
         .width(px(WIDTH))
         // SPEC.md, "Opening and closing": the dialogs that share the host and Settings installer keep focus on the
@@ -193,9 +223,10 @@ pub(crate) fn provision_command(probe_id: &str) -> Result<Command, PathError> {
     ))
 }
 
-/// Submit `offer` under its host-add key, as the operation store's work, so it goes on whatever view is open. An
-/// accepted submission needs nothing more here: the run shows in the pushed host progress. A refusal reopens Add host
-/// through [`Offer::mark`], or shows on the Hosts panel's line if the user moved on since (the module docs).
+/// Submit `offer` under its key, as the operation store's work, so it goes on whatever view is open. An accepted
+/// submission needs nothing more here: the run shows in the pushed host progress. A new host's refusal reopens Add host
+/// through [`Offer::mark`], or shows on the Hosts panel's line if the user moved on since; a registered host's shows
+/// under its row, where the operation store keeps it (the module docs).
 pub(crate) fn submit(offer: Offer, window: AnyWindowHandle, cx: &mut App) {
     let Some(operations) = session::current_operations(cx) else {
         return;
@@ -208,20 +239,29 @@ pub(crate) fn submit(offer: Offer, window: AnyWindowHandle, cx: &mut App) {
         }
     };
     let key = offer.key.clone();
+    let new = matches!(offer.target, Target::New { .. });
     let started = operations.update(cx, |operations, cx| {
         operations.start(&key, command, cx, move |settled, cx| {
             let Outcome::Refused(reason) = &settled.outcome else {
+                return;
+            };
+            let Target::New {
+                destination,
+                alias,
+                opener,
+            } = &offer.target
+            else {
                 return;
             };
             let reopened = !focus::has_moved_on(&offer.mark, cx)
                 && window
                     .update(cx, |_, window, cx| {
                         let seed = add::Seed {
-                            destination: offer.destination.clone(),
-                            alias: offer.alias.clone(),
+                            destination: destination.clone(),
+                            alias: alias.clone(),
                             problem: add::error_line().host(reason),
                         };
-                        add::reopen(&offer.opener, &offer.mark, Some(seed), window, cx).is_some()
+                        add::reopen(opener, &offer.mark, Some(seed), window, cx).is_some()
                     })
                     .unwrap_or(false);
             // Moved on, or Add host could not open (the window went inert): the panel's line is where it belongs. The
@@ -232,9 +272,102 @@ pub(crate) fn submit(offer: Offer, window: AnyWindowHandle, cx: &mut App) {
         })
     });
     match started {
-        // A refusal still shown from an earlier add belongs to that add; this one replaces it.
-        Ok(()) => show(cx, |lines| lines.setup = None),
+        // A refusal still shown from an earlier add belongs to that add; a new one replaces it, and a rerun leaves it.
+        Ok(()) => {
+            if new {
+                show(cx, |lines| lines.setup = None);
+            }
+        }
         Err(not_started) => tracing::debug!(?not_started, "host setup not sent"),
+    }
+}
+
+/// `POST /api/hosts/probe` for a registered SSH host's rerun of its setup: its destination with the install paths the
+/// helm recorded for it (`null` for none), and no `new_entry`, so a supervisor that answers is registered onto the same
+/// entry rather than refused as a second one, as the old rerun's probe did.
+pub(crate) fn rerun_command(host: &HostView) -> Result<Command, PathError> {
+    Ok(Command::new(
+        Work::Probe,
+        Method::Post,
+        ApiPath::api(&["hosts", "probe"])?,
+        Some(json!({
+            "target": { "kind": "ssh", "destination": host.destination },
+            "remote_farhelm": host.remote_farhelm,
+            "remote_state_dir": host.remote_state_dir,
+        })),
+        "POST /api/hosts/probe",
+    ))
+}
+
+/// Run `host`'s failed setup again, the host menu's Re-run, with `mark` the [`Mark`] taken in its click handler: probe
+/// the host under its own key, and go on from the plan as the module docs say. Sends nothing for a host with no
+/// destination (the menu offers the rerun only on an SSH host, which always has one) or while work on the host is
+/// out.
+pub(crate) fn rerun(host: &HostView, mark: Mark, window: &mut Window, cx: &mut App) {
+    let Some(operations) = session::current_operations(cx) else {
+        return;
+    };
+    if host.destination.is_none() {
+        return;
+    }
+    let command = match rerun_command(host) {
+        Ok(command) => command,
+        Err(error) => {
+            tracing::debug!(?error, "setup rerun probe not built");
+            return;
+        }
+    };
+    let key = OpKey::host(&HostView::key(host.id));
+    let target = Target::Registered {
+        name: display_name(host),
+        icon: host.icon,
+        color: host.color,
+    };
+    let handle = window.window_handle();
+    let probed = key.clone();
+    let started = operations.update(cx, |operations, cx| {
+        operations.start(&key, command, cx, move |settled, cx| {
+            let problem = match add::read_reply(&settled.outcome) {
+                // The pushed hosts and host progress already show what the helm did.
+                Reply::Added => return,
+                Reply::Show(problem) => problem.text(),
+                Reply::Setup {
+                    probe_id,
+                    confirmation,
+                    steps,
+                } => {
+                    let offer = Offer {
+                        key: probed.clone(),
+                        probe_id,
+                        confirmation,
+                        steps,
+                        target,
+                        mark,
+                    };
+                    if !asks_first(cx) {
+                        submit(offer, handle, cx);
+                        return;
+                    }
+                    if !focus::has_moved_on(&mark, cx)
+                        && handle
+                            .update(cx, |_, window, cx| confirm(offer, window, cx))
+                            .is_ok()
+                    {
+                        return;
+                    }
+                    HostText::from_host(RERUN_MOVED_ON)
+                }
+            };
+            // Why the rerun leads nowhere shows under the host's row, where a refusal of the probe already does.
+            if let Some(operations) = session::current_operations(cx) {
+                operations.update(cx, |operations, cx| {
+                    operations.note(&probed, Work::Probe, problem, cx)
+                });
+            }
+        })
+    });
+    if let Err(not_started) = started {
+        tracing::debug!(?not_started, "setup rerun probe not sent");
     }
 }
 

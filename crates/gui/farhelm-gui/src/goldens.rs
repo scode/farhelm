@@ -7,9 +7,10 @@
 //! reach, an empty fleet, a row's open menu, a row's Delete question, and a pending and a refused Delete), the Rename
 //! editor, the select closed and open, the
 //! YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer, the Settings dialog at
-//! Sessions, at Appearance, at Hosts, at Terminal and at Agent trust, the Hosts panel (closed, with Details, and with a
-//! host failing to connect), the Add host dialog and the setup confirmation it leads to, a host's actions menu, and the
-//! host settings dialog at its top and scrolled to its end, in both appearances, compared pixel for pixel.
+//! Sessions, at Appearance, at Hosts, at Terminal and at Agent trust, the Hosts panel (closed, with Details, with a
+//! host failing to connect, and with a host's setup running and failed), the Add host dialog and the setup
+//! confirmation it leads to, a host's actions menu, and the host settings dialog at its top and scrolled to its end,
+//! in both appearances, compared pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
@@ -2169,9 +2170,19 @@ fn host_add_setup_plan_setup(state: &SceneState, window: &mut Window, cx: &mut A
 /// Make the Hosts panel over a fake helm holding `listed` hosts, with Details on when `details` is; the scene draws it
 /// through [`hosts_panels`]. The fake, the connection and the panel are kept for the scene's life.
 fn hosts_panel_scene(state: &SceneState, listed: &[HostView], details: bool, cx: &mut App) {
+    hosts_panel_scene_with(state, vec![crate::hosts::tests::hosts(listed)], details, cx);
+}
+
+/// [`hosts_panel_scene`] over a fake helm connected with `snapshot`, for a scene that needs more than the hosts.
+fn hosts_panel_scene_with(
+    state: &SceneState,
+    snapshot: Vec<farhelm_proto::ui_channel::CollectionState>,
+    details: bool,
+    cx: &mut App,
+) {
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
-    helm.connect(vec![crate::hosts::tests::hosts(listed)]);
+    helm.connect(snapshot);
     let panel = cx.new(HostsPanel::new);
     if details {
         panel.update(cx, |panel, cx| panel.show_details(true, cx));
@@ -2215,6 +2226,118 @@ fn hosts_panel_host_unreachable_setup(state: &SceneState, _: &mut Window, cx: &m
         "reference-capture.invalid",
     );
     hosts_panel_scene(state, &listed, true, cx);
+}
+
+/// The reference screens' setup of `dev@new-box` (`host-setup-running-hosts-panel` and `host-setup-failed-hosts-panel`)
+/// with Details on: the three reference hosts and `dev@new-box` failing to connect at `attempt`, its setup's nine steps
+/// in `statuses`, the run in `status`, and `reason` as the failed step's and the run's message. Motion is reduced, so
+/// the running step's ring and the status's dot hold still; the test clock does not move, so the elapsed time reads
+/// "0:00" where the reference caught "0:06".
+fn host_setup_scene(
+    state: &SceneState,
+    attempt: u32,
+    status: farhelm_proto::provisioning::RunStatus,
+    statuses: [farhelm_proto::provisioning::StepStatus; 9],
+    reason: Option<&str>,
+    cx: &mut App,
+) {
+    use crate::hosts::tests::{connecting, host, hosts, progress, reference_hosts, run};
+    use farhelm_proto::provisioning::{ProvisioningOperation, StepStatus};
+    ticker::set_reduced_motion(true, cx);
+    let mut new_box = host(
+        4,
+        "ssh",
+        connecting(
+            attempt,
+            Some(
+                "SSH could not connect or log in to the host; SSH stderr: \"ssh: Could not resolve hostname new-box: \
+                 Temporary failure in name resolution\"; cause: connection closed before hello",
+            ),
+        ),
+    );
+    new_box.name = "dev@new-box".into();
+    new_box.destination = Some("dev@new-box".into());
+    let mut listed = reference_hosts();
+    listed.push(new_box);
+    let names = [
+        "Create directories",
+        "Upload the farhelm binary",
+        "Install the farhelm binary",
+        "Write the systemd user unit",
+        "Reload systemd user units",
+        "Enable and start the supervisor",
+        "Enable lingering, to start at boot",
+        "Remove the bundled tmux",
+        "Connect to the supervisor",
+    ];
+    let mut setup = run(4, ProvisioningOperation::Add, status);
+    setup.steps = names
+        .into_iter()
+        .zip(statuses)
+        .map(|(name, status)| {
+            let failed = status == StepStatus::Failed;
+            let mut step = crate::hosts::progress::tests::step(name, status);
+            step.message = reason.filter(|_| failed).map(str::to_owned);
+            step
+        })
+        .collect();
+    setup.message = reason.map(str::to_owned);
+    hosts_panel_scene_with(state, vec![hosts(&listed), progress(&[setup])], true, cx);
+}
+
+/// `dev@new-box`'s setup at its first step (reference `host-setup-running-hosts-panel`): the inline status on its own
+/// line under the name, the step list with the running step's amber ring and the rest pending.
+fn host_setup_running_hosts_panel_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    use farhelm_proto::provisioning::{RunStatus, StepStatus};
+    let statuses = std::array::from_fn(|n| {
+        if n == 0 {
+            StepStatus::Running
+        } else {
+            StepStatus::Pending
+        }
+    });
+    host_setup_scene(state, 3, RunStatus::Running, statuses, None, cx);
+}
+
+/// `dev@new-box`'s setup failed at its last step (reference `host-setup-failed-hosts-panel`): the phase words back,
+/// eight steps checked green, the last crossed red with the helm's reason under it, and the run's message after them.
+fn host_setup_failed_hosts_panel_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    use farhelm_proto::provisioning::{RunStatus, StepStatus};
+    let statuses = std::array::from_fn(|n| {
+        if n == 8 {
+            StepStatus::Failed
+        } else {
+            StepStatus::Completed
+        }
+    });
+    host_setup_scene(
+        state,
+        4,
+        RunStatus::Failed,
+        statuses,
+        Some(
+            "step 9 (attach-supervisor) failed: injected attach-supervisor failure: host stderr \"Setup could not \
+             finish\"; rerun provisioning to continue",
+        ),
+        cx,
+    );
+}
+
+/// The Hosts panel a scene's setup made, as [`hosts_panels`] draws it, in a column tall enough for a setup's nine
+/// steps under its row and a failure's messages after them, as the reference screens' sidebar was.
+fn tall_hosts_panels(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    let palette = theme::palette(cx);
+    let panel = state
+        .keep
+        .borrow()
+        .iter()
+        .find_map(|kept| kept.downcast_ref::<Entity<HostsPanel>>().cloned());
+    div()
+        .w(theme::metrics::SIDEBAR_WIDTH - px(56.))
+        .h(px(900.))
+        .bg(theme::color(palette.bg_1))
+        .children(panel)
+        .into_any_element()
 }
 
 /// The Hosts panel a scene's setup made, in the sidebar's column beside the rail (the sidebar's width less the rail's
@@ -2701,6 +2824,18 @@ static SCENES: &[Scene] = &[
         size: (600., 1000.),
         draw: empty,
         setup: host_add_setup_plan_setup,
+    },
+    Scene {
+        name: "host-setup-running-hosts-panel",
+        size: (364., 924.),
+        draw: tall_hosts_panels,
+        setup: host_setup_running_hosts_panel_setup,
+    },
+    Scene {
+        name: "host-setup-failed-hosts-panel",
+        size: (364., 924.),
+        draw: tall_hosts_panels,
+        setup: host_setup_failed_hosts_panel_setup,
     },
 ];
 

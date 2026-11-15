@@ -233,12 +233,12 @@ pub(crate) fn error_line() -> HostSentence {
     HostSentence::new("add-host-error")
 }
 
-/// What a probe's reply means for the dialog.
-enum Reply {
+/// What a probe's reply means, for the dialog and for a host row's rerun of its setup ([`super::setup::rerun`]).
+pub(super) enum Reply {
     /// The helm registered an answering supervisor: the dialog closes.
     Added,
-    /// The line to show in the dialog: why setup is manual, a refusal, a reply that cannot be read.
-    Show(HostSentence),
+    /// Why the probe leads nowhere, to show: why setup is manual, a refusal, a reply that cannot be read.
+    Show(Problem),
     /// No supervisor answered, and the helm offers this plan to set one up ([`setup`]).
     Setup {
         probe_id: String,
@@ -247,11 +247,45 @@ enum Reply {
     },
 }
 
+/// Why a probe's reply leads nowhere: the helm's own words (a refusal, why setup is manual), the app's for a reply it
+/// cannot use, or the app's with the decoder's words for a reply it could not read.
+pub(super) enum Problem {
+    Helm(HostText),
+    App(&'static str),
+    Unreadable(HostText),
+}
+
+/// What [`Problem::Unreadable`] says before the decoder's words.
+const UNREADABLE: &str = "The helm accepted the host probe, but its reply could not be read: ";
+
+impl Problem {
+    /// The problem appended to the empty `line`, each host value its own part.
+    pub(super) fn sentence(self, line: HostSentence) -> HostSentence {
+        match self {
+            Problem::Helm(words) => line.host(&words),
+            Problem::App(words) => line.text(words),
+            Problem::Unreadable(error) => line.text(UNREADABLE).host(&error),
+        }
+    }
+
+    /// The problem as one piece of host text, for the operation store's record under a host's key, which holds only
+    /// host text (a refusal's words); the app's words in it are escaped too, which changes nothing.
+    pub(super) fn text(self) -> HostText {
+        match self {
+            Problem::Helm(words) => words,
+            Problem::App(words) => HostText::from_host(words),
+            Problem::Unreadable(error) => {
+                HostText::from_host(format!("{UNREADABLE}{}", error.raw()))
+            }
+        }
+    }
+}
+
 /// Read a probe's reply. The probe never answers 202, but an accepted reply is read the same way as a done one, by its
 /// body.
-fn read_reply(outcome: &Outcome) -> Reply {
+pub(super) fn read_reply(outcome: &Outcome) -> Reply {
     let body = match outcome {
-        Outcome::Refused(words) => return Reply::Show(error_line().host(words)),
+        Outcome::Refused(words) => return Reply::Show(Problem::Helm(words.clone())),
         Outcome::Done(body) | Outcome::Accepted(body) => body.as_ref().unwrap_or(&Value::Null),
     };
     // The plan is the helm's own and never read here (`ProbeReply`'s docs): the setup confirmation shows the steps and
@@ -259,7 +293,7 @@ fn read_reply(outcome: &Outcome) -> Reply {
     match ProbeReply::<IgnoredAny>::deserialize(body) {
         Ok(ProbeReply::Discovered { .. }) => Reply::Added,
         Ok(ProbeReply::Manual { reason }) => {
-            Reply::Show(error_line().host(&HostText::from_host(reason.as_str())))
+            Reply::Show(Problem::Helm(HostText::from_host(reason.as_str())))
         }
         Ok(ProbeReply::Provisionable {
             probe_id,
@@ -272,16 +306,12 @@ fn read_reply(outcome: &Outcome) -> Reply {
             steps: *steps,
         },
         // The old app's words for the same impossible reply to an SSH probe.
-        Ok(ProbeReply::TensorlakeProvisionable { .. }) => {
-            Reply::Show(error_line().text("The helm returned a Tensorlake plan for an SSH host"))
-        }
+        Ok(ProbeReply::TensorlakeProvisionable { .. }) => Reply::Show(Problem::App(
+            "The helm returned a Tensorlake plan for an SSH host",
+        )),
         // The decoder's words quote the reply (an unknown variant's name, a string it did not expect), so they are host
         // text.
-        Err(error) => Reply::Show(
-            error_line()
-                .text("The helm accepted the host probe, but its reply could not be read: ")
-                .host(&HostText::from_host(error.to_string())),
-        ),
+        Err(error) => Reply::Show(Problem::Unreadable(HostText::from_host(error.to_string()))),
     }
 }
 
@@ -412,7 +442,7 @@ impl AddHostDialog {
         self.set_read_only(false, cx);
         match read_reply(&settled.outcome) {
             Reply::Added => self.close_later(None, window, cx),
-            Reply::Show(line) => self.problem = Some(line),
+            Reply::Show(problem) => self.problem = Some(problem.sentence(error_line())),
             Reply::Setup {
                 probe_id,
                 confirmation,
@@ -424,9 +454,11 @@ impl AddHostDialog {
                     probe_id,
                     confirmation,
                     steps,
-                    destination: self.destination.draft().value().clone(),
-                    alias: self.alias.draft().value().clone(),
-                    opener: self.opener.clone(),
+                    target: setup::Target::New {
+                        destination: self.destination.draft().value().clone(),
+                        alias: self.alias.draft().value().clone(),
+                        opener: self.opener.clone(),
+                    },
                     // The setup's own action replaces it when the user answers the confirmation; without asking, the
                     // plan goes out on the strength of the Add, so a refusal is judged against that.
                     mark,
