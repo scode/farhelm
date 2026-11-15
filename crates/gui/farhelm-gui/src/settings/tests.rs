@@ -80,6 +80,7 @@ pub(super) fn section_button(section: Section) -> &'static str {
     match section {
         Section::Sessions => "settings-section-sessions",
         Section::Hosts => "settings-section-hosts",
+        Section::Containers => "settings-section-containers",
         Section::Credentials => "settings-section-credentials",
         Section::Appearance => "settings-section-appearance",
         Section::Terminal => "settings-section-terminal",
@@ -255,13 +256,13 @@ fn the_gear_opens_settings_at_sessions_with_focus_on_its_first_switch(cx: &mut T
     );
 }
 
-/// SPEC.md lists every section, but this build has only Sessions, Appearance, Hosts, Credentials, Terminal,
-/// Checkouts, Agent trust and Notifications, and App only where the desktop app's updater runs, which it does not
-/// here; listing a section with nothing behind it would offer a button that shows an empty pane. The list follows
+/// SPEC.md lists every section, but this build has only Sessions, Appearance, Hosts, Containers, Credentials,
+/// Terminal, Checkouts, Agent trust and Notifications, and App only where the desktop app's updater runs, which it does
+/// not here; listing a section with nothing behind it would offer a button that shows an empty pane. The list follows
 /// SPEC.md's order ("Sessions, Appearance, Hosts, Recipes, Tensorlake, Containers, Credentials, Terminal, Checkouts,
 /// Agent trust and Notifications, followed by App"), and the button of the shown section is the pressed one.
-/// Specified: the section list holds exactly the Sessions, Appearance, Hosts, Credentials, Terminal, Checkouts, Agent
-/// trust and Notifications buttons, in that order, Sessions pressed and the others not.
+/// Specified: the section list holds exactly the Sessions, Appearance, Hosts, Containers, Credentials, Terminal,
+/// Checkouts, Agent trust and Notifications buttons, in that order, Sessions pressed and the others not.
 #[gpui::test]
 fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
     let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
@@ -288,6 +289,7 @@ fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
             ("Sessions".to_string(), Some(Toggled::True)),
             ("Appearance".to_string(), Some(Toggled::False)),
             ("Hosts".to_string(), Some(Toggled::False)),
+            ("Containers".to_string(), Some(Toggled::False)),
             ("Credentials".to_string(), Some(Toggled::False)),
             ("Terminal".to_string(), Some(Toggled::False)),
             ("Checkouts".to_string(), Some(Toggled::False)),
@@ -3259,5 +3261,547 @@ fn send_test_sends_nothing_of_the_form_and_reports_how_it_went(cx: &mut TestAppC
         body["topic"],
         json!("saved-again"),
         "closing discarded the draft"
+    );
+}
+
+// ---- Containers ----------------------------------------------------------------------------------------------------
+
+/// The two reads Containers sends as it is first shown, in its order.
+const CONTAINER_READS: [&str; 2] = ["/api/environment-places", "/api/container-orphans"];
+
+/// A container host's place as `GET /api/environment-places` answers it: host `host` named `name`, with the cached
+/// check's `reason` (none: ready) and whether a check is running.
+fn container_place(host: i64, name: &str, reason: Option<&str>, refreshing: bool) -> Value {
+    json!({ "place": { "kind": "podman_host", "host": host }, "name": name, "reason": reason, "refreshing": refreshing })
+}
+
+/// A leftover as `GET /api/container-orphans` answers it: named `name` on container host 7, with host row `host` if any.
+fn leftover(name: &str, host: Option<i64>) -> Value {
+    json!({ "id": "a".repeat(64), "name": name, "place": { "kind": "podman_host", "host": 7 }, "role": "session",
+            "host": host })
+}
+
+/// Open Settings and show Containers, returning the ids of its two reads (places, leftovers) after checking they are
+/// the only commands sent.
+fn show_containers(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> (u64, u64) {
+    open_settings(cx);
+    assert_eq!(sent(helm), [], "the premise: Sessions reads nothing");
+    click(cx, section_button(Section::Containers));
+    assert_eq!(heading(cx).as_deref(), Some("Containers"));
+    let reads = sent_reads(helm);
+    let paths: Vec<&str> = reads.iter().map(|(_, path)| path.as_str()).collect();
+    assert_eq!(paths, CONTAINER_READS);
+    (reads[0].0, reads[1].0)
+}
+
+/// What the window painted ([`painted`]) without the directional isolates host text is drawn between, so a sentence
+/// mixing the app's words and a host value can be matched as the user reads it.
+fn painted_words(cx: &mut VisualTestContext) -> String {
+    painted(cx).replace(['\u{2066}', '\u{2067}', '\u{2068}', '\u{2069}'], "")
+}
+
+/// The commands sent since the last call, as (method, path).
+fn sent_paths(helm: &mut FakeHelm) -> Vec<(Method, String)> {
+    sent(helm)
+        .into_iter()
+        .map(|command| (command.method, command.path))
+        .collect()
+}
+
+/// Answer every command sent since the last call with 202 and no body, as the helm answers a check it started in the
+/// background, after checking they are exactly checks of `hosts`.
+fn answer_checks(helm: &mut FakeHelm, hosts: &[i64], cx: &mut VisualTestContext) {
+    let checks = sent(helm);
+    let paths: Vec<(Method, String)> = checks
+        .iter()
+        .map(|command| (command.method, command.path.clone()))
+        .collect();
+    let expected: Vec<(Method, String)> = hosts
+        .iter()
+        .map(|host| (Method::Post, format!("/api/hosts/{host}/podman-probe")))
+        .collect();
+    assert_eq!(paths, expected, "a check of each container host");
+    for check in checks {
+        helm.reply(check.id, 202, None);
+    }
+    settle(cx);
+}
+
+/// Show Containers with the hosts read answered by `places` and the leftovers by `leftovers`, its checks answered
+/// (202) and the read after them answered by `places` again.
+fn show_containers_with(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    places: Value,
+    leftovers: Value,
+) {
+    let (places_read, leftovers_read) = show_containers(helm, cx);
+    helm.reply(places_read, 200, Some(places.clone()));
+    helm.reply(leftovers_read, 200, Some(leftovers));
+    settle(cx);
+    let hosts: Vec<i64> = places
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|place| place["place"]["host"].as_i64())
+        .collect();
+    answer_checks(helm, &hosts, cx);
+    let reads = sent_reads(helm);
+    assert_eq!(reads.len(), 1, "one read after the checks: {reads:?}");
+    helm.reply(reads[0].0, 200, Some(places));
+    settle(cx);
+}
+
+/// SPEC.md, "Container sessions": "Settings → Containers shows probe status per host", and SPEC_impl.md: the helm
+/// caches each host's check and refreshes it in the background, so the section must show the cached state at once and
+/// then ask for fresh checks, as the old section did, without treating the Tensorlake account as a container host.
+/// Neither list is pushed, so it reads them once per opening. Specified: showing Containers sends the places read and
+/// the leftovers read, and shows both as being read; once answered, each container host shows its name and Ready or
+/// its reason, a running check adds "· Refreshing…", the Tensorlake account is not listed, and no leftovers reads
+/// "None found"; then one check goes to each container host, and once they answer, one more places read; showing
+/// another section and Containers again sends nothing.
+#[gpui::test]
+fn containers_reads_the_hosts_and_leftovers_once_then_checks_each_container_host(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let (places_read, leftovers_read) = show_containers(&mut helm, cx);
+    let shown = painted(cx);
+    assert!(shown.contains("Reading container hosts…"), "{shown}");
+    assert!(shown.contains("Reading container leftovers…"), "{shown}");
+
+    let places = json!([
+        container_place(7, "build-box", None, false),
+        container_place(8, "gpu-1", Some("Podman is not installed on this host"), true),
+        { "place": { "kind": "tensorlake_account" }, "name": "sandbox-account", "reason": null, "refreshing": false },
+    ]);
+    helm.reply(places_read, 200, Some(places.clone()));
+    helm.reply(leftovers_read, 200, Some(json!([])));
+    settle(cx);
+    let shown = painted_words(cx);
+    assert!(shown.contains("build-box Ready"), "{shown}");
+    assert!(
+        shown.contains("gpu-1 Podman is not installed on this host · Refreshing…"),
+        "{shown}"
+    );
+    assert!(
+        !shown.contains("sandbox-account"),
+        "the Tensorlake account is not a container host"
+    );
+    assert!(shown.contains("None found"), "{shown}");
+
+    answer_checks(&mut helm, &[7, 8], cx);
+    let reads = sent_reads(&mut helm);
+    let paths: Vec<&str> = reads.iter().map(|(_, path)| path.as_str()).collect();
+    assert_eq!(
+        paths,
+        ["/api/environment-places"],
+        "one read after the checks"
+    );
+    helm.reply(
+        reads[0].0,
+        200,
+        Some(json!([container_place(7, "build-box", None, false)])),
+    );
+    settle(cx);
+    assert!(
+        !painted(cx).contains("gpu-1"),
+        "the later read replaces the rows"
+    );
+
+    click(cx, section_button(Section::Hosts));
+    click(cx, section_button(Section::Containers));
+    assert_eq!(sent(&mut helm), [], "read once per opening");
+}
+
+/// The helm pushes nothing when a background check finishes, so a host shown "· Refreshing…" would keep saying so
+/// for the whole opening. The migration's orchestrator chose one bounded later read over polling (2026-11-15).
+/// Specified: when the read after the checks shows a host still refreshing, nothing is sent until `FOLLOW_UP` has
+/// passed, then exactly one places read, whose answer shows the finished check; nothing follows it however long the
+/// dialog stays open, even if a host is still refreshing then. When the read after the checks shows no host
+/// refreshing, nothing follows it at all.
+#[gpui::test]
+fn a_running_check_is_read_again_once_after_the_follow_up_delay(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let refreshing = json!([container_place(7, "build-box", None, true)]);
+    show_containers_with(&mut helm, cx, refreshing.clone(), json!([]));
+    assert!(painted(cx).contains("build-box Ready · Refreshing…"));
+
+    test_support::advance(
+        cx,
+        super::containers::FOLLOW_UP - std::time::Duration::from_secs(1),
+    );
+    assert_eq!(sent(&mut helm), [], "nothing before the delay");
+    test_support::advance(cx, std::time::Duration::from_secs(1));
+    let reads = sent_reads(&mut helm);
+    let paths: Vec<&str> = reads.iter().map(|(_, path)| path.as_str()).collect();
+    assert_eq!(paths, ["/api/environment-places"], "one later read");
+    helm.reply(reads[0].0, 200, Some(refreshing));
+    settle(cx);
+    test_support::advance(cx, super::containers::FOLLOW_UP * 3);
+    assert_eq!(
+        sent(&mut helm),
+        [],
+        "the later read is the last, whatever it shows"
+    );
+
+    // Refresh starts a new chain; this one's read after the checks shows nothing running, so no later read follows.
+    click(cx, "containers-refresh");
+    let reads = sent_reads(&mut helm);
+    let paths: Vec<&str> = reads.iter().map(|(_, path)| path.as_str()).collect();
+    assert_eq!(paths, CONTAINER_READS, "Refresh reads both lists again");
+    let ready = json!([container_place(7, "build-box", None, false)]);
+    helm.reply(reads[0].0, 200, Some(ready.clone()));
+    helm.reply(reads[1].0, 200, Some(json!([])));
+    settle(cx);
+    answer_checks(&mut helm, &[7], cx);
+    let reads = sent_reads(&mut helm);
+    helm.reply(reads[0].0, 200, Some(ready));
+    settle(cx);
+    assert!(!painted(cx).contains("Refreshing…"));
+    test_support::advance(cx, super::containers::FOLLOW_UP * 2);
+    assert_eq!(
+        sent(&mut helm),
+        [],
+        "nothing follows a read with no check running"
+    );
+}
+
+/// SPEC.md: a container's removal destroys every session, process, file and unpushed change in it, so Delete must
+/// always ask, Cancel must send nothing, and the confirmed request must name only the row that was asked about (its
+/// place and canonical id; the helm rechecks ownership). A refusal must stay visible with the helm's words and leave
+/// the row, so the user can retry ("retryable failure"). Specified: Delete on a leftover without a host row asks
+/// "Delete container?" naming it, with focus on Cancel and nothing sent; Cancel closes it with nothing sent; Delete
+/// container sends `DELETE /api/container-orphans` with that place and id, while Refresh is unavailable; the helm's
+/// refusal shows under the section and the row stays; a second confirmed Delete that succeeds reads the leftovers
+/// again.
+#[gpui::test]
+fn a_leftover_delete_asks_sends_its_place_and_id_and_shows_a_refusal(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_containers_with(
+        &mut helm,
+        cx,
+        json!([container_place(7, "build-box", None, false)]),
+        json!([leftover("Interrupted launch", None)]),
+    );
+    click(cx, "containers-leftover-0-delete");
+    let shown = painted_words(cx);
+    assert!(shown.contains("Delete container?"), "{shown}");
+    // The name is a host part of its own, so the painted text has a break around it.
+    assert!(shown.contains("Delete Interrupted launch"), "{shown}");
+    assert!(
+        shown.contains(
+            "Every session, process, file and unpushed change in it will be permanently removed."
+        ),
+        "{shown}"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+    assert_eq!(sent(&mut helm), [], "asking sends nothing");
+    click(cx, "prompt-cancel");
+    assert!(!drawn(cx, "prompt-confirm"), "Cancel closed the question");
+    assert_eq!(sent(&mut helm), [], "Cancel sends nothing");
+
+    click(cx, "containers-leftover-0-delete");
+    click(cx, "prompt-confirm");
+    let deletes = sent(&mut helm);
+    assert_eq!(deletes.len(), 1, "{deletes:?}");
+    assert_eq!(
+        (deletes[0].method, deletes[0].path.as_str()),
+        (Method::Delete, "/api/container-orphans")
+    );
+    assert_eq!(
+        deletes[0].body,
+        Some(json!({ "place": { "kind": "podman_host", "host": 7 }, "id": "a".repeat(64) }))
+    );
+    assert_eq!(
+        available(cx, "containers-refresh"),
+        Some(false),
+        "busy while it is out"
+    );
+    helm.reply(
+        deletes[0].id,
+        502,
+        Some(json!("container cleanup did not finish: fixture refusal")),
+    );
+    settle(cx);
+    assert!(painted(cx).contains("container cleanup did not finish: fixture refusal"));
+    assert!(painted(cx).contains("Interrupted launch"), "the row stays");
+    assert_eq!(sent(&mut helm), [], "a refusal reads nothing");
+
+    click(cx, "containers-leftover-0-delete");
+    assert!(
+        !painted(cx).contains("fixture refusal"),
+        "asking again clears the old refusal"
+    );
+    click(cx, "prompt-confirm");
+    let deletes = sent(&mut helm);
+    helm.reply(deletes[0].id, 200, Some(json!({})));
+    settle(cx);
+    assert_eq!(
+        sent_paths(&mut helm),
+        [(Method::Get, "/api/container-orphans".to_string())],
+        "a done Delete reads the leftovers again"
+    );
+}
+
+/// SPEC_impl.md, "Podman places, creation and images": "Row-backed leftovers use the ordinary confirmed whole-host
+/// Delete path with its actor hold and provisioning lock"; the container-orphans route refuses them. Specified: a
+/// confirmed Delete of a leftover that has host row 12 sends `DELETE /api/hosts/12` with no body.
+#[gpui::test]
+fn a_leftover_with_a_host_row_is_deleted_through_host_removal(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_containers_with(
+        &mut helm,
+        cx,
+        json!([container_place(7, "build-box", None, false)]),
+        json!([leftover("farhelm-sess-recorded", Some(12))]),
+    );
+    click(cx, "containers-leftover-0-delete");
+    click(cx, "prompt-confirm");
+    let deletes = sent(&mut helm);
+    assert_eq!(deletes.len(), 1, "{deletes:?}");
+    assert_eq!(
+        (
+            deletes[0].method,
+            deletes[0].path.as_str(),
+            deletes[0].body.clone()
+        ),
+        (Method::Delete, "/api/hosts/12", None)
+    );
+}
+
+/// The old section kept a failed read an error ("A failed discovery must stay an error; an empty list promises no
+/// leftovers"), and a host that did not answer within the helm's bound reaches the GUI as such a failure. Specified: a
+/// refused places read shows its reason where the hosts would be, a refused leftovers read shows its reason instead of
+/// "None found", and no check is asked for after a refused places read.
+#[gpui::test]
+fn failed_container_reads_show_their_reasons_and_never_none_found(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let (places_read, leftovers_read) = show_containers(&mut helm, cx);
+    helm.reply(places_read, 503, Some(json!("fixture places refusal")));
+    helm.reply(
+        leftovers_read,
+        504,
+        Some(json!("the host did not answer within 20 seconds")),
+    );
+    settle(cx);
+    let shown = painted(cx);
+    assert!(shown.contains("fixture places refusal"), "{shown}");
+    assert!(
+        shown.contains("the host did not answer within 20 seconds"),
+        "{shown}"
+    );
+    assert!(!shown.contains("None found"), "{shown}");
+    assert!(drawn(cx, "containers-hosts-error") && drawn(cx, "containers-leftovers-error"));
+    assert_eq!(sent(&mut helm), [], "no check without a host list");
+}
+
+/// A Refresh pressed while the previous round's checks are still out must not let that round's later answers undo it:
+/// a stale refusal would replace the rows, and a stale read after its checks would schedule a later read nobody asked
+/// for, the polling the single later read exists to avoid. The helm answers in send order, so the old round's checks
+/// answer after Refresh but before its reads. Specified: with the first round's two checks unanswered, Refresh reads
+/// both lists again; the old checks then answering (one 202, one refused) show nothing and send nothing; the new
+/// round's reads, its checks and its read after them (no check running) show its rows, and nothing follows however
+/// long the dialog stays open.
+#[gpui::test]
+fn a_refresh_drops_the_older_rounds_answers_and_later_read(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let (places_read, leftovers_read) = show_containers(&mut helm, cx);
+    let refreshing = json!([
+        container_place(7, "build-box", None, true),
+        container_place(8, "gpu-1", None, true),
+    ]);
+    helm.reply(places_read, 200, Some(refreshing));
+    helm.reply(leftovers_read, 200, Some(json!([])));
+    settle(cx);
+    let old_checks = sent(&mut helm);
+    assert_eq!(
+        old_checks.len(),
+        2,
+        "premise: the first round's checks are out"
+    );
+
+    click(cx, "containers-refresh");
+    let reads = sent_reads(&mut helm);
+    let paths: Vec<&str> = reads.iter().map(|(_, path)| path.as_str()).collect();
+    assert_eq!(paths, CONTAINER_READS, "Refresh reads both lists again");
+    helm.reply(old_checks[0].id, 202, None);
+    helm.reply(
+        old_checks[1].id,
+        503,
+        Some(json!("fixture stale check refusal")),
+    );
+    settle(cx);
+    assert!(
+        !painted(cx).contains("fixture stale check refusal"),
+        "the old round's refusal is dropped"
+    );
+    assert_eq!(
+        sent(&mut helm),
+        [],
+        "the old round reads nothing after its checks"
+    );
+
+    let ready = json!([container_place(7, "build-box", None, false)]);
+    helm.reply(reads[0].0, 200, Some(ready.clone()));
+    helm.reply(reads[1].0, 200, Some(json!([])));
+    settle(cx);
+    answer_checks(&mut helm, &[7], cx);
+    let reads = sent_reads(&mut helm);
+    assert_eq!(reads.len(), 1, "the new round's read after its checks");
+    helm.reply(reads[0].0, 200, Some(ready));
+    settle(cx);
+    assert!(painted(cx).contains("build-box Ready"));
+    assert!(!painted(cx).contains("gpu-1"));
+    test_support::advance(cx, super::containers::FOLLOW_UP * 2);
+    assert_eq!(sent(&mut helm), [], "no later read from either round");
+}
+
+/// The later read is held by the section, so it must end with the section: an interim that outlived its dialog would
+/// become a read nobody can see, after every opening. Specified: with a later read due (a host still refreshing after
+/// the checks), closing Settings with Escape and letting `FOLLOW_UP` pass sends nothing; the same after a reset of the
+/// connection, which closes Settings, and the reconnect that follows.
+#[gpui::test]
+fn closing_settings_or_a_reset_cancels_the_later_read(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let refreshing = json!([container_place(7, "build-box", None, true)]);
+    show_containers_with(&mut helm, cx, refreshing.clone(), json!([]));
+    assert!(
+        painted(cx).contains("Refreshing…"),
+        "premise: a later read is due"
+    );
+    keys(cx, "escape");
+    assert!(!any_open(cx), "premise: Settings closed");
+    test_support::advance(cx, super::containers::FOLLOW_UP * 2);
+    assert_eq!(sent(&mut helm), [], "closing ended the later read");
+
+    show_containers_with(&mut helm, cx, refreshing, json!([]));
+    assert!(
+        painted(cx).contains("Refreshing…"),
+        "premise: a later read is due again"
+    );
+    helm.break_channel();
+    settle(cx);
+    assert!(!any_open(cx), "premise: the reset closed Settings");
+    helm.connect(vec![preferences_state(&Preferences::default())]);
+    settle(cx);
+    test_support::advance(cx, super::containers::FOLLOW_UP * 2);
+    assert_eq!(sent(&mut helm), [], "the reset ended the later read");
+}
+
+/// The overlap test above refuses one of the old round's checks, so it shows only that the checks' answers are dropped.
+/// The reads need their own guard: a read the old round sent before Refresh answers after it, in send order, and taken
+/// as the newest it would put stale rows on screen and, for the places read after the checks, arm a later read again.
+/// Specified: with the old round's read after its checks out when Refresh is pressed, its answer (a still-refreshing
+/// host named stale-box) shows nothing and arms nothing, so once the new round finishes with nothing running, nothing
+/// is sent however long the dialog stays open; and with the old round's leftovers read out when Refresh is pressed,
+/// its answer (a leftover named stale-leftover) shows nothing, and the section goes on reading until the new round's
+/// answer shows "None found".
+#[gpui::test]
+fn an_older_rounds_reads_answering_after_a_refresh_are_dropped(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    let (places_read, leftovers_read) = show_containers(&mut helm, cx);
+    helm.reply(
+        places_read,
+        200,
+        Some(json!([container_place(7, "build-box", None, true)])),
+    );
+    helm.reply(leftovers_read, 200, Some(json!([])));
+    settle(cx);
+    answer_checks(&mut helm, &[7], cx);
+    let old_after_checks = sent_reads(&mut helm);
+    assert_eq!(
+        old_after_checks.len(),
+        1,
+        "premise: the old round's read after its checks is out"
+    );
+
+    click(cx, "containers-refresh");
+    let reads = sent_reads(&mut helm);
+    helm.reply(
+        old_after_checks[0].0,
+        200,
+        Some(json!([container_place(7, "stale-box", None, true)])),
+    );
+    settle(cx);
+    assert!(
+        !painted(cx).contains("stale-box"),
+        "the old round's places are dropped"
+    );
+    let ready = json!([container_place(7, "build-box", None, false)]);
+    helm.reply(reads[0].0, 200, Some(ready.clone()));
+    helm.reply(reads[1].0, 200, Some(json!([])));
+    settle(cx);
+    answer_checks(&mut helm, &[7], cx);
+    let after = sent_reads(&mut helm);
+    helm.reply(after[0].0, 200, Some(ready.clone()));
+    settle(cx);
+    test_support::advance(cx, super::containers::FOLLOW_UP * 2);
+    assert_eq!(
+        sent(&mut helm),
+        [],
+        "the old round's read armed no later read"
+    );
+
+    // The leftovers: the old round's read is still out when Refresh is pressed.
+    click(cx, "containers-refresh");
+    let old_reads = sent_reads(&mut helm);
+    helm.reply(old_reads[0].0, 200, Some(ready.clone()));
+    settle(cx);
+    let old_checks = sent(&mut helm);
+    click(cx, "containers-refresh");
+    let new_reads = sent_reads(&mut helm);
+    helm.reply(
+        old_reads[1].0,
+        200,
+        Some(json!([leftover("stale-leftover", None)])),
+    );
+    settle(cx);
+    assert!(
+        !painted(cx).contains("stale-leftover"),
+        "the old round's leftovers are dropped"
+    );
+    for check in old_checks {
+        helm.reply(check.id, 202, None);
+    }
+    settle(cx);
+    helm.reply(new_reads[0].0, 200, Some(ready));
+    helm.reply(new_reads[1].0, 200, Some(json!([])));
+    settle(cx);
+    assert!(painted(cx).contains("None found"));
+}
+
+/// Each Refresh starts its round without the previous round's later read, or a Refresh pressed while one is due would
+/// still send it when its time came, a read nobody asked for. Specified: with a later read due (a host still refreshing
+/// after the checks), Refresh and a new round that finishes with nothing running leave nothing to send once
+/// `FOLLOW_UP` has passed.
+#[gpui::test]
+fn a_refresh_drops_the_later_read_already_due(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_containers_with(
+        &mut helm,
+        cx,
+        json!([container_place(7, "build-box", None, true)]),
+        json!([]),
+    );
+    assert!(
+        painted(cx).contains("Refreshing…"),
+        "premise: a later read is due"
+    );
+    click(cx, "containers-refresh");
+    let reads = sent_reads(&mut helm);
+    let ready = json!([container_place(7, "build-box", None, false)]);
+    helm.reply(reads[0].0, 200, Some(ready.clone()));
+    helm.reply(reads[1].0, 200, Some(json!([])));
+    settle(cx);
+    answer_checks(&mut helm, &[7], cx);
+    let after = sent_reads(&mut helm);
+    helm.reply(after[0].0, 200, Some(ready));
+    settle(cx);
+    test_support::advance(cx, super::containers::FOLLOW_UP * 2);
+    assert_eq!(
+        sent(&mut helm),
+        [],
+        "the earlier round's later read was dropped"
     );
 }

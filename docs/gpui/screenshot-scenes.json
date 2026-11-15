@@ -1060,6 +1060,11 @@
       "reference": "settings-hosts"
     },
     {
+      "golden": "settings-containers",
+      "title": "Settings at Containers, three container hosts ready and no containers left behind",
+      "reference": "settings-containers"
+    },
+    {
       "golden": "settings-credentials",
       "title": "Settings at Credentials: the Not encrypted on disk warning and the three lists with nothing saved (no Tensorlake API key form yet)",
       "reference": "settings-credentials"
