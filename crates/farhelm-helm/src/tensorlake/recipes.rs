@@ -16,7 +16,8 @@
 //!   definition; a missing name is a 404 (a PUT never creates). The URL is the
 //!   name's only authority, so names cannot change.
 //! - `DELETE /api/tensorlake/recipes/{name}` removes one, refused while a host
-//!   uses it, after deleting what Tensorlake bills for it.
+//!   uses it, after deleting what Tensorlake bills for it. It answers within
+//!   the helm's host reply bound, a slow cleanup carrying on past its reply.
 //! - `POST /api/tensorlake/recipes/{name}/build` starts or joins a snapshot
 //!   build (Build, Rebuild and Retry).
 //!
@@ -555,6 +556,11 @@ pub(crate) async fn create_recipe(
 /// Saves only change the definition. Current snapshots remain usable until
 /// their replacement build succeeds, and already-retired snapshots wait for
 /// the next build or recipe deletion to retry cleanup.
+///
+/// A recipe being deleted is refused with 409, as its Build is. A Delete can
+/// answer that its deletion carries on while the recipe is still listed (see
+/// [`delete_recipe`]), and a save accepted then would be lost without a word
+/// when the cleanup removes the row.
 pub(crate) async fn update_recipe(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
@@ -563,6 +569,13 @@ pub(crate) async fn update_recipe(
     let Ok(Json(save)) = body else {
         return malformed_body();
     };
+    if state.tensorlake.builds().is_deleting(&name) {
+        return (
+            StatusCode::CONFLICT,
+            format!("recipe {name} is being deleted"),
+        )
+            .into_response();
+    }
     match state
         .store
         .update_tensorlake_recipe(name.clone(), save)
@@ -577,26 +590,71 @@ pub(crate) async fn update_recipe(
     }
 }
 
-/// The compatibility route deletes the one shared recipe across all places.
+/// `DELETE /api/tensorlake/recipes/{name}`: the compatibility route deletes
+/// the one shared recipe across all places, answering within the host reply
+/// bound (`crate::sessions::HOST_REPLY_BOUND`) counted from here.
+///
 /// Admission excludes new builds and source users before either provider
 /// cleans resources. Partial failure retains the row and remaining ownership;
 /// an empty Tensorlake side needs no cloud credentials for Podman cleanup.
+///
+/// Unbounded, the cleanup could hold the GUI's one-at-a-time channel far past
+/// its watchdog (SPEC_impl.md, "The UI channel"): it waits for a cancelled
+/// build or preparation to stop, and a sandbox create in flight is never
+/// cancelled, which the Tensorlake client allows ten minutes; it then sweeps
+/// Tensorlake sandboxes and snapshots one call at a time and removes Podman
+/// images over SSH at each container host in turn. So the work runs on a task
+/// of its own (which also keeps it going if the caller leaves), and a cleanup
+/// still running at the bound gets a 504 saying the deletion carries on. A
+/// late success deletes the row and bumps the feed, so the recipe leaves the
+/// list; a late failure keeps the row and reaches only the helm's log, and a
+/// second Delete runs the cleanup again and answers its reason. Until the
+/// cleanup ends, a save of the recipe is refused ([`update_recipe`]).
+/// Decided by the GPUI migration's orchestrator on 2026-11-15.
+///
+/// The refusals its admission gives come from local state alone, so they
+/// answer at once, never as the 504. No lookup before the cleanup starts
+/// waits on Tensorlake or a host, so there is no separate, shorter bound
+/// before admission; the local reads are not bounded themselves and take
+/// milliseconds in practice.
 pub(crate) async fn delete_recipe(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> Response {
-    crate::run_owned(async move { delete_recipe_owned(state, name).await }).await
+    let timed_out = format!(
+        "recipe {name}'s cleanup did not finish within {} seconds; the deletion carries on, and \
+         the recipe leaves the recipe list once it is deleted; if it is still listed later, delete \
+         it again to see why",
+        crate::sessions::HOST_REPLY_BOUND.as_secs()
+    );
+    crate::sessions::within_host_reply_bound_saying(delete_recipe_owned(state, name), timed_out)
+        .await
 }
 
 /// Keep deletion admission through job cancellation and every confirmed
-/// cleanup even if the HTTP caller disappears during a remote command.
+/// cleanup even if the HTTP caller disappears during a remote command, or
+/// [`delete_recipe`] has already answered that the deletion carries on.
 async fn delete_recipe_owned(state: Arc<AppState>, name: String) -> Response {
-    // Refuse a recipe in use before deleting anything at any place: hosts
+    // Admission: refuse what local state already refuses, then take the
+    // shared deletion admission. An unknown recipe (404), one a host uses
+    // (409) and one already being deleted (409) are refused here, before
+    // anything is cancelled. Nothing in this part waits on Tensorlake or a
+    // host, which is what lets these refusals reach the user before the reply
+    // bound rather than as its 504.
+    //
+    // A recipe in use is refused before deleting anything at any place: hosts
     // started from its snapshot keep working without it, but the user asked
     // for nothing to change while the refusal stands.
     match state.store.tensorlake_recipe_users(name.clone()).await {
         Ok(0) => {}
         Ok(users) => return refusal_response(&name, Refusal::InUse(users)),
+        Err(error) => return storage_failure("delete the Tensorlake recipe", error),
+    }
+    // Only for a clear answer, the one PUT gives: the store's final
+    // transaction still refuses a recipe that went missing meanwhile.
+    match state.store.tensorlake_recipe_row(&name).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return refusal_response(&name, Refusal::Missing),
         Err(error) => return storage_failure("delete the Tensorlake recipe", error),
     }
     let builds = Arc::clone(state.tensorlake.builds());
@@ -607,7 +665,11 @@ async fn delete_recipe_owned(state: Arc<AppState>, name: String) -> Response {
             return cleanup_refusal_response(&name, refusal);
         }
     };
+    // The cleanup: from here on the wait is on Tensorlake and container hosts.
     if let Err(error) = state.manager.providers().clean_recipe(&name, &guard).await {
+        // Release admission before the bump, as the success path does: a
+        // client reacting to the bump may send the Delete again at once.
+        drop(guard);
         state.manager.events().bump();
         return crate::http_error(error);
     }
