@@ -76,6 +76,12 @@ pub struct Palette {
     pub fg_0: Token,
     /// `--fg-bright`: emphasis on an ordinary neutral surface, such as a link's host in its destination display.
     pub fg_bright: Token,
+    /// `--tunnel-fg`: the open-tunnels pill's text, the one distinctively colored control in the session's top row.
+    pub tunnel_fg: Token,
+    /// `--tunnel-bg`: the open-tunnels pill's fill.
+    pub tunnel_bg: Token,
+    /// `--tunnel-border`: the open-tunnels pill's edge.
+    pub tunnel_border: Token,
     /// `--fg-dim`: explanatory prose on a notice surface.
     pub fg_dim: Token,
     /// `--fg-1`: secondary text: labels, metadata, quiet status words.
@@ -174,6 +180,9 @@ pub const DARK: Palette = Palette {
     control_hover: rgb_token(0x333b49),
     fg_0: rgb_token(0xe2e6f0),
     fg_bright: rgb_token(0xf2f5ff),
+    tunnel_fg: rgb_token(0xa0d8cf),
+    tunnel_bg: rgb_token(0x213b3b),
+    tunnel_border: rgb_token(0x436b68),
     fg_dim: rgb_token(0xbbc3d2),
     fg_1: rgb_token(0xa2aabb),
     fg_2: rgb_token(0x9ba5b8),
@@ -245,6 +254,9 @@ pub const LIGHT: Palette = Palette {
     control_hover: rgb_token(0xdde3ee),
     fg_0: rgb_token(0x1b2130),
     fg_bright: rgb_token(0x111827),
+    tunnel_fg: rgb_token(0x1c6865),
+    tunnel_bg: rgb_token(0xd4eeeb),
+    tunnel_border: rgb_token(0x81bdb4),
     fg_dim: rgb_token(0x414b5f),
     fg_1: rgb_token(0x4f5a70),
     fg_2: rgb_token(0x5a6579),

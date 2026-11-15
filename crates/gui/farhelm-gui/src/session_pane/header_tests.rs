@@ -984,3 +984,123 @@ fn every_action_is_whole_and_reachable_in_a_650_pixel_pane() {
     );
     assert_whole_on_one_line(&waiting_nodes);
 }
+
+/// SPEC.md: "Stop, Restart, Replace, Clone, Delete and the tunnel pill remain fully visible and keyboard reachable from
+/// a 650px main pane". The pill is the first thing in the top row's left region, so it is what can push the actions,
+/// and with a long host name it is wide: it must give up its width first, cutting the host short and keeping both
+/// ports. Today the pill at its widest and the four actions fit in 650 pixels without the pill shrinking, so this pins
+/// that fit; the pill's shrinking is what keeps it once the tab strip and the text size group join the row. Specified:
+/// in a 650-pixel pane, with a session on a remote host whose terminal lists one tunnel on a host with a very long
+/// name, each of the four actions is drawn whole inside the pane, all on one line, and the pill is drawn whole inside
+/// the pane too, tracking a focus handle so Tab reaches it.
+#[test]
+fn the_tunnel_pill_and_every_action_fit_a_650_pixel_pane() {
+    let text_system = Arc::new(gpui_wgpu::CosmicTextSystem::new_without_system_fonts(
+        assets::UI_FONT,
+    ));
+    let mut cx =
+        HeadlessAppContext::with_platform(text_system, Arc::new(assets::Assets), || Ok(None));
+    cx.update(bootstrap::install).unwrap();
+    let (mut fake, handle, events) = FakeHelm::new();
+    let _connection = cx.update(|cx| crate::session::start(handle, events, None, cx));
+    cx.run_until_parked();
+    // The session on the pinned host list's SSH host 2, so its terminal reads its tunnels as it opens.
+    let mut remote = entry(&idle("a"), 0);
+    remote.value["host"] = json!(2);
+    let hosts: Value = serde_json::from_str(include_str!(
+        "../../../../farhelm-helm/http-contract/host-list.json"
+    ))
+    .unwrap();
+    let host_entries: Vec<KeyedEntry> = hosts["hosts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|host| KeyedEntry {
+            key: farhelm_proto::ui_channel::HostView::key(host["id"].as_i64().unwrap()),
+            value: host.clone(),
+        })
+        .collect();
+    let keys: Vec<String> = host_entries.iter().map(|entry| entry.key.clone()).collect();
+    let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+    let mut snapshot = snapshot_of(vec![remote], false);
+    snapshot.push(CollectionState {
+        collection: Collection::Hosts,
+        meta: meta(&keys),
+        entries: host_entries,
+    });
+    fake.connect(snapshot);
+    cx.run_until_parked();
+    let window = cx
+        .open_window(size(px(650.), px(300.)), |window, cx| {
+            let view = cx.new(|cx| {
+                let pane = cx.new(|cx| SessionPane::new(window, cx));
+                PaneOnly {
+                    pane,
+                    _list: cx.new(SessionList::new),
+                    root: root::attach(window, cx),
+                }
+            });
+            cx.new(|cx| Root::new(view, window, cx))
+        })
+        .unwrap();
+    let draw = |cx: &mut HeadlessAppContext| {
+        for _ in 0..3 {
+            cx.run_until_parked();
+            cx.update_window(window.into(), |_, window, cx| {
+                window.set_driver_enabled(true);
+                window.draw(cx).clear(cx);
+            })
+            .unwrap();
+        }
+        cx.update_window(window.into(), |_, window, _| window.driver_nodes().to_vec())
+            .unwrap()
+    };
+    draw(&mut cx);
+    // Answer what the app sent, in order: the terminal's tunnel read lists one tunnel on a very long host name.
+    let long_host = format!("a-very-long-host-name{}.example.internal", "-x".repeat(40));
+    let mut read = false;
+    for command in fake.commands() {
+        if command.method == Method::Get && command.path == "/api/sessions/a/tunnels" {
+            read = true;
+            fake.reply(
+                command.id,
+                200,
+                Some(json!({
+                    "available": true,
+                    "host_name": long_host,
+                    "consent": true,
+                    "tunnels": [{ "id": "t1", "local_port": 54321, "remote_port": 5173 }],
+                })),
+            );
+        } else {
+            fake.reply(command.id, 200, None);
+        }
+    }
+    assert!(
+        read,
+        "the premise: the remote session's terminal read its tunnels"
+    );
+    let nodes = draw(&mut cx);
+    assert_whole_on_one_line(&nodes);
+    let pill = nodes
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some("session-tunnel-pill"))
+        .expect("the pill is drawn");
+    assert_eq!(
+        pill.bounds.size.width,
+        px(280.),
+        "the premise: the long host name makes the pill as wide as it gets"
+    );
+    assert!(
+        pill.bounds.size.width > px(0.)
+            && pill.visible_bounds == pill.bounds
+            && pill.bounds.origin.x + pill.bounds.size.width <= px(650.),
+        "the pill is drawn whole inside the pane: {:?}, visible {:?}",
+        pill.bounds,
+        pill.visible_bounds
+    );
+    assert!(
+        pill.focus.is_some(),
+        "and tracks a focus handle, so Tab reaches it"
+    );
+}

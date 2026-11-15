@@ -42,6 +42,9 @@ fn metrics() -> CellMetrics {
 /// The size of the second owner's pane, in tests that draw two: small enough that both fit the test window.
 const SECOND_PANE: (f32, f32) = (400., 200.);
 
+/// The height of the row the test pane draws the tunnel pill in, as the session's top row is at least 30 pixels high.
+const PILL_ROW: f32 = 30.;
+
 /// The window's root: a pane of the size in `size` holding the owner (and, in tests that need one, a second, smaller
 /// pane below it), wired through [`root`] as the app's root views are, so the Take control button and focus behave as
 /// they do there. It handles the session Delete shortcut's action on the root element, as the session view will,
@@ -77,11 +80,25 @@ impl Render for Pane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (width, height) = self.size.get();
         let deletes = self.deletes.clone();
+        // The open-tunnels pill, as the session's top row places it, in a row of its own above the terminal while the
+        // session has tunnels open (never otherwise, so no other test's layout moves).
+        let pill = self
+            .owner
+            .update(cx, |owner, cx| owner.tunnel_pill(window, cx))
+            .map(|pill| {
+                div()
+                    .flex_none()
+                    .h(px(PILL_ROW))
+                    .flex()
+                    .items_center()
+                    .child(pill)
+            });
         let content = div()
             .size_full()
             .flex()
             .flex_col()
             .on_action(move |_: &DeleteSession, _, _| deletes.set(deletes.get() + 1))
+            .children(pill)
             .child(
                 div()
                     .flex_none()
@@ -128,19 +145,56 @@ fn harness(cx: &mut TestAppContext) -> Harness<'_> {
 
 /// [`harness`], with a second owner, made after the first, drawn below it when `two` is set.
 fn harness_with(cx: &mut TestAppContext, two: bool) -> Harness<'_> {
+    harness_connected(cx, two, Vec::new())
+}
+
+/// [`harness`], with the session `s1` listed on a remote host: the pinned session fixture, whose host is the pinned
+/// host list's SSH host 2. Its terminal reads its tunnels as it opens.
+fn remote_harness(cx: &mut TestAppContext) -> Harness<'_> {
+    let hosts: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../farhelm-helm/http-contract/host-list.json"
+    ))
+    .unwrap();
+    let entries: Vec<_> = hosts["hosts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|host| farhelm_proto::ui_channel::KeyedEntry {
+            key: farhelm_proto::ui_channel::HostView::key(host["id"].as_i64().unwrap()),
+            value: host.clone(),
+        })
+        .collect();
+    let keys: Vec<String> = entries.iter().map(|entry| entry.key.clone()).collect();
+    let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+    let hosts = farhelm_proto::ui_channel::CollectionState {
+        collection: farhelm_proto::ui_channel::Collection::Hosts,
+        meta: test_support::meta(&keys),
+        entries,
+    };
+    harness_connected(cx, false, vec![test_support::sessions(&["s1"]), hosts])
+}
+
+/// The harness, connected with an empty preferences row and `more` collections.
+fn harness_connected(
+    cx: &mut TestAppContext,
+    two: bool,
+    more: Vec<farhelm_proto::ui_channel::CollectionState>,
+) -> Harness<'_> {
     test_support::install(cx);
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = cx.update(|cx| session::start(handle, events, None, cx));
     // An empty preferences row, as a fresh helm pushes it: a test changes a preference by pushing to it (the client
     // ignores changes to a collection it has no snapshot of).
-    helm.connect(vec![farhelm_proto::ui_channel::CollectionState {
+    let mut snapshot = vec![farhelm_proto::ui_channel::CollectionState {
         collection: farhelm_proto::ui_channel::Collection::Preferences,
         meta: test_support::meta(&[farhelm_proto::ui_channel::PREFERENCES_KEY]),
         entries: vec![farhelm_proto::ui_channel::KeyedEntry {
             key: farhelm_proto::ui_channel::PREFERENCES_KEY.into(),
             value: serde_json::json!({}),
         }],
-    }]);
+    }];
+    snapshot.extend(more);
+    helm.connect(snapshot);
     cx.run_until_parked();
     let session = cx.update(|cx| connection.read(cx).session().cloned().unwrap());
     let opened: Opened = Rc::new(RefCell::new(None));
@@ -2737,12 +2791,8 @@ fn with_consent_a_cmd_click_opens_at_once_and_a_refusal_shows_until_dismissed(
         "the refusal shows"
     );
     assert_eq!(
-        h.read(|owner, cx| owner
-            .tunnels()
-            .read(cx)
-            .notice()
-            .map(|n| n.raw().to_string())),
-        Some("the helm is shutting down".to_string()),
+        h.tunnel_notice().as_deref(),
+        Some("the helm is shutting down"),
         "in the helm's words"
     );
     let reread = h.helm.commands();
@@ -2854,14 +2904,17 @@ impl Harness<'_> {
         on
     }
 
-    /// The tunnel notice's words, as the helm or the app wrote them.
+    /// The tunnel notice's words, as the helm or the app wrote them, a line per failure; `None` when it is empty.
     fn tunnel_notice(&mut self) -> Option<String> {
         self.read(|owner, cx| {
-            owner
+            let lines: Vec<String> = owner
                 .tunnels()
                 .read(cx)
                 .notice()
-                .map(|notice| notice.raw().to_string())
+                .iter()
+                .map(|line| line.raw().to_string())
+                .collect();
+            (!lines.is_empty()).then(|| lines.join("\n"))
         })
     }
 }
@@ -3111,6 +3164,368 @@ fn a_lookalike_loopback_hyperlink_keeps_its_warning_and_adds_the_hint(cx: &mut T
         Some(LOOPBACK_HINT),
         "and the hint is added"
     );
+}
+
+// ---- The open-tunnels pill and its list ----------------------------------------------------------------------------
+
+impl Harness<'_> {
+    /// Answer the one command the terminal has sent, which must be its tunnel read, with `listed` tunnels as (id,
+    /// local port, remote port) on the remote host `build-box`.
+    fn answer_listing(&mut self, listed: &[(&str, u16, u16)]) {
+        let commands = self.helm.commands();
+        assert_eq!(
+            commands
+                .iter()
+                .map(|command| (command.method, command.path.as_str()))
+                .collect::<Vec<_>>(),
+            [(farhelm_helm_client::Method::Get, "/api/sessions/s1/tunnels")],
+            "the premise: the terminal read its session's tunnels"
+        );
+        let tunnels: Vec<_> = listed
+            .iter()
+            .map(|(id, local, remote)| serde_json::json!({"id": id, "local_port": local, "remote_port": remote}))
+            .collect();
+        self.helm.reply(
+            commands[0].id,
+            200,
+            Some(serde_json::json!({
+                "available": true,
+                "host_name": "build-box",
+                "consent": true,
+                "tunnels": tunnels,
+            })),
+        );
+        settle(self.cx);
+        redraw(self.cx);
+    }
+
+    /// The pill's accessible name, from a fresh frame's record; `None` when no pill is drawn.
+    fn pill_label(&mut self) -> Option<String> {
+        test_support::frame(self.cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some(tunnels::PILL_ID))
+            .and_then(|node| node.label.map(|label| label.to_string()))
+    }
+}
+
+/// SPEC.md: the pill lists a session's open tunnels, so its tunnels must be known as the session view opens, not only
+/// once a loopback link happens to be hovered; and the listing is not pushed, so the read must not repeat on every
+/// frame. Specified: a remote session's terminal sends one tunnel read as it opens, and further frames send nothing.
+#[gpui::test]
+fn a_remote_sessions_terminal_reads_its_tunnels_once_as_it_opens(cx: &mut TestAppContext) {
+    let mut h = remote_harness(cx);
+    h.attach_showing("hello");
+    h.answer_listing(&[]);
+    redraw(h.cx);
+    redraw(h.cx);
+    assert_eq!(h.helm.commands(), [], "no second read");
+    assert_eq!(h.pill_label(), None, "no pill without tunnels");
+}
+
+/// SPEC.md: "A distinctively colored pill beside the terminal tabs shows the local-port → host-port mapping for one
+/// listener, or a count for several ... with the full mapping in its tooltip and accessible name." Specified: one
+/// tunnel names its mapping; a change of the shared consent reads the listing again (withdrawing it closes every
+/// tunnel), and with two tunnels the pill names their count.
+#[gpui::test]
+fn the_pill_names_one_mapping_or_a_count_and_follows_consent_changes(cx: &mut TestAppContext) {
+    let mut h = remote_harness(cx);
+    h.attach_showing("hello");
+    h.answer_listing(&[("t1", 54321, 5173)]);
+    assert_eq!(
+        h.pill_label().as_deref(),
+        Some("Open tunnels from this Mac: :54321 → build-box:5173")
+    );
+    h.tunnel_consent(true);
+    h.answer_listing(&[("t1", 54321, 5173), ("t2", 54400, 8080)]);
+    assert_eq!(
+        h.pill_label().as_deref(),
+        Some("2 open tunnels from this Mac")
+    );
+    h.tunnel_consent(false);
+    h.answer_listing(&[]);
+    assert_eq!(
+        h.pill_label(),
+        None,
+        "consent withdrawn: the helm closed them, and the pill goes"
+    );
+}
+
+/// The listing is read again whenever consent changes, and withdrawing consent closes every tunnel, so a change that
+/// lands while the first read is still out must be followed by another read: the first answer may predate it. Once,
+/// such a change went unread until something else was pushed. Specified: with the first read unanswered, a consent
+/// change sends a second read.
+#[gpui::test]
+fn a_consent_change_during_the_first_read_reads_again(cx: &mut TestAppContext) {
+    let mut h = remote_harness(cx);
+    h.attach_showing("hello");
+    let first = h.helm.commands();
+    assert_eq!(first.len(), 1, "the premise: the first read is out");
+    h.tunnel_consent(true);
+    let second = h.helm.commands();
+    assert_eq!(
+        second.iter().map(|c| c.path.as_str()).collect::<Vec<_>>(),
+        ["/api/sessions/s1/tunnels"],
+        "the change sends another read"
+    );
+}
+
+/// SPEC.md: "Opening the pill shows a list of mappings with a close button for each listener and Close all ...
+/// Escape closes the list and returns focus to the pill." Specified: pressing the pill draws the list with focus
+/// inside it; Escape closes it and focus is on the pill.
+#[gpui::test]
+fn the_pill_opens_its_list_and_escape_returns_focus_to_the_pill(cx: &mut TestAppContext) {
+    let mut h = remote_harness(cx);
+    h.attach_showing("hello");
+    h.answer_listing(&[("t1", 54321, 5173)]);
+    // As on a Mac, where a click leaves a button unfocused: the list must return focus to the pill itself, not to
+    // whatever held it before.
+    h.cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
+    click(h.cx, tunnels::PILL_ID);
+    settle(h.cx);
+    assert!(
+        h.cx.debug_bounds(tunnels::LIST_ID).is_some(),
+        "the list opens"
+    );
+    assert_eq!(
+        test_support::focused_id(h.cx).as_deref(),
+        Some(tunnels::CLOSE_ALL_ID),
+        "with focus on Close all"
+    );
+    keys(h.cx, "escape");
+    settle(h.cx);
+    assert!(
+        h.cx.debug_bounds(tunnels::LIST_ID).is_none(),
+        "Escape closes it"
+    );
+    assert_eq!(
+        test_support::focused_id(h.cx).as_deref(),
+        Some(tunnels::PILL_ID),
+        "and focus is back on the pill"
+    );
+}
+
+/// SPEC.md: "Tab follows its ordinary controls and leaving the list closes it without reclaiming focus", where a
+/// menu would hold Tab. Specified: with the list open and focus on Close all, its last control, Tab leaves the list,
+/// which closes, and focus is neither inside it nor sent back to the pill.
+#[gpui::test]
+fn tab_out_of_the_list_closes_it_without_reclaiming_focus(cx: &mut TestAppContext) {
+    let mut h = remote_harness(cx);
+    h.attach_showing("hello");
+    h.answer_listing(&[("t1", 54321, 5173)]);
+    click(h.cx, tunnels::PILL_ID);
+    settle(h.cx);
+    assert_eq!(
+        test_support::focused_id(h.cx).as_deref(),
+        Some(tunnels::CLOSE_ALL_ID),
+        "the premise: focus is on Close all"
+    );
+    keys(h.cx, "tab");
+    settle(h.cx);
+    assert!(
+        h.cx.debug_bounds(tunnels::LIST_ID).is_none(),
+        "leaving the list closes it"
+    );
+    assert_ne!(
+        test_support::focused_id(h.cx).as_deref(),
+        Some(tunnels::PILL_ID),
+        "without sending focus back to the pill"
+    );
+}
+
+/// SPEC.md: "Close all attempts the listeners shown at activation in order, continuing after failures and retaining
+/// failed listeners with their reasons", in a notice that a refresh does not dismiss. Specified: three tunnels are
+/// closed one at a time, in order; the first that closes leaves the list at once; the second's refusal does not stop
+/// the third; afterwards the listing is read again, and the notice names the failed tunnel with the helm's words.
+#[gpui::test]
+fn close_all_closes_in_order_and_keeps_failures_with_their_reasons(cx: &mut TestAppContext) {
+    let mut h = remote_harness(cx);
+    h.attach_showing("hello");
+    h.answer_listing(&[
+        ("t1", 54321, 5173),
+        ("t2", 54400, 8080),
+        ("t3", 54500, 9000),
+    ]);
+    click(h.cx, tunnels::PILL_ID);
+    settle(h.cx);
+    click(h.cx, tunnels::CLOSE_ALL_ID);
+    settle(h.cx);
+    let mut closed = Vec::new();
+    for (id, status, body) in [
+        ("t1", 204, None),
+        ("t2", 409, Some(serde_json::json!("the listener is busy"))),
+        ("t3", 204, None),
+    ] {
+        let commands = h.helm.commands();
+        assert_eq!(commands.len(), 1, "one close at a time");
+        assert_eq!(commands[0].method, farhelm_helm_client::Method::Delete);
+        closed.push(commands[0].path.clone());
+        h.helm.reply(commands[0].id, status, body);
+        settle(h.cx);
+        if id == "t1" {
+            assert!(
+                h.cx.debug_bounds("session-tunnel-close-t1").is_none(),
+                "a closed tunnel leaves the list at once"
+            );
+        }
+    }
+    assert_eq!(
+        closed,
+        [
+            "/api/sessions/s1/tunnels/t1",
+            "/api/sessions/s1/tunnels/t2",
+            "/api/sessions/s1/tunnels/t3",
+        ],
+        "in the order shown"
+    );
+    h.answer_listing(&[("t2", 54400, 8080)]);
+    assert_eq!(
+        h.tunnel_notice().as_deref(),
+        Some(":54400 → build-box:8080: the listener is busy"),
+        "the failure, named, survives the read"
+    );
+}
+
+/// SPEC.md: "refreshing the list does not dismiss a close failure", and the notice must be readable while the list is
+/// open, which would otherwise cover it. Specified: after a Close all with one refused tunnel, a failed read of the
+/// listing shows its own reason first and keeps the close failure; while the list is open the notice is drawn inside
+/// it.
+#[gpui::test]
+fn a_failed_read_after_close_all_keeps_the_close_failure_inside_the_open_list(
+    cx: &mut TestAppContext,
+) {
+    let mut h = remote_harness(cx);
+    h.attach_showing("hello");
+    h.answer_listing(&[("t1", 54321, 5173)]);
+    click(h.cx, tunnels::PILL_ID);
+    settle(h.cx);
+    click(h.cx, tunnels::CLOSE_ALL_ID);
+    settle(h.cx);
+    let close = h.helm.commands();
+    h.helm.reply(
+        close[0].id,
+        409,
+        Some(serde_json::json!("the listener is busy")),
+    );
+    settle(h.cx);
+    let read = h.helm.commands();
+    assert_eq!(
+        read[0].path, "/api/sessions/s1/tunnels",
+        "the premise: the read after Close all"
+    );
+    h.helm.reply(
+        read[0].id,
+        500,
+        Some(serde_json::json!("the helm is restarting")),
+    );
+    settle(h.cx);
+    assert_eq!(
+        h.tunnel_notice().as_deref(),
+        Some("the helm is restarting\n:54321 → build-box:5173: the listener is busy"),
+        "the read's failure first, and the close failure kept"
+    );
+    let (notice, list) = (
+        h.cx.debug_bounds(tunnels::NOTICE_ID)
+            .expect("the notice is drawn"),
+        h.cx.debug_bounds(tunnels::LIST_ID)
+            .expect("the premise: the list is open"),
+    );
+    assert!(
+        list.contains(&notice.origin) && list.contains(&notice.bottom_right()),
+        "inside the open list"
+    );
+    let drawn = test_support::frame(h.cx)
+        .into_iter()
+        .filter(|node| node.element_id.as_deref() == Some(tunnels::NOTICE_ID))
+        .count();
+    assert_eq!(drawn, 1, "and only there, not also under the list");
+    keys(h.cx, "escape");
+    settle(h.cx);
+    assert!(
+        h.cx.debug_bounds(tunnels::LIST_ID).is_none(),
+        "the premise: Escape closed the list"
+    );
+    assert!(
+        h.cx.debug_bounds(tunnels::NOTICE_ID).is_some(),
+        "and the notice is back under the top row"
+    );
+    // The pill closes the list too, and the notice comes back the same way, with no other cause for a frame.
+    click(h.cx, tunnels::PILL_ID);
+    settle(h.cx);
+    click(h.cx, tunnels::PILL_ID);
+    settle(h.cx);
+    assert!(
+        h.cx.debug_bounds(tunnels::LIST_ID).is_none(),
+        "the premise: the pill closed the list"
+    );
+    assert!(
+        h.cx.debug_bounds(tunnels::NOTICE_ID).is_some(),
+        "and the notice is back under the top row"
+    );
+}
+
+/// Each tunnel's own close button closes just that tunnel. Specified: the second row's close sends that tunnel's
+/// delete and nothing else.
+#[gpui::test]
+fn a_rows_close_button_closes_only_its_tunnel(cx: &mut TestAppContext) {
+    let mut h = remote_harness(cx);
+    h.attach_showing("hello");
+    h.answer_listing(&[("t1", 54321, 5173), ("t2", 54400, 8080)]);
+    click(h.cx, tunnels::PILL_ID);
+    settle(h.cx);
+    click(h.cx, "session-tunnel-close-t2");
+    settle(h.cx);
+    let commands = h.helm.commands();
+    assert_eq!(
+        commands.iter().map(|c| c.path.as_str()).collect::<Vec<_>>(),
+        ["/api/sessions/s1/tunnels/t2"]
+    );
+}
+
+/// Settings' tunnel switch turns tunnels on only through the same warning (SPEC.md: off "until they accept the
+/// warning"), so the terminal area offers it a way in. Specified: Allow saves `tunnel_consent: true` and reports the
+/// save as stored; Cancel saves nothing and reports nothing.
+#[gpui::test]
+fn settings_way_into_the_warning_saves_consent_only_on_allow(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_showing("hello");
+    let saved: Rc<RefCell<Vec<Result<(), String>>>> = Rc::default();
+    let record = saved.clone();
+    h.cx.update(|window, cx| {
+        let mark = focus::Mark::take(cx);
+        tunnels::ask_consent(&mark, window, cx, move |result, _| {
+            record
+                .borrow_mut()
+                .push(result.map_err(|reason| reason.raw().to_string()));
+        });
+    });
+    settle(h.cx);
+    click(h.cx, "prompt-cancel");
+    assert_eq!(h.helm.commands(), [], "Cancel saves nothing");
+    assert!(saved.borrow().is_empty(), "and reports nothing");
+    let record = saved.clone();
+    h.cx.update(|window, cx| {
+        let mark = focus::Mark::take(cx);
+        tunnels::ask_consent(&mark, window, cx, move |result, _| {
+            record
+                .borrow_mut()
+                .push(result.map_err(|reason| reason.raw().to_string()));
+        });
+    });
+    settle(h.cx);
+    click(h.cx, "prompt-confirm");
+    let save = h.helm.commands();
+    assert_eq!(
+        save.iter()
+            .map(|c| (c.path.as_str(), c.body.clone()))
+            .collect::<Vec<_>>(),
+        [(
+            "/api/preferences",
+            Some(serde_json::json!({ "tunnel_consent": true }))
+        )]
+    );
+    h.helm.reply(save[0].id, 204, None);
+    settle(h.cx);
+    assert_eq!(*saved.borrow(), [Ok(())], "Allow's save is reported stored");
 }
 
 // ---- Mouse reporting -----------------------------------------------------------------------------------------------

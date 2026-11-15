@@ -570,8 +570,13 @@ fn leaving_and_returning_while_the_session_is_hidden_marks_it_seen(cx: &mut Test
         &[],
     ));
     test_support::settle(cx);
+    // a lives on a remote host, so its terminal also reads a's tunnels as it opens; that read is the terminal's.
+    let sent: Vec<_> = answered(&mut fake)
+        .into_iter()
+        .filter(|(_, path, _)| !path.ends_with("/tunnels"))
+        .collect();
     assert_eq!(
-        answered(&mut fake),
+        sent,
         [seen_put("a", json!(100))],
         "a's return after the user left it is marked seen"
     );

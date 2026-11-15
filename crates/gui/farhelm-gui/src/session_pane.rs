@@ -52,10 +52,10 @@
 //! none ([`crate::session_list::empty_fleet`]); before the session list has been read it says "Loading sessions…"; and
 //! when there are sessions it is blank, because the session list is about to open one.
 //!
-//! NOTE: Not ported yet: terminal tabs and the tunnel pill (the top row's left region is empty until the terminal area
-//! brings them), the text size control (the terminal is drawn at the old default size), the details bar below the
-//! terminal, and the card a session without terminal contents shows instead. With no tabs, the scrim covers the agent
-//! terminal only, where the old one covered every pane.
+//! NOTE: Not ported yet: terminal tabs (the top row's left region holds only the terminal's open-tunnels pill until the
+//! terminal area brings them), the text size control (the terminal is drawn at the old default size), the details bar
+//! below the terminal, and the card a session without terminal contents shows instead. With no tabs, the scrim covers
+//! the agent terminal only, where the old one covered every pane.
 
 pub(crate) mod header;
 

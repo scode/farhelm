@@ -162,6 +162,9 @@ pub enum Icon {
     /// A downward chevron: the closed select's sign that it opens a list (the old app's ChevronDown glyph, which its
     /// split buttons and sort menu drew; the native select it stands in for drew the platform's own chevron).
     ChevronDown,
+    /// Two links of a chain: a tunnel from this Mac to a remote host's loopback (the old app's Tunnel glyph, on its
+    /// open-tunnels pill and the tunnel warning).
+    Tunnel,
     /// An eye: mark a session's latest output as seen, or as unseen again (the old app's mark-seen glyph, on its Mark
     /// read and Mark unread command).
     MarkSeen,
@@ -264,6 +267,7 @@ impl Icon {
         Icon::HostCastle,
         Icon::HostLaptop,
         Icon::ChevronDown,
+        Icon::Tunnel,
         Icon::MarkSeen,
         Icon::Settings,
         Icon::Sessions,
@@ -330,6 +334,7 @@ impl Icon {
             Icon::HostCastle => "icons/host-castle.svg",
             Icon::HostLaptop => "icons/host-laptop.svg",
             Icon::ChevronDown => "icons/chevron-down.svg",
+            Icon::Tunnel => "icons/tunnel.svg",
             Icon::MarkSeen => "icons/mark-seen.svg",
             Icon::Settings => "icons/settings.svg",
             Icon::Sessions => "icons/sessions.svg",
@@ -411,6 +416,7 @@ impl Assets {
             "icons/host-castle.svg" => Some(include_bytes!("../assets/icons/host-castle.svg")),
             "icons/host-laptop.svg" => Some(include_bytes!("../assets/icons/host-laptop.svg")),
             "icons/chevron-down.svg" => Some(include_bytes!("../assets/icons/chevron-down.svg")),
+            "icons/tunnel.svg" => Some(include_bytes!("../assets/icons/tunnel.svg")),
             "icons/mark-seen.svg" => Some(include_bytes!("../assets/icons/mark-seen.svg")),
             "icons/settings.svg" => Some(include_bytes!("../assets/icons/settings.svg")),
             "icons/sessions.svg" => Some(include_bytes!("../assets/icons/sessions.svg")),
