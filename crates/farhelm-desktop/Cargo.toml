@@ -73,6 +73,12 @@ gio = "0.18"
 # app's behavior). GPUI's macOS backend already links both.
 core-foundation = "0.10"
 core-foundation-sys = "0.8"
+# The status sounds play through AppKit's `NSSound`, made from the WAV bytes the GUI renders (src/sound.rs; decided by
+# the migration's orchestrator on 2026-11-14, no audio crate). GPUI's macOS backend already links all three at these
+# versions; only the features the player uses are named here.
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSSound"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSData"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 # Windows' std::fs::rename refuses an existing destination; MoveFileExW keeps the state files' replacement atomic
