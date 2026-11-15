@@ -848,10 +848,17 @@ are reached through that field and never take focus, as the old quick switcher's
 `OptionRow`. A second exception, decided by the migration's orchestrator on 2026-11-14: a pointer control whose action
 its owner offers by keyboard may take no focus. Two controls use it: `MarkToggle`, a session row's status dot that marks
 it read or unread, which the row's menu item does by keyboard, and the terminal's `Scrollbar`, whose terminal pages its
-history with Shift+PageUp and Shift+PageDown. Colors come only from theme tokens, which are copied from the old
-stylesheet (`crates/farhelm-ui/assets/app.css` at the reference commit). One dialog frame keeps the answer buttons
-pinned and scrolls the body, and when even those do not fit, the whole frame scrolls, as today's dialogs do. The
-window's minimum size is in SPEC.md ("Desktop window chrome"; `MIN_WINDOW_SIZE` in the app's bootstrap holds it).
+history with Shift+PageUp and Shift+PageDown. A region whose content holds nothing focusable gets its named tab stop
+(SPEC.md, "Reaching everything by keyboard") from one scroll stop in the component layer, drawn either as a `ScrollBox`
+around a card's bounded text, a stop whenever drawn as the old labelled box was, or through `DialogFrame::scroll_stop`
+for a dialog's body, a stop whenever the body holds no tab stop (a button counts), as the old region was; the focus
+coordinator detects that as the body is laid out, so the stop follows one frame behind with one redraw, rather than each
+dialog declaring it. Both take the region role, the old inset ring and the old browser's scroll keys, and both count as
+text fields for macOS's Tab reach: WebKit kept an element focusable through `tabindex="0"` in plain Tab's order whatever
+the Keyboard navigation setting. Colors come only from theme tokens, which are copied from the old stylesheet
+(`crates/farhelm-ui/assets/app.css` at the reference commit). One dialog frame keeps the answer buttons pinned and
+scrolls the body, and when even those do not fit, the whole frame scrolls, as today's dialogs do. The window's minimum
+size is in SPEC.md ("Desktop window chrome"; `MIN_WINDOW_SIZE` in the app's bootstrap holds it).
 
 Enter on a choice control is one rule of the component layer (`components::enter_choice`), the old launcher's
 `enter_choice`. A control takes it only when its owner hands it the dialog's main action, through an `on_enter` builder

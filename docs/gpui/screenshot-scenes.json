@@ -729,6 +729,11 @@
       "reference": "settings-notifications"
     },
     {
+      "golden": "scroll-box",
+      "title": "A labelled read-only scroll box: focused with its ring, and a short one at rest",
+      "reference": null
+    },
+    {
       "golden": "text-input-growing",
       "title": "The growing multi-line text box, grown to its text and held at its cap",
       "reference": "launcher-scrolled-end"
