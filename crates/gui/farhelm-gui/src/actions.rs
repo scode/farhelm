@@ -581,8 +581,9 @@ const ONCE_PER_PRESS: &[&dyn Action] = &[
     &TemplateNumberKey { digit: 0 },
     &ShowKeyboardShortcuts,
     // SPEC.md does not name this one: its "ignore repeat" ("Desktop window chrome") covers the two session shortcuts.
-    // It is listed the same way so a held chord opens the switcher once; a repeat would only reach the ground's
-    // handler, which refuses while the switcher is open, and listed, it never runs the opener again.
+    // The migration's orchestrator decided on 2026-11-14 that a held opening shortcut acts once per press, so it is
+    // listed the same way and a held chord opens the switcher once; a repeat would only reach the ground's handler,
+    // which refuses while the switcher is open, and listed, it never runs the opener again.
     &QuickSwitcher,
     // The Mac app menu's chords (`MAC_MENU_CHORDS`): a GPUI binding runs on every repeat of a held key, so without
     // these a held Ctrl+Cmd+F would flip full screen on and off, and a held Cmd+M, Cmd+H or Cmd+Q act again on each
