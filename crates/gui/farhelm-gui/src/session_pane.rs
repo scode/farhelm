@@ -1,37 +1,39 @@
 //! The main pane beside the session list: the selected session's top row and live terminal, or what the window says
 //! with no session open.
 //!
-//! SPEC.md, "Session view": "Opening a session shows the agent's real TUI, live". The pane owns one
-//! [`AttachedTerminal`], for the selected session's agent terminal, and draws the session's top row above it
-//! ([`header`]: the lifecycle actions, and the left region the terminal area's tabs will take), with the lines a long
+//! SPEC.md, "Session view": "Opening a session shows the agent's real TUI, live". The pane owns the selected session's
+//! terminals, the agent terminal and one per shell tab (the terminal area's [`TerminalSet`], which draws whichever the
+//! user chose), and draws the session's top row above them ([`header`]: the lifecycle actions, and the left region
+//! holding the set's tab strip and the open-tunnels pill), with the lines a long
 //! Restart or Replace and a refusal add between the two, and the details bar below it ([`details`]: the session's
 //! status, title, host and age). Neither row keeps anything that belongs to a session: both read the store and the
 //! operation store while they draw.
 //!
-//! - **One terminal, remade on every change of selection.** Choosing another session drops the terminal (which ends
-//!   its stream) and makes a new one with a fresh attachment lease. This is the old app's keyed remount (its
-//!   `SessionView` keyed by the session's id, so a switch tore the old view down and mounted a new one, which attached
-//!   again), not the GPUI prototype's deck of terminals kept attached across selections, which the old app never had.
-//!   A terminal is made for whichever session is selected, listed or not, because a selection the list cannot show (past
-//!   a cut listing, say) is still the open session.
+//! - **One set of terminals, remade on every change of selection.** Choosing another session drops the set (which ends
+//!   every one of its streams, tabs included) and makes a new one with a fresh attachment lease. This is the old app's
+//!   keyed remount (its `SessionView` keyed by the session's id, so a switch tore the old view down and mounted a new
+//!   one, which attached again), not the GPUI prototype's deck of terminals kept attached across selections, which the
+//!   old app never had. A terminal is made for whichever session is selected, listed or not, because a selection the
+//!   list cannot show (past a cut listing, say) is still the open session.
 //! - **One UI session.** The terminal is made with the current UI session's opener and retires with that session. The
 //!   pane keeps it in [`PerSession`], which compares the current UI session with the one it was made under each time
 //!   the pane reaches it, drawing included, so a terminal made for an earlier connection is never drawn or focused. The
 //!   session that a reset rebuilds gets a terminal of its own for the selection that survived.
-//! - **Focus.** The terminal is home (SPEC.md, "Where focus rests"): every time the pane makes one it tells the focus
-//!   coordinator, which gives it focus only if nothing else holds it. That covers the automatic choices: the session
-//!   opened at startup, and the next session after the open one went away, from another window or an agent included.
-//!   When the user chooses a session ([`chosen`]), its terminal also takes focus, from whatever holds it, through
-//!   [`focus::choose_terminal`] with the mark of the click that chose it.
+//! - **Focus.** The shown terminal is home (SPEC.md, "Where focus rests"): the agent terminal when the pane makes the
+//!   set, then whichever terminal the user chooses in the strip, and the agent terminal again when a chosen tab goes.
+//!   Each time, the pane tells the focus coordinator, which gives it focus only if nothing else holds it. That covers
+//!   the automatic choices: the session opened at startup, and the next session after the open one went away, from
+//!   another window or an agent included. When the user chooses a session ([`chosen`]), its terminal also takes focus,
+//!   from whatever holds it, through [`focus::choose_terminal`] with the mark of the click that chose it.
 //! - **A Delete of the open session.** From the moment its request is sent until the helm answers, the top row shows
 //!   what the row says in place of its actions ([`header`]), a scrim over the terminal says it again (stopping the
-//!   agent, stopping its terminal tabs, or deleting), and the terminal's
-//!   own notices are held back ([`AttachedTerminal::hold_notices`]): the Delete kills the agent and detaches the
-//!   viewer, so the exit line ("Process ended by signal 15") and the status line ("Session unavailable —
-//!   reconnecting") would otherwise read as failures while the Delete is going as asked. SPEC.md, "Lifecycle
-//!   operations": "a scrim over its terminal says it again. The terminal's own 'Detached' notice, which the delete
-//!   itself causes, is held back meanwhile; if the delete fails, the row and header come back with the refusal shown,
-//!   and a held notice appears." Both the scrim and the hold ask the operation store while they draw
+//!   agent, stopping its terminal tabs, or deleting), and the terminal's own notices are held back
+//!   ([`AttachedTerminal::hold_notices`](crate::terminal::attached::AttachedTerminal::hold_notices)): the Delete kills
+//!   the agent and detaches the viewer, so the exit line ("Process ended by signal 15") and the status line ("Session
+//!   unavailable — reconnecting") would otherwise read as failures while the Delete is going as asked. SPEC.md,
+//!   "Lifecycle operations": "a scrim over its terminal says it again. The terminal's own 'Detached' notice, which the
+//!   delete itself causes, is held back meanwhile; if the delete fails, the row and header come back with the refusal
+//!   shown, and a held notice appears." Both the scrim and the hold ask the operation store while they draw
 //!   ([`delete::in_flight`]), so neither keeps a copy that could outlive the request. A refusal therefore takes the
 //!   scrim away and lets the terminal show whatever it has to say by then, while the row shows the refusal. A Delete
 //!   that succeeds removes the session, and the selection rules take the pane from there. Ported from the old app's
@@ -53,10 +55,9 @@
 //! none ([`crate::session_list::empty_fleet`]); before the session list has been read it says "Loading sessions…"; and
 //! when there are sessions it is blank, because the session list is about to open one.
 //!
-//! NOTE: Not ported yet: terminal tabs (the top row's left region holds only the terminal's open-tunnels pill until the
-//! terminal area brings them), the details bar's managed-checkout mark and copy buttons, and the card a session without
-//! terminal contents shows instead. With no tabs, the scrim covers the agent terminal only,
-//! where the old one covered every pane.
+//! NOTE: Not ported yet: the details bar's managed-checkout mark and copy buttons, and the card a session without
+//! terminal contents shows instead. The scrim covers whichever terminal is shown, as the old one covered every pane; a
+//! Delete holds back the notices of all of them.
 
 pub(crate) mod details;
 pub(crate) mod header;
@@ -71,7 +72,6 @@ mod header_tests;
 mod tests;
 
 use farhelm_helm_client::Collections;
-use farhelm_helm_client::terminal::AttachmentLease;
 use farhelm_proto::DeleteGuard;
 use farhelm_proto::ui_channel::{Collection, SessionRow};
 use gpui::{
@@ -86,8 +86,10 @@ use crate::focus::{self, Mark};
 use crate::local_state::{self, LocalState};
 use crate::session::{self, PerSession, UiSession};
 use crate::session_list::{age, delete};
+use std::rc::Rc;
+
 use crate::terminal::CellMetrics;
-use crate::terminal::attached::{AttachedTerminal, TerminalTarget};
+use crate::terminal::set::{SharedHold, TerminalSet};
 use crate::theme::metrics;
 use crate::{layers, session_list, theme, ticker};
 
@@ -150,17 +152,20 @@ pub struct SessionPane {
     _observing: Vec<Subscription>,
 }
 
-/// The terminal the pane shows, and the session it is for.
+/// The terminals the pane shows (the session's agent terminal and its tabs), and the session they are for.
 struct Mounted {
     key: String,
-    terminal: Entity<AttachedTerminal>,
+    set: Entity<TerminalSet>,
+    /// Keeps home on the set's shown terminal as the user chooses tabs and tabs come and go.
+    _home: Option<Subscription>,
 }
 
 impl Mounted {
-    /// The agent terminal of the session filed under `key`, made for `session` with a lease of its own, at the text
-    /// size every open terminal is drawn at now ([`crate::terminal::text_size::current`]). `None` when the text system
-    /// cannot measure the terminal font, which is logged: the pane then stays blank, and the next change it observes
-    /// tries again, most likely with the same result.
+    /// The terminals of the session filed under `key` ([`TerminalSet`]: the agent terminal and its tabs, under one
+    /// lease of their own), made for `session`, at the text size every open terminal is drawn at now
+    /// ([`crate::terminal::text_size::current`]). `None` when the text system cannot measure the terminal font, which
+    /// is logged: the pane then stays blank, and the next change it observes tries again, most likely with the same
+    /// result.
     fn new(
         session: &Entity<UiSession>,
         key: String,
@@ -174,24 +179,17 @@ impl Mounted {
             );
             return None;
         };
-        let open = session.read(cx).terminal_opener();
-        let target = TerminalTarget {
-            session: key.clone(),
-            tab: None,
-            lease: AttachmentLease::new(),
-        };
         let deleting = key.clone();
-        let terminal = cx.new(|cx| {
-            let mut terminal = AttachedTerminal::new(session, target, metrics, open, cx);
-            // Asked while the terminal draws, from the current UI session's operation store, which notifies when a
-            // request starts or settles. A terminal outlives no UI session (it retires with its own), so the store it
-            // reads is always the one its Delete went through.
-            terminal.hold_notices(Box::new(move |cx| {
-                delete::in_flight(&deleting, cx).is_some()
-            }));
-            terminal
-        });
-        Some(Mounted { key, terminal })
+        // Asked while the terminals draw, from the current UI session's operation store, which notifies when a request
+        // starts or settles. A terminal outlives no UI session (it retires with its own), so the store it reads is
+        // always the one its Delete went through.
+        let hold: SharedHold = Rc::new(move |cx| delete::in_flight(&deleting, cx).is_some());
+        let set = cx.new(|cx| TerminalSet::new(session, key.clone(), metrics, hold, cx));
+        Some(Mounted {
+            key,
+            set,
+            _home: None,
+        })
     }
 }
 
@@ -225,25 +223,57 @@ impl SessionPane {
         }
     }
 
-    /// Bring the pane up to date: a terminal for the selected session under the current UI session (none when nothing is
-    /// selected or the window is inert), made home whenever it changes, and the user's latest choice acted on.
+    /// Bring the pane up to date: terminals for the selected session under the current UI session (none when nothing is
+    /// selected or the window is inert), the shown one made home every time, and the user's latest choice acted on.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let session =
             session::connection(cx).and_then(|connection| connection.read(cx).session().cloned());
         let wanted = session.as_ref().and_then(|_| local_state::selected(cx));
         let mounted = self.mounted.current(cx);
         if mounted.as_ref().map(|mounted| &mounted.key) != wanted.as_ref() {
-            // The old terminal goes with this assignment, and its stream with it.
+            // The old terminals go with this assignment, and their streams with them.
             *mounted = session
                 .zip(wanted)
                 .and_then(|(session, key)| Mounted::new(&session, key, cx));
-            let home = mounted
-                .as_ref()
-                .map(|mounted| mounted.terminal.read(cx).focus_handle().clone());
-            focus::set_home(home.as_ref(), window, cx);
+            // Home follows the shown terminal: a tab the user chooses (the set has already focused it) or the agent
+            // terminal when the chosen tab goes, which takes focus if the tab held it. Only while the set is still the
+            // one mounted under the current UI session: a set a reset left behind must not pull home back to its
+            // retired terminals.
+            if let Some(mounted) = mounted.as_mut() {
+                mounted._home =
+                    Some(
+                        cx.observe_in(&mounted.set, window, |pane, set, window, cx| {
+                            let current = pane
+                                .mounted
+                                .current(cx)
+                                .as_ref()
+                                .is_some_and(|mounted| mounted.set == set);
+                            if current {
+                                let home = set.read(cx).home(cx);
+                                focus::set_home(home.as_ref(), window, cx);
+                            }
+                        }),
+                    );
+            }
             cx.notify();
         }
+        // Every time, not only when the pane mounted something else: a reset drops the mounted terminals when `mounted`
+        // is next reached (above) while the selection stays, so the key compares equal, and home would otherwise keep
+        // naming a terminal that is gone.
+        let home = mounted
+            .as_ref()
+            .and_then(|mounted| mounted.set.read(cx).home(cx));
+        focus::set_home(home.as_ref(), window, cx);
         self.act_on_choice(window, cx);
+    }
+
+    /// The open session's terminals under the current UI session, for tests.
+    #[cfg(test)]
+    pub(crate) fn terminal_set(&mut self, cx: &App) -> Option<Entity<TerminalSet>> {
+        self.mounted
+            .current(cx)
+            .as_ref()
+            .map(|mounted| mounted.set.clone())
     }
 
     /// The key of the session whose terminal the pane shows, under the current UI session.
@@ -267,14 +297,13 @@ impl SessionPane {
         let Some((key, mark)) = chosen.latest.clone() else {
             return;
         };
-        let terminal = self
+        let home = self
             .mounted
             .current(cx)
             .as_ref()
             .filter(|mounted| mounted.key == key)
-            .map(|mounted| mounted.terminal.clone());
-        if let Some(terminal) = terminal {
-            let handle = terminal.read(cx).focus_handle().clone();
+            .and_then(|mounted| mounted.set.read(cx).home(cx));
+        if let Some(handle) = home {
             focus::choose_terminal(&handle, &mark, window, cx);
         }
     }
@@ -288,8 +317,8 @@ impl Render for SessionPane {
             .mounted
             .current(cx)
             .as_ref()
-            .map(|mounted| (mounted.key.clone(), mounted.terminal.clone()));
-        let Some((key, terminal)) = shown else {
+            .map(|mounted| (mounted.key.clone(), mounted.set.clone()));
+        let Some((key, terminals)) = shown else {
             self.spinner = None;
             self.pulse = None;
             self.clock = None;
@@ -321,7 +350,7 @@ impl Render for SessionPane {
                     .relative()
                     .flex_1()
                     .min_h_0()
-                    .child(terminal)
+                    .child(terminals)
                     .children(deleting.map(|guard| delete_scrim(guard, step, cx)))
                     // The approval region starts its cards below this box's top, clear of the tabs and the lines
                     // above the terminal, as the old cards started below `.terminal-panes`.

@@ -20,6 +20,7 @@
 
 pub mod attached;
 mod disclosure;
+pub(crate) mod set;
 mod style;
 #[cfg(test)]
 mod tests;

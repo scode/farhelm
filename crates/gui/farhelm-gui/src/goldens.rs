@@ -1885,11 +1885,12 @@ fn session_list_selected_stale_setup(state: &SceneState, _: &mut Window, cx: &mu
 }
 
 /// The fleet of [`session_list_setup`], which the row menu and Delete scenes draw too. Each row lists the helm
-/// fixture's one terminal tab and managed checkout. The rows run on the local host (the red laptop, inverted on the
-/// selected row) and on remotes (the cloud), with one launch of each kind and shield: a guarded Claude launch (an
-/// identity color and the green shield), the fixture's Codex YOLO launch (a grey mark and the amber slashed shield), a
-/// command with no agent asserted not YOLO (the Terminal mark), Cursor under its own setting (the dashed shield), a
-/// guarded Muse launch, and a session from before launch kinds (the amber question mark).
+/// fixture's managed checkout, and the waiting row one terminal tab, which its Delete question names. The rows run on
+/// the local host (the red laptop, inverted on the selected row) and on remotes (the cloud), with one launch of each
+/// kind and shield: a guarded Claude launch (an identity color and the green shield), the fixture's Codex YOLO launch
+/// (a grey mark and the amber slashed shield), a command with no agent asserted not YOLO (the Terminal mark), Cursor
+/// under its own setting (the dashed shield), a guarded Muse launch, and a session from before launch kinds (the amber
+/// question mark).
 fn fleet() -> [Fixture; 6] {
     let status = |state: &str| serde_json::json!({ "state": state });
     let agent = |harness: &str, permissions: serde_json::Value, program: &str| {
@@ -1915,7 +1916,9 @@ fn fleet() -> [Fixture; 6] {
             .cwd("/home/user/src/api")
             .host(1)
             .launch(agent("claude", serde_json::json!("guarded"), "claude")),
-        row("b", "Review the install docs", "waiting", 2 * MINUTE).cwd("/home/user/src/docs"),
+        row("b", "Review the install docs", "waiting", 2 * MINUTE)
+            .cwd("/home/user/src/docs")
+            .tabs(1),
         row("c", "Fix the flaky upload test", "idle", 14 * MINUTE)
             .seen(Some(TEST_NOW - DAY))
             .cwd("/srv/ci/uploads")

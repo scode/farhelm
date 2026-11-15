@@ -501,7 +501,7 @@ impl Fleet<'_> {
                 pane.mounted
                     .current(cx)
                     .as_ref()
-                    .map(|mounted| mounted.terminal.clone())
+                    .map(|mounted| mounted.set.read(cx).agent().clone())
             });
             terminal.and_then(|terminal| terminal.read(cx).shown_lift(cx))
         })
@@ -515,7 +515,7 @@ impl Fleet<'_> {
                 pane.mounted
                     .current(cx)
                     .as_ref()
-                    .map(|mounted| mounted.terminal.clone())
+                    .map(|mounted| mounted.set.read(cx).agent().clone())
             });
             terminal
                 .and_then(|terminal| terminal.read(cx).status_line())

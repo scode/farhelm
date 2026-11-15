@@ -884,6 +884,9 @@ mod shared_helper_tests {
         let mut listing = super::sessions(&["a", "b"]);
         for entry in &mut listing.entries {
             entry.value["id"] = serde_json::json!(entry.key);
+            // No terminal tabs, whatever the helm fixture lists: each tab of the open session attaches a terminal of
+            // its own, and this test counts a's agent terminal alone.
+            entry.value["tabs"] = serde_json::json!([]);
         }
         listing.meta.counts = Some(ListCounts {
             total: 2,

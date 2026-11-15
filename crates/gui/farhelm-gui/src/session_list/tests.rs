@@ -65,6 +65,8 @@ pub(crate) struct Fixture {
     /// The session's notifications in the helm's wire form and its read mark, when the test names them; else none, and
     /// a read mark of 0.
     notifications: Option<(Value, u64)>,
+    /// How many terminal tabs the row lists (`tab-0`, `tab-1`, ...); none unless a test asks.
+    tabs: usize,
 }
 
 pub(crate) fn session(key: &'static str) -> Fixture {
@@ -83,10 +85,17 @@ pub(crate) fn session(key: &'static str) -> Fixture {
         launch: None,
         screen_yolo: false,
         notifications: None,
+        tabs: 0,
     }
 }
 
 impl Fixture {
+    /// The row lists `tabs` terminal tabs.
+    pub(crate) fn tabs(mut self, tabs: usize) -> Self {
+        self.tabs = tabs;
+        self
+    }
+
     pub(crate) fn title(mut self, title: &str) -> Self {
         self.title = title.to_owned();
         self
@@ -172,6 +181,13 @@ impl Fixture {
             self.notifications.clone().unwrap_or_else(|| (json!([]), 0));
         value["notifications"] = notifications;
         value["notifications_read_through"] = json!(read_through);
+        // Only the tabs the test asked for, whatever the helm fixture's row has: an open session's tabs each attach a
+        // terminal of their own, which a test about the agent terminal would otherwise meet.
+        value["tabs"] = json!(
+            (0..self.tabs)
+                .map(|tab| json!({ "id": format!("tab-{tab}") }))
+                .collect::<Vec<_>>()
+        );
         entry
     }
 

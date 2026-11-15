@@ -203,6 +203,10 @@ pub struct StatusLine {
 /// and this owner keeps no copy that could go stale.
 pub type NoticeHold = Box<dyn Fn(&App) -> bool>;
 
+/// Told the pane's size each time the terminal is drawn and measures it (see [`AttachedTerminal::on_measured`]): the
+/// session view's terminal set hands it on to the terminals it is not drawing.
+pub type Measured = Rc<dyn Fn(Bounds<Pixels>, f32, &mut App)>;
+
 /// The owner of one attached terminal. See the module docs.
 pub struct AttachedTerminal {
     target: TerminalTarget,
@@ -262,7 +266,8 @@ pub struct AttachedTerminal {
     /// and the display that was not fully visible does not keep sitting over the explanation.
     refusal_raised: bool,
     /// The session's tunnels: what the destination display offers for a remote host's loopback link, and what a
-    /// Cmd-click opens through ([`super::tunnels`]). One per terminal until terminal tabs share one per session.
+    /// Cmd-click opens through ([`super::tunnels`]). One per session: a tab shares its agent terminal's
+    /// ([`AttachedTerminal::sharing`]).
     tunnels: Entity<Tunnels>,
     /// The platform the tunnel offer is decided for: this one, except in tests, which decide it for the Mac on any
     /// machine ([`AttachedTerminal::set_platform`]).
@@ -326,6 +331,11 @@ pub struct AttachedTerminal {
     _tunnel_reads: session::ObservingCurrent,
     /// Follows text size steps this client has sent and the helm has not answered yet ([`super::text_size`]).
     _size_steps: Subscription,
+    /// Told the pane's size whenever this terminal is drawn and measures it ([`AttachedTerminal::on_measured`]).
+    measured: Option<Measured>,
+    /// Kept from opening its stream while another window holds the session's terminals ([`AttachedTerminal::park`]),
+    /// with the size it would have opened at, once it is known.
+    parked: Option<Option<(Bounds<Pixels>, f32)>>,
     /// The text size the terminal is drawn at: the size current when it was made, then each size
     /// [`AttachedTerminal::follow_text_size`] took on. The maker measures the metrics it passes in at that same current
     /// size (the session pane does); a terminal handed metrics for another size would keep them until the size moves.
@@ -348,6 +358,20 @@ impl AttachedTerminal {
         open: OpenStream,
         cx: &mut Context<Self>,
     ) -> Self {
+        Self::sharing(session, target, metrics, open, None, cx)
+    }
+
+    /// [`AttachedTerminal::new`], reading and opening tunnels through `tunnels` when given: the session's terminal set
+    /// hands its tabs the agent terminal's, since tunnels belong to the session, so a tunnel a tab opens shows in the
+    /// top row's pill and a remote session's tabs read the list once between them rather than once each.
+    pub(crate) fn sharing(
+        session: &Entity<UiSession>,
+        target: TerminalTarget,
+        metrics: CellMetrics,
+        open: OpenStream,
+        tunnels: Option<Entity<Tunnels>>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let retired = session.read(cx).is_retired();
         // A retiring session notifies its observers; one that is dropped outright never does, hence both.
         let subscriptions = [
@@ -361,7 +385,8 @@ impl AttachedTerminal {
         #[cfg(any(feature = "agent", test))]
         probe::enroll(cx.weak_entity(), cx);
         super::text_size::enroll(cx.weak_entity(), cx);
-        let tunnels = cx.new(|cx| Tunnels::new(target.session.clone(), cx));
+        let tunnels =
+            tunnels.unwrap_or_else(|| cx.new(|cx| Tunnels::new(target.session.clone(), cx)));
         let tunnel_watch = cx.observe(&tunnels, |_, _, cx| cx.notify());
         let tunnel_reads =
             session::observe_current(cx, |owner: &mut Self, cx| owner.follow_store(cx));
@@ -422,6 +447,8 @@ impl AttachedTerminal {
             _tunnels: tunnel_watch,
             _tunnel_reads: tunnel_reads,
             _size_steps: size_steps,
+            measured: None,
+            parked: None,
             text_size: super::text_size::current(cx),
             #[cfg(test)]
             turns: 0,
@@ -501,6 +528,17 @@ impl AttachedTerminal {
         if let Some(fault) = &self.fault {
             return line(fault.to_string(), None, false);
         }
+        // Parked before it ever opened: it waits for Take control as a terminal the takeover detached does, and says so
+        // in the same words, the helm's own for a takeover.
+        if self.parked.is_some() && self.handle.is_none() {
+            return line(
+                "Detached: ".into(),
+                Some(HostText::from_host(
+                    farhelm_proto::ATTACH_REFUSED_TAKEN_OVER,
+                )),
+                true,
+            );
+        }
         match &self.stream {
             StreamState::Attaching | StreamState::Attached(_) => None,
             // The heading of the old app's outage card. Its explanation, phase and Reconnect now are the terminal
@@ -512,6 +550,14 @@ impl AttachedTerminal {
             // refused attach until Take control as well, and nothing else in this milestone can ask it to try again
             // (Retry comes with the reconnect display), so they offer it too, on purpose. A closed tab is gone, so there
             // is nothing to take.
+            // A tab that was attached and then closed or reaped says nothing: the session view drops it at the next
+            // pushed tab list, moments later, and SPEC.md has a tab whose shell exits disappear "automatically and
+            // silently". A tab the helm never attached (one the supervisor cannot find) still explains itself, or its
+            // pane would stay blank.
+            StreamState::Detached {
+                code: Some(DetachCode::TabClosed),
+                ..
+            } if self.attachment.is_some() => None,
             StreamState::Detached { code, reason } => line(
                 "Detached: ".into(),
                 Some(HostText::from_host(reason.as_str())),
@@ -557,8 +603,13 @@ impl AttachedTerminal {
             .map(|placement| placement.lift)
     }
 
-    /// The user's Take control: attach again through the displacing route. Only the states that wait for it offer it.
+    /// The user's Take control: attach again through the displacing route, or, parked, open at last. Only the states
+    /// that wait for it offer it.
     pub fn take_control(&mut self, cx: &mut Context<Self>) {
+        if self.parked.is_some() && self.handle.is_none() {
+            self.unpark(cx);
+            return;
+        }
         let waiting = matches!(
             self.stream,
             StreamState::Detached { .. } | StreamState::Refused { .. }
@@ -567,6 +618,56 @@ impl AttachedTerminal {
             handle.take_control();
             cx.notify();
         }
+    }
+
+    /// Tell `measured` the pane's size each time this terminal is drawn and measures it. The session view's terminal
+    /// set draws only the terminal of the tab the user chose, and hands that size on to the others
+    /// ([`AttachedTerminal::fit_hidden`]), so a hidden tab attaches and keeps the geometry it would have if shown (the
+    /// old app laid hidden tabs out with `visibility: hidden` for the same reason).
+    pub(crate) fn on_measured(&mut self, measured: Measured) {
+        self.measured = Some(measured);
+    }
+
+    /// Fit to `pane` as if drawn there on a display of `scale`, while the terminal is not drawn: open the stream at the
+    /// size that fits, or resize it. The terminal set calls this with the shown terminal's measured pane, which every
+    /// terminal of a session shares.
+    pub(crate) fn fit_hidden(&mut self, pane: Bounds<Pixels>, scale: f32, cx: &mut Context<Self>) {
+        self.fitted(pane, scale, cx);
+    }
+
+    /// Keep this terminal from opening its stream until [`AttachedTerminal::unpark`] or the user's Take control. The
+    /// terminal set parks a tab it learns about while another window holds the session's terminals: the helm groups a
+    /// session's streams by lease, so opening one under this window's lease would take every terminal back from the
+    /// window that took them, without the user asking (the old app's takeover latch, `terminal.js` at the reference
+    /// commit). Parked, it says it is detached and offers Take control. Does nothing to a terminal that already opened.
+    pub(crate) fn park(&mut self, cx: &mut Context<Self>) {
+        if self.handle.is_none() && self.parked.is_none() {
+            self.parked = Some(None);
+            cx.notify();
+        }
+    }
+
+    /// Let a parked terminal open, at the size it was last told, if any; otherwise it opens at its next fit.
+    pub(crate) fn unpark(&mut self, cx: &mut Context<Self>) {
+        if let Some(parked) = self.parked.take() {
+            if let Some((pane, scale)) = parked {
+                self.fitted(pane, scale, cx);
+            }
+            cx.notify();
+        }
+    }
+
+    /// Whether another window took this terminal over and it waits for Take control, or it is parked for the same
+    /// reason. The terminal set reads this to hold back tabs it learns about meanwhile.
+    pub(crate) fn taken_over(&self) -> bool {
+        (self.parked.is_some() && self.handle.is_none())
+            || matches!(
+                self.stream,
+                StreamState::Detached {
+                    code: Some(DetachCode::TakenOver),
+                    ..
+                }
+            )
     }
 
     /// The pane was drawn at `pane` on a display of `scale`: open the stream at the size that fits, or resize it when
@@ -581,6 +682,11 @@ impl AttachedTerminal {
             cx.notify();
         }
         if self.fault.is_some() {
+            return;
+        }
+        // Parked, it remembers where it would have opened and opens nothing (see `park`).
+        if let (Some(parked), None) = (&mut self.parked, &self.handle) {
+            *parked = Some((pane, scale));
             return;
         }
         let width = f32::from(pane.size.width) - 2. * PANE_PADDING;
@@ -1619,7 +1725,17 @@ impl Render for AttachedTerminal {
             move |bounds, (), window, cx| {
                 let scale = window.scale_factor();
                 window.defer(cx, move |_, cx| {
-                    let _ = owner.update(cx, |owner, cx| owner.fitted(bounds, scale, cx));
+                    let measured = owner
+                        .update(cx, |owner, cx| {
+                            owner.fitted(bounds, scale, cx);
+                            owner.measured.clone()
+                        })
+                        .ok()
+                        .flatten();
+                    // Outside the update: the hook reaches the other terminals of the set, which may reach this one.
+                    if let Some(measured) = measured {
+                        measured(bounds, scale, cx);
+                    }
                 });
             },
         )
@@ -2063,6 +2179,12 @@ impl AttachedTerminal {
         self.send(attachment, releases);
     }
 
+    /// Whether the terminal is inert ([`AttachedTerminal::set_inert`]), for tests.
+    #[cfg(test)]
+    pub(crate) fn is_inert(&self) -> bool {
+        self.inert
+    }
+
     /// The frame's color as last taken from the pushed state, for tests.
     #[cfg(test)]
     pub(crate) fn frame(&self) -> Option<HostColor> {
@@ -2077,12 +2199,20 @@ impl AttachedTerminal {
 
     /// Read the session's tunnels when they are due ([`Tunnels::stale`]): as a remote session's terminal opens, so its
     /// pill lists them at once, and whenever the shared consent changed since the last read. Called by the store
-    /// observer, never while drawing; the read goes out after the update that called it.
+    /// observer, never while drawing; the read goes out after the update that called it. The list may be shared by a
+    /// session's terminals ([`AttachedTerminal::sharing`]), which all hear the same store change and all find it due,
+    /// so the deferred read asks again: the first one sent makes it current for the rest.
     fn keep_tunnels_current(&mut self, cx: &mut Context<Self>) {
         let remote = tunnels::session_is_remote(&self.target.session, cx);
         if self.tunnels.read(cx).stale(remote, cx) {
             let tunnels = self.tunnels.clone();
-            cx.defer(move |cx| tunnels.update(cx, |tunnels, cx| tunnels.refresh(cx)));
+            cx.defer(move |cx| {
+                tunnels.update(cx, |tunnels, cx| {
+                    if tunnels.stale(remote, cx) {
+                        tunnels.refresh(cx);
+                    }
+                })
+            });
         }
     }
 
@@ -2110,8 +2240,8 @@ impl AttachedTerminal {
         self.platform = platform;
     }
 
-    /// The session's tunnels, for tests that answer their reads and check their notice.
-    #[cfg(test)]
+    /// The session's tunnels: tests answer their reads and check their notice, and the terminal set hands the agent
+    /// terminal's to its tabs.
     pub(crate) fn tunnels(&self) -> &Entity<Tunnels> {
         &self.tunnels
     }

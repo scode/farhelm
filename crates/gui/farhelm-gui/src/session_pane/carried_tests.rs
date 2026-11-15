@@ -93,13 +93,13 @@ fn sent(fake: &mut FakeHelm) -> Vec<(Method, String, serde_json::Value)> {
 /// selection is written or cleared); the list draws no row for a, counts "0 of 2" and says "No waiting sessions."; a's
 /// terminal is still drawn and the details bar names "Hidden work"; the Rename shortcut opens the editor, and a typed
 /// title sends `{"title": "renamed"}` to a's rename route; the helm's push of the renamed carried a and its reply close
-/// the editor, the details bar names "renamed", and the list still draws no row for a; the header's Stop then asks (the
-/// fixture has tabs), and Confirm sends a's Stop.
+/// the editor, the details bar names "renamed", and the list still draws no row for a; the header's Stop then asks (a
+/// lists a tab), and Confirm sends a's Stop.
 #[gpui::test]
 fn a_filtered_out_open_session_keeps_its_terminal_header_details_bar_and_rename(
     cx: &mut TestAppContext,
 ) {
-    let (mut fake, cx) = open_a(cx, session("a").title("Hidden work"), session("b"));
+    let (mut fake, cx) = open_a(cx, session("a").title("Hidden work").tabs(1), session("b"));
     hide_a(&mut fake, cx);
     assert_eq!(sent(&mut fake), [], "nothing but the query was sent");
     let nodes = frame(cx);
@@ -141,7 +141,7 @@ fn a_filtered_out_open_session_keeps_its_terminal_header_details_bar_and_rename(
     );
     fake.push(change(
         carrying(filtered(&[], 2, 0), "a"),
-        &[session("a").title("renamed")],
+        &[session("a").title("renamed").tabs(1)],
         &[],
     ));
     fake.reply(rename.id, 200, None);

@@ -25,16 +25,17 @@ use crate::main_view::MainView;
 use crate::session_list::tests::{listing, preferences_state, session};
 use crate::test_support::{self, any_open, settle, started};
 
-/// The sessions: `a` on host9 as its install `identity9`, `b` on host9's row as the install `old-install` it no longer
-/// names, `c` on the sandbox host11, and `d` on host5 as its recorded install `identity5`, which host5 now contradicts
-/// (its state is an identity mismatch), and `e` on host9 as `identity9`, titled "fix login" and launched as a command
-/// with a resume command, the shape Clone carries verbatim. `e` is outside the listing's order: the session a filter
-/// hides, which the helm keeps in the pushed collection while it is open, so the open session's actions still find it.
+/// The sessions: `a` on host9 as its install `identity9`, with one terminal tab open, `b` on host9's row as the install
+/// `old-install` it no longer names, `c` on the sandbox host11, and `d` on host5 as its recorded install `identity5`,
+/// which host5 now contradicts (its state is an identity mismatch), and `e` on host9 as `identity9`, titled "fix login"
+/// and launched as a command with a resume command, the shape Clone carries verbatim. `e` is outside the listing's
+/// order: the session a filter hides, which the helm keeps in the pushed collection while it is open, so the open
+/// session's actions still find it.
 fn fleet() -> CollectionState {
     let mut state = listing(
         &["a", "b", "c", "d"],
         &[
-            session("a").host(9),
+            session("a").host(9).tabs(1),
             session("b").host(9),
             session("c").host(11),
             session("d").host(5),
