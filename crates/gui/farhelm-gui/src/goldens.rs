@@ -9,17 +9,17 @@
 //! cannot reach, an empty fleet, a row's open menu, a row's notification list, a row's Delete question, and a pending
 //! and a refused Delete), the Rename editor, the Send feedback dialog (as it opens, and with a remembered contact), the
 //! select closed and open, the YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer,
-//! the Settings dialog at Sessions, at Appearance, at Hosts, at Recipes (empty, and with recipes in each build state),
-//! at Credentials, at Terminal and at Agent trust, the Hosts panel (closed, with Details, with a host failing to
-//! connect, with a host's setup running and failed, with outdated hosts' inline Update, and with a host's Update
-//! running), the Add host dialog and the setup confirmation it leads to, a host's actions menu, the host settings
-//! dialog at its top and scrolled to its end, the host refusal dialog for a refused Update, the version readout while
-//! an updater runs (the check button at rest, lit, warned and focused; work in progress; a check's outcomes; the
-//! update-menu toggle; its open menu; and the reinstall hover), the title bar the Linux window draws for itself
-//! (ordinary and maximized), the Open-Source Notices window over a short fixture, and the Trash button empty, full and
-//! freeing space, and the Trash dialog, alone and asking to delete everything or one host's archives, in both
-//! appearances, compared pixel for pixel. (The terminal stays dark in both appearances, so it draws identically in both
-//! pictures; only the scene's ground around it differs.)
+//! the Settings dialog at Sessions, at Appearance, at Hosts, at Recipes (empty, with recipes in each build state, and
+//! with a recipe's per-place lines), at Credentials, at Terminal and at Agent trust, the Hosts panel (closed, with
+//! Details, with a host failing to connect, with a host's setup running and failed, with outdated hosts' inline Update,
+//! and with a host's Update running), the Add host dialog and the setup confirmation it leads to, a host's actions
+//! menu, the host settings dialog at its top and scrolled to its end, the host refusal dialog for a refused Update, the
+//! version readout while an updater runs (the check button at rest, lit, warned and focused; work in progress; a
+//! check's outcomes; the update-menu toggle; its open menu; and the reinstall hover), the title bar the Linux window
+//! draws for itself (ordinary and maximized), the Open-Source Notices window over a short fixture, and the Trash button
+//! empty, full and freeing space, and the Trash dialog, alone and asking to delete everything or one host's archives,
+//! in both appearances, compared pixel for pixel. (The terminal stays dark in both appearances, so it draws identically
+//! in both pictures; only the scene's ground around it differs.)
 //!
 //! The agent approval card has its own two scenes, wide and narrow, and the Add host dialog as an agent's host add
 //! request opens it one more, in both appearances. A dialog's notices made a stop of their own have one too, focused
@@ -2810,37 +2810,73 @@ fn keyboard_shortcuts_dialog_setup(state: &SceneState, window: &mut Window, cx: 
 /// Checkouts' reads as the reference stack had them: no default folder, no post-clone command, and a checkout kept
 /// ready, Notifications' read of the ntfy settings with the helm's defaults (off, `https://ntfy.sh`, no topic, Default
 /// priority, no token), Credentials' reads with an empty catalog and no Tensorlake key saved, Recipes' read of the
-/// Tensorlake account with a key saved (so the rows offer their builds) over an empty pushed catalog, and Containers'
-/// reads with the reference's three container hosts, all ready, and no leftovers; nothing else is answered, so the
-/// checks Containers then asks for stay unanswered and the rows keep the first read's state. The opener is the scene's
-/// ring handle, which stands in for the gear. The fake and the connection are kept for the scene's life, like the
-/// Rename editor's.
+/// Tensorlake account with a key saved (so the rows offer their builds) over an empty pushed catalog and no pushed
+/// places, and Containers' reads with the reference's three container hosts, all ready, and no leftovers; nothing else
+/// is answered, so the checks Containers then asks for stay unanswered and the rows keep the first read's state. The
+/// opener is the scene's ring handle, which stands in for the gear. The fake and the connection are kept for the
+/// scene's life, like the Rename editor's.
 fn settings_scene(
     state: &SceneState,
     section: crate::settings::Section,
     window: &mut Window,
     cx: &mut App,
 ) {
-    settings_scene_with(state, section, Vec::new(), window, cx);
+    settings_scene_with(state, section, SettingsFixture::default(), window, cx);
 }
 
-/// [`settings_scene`], with `recipes` (entries as `GET /api/tensorlake/recipes` lists them) as the helm's pushed recipe
-/// catalog, which the snapshot carries beside the preference row.
+/// What a Settings scene's fake helm holds beyond [`settings_scene`]'s defaults.
+#[derive(Default)]
+struct SettingsFixture {
+    /// The pushed recipe catalog's entries, as `GET /api/tensorlake/recipes` lists them; no recipes when empty.
+    recipes: Vec<serde_json::Value>,
+    /// The pushed recipe places' entries, as `GET /api/recipe-places` lists them; no places when empty.
+    places: Vec<serde_json::Value>,
+    /// The registered hosts, in the first snapshot's hosts collection (where Recipes' place names come from); the
+    /// snapshot carries no hosts collection when empty.
+    hosts: Vec<farhelm_proto::ui_channel::HostView>,
+    /// The platform the Terminal section decides its tunnel switch for, instead of this machine's, through the
+    /// dialog's test-only setter (`settings::decide_tunnels_for_opened`) applied as it opens.
+    tunnels: Option<farhelm_input_mapping::Platform>,
+}
+
+/// `entries` as a pushed collection's first snapshot, each filed under the key `key` gives it, in their order.
+fn pushed_state(
+    collection: Collection,
+    entries: Vec<serde_json::Value>,
+    key: impl Fn(&serde_json::Value) -> String,
+) -> CollectionState {
+    let entries: Vec<KeyedEntry> = entries
+        .into_iter()
+        .map(|value| KeyedEntry {
+            key: key(&value),
+            value,
+        })
+        .collect();
+    let order: Vec<&str> = entries.iter().map(|entry| entry.key.as_str()).collect();
+    CollectionState {
+        collection,
+        meta: test_support::meta(&order),
+        entries,
+    }
+}
+
+/// [`settings_scene`], with the fake helm holding `fixture`.
 fn settings_scene_with(
     state: &SceneState,
     section: crate::settings::Section,
-    recipes: Vec<serde_json::Value>,
+    fixture: SettingsFixture,
     window: &mut Window,
     cx: &mut App,
 ) {
+    let SettingsFixture {
+        recipes,
+        places,
+        hosts,
+        tunnels,
+    } = fixture;
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
-    let names: Vec<String> = recipes
-        .iter()
-        .map(|recipe| recipe["name"].as_str().unwrap_or_default().to_owned())
-        .collect();
-    let order: Vec<&str> = names.iter().map(String::as_str).collect();
-    helm.connect(vec![
+    let mut snapshot = vec![
         CollectionState {
             collection: Collection::Preferences,
             meta: test_support::meta(&[PREFERENCES_KEY]),
@@ -2849,17 +2885,20 @@ fn settings_scene_with(
                 value: serde_json::json!({ "auto_update_remote_hosts": true }),
             }],
         },
-        CollectionState {
-            collection: Collection::Recipes,
-            meta: test_support::meta(&order),
-            entries: names
-                .iter()
-                .cloned()
-                .zip(recipes)
-                .map(|(key, value)| KeyedEntry { key, value })
-                .collect(),
-        },
-    ]);
+        pushed_state(Collection::Recipes, recipes, |recipe| {
+            recipe["name"].as_str().unwrap_or_default().to_owned()
+        }),
+        // A place that does not decode gets no key, and the fake helm's snapshot then fails the scene loudly.
+        pushed_state(Collection::RecipePlaces, places, |place| {
+            serde_json::from_value::<farhelm_proto::RecipePlaceView>(place.clone())
+                .map(|view| farhelm_proto::RecipePlaceView::key(&view.recipe, view.place))
+                .unwrap_or_default()
+        }),
+    ];
+    if !hosts.is_empty() {
+        snapshot.push(crate::hosts::tests::hosts(&hosts));
+    }
+    helm.connect(snapshot);
     // The dialog reads the row from the store, which the snapshot reaches after this setup returns: open once the
     // connection has a UI session, and only once.
     let handle = window.window_handle();
@@ -2876,6 +2915,9 @@ fn settings_scene_with(
             let mark = Mark::take(cx);
             crate::settings::open_at(section, &opener, &mark, window, cx);
         });
+        if let Some(platform) = tunnels {
+            crate::settings::decide_tunnels_for_opened(platform, cx);
+        }
         let mut helm = answering.borrow_mut();
         for read in helm.commands() {
             let trust = read.path.starts_with("/api/checkout-claude-trust")
@@ -3207,7 +3249,79 @@ fn settings_recipes_rows_setup(state: &SceneState, window: &mut Window, cx: &mut
     settings_scene_with(
         state,
         crate::settings::Section::Recipes,
-        recipes,
+        SettingsFixture {
+            recipes,
+            ..SettingsFixture::default()
+        },
+        window,
+        cx,
+    );
+}
+
+/// Settings at Recipes with one recipe's per-place lines and a stale prepared snapshot, against the reference
+/// `settings-recipes`, whose stack had no recipe: `rust-dev`, built, whose prepared snapshot the helm reports expired;
+/// ready at `build-box` (a registered host, named from the hosts collection) with an older image awaiting cleanup; and
+/// building at a host the registry no longer lists ("Unavailable place"), whose Rebuild is unavailable. The Tensorlake
+/// account's place is pushed too and draws no line. No line shows an age, which the viewer's clock would move.
+fn settings_recipes_places_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    let recipe = serde_json::json!({
+        "name": "rust-dev",
+        "size": { "cpus": 2, "memory_gb": 4, "disk_gb": 20 },
+        "base": { "kind": "tensorlake_ubuntu" },
+        "packages": ["jq"],
+        "claude": null, "codex": null,
+        "claude_login_credential": null, "codex_login_credential": null, "github_token_credential": null,
+        "tunnels": [],
+        "snapshot": {
+            "id": "snap-1", "built_at": 1_793_714_525, "base": { "kind": "tensorlake_ubuntu" }, "disk_gb": 20,
+            "packages": ["jq"], "claude_version": "2.0.1 (Claude Code)", "codex_version": "codex-cli 0.40.0",
+        },
+        "build": { "state": "idle" },
+        "prepared": {
+            "id": "prepared-1", "prepared_at": 1_793_714_525, "farhelm_version": "0.38.0",
+            "source_snapshot": "snap-1", "stale_reason": "expired",
+        },
+        "preparation": { "state": "idle" },
+        "cleanup_pending": false,
+    });
+    let place = |place: serde_json::Value, fields: serde_json::Value| {
+        let mut entry = serde_json::json!({
+            "recipe": "rust-dev", "place": place, "ready": false, "building": false, "reason": null,
+            "built_at": null, "prepared_at": null, "step": null, "cleanup_pending": false,
+        });
+        if let (Some(entry), Some(fields)) = (entry.as_object_mut(), fields.as_object()) {
+            entry.extend(fields.clone());
+        }
+        entry
+    };
+    let places = vec![
+        place(
+            serde_json::json!({ "kind": "tensorlake_account" }),
+            serde_json::json!({ "ready": true }),
+        ),
+        place(
+            serde_json::json!({ "kind": "podman_host", "host": 7 }),
+            serde_json::json!({ "ready": true, "built_at": 1_793_714_525, "cleanup_pending": true }),
+        ),
+        place(
+            serde_json::json!({ "kind": "podman_host", "host": 9 }),
+            serde_json::json!({ "building": true, "step": "installing packages" }),
+        ),
+    ];
+    use crate::hosts::tests::{aliased, connected, host};
+    settings_scene_with(
+        state,
+        crate::settings::Section::Recipes,
+        SettingsFixture {
+            recipes: vec![recipe],
+            places,
+            hosts: vec![aliased(
+                host(7, "ssh", connected()),
+                "build-box",
+                "dev@build-box.invalid",
+            )],
+            ..SettingsFixture::default()
+        },
         window,
         cx,
     );
@@ -3224,10 +3338,16 @@ fn settings_credentials_setup(state: &SceneState, window: &mut Window, cx: &mut 
 /// (`Section::first`), so no ring shows, as in the reference, where the section was reached by a click. The reference is
 /// the browser interface, which had no tunnel switch; the old Mac app drew it under the link choices.
 fn settings_terminal_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
-    cx.set_global(crate::settings::TunnelsPlatform(
-        farhelm_input_mapping::Platform::Mac,
-    ));
-    settings_scene(state, crate::settings::Section::Terminal, window, cx);
+    settings_scene_with(
+        state,
+        crate::settings::Section::Terminal,
+        SettingsFixture {
+            tunnels: Some(farhelm_input_mapping::Platform::Mac),
+            ..SettingsFixture::default()
+        },
+        window,
+        cx,
+    );
 }
 
 /// The Add host dialog over the fake helm's reference hosts, as the host rail's Add host opens it (reference
@@ -4708,6 +4828,12 @@ static SCENES: &[Scene] = &[
         size: (800., 830.),
         draw: empty,
         setup: settings_recipes_rows_setup,
+    },
+    Scene {
+        name: "settings-recipes-places",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_recipes_places_setup,
     },
     Scene {
         name: "settings-credentials",

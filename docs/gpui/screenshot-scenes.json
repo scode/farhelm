@@ -1252,6 +1252,11 @@
       "reference": "settings-recipes"
     },
     {
+      "golden": "settings-recipes-places",
+      "title": "Settings at Recipes with a recipe's per-place lines (ready at a registered host with cleanup pending, building at a host no longer registered) and an expired prepared snapshot",
+      "reference": "settings-recipes"
+    },
+    {
       "golden": "settings-recipes-rows",
       "title": "Settings at Recipes with rows in three states: built with changed packages and rebuilding at step 5 of 9, failed with Retry, and a container base Tensorlake cannot run",
       "reference": "settings-recipes"
