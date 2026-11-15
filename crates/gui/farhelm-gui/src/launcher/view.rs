@@ -67,6 +67,7 @@ use crate::{operations, session};
 mod choices;
 mod host_picker;
 mod model_field;
+mod yolo_question;
 
 /// `.launch-composer-backdrop .create-session-form`: `width: min(960px, 100%)`.
 const WIDTH: f32 = 960.;
@@ -116,6 +117,7 @@ pub(super) fn show(
     let start = launcher.read(cx).start_focus(cx);
     let weak = launcher.downgrade();
     // Enter on the dialog itself (after a click on its empty space) presses the main action.
+    let dismissing = weak.clone();
     let main_action: MainAction = Rc::new(move |window, cx| {
         let _ = weak.update(cx, |launcher, cx| launcher.press(window, cx));
     });
@@ -130,8 +132,18 @@ pub(super) fn show(
             // session launcher, Restart with".
             keeps_focus_on_empty_click: true,
             returns_to: ReturnTo::Opener,
-            // Escape and the header Close discard the draft, as Cancel does.
-            on_dismiss: None,
+            // Escape discards the draft, as Cancel and the header Close do, except while the YOLO question's host
+            // write is out (Cancel and Close refuse then too, in `Launcher::cancel`).
+            on_dismiss: Some(Rc::new(move |_, cx| {
+                if dismissing
+                    .upgrade()
+                    .is_some_and(|launcher| launcher.read(cx).yolo_in_flight(cx))
+                {
+                    layers::Dismissal::Stay
+                } else {
+                    layers::Dismissal::Close
+                }
+            })),
             placement: DialogPlacement::Centered,
             dismiss_on_outside_press: false,
         },
@@ -139,7 +151,11 @@ pub(super) fn show(
         window,
         cx,
     )?;
-    launcher.update(cx, |launcher, _| launcher.layer = Some(layer));
+    launcher.update(cx, |launcher, cx| {
+        launcher.layer = Some(layer);
+        // A launch the helm refused for YOLO comes back with its question, asked now that it can open in place.
+        launcher.ask_pending_yolo(mark, window, cx);
+    });
     Some(layer)
 }
 
@@ -206,6 +222,9 @@ pub(crate) struct Launcher {
     /// Cancel's focus handle, where Restart with starts.
     pub(super) cancel_focus: gpui::FocusHandle,
     layer: Option<LayerId>,
+    /// The YOLO question for a launch the helm refused because its host asks first, from the refusal until it is
+    /// answered or the draft changes (`yolo_question`).
+    yolo: Option<yolo_question::YoloState>,
     _fields: Vec<Subscription>,
 }
 
@@ -365,6 +384,7 @@ impl Launcher {
             resume,
             cancel_focus: cx.focus_handle().tab_stop(true),
             layer: None,
+            yolo: None,
             _fields: fields,
         }
     }
@@ -398,6 +418,8 @@ impl Launcher {
     fn changed(&mut self, cx: &mut Context<Self>) {
         self.pressed = false;
         self.refused = None;
+        // A YOLO question asks about the launch that was sent; once the draft changes, it would answer for another.
+        self.yolo = None;
         cx.notify();
     }
 
@@ -500,7 +522,26 @@ impl Launcher {
     /// NOTE: Restart with and Replace with send nothing yet; they come with the pieces that port them, and until then a
     /// press of a complete draft there does nothing.
     pub(super) fn press(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // While the YOLO question's host write is out, its answer owns the launch: a press now would send a create
+        // without consent beside the one the answer sends with it.
+        if self.yolo_in_flight(cx) {
+            return;
+        }
+        self.submit(false, Mark::take(cx), window, cx);
+    }
+
+    /// [`Launcher::press`], with `confirm_yolo` saying whether the user consented to a YOLO launch on a host that asks
+    /// first (the YOLO question's answers, `yolo_question`); a plain press never consents. `mark` is the answer the
+    /// reply's moved-on check counts from ([`launch::start`]).
+    fn submit(
+        &mut self,
+        confirm_yolo: bool,
+        mark: Mark,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.refused = None;
+        self.yolo = None;
         let creates = matches!(self.draft.mode, Mode::New | Mode::Clone);
         let body = (creates && self.refusal(cx).is_none())
             .then(|| {
@@ -511,12 +552,13 @@ impl Launcher {
                 })
             })
             .flatten();
-        let Some(body) = body else {
+        let Some(mut body) = body else {
             self.pressed = true;
             cx.notify();
             return;
         };
-        if launch::start(cx.entity(), &body, window, cx)
+        body.confirm_yolo = confirm_yolo;
+        if launch::start(cx.entity(), &body, mark, window, cx)
             && let Some(layer) = self.layer.take()
         {
             layers::close(layer, window, cx);
@@ -556,7 +598,13 @@ impl Launcher {
     }
 
     /// Cancel and Close: close the launcher, discarding its draft.
+    ///
+    /// Refused while the YOLO question's host write is out, as Escape is (the dialog's dismissal hook): closing then
+    /// would let the write change the host's setting with nothing left to say whether it did.
     fn cancel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.yolo_in_flight(cx) {
+            return;
+        }
         if let Some(layer) = self.layer.take() {
             layers::close(layer, window, cx);
         }
@@ -1247,6 +1295,8 @@ impl Render for Launcher {
         let weak = cx.weak_entity();
         let refusal = self.refusal(cx);
         let target = self.target(cx);
+        // While the YOLO question's host write is out, the launcher holds still (`yolo_question`).
+        let holding = self.yolo_in_flight(cx);
         let restart = matches!(self.draft.mode, Mode::RestartWith(_));
 
         // A held destination (Restart with's) is shown, not edited: its folder as read-only text, its name not at all
@@ -1406,6 +1456,8 @@ impl Render for Launcher {
             )
             .tier(Tier::Neutral)
             .focus(&self.cancel_focus)
+            // Drawn busy while the YOLO question's host write is out, when it refuses (`Launcher::cancel`).
+            .busy(holding)
             .on_click(on_launcher(weak.clone(), Launcher::cancel)),
         ];
         if self.draft.tab == Tab::Agent {
@@ -1443,6 +1495,8 @@ impl Render for Launcher {
             .content(verb)
             .tier(Tier::Primary)
             .refused(refusal.is_some())
+            // Busy while the YOLO question's host write is out, when a press does nothing (`Launcher::press`).
+            .busy(holding)
             .on_click(on_launcher(weak.clone(), Launcher::press)),
         );
         let (title, summary) = self.heading();
@@ -1460,10 +1514,13 @@ impl Render for Launcher {
             .close(
                 "Close session launcher",
                 HoverHelp::tooltip("Close: discard this session setup"),
-                false,
+                holding,
                 on_launcher(weak.clone(), Launcher::cancel),
             );
-        if let Some(notices) = notices {
+        // The YOLO question, while it is up, takes the notices' place: it is what a press of Launch has to say.
+        if let Some(question) = self.yolo_inline() {
+            frame = frame.notices(question.clone());
+        } else if let Some(notices) = notices {
             frame = frame.notices(notices);
         }
         frame

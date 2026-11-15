@@ -48,7 +48,15 @@ pub(super) fn creates(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<Fa
 /// Open the launcher on [`command_draft`], press Launch, and return the one create it sent, checking that it sent
 /// exactly one and hid.
 fn launched(cx: &mut gpui::TestAppContext) -> (FakeHelm, &mut VisualTestContext, FakeCommand) {
-    let (mut helm, cx) = launcher_on(cx, command_draft());
+    launched_with(cx, command_draft())
+}
+
+/// [`launched`] with `draft`, which must be complete.
+pub(super) fn launched_with(
+    cx: &mut gpui::TestAppContext,
+    draft: LaunchDraft,
+) -> (FakeHelm, &mut VisualTestContext, FakeCommand) {
+    let (mut helm, cx) = launcher_on(cx, draft);
     assert!(
         creates(&mut helm, cx).is_empty(),
         "the premise: opening sends no create"
@@ -65,7 +73,7 @@ fn launched(cx: &mut gpui::TestAppContext) -> (FakeHelm, &mut VisualTestContext,
 
 /// The helm lists session `key` (as it does before answering the create that made it) and answers create `id` with that
 /// session, as `POST /api/sessions` does.
-fn created(helm: &mut FakeHelm, cx: &mut VisualTestContext, id: u64, key: &'static str) {
+pub(super) fn created(helm: &mut FakeHelm, cx: &mut VisualTestContext, id: u64, key: &'static str) {
     let state: CollectionState = listing(&["a", key], &[session("a"), session(key)]);
     helm.push(CollectionChanges {
         collection: state.collection,
@@ -79,7 +87,7 @@ fn created(helm: &mut FakeHelm, cx: &mut VisualTestContext, id: u64, key: &'stat
 }
 
 /// The session the window has selected.
-fn selected(cx: &mut VisualTestContext) -> Option<String> {
+pub(super) fn selected(cx: &mut VisualTestContext) -> Option<String> {
     cx.update(|_, cx| local_state::selected(cx))
 }
 
