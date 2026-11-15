@@ -4,14 +4,20 @@
 //! Each stream reconnects on its own, independently of the UI channel and of other streams. The rules come from how
 //! the helm and supervisor decide who holds a terminal (SPEC.md, "Terminal experience"):
 //!
-//! - The first attach takes control (the user opened this terminal). Every automatic reconnect attaches with the
+//! - The first attach takes control when [`TerminalAttach::take_control`] says so (the user opened this terminal), and
+//!   otherwise attaches without displacing anyone, like a reconnect. Every automatic reconnect attaches with the
 //!   non-displacing `/term/unowned` route, so a stream coming back after a network blip can never take a terminal
 //!   away from another client that took it meanwhile.
-//! - A dropped socket or an unanswered ping reconnects. It reconnects at once only if the attachment had answered a
-//!   ping, which shows the link worked; otherwise it waits a backoff that doubles while attempts keep failing, so a
-//!   path that attaches, replays and drops again cannot loop on full replays. A successful attachment resets the
-//!   backoff, so a terminal that recovered retries promptly the next time.
-//! - A `replaced` or `other` detach waits the backoff and reattaches: `other` carries transport trouble (a lost
+//! - A dropped socket, an unanswered ping, a failed attempt or a 5xx answer to the upgrade reconnects, climbing the
+//!   terminal's own [`TerminalLadder`] (0.5 to 15 s over six retries, then a probe every 30 s forever). It reconnects
+//!   at once only if the attachment had answered a ping, which shows the link worked; otherwise it waits its rung, so
+//!   a path that attaches, replays and drops again cannot loop on full replays. A successful attachment starts the
+//!   ladder over, so a terminal that recovered retries promptly the next time. Each wait and each attempt is a
+//!   [`StreamState::Reconnecting`] carrying the card's facts ([`ReconnectStatus`]).
+//! - A 5xx answer is retried because a helm restarting usually gives one for a moment (the migration's orchestrator
+//!   decided this on 2026-11-15). Any other status the helm answers the upgrade with (401 credential, 404 session or
+//!   tab gone, 400, 403, 409, a 3xx) cannot fix itself and stops the stream in [`StreamState::Refused`].
+//! - A `replaced` or `other` detach waits its rung and reattaches: `other` carries transport trouble (a lost
 //!   supervisor, an unreachable host) that keeps recovering. `replaced` means a newer attachment with this stream's
 //!   own lease took the terminal; the supervisor lets a same-lease attach replace the incumbent rather than defer to
 //!   it, so the reattach takes the terminal back. Two live streams of one lease on one terminal would therefore keep
@@ -20,8 +26,8 @@
 //! - `taken_over`, `tab_closed` and `stalled` stop the stream in [`StreamState::Detached`]: someone else holds the
 //!   terminal, it is gone, or this client fell behind and attaching again would walk back into the same wedge.
 //!   [`TerminalHandle::take_control`] attaches again, displacing whoever holds it.
-//! - [`TerminalHandle::reconnect_now`] skips a running backoff (the "Reconnect now" button) without displacing
-//!   anyone.
+//! - [`TerminalHandle::reconnect_now`] skips a running wait (the "Reconnect now" button), retrying or probing, without
+//!   displacing anyone.
 //!
 //! Every attachment starts with a full replay of the screen and history, ended by [`TerminalEvent::ReplayComplete`].
 //! A [`StreamState::Attached`] event precedes each attachment's first output, and the caller must reset its grid
@@ -44,14 +50,16 @@ use std::collections::VecDeque;
 use farhelm_proto::DetachCode;
 use farhelm_proto::grid::{GRID_MAX_MESSAGE, GridInput, GridOutput};
 use farhelm_proto::terminal_socket::{TerminalClientMessage, TerminalServerMessage};
+use futures_util::future::BoxFuture;
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use tokio::time::{Instant, sleep_until, timeout};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::ChannelConfig;
-use crate::reconnect::Backoff;
-use crate::ws::{ConnectError, HelmEndpoint, open_socket};
+use crate::reconnect::Ladder;
+pub use crate::reconnect::{ReconnectPhase, ReconnectStatus, TerminalLadder};
+use crate::ws::{ConnectError, HelmEndpoint, Socket, open_socket};
 use farhelm_proto::ui_channel::ApiPath;
 
 /// How many events may wait for the caller before the stream stops reading its socket. A grid output message is
@@ -90,6 +98,12 @@ pub struct TerminalAttach {
     pub lease: AttachmentLease,
     pub cols: u16,
     pub rows: u16,
+    /// Whether the stream's first attach takes the terminal from whoever holds it. True when the user opened this
+    /// terminal. False for an attach nobody asked for on purpose, such as a tab a recovering view opens while it may
+    /// have missed a takeover: that attach is refused if another client holds the session, and the stream then waits
+    /// in [`StreamState::Detached`] like any displaced one. Only the first attach reads this; reconnects never
+    /// displace and [`TerminalHandle::take_control`] always does.
+    pub take_control: bool,
 }
 
 /// One attachment of a stream, as its [`StreamState::Attached`] announced it: the stamp input carries so that it
@@ -104,15 +118,17 @@ pub enum StreamState {
     /// A new attachment began; reset the grid model, a full replay follows. Input for it is stamped with this
     /// [`Attachment`].
     Attached(Attachment),
-    /// The stream dropped and is coming back by itself.
-    Reconnecting,
+    /// The stream dropped and is coming back by itself: shown when each wait begins and again when its attempt starts,
+    /// so the status is always the current one. The outage ends at the next `Attached`, or when the stream stops.
+    Reconnecting(ReconnectStatus),
     /// Stopped by a `taken_over`, `tab_closed` or `stalled` detach notice. Waits for
     /// [`TerminalHandle::take_control`].
     Detached {
         code: Option<DetachCode>,
         reason: String,
     },
-    /// The helm refused the upgrade (401 credential, 404 session gone, ...). Waits for `take_control`.
+    /// The helm refused the upgrade with a status that is not 5xx (401 credential, 404 session gone, ...). Waits for
+    /// `take_control`. A 5xx is retried instead, as `Reconnecting`.
     Refused {
         status: u16,
     },
@@ -176,8 +192,8 @@ impl TerminalHandle {
         let _ = self.requests.send(Request::TakeControl);
     }
 
-    /// Skip the current reconnect backoff and attach now, through the non-displacing route. Ignored in every other
-    /// state: it never takes a terminal from anyone.
+    /// Skip the current reconnect wait, retrying or probing, and attach now through the non-displacing route. The
+    /// attempt keeps its number on the ladder. Ignored in every other state: it never takes a terminal from anyone.
     pub fn reconnect_now(&self) {
         let _ = self.requests.send(Request::ReconnectNow);
     }
@@ -211,14 +227,36 @@ pub fn open_terminal(
     attach: TerminalAttach,
     config: ChannelConfig,
 ) -> (TerminalHandle, TerminalEvents) {
+    let watchdog = config.watchdog;
+    let dial: Dial = Box::new(move |path| {
+        let endpoint = endpoint.clone();
+        Box::pin(
+            async move { open_socket(&endpoint, path.as_str(), GRID_MAX_MESSAGE, watchdog).await },
+        )
+    });
+    spawn_stream(attach, config, dial)
+}
+
+/// How a stream opens one attach's socket at a path [`attach_path`] built. The real one is [`open_socket`] against
+/// the helm. The seam exists for the ladder's tests, which script failed attempts on tokio's paused clock: real
+/// sockets cannot run under it, because the clock jumps past their timeouts while the kernel is still answering.
+pub(crate) type Dial =
+    Box<dyn Fn(ApiPath) -> BoxFuture<'static, Result<Socket, ConnectError>> + Send + Sync>;
+
+/// Start a stream that opens its sockets through `dial`. Panics outside a tokio runtime.
+pub(crate) fn spawn_stream(
+    attach: TerminalAttach,
+    config: ChannelConfig,
+    dial: Dial,
+) -> (TerminalHandle, TerminalEvents) {
     let (handle, events, requests, events_tx) = stream_channels(EVENT_QUEUE);
     let stream = Stream {
-        endpoint,
+        dial,
+        ladder: Ladder::new(config.terminal_ladder.clone()),
         attach,
         config,
         requests,
         events: events_tx,
-        reconnecting_shown: false,
         attachments: 0,
     };
     tokio::spawn(stream.run());
@@ -286,9 +324,10 @@ pub(crate) fn attach_path(
 /// How one socket ended.
 enum Ended {
     /// The socket dropped, its watchdog fired, or the helm detached it for a reason that keeps recovering
-    /// (`replaced`, `other`). Two separate facts decide what happens next: `attached` (the socket got as far as an
-    /// attachment, so the backoff starts over) and `skip_wait` (the attachment answered a ping and then lost its
-    /// socket, so the link was working and an immediate reconnect is earned). A detach notice never skips the wait.
+    /// (`replaced`, `other`); also an attempt that failed before its socket opened. Two separate facts decide what
+    /// happens next: `attached` (the socket got as far as an attachment, so the ladder starts over) and `skip_wait`
+    /// (the attachment answered a ping and then lost its socket, so the link was working and an immediate reconnect
+    /// is earned). A detach notice never skips the wait.
     Dropped {
         attached: bool,
         skip_wait: bool,
@@ -316,23 +355,28 @@ fn control_frame(message: &TerminalClientMessage) -> Message {
     Message::text(message.to_text())
 }
 
+/// Whether a refusal of the upgrade with `status` is retried on the ladder. Only a 5xx is: the helm answers one for
+/// a moment while it restarts, and it says nothing about the terminal (decided by the migration's orchestrator on
+/// 2026-11-15). Every other status is the route's own answer about this attach and would come back unchanged.
+pub(crate) fn retried_refusal(status: u16) -> bool {
+    (500..=599).contains(&status)
+}
+
 struct Stream {
-    endpoint: HelmEndpoint,
+    dial: Dial,
+    /// Where this stream is on its reconnect ladder in the current outage.
+    ladder: Ladder,
     attach: TerminalAttach,
     config: ChannelConfig,
     requests: mpsc::UnboundedReceiver<Request>,
     events: mpsc::Sender<TerminalEvent>,
-    /// Whether `Reconnecting` is the state the caller last saw, so an outage is announced once however many attempts
-    /// it takes. Cleared by every other state.
-    reconnecting_shown: bool,
     /// How many attachments have begun: the newest one's stamp, 0 before the first.
     attachments: u64,
 }
 
 impl Stream {
     async fn run(mut self) {
-        let mut take_control = true;
-        let mut backoff = Backoff::new(&self.config);
+        let mut take_control = self.attach.take_control;
         if !self
             .emit(TerminalEvent::State(StreamState::Attaching))
             .await
@@ -343,8 +387,7 @@ impl Stream {
             let ended = match self.connect(take_control).await {
                 None => Ended::Closed,
                 Some(Ok(socket)) => self.serve(socket).await,
-                Some(Err(ConnectError::Refused { status })) => {
-                    self.reconnecting_shown = false;
+                Some(Err(ConnectError::Refused { status })) if !retried_refusal(status) => {
                     if !self
                         .emit(TerminalEvent::State(StreamState::Refused { status }))
                         .await
@@ -358,9 +401,10 @@ impl Stream {
                         break;
                     }
                     take_control = true;
-                    backoff.reset();
+                    self.ladder.reset();
                     continue;
                 }
+                // A 5xx lands here too: retried like a connection that never opened.
                 Some(Err(error)) => {
                     tracing::debug!(%error, "terminal attach attempt failed");
                     Ended::Dropped {
@@ -376,27 +420,33 @@ impl Stream {
                     attached,
                     skip_wait,
                 } => {
-                    // Announced once per outage, not once per failed attempt.
-                    if !self.reconnecting_shown {
-                        self.reconnecting_shown = true;
+                    if attached {
+                        self.ladder.reset();
+                    }
+                    let status = self.ladder.schedule(skip_wait);
+                    if let Some(wait) = status.next_attempt_in {
                         if !self
-                            .emit(TerminalEvent::State(StreamState::Reconnecting))
+                            .emit(TerminalEvent::State(StreamState::Reconnecting(status)))
                             .await
                         {
                             return;
                         }
+                        if !self.idle(Some(Instant::now() + wait)).await {
+                            break;
+                        }
                     }
-                    if attached {
-                        backoff.reset();
-                    }
-                    if let Some(wait) = backoff.after_break(skip_wait)
-                        && !self.idle(Some(Instant::now() + wait)).await
+                    let in_flight = ReconnectStatus {
+                        next_attempt_in: None,
+                        ..status
+                    };
+                    if !self
+                        .emit(TerminalEvent::State(StreamState::Reconnecting(in_flight)))
+                        .await
                     {
-                        break;
+                        return;
                     }
                 }
                 Ended::Detached { code, reason } => {
-                    self.reconnecting_shown = false;
                     if !self
                         .emit(TerminalEvent::State(StreamState::Detached { code, reason }))
                         .await
@@ -409,7 +459,7 @@ impl Stream {
                         break;
                     }
                     take_control = true;
-                    backoff.reset();
+                    self.ladder.reset();
                 }
             }
         }
@@ -418,21 +468,14 @@ impl Stream {
 
     /// Open the socket, serving requests meanwhile. `None` when the stream was closed. A socket comes back already
     /// told the latest size, if a resize during the connect changed it from the one the query asked for.
-    async fn connect(
-        &mut self,
-        take_control: bool,
-    ) -> Option<Result<crate::ws::Socket, ConnectError>> {
+    async fn connect(&mut self, take_control: bool) -> Option<Result<Socket, ConnectError>> {
         let asked = (self.attach.cols, self.attach.rows);
         let path = match attach_path(&self.attach, take_control) {
             Ok(path) => path,
             // An empty or dot session id has no route; the helm would answer 404, so say that.
             Err(_) => return Some(Err(ConnectError::Refused { status: 404 })),
         };
-        let endpoint = self.endpoint.clone();
-        let watchdog = self.config.watchdog;
-        let opening =
-            async move { open_socket(&endpoint, path.as_str(), GRID_MAX_MESSAGE, watchdog).await };
-        tokio::pin!(opening);
+        let mut opening = (self.dial)(path);
         loop {
             tokio::select! {
                 result = &mut opening => return Some(match result {
@@ -465,9 +508,9 @@ impl Stream {
     /// replay.
     async fn send_overtaken_size(
         &self,
-        mut socket: crate::ws::Socket,
+        mut socket: Socket,
         asked: (u16, u16),
-    ) -> Result<crate::ws::Socket, ConnectError> {
+    ) -> Result<Socket, ConnectError> {
         let (cols, rows) = (self.attach.cols, self.attach.rows);
         if (cols, rows) == asked {
             return Ok(socket);
@@ -483,7 +526,7 @@ impl Stream {
     }
 
     /// Serve one open socket until it ends.
-    async fn serve(&mut self, socket: crate::ws::Socket) -> Ended {
+    async fn serve(&mut self, socket: Socket) -> Ended {
         let (mut sink, mut stream) = socket.split();
         let watchdog_period = self.config.watchdog;
         let mut attached = false;
@@ -522,7 +565,7 @@ impl Stream {
                 frame = stream.next(), if !waiting_on_caller => match frame {
                     Some(Ok(Message::Binary(bytes))) => match GridOutput::decode(&bytes) {
                         Ok(output) => {
-                            Self::mark_attached(&mut attached, &mut pending, &mut self.reconnecting_shown, &mut self.attachments);
+                            Self::mark_attached(&mut attached, &mut pending, &mut self.attachments);
                             pending.push_back(TerminalEvent::Output(output));
                         }
                         Err(error) => {
@@ -537,7 +580,7 @@ impl Stream {
                             ping_sent = None;
                         }
                         Ok(TerminalServerMessage::ReplayComplete) => {
-                            Self::mark_attached(&mut attached, &mut pending, &mut self.reconnecting_shown, &mut self.attachments);
+                            Self::mark_attached(&mut attached, &mut pending, &mut self.attachments);
                             pending.push_back(TerminalEvent::ReplayComplete);
                         }
                         Ok(TerminalServerMessage::Detached { reason, code }) if detach_stops(code) => {
@@ -621,12 +664,10 @@ impl Stream {
     fn mark_attached(
         attached: &mut bool,
         pending: &mut VecDeque<TerminalEvent>,
-        reconnecting_shown: &mut bool,
         attachments: &mut u64,
     ) {
         if !*attached {
             *attached = true;
-            *reconnecting_shown = false;
             *attachments += 1;
             pending.push_back(TerminalEvent::State(StreamState::Attached(Attachment(
                 *attachments,
@@ -636,8 +677,8 @@ impl Stream {
 
     /// Wait outside a socket until `until`, or for the user when `until` is `None`. False when the stream was closed.
     ///
-    /// During a backoff (`until` set) a reconnect-now request ends the wait early; while waiting for the user only
-    /// take-control does.
+    /// During a reconnect wait (`until` set) a reconnect-now request ends the wait early; while waiting for the user
+    /// only take-control does.
     async fn idle(&mut self, until: Option<Instant>) -> bool {
         loop {
             let timeout = async {

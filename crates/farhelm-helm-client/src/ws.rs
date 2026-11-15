@@ -55,7 +55,8 @@ impl std::fmt::Debug for HelmEndpoint {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ConnectError {
     /// The helm answered the upgrade with an HTTP status instead. 401 means the credential was refused, which no
-    /// amount of retrying fixes; other statuses are the route's own refusal (a session that is gone, say).
+    /// amount of retrying fixes; other statuses are the route's own refusal (a session that is gone, say), except
+    /// that a terminal stream treats a 5xx as a helm restarting and retries it on its ladder (`crate::terminal`).
     #[error("the helm refused the connection with HTTP {status}")]
     Refused { status: u16 },
     /// Anything else: nothing listening, a timeout, a broken handshake. Worth retrying.

@@ -470,6 +470,17 @@ Terminal streams stay one stream per terminal, with their own reconnect handling
 each can fail independently of the helm. File uploads and downloads use plain HTTP; a failed transfer is that transfer's
 own visible outcome, and the user retries it. Neither touches the command path, so a large upload never delays a click.
 
+A terminal stream's reconnects climb a ladder of their own, the old app's: 0.5, 1, 2, 4, 8 and 15 s, then a probe every
+30 s forever (the terminal area asked for it and the migration's orchestrator approved it on 2026-11-15; the UI channel
+keeps its 1 to 8 s doubling). That is SPEC.md's bounded retries, then periodic re-probing. As on the UI channel, only a
+link that answered a heartbeat reconnects at once, and an attachment starts the ladder over. The stream reports each
+wait and each attempt to the terminal's card as it goes: the attempt number, the six retries it counts against, the
+phase (retrying or probing) and the next attempt's delay. A 5xx answer to the attach's upgrade is retried on the ladder,
+because a helm restarting usually gives one for a moment (the orchestrator decided this on 2026-11-15); any other
+refusal waits for the user. A stream may also be opened with a first attach that does not displace another viewer, for a
+terminal the user did not ask to take, such as a tab opened by a view that may have missed a takeover while its own
+connection was down; reconnects never displace. `crates/farhelm-helm-client/src/terminal.rs` has the rules.
+
 ### The store, and how views redraw
 
 Owner: the store.

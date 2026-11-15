@@ -208,6 +208,7 @@ fn terminal_attach(key: &str) -> TerminalAttach {
         lease: AttachmentLease::new(),
         cols: 100,
         rows: 30,
+        take_control: true,
     }
 }
 
