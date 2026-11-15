@@ -31,14 +31,15 @@
 //! [`super::filters`]'s. Removing the host filter from the chip or the empty sentence moves focus to the rail's All,
 //! whose focus handle is the list's for that reason.
 //!
-//! The rail's foot ([`foot`]) is pinned under its entries, which scroll above it, and holds Hosts above the Settings
-//! gear, and the `?` Help button below the gear ([`crate::help_menu`]), in the old foot's order. Hosts swaps the list's
-//! column for the Hosts panel ([`crate::hosts::HostsPanel`]) and back, keeping focus on itself; choosing All or a host
-//! returns to Sessions (SPEC.md: "All or a host avatar returns to Sessions"), and while the panel shows, the rail's
-//! chosen entry wears a quieter look so the filled Hosts control marks the view on screen. Whether the panel shows
-//! belongs to the UI session, like the choice. The gear opens the Settings dialog ([`crate::settings::open`]) with
-//! itself as the opener, so that Escape and either close control bring focus back to it (SPEC.md: "Escape and either
-//! close control return focus to the gear").
+//! The rail's foot ([`foot`]) is pinned under its entries, which scroll above it, and holds the notices bell at its top
+//! ([`crate::rail_notices`]), Hosts under it above the Settings gear, and the `?` Help button below the gear
+//! ([`crate::help_menu`]), in the old foot's order. Hosts swaps the list's column for the Hosts panel
+//! ([`crate::hosts::HostsPanel`]) and back, keeping focus on itself; choosing All or a host returns to Sessions
+//! (SPEC.md: "All or a host avatar returns to Sessions"), and while the panel shows, the rail's chosen entry wears a
+//! quieter look so the filled Hosts control marks the view on screen. Whether the panel shows belongs to the UI
+//! session, like the choice. The gear opens the Settings dialog ([`crate::settings::open`]) with itself as the opener,
+//! so that Escape and either close control bring focus back to it (SPEC.md: "Escape and either close control return
+//! focus to the gear").
 //!
 //! The foot is drawn by the list after its own column rather than inside the rail, as the old app placed its
 //! `.host-rail-footer` after the sidebar's content: GPUI's Tab order follows the order controls are drawn in, and the
@@ -46,12 +47,11 @@
 //! through the list (or the Hosts panel) to the foot. The rail leaves the foot's height free at its bottom
 //! ([`FOOT_HEIGHT`]), and the foot is drawn over that room.
 //!
-//! NOTE: Not drawn yet, each waiting for its area: the rest of the rail's foot (the notices bell and the expand toggle)
-//! for the notices area and the rail's expansion; an avatar's right-click menu; every host status (connection dots,
-//! update badges, progress rings, dimming and the state words that join the avatar's name, and the update count that
-//! joins Hosts' name); and the rail's expansion to 220 pixels, with Add host's "Add host" label. The foot is sized for
-//! the three controls it holds: the old foot was 208 pixels, five 40-pixel controls, and it grows back as the others
-//! arrive.
+//! NOTE: Not drawn yet, each waiting for its area: the rest of the rail's foot (the expand toggle) for the rail's
+//! expansion; an avatar's right-click menu; every host status (connection dots, update badges, progress rings, dimming
+//! and the state words that join the avatar's name, and the update count that joins Hosts' name); and the rail's
+//! expansion to 220 pixels, with Add host's "Add host" label. The foot is sized for the four controls it holds: the old
+//! foot was 208 pixels, five 40-pixel controls, and it grows back as the last one arrives.
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -72,6 +72,7 @@ use crate::focus::{self, Mark};
 use crate::help_menu::HelpButton;
 use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::identity::{display_name, host_mark};
+use crate::rail_notices::NoticesButton;
 use crate::settings;
 use crate::theme::{self, Palette};
 
@@ -103,9 +104,9 @@ const RAIL_BUTTON: f32 = 40.;
 const FOOT_PAD_BOTTOM: f32 = 8.;
 const FOOT_PAD_X: f32 = 7.5;
 
-/// The foot's height while it holds Hosts, the gear and Help: three controls and the bottom padding. The old foot's 208
-/// pixels held five controls; it grows by 40 pixels with each control that joins it.
-pub(super) const FOOT_HEIGHT: f32 = 3. * RAIL_BUTTON + FOOT_PAD_BOTTOM;
+/// The foot's height while it holds the notices bell, Hosts, the gear and Help: four controls and the bottom padding.
+/// The old foot's 208 pixels held five controls; it grows by 40 pixels with each control that joins it.
+pub(super) const FOOT_HEIGHT: f32 = 4. * RAIL_BUTTON + FOOT_PAD_BOTTOM;
 
 /// `SettingsIcon`'s size in the old foot's icon box.
 const SETTINGS_GLYPH: f32 = 16.;
@@ -448,6 +449,7 @@ pub(super) fn foot(
     hosts_focus: &FocusHandle,
     hosts_shown: bool,
     settings_focus: &FocusHandle,
+    notices: &Entity<NoticesButton>,
     help: &Entity<HelpButton>,
     palette: &Palette,
 ) -> impl IntoElement {
@@ -467,6 +469,8 @@ pub(super) fn foot(
         .border_r_1()
         .border_color(theme::color(palette.border_row))
         .bg(theme::color(palette.bg_1))
+        // The notices bell first, above Hosts (SPEC.md: "at the top of the navigation rail's footer, above Hosts").
+        .child(notices.clone())
         // An icon button draws the glyph at the old `ActionIcon`'s 14 pixels in the button's own ink, which its pressed
         // look turns to the inverse. SPEC.md: Hosts "exposes its pressed and expanded state". GPUI's driver record has
         // no expanded field, so no in-process test reads the expanded state back; the pressed state is tested, and the

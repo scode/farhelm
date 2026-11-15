@@ -18,12 +18,13 @@ switcher's New row; 52 and 53, the other-dialogs area's Welcome card, reopened f
 start that asks for it; 54, the session list's Replace meeting the YOLO question; 60 and 62 to 64, the approvals area's
 cards for agents' requests: Allow, the host-only grant, Deny over the quick switcher, and an agent's host add through
 the Add host dialog; 61, the settings-and-hosts area's host uninstall, its refusal, run and removal notice; 65, the
-other-dialogs area's Keyboard shortcuts overview). The behavior itself is specified and tested in process
-(`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`, `terminal/attached/tests.rs`, `hosts/`,
-`help_menu/tests.rs`, `feedback/tests.rs`, `trash/`, `approvals/`, `shortcuts/tests.rs`); nothing here checks layout or
-wording beyond the names it clicks. A menu's commands are clicked by their ids (`id:session-menu-delete`), not their
-labels: the open session's header has buttons with the same names (Stop, Replace, Delete), and a `text:` target picks
-the first match in drawing order, which is the header's.
+other-dialogs area's Keyboard shortcuts overview; 66, the other-dialogs area's rail notices bell and its empty panel).
+The behavior itself is specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`,
+`session_pane/`, `terminal/attached/tests.rs`, `hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`, `trash/`,
+`approvals/`, `shortcuts/tests.rs`, `notices_bell/tests.rs`); nothing here checks layout or wording beyond the names it
+clicks. A menu's commands are clicked by their ids (`id:session-menu-delete`), not their labels: the open session's
+header has buttons with the same names (Stop, Replace, Delete), and a `text:` target picks the first match in drawing
+order, which is the header's.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
 
@@ -162,6 +163,9 @@ YOLO_ONE_OFF = "Start YOLO session anyway"
 # The launcher's header summary in New: text only the open launcher draws (New's hover help says it with a lowercase
 # "start", which this does not match), so waiting for it (or for it to go) tells whether the launcher is open (step 51).
 LAUNCHER_SUMMARY = "Start an agent or a command on any host"
+
+# The rail notices panel's summary under its "Notifications" header, drawn only while the panel is open (step 66).
+NOTICES_SUMMARY = "About your hosts and Farhelm"
 
 # A row only the open Keyboard shortcuts overview draws: the oracle for it open and closed (step 65).
 SHORTCUTS_ROW = "Begin launch sequence"
@@ -1870,6 +1874,28 @@ class Smoke(unittest.TestCase):
         # `terminal-text` prints the screen as one JSON string, its lines joined by escaped newlines.
         lines = [line.strip() for line in json.loads(screen).splitlines()]
         self.assertIn(f"echo:{after}", lines, "the echo is of exactly the typed line, nothing before it")
+
+    # ---- The rail's notices bell (66), touching no session -----------------------------------------------------------
+
+    def test_66_the_rail_notices_bell_opens_its_empty_panel_and_escape_returns_to_it(self) -> None:
+        """The notices bell at the top of the rail's foot is the way to notices about hosts, and its panel reads the
+        helm's pushed notices through the real helm. The bridge's fleet has no failed trash cleanup, so the panel this
+        step sees is empty; it seeds and touches no session and marks nothing. Specified: with the panel not open, the
+        bell is named "Notifications: 0 unread"; a click on it opens the panel, which says "No notifications"; Escape
+        closes it with focus back on the bell. The panel's summary is the oracle for open and closed, since only the
+        open panel draws it."""
+        self.assertNotIn(NOTICES_SUMMARY, self.ok("snapshot"), "premise: the notices panel is not open")
+        self.assertIn('button "Notifications: 0 unread"', self.ok("snapshot", "-i"), "premise: the bell is quiet")
+        self.ok("click", "id:rail-notices-toggle")
+        self.ok("wait", "--text", NOTICES_SUMMARY)
+        self.ok("wait", "--text", "No notifications")
+        self.ok("press", "escape")
+        self.ok("wait", "--gone", NOTICES_SUMMARY)
+        self.assertRegex(
+            self.ok("snapshot", "-i"),
+            r'button "Notifications: 0 unread" \[focused\]',
+            "focus is back on the bell",
+        )
 
 
 def waiting_approvals() -> list[dict]:

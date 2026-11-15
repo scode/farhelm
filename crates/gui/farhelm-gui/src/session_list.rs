@@ -181,6 +181,7 @@ use crate::hosts::HostsPanel;
 use crate::layers::Anchor;
 use crate::local_state::{self, LocalState};
 use crate::operations;
+use crate::rail_notices::NoticesButton;
 use crate::render_count;
 use crate::session::{self, PerSession};
 use crate::theme::{self, metrics};
@@ -259,6 +260,10 @@ pub struct SessionList {
     /// The heading's Trash button: a view of the trash's own, which keeps its focus handle, its reads of every host's
     /// trash and the dialog it opens, created here once for the window's life ([`crate::trash`]).
     trash: Entity<TrashButton>,
+    /// The notices bell at the top of the rail's foot, above Hosts: a view of the rail notices' own, which keeps its
+    /// focus handle and its open panel, created here once for the window's life ([`crate::rail_notices`]). Its notices'
+    /// Retry now and Open Trash go to [`Self::trash`].
+    notices: Entity<NoticesButton>,
     /// The order title's focus handle, a tab stop: kept here for the window's life so that the order menu names the
     /// title as where closing returns focus, whichever frame drew it ([`order`]).
     order_focus: FocusHandle,
@@ -304,6 +309,12 @@ impl SessionList {
         &self.help
     }
 
+    /// The rail foot's notices bell, for the screenshot goldens, which open its panel without a click.
+    #[cfg(test)]
+    pub(crate) fn notices_button(&self) -> &Entity<NoticesButton> {
+        &self.notices
+    }
+
     /// The list, settled once when it is made and again on every change it observes.
     ///
     /// The settle at the end runs while the list is being made. [`session::observe_current`]'s own first call comes
@@ -315,6 +326,8 @@ impl SessionList {
             list.settle(cx);
         });
         let following = session::observe_current(cx, |list: &mut Self, cx| list.settle(cx));
+        let trash = cx.new(TrashButton::new);
+        let weak_trash = trash.downgrade();
         let mut list = SessionList {
             current: PerSession::default(),
             _following: following,
@@ -332,7 +345,8 @@ impl SessionList {
             settings_focus: cx.focus_handle().tab_stop(true),
             hosts_focus: cx.focus_handle().tab_stop(true),
             help: cx.new(HelpButton::new),
-            trash: cx.new(TrashButton::new),
+            trash,
+            notices: cx.new(|cx| NoticesButton::new(weak_trash, cx)),
             order_focus: cx.focus_handle().tab_stop(true),
             order_anchor: None,
             rail: host_rail::Kept::new(cx),
@@ -675,6 +689,7 @@ impl Render for SessionList {
             &self.hosts_focus,
             hosts_shown,
             &self.settings_focus,
+            &self.notices,
             &self.help,
             palette,
         );

@@ -1959,6 +1959,17 @@ fn session_list_scene_opening(
     open: Option<&str>,
     cx: &mut App,
 ) {
+    session_list_scene_holding(state, rows, open, Vec::new(), cx);
+}
+
+/// [`session_list_scene_opening`], with `extra` collections in the helm's snapshot too (the notices, say).
+fn session_list_scene_holding(
+    state: &SceneState,
+    rows: &[Fixture],
+    open: Option<&str>,
+    extra: Vec<CollectionState>,
+    cx: &mut App,
+) {
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
     let order: Vec<&str> = rows.iter().map(|row| row.key).collect();
@@ -1973,11 +1984,9 @@ fn session_list_scene_opening(
         "cause": "transport-failure",
         "last_error": "timed out",
     });
-    helm.connect(vec![
-        listing(&order, rows),
-        preferences(&history, None),
-        registry,
-    ]);
+    let mut snapshot = vec![listing(&order, rows), preferences(&history, None), registry];
+    snapshot.extend(extra);
+    helm.connect(snapshot);
     state.lists.borrow_mut().push(cx.new(SessionList::new));
     let mut keep = state.keep.borrow_mut();
     keep.push(Box::new(helm));
@@ -2122,6 +2131,73 @@ fn help_menu_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     );
 }
 
+/// The fleet of [`session_list_setup`] with `held` as the helm's notices, and the rail's notices panel open beside the
+/// bell at the top of the rail's foot when `open`.
+fn rail_notices_scene(state: &SceneState, held: &[serde_json::Value], open: bool, cx: &mut App) {
+    let keys: Vec<String> = held.iter().map(|notice| notice["id"].to_string()).collect();
+    let order: Vec<&str> = keys.iter().map(String::as_str).collect();
+    let notices = CollectionState {
+        collection: Collection::Notices,
+        meta: crate::test_support::meta(&order),
+        entries: held
+            .iter()
+            .map(|notice| KeyedEntry {
+                key: notice["id"].to_string(),
+                value: notice.clone(),
+            })
+            .collect(),
+    };
+    let rows = fleet();
+    session_list_scene_holding(state, &rows, Some(rows[0].key), vec![notices], cx);
+    if !open {
+        return;
+    }
+    state.after.set(Some(|list, _, window, cx| {
+        let bell = list.read(cx).notices_button().clone();
+        bell.update(cx, |bell, cx| bell.toggle(window, cx));
+    }));
+}
+
+/// The rail's notices panel with nothing in it (reference `notices-empty`): the header, "No notifications", and the
+/// footer with Clear resolved unavailable and Close; the bell quiet, in the open look.
+fn notices_empty_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    rail_notices_scene(state, &[], true, cx);
+}
+
+/// The rail's notices panel with one unread trash cleanup notice about the local host (reference `notices-alerting`):
+/// its host and what happened, the checkout's repository and size, the reason in red, when it last failed, the promise
+/// of a retry, and Retry now unavailable (the host's trash read is never answered here, so no listing shows the
+/// checkout stuck) beside Open Trash.
+fn notices_alerting_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    rail_notices_scene(state, &[alerting_notice()], true, cx);
+}
+
+/// The rail with that unread notice and the panel closed: the bell filled, in the strong red, with its count "1" over
+/// its corner, the look nothing else pictures (the open bell wears the open look's inverse ink instead).
+fn notices_bell_loud_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    rail_notices_scene(state, &[alerting_notice()], false, cx);
+}
+
+/// The one unread trash cleanup notice about the local host that the alerting scenes show.
+fn alerting_notice() -> serde_json::Value {
+    serde_json::json!({
+            "id": 1,
+            "host": 1,
+            "raised_at": 1_794_596_700_i64,
+            "read": false,
+            "resolved": false,
+            "content": {
+                "kind": "stuck_trash",
+                "checkout_id": "archived-work",
+                "name": "archived-work",
+                "repository": "example/project",
+                "bytes": 4096,
+                "reason": "Permission denied",
+                "at": 1_794_596_700_i64,
+            },
+    })
+}
+
 /// The list's order menu, open below its title as a click opens it (reference `sort-menu`): the title in its open look,
 /// the shared header ("Session list"), and the three orders with Recently active, the stored default, checked and
 /// highlighted. The old menu's Compact is not ported, so the picture is one item short of the reference.
@@ -2138,7 +2214,8 @@ fn session_order_menu_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
 /// opened (the red edge and New), whose text ends with a docs link, one already read, and one resolved (greyed and
 /// marked Resolved). Its bell is loud, with one unread. The bell is pressed as a click would press it, and the pointer
 /// then leaves for an empty corner, so neither a hover fill nor a tooltip is in the picture ([`press_bell_b`]).
-fn session_bell_list_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+fn session_bell_list_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    window.set_driver_enabled(true);
     let row = |key, title, ago: i64| {
         session(key)
             .title(title)
@@ -2177,29 +2254,42 @@ fn session_bell_list_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     state.after.set(Some(press_bell_b));
 }
 
-/// How many frames [`press_bell_b`] waits for row `b`'s bell to be drawn before it gives up.
-const BELL_WAIT_FRAMES: usize = 20;
-
-/// Press row `b`'s bell as a click would ([`crate::notices_bell::press_drawn`]), then move the pointer to the empty corner
-/// at the top left (see [`session_bell_list_setup`]). The list's rows are drawn a frame or more after the list itself,
-/// so until a frame has drawn the bell this waits for the next one, asking for it. The wait is bounded: asking for a
-/// frame from here can keep the headless window drawing without the scene's settling ever regaining control (an
-/// unbounded version hung a golden run), so after [`BELL_WAIT_FRAMES`] it gives up and the scene fails on its picture.
+/// Press row `b`'s bell as a click would, where the last frame drew it, then move the pointer to the empty corner at
+/// the top left (see [`session_bell_list_setup`]). The bell's place comes from GPUI's driver record, which the setup
+/// turns on and which only reads what a frame drew, so the app keeps nothing for the scene. The store's first snapshot
+/// reaches the list only once the executor has run, a frame or more after the list is first drawn, so until a frame has
+/// drawn the bell this waits for the next frame the scene's settling draws; it asks for none itself, since a frame asked
+/// for here would be drawn before the executor runs again and could never show the bell.
 fn press_bell_b(_: &Entity<SessionList>, state: &SceneState, window: &mut Window, cx: &mut App) {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    /// Frames waited for the bell in the scene being captured; back to zero once the bell is pressed or the wait is
-    /// given up, so the next capture (the other appearance) waits afresh.
-    static WAITED: AtomicUsize = AtomicUsize::new(0);
-    if !crate::notices_bell::press_drawn("b", window, cx) {
-        if WAITED.fetch_add(1, Ordering::Relaxed) < BELL_WAIT_FRAMES {
-            state.after.set(Some(press_bell_b));
-            window.refresh();
-        } else {
-            WAITED.store(0, Ordering::Relaxed);
-        }
+    let Some(bell) = window
+        .driver_nodes()
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some("session-bell-b"))
+        .map(|node| node.bounds.center())
+    else {
+        state.after.set(Some(press_bell_b));
         return;
-    }
-    WAITED.store(0, Ordering::Relaxed);
+    };
+    let pressed = |down: bool| {
+        if down {
+            gpui::PlatformInput::MouseDown(gpui::MouseDownEvent {
+                button: gpui::MouseButton::Left,
+                position: bell,
+                modifiers: gpui::Modifiers::default(),
+                click_count: 1,
+                first_mouse: false,
+            })
+        } else {
+            gpui::PlatformInput::MouseUp(gpui::MouseUpEvent {
+                button: gpui::MouseButton::Left,
+                position: bell,
+                modifiers: gpui::Modifiers::default(),
+                click_count: 1,
+            })
+        }
+    };
+    window.dispatch_event(pressed(true), cx);
+    window.dispatch_event(pressed(false), cx);
     window.dispatch_event(
         gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
             position: point(px(2.), px(2.)),
@@ -4203,6 +4293,24 @@ static SCENES: &[Scene] = &[
         size: (420., 418.),
         draw: session_lists_then,
         setup: session_row_menu_setup,
+    },
+    Scene {
+        name: "notices-empty",
+        size: (820., 560.),
+        draw: session_lists_then,
+        setup: notices_empty_setup,
+    },
+    Scene {
+        name: "notices-bell-loud",
+        size: (420., 418.),
+        draw: session_lists_then,
+        setup: notices_bell_loud_setup,
+    },
+    Scene {
+        name: "notices-alerting",
+        size: (820., 560.),
+        draw: session_lists_then,
+        setup: notices_alerting_setup,
     },
     Scene {
         name: "help-menu",
