@@ -668,10 +668,13 @@ Replacing tests, in `crates/gui/farhelm-gui/src/settings/tests.rs`:
   `a_leftover_with_a_host_row_is_deleted_through_host_removal`; the spec's Container hosts region holding "Build
   machine" is `containers_reads_the_hosts_and_leftovers_once_then_checks_each_container_host`, which also checks that
   each container host is checked again on showing, as the old section did on mount.
-- With no old case: `a_running_check_is_read_again_once_after_the_follow_up_delay`,
-  `a_refresh_drops_the_older_rounds_answers_and_later_read` and `closing_settings_or_a_reset_cancels_the_later_read`
-  (the later read in Deviations, Containers) and `failed_container_reads_show_their_reasons_and_never_none_found` (the
-  old reader's "a failed discovery must stay an error").
+- With no old case: `a_pushed_result_changes_the_row_with_no_request_sent`, `before_a_result_the_places_read_shows`,
+  `a_refused_check_keeps_its_reason_until_the_next_round` and `a_fleet_change_the_places_reflect_reads_them_once`
+  (following the pushed hosts collection, which stands in for the old section's polling and its re-read on fleet
+  notices), `a_refresh_drops_the_older_rounds_check_answers` and
+  `an_older_rounds_reads_answering_after_a_refresh_are_dropped` (refresh rounds), and
+  `failed_container_reads_show_their_reasons_and_never_none_found` (the old reader's "a failed discovery must stay an
+  error").
 - The look: the golden `settings-containers` (`crates/gui/farhelm-gui/src/goldens.rs`).
 
 The helm answers the listing and a Delete within its host reply bound (decided by the migration's orchestrator on
@@ -861,24 +864,16 @@ Where the port does not match the old app, and why. Each stays until the work na
 
 ### Containers
 
-- **A finished check shows after one later read, not by itself.** The old section re-read the hosts on every fleet
-  notice, and polled them while any host's check was running, so "· Refreshing…" went away by itself. The helm pushes
-  nothing when a check finishes (`PodmanPlaces::refresh` publishes only to its own cache, and no pushed collection
-  carries a check's state), and this app reads what is not pushed once per opening. So after the read that follows the
-  checks, if a host is still refreshing, the section reads the hosts once more 30 seconds later
-  (`containers::FOLLOW_UP`, how long a container launch waits for a host's check) and then stops: a check that takes
-  longer keeps "· Refreshing…" until the next Refresh or opening. Chosen by the migration's orchestrator on 2026-11-15
-  as an interim, while the helm change that would push finished checks is requested; when that lands, the section
-  re-reads the hosts on that push instead and this entry goes.
 - **The leftovers are not re-read on fleet notices.** The old section re-read **Containers not on this helm** on every
-  fleet notice too. Here they are read once per opening, on Refresh and after a done Delete, under this app's rule that
-  what the helm does not push is read once per opening, and pushing finished checks would not change that. The visible
-  case: after a Delete the helm answered at its 20-second bound, the container may be gone a moment later, but its row
-  stays until the user presses Refresh, as the reply's own words say ("the list shows whether the container is gone when
-  it is read again"); the old app cleared the row by itself.
+  fleet notice, as it did the hosts. The hosts still follow the fleet here (each host's check from the pushed hosts
+  collection, and the places read again when a container host is added, removed, renamed or retargeted), but the
+  leftovers are read once per opening, on Refresh and after a done Delete, under this app's rule that what the helm does
+  not push is read once per opening. The visible case: after a Delete the helm answered at its 20-second bound, the
+  container may be gone a moment later, but its row stays until the user presses Refresh, as the reply's own words say
+  ("the list shows whether the container is gone when it is read again"); the old app cleared the row by itself.
 - **The hosts show before their checks are asked for.** The old section showed nothing new until it had asked for every
-  host's check and read the hosts again; here the first read shows at once, then the checks go out, then the second read
-  replaces it. Both reads answer without waiting on a host.
+  host's check and read the hosts again; here the first read shows at once, then the checks go out, and each check's
+  result replaces the read's state for its host as the push brings it. The read answers without waiting on a host.
 - **The Delete question starts on Cancel.** The old inline question left focus on the Delete that opened it. Here it is
   the prompt's inline question, which takes focus, and starts on Cancel since deleting a container cannot be undone
   (SPEC.md, "Opening and closing").
