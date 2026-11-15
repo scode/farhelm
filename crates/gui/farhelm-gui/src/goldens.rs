@@ -1839,6 +1839,17 @@ fn help_menu_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     );
 }
 
+/// The list's order menu, open below its title as a click opens it (reference `sort-menu`): the title in its open look,
+/// the shared header ("Session list"), and the three orders with Recently active, the stored default, checked and
+/// highlighted. The old menu's Compact is not ported, so the picture is one item short of the reference.
+fn session_order_menu_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    session_list_then(
+        state,
+        |list, _, window, cx| list.update(cx, |list, cx| list.toggle_order_menu(window, cx)),
+        cx,
+    );
+}
+
 /// The waiting row's Delete question, asked from its row as the menu's Delete asks it (reference
 /// `row-delete-confirmation`): its tab, its running agent, its quoted title and its managed checkout. The
 /// `anchored-prompt` golden pins the prompt's own look with made-up wording; this one pins the row's wording and where
@@ -3019,6 +3030,12 @@ static SCENES: &[Scene] = &[
         size: (560., 480.),
         draw: empty,
         setup: host_remove_confirmation_setup,
+    },
+    Scene {
+        name: "session-order-menu",
+        size: (420., 418.),
+        draw: session_lists_then,
+        setup: session_order_menu_setup,
     },
 ];
 
