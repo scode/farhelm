@@ -400,9 +400,9 @@ impl SessionList {
         let collections = store.read(cx).collections();
         let listed = selection::listed(collections);
         // Gone on a complete listing without it, on any available listing without it once the query the helm serves
-        // names it, or once this window's own Delete of it succeeded and the store no longer holds it (`selection`'s
-        // "A selection stays until it is proven gone"); and never while its own Replace is in flight (`selection`'s "A
-        // Replace keeps its own source open until it answers").
+        // names it and no cap cut it away, or once this window's own Delete of it succeeded and the store no longer
+        // holds it (`selection`'s "A selection stays until it is proven gone"); and never while its own Replace is in
+        // flight (`selection`'s "A Replace keeps its own source open until it answers").
         let gone = selected.as_deref().is_some_and(|key| {
             let proven = session::listing_proves_gone(collections, key)
                 || selection::absent_while_named(collections, key, serves_named)
