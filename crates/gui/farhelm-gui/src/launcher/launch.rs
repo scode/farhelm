@@ -215,12 +215,8 @@ fn held(cx: &mut App) -> Option<Waiting> {
 /// session, the rename dialog opens over it"). Revealing the launcher, for a refusal or the draft's own reason, clears
 /// it for good, since "A launch that revealed New gets no naming dialog, even if a later submission succeeds".
 ///
-/// Only tests read it so far; naming a quick-launched session, the templates work's next piece, reads the same fact in
-/// the success path. Crate-private until then, and allowed to be unused outside tests meanwhile.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "naming a quick-launched session reads it next")
-)]
+/// For tests: the success path reads the same fact from the launcher it was handed (`settle`), not from the slot.
+#[cfg(test)]
 pub(crate) fn pending_unseen_quick_launch(cx: &mut App) -> bool {
     let Some(slot) = cx.try_global::<Slot>().map(|slot| slot.0.clone()) else {
         return false;
@@ -505,6 +501,8 @@ fn settle(
     let user_moved_on = settled.user_moved_on || focus::has_moved_on(&mark, cx);
     match &settled.outcome {
         Outcome::Done(body) => {
+            // Whether New was never shown, which decides naming (`opened`), read from the launcher this reply is for.
+            let unseen = launcher.read(cx).quick_launch_unseen;
             hold(None, cx);
             match source {
                 Some(source) if work == Work::Replace => {
@@ -515,7 +513,7 @@ fn settle(
                     replace::settle(&source, &settled, cx);
                 }
                 Some(_) => {}
-                None => opened(body.clone(), user_moved_on, window, cx),
+                None => opened(body.clone(), unseen, user_moved_on, window, cx),
             }
         }
         // None of these requests is accepted as long work, so this cannot arrive. If it did, nothing failed, and
@@ -566,8 +564,13 @@ fn settle(
 /// anywhere in the page since their last answer to it"). The opening is current by construction: nothing replaces a
 /// launcher while its create is out. Otherwise the row appears, nothing else moves, and the "Started" report says so in
 /// `window` for four seconds.
+///
+/// A quick launch whose launcher was never shown (`unseen`) and whose session this opened goes on to naming
+/// (`crate::templates::name_quick_launched`), the one hand-off to it: SPEC.md, "When New was never shown and success
+/// selects its session, the rename dialog opens over it". One the user moved on from keeps its generated name.
 fn opened(
     body: Option<serde_json::Value>,
+    unseen: bool,
     user_moved_on: bool,
     window: AnyWindowHandle,
     cx: &mut App,
@@ -578,6 +581,9 @@ fn opened(
     };
     if !user_moved_on {
         selection::choose(&session.id, cx);
+        if unseen {
+            crate::templates::name_quick_launched(&session.id, &session.title, window, cx);
+        }
         return;
     }
     let shown = cx

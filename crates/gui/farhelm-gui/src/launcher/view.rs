@@ -473,7 +473,7 @@ pub(crate) struct Launcher {
     yolo: Option<yolo_question::YoloState>,
     /// Set while this launcher is a quick launch's that has never been drawn ([`prepare_unseen`]), and cleared for good
     /// the first time it is ([`show`]). The success path reads it to hand the new session to naming (SPEC.md, "Quick
-    /// launch": only "When New was never shown"), which is the templates work's next piece.
+    /// launch": only "When New was never shown"; `launch::settle`).
     pub(super) quick_launch_unseen: bool,
     /// What the notices region says for a quick launch or a template shortcut ([`Note`]), until the next edit, or for a
     /// banner until [`Launcher::banner_expiry`] if that comes first.

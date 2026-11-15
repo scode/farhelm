@@ -312,6 +312,18 @@ impl TextInputState {
         self.1.replace(self.text(cx));
     }
 
+    /// Select the whole text, as Kit's own select-all does, so the next key the user types replaces it: for a dialog
+    /// that opens on a value the user is likely to replace rather than edit (the Rename editor's naming mode, which
+    /// SPEC.md has open with "The actual created name ... focused and fully selected"). Not an edit: no change event.
+    pub fn select_all(&self, window: &mut Window, cx: &mut App) {
+        match &self.0 {
+            Field::Line(input) => input.update(cx, |state, cx| state.select_all(window, cx)),
+            Field::Row(area) | Field::Area(area) => {
+                area.update(cx, |state, cx| state.select_all(window, cx))
+            }
+        }
+    }
+
     /// Show `text` in the field while it is empty, as a hint of what goes there (the quick switcher's "Jump to a
     /// session"). It is the app's own wording, never a value: it raises no event, and [`Self::text`] never returns it.
     pub fn set_placeholder(
