@@ -1951,6 +1951,7 @@ fn session_interrupted_cards(state: &SceneState, window: &mut Window, cx: &mut A
             row: &row,
             focus: &state.ring,
             question: None,
+            launcher_wait: None,
             step: 0,
         };
         div()

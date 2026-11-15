@@ -5,9 +5,9 @@
 //! Everything runs in the real main view over the helm client's fake, whose connection hands out fake terminal streams
 //! and records them (`test_support::open_main`), and reads what the window sent from the fake and what it drew from
 //! GPUI's driver record of the frame. The card is `session-interrupted-card`; its buttons are `session-card-restart`
-//! and `session-card-replace`; its wait line is `session-card-<restart|replace>-progress-label-<key>`, and the
-//! refusal it draws is the header's line, `session-header-outcome-<key>`. The first session of every snapshot is the
-//! open one.
+//! and `session-card-replace` (`session-card-replace-with` for a legacy launch); its wait line is
+//! `session-card-<restart|replace>-progress-label-<key>`, and the refusal it draws is the header's line,
+//! `session-header-outcome-<key>`. The first session of every snapshot is the open one.
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::terminal::FakePhase;
@@ -18,11 +18,16 @@ use gpui::TestAppContext;
 use serde_json::{Value, json};
 
 use crate::actions::{DELETE_SESSION_CHORD, FocusNextControl};
-use crate::launcher::launch_tests::{HostChange, start_host_change};
+use crate::launcher::draft::{LaunchDraft, Tab};
+use crate::launcher::launch_tests::{HostChange, creates_answering, start_host_change};
+use crate::launcher::view_tests::fixture_hosts;
 use crate::session_list::lifecycle_tests::{consented, drawn_inside, refuse_for_yolo, replace};
+use crate::session_list::menu;
 use crate::session_list::menu_tests::{any_layer, drawn, label_of, push, snapshot};
 use crate::session_list::outcome::PROGRESS_SHOWS_AFTER;
-use crate::session_list::tests::{Fixture, change, listing_meta, painted, selected, session};
+use crate::session_list::tests::{
+    Fixture, change, launcher_drawn, listing_meta, painted, selected, session,
+};
 use crate::terminal::set::STRIP_ID;
 use crate::test_support::{self, MainWindow, focused_id, frame, open_main};
 
@@ -112,6 +117,25 @@ fn available(cx: &mut gpui::VisualTestContext, id: &str) -> bool {
         .find(|node| node.element_id.as_deref() == Some(id))
         .is_some_and(|node| node.flags.focusable)
 }
+
+/// Whether the control drawn under `id` takes a click: an unavailable menu item is still focusable (the menu's keys
+/// need somewhere to go) but has no click handler.
+fn takes_clicks(cx: &mut gpui::VisualTestContext, id: &str) -> bool {
+    frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(id))
+        .is_some_and(|node| node.flags.click)
+}
+
+/// The row menu's lifecycle commands, which an open lifecycle question refuses (`session_list::menu::refused`).
+const ROW_ACTIONS: [&str; 6] = [
+    "session-menu-rename",
+    "session-menu-clone",
+    "session-menu-replace-with",
+    "session-menu-replace",
+    "session-menu-stop",
+    "session-menu-delete",
+];
 
 /// Push `fixture` as the open session `a`'s new state, under the listing `a`, `b`.
 fn push_a(main: &mut MainWindow, fixture: Fixture) {
@@ -326,6 +350,44 @@ fn an_interrupted_session_whose_host_drops_away_mounts_no_terminal(cx: &mut Test
     assert!(drawn(main.cx, CARD));
     push_a(&mut main, session("a").status(json!({"state": "idle"})));
     assert_eq!(streams(&main), [FakePhase::Attaching]);
+}
+
+/// The card's question while its host drops away: the card goes and draws nothing, so the question goes with it, or it
+/// would refuse every lifecycle command of a's with nothing on screen to answer until the host came back. The old card
+/// cleared its Replace prompt the moment it was hidden (`use_clear_when_hidden`), and a stale row hid it. Specified:
+/// with the card's Replace question open on a, a push that lists a on an unreachable host takes the card and the
+/// question away, and a's menu then offers Rename, Clone, Replace with…, Replace, Stop and Delete; once a is listed
+/// reachable and interrupted again, the card shows with no question open.
+#[gpui::test]
+fn the_cards_question_goes_when_its_host_drops_away(cx: &mut TestAppContext) {
+    let mut main = open_main(
+        cx,
+        snapshot(&[(interrupted("a"), 0), (session("b"), 0)], false),
+    );
+    lifecycle(&mut main.helm);
+    test_support::click(main.cx, "session-card-replace");
+    assert!(
+        drawn(main.cx, "prompt-confirm"),
+        "the premise: the card asks"
+    );
+
+    push_a(&mut main, interrupted("a").stale());
+    lifecycle(&mut main.helm);
+    assert!(
+        !drawn(main.cx, CARD),
+        "the premise: no card while unreachable"
+    );
+    assert!(!drawn(main.cx, "prompt-confirm"), "no question is drawn");
+    test_support::click(main.cx, "session-menu-a");
+    for item in ROW_ACTIONS {
+        assert!(takes_clicks(main.cx, item), "{item} is available");
+    }
+    test_support::keys(main.cx, "escape");
+
+    push_a(&mut main, interrupted("a"));
+    lifecycle(&mut main.helm);
+    assert!(drawn(main.cx, CARD), "the premise: the card is back");
+    assert!(!drawn(main.cx, "prompt-confirm"), "with no question open");
 }
 
 // ---- Replace -------------------------------------------------------------------------------------------------------
@@ -633,6 +695,135 @@ fn the_cards_open_question_leaves_the_headers_actions_unavailable(cx: &mut TestA
     assert!(drawn_inside(main.cx, "prompt-confirm", CARD));
 }
 
+/// The same rule for the row menu: the card's question is inline, so the press on a row's ⋯ that opens its menu leaves
+/// it open, and a row action taken meanwhile would run beside a question whose answer still sends the guard it froze.
+/// Specified: a's row menu offers Rename, Clone, Replace with…, Replace, Stop and Delete; with the card's Replace
+/// question open, each is drawn unavailable (no click handler), a click on each leaves the menu open, nothing is sent,
+/// and the card's question is still open once Escape closes the menu; once the question is cancelled, a's menu offers
+/// all six again.
+#[gpui::test]
+fn the_cards_open_question_leaves_the_row_menus_actions_unavailable(cx: &mut TestAppContext) {
+    let mut main = open_main(cx, snapshot(&[(interrupted("a"), 0)], false));
+    lifecycle(&mut main.helm);
+    test_support::click(main.cx, "session-menu-a");
+    for item in ROW_ACTIONS {
+        assert!(
+            takes_clicks(main.cx, item),
+            "the premise: {item} is available"
+        );
+    }
+    test_support::keys(main.cx, "escape");
+
+    test_support::click(main.cx, "session-card-replace");
+    assert!(
+        drawn(main.cx, "prompt-confirm"),
+        "the premise: the card asks"
+    );
+    test_support::click(main.cx, "session-menu-a");
+    assert!(
+        drawn(main.cx, "session-menu"),
+        "the premise: the menu opened"
+    );
+    for item in ROW_ACTIONS {
+        assert!(!takes_clicks(main.cx, item), "{item} is drawn unavailable");
+        test_support::click(main.cx, item);
+        assert!(
+            drawn(main.cx, "session-menu"),
+            "{item} does nothing: the menu is still open"
+        );
+    }
+    assert_eq!(sent(&mut main.helm), []);
+    test_support::keys(main.cx, "escape");
+    assert!(
+        !drawn(main.cx, "session-menu"),
+        "the premise: Escape closed the menu"
+    );
+    assert!(
+        drawn_inside(main.cx, "prompt-confirm", CARD),
+        "the card still asks"
+    );
+
+    test_support::click(main.cx, "prompt-cancel");
+    assert!(!drawn(main.cx, "prompt-confirm"), "the premise: cancelled");
+    test_support::click(main.cx, "session-menu-a");
+    for item in ROW_ACTIONS {
+        assert!(takes_clicks(main.cx, item), "{item} is available again");
+    }
+    assert_eq!(sent(&mut main.helm), []);
+}
+
+/// The card's question goes with its card, and a question dropped unanswered still reads open: kept on, it would go
+/// on refusing the actions of a session the user can no longer see, for the rest of the UI session. The pane drops it
+/// when the selection moves and whenever the card does not show; this pins one of the paths where the card goes with
+/// no answer and no recovery, its session deleted elsewhere. Specified: with the card's Replace question open on a, a
+/// complete listing pushed without a opens b, and a's lifecycle commands are no longer refused.
+#[gpui::test]
+fn the_cards_question_goes_when_its_session_is_deleted_elsewhere(cx: &mut TestAppContext) {
+    let mut main = open_main(
+        cx,
+        snapshot(&[(interrupted("a"), 0), (session("b"), 0)], false),
+    );
+    lifecycle(&mut main.helm);
+    test_support::click(main.cx, "session-card-replace");
+    assert!(
+        main.cx.update(|_, cx| menu::refused("a", cx)),
+        "the premise: the card asks, which refuses a's actions"
+    );
+
+    main.helm
+        .push(change(listing_meta(&["b"], 1, false), &[], &["a"]));
+    test_support::settle(main.cx);
+    lifecycle(&mut main.helm);
+    assert_eq!(
+        selected(main.cx).as_deref(),
+        Some("b"),
+        "the premise: a is gone and b is open"
+    );
+    assert!(!main.cx.update(|_, cx| menu::refused("a", cx)));
+}
+
+/// The user's own way of leaving the card while it asks: opening another session. a's row stays listed, so a question
+/// kept on would show as a's whole menu refused with nothing on screen to answer. The other session shows a card of
+/// its own here, so only the drop on a change of selection takes a's question away, not the one for a card that does
+/// not show. Specified: with a's card asking, a click on b's row (b interrupted too) opens b on its card with no
+/// question; a's menu then offers Rename, Clone, Replace with…, Replace, Stop and Delete; and opening a again shows its
+/// card with no question.
+#[gpui::test]
+fn the_cards_question_goes_when_another_session_is_opened(cx: &mut TestAppContext) {
+    let mut main = open_main(
+        cx,
+        snapshot(&[(interrupted("a"), 0), (interrupted("b"), 0)], false),
+    );
+    lifecycle(&mut main.helm);
+    test_support::click(main.cx, "session-card-replace");
+    assert!(
+        drawn(main.cx, "prompt-confirm"),
+        "the premise: the card asks"
+    );
+
+    test_support::click(main.cx, "session-row-b");
+    test_support::settle(main.cx);
+    lifecycle(&mut main.helm);
+    assert_eq!(
+        selected(main.cx).as_deref(),
+        Some("b"),
+        "the premise: b is open"
+    );
+    assert!(drawn(main.cx, CARD), "the premise: b shows its card");
+    assert!(!drawn(main.cx, "prompt-confirm"), "b's card asks nothing");
+    test_support::click(main.cx, "session-menu-a");
+    for item in ROW_ACTIONS {
+        assert!(takes_clicks(main.cx, item), "a's {item} is available");
+    }
+    test_support::keys(main.cx, "escape");
+
+    test_support::click(main.cx, "session-row-a");
+    test_support::settle(main.cx);
+    lifecycle(&mut main.helm);
+    assert!(drawn(main.cx, CARD), "the premise: a shows its card");
+    assert!(!drawn(main.cx, "prompt-confirm"), "a's card asks nothing");
+}
+
 /// Restart and Replace start a session, and SPEC.md, "Creation", says "Launches and changes to the host registry still
 /// exclude each other"; the migration's orchestrator decided on 2026-11-15 that they wait for a host change as the
 /// launcher's Launch does, giving its reason, on every surface that offers them. Specified: with Add host's probe in
@@ -675,6 +866,56 @@ fn the_cards_restart_and_replace_wait_for_a_host_change(cx: &mut TestAppContext)
     test_support::settle(main.cx);
     test_support::click(main.cx, "session-card-restart");
     assert_eq!(sent(&mut main.helm), [restart("a")]);
+}
+
+/// The other cause of the launcher's wait: a launch the user has asked for and the helm has not answered. The launcher
+/// holds one launch at a time, so a legacy session's Replace with waits for it, and must say so rather than look ready
+/// while the launcher refuses it, as the row's and the header's Replace with do (SPEC.md, "Terminal experience": greyed
+/// entries' "tooltips and accessible descriptions explain the specific reason"). Specified: on a legacy session's card
+/// with host1 listed, a command launch opened in the launcher and launched sends one create, which stays unanswered;
+/// the card's Replace with, still focusable, then says "Wait for the pending launch to finish", and a click on it opens
+/// nothing.
+#[gpui::test]
+fn the_cards_replace_with_says_why_it_waits_while_a_launch_is_pending(cx: &mut TestAppContext) {
+    let legacy = json!({"kind": "legacy", "invocation": "claude", "agent_kind": "claude", "resume_template": null});
+    let mut collections = snapshot(&[(interrupted("a").launch(legacy), 0)], false);
+    collections.push(fixture_hosts(&[0]));
+    let mut main = open_main(cx, collections);
+    creates_answering(&mut main.helm, main.cx, &json!([]));
+    assert_eq!(
+        hover(main.cx, "session-card-replace-with").as_deref(),
+        Some("Replace with: edit the settings, then swap this session for a new one"),
+        "the premise: Replace with is ready"
+    );
+
+    // The smallest complete draft: a Command tab launch of `true`, not YOLO, on host1 in `~`.
+    let mut draft = LaunchDraft::new(Some(1), "~".into(), None);
+    draft.choose_tab(Tab::Command);
+    draft.edit_command("true".into());
+    draft.choose_command_yolo(false);
+    let opened = main
+        .cx
+        .update(|window, cx| crate::launcher::entry::open_with(draft, None, window, cx));
+    assert!(opened, "the premise: the launcher opened");
+    test_support::settle(main.cx);
+    test_support::click(main.cx, "launcher-launch");
+    let creates = creates_answering(&mut main.helm, main.cx, &json!([]));
+    assert_eq!(creates.len(), 1, "the premise: one create is pending");
+    assert!(!launcher_drawn(main.cx), "the premise: the launcher hid");
+
+    assert!(
+        available(main.cx, "session-card-replace-with"),
+        "Replace with stays keyboard-reachable"
+    );
+    assert_eq!(
+        hover(main.cx, "session-card-replace-with").as_deref(),
+        Some("Wait for the pending launch to finish")
+    );
+    test_support::click(main.cx, "session-card-replace-with");
+    assert!(
+        !launcher_drawn(main.cx),
+        "a click on Replace with opens nothing"
+    );
 }
 
 // ---- Focus ---------------------------------------------------------------------------------------------------------

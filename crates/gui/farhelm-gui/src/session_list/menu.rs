@@ -59,11 +59,11 @@
 //! separate layers, one after the other), or before its request goes out when it asks nothing. While that question is
 //! open the button is inert: a click on it neither reopens the menu nor answers the question, and the question's own
 //! Cancel, Escape or a press elsewhere is the way out. While the session has any request in flight, or the YOLO
-//! question its Replace met is open, every command here is unavailable ([`refused`]; SPEC.md: "an open lifecycle
-//! confirmation or a pending request refuses another lifecycle action"); opening the session stays possible, and other
-//! sessions' menus are untouched. Replace also waits for a host change ([`launch_wait`]). A refusal or a notice from
-//! the helm shows inside the menu as well as on the row, since the open menu covers the row's own copy
-//! ([`super::outcome`]).
+//! question its Replace met or its interrupted card's Replace question is open, every command here is unavailable
+//! ([`refused`]; SPEC.md: "an open lifecycle confirmation or a pending request refuses another lifecycle action");
+//! opening the session stays possible, and other sessions' menus are untouched. Replace also waits for a host change
+//! ([`launch_wait`]). A refusal or a notice from the helm shows inside the menu as well as on the row, since the open
+//! menu covers the row's own copy ([`super::outcome`]).
 //!
 //! **The button's reveal.** The button is drawn on every row but shows only while there is a reason to: the pointer is
 //! over its row, any control in its row holds focus, the row is the open session's, or the button's own menu or
@@ -486,10 +486,11 @@ pub(crate) struct Actionable {
     pub(crate) skips_questions: bool,
 }
 
-/// `key`'s row, for a lifecycle action the user just asked for (from the row's menu, or the open session's header), or
-/// `None` when nothing may happen: the store holds no row for the session, or its lifecycle commands are refused
-/// ([`refused`]: a request in flight, or its YOLO question open). The row is read by key, so the open session the helm
-/// carries outside a filtered or cut list is actionable like a listed one.
+/// `key`'s row, for a lifecycle action the user just asked for (from the row's menu, the open session's header, or its
+/// interrupted card), or `None` when nothing may happen: the store holds no row for the session, or its lifecycle
+/// commands are refused ([`refused`]: a request in flight, or its YOLO question or its card's Replace question open).
+/// The row is read by key, so the open session the helm carries outside a filtered or cut list is actionable like a
+/// listed one.
 pub(crate) fn actionable(key: &str, cx: &App) -> Option<Actionable> {
     let store = session::current_store(cx)?;
     let collections = store.read(cx).collections();
@@ -506,11 +507,15 @@ pub(crate) fn actionable(key: &str, cx: &App) -> Option<Actionable> {
 /// Whether `key`'s lifecycle commands (Rename, Clone, Replace with, Replace, Stop and Delete here, and Restart, Restart
 /// with and Clone in the open session's header) are refused now, and drawn unavailable: SPEC.md's "an open lifecycle
 /// confirmation or a pending request refuses another lifecycle action". A request of the session in flight is one
-/// ([`delete::busy`]); the YOLO question a Replace of the session met, while it is open, is the other
-/// ([`super::replace_yolo::open`]). The row's and the header's own questions refuse through their buttons, which are
-/// inert while their question is open.
+/// ([`delete::busy`]). The other two are the inline questions, which a press elsewhere does not close: the YOLO
+/// question a Replace of the session met ([`super::replace_yolo::open`]), and the Replace question the session's
+/// interrupted card asked ([`crate::session_pane::card::asks`]), each while it is open. The row's and the header's own
+/// questions are anchored, so a press elsewhere closes them, and they refuse through their buttons, which are inert
+/// while their question is open.
 pub(crate) fn refused(key: &str, cx: &App) -> bool {
-    delete::busy(key, cx) || super::replace_yolo::open(key, cx)
+    delete::busy(key, cx)
+        || super::replace_yolo::open(key, cx)
+        || crate::session_pane::card::asks(key, cx)
 }
 
 /// Send `command`, one of the row's own requests (a seen toggle, a pin, a move), through the operation store under
@@ -552,10 +557,16 @@ pub(crate) fn launch_wait(cx: &App) -> Option<&'static str> {
 }
 
 /// Why the launcher cannot open now, if it cannot ([`entry::new_available`]): a host change in flight
-/// ([`launch_wait`]'s words), or a launch pending ([`LAUNCH_PENDING`]). This menu's Clone and Replace with… and the
-/// header's Clone, Restart with… and Replace with… draw themselves unavailable with it as their hover help and
-/// description, as the plain choices say [`launch_wait`]'s, so a greyed launcher trigger always says why (SPEC.md,
-/// "Terminal experience": the greyed entries' "tooltips and accessible descriptions explain the specific reason").
+/// ([`launch_wait`]'s words), or a launch pending ([`LAUNCH_PENDING`]). This menu's Clone and Replace with…, the
+/// header's Clone, Restart with… and Replace with…, and the interrupted card's Replace with draw themselves unavailable
+/// with it as their hover help and description, as the plain choices say [`launch_wait`]'s, so a greyed launcher
+/// trigger always says why (SPEC.md, "Terminal experience": the greyed entries' "tooltips and accessible descriptions
+/// explain the specific reason").
+///
+/// It takes `&mut App` because the launcher reads its pending launch through `session::PerSession::current`, which
+/// starts the state over when the UI session changed and so needs `&mut`; `PerSession` has no read-only form. A surface
+/// that draws with `&App` reads this where its caller still has `&mut App` (the pane's render, for the card and the
+/// header).
 pub(crate) fn launcher_wait(cx: &mut App) -> Option<&'static str> {
     if entry::new_available(cx) {
         return None;
