@@ -17,13 +17,14 @@
 //!   local host without a supervisor offers no install.
 //! - The `confirmation_may_open` output, which made Settings on every host wait for another host's confirmation, is
 //!   dropped with the old modal queue it existed for. A host's own Settings still waits for that host's own work.
-//! - Uninstall, Suspend, Resume and Delete sandbox come with their own pieces of the port, and are not offered here.
+//! - Suspend, Resume and Delete sandbox come with their own pieces of the port, and are not offered here.
 //!
 //! The host menu ([`super::menu`]) renders only what this says; the rules are tested here, without a window. The menu
 //! draws the rerun of a failed setup on an SSH host ([`HostKind::reruns_setup`]), the rerun of a failed Update, Update
-//! (live, greyed on the helm's own machine, or the app's own check there in the installed desktop app), Settings, and
-//! Remove on a host whose removal only forgets it ([`Offers::remove`]); the inline Update and Update all ask the
-//! panel's own offer (`super::update::available`), which never includes the app's check.
+//! (live, greyed on the helm's own machine, or the app's own check there in the installed desktop app), Settings,
+//! Uninstall on an SSH host ([`Offers::uninstall`]), and Remove on a host whose removal only forgets it
+//! ([`Offers::remove`]); the inline Update and Update all ask the panel's own offer (`super::update::available`), which
+//! never includes the app's check.
 
 use farhelm_proto::http::LOCAL_SUPERVISOR_NOT_RUNNING;
 use farhelm_proto::provisioning::{ProvisioningOperation, ProvisioningView, RunStatus};
@@ -102,6 +103,18 @@ impl HostKind {
         match self {
             HostKind::Local => true,
             HostKind::Ssh | HostKind::Tensorlake | HostKind::Podman | HostKind::Unrecognized => {
+                false
+            }
+        }
+    }
+
+    /// Whether the panel's Uninstall removes Farhelm from the host: an SSH host only (SPEC.md, "Topology"). The helm's
+    /// own machine is uninstalled with `farhelm uninstall` there, and a Tensorlake sandbox or a container goes with its
+    /// machine (Delete sandbox); the helm refuses an uninstall plan for each of those, and the menu offers none.
+    pub(crate) fn uninstalls_from_panel(self) -> bool {
+        match self {
+            HostKind::Ssh => true,
+            HostKind::Local | HostKind::Tensorlake | HostKind::Podman | HostKind::Unrecognized => {
                 false
             }
         }
@@ -235,6 +248,10 @@ pub(crate) struct Offers {
     /// offer of its own): `Some(true)` when it can be chosen now, `Some(false)` while the host is
     /// busy with work in flight or a run.
     pub(crate) remove: Option<bool>,
+    /// Uninstall, which removes Farhelm from the host, offered only where the panel uninstalls
+    /// ([`HostKind::uninstalls_from_panel`]): `Some(true)` when it can be chosen now, `Some(false)` while the host is
+    /// busy. A failed uninstall is continued by choosing it again, so a failed run leaves it available.
+    pub(crate) uninstall: Option<bool>,
 }
 
 /// Which failed run a rerun repeats.
@@ -303,6 +320,8 @@ impl Update {
 ///   waiting for `farhelm helm setup`, it does not run a newer Farhelm, and it is not suspended. On the helm's own
 ///   machine it is [`Update::Greyed`] wherever it would otherwise be offered.
 /// - **Settings** always, chosen only while the host is idle.
+/// - **Uninstall** for a kind the panel uninstalls, chosen only while the host is idle; after a failed uninstall too,
+///   since choosing it again is how that run is continued.
 /// - **Remove** for a kind whose removal only forgets the host, chosen only while the host is idle.
 pub(crate) fn offers(
     host: &HostView,
@@ -341,6 +360,7 @@ pub(crate) fn offers(
         rerun,
         update,
         remove: kind.removal_only_forgets().then_some(!busy),
+        uninstall: kind.uninstalls_from_panel().then_some(!busy),
     }
 }
 

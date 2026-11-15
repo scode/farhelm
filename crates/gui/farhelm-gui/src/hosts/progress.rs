@@ -9,20 +9,22 @@
 //! with the look of the `.host-update-*` and `.provisioning-*` rules in `app.css`, all at reference commit `24bc0580`.
 //! Here's the TLDR of its rules:
 //!
-//! - **Setup and Update runs are drawn** ([`shown`], [`Run`]). Uninstall's come with its piece of the port.
-//! - **The inline status** ([`status`]): "Setting up", the completed-step count over the step count, the current step
-//!   (the first running one, by the helm's own name for it) and the elapsed time, beside a pulsing amber dot. An
-//!   Update's says the same without the visible verb ("Updating" is read out, not drawn), as the old label kept
-//!   Update's narrower. While a rerun's probe or its confirmed setup is out and no run shows yet, "Setting up…"; while
-//!   an Update's plan or its confirming request is out, "Updating…" (SPEC.md: "`Updating…` until a progress snapshot
-//!   is available").
-//! - **The step list** ([`run_section`]) shows under an open row for any retained setup or Update run, running, failed
-//!   or completed, as the old panel did: each step's number, check or cross on a rail, its name and its result word, and
-//!   the step's and the run's messages, which carry the helm's reason for a failure.
-//! - **Disclosure** ([`opens_row`]): a running setup opens its row by itself until the user folds that run with
-//!   Collapse; success closes it again, and a failure keeps it open whatever the fold said (the Hosts panel's
-//!   `disclosed` adds the failure rule for every kind of run). A running Update never opens its row (SPEC.md: "While an
-//!   update is running, its host row stays folded"), so it offers no Collapse.
+//! - **Setup, Update and uninstall runs are drawn** ([`shown`], [`Run`]).
+//! - **The inline status** ([`status`]): "Setting up" (or "Uninstalling"), the completed-step count over the step
+//!   count, the current step (the first running one, by the helm's own name for it) and the elapsed time, beside a
+//!   pulsing amber dot. An Update's says the same without the visible verb ("Updating" is read out, not drawn), as the
+//!   old label kept Update's narrower. While a rerun's probe or its confirmed setup is out and no run shows yet,
+//!   "Setting up…"; while an Update's plan or its confirming request is out, "Updating…" (SPEC.md: "`Updating…` until
+//!   a progress snapshot is available"); while an uninstall's plan or its confirming request is out, "Uninstalling…"
+//!   (SPEC.md: "Setup and uninstall planning show their action in the folded row while the helm prepares a dialog").
+//! - **The step list** ([`run_section`]) shows under an open row for any retained run, running, failed or completed, as
+//!   the old panel did: each step's number, check or cross on a rail, its name and its result word, and the step's and
+//!   the run's messages, which carry the helm's reason for a failure.
+//! - **Disclosure** ([`opens_row`]): a running setup or uninstall opens its row by itself until the user folds that run
+//!   with Collapse; success closes it again (a finished uninstall takes the row with it), and a failure keeps it open
+//!   whatever the fold said (the Hosts panel's `disclosed` adds the failure rule for every kind of run). A running
+//!   Update never opens its row (SPEC.md: "While an update is running, its host row stays folded"), so it offers no
+//!   Collapse.
 //! - **What the UI keeps** ([`Seen`]): per host, the run it last saw running, when it first saw it, and the fold. The
 //!   helm's progress carries no timestamps, so the elapsed time counts from when this UI session first saw the run
 //!   running, as the old app counted from its own first sight (a reload started it over; here a reset does). The
@@ -121,20 +123,21 @@ pub(crate) fn fold(seen: &mut HashMap<i64, Seen>, host: i64, run_id: &str) {
 
 // ---- Which runs show, and what they open ----------------------------------------------------------------------------
 
-/// The kinds of run a row draws, which decide its words: the helm's setup (`add`) and Update operations.
+/// The kinds of run a row draws, which decide its words: the helm's setup (`add`), Update and uninstall operations.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Run {
     Setup,
     Update,
+    Uninstall,
 }
 
 impl Run {
-    /// The kind of a run of `operation`, or `None` for one no row draws yet (an uninstall) or a run without one.
+    /// The kind of a run of `operation`, or `None` for a run without one (the helm's idle view).
     fn of(operation: Option<ProvisioningOperation>) -> Option<Run> {
         match operation? {
             ProvisioningOperation::Add => Some(Run::Setup),
             ProvisioningOperation::Update => Some(Run::Update),
-            ProvisioningOperation::Uninstall => None,
+            ProvisioningOperation::Uninstall => Some(Run::Uninstall),
         }
     }
 
@@ -143,6 +146,27 @@ impl Run {
         match self {
             Run::Setup => "Setting up",
             Run::Update => "Updating",
+            Run::Uninstall => "Uninstalling",
+        }
+    }
+
+    /// Whether the inline status draws its verb before the count. The old label drew "Setting up" and "Uninstalling"
+    /// but left Update's at the count (`.host-update-verb`), so an Update's status reads its verb out without drawing
+    /// it.
+    fn draws_verb(self) -> bool {
+        match self {
+            Run::Setup | Run::Uninstall => true,
+            Run::Update => false,
+        }
+    }
+
+    /// Whether a running run of this kind opens its row by itself until the user folds it: setup and uninstall, whose
+    /// running row "expands once to show the helm's steps" (SPEC.md, "Topology"), never an Update, whose row "stays
+    /// folded".
+    fn opens_its_row(self) -> bool {
+        match self {
+            Run::Setup | Run::Uninstall => true,
+            Run::Update => false,
         }
     }
 
@@ -151,6 +175,7 @@ impl Run {
         match self {
             Run::Setup => "Setup steps",
             Run::Update => "Update steps",
+            Run::Uninstall => "Uninstall steps",
         }
     }
 
@@ -159,21 +184,22 @@ impl Run {
         match self {
             Run::Setup => "Setup provisioning",
             Run::Update => "Update provisioning",
+            Run::Uninstall => "Uninstall provisioning",
         }
     }
 }
 
-/// The host's retained run, if it is one a row draws: a setup or Update run with a run id (the helm's idle view has
-/// none).
+/// The host's retained run, if it is one a row draws: a run with a run id and an operation (the helm's idle view has
+/// neither).
 pub(crate) fn shown(run: Option<&ProvisioningView>) -> Option<&ProvisioningView> {
     run.filter(|run| run.run_id.is_some() && Run::of(run.operation).is_some())
 }
 
-/// Whether `run` is a setup going on now that the user has not folded (by `seen`): such a run opens its row by itself.
-/// An Update never does (the module docs).
+/// Whether `run` is a setup or an uninstall going on now that the user has not folded (by `seen`): such a run opens
+/// its row by itself. An Update never does (the module docs).
 pub(crate) fn opens_row(run: Option<&ProvisioningView>, seen: Option<&Seen>) -> bool {
     shown(run).is_some_and(|run| {
-        Run::of(run.operation) == Some(Run::Setup)
+        Run::of(run.operation).is_some_and(Run::opens_its_row)
             && run.status == RunStatus::Running
             && !folded(run, seen)
     })
@@ -189,8 +215,9 @@ fn folded(run: &ProvisioningView, seen: Option<&Seen>) -> bool {
 /// What a row's inline status says, in place of its phase words.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Status {
-    /// Work on the host is out (a rerun's probe or its confirmed setup, an Update's plan or its confirming request,
-    /// before the helm accepts it) and no run shows yet: "Setting up…" or "Updating…" alone.
+    /// Work on the host is out (a rerun's probe or its confirmed setup, an Update's or an uninstall's plan or its
+    /// confirming request, before the helm accepts it) and no run shows yet: "Setting up…", "Updating…" or
+    /// "Uninstalling…" alone.
     Pending(Run),
     /// A run shows: how many steps are done of how many, its current step, and how long since this UI first saw it
     /// running.
@@ -232,6 +259,7 @@ pub(crate) fn status(
     match in_flight? {
         Work::Probe | Work::Setup => Some(Status::Pending(Run::Setup)),
         Work::UpdateHost => Some(Status::Pending(Run::Update)),
+        Work::UninstallHost => Some(Status::Pending(Run::Uninstall)),
         _ => None,
     }
 }
@@ -266,9 +294,9 @@ pub(crate) fn clock(elapsed: Duration) -> String {
 
 /// Host `id`'s inline status (`.host-update-running`): drawn under `host-status-<id>` like the phase words it replaces,
 /// as a status named for its count and step and whose hover says the same at length (the step name is cut short
-/// on screen, as the old label's was; the old hover card is not ported). The dot is at `pulse`'s opacity. A setup draws
-/// its verb before the count; an Update does not, though its name and hover still start with it, as the old label
-/// drew "Setting up" and "Uninstalling" but left Update's visible label at the count (`.host-update-verb`).
+/// on screen, as the old label's was; the old hover card is not ported). The dot is at `pulse`'s opacity. A setup and
+/// an uninstall draw their verb before the count; an Update does not, though its name and hover still start with it
+/// ([`Run::draws_verb`]).
 pub(crate) fn status_mark(id: i64, status: &Status, pulse: f32, palette: &Palette) -> AnyElement {
     let dot = div()
         .flex_none()
@@ -303,10 +331,9 @@ pub(crate) fn status_mark(id: i64, status: &Status, pulse: f32, palette: &Palett
                 Some(step) => sentence.text(", now ").host(step),
                 None => sentence,
             };
-            let verb = match run {
-                Run::Setup => Some(div().flex_none().child(run.verb())),
-                Run::Update => None,
-            };
+            let verb = run
+                .draws_verb()
+                .then(|| div().flex_none().child(run.verb()));
             let line = line
                 .children(verb)
                 .child(div().flex_none().child(count))

@@ -3641,8 +3641,9 @@ pub(crate) async fn rename_session(
 /// session wait for the host before answering that it did not answer in time.
 /// A create waits the same, and so do the launcher's host reads (see
 /// [`within_host_read_bound`]). The host management routes that can wait as
-/// long use the same bound: a host probe, an Update's plan, and a destination
-/// or alias change (see [`within_host_reply_bound_saying`]). A credential
+/// long use the same bound: a host probe, an Update's plan, an uninstall's
+/// plan, and a destination or alias change (see
+/// [`within_host_reply_bound_saying`]). A credential
 /// replacement waits as long for its delivery to hosts, and reports the hosts
 /// it has not reached by then as not delivered rather than refusing, since the
 /// value is already saved (`crate::credentials::save`).
@@ -3704,12 +3705,13 @@ pub(crate) async fn within_host_reply_bound(
 /// [`within_host_reply_bound`] for work whose late result does not show in the
 /// session list, so the timeout reply has to say where it does show instead.
 ///
-/// The host management routes the GUI sends (a host probe, an Update's plan, a
-/// destination or alias change waiting for a setup or Update to finish) can
-/// wait on a host for longer than the UI channel tolerates, and each one's
-/// eventual outcome shows in a different place: the hosts list, or nowhere,
-/// when the user simply has to try again. `timed_out` is the whole message the
-/// 504 carries, and it is the caller's because only the caller knows which.
+/// The host management routes the GUI sends (a host probe, an Update's plan,
+/// an uninstall's plan, a destination or alias change waiting for a setup or
+/// Update to finish) can wait on a host for longer than the UI channel
+/// tolerates, and each one's eventual outcome shows in a different place: the
+/// hosts list, or nowhere, when the user simply has to try again. `timed_out`
+/// is the whole message the 504 carries, and it is the caller's because only
+/// the caller knows which.
 ///
 /// A failure the work produces after the 504 went out reaches nobody, so it is
 /// logged with its status and the start of its text; the caller's pushed state

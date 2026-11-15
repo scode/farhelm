@@ -60,11 +60,14 @@ fn painted(nodes: &[DriverNode]) -> String {
 /// be what the offers rule says for that host, so a remote host shows no command this build cannot carry out yet. Its
 /// header names the host and where it is, and focus starts on its first command that can act, as the old menu's did.
 /// Specified: a click on `build-box`'s toggle opens the menu beside it, named "Host actions for build-box", its header
-/// reading "dev@build-box · Farhelm 0.0.0-unreleased", offering Update, which holds focus, then Settings, then Remove
-/// ("Forget this host"); Escape closes it with focus on the toggle. (That Update and Remove act is `hosts::update`'s and
+/// reading "dev@build-box · Farhelm 0.0.0-unreleased", offering Update, which holds focus, then Settings, then
+/// Uninstall ("Remove Farhelm from this host, keeping its data") and Remove ("Forget this host"); Escape closes it with
+/// focus on the toggle. (That Update and Remove act is `hosts::update`'s and
 /// `hosts::remove`'s tests'.)
 #[gpui::test]
-fn a_remote_hosts_toggle_opens_a_menu_offering_update_settings_and_remove(cx: &mut TestAppContext) {
+fn a_remote_hosts_toggle_opens_a_menu_offering_update_settings_uninstall_and_remove(
+    cx: &mut TestAppContext,
+) {
     let (_helm, cx) = open_hosts(cx);
     assert_eq!(
         label(&frame(cx), "host-menu-toggle-2"),
@@ -92,9 +95,19 @@ fn a_remote_hosts_toggle_opens_a_menu_offering_update_settings_and_remove(cx: &m
         (Some(Role::MenuItem), Some("Remove".to_owned()))
     );
     assert!(painted(&nodes).contains("Forget this host"));
+    let uninstall = node(&nodes, "host-menu-uninstall").expect("Uninstall is offered");
+    assert_eq!(
+        (
+            uninstall.role,
+            uninstall.label.map(|label| label.to_string())
+        ),
+        (Some(Role::MenuItem), Some("Uninstall".to_owned()))
+    );
+    assert!(painted(&nodes).contains("Remove Farhelm from this host, keeping its data"));
     assert!(
-        bounds(cx, "host-menu-remove").origin.y > bounds(cx, "host-menu-settings").origin.y,
-        "Remove comes after Settings"
+        bounds(cx, "host-menu-uninstall").origin.y > bounds(cx, "host-menu-settings").origin.y
+            && bounds(cx, "host-menu-remove").origin.y > bounds(cx, "host-menu-uninstall").origin.y,
+        "Uninstall and then Remove come after Settings"
     );
     let update = node(&nodes, "host-menu-update").expect("Update is offered");
     assert_eq!(
@@ -164,9 +177,9 @@ fn escape_on_the_menu_returns_focus_to_its_toggle_under_the_macos_click_rule(
 /// local row's update is greyed out, points at the installer, and sends nothing"). Focus must not start on it: a greyed
 /// command draws no highlight, so a menu opening there showed no mark of where Enter would go (the old menu opened on
 /// Retry, ahead of it). Specified: the local host's menu reads "Local host · Farhelm ..." and offers Update, then
-/// Settings; focus starts on Settings, and Up reaches the greyed Update, as the old menu's arrows reached it; its line
-/// says "Run the installer again to update this machine"; clicking it and pressing Enter on it send nothing and leave
-/// the menu open.
+/// Settings, and neither Remove nor Uninstall; focus starts on Settings, and Up reaches the greyed Update, as the old
+/// menu's arrows reached it; its line says "Run the installer again to update this machine"; clicking it and pressing
+/// Enter on it send nothing and leave the menu open.
 #[gpui::test]
 fn the_local_hosts_greyed_update_says_why_and_sends_nothing(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_hosts(cx);
@@ -181,6 +194,10 @@ fn the_local_hosts_greyed_update_says_why_and_sends_nothing(cx: &mut TestAppCont
     assert!(
         node(&nodes, "host-menu-remove").is_none(),
         "the helm's own machine is never removed"
+    );
+    assert!(
+        node(&nodes, "host-menu-uninstall").is_none(),
+        "nor uninstalled from the panel: `farhelm uninstall` there does it"
     );
     assert!(painted(&nodes).contains("Run the installer again to update this machine"));
     assert_eq!(focused_id(cx).as_deref(), Some("host-menu-settings"));
@@ -300,7 +317,7 @@ fn settings_waits_for_the_hosts_own_work_in_flight(cx: &mut TestAppContext) {
 /// Why this matters: removing a Tensorlake sandbox's host deletes the sandbox, its files and its sessions (SPEC.md,
 /// "Topology": the panel calls that Delete sandbox, and it always asks); that command is not ported yet, so the menu must
 /// not offer the ordinary Remove in its place, whose question promises the host keeps running. Specified: a connected
-/// Tensorlake host's menu offers Settings and no Remove.
+/// Tensorlake host's menu offers Settings and neither Remove nor Uninstall.
 #[gpui::test]
 fn a_sandbox_hosts_menu_offers_no_remove(cx: &mut TestAppContext) {
     let mut listed = reference_hosts();
@@ -315,4 +332,8 @@ fn a_sandbox_hosts_menu_offers_no_remove(cx: &mut TestAppContext) {
         "the premise: its menu opened"
     );
     assert!(node(&nodes, "host-menu-remove").is_none());
+    assert!(
+        node(&nodes, "host-menu-uninstall").is_none(),
+        "SPEC.md: the panel \"offers no Uninstall for these hosts\""
+    );
 }

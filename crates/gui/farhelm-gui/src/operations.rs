@@ -150,6 +150,12 @@ pub enum Work {
     /// key ([`OpKey::trash`]): the Trash dialog's own Delete or Retry of one checkout (`crate::trash`). Not supersedable:
     /// the trash control prevents overlapping deletes of its own (SPEC.md, "Managed checkouts").
     TrashDelete,
+    /// Removing Farhelm from a remote host (`POST /api/hosts/{id}/uninstall`), under the host's key: first the plan
+    /// request without a body, which answers 200 with the one-use plan the user confirms, then the confirming request
+    /// naming that plan, which the helm accepts (202) once it has started the run whose progress it pushes
+    /// (`hosts::uninstall`). Not supersedable: the plan is one-use. It changes the host registry, since the run's last
+    /// step forgets the host.
+    UninstallHost,
 }
 
 /// The two halves of SPEC.md's "Launches and changes to the host registry still exclude each other". Each side refuses
@@ -195,6 +201,7 @@ impl Work {
             Work::UpdateHost => false,
             Work::SendFeedback => false,
             Work::TrashDelete => false,
+            Work::UninstallHost => false,
         }
     }
 
@@ -223,6 +230,7 @@ impl Work {
             Work::UpdateHost => true,
             Work::SendFeedback => false,
             Work::TrashDelete => false,
+            Work::UninstallHost => true,
         }
     }
 }
