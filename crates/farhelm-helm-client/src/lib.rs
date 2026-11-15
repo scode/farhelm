@@ -14,14 +14,14 @@
 //!   resolves only after every event the helm sent before its reply has been handed out.
 //! - [`collections`] applies that feed to keyed collections with one generic code path.
 //! - [`terminal`] attaches terminal streams (the agent terminal and tabs) and reconnects them.
+//! - [`transfers`] is the plain-HTTP side: a file path's hover check, saving a file into Downloads, and attachment
+//!   uploads. The transfers stay off the UI channel so a large one never delays a command, and the hover check does
+//!   because a channel command cannot be cancelled on its own (see its module docs).
 //! - [`ApiPath`] (from `farhelm-proto`, where the helm decodes it too) is the only constructor of a command path.
-//! - `fake` stands in for the helm in GUI tests, in process and without a runtime: the UI channel, and terminal
-//!   streams through `fake::terminal::FakeTerminal`. It exists only in this crate's own tests and with the
-//!   `test-support` feature, which the GUI turns on for its tests alone, so the app never compiles it.
-//!
-//! NOTE: There is no HTTP client here yet. File transfers (attachment uploads, downloads) are the one thing that does
-//! not fit a JSON command, and nothing in the first GPUI milestone uses them, so the area that ports transfers adds
-//! that client. A file stat is an ordinary GET on the channel.
+//! - `fake` stands in for the helm in GUI tests, in process and without a runtime: the UI channel, terminal streams
+//!   through `fake::terminal::FakeTerminal`, and file transfers through `fake::transfers::FakeTransfers`. It exists
+//!   only in this crate's own tests and with the `test-support` feature, which the GUI turns on for its tests alone,
+//!   so the app never compiles it.
 
 pub mod channel;
 pub mod collections;
@@ -30,6 +30,7 @@ pub mod collections;
 pub mod fake;
 mod reconnect;
 pub mod terminal;
+pub mod transfers;
 mod ws;
 
 pub use channel::{
@@ -38,13 +39,17 @@ pub use channel::{
 };
 pub use collections::{Collections, Pushed, PushedChanges, PushedEntry, PushedState};
 pub use farhelm_proto::ui_channel::{ApiPath, PathError};
+pub use transfers::{
+    FileStat, OpenOutcome, SavedDownload, Transfer, TransferError, Transfers, UploadOutcome,
+    UploadSource,
+};
 pub use ws::{ConnectError, HelmEndpoint};
 
 use std::sync::Arc;
 
-/// The GUI's handle on one helm: a private tokio runtime plus the UI channel running on it.
+/// The GUI's handle on one helm: a private tokio runtime plus the UI channel and the file transfers running on it.
 ///
-/// Everything this hands out (channel handles, event receivers, command futures, terminal streams) is
+/// Everything this hands out (channel handles, event receivers, command futures, terminal streams, transfers) is
 /// runtime-agnostic: the GUI polls it on its own executor and never enters this runtime. Dropping the connection
 /// stops the runtime without waiting for its tasks, so a window closing never blocks on a socket.
 pub struct HelmConnection {
@@ -55,11 +60,12 @@ pub struct HelmConnection {
     handle: tokio::runtime::Handle,
     endpoint: HelmEndpoint,
     channel: ChannelHandle,
+    transfers: Transfers,
 }
 
 impl HelmConnection {
-    /// Start the runtime and open the UI channel. Returns the connection and the channel's event feed, which the
-    /// caller must keep draining (see [`ChannelEvents`]).
+    /// Start the runtime, open the UI channel and start serving file transfers. Returns the connection and the
+    /// channel's event feed, which the caller must keep draining (see [`ChannelEvents`]).
     pub fn open(
         endpoint: HelmEndpoint,
         config: ChannelConfig,
@@ -73,9 +79,10 @@ impl HelmConnection {
             endpoint.clone(),
             config.watchdog,
         ));
-        let (channel, events) = {
+        let (channel, events, transfers) = {
             let _guard = runtime.enter();
-            channel::spawn_channel(connector, config)
+            let (channel, events) = channel::spawn_channel(connector, config);
+            (channel, events, transfers::spawn(endpoint.clone()))
         };
         Ok((
             HelmConnection {
@@ -83,6 +90,7 @@ impl HelmConnection {
                 runtime: Some(runtime),
                 endpoint,
                 channel,
+                transfers,
             },
             events,
         ))
@@ -91,6 +99,11 @@ impl HelmConnection {
     /// The UI channel. Clones share the one channel.
     pub fn channel(&self) -> &ChannelHandle {
         &self.channel
+    }
+
+    /// File transfers to this helm. Clones share one HTTP client.
+    pub fn transfers(&self) -> &Transfers {
+        &self.transfers
     }
 
     /// Attach one terminal stream. See [`terminal::open_terminal`].
