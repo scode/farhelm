@@ -937,11 +937,11 @@ fn a_clone_of_a_managed_checkout_starts_on_its_repository_named_clone() {
 }
 
 /// A repository identity the shared parser would not produce (a capital, an invisible character) did not come from the
-/// helm, so a Clone does not carry it into the editable field; the old launcher showed such text escaped behind a
-/// "Clear repository" button instead. The Clone still opens on a managed checkout, with nothing chosen, so one press of
-/// Launch cannot start it inside the source's own checkout (SPEC.md: "Empty, invalid or unselected repository input
-/// cannot launch using a previous folder"). Specified: for a capitalized and a formatting-character owner, the Clone is
-/// a managed checkout with no repository chosen and an empty field.
+/// helm, so a Clone does not carry it into the editable field; the old launcher carried it, showing one with an
+/// invisible character escaped behind a "Clear repository" button. The Clone still opens on a managed checkout, with
+/// nothing chosen, so one press of Launch cannot start it inside the source's own checkout (SPEC.md: "Empty, invalid or
+/// unselected repository input cannot launch using a previous folder"). Specified: for a capitalized and a
+/// formatting-character owner, the Clone is a managed checkout with no repository chosen and an empty field.
 #[test]
 fn a_clone_carries_only_a_repository_the_shared_parser_reads_back() {
     for owner in ["Acme", "ac\u{202e}me"] {
