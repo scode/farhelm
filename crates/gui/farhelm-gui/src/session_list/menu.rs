@@ -10,6 +10,11 @@
 //! commands, in a [`Role::Menu`] of their own, so the header is not read out as one of them. Up and Down walk the
 //! commands (the layer manager's menu context), and the pointer moves the same highlight.
 //!
+//! The menu names its button as where closing returns focus ([`focus::ReturnTo::Control`]), so Escape and every command
+//! chosen from it leave focus on the button, also on macOS, where the click that opened the menu left the button
+//! unfocused (the old app named the button through `RETURN_FOCUS`). When the button is no longer drawn, focus goes back
+//! to what held it before the menu opened, or, when that was the button itself (a click focuses it on Linux), home.
+//!
 //! Rename comes first, as in the old app. Choosing it closes the menu, which leaves focus on the menu's button, and
 //! opens the Rename editor ([`super::rename`]), which returns focus there when it closes. Its hover help names the
 //! Rename shortcut on the open session's row only, the one row the shortcut acts on (SPEC.md, "Desktop window
@@ -79,7 +84,8 @@ pub(super) enum Opened {
 }
 
 /// What the list keeps about its rows' menus for one UI session: where each row's button was drawn, so a command or
-/// the Delete shortcut can anchor a question to it, and which layer each row opened last.
+/// the Delete shortcut can anchor a question to it, each drawn button's focus handle, which its menu names as where
+/// closing returns focus, and which layer each row opened last.
 ///
 /// The layers are kept by id and checked with the layer manager whenever they are read, so a layer closed some other
 /// way (Escape, a press outside, its row gone) needs no bookkeeping here.
@@ -92,6 +98,9 @@ pub(super) enum Opened {
 #[derive(Default)]
 pub(super) struct RowLayers {
     anchors: HashMap<String, Anchor>,
+    /// Each drawn button's focus handle, recorded with its anchor: the handle is element state, made only while the
+    /// row draws, so the menu's opener (a click handler) reads it from here.
+    buttons: HashMap<String, FocusHandle>,
     open: HashMap<String, (LayerId, Opened)>,
 }
 
@@ -102,6 +111,7 @@ impl RowLayers {
     /// Forget the buttons drawn last frame; the list's item callback records this frame's as it draws them.
     pub(super) fn start_frame(&mut self) {
         self.anchors.clear();
+        self.buttons.clear();
     }
 
     /// The anchor of `key`'s menu button, as last drawn.
@@ -127,8 +137,9 @@ impl RowLayers {
 }
 
 /// The menu button of the row of `key`, a session titled `title` (as the host wrote it), with its anchor recorded in
-/// `rows` for the commands and the shortcut. Called from the virtualized list's item callback, once per drawn row and
-/// frame: an anchor is element state, so it is made while the row's elements are.
+/// `rows` for the commands and the shortcut, and its focus handle for the menu to return focus to. Called from the
+/// virtualized list's item callback, once per drawn row and frame: an anchor and a control's focus handle are element
+/// state, so they are made while the row's elements are.
 pub(super) fn menu_button(
     rows: &RefCell<RowLayers>,
     list: &WeakEntity<SessionList>,
@@ -151,6 +162,9 @@ pub(super) fn menu_button(
     };
     let id: SharedString = format!("{BUTTON_ID_PREFIX}{key}").into();
     let focus = focus::control_handle(SharedString::from(format!("{id}-focus-handle")), window, cx);
+    rows.borrow_mut()
+        .buttons
+        .insert(key.to_owned(), focus.clone());
     // Like the old `.session-row-menu`, invisible on a row that is neither hovered, selected nor holding the button's
     // focus and has nothing open, though still there to click and to reach with Tab.
     let visible = selected || open || focus.is_focused(window);
@@ -189,9 +203,13 @@ impl SessionList {
     /// the user can see. Visible to the crate for the screenshot goldens, which open a menu without a click.
     pub(crate) fn toggle_menu(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.reveal_row(key, cx);
-        let (open, anchor) = {
+        let (open, anchor, button) = {
             let mut rows = self.current.current(cx).rows.borrow_mut();
-            (rows.still_open(key, window, cx), rows.anchor(key))
+            (
+                rows.still_open(key, window, cx),
+                rows.anchor(key),
+                rows.buttons.get(key).cloned(),
+            )
         };
         match open {
             Some((_, Opened::Question)) => return,
@@ -201,7 +219,7 @@ impl SessionList {
             }
             None => {}
         }
-        let Some(anchor) = anchor else {
+        let (Some(anchor), Some(button)) = (anchor, button) else {
             return;
         };
         let mark = Mark::take(cx);
@@ -219,6 +237,9 @@ impl SessionList {
                 // The first command, as the old menu started.
                 start: Some(rename_focus),
                 anchor,
+                // The button, not what held focus before: on macOS the click that opened the menu left the button
+                // unfocused, and SPEC.md returns focus to the button when the menu closes.
+                returns_to: focus::ReturnTo::Control(button),
             },
             &mark,
             window,
@@ -233,8 +254,8 @@ impl SessionList {
         }
     }
 
-    /// Close `key`'s menu if it is still open, which returns focus to where it was when the menu opened (its button):
-    /// what every command chosen from the menu does first, at acceptance rather than at a reply.
+    /// Close `key`'s menu if it is still open, which returns focus to its button (the menu names it, so on every
+    /// platform): what every command chosen from the menu does first, at acceptance rather than at a reply.
     fn close_menu(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
         let open = self
             .current
@@ -273,9 +294,8 @@ impl SessionList {
         seen::send(key, toggle, cx);
     }
 
-    /// One of the menu's lifecycle commands was chosen at `mark`: close the menu, which returns focus to where it was
-    /// when the menu opened, then go on as `command` goes on for the row (its Replace, Stop or Delete), so any question
-    /// opens from there.
+    /// One of the menu's lifecycle commands was chosen at `mark`: close the menu, which returns focus to its button,
+    /// then go on as `command` goes on for the row (its Replace, Stop or Delete), so any question opens from there.
     fn lifecycle_from_menu(
         &mut self,
         key: &str,

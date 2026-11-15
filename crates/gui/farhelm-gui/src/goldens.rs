@@ -43,7 +43,7 @@ use crate::components::{TabOption, TabStrip};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::focus::Mark;
+use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::HostsPanel;
 use crate::hosts::identity::host_mark;
@@ -826,6 +826,7 @@ fn popover_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
             container: container.clone(),
             start: Some(container),
             anchor,
+            returns_to: focus::ReturnTo::Opener,
         },
         &mark,
         window,

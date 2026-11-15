@@ -32,10 +32,11 @@
 //!   counts as empty space) keeps focus on the control in use in the dialogs SPEC.md lists, and moves focus to the
 //!   dialog itself in the others ([`Dialog::keeps_focus_on_empty_click`]); a click on a menu's empty space keeps focus
 //!   on its item. Tab stays inside the topmost layer, dialog or menu alike (the focus coordinator walks GPUI's tab
-//!   order within [`trap`]). Closing any layer returns focus to what held it when the layer opened, unless a dialog's
-//!   opener named home or a control (the button that opened it) instead ([`Dialog::returns_to`]). A press reaches a
-//!   dialog's empty-space rule only after the controls under it have handled it, and one that gave focus to a control
-//!   (a click into a text field) is not a press on empty space (the focus coordinator's [`focus::OnPress::Focus`]).
+//!   order within [`trap`]). Closing any layer returns focus to what held it when the layer opened, unless its opener
+//!   named home or a control (the button that opened a dialog, the toggle that opened a menu) instead
+//!   ([`Dialog::returns_to`], [`Popover::returns_to`]). A press reaches a dialog's empty-space rule only after the
+//!   controls under it have handled it, and one that gave focus to a control (a click into a text field) is not a press
+//!   on empty space (the focus coordinator's [`focus::OnPress::Focus`]).
 //! - **A popover's card takes the pointer from what it covers.** It has no veil, so the page around it stays live, but
 //!   a press, click, wheel, hover or move on the card itself never reaches the element under it: a click on a
 //!   question's answer over a terminal must not also focus the terminal or click a control there.
@@ -174,7 +175,8 @@ struct Layer {
     /// Whether the layer took focus when it opened and holds it while open: every layer but a popover opened without
     /// a start ([`Popover::start`]), which Tab's trap, focus recovery and the focus return on close all pass over.
     takes_focus: bool,
-    /// Where closing it returns focus: `opener`, unless its opener named home or a control ([`Dialog::returns_to`]).
+    /// Where closing it returns focus: `opener`, unless its opener named home or a control ([`Dialog::returns_to`],
+    /// [`Popover::returns_to`]).
     returns_to: focus::ReturnTo,
     /// What a dismissal of it does ([`Dialog::on_dismiss`]); `None` always closes.
     on_dismiss: Option<DismissHook>,
@@ -491,6 +493,15 @@ pub struct Popover {
     /// The element it is drawn below (or beside, [`Anchor::beside`]), following it as it moves; it closes when the
     /// element is no longer drawn.
     pub anchor: Anchor,
+    /// Where focus goes when it closes with focus inside it, under the same rules as [`Dialog::returns_to`]:
+    /// [`focus::ReturnTo::Opener`] (what held focus when it opened) for a popover opened from the control that keeps
+    /// focus (a select's list, a field's floating list), and [`focus::ReturnTo::Control`] with the toggle's handle for
+    /// a menu a toggle button opens (a session row's ⋯), so Escape or a chosen item returns focus to the toggle also
+    /// where the click that opened the menu left the toggle unfocused (macOS). A named control that is no longer drawn,
+    /// or that sits outside another layer that still holds focus, falls back to the opener, as for a dialog, and focus
+    /// recovers (home, on the page) when the opener was that control itself and it is gone. A popover that never takes
+    /// focus ([`Popover::start`] `None`) returns none, so this is never used for one.
+    pub returns_to: focus::ReturnTo,
 }
 
 /// A dialog drawn beside an element instead of centered over a veil: placed and followed like a [`Popover`], closed
@@ -656,6 +667,7 @@ pub fn open_popover(
         container,
         start,
         anchor,
+        returns_to,
     } = popover;
     let drawn = drawn(&anchor)?;
     open(
@@ -667,7 +679,7 @@ pub fn open_popover(
         None,
         // A menu's empty space (a separator, padding) keeps focus on its item.
         focus::OnPress::Keep,
-        focus::ReturnTo::Opener,
+        returns_to,
         None,
         mark,
         window,
@@ -747,8 +759,8 @@ fn close_later(window: AnyWindowHandle, id: LayerId, cx: &mut App) {
 
 /// Close the layer `id`, if it is still open, and anything opened on top of it, unless `id` is a popover that never
 /// takes focus ([`Popover::start`] `None`): that one closes alone. If focus was inside what closed, it returns to what
-/// held it when `id` opened, or where `id`'s opener said instead ([`Dialog::returns_to`]). A popover that never took
-/// focus is passed over: closing one moves no focus.
+/// held it when `id` opened, or where `id`'s opener said instead ([`Dialog::returns_to`], [`Popover::returns_to`]).
+/// A popover that never took focus is passed over: closing one moves no focus.
 ///
 /// A layer that takes focus owns what was opened over it: focus stays inside the topmost such layer ([`trap`]), so
 /// whatever opened over it was opened from inside it (a menu from one of a dialog's controls), and goes with it. A

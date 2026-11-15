@@ -80,10 +80,10 @@
 //!   update that shows it) has no position yet and is not scrolled to, and [`move_within_control`] scrolls nothing. A
 //!   move to another control of the open dialog goes through [`focus_in_layer`], which moves and scrolls only once a
 //!   frame has drawn the control: Settings' trust hints, which open agent trust and, once the agent's read answers,
-//!   move focus to its switch and scroll its block into view, the launcher's Custom choice, which moves focus into the
-//!   flags field it shows (SPEC.md), and an inline question's starting answer. Nothing yet scrolls to a layer's start
-//!   below the fold; SPEC.md's archive global confirmation, whose actions are brought into view when it opens, will
-//!   need it.
+//!   move focus to its switch and scroll its switch into view, the launcher's Custom choice, which moves focus into
+//!   the flags field it shows (SPEC.md), and an inline question's starting answer. Nothing yet scrolls to a layer's
+//!   start below the fold; SPEC.md's archive global confirmation, whose actions are brought into view when it opens,
+//!   will need it.
 //!
 //! NOTE: Agent approval cards, which keep focus while a dialog is open, do not exist yet, so [`invariant_violation`]
 //! knows only the topmost dialog.
@@ -1251,26 +1251,28 @@ pub(crate) fn enter_layer(handle: &FocusHandle, window: &mut Window, cx: &mut Ap
     apply(Move::To(handle), window, cx);
 }
 
-/// Where focus goes when a dialog closes with focus inside it. The dialog's opener chooses
-/// ([`crate::layers::Dialog::returns_to`]).
+/// Where focus goes when a dialog or menu closes with focus inside it. Its opener chooses
+/// ([`crate::layers::Dialog::returns_to`], [`crate::layers::Popover::returns_to`]); the variants below say "dialog"
+/// for both.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReturnTo {
     /// What held focus when the dialog opened: SPEC.md, "Closing something the user opened returns focus to where it
     /// was before it opened". Every dialog but those below.
     Opener,
-    /// The control the opener names, however the dialog closes: the button that opened it (Settings' gear, Add host),
-    /// so that closing returns focus to that button on every platform. On macOS a click leaves a button unfocused, so
-    /// what held focus when the dialog opened is whatever held it before the click (the terminal, say), not the button
-    /// SPEC.md returns focus to ("Escape and either close control return focus to the gear"); the old app named the
-    /// return target explicitly for the same reason (`RETURN_FOCUS`). Naming it here, rather than focusing the button
-    /// before opening, costs no extra focus move, and works from inside another dialog, where the coordinator moves no
-    /// focus to a control on the page's behalf.
+    /// The control the opener names, however the dialog closes: the button that opened it (Settings' gear, Add host, a
+    /// session row's menu toggle), so that closing returns focus to that button on every platform. On macOS a click
+    /// leaves a button unfocused, so what held focus when the dialog opened is whatever held it before the click (the
+    /// terminal, say), not the button SPEC.md returns focus to ("Escape and either close control return focus to the
+    /// gear"); the old app named the return target explicitly for the same reason (`RETURN_FOCUS`). Naming it here,
+    /// rather than focusing the button before opening, costs no extra focus move, and works from inside another dialog,
+    /// where the coordinator moves no focus to a control on the page's behalf.
     ///
     /// The control only when it is drawn inside the topmost layer that holds focus once the dialog has closed, or on
     /// the page when no such layer is left; otherwise it falls back to [`ReturnTo::Opener`]: when the opener named a
     /// control on the page while another dialog stays open, or a control that went while the dialog was open (the gear
     /// no longer drawn), whatever held focus before it opened is the closer match to SPEC.md's "returns focus to where
-    /// it was before it opened".
+    /// it was before it opened". When what held focus then is the named control itself (a click focused it, on
+    /// Linux), there is nothing to fall back to, and focus recovers as from a control that vanished.
     Control(FocusHandle),
     /// Home as it is when the dialog closes (the selected session's terminal), whatever held focus when it opened. For
     /// a dialog SPEC.md sends back to the terminal however it closes: the Rename editor opened with its shortcut, which
@@ -1300,8 +1302,8 @@ pub(crate) fn return_to(
     if let Some(state) = state(window, cx) {
         state.update(cx, |state, _| state.pending = None);
     }
-    let named = match target {
-        ReturnTo::Home if !layers::focus_layer_open(window, cx) => home(window, cx),
+    let (named, undrawn) = match target {
+        ReturnTo::Home if !layers::focus_layer_open(window, cx) => (home(window, cx), None),
         // `contains` reads the frame on screen, which still has the closed layer over the one below it. With no layer
         // left, the control must still be drawn on the page.
         ReturnTo::Control(control)
@@ -1310,14 +1312,26 @@ pub(crate) fn return_to(
                 None => root_handle(window, cx).is_some_and(|root| root.contains(&control, window)),
             } =>
         {
-            Some(control)
+            (Some(control), None)
         }
+        ReturnTo::Control(control) => (None, Some(control)),
         // The layer manager turns `HomeOnEscape` into `Home` or `Opener` before it gets here; reaching here unturned,
         // it was not a dismissal.
-        ReturnTo::Home | ReturnTo::Control(_) | ReturnTo::Opener | ReturnTo::HomeOnEscape => None,
+        ReturnTo::Home | ReturnTo::Opener | ReturnTo::HomeOnEscape => (None, None),
     };
-    match named.or_else(|| opener.and_then(WeakFocusHandle::upgrade)) {
-        // If it is no longer drawn, GPUI reports the focus as lost on the next frame and [`recover`] runs then.
+    // A named control found not drawn is no fallback either, also when it is what held focus as the layer opened (the
+    // click that opened a menu focused its toggle, on Linux, and then the toggle's row went). The name holds a strong
+    // handle, which keeps that weak opener alive after the control's own state is gone, so focus would land on a
+    // control that dies once the closed layer is dropped. GPUI reports focus lost only on a frame that goes from
+    // drawing the focused element to not drawing it, and the frame on screen at the close may already lack it (a row's
+    // removal closes its menu after the frame that drew neither), so nothing would report it.
+    let opener = opener
+        .and_then(WeakFocusHandle::upgrade)
+        .filter(|opener| undrawn.as_ref() != Some(opener));
+    match named.or(opener) {
+        // If it is no longer drawn but the frame on screen drew it, GPUI reports the focus as lost on the next frame and
+        // [`recover`] runs then; a control the frame on screen already lacks is never reported, which is why the named
+        // control above must not come back as the opener.
         Some(place) => {
             // Noted for [`press_was_taken`]: a press that closed the layer did not give focus to `place`.
             if let Some(state) = state(window, cx) {

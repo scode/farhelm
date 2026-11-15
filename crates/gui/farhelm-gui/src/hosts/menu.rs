@@ -14,9 +14,11 @@
 //!
 //! [`open_menu`] is the entry point. The Hosts panel's row toggle calls it, and so will the host rail's avatar menu,
 //! with its own anchor and focus handle. Focus goes back to that control on every platform, also where a click leaves a
-//! button unfocused (macOS), as the old app returned it there (SPEC.md, "Opening and closing"): the settings dialog
-//! opened from the menu names it as where its closing returns focus, and the menu, a popover, which cannot name one,
-//! gives it focus as it opens, so closing the menu returns focus there.
+//! button unfocused (macOS), as the old app returned it there (SPEC.md, "Opening and closing"): the menu and the
+//! settings dialog opened from it both name the control as where their closing returns focus
+//! ([`focus::ReturnTo::Control`]), so nothing focuses it before the menu opens. When the control is no longer drawn,
+//! focus goes back to what held it before the menu opened, or, when that was the control itself (a click focuses it on
+//! Linux), home.
 //!
 //! NOTE: Each of the other commands arrives with the piece of the port that sends it, at its place in the old order
 //! (a rerun, Update, Settings, then Remove behind a separator), and the toggle keeps the old hover help, which names
@@ -104,11 +106,10 @@ pub(super) fn toggle(
 /// the entry point the Hosts panel's row toggle calls, and the host rail's avatar menu will. `mark` is the [`Mark`]
 /// taken in that control's handler.
 ///
-/// `opener` takes focus first and focus starts on the menu's first command, as the old menu's did, so closing the menu
-/// returns focus to `opener`, and the settings dialog opened from the menu returns it there too (see the module docs).
-/// Nothing opens, and no focus moves, when the user has moved on since `mark`, the window is inert, or the registry does
-/// not list the host. When `anchor` is not drawn, nothing opens but `opener` keeps the focus it was given: the anchor is
-/// checked only as the menu opens. A row toggle never meets this (a press means its anchor was drawn).
+/// Focus starts on the menu's first command, as the old menu's did, and the menu names `opener` as where its closing
+/// returns focus, so closing it returns focus to `opener`, and the settings dialog opened from the menu returns it
+/// there too (see the module docs). Nothing opens, and no focus moves, when the user has moved on since `mark`, the
+/// window is inert, the registry does not list the host, or `anchor` is not drawn.
 ///
 /// Returns the menu's layer, or `None` when nothing opened.
 pub fn open_menu(
@@ -123,10 +124,6 @@ pub fn open_menu(
     if focus::has_moved_on(mark, cx) {
         return None;
     }
-    // A popover returns focus to what held it when it opened, and on macOS a click leaves the toggle unfocused, so the
-    // toggle takes focus first. This goes once popovers can name the control their closing returns focus to, as
-    // dialogs do (`focus::ReturnTo::Control`).
-    focus::focus_control(opener, mark, window, cx);
     let update_focus = cx.focus_handle().tab_stop(true);
     let settings_focus = cx.focus_handle().tab_stop(true);
     let start = match offered.update {
@@ -146,6 +143,8 @@ pub fn open_menu(
             container: cx.focus_handle(),
             start: Some(start),
             anchor,
+            // The toggle, not what held focus before: on macOS the click that opened the menu left it unfocused.
+            returns_to: focus::ReturnTo::Control(opener.clone()),
         },
         mark,
         window,
