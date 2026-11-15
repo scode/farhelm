@@ -24,6 +24,12 @@ pub enum Notice {
     /// The banner's Open launcher brings it back (`launcher::launch`). The launcher withdraws it when it returns or a
     /// reset drops it.
     LaunchNotStarted,
+    /// An answer to an agent's approval card arrived after its request had stopped waiting (answered elsewhere,
+    /// expired, or its session gone), so it did not take effect. `always` is set after an Always allow, whose host
+    /// setting the helm stores before it looks for the request. To be drawn by the approval region above its waiting
+    /// list, as the old app drew it, never as a banner; it stays until the user dismisses it, and a later late answer
+    /// replaces it.
+    LateAnswer { always: bool },
 }
 
 impl Notice {
@@ -37,6 +43,15 @@ impl Notice {
             }
             Notice::LaunchNotStarted => {
                 "Not launched. Open the launcher to see why; it still holds your settings.".into()
+            }
+            Notice::LateAnswer { always: false } => {
+                "Your answer arrived after its request had stopped waiting, so it did not take effect.".into()
+            }
+            Notice::LateAnswer { always: true } => {
+                "Your answer arrived after its request had stopped waiting, so it did not take effect. The \
+                 host's permission for this kind of request may still have been turned on; its settings show \
+                 whether it was."
+                    .into()
             }
         }
     }
