@@ -18,7 +18,8 @@
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
-//! The agent approval card has its own two scenes, wide and narrow, in both appearances.
+//! The agent approval card has its own two scenes, wide and narrow, and the Add host dialog as an agent's host add
+//! request opens it one more, in both appearances.
 //!
 //! These are test references, not documentation media: they pin what each component draws, so a change to a token, a
 //! padding or a font shows up as a failing test with the new picture beside the old one, instead of drifting unnoticed.
@@ -2544,6 +2545,68 @@ fn host_add_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) 
     keep.push(Box::new(watch));
 }
 
+/// The Add host dialog as an approval card opens it for an agent's host add (no reference screen: the old app's dialog
+/// for an agent was the same dialog with two unstyled description lists): who asked, what Add approves, and the fields
+/// prefilled with the request's destination and alias. Pins the agent's lines above the ordinary fields.
+fn host_add_dialog_agent_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    use farhelm_proto::approvals::{ApprovalAction, ApprovalSession, PendingApproval};
+    use farhelm_proto::ui_channel::{Collection, CollectionState, KeyedEntry};
+    let request = PendingApproval {
+        id: "golden-add".to_owned(),
+        host_id: 2,
+        host_name: "build-box".to_owned(),
+        session: ApprovalSession {
+            id: "7f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:a75bff30-1c2d-4e5f-8a9b-0c1d2e3f27a4"
+                .to_owned(),
+            title: Some("Provision the test fleet".to_owned()),
+            host_name: Some("build-box".to_owned()),
+        },
+        action: ApprovalAction::HostAdd {
+            destination: "ops@new-box.example".to_owned(),
+            alias: Some("new-box".to_owned()),
+        },
+        own_host_session_action: false,
+        expires_at_ms: 1,
+    };
+    let approvals = CollectionState {
+        collection: Collection::Approvals,
+        meta: crate::test_support::meta(&["golden-add"]),
+        entries: vec![KeyedEntry {
+            key: "golden-add".to_owned(),
+            value: serde_json::to_value(&request).expect("an approval encodes"),
+        }],
+    };
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    helm.connect(vec![
+        crate::hosts::tests::hosts(&crate::hosts::tests::reference_hosts()),
+        approvals,
+    ]);
+    let arming = cx.new(|_| crate::approvals::answers::Arming::armed_for_scene());
+    // Opened once the connection has its UI session, as Add host's own scene opens.
+    let handle = window.window_handle();
+    let opener = state.ring.clone();
+    let opened = std::cell::Cell::new(false);
+    let watch = cx.observe(&connection, move |connection, cx| {
+        if opened.get() || connection.read(cx).session().is_none() {
+            return;
+        }
+        opened.set(true);
+        let arming = arming.clone();
+        let request = request.clone();
+        let _ = handle.update(cx, |_, window, cx| {
+            let mark = Mark::take(cx);
+            if let Some(agent) = crate::approvals::host_add::AgentRequest::of(&request, arming) {
+                let _ = crate::hosts::add::open_for_agent(agent, &opener, &mark, window, cx);
+            }
+        });
+    });
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    keep.push(Box::new(watch));
+}
+
 /// Settings at Checkouts, its fields empty and the spare switch on, as in the reference. Focus starts on the dialog
 /// itself (`Section::first`), so no ring shows.
 fn settings_checkouts_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
@@ -3757,6 +3820,12 @@ static SCENES: &[Scene] = &[
         size: (600., 600.),
         draw: empty,
         setup: host_add_dialog_setup,
+    },
+    Scene {
+        name: "host-add-dialog-agent",
+        size: (600., 900.),
+        draw: empty,
+        setup: host_add_dialog_agent_setup,
     },
     Scene {
         name: "hosts-shown-with-a-host-chosen",

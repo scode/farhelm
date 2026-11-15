@@ -198,6 +198,7 @@ pub(crate) fn reference_offer(opener: gpui::FocusHandle, mark: crate::focus::Mar
             destination: "dev@new-box".into(),
             alias: String::new(),
             opener,
+            from_agent: false,
         },
         mark,
     }

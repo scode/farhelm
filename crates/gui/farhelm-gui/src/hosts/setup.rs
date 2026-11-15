@@ -136,6 +136,9 @@ pub(crate) enum Target {
         alias: String,
         /// The control that opened Add host, which gets focus back.
         opener: FocusHandle,
+        /// The add began as an agent's request: a refusal reopens Add host still marked so ([`add::Seed::from_agent`]),
+        /// so its next plan still asks.
+        from_agent: bool,
     },
     /// A registered host whose failed setup the user runs again from its row: the title names it as its row does, and
     /// the tile is its own mark. A refusal shows under its row ([`rerun`]).
@@ -305,6 +308,7 @@ fn reopen_new(offer: &Offer, problem: HostSentence, window: AnyWindowHandle, cx:
         destination,
         alias,
         opener,
+        from_agent,
     } = &offer.target
     else {
         return false;
@@ -316,6 +320,7 @@ fn reopen_new(offer: &Offer, problem: HostSentence, window: AnyWindowHandle, cx:
                     destination: destination.clone(),
                     alias: alias.clone(),
                     problem,
+                    from_agent: *from_agent,
                 };
                 add::reopen(opener, &offer.mark, Some(seed), window, cx).is_some()
             })
