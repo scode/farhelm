@@ -252,6 +252,41 @@ class SeedTest(unittest.TestCase):
                 self.assertIsNone(body["command"]["agent"])
                 self.assertNotIn("{farhelm_args}", body["command"]["command"])
 
+    def test_a_spawner_runs_the_spawn_script_undeclared(self):
+        """A scene of an agent's approval card types `spawn /tmp` into a `spawner` session, so that session must run
+        the fake agent's spawn script, the one whose lines become real `farhelm spawn` requests, and the card shows that
+        command. Specified: its body is the spawn script named by its bare binary name, never the build path (which the
+        card would show), as an undeclared, non-YOLO command (a declared agent type would need `{farhelm_args}`, which
+        the spawn script has no use for)."""
+        body = gui_agent.seed_body(1, pathlib.Path("/tmp"), "/t dir/fx", "spawner")
+        self.assertEqual(body["command"]["command"], "farhelm-fixtures fake-agent --script spawn")
+        self.assertIsNone(body["command"]["agent"])
+        self.assertFalse(body["command"]["yolo"])
+        self.assertEqual(gui_agent.parse_fleet("spawner"), ["spawner"])
+
+    def test_a_spawner_lets_its_own_launch_be_copied_on_the_local_host(self):
+        """The helm refuses an agent's copy of a command launch before any card on a host that asks before YOLO
+        launches, so a spawner whose host asked would show the agent an error and the scene no card. Specified: the
+        local host's "Start YOLO sessions without asking" is turned on through the helm's own route, and no other host
+        is touched."""
+        sent = []
+
+        def fake_request(run, method, path, body=None):
+            sent.append((method, path, body))
+            if path == "/api/hosts":
+                return {"hosts": [{"id": 7, "kind": "ssh"}, {"id": 3, "kind": "local"}]}
+            return None
+
+        real_request = gui_agent.helm_request
+        gui_agent.helm_request = fake_request
+        try:
+            gui_agent.allow_copied_launches(pathlib.Path("/tmp/run"))
+        finally:
+            gui_agent.helm_request = real_request
+        self.assertEqual(
+            sent[1:], [("POST", "/api/hosts/3/yolo-without-asking", {"yolo_without_asking": True})]
+        )
+
     def test_seeded_sessions_run_in_the_neutral_folder_and_keep_transcripts_in_the_run(self):
         """Every row shows its session's folder, and pictures of the app are compared from one run to the next;
         seeding into the run's own random directory made every capture differ and put a scratch path in front of the

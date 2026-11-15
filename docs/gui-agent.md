@@ -30,14 +30,14 @@ it first. `terminal-text --wait TEXT` asks again until the focused terminal show
 click returns.
 
 `start` takes `--sessions N` (basic fake-agent sessions to seed, default 2, 0 for none) or `--fleet KIND,...` (one
-session per kind, in order: `basic`, `running`, `waiting`, `idle` or `exited`; see "Seeded sessions"), `--size WxH`
-(Linux only: Mutter's virtual monitor, default 1600x1200; refused on a Mac, which uses its real screen), `--no-build`
-(reuse the binaries already in the target directory), `--lock FILE` (hold an exclusive lock on FILE from before the
-build until `stop`; see "On a Mac"), `--window-size WxH` (the window's first size, still fitted to the screen; on Linux
-it must fit Mutter's monitor, and it includes the frame GPUI Kit draws inside the window there, a 20-pixel black shadow
-margin and a 1-pixel border on every side, and the 34-pixel title bar the window draws for itself under Mutter, which
-`screenshot` captures too) and `--appearance light|dark` (start in that palette whatever the system's appearance). The
-last two are test hooks of agent builds, passed to the app as environment variables that
+session per kind, in order: `basic`, `running`, `waiting`, `idle`, `exited` or `spawner`; see "Seeded sessions"),
+`--size WxH` (Linux only: Mutter's virtual monitor, default 1600x1200; refused on a Mac, which uses its real screen),
+`--no-build` (reuse the binaries already in the target directory), `--lock FILE` (hold an exclusive lock on FILE from
+before the build until `stop`; see "On a Mac"), `--window-size WxH` (the window's first size, still fitted to the
+screen; on Linux it must fit Mutter's monitor, and it includes the frame GPUI Kit draws inside the window there, a
+20-pixel black shadow margin and a 1-pixel border on every side, and the 34-pixel title bar the window draws for itself
+under Mutter, which `screenshot` captures too) and `--appearance light|dark` (start in that palette whatever the
+system's appearance). The last two are test hooks of agent builds, passed to the app as environment variables that
 `crates/gui/farhelm-gui/src/agent_startup.rs` reads, so a screenshot batch can capture each theme and size; they are not
 the app's appearance setting, and a value the app cannot parse makes it refuse to start. `--start-dialogs` lets the
 window's start dialogs open: the Welcome card, which a helm that has not seen it opens at window start, and the
@@ -70,7 +70,13 @@ the supervisor reads as that status: a spinner line redrawn every second (`runni
 nothing more (`idle`), or an exit (`exited`). The waiting one is declared a Claude session, because only an agent type's
 own reading recognizes a question; the rest are undeclared commands. `start` then waits (up to two minutes) until the
 helm lists every one of them in its status, so a scene that follows can rely on it. The statuses are the supervisor's
-own reading of each live screen, never written in by the harness.
+own reading of each live screen, never written in by the harness. The `spawner` kind is not replayed and has no status
+to wait for: it runs the fake agent's spawn script (by its bare binary name, which the session's launch shim puts on the
+PATH, so the card that shows the command shows no build path), which prints `FAKE-AGENT READY` and turns each
+`spawn <folder>` line typed into it into a real `farhelm spawn` of its own launch, so typing `spawn /tmp` makes an
+agent's approval card appear in the window. That launch is a command Farhelm did not compose, which an agent may copy
+only on a host that starts YOLO sessions without asking, so seeding a spawner turns that setting on for the run's local
+host; the spawn still waits on its card.
 
 ## Scripted hosts
 
