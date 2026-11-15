@@ -249,11 +249,17 @@ probes again), an Update's plan (nothing changed, so the user asks again), an un
 user chooses uninstall again), and a destination or alias change, which waits for any setup or update running on that
 host (SPEC.md, "Waiting between operations on one host") and lands when the run ends; those two first refuse at once
 what the registry already refuses, so the reply that they are still waiting is not given for a change that cannot land
-as things stand. Environment and sandbox deletes, Suspend and Resume are not bounded yet and are bounded, or take the
-accepted form, when the work that ports them needs it. A credential replacement waits the same bound, counted from its
-handler's start, for delivery to its hosts (decided by the migration's orchestrator on 2026-11-15); being already saved,
-it is not refused, and the hosts still being delivered to are reported as not delivered (see "Named credential
-catalog").
+as things stand. Settings → Containers' routes and host removal answer within the same bound (decided by the migration's
+orchestrator on 2026-11-15, under its rule that every host-waiting route the GUI sends is bounded): the leftover listing
+asks the container hosts concurrently, so the bound applies to the slowest of them, and drops its read at the bound; a
+leftover's Delete replies that its cleanup carries on, and the list's next read shows whether the container is gone; and
+removing a host whose removal deletes its machine replies the same way, the host leaving the hosts list once its removal
+finishes, or staying listed with the reason only in the helm's log if it fails. A session's Delete of its environment, a
+sandbox leftover's Delete (`DELETE /api/tensorlake/orphans/{id}`, which the Tensorlake work bounds in a change of its
+own), Suspend and Resume are not bounded yet and are bounded, or take the accepted form, when the work that ports them
+needs it. A credential replacement waits the same bound, counted from its handler's start, for delivery to its hosts
+(decided by the migration's orchestrator on 2026-11-15); being already saved, it is not refused, and the hosts still
+being delivered to are reported as not delivered (see "Named credential catalog").
 
 The helm runs each command through its existing HTTP router in process, so a command gets the same handlers, validation
 and authentication middleware as an HTTP request. There is no second, typed command API. A reply relays the response's

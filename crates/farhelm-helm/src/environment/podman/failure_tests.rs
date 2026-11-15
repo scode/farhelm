@@ -108,6 +108,7 @@ struct State {
     lost_created_run: bool,
     cleanup_fails: bool,
     session_gate: bool,
+    removal_gate: bool,
     lost_commit: Option<String>,
     invalid_commit_reply: bool,
     absent_run: Option<(String, AbsentRun)>,
@@ -126,6 +127,7 @@ pub(crate) struct Commands {
     state: Mutex<State>,
     phases: watch::Sender<Vec<String>>,
     session_release: Notify,
+    removal_release: Notify,
     helm: String,
     store: HelmStore,
     place: HostId,
@@ -138,6 +140,7 @@ impl Commands {
             state: Mutex::default(),
             phases: watch::Sender::new(vec![]),
             session_release: Notify::new(),
+            removal_release: Notify::new(),
             helm,
             store,
             place,
@@ -161,6 +164,41 @@ impl Commands {
     /// Notify retains a permit when setup has not yet reached the gate await.
     pub(crate) fn release_session(&self) {
         self.session_release.notify_one();
+    }
+    /// Hold every `podman rm` until [`Commands::release_removal`], standing
+    /// in for a container host that stops answering while a container is
+    /// deleted. The call is recorded first, so it shows as sent.
+    pub(crate) fn gate_removal(&self) {
+        self.state.lock().unwrap().removal_gate = true;
+    }
+    /// Notify retains a permit when the removal has not reached its gate yet.
+    pub(crate) fn release_removal(&self) {
+        self.removal_release.notify_one();
+    }
+    /// Put a running session container owned by this helm in the model, as
+    /// a launch would have left it, without running a launch: for tests of
+    /// what happens to an existing container, such as its host's removal.
+    pub(crate) fn plant_session(&self, id: &str, name: &str) {
+        self.state.lock().unwrap().containers.insert(
+            id.into(),
+            Container {
+                id: id.into(),
+                name: name.into(),
+                role: "session".into(),
+                stage: "session".into(),
+                image: String::new(),
+                status: "running".into(),
+            },
+        );
+    }
+    /// Whether a `podman rm` has been sent, held or not.
+    pub(crate) fn removal_sent(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap()
+            .calls
+            .iter()
+            .any(|argv| argv.get(1).is_some_and(|arg| arg == "rm"))
     }
     /// Refuse removal only after the selected phase actually failed.
     pub(crate) fn fail_cleanup(&self) {
@@ -657,6 +695,10 @@ impl Commands {
                 Ok(output(0, &id))
             }
             ("rm", _) => {
+                let gated = self.state.lock().unwrap().removal_gate;
+                if gated {
+                    self.removal_release.notified().await;
+                }
                 let refusing = {
                     let state = self.state.lock().unwrap();
                     state.cleanup_fails && state.failed.is_some()

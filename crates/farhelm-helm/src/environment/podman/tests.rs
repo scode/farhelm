@@ -21,6 +21,14 @@ struct Model {
     image_exists: bool,
     lost_run: bool,
     helper_oracle: bool,
+    /// The Podman subcommand (`ps`, `rm`) whose reply waits for
+    /// [`Commands::release`], standing in for a container host that has
+    /// stopped answering. It is recorded before the wait, so a test can tell
+    /// a command that reached the host from one never sent.
+    hold: Option<&'static str>,
+    /// How long every `podman ps` takes to answer, on the test's clock: a slow
+    /// but healthy container host, which a paused clock lets a test measure.
+    slow_listing: Option<Duration>,
     commands: Vec<Vec<String>>,
 }
 
@@ -30,6 +38,9 @@ struct Commands {
     model: Mutex<Model>,
     store: HelmStore,
     place: HostId,
+    /// Lets the held command (`Model::hold`) answer. A `Notify` keeps the
+    /// permit if the release comes before the command reaches its wait.
+    release: tokio::sync::Notify,
 }
 
 #[async_trait::async_trait]
@@ -89,6 +100,19 @@ impl PlaceCommands for Commands {
             argv[0], "/usr/bin/podman",
             "private absolute probe path is the only executable"
         );
+        let (held, slow) = {
+            let model = self.model.lock().unwrap();
+            (model.hold, model.slow_listing)
+        };
+        if held.is_some() && argv.get(1).map(String::as_str) == held {
+            self.release.notified().await;
+        }
+        if let Some(slow) = slow
+            && argv.get(1).is_some_and(|arg| arg == "ps")
+        {
+            // sleep-ok: the scripted host's answer time is the measured quantity, on the test's paused clock.
+            tokio::time::sleep(slow).await;
+        }
         let mut model = self.model.lock().unwrap();
         let args = &argv[1..];
         Ok(match (args[0].as_str(), args.get(1).map(String::as_str)) {
@@ -175,6 +199,7 @@ async fn fixture() -> (tempfile::TempDir, Podman, Arc<Commands>, HostId) {
             name: "farhelm-sess-test".into(),
             ..Default::default()
         }),
+        release: tokio::sync::Notify::new(),
     });
     let places = PodmanPlaces::with_commands(commands.clone());
     places.fresh(&store, place).await.unwrap();
@@ -882,4 +907,201 @@ async fn first_helper_write_refuses_removed_retargeted_or_replaced_probe_place()
             "{boundary}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Settings → Containers' routes answer within the host reply bound
+// ---------------------------------------------------------------------------
+
+/// Whether `argv` is the Podman subcommand `subcommand` (`ps`, `rm`, or
+/// `container` for `container exists` and `container inspect`).
+fn is_podman(argv: &[String], subcommand: &str) -> bool {
+    argv.first()
+        .is_some_and(|program| program == "/usr/bin/podman")
+        && argv.get(1).is_some_and(|arg| arg == subcommand)
+}
+
+/// Await a route's reply, failing the test with a message if it takes longer than `HOST_REPLY_BOUND` and a second:
+/// with the clock paused and a host held, a route without its bound would otherwise wait for the hold forever and
+/// hang the test until the runner kills it.
+async fn answered_within_the_bound(
+    reply: impl std::future::Future<Output = axum::response::Response>,
+) -> axum::response::Response {
+    tokio::time::timeout(
+        crate::sessions::HOST_REPLY_BOUND + Duration::from_secs(1),
+        reply,
+    )
+    .await
+    .expect("answered by the host reply bound")
+}
+
+/// The body of a reply, as text.
+async fn body_text(response: axum::response::Response) -> String {
+    let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    String::from_utf8(bytes.to_vec()).unwrap()
+}
+
+/// The GUI's channel admits one command at a time and resets the window when
+/// one stays unanswered for 30 seconds, so the leftover listing must give up on
+/// a container host that stopped answering instead of waiting out Podman's
+/// own 30-second command bound. Specified: with the host's `podman ps` held
+/// and the clock paused, the listing answers 504 at `HOST_REPLY_BOUND` (to the
+/// timer's millisecond) with the shared "did not answer" words, and the held
+/// `ps` was really sent, so the reply is the bound's and not an earlier
+/// refusal.
+#[farhelm_testtrace::test]
+async fn a_leftover_listing_answers_at_the_reply_bound_when_its_host_stalls() {
+    let (_directory, provider, commands, _place) = fixture().await;
+    commands.model.lock().unwrap().hold = Some("ps");
+    // Paused, the clock moves only when every task waits on a timer; the
+    // store's work on the blocking pool holds it still until it is done.
+    tokio::time::pause();
+    let started = tokio::time::Instant::now();
+    let response = answered_within_the_bound(listing(Some(provider))).await;
+    let waited = started.elapsed();
+    assert!(
+        waited >= crate::sessions::HOST_REPLY_BOUND
+            && waited <= crate::sessions::HOST_REPLY_BOUND + Duration::from_millis(1),
+        "the listing answered after {waited:?}"
+    );
+    assert!(
+        commands
+            .model
+            .lock()
+            .unwrap()
+            .commands
+            .iter()
+            .any(|argv| is_podman(argv, "ps")),
+        "premise: the listing reached the held host"
+    );
+    assert_eq!(response.status(), axum::http::StatusCode::GATEWAY_TIMEOUT);
+    assert!(
+        body_text(response)
+            .await
+            .contains("did not answer within 20 seconds")
+    );
+}
+
+/// A leftover's Delete must answer within the bound too, and answering must
+/// abandon only the wait: the user confirmed the removal, so it has to finish
+/// on its own once the host answers, and the list's next read must find the
+/// container gone. Specified: with an owned, unregistered container's
+/// `podman rm` held and the clock paused, the Delete answers 504 at
+/// `HOST_REPLY_BOUND` saying the cleanup carries on, while nothing has been
+/// removed and the feed has not moved. Released, the removal runs `rm`, then
+/// confirms the container's absence, and only then bumps the feed, which is
+/// what makes the GUI's pushed state and a later read catch up.
+#[farhelm_testtrace::test]
+async fn a_leftover_delete_answers_at_the_reply_bound_and_its_removal_finishes_after() {
+    let (_directory, provider, commands, place) = fixture().await;
+    {
+        let mut model = commands.model.lock().unwrap();
+        model.exists = true;
+        model.hold = Some("rm");
+    }
+    let events = Arc::new(FleetEvents::new());
+    let before = events.revision();
+    tokio::time::pause();
+    let started = tokio::time::Instant::now();
+    let response = answered_within_the_bound(deleting(
+        Some(provider),
+        Arc::clone(&events),
+        DeleteLeftover {
+            place: Place::PodmanHost(place),
+            id: ID.into(),
+        },
+    ))
+    .await;
+    let waited = started.elapsed();
+    assert!(
+        waited >= crate::sessions::HOST_REPLY_BOUND
+            && waited <= crate::sessions::HOST_REPLY_BOUND + Duration::from_millis(1),
+        "the delete answered after {waited:?}"
+    );
+    assert_eq!(response.status(), axum::http::StatusCode::GATEWAY_TIMEOUT);
+    assert!(body_text(response).await.contains("the cleanup carries on"));
+    {
+        let model = commands.model.lock().unwrap();
+        assert!(
+            model.commands.iter().any(|argv| is_podman(argv, "rm")),
+            "premise: the removal reached the held host"
+        );
+        assert!(model.exists, "nothing is removed while the host is held");
+    }
+    assert_eq!(events.revision(), before, "no bump before the removal ends");
+
+    let mut bumped = events.subscribe();
+    commands.release.notify_one();
+    tokio::time::timeout(Duration::from_secs(5), bumped.changed())
+        .await
+        .expect("the removal finished and bumped the feed after its reply")
+        .unwrap();
+    let model = commands.model.lock().unwrap();
+    assert!(!model.exists, "the container is gone");
+    let removed = model
+        .commands
+        .iter()
+        .position(|argv| is_podman(argv, "rm"))
+        .unwrap();
+    assert!(
+        model.commands[removed + 1..]
+            .iter()
+            .any(|argv| is_podman(argv, "container") && argv[2] == "exists"),
+        "absence was confirmed after the removal"
+    );
+}
+
+/// The listing is bounded as a whole, so asking the container hosts one after another would make the bound cover the
+/// sum of their answer times: a fleet of slow but healthy hosts would get a 504 on every read, and "Containers not on
+/// this helm" could never show. Specified: with two container hosts whose `podman ps` each takes 15 seconds (together
+/// longer than `HOST_REPLY_BOUND`) and the clock paused, the listing answers 200 after 15 seconds, the slowest host's
+/// time, listing the owned container on both hosts.
+#[farhelm_testtrace::test]
+async fn the_listing_asks_its_container_hosts_concurrently() {
+    let (_directory, provider, commands, place) = fixture().await;
+    let second = provider
+        .0
+        .store
+        .add_ssh_host("second.example", None, None)
+        .await
+        .unwrap();
+    provider
+        .0
+        .places
+        .fresh(&provider.0.store, second)
+        .await
+        .unwrap();
+    let slow = Duration::from_secs(15);
+    {
+        let mut model = commands.model.lock().unwrap();
+        model.exists = true;
+        model.slow_listing = Some(slow);
+    }
+    assert!(
+        slow < crate::sessions::HOST_REPLY_BOUND && slow * 2 > crate::sessions::HOST_REPLY_BOUND,
+        "premise: each host answers within the bound, and the two together take longer"
+    );
+    tokio::time::pause();
+    let started = tokio::time::Instant::now();
+    let response = answered_within_the_bound(listing(Some(provider))).await;
+    let waited = started.elapsed();
+    assert_eq!(
+        response.status(),
+        axum::http::StatusCode::OK,
+        "answered in {waited:?}"
+    );
+    assert!(
+        waited >= slow && waited < slow + Duration::from_secs(1),
+        "the slowest host's time, not the sum: {waited:?}"
+    );
+    let listed: Vec<farhelm_proto::environment::ContainerLeftoverView> =
+        serde_json::from_str(&body_text(response).await).unwrap();
+    let mut places: Vec<_> = listed.iter().map(|row| row.place).collect();
+    places.sort_by_key(|place| place.container_host());
+    assert_eq!(
+        places,
+        [Place::PodmanHost(place), Place::PodmanHost(second)]
+    );
 }
