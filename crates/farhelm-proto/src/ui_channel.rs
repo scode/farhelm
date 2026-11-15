@@ -370,6 +370,20 @@ pub struct CollectionMeta {
     /// a collection without one is sent exactly as before the field existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_outside_query: Option<String>,
+    /// The session [`SessionQuery::selected`] names is in neither the list
+    /// nor its own read, and that read was cut at its host's cap: each
+    /// supervisor lists only its newest sessions, so an old session can exist
+    /// unlisted. Its absence is then no evidence that it was deleted.
+    ///
+    /// A fact about the open session, not the list: the list itself may have
+    /// been read whole, so [`ListCounts::truncated`] stays the query's own
+    /// and the list says nothing about a cut it did not suffer. Always
+    /// `false` when [`Self::selected_outside_query`] is `Some`, when the
+    /// query selects nothing, when the selected session is listed, and when
+    /// its host's list was not cut (an absence then is a deletion). Omitted
+    /// from the wire when `false`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub selected_cut: bool,
 }
 
 /// Whether the helm could read a collection the last time it tried.
@@ -1140,10 +1154,12 @@ mod tests {
     /// The open session rides the session list outside its query, and both
     /// halves of that are wire format: the GUI names the session in its query
     /// as `selected`, and the helm names the entry it carries for that reason
-    /// as `selected_outside_query` in the collection's metadata. Pins both
-    /// spellings, that each round-trips, and that each is left off the wire
-    /// when unset, so a query or a collection without one is exactly what it
-    /// was before the fields existed and a message from before them decodes.
+    /// as `selected_outside_query` in the collection's metadata, or says it
+    /// could not because its host's cut list left it out (`selected_cut`).
+    /// Pins those spellings, that each round-trips, and that each is left off
+    /// the wire when unset, so a query or a collection without one is exactly
+    /// what it was before the fields existed and a message from before them
+    /// decodes.
     #[test]
     fn the_selected_session_fields_round_trip_and_are_omitted_when_unset() {
         let query = SessionQuery {
@@ -1168,6 +1184,7 @@ mod tests {
                 truncated: false,
             }),
             selected_outside_query: Some("carried".into()),
+            selected_cut: false,
         };
         let json = serde_json::json!({
             "availability": { "state": "available" },
@@ -1195,6 +1212,19 @@ mod tests {
             serde_json::from_value::<CollectionMeta>(json).unwrap(),
             unflagged
         );
+
+        let cut = CollectionMeta {
+            selected_cut: true,
+            ..unflagged
+        };
+        let json = serde_json::json!({
+            "availability": { "state": "available" },
+            "order": ["listed"],
+            "counts": { "total": 2, "matching": 1, "truncated": false },
+            "selected_cut": true,
+        });
+        assert_eq!(serde_json::to_value(&cut).unwrap(), json);
+        assert_eq!(serde_json::from_value::<CollectionMeta>(json).unwrap(), cut);
     }
 
     /// Each marker stands for one helm header with one value, and the GUI
