@@ -305,7 +305,7 @@ fn a_repeated_enter_on_launch_still_opens_the_session(cx: &mut gpui::TestAppCont
 /// Work one of the hosts area's dialogs starts, for the exclusion tests: three host-registry changes, and a host
 /// settings save, which is not one.
 #[derive(Clone, Copy, Debug)]
-pub(super) enum HostChange {
+pub(crate) enum HostChange {
     /// Add host's probe of a new destination, under a fresh host-add key.
     Probe,
     /// A new host's setup, under a fresh host-add key.
@@ -317,8 +317,9 @@ pub(super) enum HostChange {
 }
 
 /// Start `change` in the window's operation store as the hosts area does, and return the path it sends, so a test
-/// can find and answer it.
-pub(super) fn start_host_change(cx: &mut VisualTestContext, change: HostChange) -> &'static str {
+/// can find and answer it. The session list's tests use the probe too, to make New unavailable for its triggers (the
+/// heading's New, the quick switcher's New row) without staging a launch.
+pub(crate) fn start_host_change(cx: &mut VisualTestContext, change: HostChange) -> &'static str {
     use crate::operations::{Command, OpKey, Work};
     use farhelm_helm_client::{ApiPath, Method};
     let (key, command, path) = match change {

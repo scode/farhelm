@@ -544,9 +544,9 @@ fn the_chip_names_the_chosen_host_and_removes_the_choice(cx: &mut TestAppContext
 /// focus to the rail's All then ("After a clear button or the chip removes its focused control, focus returns to the
 /// rail's All button"), where the coordinator's ordinary rule would send it home to the terminal. Specified: a click on
 /// the chip leaves focus on All, whatever a click focuses on this platform; and by keyboard alone, from All, Tab twice
-/// and Space choose host 3, Tab seven times more (host 2, Add host, the heading's order title, Trash button and
-/// Templates button, the status segments' one stop) reaches the chip, and Enter on it removes the filter and leaves
-/// focus on All. Each removal sends `{"selected": "a"}`.
+/// and Space choose host 3, Tab eight times more (host 2, Add host, the heading's order title, Trash, Templates and New
+/// buttons, the status segments' one stop) reaches the chip, and Enter on it removes the filter and leaves focus on
+/// All. Each removal sends `{"selected": "a"}`.
 #[gpui::test]
 fn clearing_the_filter_by_keyboard_or_click_focuses_all(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot());
@@ -575,7 +575,7 @@ fn clearing_the_filter_by_keyboard_or_click_focuses_all(cx: &mut TestAppContext)
     );
     fake.reply(query.id, 204, None);
     cx.run_until_parked();
-    test_support::keys(cx, "tab tab tab tab tab tab tab");
+    test_support::keys(cx, "tab tab tab tab tab tab tab tab");
     assert_eq!(
         focused_id(cx).as_deref(),
         Some("host-filter-chip"),
@@ -972,10 +972,10 @@ fn choosing_all_or_a_host_returns_from_the_panel_to_sessions(cx: &mut TestAppCon
 /// between them, before the foot; in GPUI, Tab follows the order controls are drawn in, which is why the list draws the
 /// foot after its own column. A foot drawn inside the rail would put Hosts and the gear between the last avatar and the
 /// list. Specified (Linux's rule, where Tab reaches every control): over an empty fleet with host 3 chosen by a click,
-/// which leaves focus on its avatar and draws the heading's order title, Trash and Templates buttons, the status
+/// which leaves focus on its avatar and draws the heading's order title, Trash, Templates and New buttons, the status
 /// segments and the chip as the list's controls, Tab goes to host 2's avatar, Add host, the order title, Trash,
-/// Templates, the segments' chosen All (their one stop), the chip, Hosts, the gear, then Help; Shift+Tab from Help goes
-/// back to the gear.
+/// Templates, New, the segments' chosen All (their one stop), the chip, Hosts, the gear, then Help; Shift+Tab from Help
+/// goes back to the gear.
 #[gpui::test]
 fn tab_reaches_the_foot_after_the_rail_and_the_lists_controls(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, vec![listing(&[], &[]), hosts(&fleet_hosts())]);
@@ -996,6 +996,7 @@ fn tab_reaches_the_foot_after_the_rail_and_the_lists_controls(cx: &mut TestAppCo
         "session-order",
         crate::trash::BUTTON_ID,
         "templates-button",
+        crate::session_list::NEW_ID,
         "session-status-All",
         "host-filter-chip",
         HOSTS,

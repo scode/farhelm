@@ -321,6 +321,12 @@ pub(crate) fn painted(nodes: &[DriverNode]) -> Vec<String> {
         .collect()
 }
 
+/// Whether the launcher's dialog is drawn: what the list's New triggers (the heading's New, the quick switcher's New
+/// row) open.
+pub(crate) fn launcher_drawn(cx: &mut VisualTestContext) -> bool {
+    cx.debug_bounds("launcher").is_some()
+}
+
 // ---- The rows ------------------------------------------------------------------------------------------------------
 
 /// The helm sorts the list (the channel starts in the user's stored order), so the rows must be drawn in the order the

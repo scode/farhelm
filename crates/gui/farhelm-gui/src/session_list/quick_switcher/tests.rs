@@ -23,14 +23,20 @@ use serde_json::{Value, json};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use super::{CAP_NOTICE, QuickSwitcher, Read, mark_positions, matching_positions, ranked};
+use super::{
+    CAP_NOTICE, NEW_ROW_HELP, NEW_ROW_ID, QuickSwitcher, Read, Selected, mark_positions,
+    matching_positions, ranked,
+};
 use crate::actions::QUICK_SWITCHER_CHORD;
+use crate::launcher::launch_tests::{HostChange, start_host_change};
 use crate::layers;
 use crate::local_state;
 use crate::main_view::MainView;
-use crate::session_list::host_rail::tests::{filtered, hosts, local, node, pressed, remote};
+use crate::session_list::host_rail::tests::{
+    filtered, hosts, hover_help, local, node, pressed, remote, texts_within,
+};
 use crate::session_list::tests::{
-    Fixture, change, listing, painted, preferences, selected, session,
+    Fixture, change, launcher_drawn, listing, painted, preferences, selected, session,
 };
 use crate::test_support::{
     self, any_open, click, focused_id, frame, keys, settle, started, terminal_focused,
@@ -306,21 +312,22 @@ fn field_focused(cx: &mut VisualTestContext) -> bool {
     cx.update(|window, cx| switcher.read(cx).input.focus_handle(cx).is_focused(window))
 }
 
-/// The keys of the switcher's rows in the order they are listed, and the key of the selected one.
+/// The keys of the switcher's session rows in the order they are listed, and the key of the selected row: a session's
+/// key, or [`NEW_ROW_ID`] for the New row.
 fn listed(cx: &mut VisualTestContext) -> (Vec<String>, Option<String>) {
     let switcher = switcher(cx);
     cx.update(|_, cx| {
         let switcher = switcher.read(cx);
-        let Read::Loaded(list) = &switcher.read else {
-            return (Vec::new(), None);
+        let rows = switcher.rows(cx);
+        let key = |index: usize| match &switcher.read {
+            Read::Loaded(list) => list.sessions[index].info.id.clone(),
+            Read::Loading | Read::Failed(_) => unreachable!("only a loaded read has matches"),
         };
-        let keys: Vec<String> = ranked(&list.sessions, &switcher.input.text(cx))
-            .into_iter()
-            .map(|index| list.sessions[index].info.id.clone())
-            .collect();
-        let selected = keys
-            .get(switcher.selected.min(keys.len().saturating_sub(1)))
-            .cloned();
+        let keys: Vec<String> = rows.matches.iter().map(|&index| key(index)).collect();
+        let selected = rows.selected(switcher.selected).map(|row| match row {
+            Selected::Session(index) => key(index),
+            Selected::New => NEW_ROW_ID.to_owned(),
+        });
         (keys, selected)
     })
 }
@@ -1057,4 +1064,287 @@ fn a_pick_leaves_the_hosts_panel_and_a_refused_widening_keeps_both_choices(
         node(&frame(main.cx), "filter-refusal").is_some(),
         "the re-send leaves the refusal's words shown"
     );
+}
+
+// ---- New session named X -------------------------------------------------------------------------------------------
+
+/// A name none of the fixture sessions match: no title, host or folder (`/home/user/src/<key>`) holds an `n`.
+const NAME: &str = "nightly";
+
+/// Whether the switcher's card is drawn.
+fn switcher_drawn(cx: &mut VisualTestContext) -> bool {
+    cx.debug_bounds("quick-switcher").is_some()
+}
+
+/// The text the launcher's Name field paints.
+fn launcher_name(cx: &mut VisualTestContext) -> Vec<String> {
+    texts_within(&frame(cx), "launcher-name")
+        .into_iter()
+        .map(|text| text.text.to_string())
+        .collect()
+}
+
+/// Replace the open switcher's query with `text` and settle, for a query the test's keystrokes cannot type (spaces).
+fn set_query(cx: &mut VisualTestContext, text: &str) {
+    let switcher = switcher(cx);
+    cx.update(|window, cx| {
+        switcher.update(cx, |switcher, cx| {
+            switcher.input.set_text(text.to_owned(), window, cx);
+            cx.notify();
+        })
+    });
+    test_support::settle(cx);
+}
+
+/// The New row's accessible name as the frame drew it, `None` when it is not drawn.
+fn new_row_label(cx: &mut VisualTestContext) -> Option<String> {
+    node(&frame(cx), NEW_ROW_ID).and_then(|row| row.label.as_deref().map(str::to_owned))
+}
+
+/// SPEC.md: "While text is typed, a pinned row below the scrolling session matches offers "New session named X". It
+/// follows the sessions in arrow-key order and is selected when no session matches". The row is how a user who typed
+/// a name nothing has gets to New without leaving the keyboard, so it must be reachable after the matches and never in
+/// the way of the first match. Specified, over a, b and c: with nothing typed there is no New row; with `c` typed
+/// (matching c's title and a's and b's folders) the New row is drawn below the scrolling matches, named `New session
+/// named "c"` and helped "Open New with this name; nothing launches yet", c is selected, three presses of Down select
+/// the New row (drawn selected, with b not) and a fourth stays there, and Up selects b again; with a query nothing
+/// matches, "No sessions match" shows and the New row is selected; a query with spaces around it names the row by the
+/// trimmed text.
+#[gpui::test]
+fn the_new_row_follows_the_matches_and_is_selected_when_nothing_matches(cx: &mut TestAppContext) {
+    let mut main = open_main(cx, fleet());
+    let read = main.open_switcher();
+    main.answer(read, &[session("a"), session("b"), session("c")], false);
+    assert_eq!(new_row_label(main.cx), None, "no New row without a query");
+
+    type_query(main.cx, "c");
+    assert_eq!(
+        listed(main.cx),
+        (vec!["c".into(), "a".into(), "b".into()], Some("c".into()))
+    );
+    let nodes = frame(main.cx);
+    let row = node(&nodes, NEW_ROW_ID).expect("the New row is drawn");
+    assert_eq!(row.label.as_deref(), Some("New session named \"c\""));
+    assert_eq!(
+        row.selected,
+        Some(false),
+        "the first match is selected, not New"
+    );
+    let results = node(&nodes, "quick-switcher-results").expect("the matches are drawn");
+    assert!(
+        row.bounds.top() >= results.bounds.bottom(),
+        "the New row {:?} is pinned below the matches {:?}",
+        row.bounds,
+        results.bounds
+    );
+    assert_eq!(
+        hover_help(main.cx, NEW_ROW_ID).as_deref(),
+        Some(NEW_ROW_HELP)
+    );
+
+    keys(main.cx, "down down down");
+    assert_eq!(
+        listed(main.cx).1.as_deref(),
+        Some(NEW_ROW_ID),
+        "the New row follows the matches"
+    );
+    let nodes = frame(main.cx);
+    assert_eq!(
+        node(&nodes, NEW_ROW_ID).and_then(|row| row.selected),
+        Some(true)
+    );
+    assert_eq!(
+        node(&nodes, "quick-switcher-row-b").and_then(|row| row.selected),
+        Some(false)
+    );
+    keys(main.cx, "down");
+    assert_eq!(
+        listed(main.cx).1.as_deref(),
+        Some(NEW_ROW_ID),
+        "Down stops at the New row"
+    );
+    keys(main.cx, "up");
+    assert_eq!(listed(main.cx).1.as_deref(), Some("b"));
+
+    type_query(main.cx, "zzz");
+    assert!(
+        painted(&frame(main.cx))
+            .iter()
+            .any(|line| line == "No sessions match")
+    );
+    assert_eq!(listed(main.cx), (Vec::new(), Some(NEW_ROW_ID.into())));
+
+    set_query(main.cx, "  two words  ");
+    assert_eq!(
+        new_row_label(main.cx).as_deref(),
+        Some("New session named \"two words\"")
+    );
+}
+
+/// SPEC.md: "With a leading `tl:` (case-insensitive), sessions and the New row are replaced by matching templates".
+/// The templates section is the templates area's, but the New row is this one's, and offered there it would name a
+/// session after a template search. Specified: with `tl:claude`, `TL:claude` and `  Tl:` (spaces around) as the query
+/// there is no New row, and Enter opens nothing; `tlx` and `t:l` still offer it.
+#[gpui::test]
+fn a_template_query_offers_no_new_row(cx: &mut TestAppContext) {
+    let mut main = open_main(cx, fleet());
+    let read = main.open_switcher();
+    main.answer(read, &[session("a")], false);
+    for query in ["tl:claude", "TL:claude", "  Tl:  "] {
+        set_query(main.cx, query);
+        assert_eq!(new_row_label(main.cx), None, "{query:?} offers no New row");
+        assert_ne!(listed(main.cx).1.as_deref(), Some(NEW_ROW_ID), "{query:?}");
+    }
+    keys(main.cx, "enter");
+    assert!(
+        switcher_drawn(main.cx) && !launcher_drawn(main.cx),
+        "Enter opened nothing"
+    );
+    for query in ["tlx", "t:l"] {
+        set_query(main.cx, query);
+        assert!(
+            new_row_label(main.cx).is_some(),
+            "{query:?} still offers the New row"
+        );
+    }
+}
+
+/// SPEC.md: the New row is selected when no session matches "except while the session list is still loading, when
+/// arrow keys cannot reach it", and "After a failed session read, New and template search remain usable". Enter on a
+/// list that has not arrived must not act on a guess, but a failed read must not strand a user who only wanted New.
+/// Specified: with the read unanswered and a name typed, the New row is drawn but not selected, and Down then Enter
+/// leave the switcher open with nothing opened; once the read fails, the New row is selected, and Enter closes the
+/// switcher and opens New.
+#[gpui::test]
+fn loading_keeps_the_new_row_from_the_keys_and_a_failed_read_leaves_it_usable(
+    cx: &mut TestAppContext,
+) {
+    let mut main = open_main(cx, fleet());
+    let read = main.open_switcher();
+    type_query(main.cx, NAME);
+    let row = node(&frame(main.cx), NEW_ROW_ID)
+        .cloned()
+        .expect("the New row is drawn");
+    assert_eq!(
+        row.selected,
+        Some(false),
+        "nothing is selected while loading"
+    );
+    keys(main.cx, "down enter");
+    assert!(
+        switcher_drawn(main.cx),
+        "Enter picked nothing while loading"
+    );
+    assert!(!launcher_drawn(main.cx));
+
+    main.helm.reply(read, 503, Some(json!("the helm is busy")));
+    test_support::settle(main.cx);
+    assert_eq!(listed(main.cx).1.as_deref(), Some(NEW_ROW_ID));
+    keys(main.cx, "enter");
+    assert!(!switcher_drawn(main.cx), "the pick closed the switcher");
+    assert!(launcher_drawn(main.cx), "and opened New");
+}
+
+/// SPEC.md: "Picking it opens New with that name", and "Closing something the user opened returns focus to where it
+/// was before it opened". New refuses while any dialog is open, so the switcher must close before New opens, and New
+/// then returns focus to where the switcher found it. The name is the query trimmed, as the row shows it. Specified:
+/// from a's focused terminal, with `  nightly  ` as the query and its row selected, Enter closes the switcher and opens
+/// New with focus inside it and `nightly` in its Name field; Escape closes New with focus back in a's terminal.
+#[gpui::test]
+fn enter_on_the_new_row_opens_new_named_and_closing_it_returns_focus(cx: &mut TestAppContext) {
+    let mut main = open_main(cx, fleet());
+    main.first_terminal_live();
+    assert!(
+        terminal_focused(main.cx),
+        "the premise: a's terminal has focus"
+    );
+    let read = main.open_switcher();
+    main.answer(read, &[session("a"), session("b"), session("c")], false);
+    set_query(main.cx, "  nightly  ");
+    assert_eq!(
+        listed(main.cx).1.as_deref(),
+        Some(NEW_ROW_ID),
+        "the premise: the New row is selected"
+    );
+
+    keys(main.cx, "enter");
+    assert!(!switcher_drawn(main.cx), "the switcher closed");
+    assert!(launcher_drawn(main.cx), "New opened");
+    assert!(
+        main.cx
+            .update(|window, cx| layers::focus_layer_open(window, cx))
+            && !terminal_focused(main.cx),
+        "focus is inside New"
+    );
+    assert_eq!(
+        launcher_name(main.cx),
+        [NAME],
+        "the name is the trimmed query"
+    );
+
+    keys(main.cx, "escape");
+    assert!(!any_open(main.cx));
+    assert!(
+        terminal_focused(main.cx),
+        "focus went back to where the switcher found it"
+    );
+}
+
+/// The pointer's way to the same row: the old row took clicks, and SPEC.md has an accepted New return the sidebar to
+/// Sessions ("All or a host avatar returns to Sessions, as does an accepted quick-switcher pick or New handoff"). The
+/// Hosts panel is what tells a click that goes through the list's New from one that opens the launcher directly.
+/// Specified: with the Hosts panel shown, a click on the New row for `nightly` closes the switcher, opens New, and
+/// shows the list's column again in place of the panel.
+#[gpui::test]
+fn a_click_on_the_new_row_opens_new_and_returns_from_the_hosts_panel(cx: &mut TestAppContext) {
+    let mut main = open_main(cx, fleet());
+    click(main.cx, "hosts-panel-toggle");
+    assert!(
+        node(&frame(main.cx), "hosts-panel").is_some(),
+        "the premise: the Hosts panel shows"
+    );
+    let read = main.open_switcher();
+    main.answer(read, &[session("a"), session("b"), session("c")], false);
+    type_query(main.cx, NAME);
+    click(main.cx, NEW_ROW_ID);
+    assert!(!switcher_drawn(main.cx));
+    assert!(launcher_drawn(main.cx));
+    let nodes = frame(main.cx);
+    assert!(node(&nodes, "hosts-panel").is_none(), "the panel went");
+    assert!(
+        node(&nodes, "session-list").is_some(),
+        "Sessions shows again"
+    );
+}
+
+/// SPEC.md: the switcher "works during a pending launch", and a pick of the New row while New is unavailable (a launch
+/// pending, a host change in flight) must not leave the switcher up with a dead row or open anything; the old switcher
+/// closed and gave focus back. A host probe stands in for the pending launch, as both make New unavailable through the
+/// one answer. Specified: from a's focused terminal with Add host's probe in flight, Enter on the New row closes the
+/// switcher, opens nothing, and leaves focus in a's terminal.
+#[gpui::test]
+fn a_refused_new_closes_the_switcher_and_returns_focus(cx: &mut TestAppContext) {
+    let mut main = open_main(cx, fleet());
+    main.first_terminal_live();
+    assert!(
+        terminal_focused(main.cx),
+        "the premise: a's terminal has focus"
+    );
+    let read = main.open_switcher();
+    main.answer(read, &[session("a")], false);
+    // Started once the switcher is open: opening answers every other command the window sent, which would settle it.
+    let probe = start_host_change(main.cx, HostChange::Probe);
+    assert!(
+        main.helm
+            .commands()
+            .iter()
+            .any(|command| command.path == probe),
+        "the premise: the probe is in flight"
+    );
+    type_query(main.cx, NAME);
+    keys(main.cx, "enter");
+    assert!(!switcher_drawn(main.cx), "the switcher closed");
+    assert!(!launcher_drawn(main.cx), "New was refused");
+    assert!(!any_open(main.cx));
+    assert!(terminal_focused(main.cx), "focus is back in a's terminal");
 }

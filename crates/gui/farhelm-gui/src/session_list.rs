@@ -5,7 +5,7 @@
 //! user's stored order), so a pushed change or a reset redraws it with nothing to go stale. Above the rows, a heading
 //! band carries the order's title, which opens the menu that changes the order ([`order`]), the count ("Sessions: N" to
 //! assistive technology and on hover, as the old count said) and, at its right, the Trash button (a view of the trash's
-//! own, [`crate::trash`]) and the Templates button; a listing the helm's cap cut says so in an amber band in place of
+//! own, [`crate::trash`]), the Templates button and New; a listing the helm's cap cut says so in an amber band in place of
 //! the count, and a failed read says so in red, while the rows it had stay (a failed read is no evidence that anything
 //! was deleted).
 //!
@@ -104,11 +104,15 @@
 //! and the Settings gear.
 //!
 //! The Templates button opens the Templates dialog ([`crate::templates::open`]), which returns focus to what held it
-//! when it opened, as SPEC.md's "Opening and closing" asks.
+//! when it opened, as SPEC.md's "Opening and closing" asks. New, after it, opens the launcher through its entry point
+//! ([`open_new`], which the quick switcher's "New session named X" row and the New shortcut share): the sidebar's one
+//! filled control, drawn disabled while New is unavailable (a launch pending, a host change in flight).
 //!
-//! NOTE: Not ported yet, each with the area that brings it: the heading's New (the launcher's entry point), compact
-//! rows and the order menu's Compact, marking, pins, the row menu's other commands, and the rail's host status, the
-//! foot's controls other than Hosts and Settings, Add host and expansion.
+//! NOTE: Not ported yet, each with the area that brings it: compact rows and the order menu's Compact, marking, pins,
+//! the row menu's other commands, and the rail's host status, the foot's controls other than Hosts and Settings, Add
+//! host and expansion. New is not yet where focus rests when there are no sessions (SPEC.md, "Where focus rests"):
+//! nothing names it home; that comes with the session pane's status-card work (M2.12), which decides home when no
+//! terminal is on screen.
 
 pub(crate) mod age;
 pub(crate) mod delete;
@@ -173,7 +177,7 @@ use crate::render_count;
 use crate::session::{self, PerSession};
 use crate::theme::{self, metrics};
 use crate::trash::TrashButton;
-use crate::{templates, ticker};
+use crate::{launcher, templates, ticker};
 use selection::{Change, Listed, Open, Stamped};
 
 /// How far past each edge of its view the list draws rows: about two noncompact rows, so a row scrolling in is already
@@ -622,6 +626,8 @@ impl Render for SessionList {
         // the window's element state. No title is drawn while the Hosts panel shows.
         let stored = order::Order::stored_in(store.read(cx).collections());
         let title = (!hosts_shown).then(|| self.order_title(stored, window, cx));
+        // Read before the store is borrowed too: answering it needs the app mutably.
+        let new_available = launcher::entry::new_available(cx);
         let collections = store.read(cx).collections();
         let palette = theme::palette(cx);
         let body_row = body_row.child(host_rail::rail(
@@ -663,10 +669,18 @@ impl Render for SessionList {
         let Some(meta) = collections.meta(Collection::Sessions) else {
             return body_row
                 .child(
-                    list.child(heading(title, None, &self.trash, &self.templates_focus, cx))
-                        .child(filter_row)
-                        .children(refused)
-                        .child(status_line("Loading sessions…")),
+                    list.child(heading(
+                        title,
+                        None,
+                        &self.trash,
+                        &self.templates_focus,
+                        new_available,
+                        &weak,
+                        cx,
+                    ))
+                    .child(filter_row)
+                    .children(refused)
+                    .child(status_line("Loading sessions…")),
                 )
                 .child(foot);
         };
@@ -681,6 +695,8 @@ impl Render for SessionList {
             },
             &self.trash,
             &self.templates_focus,
+            new_available,
+            &weak,
             cx,
         );
         let truncated = match count {
@@ -790,13 +806,16 @@ fn draw_row(
 
 /// The list's heading band (`.session-heading`): the order's title ([`order`]), the count beside it when the list has
 /// one to show (none before the first listing, and none for a cut listing, whose warning has a line of its own), and
-/// the heading's actions at its right edge (`.session-heading-actions`), of which Trash (`trash`, a view of its own)
-/// and Templates are ported (the module docs' NOTE), in SPEC.md's order.
+/// the heading's actions at its right edge (`.session-heading-actions`), in SPEC.md's order: Trash (`trash`, a view of
+/// its own), Templates, then New, drawn disabled unless `new_available` ([`launcher::entry::new_available`], read by
+/// the caller).
 fn heading(
     title: AnyElement,
     count: Option<String>,
     trash: &Entity<TrashButton>,
     templates_focus: &FocusHandle,
+    new_available: bool,
+    list: &WeakEntity<SessionList>,
     cx: &App,
 ) -> impl IntoElement {
     let palette = theme::palette(cx);
@@ -817,6 +836,22 @@ fn heading(
             let _ = templates::open(&opener, &mark, window, cx);
         }
     });
+    // The old `.btn-primary.new-session-button`: the Add glyph in the band's 24-pixel square, named "New session", and
+    // the one filled control in the sidebar (SPEC.md: "New remains the sidebar's one filled control"). Disabled rather
+    // than busy, as the old button was, so it leaves the Tab order while New is unavailable; `open_new` refuses a press
+    // that lands before the redraw all the same.
+    let list = list.clone();
+    let new = IconButton::new(
+        NEW_ID,
+        Icon::Add,
+        "New session",
+        HoverHelp::tooltip(launcher::entry::NEW_SESSION_HELP),
+        Role::Button,
+    )
+    .tier(Tier::Primary)
+    .square(px(HEADING_ICON_SIDE))
+    .disabled(!new_available)
+    .on_click(move |_, window, cx| open_new(&list, None, window, cx));
     div()
         .flex()
         .flex_row()
@@ -850,8 +885,33 @@ fn heading(
                 .items_center()
                 .gap(px(HEADING_ACTIONS_GAP))
                 .child(trash.clone())
-                .child(templates),
+                .child(templates)
+                .child(new),
         )
+}
+
+/// The heading's New button's element id: tests and the end-to-end smoke test find it by this.
+pub(crate) const NEW_ID: &str = "new-session-button";
+
+/// Open New in `window` through the launcher's entry point, named `name` for the quick switcher's "New session named X"
+/// row and unnamed for the heading's New and the New shortcut, and when it opens, show Sessions in place of the Hosts
+/// panel (SPEC.md: "All or a host avatar returns to Sessions, as does an accepted quick-switcher pick or New handoff; a
+/// refused handoff leaves the panel as it was"). `list` is the window's session list, held weakly as the switcher holds
+/// it. New refuses whenever the entry point does ([`launcher::entry::open_new`]: New unavailable, a dialog or menu open,
+/// no UI session), so a trigger inside a layer closes that layer first; nothing changes then.
+pub(crate) fn open_new(
+    list: &WeakEntity<SessionList>,
+    name: Option<&str>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let opened = match name {
+        Some(name) => launcher::entry::open_new_named(name, window, cx),
+        None => launcher::entry::open_new(window, cx),
+    };
+    if opened {
+        let _ = list.update(cx, |list, cx| list.hide_hosts(cx));
+    }
 }
 
 /// The count's element id, for the count beside the title and the cut listing's warning alike (only one is drawn).
