@@ -168,6 +168,36 @@ class EnvironmentTest(unittest.TestCase):
         pairs = dict(arg.split("=", 1) for arg in args[1::2])
         self.assertNotIn("FARHELM_DESKTOP_AGENT_START_DIALOGS", pairs)
 
+    def test_payload_dir_reaches_the_app_only_when_given(self):
+        """A run that sets up or updates a real remote host needs the helm to have payloads to push, and the caller's
+        own `FARHELM_*` variables never reach the app, so `--payload-dir` is the only way in. Specified: given a
+        directory, the app gets it under the exact variable its embedded helm reads; without one the variable is
+        unset, so an ordinary run has no payloads and pushes nothing."""
+        args = gui_agent.app_env_args(pathlib.Path("/tmp/run"), {"farhelm": "/t/f"}, payload_dir=pathlib.Path("/p"))
+        pairs = dict(arg.split("=", 1) for arg in args[1::2])
+        self.assertEqual(pairs["FARHELM_HELM_PAYLOAD_DIR"], "/p")
+        args = gui_agent.app_env_args(pathlib.Path("/tmp/run"), {"farhelm": "/t/f"})
+        pairs = dict(arg.split("=", 1) for arg in args[1::2])
+        self.assertNotIn("FARHELM_HELM_PAYLOAD_DIR", pairs)
+
+    def test_payload_dir_must_be_an_existing_absolute_directory(self):
+        """The helm looks into the payload directory only when it sets up or updates a host, long after `start`
+        returned, so a bad path must be refused up front rather than surface as a failed Update mid-run. Specified: a
+        relative path is refused as not absolute even when it names an existing directory, a missing absolute path and
+        a plain file are refused as not an existing directory, and an existing absolute directory is accepted
+        unchanged. Each case checks which refusal fired, since both are the same exception type."""
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = pathlib.Path(tmp)
+            (directory / "file").write_text("")
+            relative = pathlib.Path(os.path.relpath(directory))
+            self.assertTrue(relative.is_dir() and not relative.is_absolute(), "premise: a relative existing directory")
+            with self.assertRaisesRegex(gui_agent.UsageError, "absolute"):
+                gui_agent.check_payload_dir(relative)
+            for bad in (directory / "missing", directory / "file"):
+                with self.subTest(bad=bad), self.assertRaisesRegex(gui_agent.UsageError, "existing directory"):
+                    gui_agent.check_payload_dir(bad)
+            self.assertEqual(gui_agent.check_payload_dir(directory), directory)
+
     def test_scripted_hosts_reach_the_helm_from_inside_its_state(self):
         """`--scripted-hosts` is how end-to-end steps add, set up, update and fail fake SSH hosts through the real helm.
         The helm accepts the backend only from a private directory inside its own state directory holding its exact

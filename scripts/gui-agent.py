@@ -7,7 +7,7 @@ a run starts lives under the run directory you name (which must not exist yet), 
 
     scripts/gui-agent.py RUN_DIR start [--sessions N | --fleet KIND,...] [--size WxH (Linux)] [--no-build]
                                        [--lock FILE] [--window-size WxH] [--appearance light|dark]
-                                       [--scripted-hosts] [--start-dialogs]
+                                       [--scripted-hosts] [--start-dialogs] [--payload-dir DIR]
     scripts/gui-agent.py RUN_DIR snapshot -i          # any gpui-agent command: click, type, press, wait, screenshot ...
     scripts/gui-agent.py RUN_DIR terminal-text [--wait TEXT [--timeout SECONDS]]
     scripts/gui-agent.py RUN_DIR stop
@@ -27,7 +27,10 @@ fresh, so the Welcome card would open over the app and catch the run's first cli
 window's start dialogs (that card and the announcement batch after it) off through the same agent-build overrides, and
 `--start-dialogs` leaves them on to see the real start. `--scripted-hosts` makes the helm fake every command it runs on
 a host (setup, Update and the rest) with its scripted provisioning backend
-(SCRIPTED_HOSTS_ENV, debug builds only), controlled with `script_hosts`. Any other verb goes to the vendored
+(SCRIPTED_HOSTS_ENV, debug builds only), controlled with `script_hosts`. `--payload-dir DIR` hands the app's embedded
+helm a directory of staged `farhelm` payloads to install on and update real remote hosts from (PAYLOAD_DIR_ENV), which
+a debug build otherwise has no release to download from; it is the one way to pass that setting in, since the caller's
+own `FARHELM_*` variables never reach the app. Any other verb goes to the vendored
 `gpui-agent` command line, already pointed at this run's app; `gpui-agent --help` and
 vendor/gpui-agent/README.md list them. docs/gui-agent.md is the guide.
 
@@ -198,6 +201,27 @@ def scripted_hosts_dir(run: Path) -> Path:
     return run / "state" / "scripted-hosts"
 
 
+# The provisioning payload directory the desktop app hands its embedded helm (`helm_payload_dir` in
+# crates/farhelm-desktop/src/bundle.rs), the same variable the standalone `farhelm helm run --payload-dir` reads. Every
+# build reads it, not only agent builds. Must match the app's exactly.
+PAYLOAD_DIR_ENV = "FARHELM_HELM_PAYLOAD_DIR"
+
+
+def check_payload_dir(directory: Path) -> Path:
+    """Refuse a `--payload-dir` the app could not use as given; return it unchanged otherwise.
+
+    It must be absolute, as the run directory must, because a relative path would be resolved against whatever working
+    directory the app ends up with, which nothing here promises. It must be an existing directory because the helm
+    looks into it only when it installs on or updates a host, long after `start` has returned, so a typo would surface
+    as a failed setup or Update deep inside the run instead of as a usage error. Its contents are not checked; the helm
+    trusts them as given (`--payload-dir` in crates/farhelm-helm/src/lib.rs)."""
+    if not directory.is_absolute():
+        raise UsageError(f"--payload-dir must be an absolute path: {directory}")
+    if not directory.is_dir():
+        raise UsageError(f"--payload-dir is not an existing directory: {directory}")
+    return directory
+
+
 def prepare_scripted_hosts(run: Path) -> Path:
     """Create the scripted backend's directory with its marker and an empty `config.json` (every host absent, so a
     probe offers a setup plan and every step succeeds), and return it. Steps control the fake hosts with
@@ -230,13 +254,15 @@ def app_env_args(
     appearance: str | None = None,
     scripted_hosts: Path | None = None,
     start_dialogs: bool = False,
+    payload_dir: Path | None = None,
 ) -> list[str]:
     """The `--env` arguments `gpui-agent launch` passes to the app only: its state, its CLI and the helm file, plus the
-    first window's size, a forced appearance and the scripted provisioning backend's directory when the run asks for
-    them (unset otherwise, so the app starts at its own default size in the system's appearance and sets up hosts for
-    real). The start dialogs are off unless `start_dialogs` asks for them, because every run's helm is fresh and would
-    otherwise open the Welcome card over the app. `scripts/gui-lifecycle.py` relaunches with the defaults, so its
-    relaunched app keeps them off too, as it must: the first launch marked nothing seen."""
+    first window's size, a forced appearance, the scripted provisioning backend's directory and the payload directory
+    when the run asks for them (unset otherwise, so the app starts at its own default size in the system's appearance,
+    sets up hosts for real and has no payloads to push). The start dialogs are off unless `start_dialogs` asks for
+    them, because every run's helm is fresh and would otherwise open the Welcome card over the app.
+    `scripts/gui-lifecycle.py` relaunches with the defaults, so its relaunched app keeps them off too, as it must: the
+    first launch marked nothing seen."""
     pairs = {
         # The app's state directory: never the default one, which could be a real installation's.
         "FARHELM_DESKTOP_STATE_DIR": str(run / "state"),
@@ -255,6 +281,8 @@ def app_env_args(
         pairs["FARHELM_DESKTOP_AGENT_START_DIALOGS"] = "off"
     if scripted_hosts is not None:
         pairs[SCRIPTED_HOSTS_ENV] = str(scripted_hosts)
+    if payload_dir is not None:
+        pairs[PAYLOAD_DIR_ENV] = str(payload_dir)
     args: list[str] = []
     for key, value in pairs.items():
         args += ["--env", f"{key}={value}"]
@@ -801,9 +829,17 @@ def start(run: Path, args: list[str]) -> int:
         help="let the window's start dialogs (the Welcome card, then announcements) open as in a real launch; off by "
         "default (agent-build test hook)",
     )
+    parser.add_argument(
+        "--payload-dir",
+        type=Path,
+        metavar="DIR",
+        help="an absolute directory of staged farhelm payloads the app's helm installs and updates remote hosts from",
+    )
     options = parser.parse_args(args)
     if options.window_size:
         parse_size(options.window_size)
+    if options.payload_dir is not None:
+        check_payload_dir(options.payload_dir)
     mac = sys.platform == "darwin"
     if mac:
         # The window opens in the console's GUI session, so this must run as the user logged in there (SSH is fine:
@@ -878,6 +914,7 @@ def start(run: Path, args: list[str]) -> int:
                 appearance=options.appearance,
                 scripted_hosts=scripted_hosts,
                 start_dialogs=options.start_dialogs,
+                payload_dir=options.payload_dir,
             ),
             "--",
             binaries["desktop"],
