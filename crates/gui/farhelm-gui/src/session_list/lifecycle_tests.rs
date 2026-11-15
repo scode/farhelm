@@ -7,21 +7,26 @@
 //! the frame. A row's menu button is `session-menu-<key>`, its Replace and Stop are `session-menu-replace` and
 //! `session-menu-stop`, a question's answers are `prompt-confirm` and `prompt-cancel`, and the lines under a row are
 //! named `session-outcome-<key>` (a refusal or a notice) and `session-replace-progress-label-<key>` (a long Replace).
+//! The YOLO question a Replace meets (the launcher's) names its answers `prompt-cancel`, `prompt-alternative-0` (the
+//! permanent answer) and `prompt-confirm` (the one-off answer), and its reason `yolo-reason`.
 
 use std::time::Duration;
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
-use gpui::{AppContext as _, Modifiers, TestAppContext, VisualTestContext};
+use gpui::{
+    AppContext as _, Modifiers, Pixels, ScrollDelta, ScrollEvent, TestAppContext,
+    VisualTestContext, point, px,
+};
 use gpui_component::Root;
 use serde_json::{Value, json};
 
 use super::menu_tests::{any_layer, click_at, drawn, ended, entry, label_of, push, snapshot};
 use super::outcome::PROGRESS_SHOWS_AFTER;
-use super::tests::{change, listing_meta, open_main, painted, selected, sent, session};
+use super::tests::{Fixture, change, listing_meta, open_main, painted, selected, sent, session};
 use crate::focus::Mark;
 use crate::main_view::MainView;
-use crate::operations::OpKey;
+use crate::operations::{HelmMarker, OpKey};
 use crate::test_support::{focused_id, frame, started, terminal_focused};
 use crate::{layers, session, test_support};
 
@@ -99,6 +104,52 @@ pub(crate) fn replace(
             "only_if_agent_ended": only_if_agent_ended,
         }),
     )
+}
+
+/// [`replace`] sent again with the user's YOLO consent: the same body with `confirm_yolo` set and nothing else changed.
+pub(crate) fn consented(
+    key: &str,
+    only_if_nothing_alive: bool,
+    only_if_agent_ended: bool,
+) -> (String, Value) {
+    let (path, mut body) = replace(key, only_if_nothing_alive, only_if_agent_ended);
+    body["confirm_yolo"] = json!(true);
+    (path, body)
+}
+
+/// The helm's words for a YOLO refusal of a Replace on the fixtures' host, as its `YoloNeedsConfirmation` writes them.
+/// Written for the command line: the YOLO question never shows them.
+pub(crate) const YOLO_WORDS: &str = "buildbox asks before YOLO launches, and this launch is YOLO or uses the agent's own \
+                                     setting: nothing was started.";
+
+/// The helm refuses command `id` for YOLO, as it does for a YOLO launch on a host that asks first: a 409 carrying the
+/// helm's YOLO marker.
+pub(crate) fn refuse_for_yolo(fake: &mut FakeHelm, cx: &mut VisualTestContext, id: u64) {
+    fake.reply_marked(
+        id,
+        409,
+        vec![HelmMarker::YoloConfirmation],
+        Some(json!(YOLO_WORDS)),
+    );
+    test_support::settle(cx);
+}
+
+/// Whether a fresh frame draws the element `id` inside the element `ancestor`, by the frame's own parent links.
+pub(crate) fn drawn_inside(cx: &mut VisualTestContext, id: &str, ancestor: &str) -> bool {
+    let nodes = frame(cx);
+    let Some(mut at) = nodes
+        .iter()
+        .position(|node| node.element_id.as_deref() == Some(id))
+    else {
+        return false;
+    };
+    while let Some(parent) = nodes[at].parent {
+        if nodes[parent].element_id.as_deref() == Some(ancestor) {
+            return true;
+        }
+        at = parent;
+    }
+    false
 }
 
 /// Open the menu of the row whose menu button is `button` and choose `item`, by clicks.
@@ -471,10 +522,11 @@ fn a_pending_stop_or_replace_holds_no_automatic_choice_back(cx: &mut TestAppCont
 
 /// SPEC.md: "A failure or partial result appears on the source session's row", and the old app kept it there, named by
 /// its operation ("Stop: …", "Replace: …"), until the next operation on the session started; the open menu covers the
-/// row's copy, so the menu shows it too. Without the YOLO question (the launcher's), a host's YOLO refusal of a Replace
-/// shows the same way. Specified: a refused Stop of a shows "Stop: <the helm's words>" on a's row and in a's menu,
-/// stays through an unrelated pushed change, and goes once a's next Stop is sent; a Replace of b refused with the
-/// helm's YOLO words shows them after "Replace: ".
+/// row's copy, so the menu shows it too. Only the helm's marker asks the YOLO question, never its words (which can
+/// quote a supervisor), so a refusal without the marker shows the same way even when its words speak of YOLO.
+/// Specified: a refused Stop of a shows "Stop: <the helm's words>" on a's row and in a's menu, stays through an
+/// unrelated pushed change, and goes once a's next Stop is sent; a Replace of b refused with the helm's YOLO words and
+/// no marker shows them after "Replace: " and asks nothing.
 #[gpui::test]
 fn a_refusal_shows_on_the_row_and_in_its_menu_until_the_next_operation(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
@@ -530,6 +582,10 @@ fn a_refusal_shows_on_the_row_and_in_its_menu_until_the_next_operation(cx: &mut 
         label_of(cx, "session-outcome-b").as_deref(),
         Some(format!("Replace: {yolo}").as_str())
     );
+    assert!(
+        !drawn(cx, "prompt-confirm"),
+        "no YOLO question without the marker"
+    );
 }
 
 /// SPEC.md, "Lifecycle operations": "A tab that cannot be closed does not prevent the other tabs from closing; the reply
@@ -582,7 +638,13 @@ fn a_stops_notice_stays_on_its_row_until_the_next_operation_starts(cx: &mut Test
 /// a and b with a open, and a's Replace asked from its row, confirmed and sent: the window, the fake, and the Replace's
 /// id for the test to answer.
 fn replacing_the_open_session(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext, u64) {
-    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
+    replacing_open(cx, session("a"))
+}
+
+/// [`replacing_the_open_session`] with `a` as the open session's fixture (its key must be `a`), so a test can choose
+/// the Delete guard its Replace question freezes.
+fn replacing_open(cx: &mut TestAppContext, a: Fixture) -> (FakeHelm, &mut VisualTestContext, u64) {
+    let (mut fake, cx) = open_main(cx, snapshot(&[(a, 0), (session("b"), 0)], false));
     assert_eq!(selected(cx).as_deref(), Some("a"), "the premise: a is open");
     pending(&mut fake);
     choose(cx, "session-menu-a", "session-menu-replace");
@@ -803,4 +865,403 @@ fn a_replace_after_the_user_opened_another_session_leaves_them_there(cx: &mut Te
     the_helm_replaces_a_with_n(&mut fake, cx, id, "b");
     assert_eq!(selected(cx).as_deref(), Some("b"));
     assert_eq!(label_of(cx, "session-row-n").as_deref(), Some("n"));
+}
+
+// ---- The YOLO question a Replace meets -----------------------------------------------------------------------------
+
+/// The bounds a fresh frame draws the element `id` at, by the frame's own record (rows' items carry an id but no debug
+/// selector).
+pub(crate) fn node_bounds(cx: &mut VisualTestContext, id: &str) -> gpui::Bounds<Pixels> {
+    frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some(id))
+        .unwrap_or_else(|| panic!("{id} is drawn"))
+        .bounds
+}
+
+/// SPEC.md, "Creation": the GUI answers the helm's YOLO refusal "with a prominent confirmation, shown with the control
+/// or surface that started the launch", and "a plain Replace's question, which arrives after its reply, takes focus
+/// only if the user has not moved on since answering Replace", on Cancel. The question's words and answers are the
+/// launcher's and tested there; this pins where it shows and that the helm's command-line sentence does not. Specified:
+/// with a's Replace confirmed from its row's menu and nothing touched since, a YOLO refusal draws the question inside
+/// a's row, focus on Cancel; no "Replace: …" line shows on a's row, and nothing more is sent.
+#[gpui::test]
+fn a_yolo_refused_replace_asks_the_launchers_question_in_its_row(cx: &mut TestAppContext) {
+    let (mut fake, cx, id) = replacing_the_open_session(cx);
+    refuse_for_yolo(&mut fake, cx, id);
+    assert!(
+        drawn_inside(cx, "prompt-confirm", "session-item-a"),
+        "the question is drawn in a's row"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+    assert_eq!(
+        label_of(cx, "session-outcome-a"),
+        None,
+        "the helm's sentence is not shown"
+    );
+    assert!(fake.commands().is_empty(), "nothing more was sent");
+}
+
+/// LA-L18 has the sidebar pass the source's host "and its `hosts::identity::display_name`": the question names the
+/// machine an agent would act on unchecked, so a wrong or generic name would leave the user unable to tell which host
+/// they are agreeing for. The fixtures' snapshot lists no hosts, so the name is the one the helm sent with the row.
+/// Specified: the question's line about asking names the row's host, `buildbox`, not "this host".
+#[gpui::test]
+fn the_question_names_the_sources_host(cx: &mut TestAppContext) {
+    let (mut fake, cx, id) = replacing_the_open_session(cx);
+    refuse_for_yolo(&mut fake, cx, id);
+    assert_eq!(
+        label_of(cx, "yolo-asks").as_deref(),
+        Some("buildbox asks before every YOLO launch. Nothing has been started.")
+    );
+}
+
+/// SPEC.md: the GUI "retries with the override only when the user confirms", and the retry is the same Replace (the
+/// source and the Delete guard the user's Replace question froze, here the old app's "keeps its confirmed nothing-alive
+/// answer" case). Exactly once: a second Replace would be refused for a source the first already removed, after
+/// creating a second replacement. Its success follows Replace's own rule. Specified: on an ended a without tabs, the
+/// one-off answer sends one Replace of a, the body pinned with `confirm_yolo` set and `only_if_nothing_alive` as its
+/// question froze it; the question goes; the helm's replacement n opens and its terminal takes focus; nothing else is
+/// sent.
+#[gpui::test]
+fn the_one_off_answer_replaces_again_with_consent_exactly_once(cx: &mut TestAppContext) {
+    let (mut fake, cx, id) = replacing_open(cx, ended("a"));
+    refuse_for_yolo(&mut fake, cx, id);
+    test_support::click(cx, "prompt-confirm");
+    let sent = pending(&mut fake);
+    let [(again, _, _)] = sent[..] else {
+        panic!("one Replace was sent again, not {}", sent.len());
+    };
+    assert_eq!(requests(sent), [consented("a", true, false)]);
+    assert!(!drawn(cx, "prompt-confirm"), "the question went");
+    the_helm_replaces_a_with_n(&mut fake, cx, again, "a");
+    assert_eq!(selected(cx).as_deref(), Some("n"));
+    assert!(
+        terminal_focused(cx),
+        "the replacement's terminal took focus"
+    );
+    assert_eq!(pending(&mut fake), [], "no second Replace");
+}
+
+/// While the permanent answer's host write is out (the launcher's to send and test), the question must stay up with
+/// its answers frozen, and the session's own Replace must not race the write's retry with a second request. Specified:
+/// after the permanent answer only one command is out; meanwhile the question is still drawn in a's row through a
+/// pushed change of another row, and a's menu Replace is unavailable and sends nothing; once the write succeeds,
+/// exactly one Replace of a with consent is sent.
+#[gpui::test]
+fn the_permanent_answer_writes_the_host_setting_then_replaces_with_consent(
+    cx: &mut TestAppContext,
+) {
+    let (mut fake, cx, id) = replacing_the_open_session(cx);
+    refuse_for_yolo(&mut fake, cx, id);
+    test_support::click(cx, "prompt-alternative-0");
+    let sent = fake.commands();
+    let [write] = &sent[..] else {
+        panic!("only the host write is out, not {} commands", sent.len());
+    };
+
+    push(
+        &mut fake,
+        &["a", "b"],
+        &[(session("b").title("renamed"), 0)],
+        cx,
+    );
+    assert!(
+        drawn_inside(cx, "prompt-alternative-0", "session-item-a"),
+        "the question stays while its write is out"
+    );
+    choose(cx, "session-menu-a", "session-menu-replace");
+    assert!(
+        drawn(cx, "session-menu"),
+        "a's Replace is unavailable meanwhile: the menu is still open"
+    );
+    assert!(fake.commands().is_empty(), "and nothing was sent");
+    test_support::keys(cx, "escape");
+
+    fake.reply(write.id, 200, Some(json!({})));
+    test_support::settle(cx);
+    assert_eq!(requests(pending(&mut fake)), [consented("a", false, false)]);
+}
+
+/// SPEC.md, "Lifecycle operations": "an open lifecycle confirmation or a pending request refuses another lifecycle
+/// action", and the YOLO question is the Replace's confirmation. A Stop or Delete meanwhile would also take the session's
+/// key, so the answer's Replace would be refused and only logged after the question closed. Specified: with a's YOLO
+/// question open in its row, a's menu draws Rename, Replace, Stop and Delete unavailable (a click on each leaves the menu
+/// open), and a click on each of the open session's header's Stop, Restart, Replace and Delete (a is open) asks nothing;
+/// nothing is sent. Once the question is cancelled, a's menu Stop sends a's Stop.
+#[gpui::test]
+fn an_open_yolo_question_refuses_the_sessions_other_lifecycle_actions(cx: &mut TestAppContext) {
+    let (mut fake, cx, id) = replacing_the_open_session(cx);
+    refuse_for_yolo(&mut fake, cx, id);
+    assert!(
+        cx.update(|_, cx| super::replace_yolo::open("a", cx)),
+        "the premise: the question is open"
+    );
+    test_support::click(cx, "session-menu-a");
+    for item in [
+        "session-menu-rename",
+        "session-menu-replace",
+        "session-menu-stop",
+        "session-menu-delete",
+    ] {
+        test_support::click(cx, item);
+        assert!(
+            drawn(cx, "session-menu"),
+            "{item} is unavailable: the menu is still open"
+        );
+    }
+    test_support::keys(cx, "escape");
+    // a is the open session, running without tabs, so its header's Stop would stop it at once and its Delete would ask.
+    for button in [
+        "session-header-stop",
+        "session-header-restart",
+        "session-header-replace",
+        "session-header-delete",
+    ] {
+        test_support::click(cx, button);
+        assert!(!any_layer(cx), "{button} asks nothing");
+    }
+    assert!(fake.commands().is_empty(), "nothing was sent");
+
+    test_support::click(cx, "prompt-cancel");
+    choose(cx, "session-menu-a", "session-menu-stop");
+    assert_eq!(requests(pending(&mut fake)), [stop("a", true, false)]);
+}
+
+/// LA-L18: the retry "gets the answer's mark to combine with its own `Settled::user_moved_on`". The permanent answer's
+/// retry is sent from the host write's reply, so the operation store's own mark, taken then, misses a press the user
+/// made while the write was out; only the answer's mark sees it. Without the combination the replacement would pull
+/// focus from wherever the user went. Specified: after the permanent answer, the user opens b's menu and closes it with
+/// Escape while the write is out, leaving focus on b's menu button; the write succeeds, the consented Replace is sent
+/// with nothing touched since, and the helm's replacement n opens with focus still on b's button.
+#[gpui::test]
+fn a_press_during_the_host_write_keeps_the_replacement_from_taking_focus(cx: &mut TestAppContext) {
+    let (mut fake, cx, id) = replacing_the_open_session(cx);
+    refuse_for_yolo(&mut fake, cx, id);
+    test_support::click(cx, "prompt-alternative-0");
+    let sent = fake.commands();
+    let [write] = &sent[..] else {
+        panic!("only the host write is out, not {} commands", sent.len());
+    };
+    test_support::click(cx, "session-menu-b");
+    test_support::keys(cx, "escape");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("session-menu-b"),
+        "the premise: focus is on b's button"
+    );
+    fake.reply(write.id, 200, Some(json!({})));
+    test_support::settle(cx);
+    let [(again, _, _)] = pending(&mut fake)[..] else {
+        panic!("one Replace was sent again");
+    };
+    the_helm_replaces_a_with_n(&mut fake, cx, again, "a");
+    assert_eq!(selected(cx).as_deref(), Some("n"));
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-b"));
+}
+
+/// LA-L18: "Drop it with the UI session." A reset drops the host write's reply, so a question whose write was out
+/// would otherwise stay frozen for good, and with it the guard that keeps the session's own Replace back. Specified:
+/// with the permanent answer's write out, the channel breaks and reconnects with the same sessions; a's row draws no
+/// question, and a's menu Replace asks its Replace question again.
+#[gpui::test]
+fn a_reset_drops_the_question(cx: &mut TestAppContext) {
+    let (mut fake, cx, id) = replacing_the_open_session(cx);
+    refuse_for_yolo(&mut fake, cx, id);
+    test_support::click(cx, "prompt-alternative-0");
+    assert!(
+        cx.update(|_, cx| super::replace_yolo::open("a", cx)),
+        "the premise: the question is open, its write out"
+    );
+    fake.break_channel();
+    test_support::settle(cx);
+    fake.connect(snapshot(&[(session("a"), 0), (session("b"), 0)], false));
+    test_support::settle(cx);
+    pending(&mut fake);
+    assert!(
+        !drawn(cx, "prompt-alternative-0"),
+        "the question went with the reset"
+    );
+    choose(cx, "session-menu-a", "session-menu-replace");
+    assert!(
+        drawn(cx, "prompt-confirm"),
+        "a's Replace asks again after the reset"
+    );
+}
+
+/// SPEC.md, "Opening and closing": "Closing something the user opened returns focus to where it was before it
+/// opened", and Cancel starts nothing; and a closed question must give its row back the height it took, since nothing
+/// shows there any more. The question arrived where the Replace question had left focus, a's menu button, so that is
+/// where Cancel returns it. Specified: a's row is as tall after the refused Replace's question is cancelled as before
+/// the Replace was asked; Cancel sent nothing, the question went, a's row shows no line, and focus is back on a's menu
+/// button.
+#[gpui::test]
+fn cancel_drops_the_question_and_gives_focus_back_to_the_rows_button(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
+    pending(&mut fake);
+    let before = node_bounds(cx, "session-item-a").size.height;
+    choose(cx, "session-menu-a", "session-menu-replace");
+    test_support::click(cx, "prompt-confirm");
+    let [(id, _, _)] = pending(&mut fake)[..] else {
+        panic!("one Replace was sent");
+    };
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("session-menu-a"),
+        "the premise: the Replace question gave focus back to a's button"
+    );
+    refuse_for_yolo(&mut fake, cx, id);
+    assert!(
+        node_bounds(cx, "session-item-a").size.height > before,
+        "the premise: the question made a's row taller"
+    );
+    test_support::click(cx, "prompt-cancel");
+    assert!(!drawn(cx, "prompt-confirm"), "the question went");
+    assert!(fake.commands().is_empty(), "Cancel sent nothing");
+    assert_eq!(label_of(cx, "session-outcome-a"), None);
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-a"));
+    assert_eq!(
+        node_bounds(cx, "session-item-a").size.height,
+        before,
+        "a's row is as tall as before"
+    );
+}
+
+/// The old app's "row Replace YOLO arrival respects focus" case: a user who went on to something else while the
+/// Replace was out must not have focus pulled into the question, which waits where it belongs. Specified: with a's
+/// Replace out, the user opens b's menu and closes it with Escape, leaving focus on b's menu button; the YOLO refusal
+/// draws the question in a's row, and focus is still on b's button.
+#[gpui::test]
+fn a_yolo_question_after_the_user_moved_on_waits_without_focus(cx: &mut TestAppContext) {
+    let (mut fake, cx, id) = replacing_the_open_session(cx);
+    test_support::click(cx, "session-menu-b");
+    test_support::keys(cx, "escape");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("session-menu-b"),
+        "the premise: focus is on b's button"
+    );
+    refuse_for_yolo(&mut fake, cx, id);
+    assert!(drawn_inside(cx, "prompt-confirm", "session-item-a"));
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-b"));
+}
+
+/// SPEC.md: the confirmation is "scrolled into view". A wheel scroll is not moving on (only key presses and clicks
+/// are), so a user who scrolled the list while the Replace was out still gets the question with focus, and a focused
+/// control the list scrolled away would leave Cancel off screen. Specified: with 200 idle sessions, s000's Replace from
+/// its row's menu is out while the list is scrolled far down (s001 no longer drawn); the YOLO refusal moves focus to
+/// the question's Cancel, which lies wholly inside the window.
+#[gpui::test]
+fn a_yolo_question_that_takes_focus_scrolls_its_row_into_view(cx: &mut TestAppContext) {
+    let rows: Vec<_> = (0..200)
+        .map(|index| {
+            // The fixture keeps a `&'static str` key, as every fixed key in these tests is; the test leaks a few.
+            let key: &'static str = Box::leak(format!("s{index:03}").into_boxed_str());
+            session(key).status(json!({"state": "idle"}))
+        })
+        .collect();
+    let keys: Vec<&str> = rows.iter().map(|row| row.key).collect();
+    let (mut fake, cx) = open_main(
+        cx,
+        vec![
+            super::tests::listing(&keys, &rows),
+            super::tests::preferences(&["s001"], None),
+        ],
+    );
+    pending(&mut fake);
+    choose(cx, "session-menu-s000", "session-menu-replace");
+    test_support::click(cx, "prompt-confirm");
+    let [(id, _, _)] = pending(&mut fake)[..] else {
+        panic!("one Replace was sent");
+    };
+    scroll_list(cx, px(5_000.));
+    assert!(
+        !frame(cx)
+            .iter()
+            .any(|node| node.element_id.as_deref() == Some("session-row-s001")),
+        "the premise: the rows around s000 are scrolled away"
+    );
+
+    refuse_for_yolo(&mut fake, cx, id);
+    test_support::settle(cx);
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+    let view = cx.update(|window, _| window.viewport_size().height);
+    let cancel = test_support::bounds(cx, "prompt-cancel");
+    assert!(
+        cancel.top() >= px(0.) && cancel.bottom() <= view,
+        "Cancel is in view: {cancel:?} in a window {view:?} high"
+    );
+}
+
+/// The scroll into view takes two frames because the first judges the row by the height it had without the question:
+/// a row wholly in view then is left where it is, and only the next frame, which measures the row with the question
+/// under it, sees the question's foot past the list's bottom edge. Specified: with 60 idle sessions and s001 open, the
+/// Replace of the lowest row wholly inside the list's view is refused for YOLO; focus is on the question's Cancel, and
+/// Cancel lies wholly inside the list's view.
+#[gpui::test]
+fn a_yolo_question_below_its_rows_last_line_is_scrolled_into_view_too(cx: &mut TestAppContext) {
+    let rows: Vec<_> = (0..60)
+        .map(|index| {
+            // The fixture keeps a `&'static str` key, as every fixed key in these tests is; the test leaks a few.
+            let key: &'static str = Box::leak(format!("s{index:03}").into_boxed_str());
+            session(key).status(json!({"state": "idle"}))
+        })
+        .collect();
+    let keys: Vec<&str> = rows.iter().map(|row| row.key).collect();
+    let (mut fake, cx) = open_main(
+        cx,
+        vec![
+            super::tests::listing(&keys, &rows),
+            super::tests::preferences(&["s001"], None),
+        ],
+    );
+    pending(&mut fake);
+    let list = test_support::bounds(cx, "session-rows");
+    // The lowest row the list's view holds whole: its question's foot can only end below the view.
+    let lowest = frame(cx)
+        .into_iter()
+        .filter_map(|node| {
+            let key = node
+                .element_id
+                .as_deref()?
+                .strip_prefix("session-item-")?
+                .to_owned();
+            (node.bounds.top() >= list.top() && node.bounds.bottom() <= list.bottom())
+                .then_some((node.bounds.bottom(), key))
+        })
+        .max_by(|a, b| f32::from(a.0).total_cmp(&f32::from(b.0)))
+        .map(|(_, key)| key)
+        .expect("the premise: some row is wholly in view");
+    assert_ne!(
+        lowest, "s059",
+        "the premise: the list has rows below the view"
+    );
+    let button: &'static str = Box::leak(format!("session-menu-{lowest}").into_boxed_str());
+    choose(cx, button, "session-menu-replace");
+    test_support::click(cx, "prompt-confirm");
+    let [(id, _, _)] = pending(&mut fake)[..] else {
+        panic!("one Replace was sent");
+    };
+
+    refuse_for_yolo(&mut fake, cx, id);
+    test_support::settle(cx);
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+    let list = test_support::bounds(cx, "session-rows");
+    let cancel = test_support::bounds(cx, "prompt-cancel");
+    assert!(
+        cancel.top() >= list.top() && cancel.bottom() <= list.bottom(),
+        "Cancel is in the list's view: {cancel:?} in {list:?}"
+    );
+}
+
+/// Scroll the list down by `by` with the pointer over it, as a wheel or trackpad would (the list tests' helper).
+fn scroll_list(cx: &mut VisualTestContext, by: Pixels) {
+    let at = test_support::center(cx, "session-rows");
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    cx.simulate_event(ScrollEvent {
+        position: at,
+        delta: ScrollDelta::Pixels(point(px(0.), -by)),
+        ..Default::default()
+    });
+    test_support::settle(cx);
 }

@@ -34,7 +34,9 @@ use crate::actions::{DELETE_SESSION_CHORD, DELETE_SESSION_SHORTCUT_NAME};
 use crate::focus::Mark;
 use crate::main_view::MainView;
 use crate::session_list::SessionList;
-use crate::session_list::lifecycle_tests::replace;
+use crate::session_list::lifecycle_tests::{
+    consented, drawn_inside, node_bounds, refuse_for_yolo, replace,
+};
 use crate::session_list::menu_tests::{any_layer, drawn, ended, entry, label_of};
 use crate::session_list::outcome::PROGRESS_SHOWS_AFTER;
 use crate::session_list::tests::{
@@ -540,6 +542,127 @@ fn the_headers_replace_asks_the_rows_question_and_sends_its_guard(cx: &mut TestA
     assert!(texts(cx).iter().any(|text| text == "Confirm replace"));
     test_support::click(cx, "prompt-confirm");
     assert_eq!(answered(&mut fake), [replace("a", false, true)]);
+}
+
+/// An ended a without tabs, open, beside a running b, a's Replace sent from the header through its question and
+/// unanswered: the window, the fake and the Replace's id. The ended agent makes the Replace's Delete guard "nothing
+/// alive", so a test can tell that a retry carries the guard the Replace froze.
+fn replacing_from_the_header(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext, u64) {
+    let (mut fake, cx) = open_main(
+        cx,
+        snapshot_of(vec![entry(&ended("a"), 0), entry(&session("b"), 0)], false),
+    );
+    pending(&mut fake);
+    test_support::click(cx, "session-header-replace");
+    test_support::click(cx, "prompt-confirm");
+    let [(id, _, _)] = pending(&mut fake)[..] else {
+        panic!("one Replace was sent");
+    };
+    (fake, cx, id)
+}
+
+/// The height between the bottom of the header's top row and the top of the terminal: what the lines below the row
+/// take from the terminal.
+fn lines_height(cx: &mut VisualTestContext) -> gpui::Pixels {
+    let row = test_support::bounds(cx, "session-header").bottom();
+    node_bounds(cx, "terminal-grid").top() - row
+}
+
+/// SPEC.md, "Creation": the YOLO confirmation is "shown with the control or surface that started the launch", so a
+/// Replace from the header meets it in the header, not at a row the user did not use; it sits below the top row, as the
+/// header's other lines do, so it cannot push an action out of the 650-pixel floor. Specified: with an ended a's
+/// Replace confirmed from the header and nothing touched since, a YOLO refusal draws one question, below the header's
+/// top row and not in a's list row, with focus on its Cancel; the one-off answer sends exactly one Replace of a, the
+/// body pinned with `confirm_yolo` set beside the nothing-alive guard a's question froze.
+#[gpui::test]
+fn a_yolo_refused_replace_from_the_header_asks_below_its_top_row(cx: &mut TestAppContext) {
+    let (mut fake, cx, id) = replacing_from_the_header(cx);
+    refuse_for_yolo(&mut fake, cx, id);
+    let questions = frame(cx)
+        .iter()
+        .filter(|node| node.element_id.as_deref() == Some("prompt-confirm"))
+        .count();
+    assert_eq!(questions, 1, "one question");
+    assert!(
+        !drawn_inside(cx, "prompt-confirm", "session-item-a"),
+        "not in a's row"
+    );
+    assert!(
+        test_support::bounds(cx, "prompt-confirm").top()
+            >= test_support::bounds(cx, "session-header").bottom(),
+        "below the top row"
+    );
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+    test_support::click(cx, "prompt-confirm");
+    assert_eq!(answered(&mut fake), [consented("a", true, false)]);
+    assert_eq!(pending(&mut fake), [], "exactly once");
+}
+
+/// SPEC.md, "Terminal experience": "The terminal loses no height in the steady state". The question takes height from
+/// the terminal while it is up, and a cancelled one shows nothing, so the terminal must get all of it back; an empty
+/// band left behind would stay until the session's next Replace. Specified: the distance from the top row to the
+/// terminal is the same after the header's YOLO question is cancelled as before the Replace was asked, and larger while
+/// the question is up.
+#[gpui::test]
+fn cancelling_the_headers_question_gives_the_terminal_its_height_back(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(
+        cx,
+        snapshot_of(vec![entry(&ended("a"), 0), entry(&session("b"), 0)], false),
+    );
+    pending(&mut fake);
+    let before = lines_height(cx);
+    test_support::click(cx, "session-header-replace");
+    test_support::click(cx, "prompt-confirm");
+    let [(id, _, _)] = pending(&mut fake)[..] else {
+        panic!("one Replace was sent");
+    };
+    refuse_for_yolo(&mut fake, cx, id);
+    assert!(
+        lines_height(cx) > before,
+        "the premise: the question takes height"
+    );
+    test_support::click(cx, "prompt-cancel");
+    assert!(
+        !drawn(cx, "prompt-confirm"),
+        "the premise: the question went"
+    );
+    assert_eq!(lines_height(cx), before);
+}
+
+/// The header is drawn only for the open session, so a question asked from it would be shown nowhere once the user
+/// opened another session, and its refusal's record is gone (the question says it instead). SPEC.md, "Lifecycle
+/// operations": "A failure or partial result appears on the source session's row and at the top when it is opened
+/// again". Specified: with a's Replace from the header out, the user opens b; the YOLO refusal draws the question in
+/// a's row and not in b's header; once the user opens a again, it is drawn below the header's top row and not in a's
+/// row, and there is still one question.
+#[gpui::test]
+fn a_header_question_shows_at_its_row_while_its_session_is_not_open(cx: &mut TestAppContext) {
+    let (mut fake, cx, id) = replacing_from_the_header(cx);
+    test_support::click(cx, "session-row-b");
+    assert_eq!(selected(cx).as_deref(), Some("b"), "the premise: b is open");
+    refuse_for_yolo(&mut fake, cx, id);
+    assert!(
+        drawn_inside(cx, "prompt-confirm", "session-item-a"),
+        "the question is at a's row while b is open"
+    );
+    let questions = |cx: &mut VisualTestContext| {
+        frame(cx)
+            .iter()
+            .filter(|node| node.element_id.as_deref() == Some("prompt-confirm"))
+            .count()
+    };
+    assert_eq!(questions(cx), 1, "one question, so none in b's header");
+    test_support::click(cx, "session-row-a");
+    assert!(
+        !drawn_inside(cx, "prompt-confirm", "session-item-a"),
+        "not at a's row once a is open"
+    );
+    assert!(
+        test_support::bounds(cx, "prompt-confirm").top()
+            >= test_support::bounds(cx, "session-header").bottom(),
+        "below the top row"
+    );
+    assert_eq!(questions(cx), 1, "one question");
 }
 
 /// In the macOS window the top row is half of the title band, where text keeps its presses (SPEC.md, "Desktop window

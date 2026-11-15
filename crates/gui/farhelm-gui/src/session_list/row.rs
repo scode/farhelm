@@ -24,7 +24,8 @@
 //! words in place of the title, which stays the row's accessible name ([`super::delete`]); a pending Stop shows its
 //! spinner and "Stopping…" before the title, which stays on screen, since the session stays too ([`super::stop`]); a
 //! Replace that has waited two seconds says so on a line under the row ([`super::replace`]). The refusal of the row's
-//! last request, or the notice its last success left, shows under the row for as long as [`super::outcome`] says.
+//! last request, or the notice its last success left, shows under the row for as long as [`super::outcome`] says, and
+//! below that the YOLO question a Replace from the row's menu met ([`super::replace_yolo`]).
 //!
 //! A session with notifications has a bell before its age, in the age track ([`crate::notices_bell`], which draws it
 //! and its list and keeps its press from the open control), so the track widens by the bell on that row only and its
@@ -45,7 +46,7 @@ use gpui::{
 use super::row_marks::{self, RowMarks};
 use super::selection::Listed;
 use super::status::{self, Badge};
-use super::{age, delete, outcome, replace, stop};
+use super::{age, delete, outcome, replace, replace_yolo, stop};
 use crate::assets;
 use crate::components::{HoverHelp, ListRow, Role, StatusMark};
 use crate::focus;
@@ -286,6 +287,7 @@ pub(crate) fn row(
             cx,
         ))
         .children(outcome::row_line(session.key, selected, cx))
+        .children(replace_yolo::row_question(session.key, cx))
         .into_any_element()
 }
 

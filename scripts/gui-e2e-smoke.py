@@ -15,12 +15,13 @@ session list's order menu; 47, the settings-and-hosts area's host Update, its pr
 other-dialogs area's Send feedback, up to but never including Send; 49, the session list header's Trash; 50, the session
 view's open session that a status filter hides, named and renamed; 51, the session list heading's New and the quick
 switcher's New row; 52 and 53, the other-dialogs area's Welcome card, reopened from the Help menu and opened by a window
-start that asks for it; 60 and 62 to 64, the approvals area's cards for agents' requests: Allow, the host-only grant,
-Deny over the quick switcher, and an agent's host add through the Add host dialog; 61, the settings-and-hosts area's
-host uninstall, its refusal, run and removal notice). The behavior itself is specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`, `session_pane/`,
-`terminal/attached/tests.rs`, `hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`, `trash/`, `approvals/`); nothing
-here checks layout or wording beyond the names it clicks. A menu's commands are clicked by their ids
-(`id:session-menu-delete`), not their labels: the open session's header has buttons with the same names (Stop,
+start that asks for it; 54, the session list's Replace meeting the YOLO question; 60 and 62 to 64, the approvals area's
+cards for agents' requests: Allow, the host-only grant, Deny over the quick switcher, and an agent's host add through
+the Add host dialog; 61, the settings-and-hosts area's host uninstall, its refusal, run and removal notice). The
+behavior itself is specified and tested in process (`crates/gui/farhelm-gui/src/session_list/`, `session_pane.rs`,
+`session_pane/`, `terminal/attached/tests.rs`, `hosts/`, `help_menu/tests.rs`, `feedback/tests.rs`, `trash/`,
+`approvals/`); nothing here checks layout or wording beyond the names it clicks. A menu's commands are clicked by their
+ids (`id:session-menu-delete`), not their labels: the open session's header has buttons with the same names (Stop,
 Replace, Delete), and a `text:` target picks the first match in drawing order, which is the header's.
 
     python3 -B scripts/gui-e2e-smoke.py [--no-build] [--keep]
@@ -152,6 +153,9 @@ WELCOME_NOTE = "This card is in the ? menu as Welcome if you want it again."
 # The Trash dialog's opening words: drawn whatever the hosts' trash holds, so the oracle for the dialog open and closed
 # (step 49).
 TRASH_INTRO = "Folders of managed checkouts whose last session was deleted."
+
+# The YOLO question's one-off answer: drawn only while the question is up (step 54).
+YOLO_ONE_OFF = "Start YOLO session anyway"
 
 # The launcher's header summary in New: text only the open launcher draws (New's hover help says it with a lowercase
 # "start", which this does not match), so waiting for it (or for it to go) tells whether the launcher is open (step 51).
@@ -1355,6 +1359,58 @@ class Smoke(unittest.TestCase):
         self.assertEqual(set(listed_titles()), before, "neither New started a session")
         self.assertEqual(last_selected(), origin, "and the open session is unchanged")
 
+    # ---- The session list's Replace of a YOLO launch (54), on a session of its own ----------------------------------
+
+    def test_54_a_yolo_replace_asks_in_its_row_and_the_one_off_answer_replaces(self) -> None:
+        """Every host asks before YOLO launches until the user says otherwise, and the helm refuses a YOLO launch's
+        plain Replace there with a marker the app answers with the launcher's YOLO question, drawn in the row the
+        Replace was asked from; the one-off answer sends the Replace again with consent. That path crosses the helm's
+        refusal marker, the operation store, the launcher's question and the row, which the in-process tests cover only
+        against the helm client's fake. Specified, on a fake-agent command launch this step creates asserted YOLO (with
+        consent, under a title of its own): the menu's Replace and Confirm replace bring up the question inside the
+        source's row (its `alertdialog` nested under the row's `listitem` in the accessibility tree), and once "Start
+        YOLO session anyway" is clicked the helm lists a session under the same title with a new id and not the old
+        one, and the local host still asks before YOLO launches (the one-off answer changes no setting). The helm's
+        listing is the oracle, as in step 34."""
+        hosts = gui_agent.helm_request(RUN, "GET", "/api/hosts")["hosts"]
+        local = [host for host in hosts if host["kind"] == "local"]
+        self.assertEqual(len(local), 1, f"premise: the helm lists one local host: {hosts}")
+        self.assertFalse(local[0]["yolo_without_asking"], "premise: the local host asks before YOLO launches")
+        fixtures = json.loads((RUN / "run.json").read_text())["binaries"]["fixtures"]
+        title = f"YOLO replace {uuid.uuid4().hex[:8]}"
+        body = gui_agent.seed_body(0, gui_agent.SESSION_CWD, fixtures)
+        body["title"] = title
+        body["command"]["yolo"] = True
+        body["confirm_yolo"] = True
+        source = gui_agent.helm_request(RUN, "POST", "/api/sessions", body)["id"]
+        self.ok("wait", "--text", title)
+
+        self.ok("click", f"text:Session actions for {title}")
+        self.ok("wait", "--text", MENU_DESCRIPTION)
+        self.ok("click", "id:session-menu-replace")
+        self.ok("wait", "--text", "Confirm replace")
+        self.ok("click", "text:Confirm replace")
+        self.ok("wait", "--text", YOLO_ONE_OFF)
+        self.assertTrue(
+            nested_under(self.ok("snapshot", "-i"), f'listitem "{title}"', 'alertdialog "Confirm YOLO launch"'),
+            "the question is drawn inside the source's row",
+        )
+        self.assertIn(source, listed_titles(), "premise: the refused Replace kept the source")
+        self.ok("click", f"text:{YOLO_ONE_OFF}")
+
+        def replacement() -> bool:
+            titles = listed_titles()
+            fresh = [id for id, listed in titles.items() if listed == title and id != source]
+            return source not in titles and len(fresh) == 1
+
+        eventually(replacement, f"{title} listed under a new id and not under its old one")
+        self.ok("wait", "--gone", YOLO_ONE_OFF)
+        hosts = gui_agent.helm_request(RUN, "GET", "/api/hosts")["hosts"]
+        self.assertFalse(
+            [host for host in hosts if host["kind"] == "local"][0]["yolo_without_asking"],
+            "the one-off answer left the local host asking",
+        )
+
     # ---- The other-dialogs area's Welcome card (52, 53) --------------------------------------------------------------
 
     def test_52_welcome_reopens_from_the_help_menu_and_escape_returns_to_the_button(self) -> None:
@@ -1808,6 +1864,24 @@ def remove_host(destination: str) -> None:
         f"{destination}'s run ending before its host is removed",
     )
     gui_agent.helm_request(RUN, "DELETE", f"/api/hosts/{host}")
+
+
+def nested_under(snapshot: str, outer: str, inner: str) -> bool:
+    """Whether a `snapshot -i` tree shows a line containing `inner` nested under one containing `outer`: some line
+    before it, less indented than it, with no line in between indented at most as far as that ancestor (which would
+    close it)."""
+    lines = snapshot.splitlines()
+    for at, line in enumerate(lines):
+        if inner not in line:
+            continue
+        depth = len(line) - len(line.lstrip())
+        for above in reversed(lines[:at]):
+            above_depth = len(above) - len(above.lstrip())
+            if above_depth < depth:
+                if outer in above:
+                    return True
+                depth = above_depth
+    return False
 
 
 def trash_close_focused(snapshot: str) -> bool:

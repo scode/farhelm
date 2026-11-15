@@ -79,14 +79,16 @@
 //! ([`seen`], also on a click on the row's status dot), Replace ([`replace`]), Stop ([`stop`]) and Delete ([`delete`]),
 //! and the open session's header (`session_pane/header.rs`) asks the same Stop, Replace and Delete through the same
 //! functions, plus Restart ([`restart`]), which the old row menu never had; the Rename shortcut reaches Rename for the
-//! open session ([`rename::open_for_selected`]), and the Delete shortcut the header's Delete. What a row says about its
-//! operations beyond "in flight" (a refusal, a success's notice, how long a Replace has waited) is [`outcome`]'s. While
-//! any Delete is in flight, the selection rules hold back their automatic choice, so a list that loses its open session
-//! to that Delete opens the next one only once every Delete has settled; a Stop or a Replace holds nothing back, with
-//! one exception for the open session's own Replace ([`selection`], "A Replace keeps its own source open until it
-//! answers"). Every pending Delete's, Stop's and long Replace's spinner turns from one handle the list holds, the way
-//! the pulse does ([`Spinner`]). A row's menu button and its anchor exist only while the row is drawn, so a
-//! menu whose row scrolls well out of view closes, and a question about a row out of view is asked centered.
+//! open session ([`rename::open_for_selected`]), and the Delete shortcut the header's Delete. A Replace that the
+//! source's host refuses for YOLO asks the launcher's question where it was asked ([`replace_yolo`]). What a row says
+//! about its operations beyond "in flight" (a refusal, a success's notice, how long a Replace has waited) is
+//! [`outcome`]'s. While any Delete is in flight, the selection rules hold back their automatic choice, so a list that
+//! loses its open session to that Delete opens the next one only once every Delete has settled; a Stop or a Replace
+//! holds nothing back, with one exception for the open session's own Replace ([`selection`], "A Replace keeps its own
+//! source open until it answers"). Every pending Delete's, Stop's and long Replace's spinner turns from one handle the
+//! list holds, the way the pulse does ([`Spinner`]). A row's menu button and its anchor exist only while the row is
+//! drawn, so a menu whose row scrolls well out of view closes, and a question about a row out of view is asked
+//! centered.
 //!
 //! The Rename editor the list owns is a dialog rather than part of a row, so a listing that changes under it never
 //! moves its field.
@@ -124,6 +126,7 @@ pub(crate) mod outcome;
 pub(crate) mod quick_switcher;
 pub(crate) mod rename;
 pub(crate) mod replace;
+pub(crate) mod replace_yolo;
 pub(crate) mod restart;
 mod row;
 pub(crate) mod row_marks;
@@ -521,6 +524,23 @@ impl SessionList {
             .is_some_and(|row| row.top() >= view.top() && row.bottom() <= view.bottom())
     }
 
+    /// Scroll the row of a plain Replace's YOLO question that took focus wholly into view, once per frame while
+    /// [`replace_yolo::take_reveal`] names one, and ask for the next frame: SPEC.md has that question "scrolled into
+    /// view", and its focus is lost if the row is not drawn in the next frame. Run before the rows are laid out, so the
+    /// frame that runs it draws the row already. The first frame judges the row by its height without the question;
+    /// the next measures it with the question and scrolls again if its foot is out of view.
+    fn reveal_yolo_question(&mut self, cx: &mut Context<Self>) {
+        let Some(key) = replace_yolo::take_reveal(cx) else {
+            return;
+        };
+        if let Some(ix) = self.entries.iter().position(|(listed, _)| *listed == key)
+            && !self.row_fully_in_view(ix)
+        {
+            self.rows.scroll_to_reveal_item(ix);
+        }
+        cx.notify();
+    }
+
     /// Scroll `key`'s row into view if it is listed and out of view: a press on a control of a row scrolled away
     /// (its menu button kept focus through a wheel scroll) acts on a row the user can see, and an overlay it opens has
     /// a drawn anchor to sit beside.
@@ -617,6 +637,7 @@ impl Render for SessionList {
         if self.sync_rows(keys, window, cx) {
             cx.notify();
         }
+        self.reveal_yolo_question(cx);
         let shared = self.current.current(cx).rows.clone();
         shared.borrow_mut().start_frame();
         let choice = self.current.current(cx).filters.clone();

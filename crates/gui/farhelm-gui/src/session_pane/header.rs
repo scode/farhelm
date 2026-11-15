@@ -24,11 +24,11 @@
 //!   ([`crate::components::Button::busy`]).
 //! - **The Delete shortcut** is this Delete (SPEC.md, "Desktop window chrome"): the main view hands it to
 //!   [`SessionPane::header_action`].
-//! - **Exclusion.** While the session has any request in flight, every action is unavailable, as the row's menu items
-//!   are; a pending Stop shows its spinner and "Stopping…" on the Stop button, and a pending Delete shows its progress
-//!   in place of the actions until it settles (they come back with a refusal). While a question an action asked is
-//!   open, its button reads as pressed and a click on it does nothing; a press anywhere else closes the question
-//!   unanswered.
+//! - **Exclusion.** While the session has any request in flight, or the YOLO question its Replace met is open, every
+//!   action is unavailable, as the row's menu items are (`session_list::menu::refused`); a pending Stop shows its
+//!   spinner and "Stopping…" on the Stop button, and a pending Delete shows its progress in place of the actions until
+//!   it settles (they come back with a refusal). While a question an action asked is open, its button reads as pressed
+//!   and a click on it does nothing; a press anywhere else closes the question unanswered.
 //! - **The open session by key.** Each action reads the session's row from the store by key, and the helm keeps the
 //!   open session there even while a filter or the list's cap leaves it out of the list (`session_list::filters`,
 //!   "The query names the open session"), so the actions work on a session the list does not show exactly as on a
@@ -37,6 +37,9 @@
 //! - **Focus.** Each question returns focus home (the terminal) on Escape and to where it was on any other close, which
 //!   is SPEC.md's "Escape cancels the header's Stop, Restart, Replace or Delete question and returns focus to the
 //!   terminal" ([`crate::prompt::Question::returns_home_on_escape`]).
+//! - **The YOLO question.** A Replace from the header that the source's host refuses for YOLO asks the launcher's
+//!   question below the top row, among the header's lines, rather than at the source's row
+//!   ([`crate::session_list::replace_yolo`]). It is drawn only while the source is the open session.
 //!
 //! The row is drawn by the pane on every frame, uncached, and reads everything it shows from the store, the operation
 //! store and the shared clocks while it draws; the only state it keeps is where each button was drawn and which
@@ -60,6 +63,7 @@ use crate::layers::{self, Anchor, LayerId, Subject};
 use crate::operations::Work;
 use crate::prompt::{self, Question};
 use crate::session;
+use crate::session_list::replace_yolo::{self, Surface};
 use crate::session_list::{delete, menu, outcome, replace, restart, stop};
 use crate::theme::{self, metrics};
 
@@ -271,7 +275,7 @@ impl SessionPane {
         let shown = Shown {
             row: &row_now,
             skipped,
-            busy: delete::busy(key, cx),
+            busy: menu::refused(key, cx),
             stopping: stop::in_flight(key, cx),
             step,
         };
@@ -316,8 +320,9 @@ impl SessionPane {
     }
 
     /// The lines between the top row and the terminal for `key`: a Restart's or Replace's wait once it has lasted two
-    /// seconds, then the session's refusal or notice, as the old header's progress and error lines were. The wait sits
-    /// below the row, never in it, so a long host name cannot push an action out of the 650-pixel floor.
+    /// seconds, then the session's refusal or notice, as the old header's progress and error lines were, then the YOLO
+    /// question a Replace from this header met ([`replace_yolo`]). The wait sits below the row, never in it, so a long
+    /// host name cannot push an action out of the 650-pixel floor; the question sits there for the same reason.
     pub(super) fn header_lines(&self, key: &str, step: u8, cx: &App) -> Vec<AnyElement> {
         let mut lines = Vec::new();
         let ink = theme::color(theme::palette(cx).fg_0);
@@ -335,6 +340,7 @@ impl SessionPane {
         if let Some(line) = outcome::pane_line(key, cx) {
             lines.push(line.into_any_element());
         }
+        lines.extend(replace_yolo::header_question(key, cx));
         lines
     }
 
@@ -391,7 +397,14 @@ impl SessionPane {
                 }
             }
             Action::Replace => {
-                if let Some(ask) = replace::begin(&key, row, skipped, cx) {
+                if let Some(ask) = replace::begin(
+                    &key,
+                    row,
+                    skipped,
+                    Surface::Header,
+                    window.window_handle(),
+                    cx,
+                ) {
                     self.ask(asking, ask, replace::confirm, window, cx);
                 }
             }
