@@ -15,9 +15,10 @@
 //!   ([`draft::Draft`], the old model), built from the inputs whenever it is needed: to tell whether anything changed,
 //!   whether an error still applies, and to save. Nothing mirrors keystrokes; an edit only redraws. The draft the
 //!   editor opened with is its baseline, and the form has unsaved changes exactly when the two differ.
-//! - **The credential choices ride along unchanged.** The GitHub token and each agent's endpoint, login and mode are
-//!   part of the draft but not drawn yet; until they are, every draft takes them from the baseline, so Edit then Save
-//!   sends a recipe's credential choices back exactly as it loaded them, never as None.
+//! - **The credential choices are chosen by name.** The GitHub token and each agent's mode, endpoint and login come
+//!   from the helm's credential catalog, read once as the editor opens ([`credentials`] has their rules). The editor
+//!   loads every one of them from the recipe it opens, so Edit then Save sends back exactly what it loaded, the
+//!   choices the user did not touch included.
 //! - **Save is the recipe's own work.** It checks a new name and the whole draft first, with the helm's shared rules,
 //!   and says why it sent nothing; otherwise it creates (`POST /api/tensorlake/recipes`) or updates (`PUT
 //!   /api/tensorlake/recipes/<name>`) through the operation store under [`OpKey::recipe`], the key the row's build uses,
@@ -35,10 +36,11 @@
 //!   Recipes shows an open editor, so switching sections hides them, and the Close row stays as it is. Add host's
 //!   Tensorlake sandbox can host the same editor and its answers when it is built.
 //!
-//! NOTE: Not ported yet (`docs/gpui/parity/settings-and-hosts.md`): the GitHub and Agents blocks with their credential
-//! pickers, Delete with its confirmation, and the question "Save these changes before leaving?" that Back, Cancel and
-//! closing Settings ask while the draft has unsaved changes. Until then Back and Cancel leave at once, dropping the
-//! draft, and closing Settings drops it too.
+//! NOTE: Not ported yet (`docs/gpui/parity/settings-and-hosts.md`): Delete with its confirmation, and the question
+//! "Save these changes before leaving?" that Back, Cancel and closing Settings ask while the draft has unsaved changes.
+//! Until then Back and Cancel leave at once, dropping the draft, and closing Settings drops it too.
+
+mod credentials;
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::recipes::{CreateRecipe, RecipeSave, RecipeView, check_recipe_name};
@@ -61,6 +63,7 @@ use crate::session;
 use crate::settings::Refused;
 use crate::settings::choices::{self, FIELD_HEIGHT, LABEL_GAP};
 use crate::theme::{self, metrics};
+use credentials::{Agent, Choices};
 
 /// `.recipe-editor`: the gap between the editor's parts.
 const EDITOR_GAP: f32 = 8.;
@@ -178,7 +181,7 @@ impl Input {
     }
 
     /// A single-line field holding `text`, showing `placeholder` while empty: a tunnel row's, whose fields have no
-    /// label above them, as the old row's had none.
+    /// label above them, as the old row's had none, and an agent endpoint's base URL, with the old example URL.
     fn placeholder(
         text: &str,
         placeholder: &'static str,
@@ -229,8 +232,7 @@ pub(in crate::settings) struct Editor {
     parent: WeakEntity<Recipes>,
     /// The saved recipe's name, or `None` for a new recipe.
     saved: Option<String>,
-    /// The draft as the editor opened it: what "unsaved changes" is measured against, and, until the credential
-    /// pickers are drawn, where every draft's credential choices come from (the module docs).
+    /// The draft as the editor opened it: what "unsaved changes" is measured against.
     baseline: Draft,
     name: Input,
     cpus: Input,
@@ -245,6 +247,8 @@ pub(in crate::settings) struct Editor {
     tunnels: Vec<TunnelRow>,
     /// The key the next added tunnel row takes.
     next_tunnel: u64,
+    /// The GitHub token and each agent's choices, and the credential catalog they are chosen from.
+    choices: Choices,
     /// Why the last Save sent nothing or was refused, with the draft as it stood then; shown while the draft is still
     /// that ([`Editor::error`]).
     error: Option<(HostText, Draft)>,
@@ -276,9 +280,10 @@ impl Editor {
             .zip(0..)
             .map(|(tunnel, key)| TunnelRow::new(key, tunnel, window, cx))
             .collect();
-        Editor {
+        let mut editor = Editor {
             parent,
             saved: existing.map(|view| view.name.clone()),
+            choices: Choices::new(&baseline, window, cx),
             cpus: Input::line(&baseline.cpus, window, cx),
             memory_gb: Input::line(&baseline.memory_gb, window, cx),
             disk_gb: Input::line(&baseline.disk_gb, window, cx),
@@ -301,7 +306,9 @@ impl Editor {
             saving: false,
             refused: Refused::default(),
             back: cx.focus_handle().tab_stop(true),
-        }
+        };
+        editor.read_credentials(cx);
+        editor
     }
 
     /// Where focus starts when the editor opens: Back, at the editor's top, so moving focus there brings the top into
@@ -312,9 +319,13 @@ impl Editor {
         self.back.clone()
     }
 
-    /// The draft the form holds now: every field's text, the chosen base and the tunnel rows, with the parts not drawn
-    /// yet (the credential choices) as the editor opened them (the module docs).
+    /// The draft the form holds now: every field's text, the chosen base, the tunnel rows and the credential choices.
+    ///
+    /// Every field is listed here, with no struct update from the baseline, so a field added to [`Draft`] fails to
+    /// compile until the form reads it, rather than quietly coming back as it was loaded.
     pub(in crate::settings) fn draft(&self, cx: &App) -> Draft {
+        let claude = self.choices.drafted(Agent::Claude, cx);
+        let codex = self.choices.drafted(Agent::Codex, cx);
         Draft {
             name: self.name.text(cx),
             cpus: self.cpus.text(cx),
@@ -326,8 +337,14 @@ impl Editor {
             snapshot_id: self.snapshot_id.text(cx),
             container_reference: self.container_reference.text(cx),
             container_user: self.container_user.text(cx),
+            claude: claude.endpoint,
+            codex: codex.endpoint,
+            claude_mode: claude.mode,
+            claude_login_credential: claude.login,
+            codex_mode: codex.mode,
+            codex_login_credential: codex.login,
+            github_token_credential: self.choices.github(),
             tunnels: self.tunnels.iter().map(|row| row.draft(cx)).collect(),
-            ..self.baseline.clone()
         }
     }
 
@@ -345,6 +362,8 @@ impl Editor {
             "recipe-container-reference" => &self.container_reference,
             "recipe-container-user" => &self.container_user,
             "recipe-packages" => &self.packages,
+            "recipe-claude-url" => self.choices.url(Agent::Claude),
+            "recipe-codex-url" => self.choices.url(Agent::Codex),
             _ => return None,
         };
         Some(&input.state)
@@ -382,6 +401,7 @@ impl Editor {
                 .iter()
                 .flat_map(|row| [&row.sandbox_port, &row.host, &row.port]),
         )
+        .chain(self.choices.inputs())
     }
 
     /// Mark the save out or settled: every field read-only while it is out, as the old editor's `readonly: locked`,
@@ -972,6 +992,7 @@ impl Render for Editor {
                  a tunnel.",
                 cx,
             ))
+            .children(self.credential_blocks(cx))
             .children(self.saved.is_some().then(|| {
                 choices::help(
                     "Size applies to Tensorlake sandboxes created after you save. Base and package changes take effect \

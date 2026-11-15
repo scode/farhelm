@@ -31,7 +31,10 @@ use crate::test_support::{bounds, click, focused_id, keys, settle};
 
 /// The gear's rail over a helm whose first snapshot pushes `recipes` as the catalog and no places, with Settings open
 /// at Recipes and its one read, the account's, answered with a saved API key.
-fn show(cx: &mut TestAppContext, recipes: Vec<Value>) -> (FakeHelm, &mut VisualTestContext) {
+pub(super) fn show(
+    cx: &mut TestAppContext,
+    recipes: Vec<Value>,
+) -> (FakeHelm, &mut VisualTestContext) {
     let (mut helm, cx, _gear) = open_rail_with(
         cx,
         &Preferences::default(),
@@ -44,14 +47,38 @@ fn show(cx: &mut TestAppContext, recipes: Vec<Value>) -> (FakeHelm, &mut VisualT
 }
 
 /// The one command sent since the last call.
-fn one_command(helm: &mut FakeHelm) -> FakeCommand {
+pub(super) fn one_command(helm: &mut FakeHelm) -> FakeCommand {
     let mut sent = sent(helm);
     assert_eq!(sent.len(), 1, "one command was sent: {sent:?}");
     sent.remove(0)
 }
 
+/// Press `id` (New recipe or a row's Edit) and answer the one read the editor sends as it opens, the credential
+/// catalog's (`GET /api/credentials`), with nothing saved.
+fn open_editor(helm: &mut FakeHelm, cx: &mut VisualTestContext, id: &'static str) {
+    open_editor_with(helm, cx, id, json!([]));
+}
+
+/// [`open_editor`], with `catalog` as the credential catalog's answer.
+pub(super) fn open_editor_with(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    id: &'static str,
+    catalog: Value,
+) {
+    click(cx, id);
+    let read = one_command(helm);
+    assert_eq!(
+        (read.method, read.path.as_str()),
+        (Method::Get, "/api/credentials"),
+        "the editor reads the credential catalog as it opens"
+    );
+    helm.reply(read.id, 200, Some(catalog));
+    settle(cx);
+}
+
 /// The open recipe editor.
-fn editor(cx: &mut VisualTestContext) -> Entity<Editor> {
+pub(super) fn editor(cx: &mut VisualTestContext) -> Entity<Editor> {
     cx.update(|_, cx| {
         let dialog = cx.global::<Opened>().0.upgrade().expect("Settings is open");
         let recipes = dialog.read(cx).recipes.clone().expect("Recipes was shown");
@@ -60,7 +87,7 @@ fn editor(cx: &mut VisualTestContext) -> Entity<Editor> {
 }
 
 /// The open editor's draft, as Save would read it.
-fn draft(cx: &mut VisualTestContext) -> Draft {
+pub(super) fn draft(cx: &mut VisualTestContext) -> Draft {
     let editor = editor(cx);
     cx.update(|_, cx| editor.read(cx).draft(cx))
 }
@@ -69,7 +96,7 @@ fn draft(cx: &mut VisualTestContext) -> Draft {
 /// focus, which scrolls it into the dialog's view, select what it holds, and type. The form is taller than the dialog's
 /// body, so a click cannot reach its lower fields, and GPUI Kit's fields carry no element id of their own for
 /// [`reach`] to find, so the editor's field is asked whether it holds focus.
-fn type_into(cx: &mut VisualTestContext, id: &str, text: &str) {
+pub(super) fn type_into(cx: &mut VisualTestContext, id: &str, text: &str) {
     let editor = editor(cx);
     for _ in 0..40 {
         let focused = cx.update(|window, cx| {
@@ -91,7 +118,7 @@ fn type_into(cx: &mut VisualTestContext, id: &str, text: &str) {
 
 /// Choose the Software card `id` the way a keyboard user does: Tab to it and Space. The second row of cards can lie
 /// below the dialog's view.
-fn choose(cx: &mut VisualTestContext, id: &str) {
+pub(super) fn choose(cx: &mut VisualTestContext, id: &str) {
     reach(cx, id);
     keys(cx, "space");
 }
@@ -115,9 +142,9 @@ fn recipe_key(cx: &mut VisualTestContext, name: &str) -> (Option<Work>, Option<S
 }
 
 /// A saved recipe as the catalog lists it, with a Claude Code endpoint naming a token, a Codex subscription login, a
-/// GitHub token and one tunnel: every credential choice the editor does not draw yet, so a save shows whether it kept
-/// them.
-fn with_credentials(name: &str) -> Value {
+/// GitHub token and one tunnel: a credential choice in every place the draft holds one, so a save shows whether the
+/// editor loaded and kept each of them.
+pub(super) fn with_credentials(name: &str) -> Value {
     json!({
         "name": name,
         "size": { "cpus": 2, "memory_gb": 4, "disk_gb": 20 },
@@ -148,9 +175,9 @@ fn one_recipe() -> Vec<Value> {
 /// visible at the bottom of the scrolling panel, above the unchanged Close footer". The answers are pinned in the
 /// dialog's footer region, not in the scrolling body, or a long form would push Save out of view. Specified: the list
 /// offers New recipe and an Edit per row; New recipe replaces the list with the editor titled "New recipe", focus on
-/// Back; Cancel and Save are drawn inside the dialog's pinned notices, with the Close row still drawn; Back with a typed
-/// name sends nothing (no save, and no read: the catalog is pushed), closes the editor, shows the list and puts focus on
-/// New recipe.
+/// Back; opening sends the credential catalog's read and nothing else; Cancel and Save are drawn inside the dialog's
+/// pinned notices, with the Close row still drawn; Back with a typed name sends nothing (no save, and no read of the
+/// recipes: they are pushed), closes the editor, shows the list and puts focus on New recipe.
 #[gpui::test]
 fn new_recipe_opens_the_editor_in_place_and_back_returns_to_the_list(cx: &mut TestAppContext) {
     let (mut helm, cx) = show(cx, one_recipe());
@@ -160,7 +187,7 @@ fn new_recipe_opens_the_editor_in_place_and_back_returns_to_the_list(cx: &mut Te
         Some("Edit rust-dev")
     );
 
-    click(cx, "recipe-new");
+    open_editor(&mut helm, cx, "recipe-new");
     assert!(drawn(cx, "recipe-editor"));
     assert!(!drawn(cx, "recipes-list"), "the editor replaces the list");
     assert_eq!(
@@ -178,7 +205,11 @@ fn new_recipe_opens_the_editor_in_place_and_back_returns_to_the_list(cx: &mut Te
         "Cancel and Save are pinned in the dialog's notices: {notices:?} {save:?} {cancel:?}"
     );
     assert!(drawn(cx, "settings-footer-close"), "the Close row stays");
-    assert_eq!(sent(&mut helm), [], "opening sends nothing");
+    assert_eq!(
+        sent(&mut helm),
+        [],
+        "opening sends nothing beyond the credentials read"
+    );
 
     fill(cx, "recipe-name", "scratch");
     click(cx, "recipe-back");
@@ -199,7 +230,7 @@ fn new_recipe_opens_the_editor_in_place_and_back_returns_to_the_list(cx: &mut Te
 #[gpui::test]
 fn a_new_recipe_is_created_under_its_key_and_its_pushed_row_shows(cx: &mut TestAppContext) {
     let (mut helm, cx) = show(cx, Vec::new());
-    click(cx, "recipe-new");
+    open_editor(&mut helm, cx, "recipe-new");
     fill(cx, "recipe-name", "rust-dev");
     click(cx, "recipe-save");
     let save = one_command(&mut helm);
@@ -243,14 +274,18 @@ fn a_new_recipe_is_created_under_its_key_and_its_pushed_row_shows(cx: &mut TestA
 
 /// The old editor's `readonly: locked`: while the save is out, nothing may change the draft being sent. An edit then
 /// would also hide the helm's refusal the moment it arrived, since a refusal shows only while the draft is still the
-/// one it answered. Specified: with a new recipe's save out, typing into CPUs leaves the draft's CPUs at 2, and every
-/// Software card and Add tunnel are unavailable; after the helm refuses the save, CPUs takes an edit again and the cards
+/// one it answered. Specified: with a new recipe's save out (Claude on API endpoint with a base URL), typing into CPUs
+/// and into Claude's base URL leaves the draft's values as sent, and every Software card, Add tunnel, the GitHub picker
+/// and Claude's mode choice are unavailable; after the helm refuses the save, CPUs takes an edit again and the cards
 /// are available.
 #[gpui::test]
 fn while_a_save_is_out_the_form_takes_no_edit(cx: &mut TestAppContext) {
     let (mut helm, cx) = show(cx, Vec::new());
-    click(cx, "recipe-new");
+    open_editor(&mut helm, cx, "recipe-new");
     fill(cx, "recipe-name", "rust-dev");
+    reach(cx, "recipe-claude-mode-None");
+    keys(cx, "right");
+    type_into(cx, "recipe-claude-url", "http://127.0.0.1:8080");
     click(cx, "recipe-save");
     let save = one_command(&mut helm);
     assert_eq!(
@@ -261,12 +296,20 @@ fn while_a_save_is_out_the_form_takes_no_edit(cx: &mut TestAppContext) {
 
     fill(cx, "recipe-cpus", "3");
     assert_eq!(draft(cx).cpus, "2", "CPUs takes no edit");
+    type_into(cx, "recipe-claude-url", "http://127.0.0.1:9");
+    assert_eq!(
+        draft(cx).claude.base_url,
+        "http://127.0.0.1:8080",
+        "the base URL takes no edit"
+    );
     for card in [
         "recipe-base-Managed Ubuntu",
         "recipe-base-Your image",
         "recipe-base-Your snapshot",
         "recipe-base-Container image",
         "recipe-add-tunnel",
+        "recipe-github",
+        "recipe-claude-mode-None",
     ] {
         assert_eq!(available(cx, card), Some(false), "{card} is unavailable");
     }
@@ -324,15 +367,16 @@ fn the_editor_opens_at_its_top_from_a_scrolled_list(cx: &mut TestAppContext) {
 
 // ---- Saving a recipe that exists -----------------------------------------------------------------------------------
 
-/// The editor does not draw the credential pickers yet, but Save writes the whole recipe: a draft that dropped the
-/// choices it cannot show would silently stop authenticating a recipe's agents and GitHub on every Edit. Specified:
+/// Save writes the whole recipe, so a draft that dropped or blanked a choice the user never touched would silently
+/// stop authenticating a recipe's agents and GitHub on every Edit, and an empty catalog makes every one of those
+/// choices unavailable, which must not change what is sent either. Specified, with the catalog read answering empty:
 /// Edit on a recipe with a Claude endpoint naming a token, a Codex login, a GitHub token and a tunnel, a new disk size
 /// and Save send `PUT /api/tensorlake/recipes/<name>` with the new size and every other field as the catalog listed it,
 /// the credential names included.
 #[gpui::test]
 fn edit_then_save_sends_the_recipes_credential_choices_back_unchanged(cx: &mut TestAppContext) {
     let (mut helm, cx) = show(cx, vec![with_credentials("rust-dev")]);
-    click(cx, "recipe-edit-rust-dev");
+    open_editor(&mut helm, cx, "recipe-edit-rust-dev");
     assert_eq!(
         label_of(cx, "recipe-editor-title").as_deref(),
         Some("Recipe: rust-dev")
@@ -367,7 +411,7 @@ fn edit_then_save_sends_the_recipes_credential_choices_back_unchanged(cx: &mut T
 #[gpui::test]
 fn a_saved_recipes_name_is_fixed(cx: &mut TestAppContext) {
     let (mut helm, cx) = show(cx, one_recipe());
-    click(cx, "recipe-edit-rust-dev");
+    open_editor(&mut helm, cx, "recipe-edit-rust-dev");
     assert_eq!(draft(cx).name, "rust-dev");
     fill(cx, "recipe-name", "renamed");
     assert_eq!(draft(cx).name, "rust-dev", "Name takes no edit");
@@ -394,7 +438,7 @@ fn a_saved_recipes_name_is_fixed(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_refused_save_keeps_the_draft_and_leaves_no_refusal_under_the_row(cx: &mut TestAppContext) {
     let (mut helm, cx) = show(cx, one_recipe());
-    click(cx, "recipe-edit-rust-dev");
+    open_editor(&mut helm, cx, "recipe-edit-rust-dev");
     fill(cx, "recipe-disk", "30");
     click(cx, "recipe-save");
     let save = one_command(&mut helm);
@@ -428,7 +472,13 @@ fn a_save_while_the_recipes_build_is_out_says_why_and_sends_nothing(cx: &mut Tes
     click(cx, "recipe-build-rust-dev");
     let build = one_command(&mut helm);
     assert_eq!(build.path, "/api/tensorlake/recipes/rust-dev/build");
+    // The editor's credential read waits behind the build, since the helm answers in order; Save needs no answer to it.
     click(cx, "recipe-edit-rust-dev");
+    assert_eq!(
+        one_command(&mut helm).path,
+        "/api/credentials",
+        "the premise: the editor opened and read the catalog"
+    );
     click(cx, "recipe-save");
     assert_eq!(sent(&mut helm), [], "nothing more went out");
     assert_eq!(
@@ -448,7 +498,7 @@ fn a_save_while_the_recipes_build_is_out_says_why_and_sends_nothing(cx: &mut Tes
 #[gpui::test]
 fn a_bad_name_or_size_is_refused_locally_until_the_next_edit(cx: &mut TestAppContext) {
     let (mut helm, cx) = show(cx, Vec::new());
-    click(cx, "recipe-new");
+    open_editor(&mut helm, cx, "recipe-new");
     fill(cx, "recipe-name", "Bad Name");
     click(cx, "recipe-save");
     assert_eq!(sent(&mut helm), [], "a local refusal sends nothing");
@@ -485,7 +535,7 @@ fn a_bad_name_or_size_is_refused_locally_until_the_next_edit(cx: &mut TestAppCon
 #[gpui::test]
 fn each_base_card_shows_its_fields_and_keeps_every_bases_text(cx: &mut TestAppContext) {
     let (mut helm, cx) = show(cx, Vec::new());
-    click(cx, "recipe-new");
+    open_editor(&mut helm, cx, "recipe-new");
     assert_eq!(switch_on(cx, "recipe-base-Managed Ubuntu"), Some(true));
     assert!(!drawn(cx, "recipe-base-requirements"));
     assert!(!drawn(cx, "recipe-image"));
@@ -529,7 +579,7 @@ fn each_base_card_shows_its_fields_and_keeps_every_bases_text(cx: &mut TestAppCo
 #[gpui::test]
 fn tunnel_rows_are_added_and_removed_by_row(cx: &mut TestAppContext) {
     let (mut helm, cx) = show(cx, vec![with_credentials("rust-dev")]);
-    click(cx, "recipe-edit-rust-dev");
+    open_editor(&mut helm, cx, "recipe-edit-rust-dev");
     assert_eq!(label_of(cx, "recipe-tunnel-0").as_deref(), Some("Tunnel 1"));
     reach(cx, "recipe-add-tunnel");
     keys(cx, "space");
@@ -562,7 +612,7 @@ fn tunnel_rows_are_added_and_removed_by_row(cx: &mut TestAppContext) {
 #[gpui::test]
 fn switching_sections_hides_the_answers_and_keeps_the_open_editor(cx: &mut TestAppContext) {
     let (mut helm, cx) = show(cx, Vec::new());
-    click(cx, "recipe-new");
+    open_editor(&mut helm, cx, "recipe-new");
     fill(cx, "recipe-name", "keep-me");
     assert!(drawn(cx, "recipe-save"));
 

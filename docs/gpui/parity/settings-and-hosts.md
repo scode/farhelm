@@ -217,8 +217,11 @@ in `crates/gui/farhelm-gui/src/settings/credential_tests.rs` unless named otherw
   answers, `the_tensorlake_key_waits_for_the_account_read`, and `each_control_sends_only_its_own_field` and
   `the_test_message_counts_sandboxes` (`settings/tensorlake_key.rs`). Its Tensorlake half waits for Settings →
   Tensorlake, which draws the second form over the same account.
-- "recipe references refresh deletion guards and preserve unavailable picker choices": waits for Recipes and the recipe
-  editor; an open editor's refresh by a fresh read is `an_open_editor_follows_a_fresh_read_and_keeps_its_secret`.
+- "recipe references refresh deletion guards and preserve unavailable picker choices": partly. An open editor's refresh
+  by a fresh read is `an_open_editor_follows_a_fresh_read_and_keeps_its_secret`; the recipe editor's pickers offering
+  only their kind, `each_picker_offers_its_kind_and_save_sends_the_names_chosen`, and keeping a missing choice visible
+  as unavailable until None is chosen, `a_missing_choice_stays_visible_until_another_is_chosen`. Not ported: the recipe
+  editor's pickers following a credential added or deleted while it stays open (see "Recipes" under Deviations).
 - "saved credentials report delivery failures without retaining the secret draft":
   `a_replacement_sends_only_the_secret_and_shows_the_hosts_it_did_not_reach`.
 - "connected credential warnings remain readable in ${palette}": a Tensorlake host's row and rail mark; waits for the
@@ -725,9 +728,9 @@ unavailable while a save runs.
 Settings → Recipes lists the shared catalog with each recipe's summary, its per-place container lines with a Rebuild per
 place, its built-snapshot status and its prepared-snapshot line, and builds snapshots. New recipe and each row's Edit
 open the recipe editor in place of the list, with Name, Size, the Software cards and each base's fields, Ubuntu packages
-and Tunnels, and Save; the editor's credential pickers, Delete and the question before leaving with unsaved changes come
-in later changes. Replacing tests, in `crates/gui/farhelm-gui/src/settings/recipe_tests.rs`,
-`crates/gui/farhelm-gui/src/settings/recipe_place_tests.rs`,
+and Tunnels, and Save; the editor's GitHub and Agents blocks with their credential pickers; Delete and the question
+before leaving with unsaved changes come in later changes. Replacing tests, in
+`crates/gui/farhelm-gui/src/settings/recipe_tests.rs`, `crates/gui/farhelm-gui/src/settings/recipe_place_tests.rs`,
 `crates/gui/farhelm-gui/src/settings/recipe_editor_tests.rs` and, for the editor's draft without a window,
 `crates/gui/farhelm-gui/src/settings/recipes/draft_tests.rs`:
 
@@ -776,17 +779,17 @@ in later changes. Replacing tests, in `crates/gui/farhelm-gui/src/settings/recip
   and keeps the editor, `switching_sections_hides_the_answers_and_keeps_the_open_editor`; the invalid name's and the
   helm's refusals beside the pinned answers, `a_bad_name_or_size_is_refused_locally_until_the_next_edit` and
   `a_refused_save_keeps_the_draft_and_leaves_no_refusal_under_the_row`; the editor opening at its top, Back included,
-  from a scrolled list, `the_editor_opens_at_its_top_from_a_scrolled_list`; the form locked while a save is out,
-  `while_a_save_is_out_the_form_takes_no_edit`. The look, in both palettes: the golden `settings-recipe-editor` (see
-  "Recipes" under Deviations for the answers' band). Not ported: the leave and delete questions in the answers' place,
-  which come with Delete and the question before leaving.
+  from a scrolled list, `the_editor_opens_at_its_top_from_a_scrolled_list`; the form locked while a save is out, the
+  credential choices included, `while_a_save_is_out_the_form_takes_no_edit`. The look, in both palettes: the golden
+  `settings-recipe-editor` (see "Recipes" under Deviations for the answers' band). Not ported: the leave and delete
+  questions in the answers' place, which come with Delete and the question before leaving.
 - "a managed recipe is created, edited and deleted without exposing its token": partly. Creation under the recipe's key
   with its row from the pushed catalog, `a_new_recipe_is_created_under_its_key_and_its_pushed_row_shows`; Edit with the
   name fixed, `a_saved_recipes_name_is_fixed`; Edit then Save sending the recipe's endpoint, login and GitHub token
   names back unchanged, `edit_then_save_sends_the_recipes_credential_choices_back_unchanged` and, without a window,
   `an_unchanged_reopened_recipe_saves_back_unchanged` and
-  `named_endpoint_selection_survives_origin_changes_and_can_be_removed`. Not ported: choosing the GitHub token and the
-  Claude Code endpoint in the form, which wait for the credential pickers, and Delete.
+  `named_endpoint_selection_survives_origin_changes_and_can_be_removed`; choosing the GitHub token and the Claude Code
+  endpoint in the form, `each_picker_offers_its_kind_and_save_sends_the_names_chosen`. Not ported: Delete.
 - "the recipe editor refuses bad names, asks before leaving, and saves a custom base": partly. The local name refusal,
   `a_bad_name_or_size_is_refused_locally_until_the_next_edit`; the helm's refusal kept with the draft,
   `a_refused_save_keeps_the_draft_and_leaves_no_refusal_under_the_row`; the cards, each base's fields, the requirements
@@ -796,9 +799,15 @@ in later changes. Replacing tests, in `crates/gui/farhelm-gui/src/settings/recip
   `a_new_container_recipe_saves_edited_reference_and_user`; tunnel rows, `tunnel_rows_are_added_and_removed_by_row`; a
   save refused for the recipe's build in flight, `a_save_while_the_recipes_build_is_out_says_why_and_sends_nothing`. Not
   ported: the question before leaving.
-- "${agent} modes retain drafts and select only named ${agent} logins": partly. The draft's rules,
+- "${agent} modes retain drafts and select only named ${agent} logins": the draft's rules,
   `claude_modes_keep_drafts_and_submit_only_the_selected_credentials` and
-  `codex_modes_keep_drafts_and_submit_exclusive_selections`; the pickers that use them wait for the credential pickers.
+  `codex_modes_keep_drafts_and_submit_exclusive_selections`; the mode choice keeping each mode's fields, with a local
+  refusal for Subscription without a login, `switching_an_agents_mode_keeps_each_modes_draft`; each login picker
+  offering only its agent's logins, `switching_an_agents_mode_keeps_each_modes_draft` (Claude) and
+  `each_picker_offers_its_kind_and_save_sends_the_names_chosen` (Codex); the catalog read as the editor opens, with
+  Retry loading credentials, `the_catalog_is_read_as_the_editor_opens_and_retry_reads_it_again`. That a referenced login
+  cannot be deleted is the helm's, and the Credentials editor shows it
+  (`delete_is_unavailable_while_a_recipe_uses_the_credential`).
 - "closing Settings with an unsaved recipe asks first and finishes the close" and "a recipe opening preserves a newer
   field focus before header close": wait for the question before leaving.
 
@@ -980,6 +989,15 @@ Where the port does not match the old app, and why. Each stays until the work na
 - **Every Software card dims while a save is out.** The old cards were disabled buttons during a save, which changed
   only their cursor; here an unavailable card is drawn at half opacity, as an unavailable segment or chip of the shared
   choice control is (its plain radio look dims only the circle), so for the length of each save all four cards dim.
+- **The recipe editor's pickers show the credential catalog as it was when the editor opened.** The old editor re-read
+  the catalog on every change the helm announced. The catalog is not pushed, so this editor reads it once per opening
+  (this app's rule for what is not pushed; the migration's orchestrator kept that rule here on 2026-11-15 rather than
+  re-reading when Recipes shows again). The common case is the editor's own help sending the user to Settings →
+  Credentials: a credential added there while the editor stays open is not offered until the editor's next opening,
+  which means Back and Edit again. A credential deleted meanwhile shows as unavailable only at the next opening too; a
+  Save that names it is refused by the helm with its own words.
+- **The credential pickers show names in the interface font.** The old pickers were monospace (`font-mono`); the shared
+  select has no monospace look, so the names read as the rest of the form's choices do.
 - **Until the question before leaving lands, leaving drops unsaved changes.** Back, Cancel and closing Settings close
   the editor at once; their hover help says so ("without saving") rather than promising the old question.
 - **A refused save that lands after Settings closed shows under the recipe's row.** Settings closing drops the editor,
