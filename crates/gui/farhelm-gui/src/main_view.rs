@@ -307,9 +307,25 @@ fn inert(state: &ChannelState, cx: &App) -> AnyElement {
 /// (`approvals.rs` at `24bc0580`), not across the window.
 fn is_banner(notice: Notice) -> bool {
     match notice {
-        Notice::ConnectionLost | Notice::LaunchNotStarted => true,
+        Notice::ConnectionLost | Notice::LaunchNotStarted | Notice::LaunchMayStillStart => true,
         Notice::LateAnswer { .. } => false,
     }
+}
+
+/// A launch notice's banner: its words with Open launcher, which brings back the launcher waiting behind it
+/// (`launcher::launch::open_waiting`), hovering as `help` says.
+fn open_launcher_banner(notice: Notice, help: &'static str) -> Banner {
+    Banner::new(notice.text()).lead_action(
+        Button::new(
+            "notice-open-launcher",
+            "Open launcher",
+            HoverHelp::tooltip(help),
+            Role::Button,
+        )
+        .on_click(|_, window, cx| {
+            launcher::launch::open_waiting(window, cx);
+        }),
+    )
 }
 
 /// One posted notice as a banner across the top of the window, with the way to dismiss it.
@@ -326,16 +342,14 @@ pub(crate) fn banner(notice: Notice) -> AnyElement {
         Notice::ConnectionLost | Notice::LateAnswer { .. } => Banner::new(notice.text()),
         // SPEC.md, "Creation": a refused launch the user had moved on from is offered by a notice, "and the launcher
         // returns when the user opens that notice".
-        Notice::LaunchNotStarted => Banner::new(notice.text()).lead_action(
-            Button::new(
-                "notice-open-launcher",
-                "Open launcher",
-                HoverHelp::tooltip("Open launcher: show the refused launch with its settings and why it did not start"),
-                Role::Button,
-            )
-            .on_click(|_, window, cx| {
-                launcher::launch::open_waiting(window, cx);
-            }),
+        Notice::LaunchNotStarted => open_launcher_banner(
+            notice,
+            "Open launcher: show the refused launch with its settings and why it did not start",
+        ),
+        // A launch that may still start is offered the same way (its launcher holds the helm's timeout reply).
+        Notice::LaunchMayStillStart => open_launcher_banner(
+            notice,
+            "Open launcher: show the launch with its settings and the helm's reply",
         ),
     };
     banner

@@ -59,7 +59,6 @@ use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::identity::{display_name, phase};
 use crate::layers::{self, Dialog, DialogPlacement, LayerId, MainAction};
-use crate::operations::OpKey;
 use crate::permission::words::{effort_label, permission_display};
 use crate::store::HelmStore;
 use crate::theme::{self, metrics};
@@ -180,10 +179,11 @@ pub(crate) struct Launcher {
     notice: Option<String>,
     /// Whether the main action was pressed since the draft last changed, which shows its reason beside it.
     pressed: bool,
-    /// The key of this launcher's last launch, once the helm refused it: the operation store keeps the refusal's words
-    /// under it, and they are shown beside the main action until the draft changes or Launch is pressed again
-    /// (`launch`). Read from the store when drawing, never copied here.
-    refused: Option<OpKey>,
+    /// This launcher's last launch, once the helm refused it: its key, under which the operation store keeps the
+    /// refusal's words (read from the store when drawing, never copied here), and whether the reply says the create may
+    /// still happen, which the store does not keep. Shown beside the main action until the draft changes or Launch is
+    /// pressed again (`launch`).
+    refused: Option<launch::RefusedLaunch>,
     /// Whether the keystroke being handled is a held Enter, which never launches. See where it is made, in `new`.
     pub(super) held_enter: Rc<Cell<bool>>,
     pub(super) folder: TextInputState,
@@ -401,17 +401,17 @@ impl Launcher {
         cx.notify();
     }
 
-    /// The helm refused this launcher's launch, sent under `key`: show the refusal the operation store keeps under it
+    /// The helm refused this launcher's launch (`refused`): show the refusal the operation store keeps under its key
     /// beside the main action when the launcher is next drawn.
-    pub(super) fn refused(&mut self, key: OpKey, cx: &mut Context<Self>) {
+    pub(super) fn refused(&mut self, refused: launch::RefusedLaunch, cx: &mut Context<Self>) {
         self.pressed = false;
-        self.refused = Some(key);
+        self.refused = Some(refused);
         cx.notify();
     }
 
     /// The helm's words refusing this launcher's last launch, as the operation store keeps them, while they are shown.
     fn refusal_words(&self, cx: &App) -> Option<HostText> {
-        let key = self.refused.as_ref()?;
+        let key = &self.refused.as_ref()?.key;
         let operations = session::current_operations(cx)?;
         operations
             .read(cx)
@@ -1356,6 +1356,15 @@ impl Render for Launcher {
         let alert = match (&refusal, &self.refusal_words(cx)) {
             (Some(reason), _) if self.pressed => {
                 Some(HostSentence::new("launcher-refusal-words").text(format!("{lead} {reason}")))
+            }
+            // The helm's timeout reply is not a refusal: the create may still happen, and its words say so.
+            (_, Some(words))
+                if self
+                    .refused
+                    .as_ref()
+                    .is_some_and(|refused| refused.may_still_start) =>
+            {
+                Some(HostSentence::new("launcher-refusal-words").host(words))
             }
             (_, Some(words)) => Some(
                 HostSentence::new("launcher-refusal-words")

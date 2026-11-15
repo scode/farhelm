@@ -18,6 +18,11 @@
 //! - **A refusal** brings the same launcher back with its draft and the helm's words beside Launch, "Not launched."
 //!   first, if the user has not moved on; otherwise a notice offers it ([`Notice::LaunchNotStarted`]) and the launcher
 //!   waits in the slot until the user opens that notice.
+//! - **The host's timeout** (the helm's bounded create answering 504 without saying the create never reached the host)
+//!   is handled as a refusal, except that it is shown without "Not launched." and offered by its own notice, since the
+//!   create may still happen. Once that reply has come, the window no longer counts the launch as in flight, so New, another
+//!   launch and host changes go ahead while the helm may still be creating; a duplicate session is then possible, an
+//!   accepted risk like the one around a lost connection (SPEC.md, "Creation").
 //!
 //! The slot's "waiting for the reply" is the hidden launcher's own lifetime, not a copy of the operation store's busy
 //! state: the store still says whether the create is in flight, and the launcher reads the refusal it shows from the
@@ -25,9 +30,7 @@
 //! brings it back.
 //!
 //! NOTE: Not built yet, each with the piece that brings it: the pending pill and the "Started" pill that report a
-//! launch while the launcher is hidden; the YOLO question a refusal can carry; and showing the host's timeout reply without "Not
-//! launched.", since the create may still happen. The last two wait on the operation store telling such replies apart
-//! from other refusals.
+//! launch while the launcher is hidden, and the YOLO question a refusal can carry (`HelmMarker::YoloConfirmation`).
 
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::SessionInfo;
@@ -37,7 +40,7 @@ use gpui::{AnyWindowHandle, App, AppContext as _, Entity, Global, Window};
 use super::view::{Launcher, show};
 use crate::focus::Mark;
 use crate::notices::{self, Notice};
-use crate::operations::{Command, OpKey, Outcome, Settled, Work};
+use crate::operations::{Command, HelmMarker, OpKey, Outcome, Settled, Work};
 use crate::session::{self, ObservingCurrent, PerSession};
 use crate::session_list::selection;
 
@@ -78,7 +81,7 @@ fn slot(cx: &mut App) -> Entity<LaunchSlot> {
         held: PerSession::default(),
         _following: session::observe_current(cx, |slot: &mut LaunchSlot, cx| {
             if slot.held.current(cx).is_none() {
-                notices::withdraw(Notice::LaunchNotStarted, cx);
+                withdraw_notices(cx);
             }
         }),
     });
@@ -243,7 +246,25 @@ fn settle(
         // A create is never accepted as long work, so this cannot arrive. If it did, nothing failed, and the pushed
         // list shows what the helm made of it.
         Outcome::Accepted(_) => hold(None, cx),
-        Outcome::Refused(_) => refused(launcher, key, window, mark, settled.user_moved_on, cx),
+        Outcome::Refused(refusal) => {
+            // The bounded create's timeout: the host did not answer within the helm's bound, and the create goes on
+            // behind the reply, so it may still happen. A create that provably never reached the host says so with
+            // its marker, and is refused like any other.
+            let may_still_start =
+                refusal.status == 504 && !refusal.has(HelmMarker::CreateUnaccepted);
+            let refused_launch = RefusedLaunch {
+                key,
+                may_still_start,
+            };
+            refused(
+                launcher,
+                refused_launch,
+                window,
+                mark,
+                settled.user_moved_on,
+                cx,
+            );
+        }
     }
 }
 
@@ -263,17 +284,19 @@ fn opened(body: Option<serde_json::Value>, user_moved_on: bool, cx: &mut App) {
     selection::choose(&session.id, cx);
 }
 
-/// A create sent under `key` was refused; the operation store keeps the helm's words under that key. Bring `launcher`
-/// back showing them if the user has not moved on; otherwise keep it, and post the notice that offers it.
+/// A create was refused ([`RefusedLaunch`]); the operation store keeps the helm's words under its key. Bring `launcher`
+/// back showing them if the user has not moved on; otherwise keep it, and post the notice that offers it, the one
+/// that does not say "Not launched." when the create may still happen.
 fn refused(
     launcher: Entity<Launcher>,
-    key: OpKey,
+    refused_launch: RefusedLaunch,
     window: AnyWindowHandle,
     mark: Mark,
     user_moved_on: bool,
     cx: &mut App,
 ) {
-    launcher.update(cx, |launcher, cx| launcher.refused(key, cx));
+    let may_still_start = refused_launch.may_still_start;
+    launcher.update(cx, |launcher, cx| launcher.refused(refused_launch, cx));
     let shown = !user_moved_on
         && cx
             .update_window(window, |_, window, cx| {
@@ -290,8 +313,31 @@ fn refused(
             }),
             cx,
         );
-        notices::post(Notice::LaunchNotStarted, cx);
+        let notice = if may_still_start {
+            Notice::LaunchMayStillStart
+        } else {
+            Notice::LaunchNotStarted
+        };
+        notices::post(notice, cx);
     }
+}
+
+/// A refused launch as the launcher shows it: the key the operation store keeps the helm's words under, and whether the
+/// reply was the helm's timeout, which says the create may still happen (SPEC_impl.md, "The UI channel": a bounded
+/// command answers "the host timed out" while the work carries on). The launcher drops the "Not launched." lead for
+/// that one: saying the launch failed would invite launching the same draft again while the first create may still
+/// start a session.
+#[derive(Clone, Debug)]
+pub(super) struct RefusedLaunch {
+    pub(super) key: OpKey,
+    pub(super) may_still_start: bool,
+}
+
+/// Withdraw both notices that offer a waiting launcher; at most one is up, and either has nothing left to open once it
+/// comes back or goes.
+fn withdraw_notices(cx: &mut App) {
+    notices::withdraw(Notice::LaunchNotStarted, cx);
+    notices::withdraw(Notice::LaunchMayStillStart, cx);
 }
 
 /// Bring back the launcher a refusal left waiting for the user, in `window`, and withdraw the notice offering it.
@@ -299,7 +345,7 @@ fn refused(
 /// notice goes either way, since it has nothing else to open. Without a UI session nothing can show, and the launcher
 /// goes too, as a reset drops it.
 pub(crate) fn open_waiting(window: &mut Window, cx: &mut App) -> bool {
-    notices::withdraw(Notice::LaunchNotStarted, cx);
+    withdraw_notices(cx);
     let Some(slot) = cx.try_global::<Slot>().map(|slot| slot.0.clone()) else {
         return false;
     };

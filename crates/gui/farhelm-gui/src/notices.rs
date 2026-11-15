@@ -30,6 +30,10 @@ pub enum Notice {
     /// list, as the old app drew it, never as a banner; it stays until the user dismisses it, and a later late answer
     /// replaces it.
     LateAnswer { always: bool },
+    /// A launch the user had moved on from got the helm's timeout reply: the host did not answer in time, so the create
+    /// may still happen, and its launcher waits with the draft and the reply. Offered and withdrawn as
+    /// [`Notice::LaunchNotStarted`] is, without saying the launch did not start.
+    LaunchMayStillStart,
 }
 
 impl Notice {
@@ -51,6 +55,11 @@ impl Notice {
                 "Your answer arrived after its request had stopped waiting, so it did not take effect. The \
                  host's permission for this kind of request may still have been turned on; its settings show \
                  whether it was."
+                    .into()
+            }
+            Notice::LaunchMayStillStart => {
+                "A launch timed out, so the session may still start. Open the launcher to see the reply; it still holds \
+                 your settings."
                     .into()
             }
         }

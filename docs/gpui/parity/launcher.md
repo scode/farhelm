@@ -72,9 +72,13 @@ These specs' rows sit in another area's parity file; their launcher cases are th
 - New from an open session that the sidebar's filter or host choice leaves unlisted opens on the helm's own host in `~`,
   not on that session's host and folder: nothing in the app keeps an unlisted selected session's row yet. The old app
   kept it (its "New inherits a filtered selected destination" case).
-- The helm's timeout reply to a create ("the host did not answer within 20 seconds; the request is still being carried
-  out") shows as a refusal, "Not launched." first, until the operation store can tell it apart from one; the create may
-  still happen.
+- A create the host does not answer within the helm's 20-second bound comes back with the helm's reply ("the host did
+  not answer within 20 seconds; the request is still being carried out, and the session list will show its result") in
+  the refusal's place, without "Not launched.", and keeps its draft; moved on from, it has its own notice. The old app
+  waited for the reply without a deadline. Tests:
+  `launcher::launch_tests::a_timed_out_create_comes_back_without_not_launched`,
+  `launcher::launch_tests::a_create_the_host_never_accepted_is_not_launched`,
+  `launcher::launch_tests::a_timed_out_create_the_user_moved_on_from_has_its_own_notice`.
 - While one of the window's host-registry changes is in flight, Launch is refused with a reason ("Wait for the host
   change to finish") as its hover text and after "Not launched." on a press; the old app only disabled it. A new host's
   probe counts as such a change, which the old app's token left out, and a save of a registered host's settings (its
