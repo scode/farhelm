@@ -1489,3 +1489,91 @@ fn home_end_up_and_space_in_the_host_list(cx: &mut TestAppContext) {
     );
     assert!(!has_node(cx, "launcher-host-list"));
 }
+
+// ---- The Command tab's declared agent type -----------------------------------------------------------------------------
+
+/// The Command tab's agent type says which agent the command runs, so Farhelm can track and resume it (SPEC.md,
+/// "Command launch": the optional declared agent type); declaring one offers the `{farhelm_args}` hint and Resume, and
+/// None takes them away again. Why this matters: Resume is only meaningful for a declared agent, so without the choice
+/// a command launch could never be resumed, and Resume offered without it would promise something Farhelm cannot do.
+#[gpui::test]
+fn declaring_the_commands_agent_type_offers_resume(cx: &mut TestAppContext) {
+    let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    test_support::click(cx, "launcher-tabs-Command");
+    assert!(
+        drawn(cx, "launcher-command-agent-row"),
+        "the agent type is offered"
+    );
+    assert!(
+        !drawn(cx, "launcher-resume"),
+        "the premise: no Resume without an agent type"
+    );
+    test_support::click(cx, "launcher-command-agent");
+    test_support::click(cx, "launcher-command-agent-option-Codex");
+    assert_eq!(draft(cx).command.agent, Some(LaunchHarness::Codex));
+    assert!(
+        drawn(cx, "launcher-resume"),
+        "Resume is offered for a declared agent"
+    );
+    assert!(
+        painted(cx, "Put {farhelm_args}"),
+        "and the farhelm_args hint"
+    );
+    test_support::click(cx, "launcher-command-agent");
+    test_support::click(cx, "launcher-command-agent-option-none");
+    assert_eq!(draft(cx).command.agent, None);
+    assert!(!drawn(cx, "launcher-resume"), "and goes with None");
+}
+
+/// Enter on the closed agent type select or on the Resume checkbox presses Launch with the values shown, changing
+/// neither (the old spec "launcher value-control Enter keeps the shown choices"; SPEC.md, "Creation": Enter on the
+/// closed pickers and checkboxes "launches with the shown values"). Specified with no host chosen, so each press is
+/// refused and says so: Enter on the select after choosing Codex shows the refusal and keeps Codex; after an edit takes
+/// the refusal away, Enter on the focused Resume checkbox shows it again and leaves Resume as it was.
+#[gpui::test]
+fn enter_on_the_commands_agent_type_and_resume_presses_launch(cx: &mut TestAppContext) {
+    let (_helm, cx) = launcher_on(cx, LaunchDraft::new(None, "~".into(), None));
+    test_support::click(cx, "launcher-tabs-Command");
+    test_support::click(cx, "launcher-command-agent");
+    test_support::click(cx, "launcher-command-agent-option-Codex");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("launcher-command-agent"),
+        "the premise: the closed select holds focus"
+    );
+    assert_eq!(shown_refusal(cx), None, "the premise: nothing said yet");
+    keys(cx, "enter");
+    assert!(
+        shown_refusal(cx).is_some(),
+        "Enter on the select pressed Launch"
+    );
+    assert_eq!(
+        draft(cx).command.agent,
+        Some(LaunchHarness::Codex),
+        "and kept the shown agent"
+    );
+    // Two clicks leave Resume as it was but count as edits, which take the refusal away.
+    test_support::click(cx, "launcher-resume");
+    test_support::click(cx, "launcher-resume");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("launcher-resume"),
+        "the premise: Resume holds focus"
+    );
+    assert_eq!(
+        shown_refusal(cx),
+        None,
+        "the premise: the edits took the refusal away"
+    );
+    let resume = draft(cx).command.resume_on;
+    keys(cx, "enter");
+    assert!(
+        shown_refusal(cx).is_some(),
+        "Enter on Resume pressed Launch"
+    );
+    assert_eq!(
+        draft(cx).command.resume_on,
+        resume,
+        "and left Resume as it was"
+    );
+}

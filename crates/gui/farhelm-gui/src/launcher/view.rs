@@ -21,13 +21,12 @@
 //!   after a failed read. Hosts, sessions and the remembered permission are read from the store while drawing, and the
 //!   remembered wrapper prefixes when an agent type is chosen.
 //!
-//! NOTE: Not built yet, each with the piece that brings it: the host picker (its list on the non-focusing popover),
-//! with the host's phase in the footer; the Command tab's declared agent type; sending the launch (until then a press
-//! of a complete draft does nothing); the composer search; recent setups, Browse and the folder check, with its warning
-//! on the folder field; managed checkouts, with their folder and name placeholders; the escaped display of a prompt,
-//! wrapper prefix, Custom flags or seeded model holding invisible characters, with its Clear wrapper prefix; and
-//! keyboard scrolling of an overflowing notice (the old region took focus once it overflowed; today's refusals are one
-//! or two lines). The model field is `model_field`.
+//! NOTE: Not built yet, each with the piece that brings it: sending the launch (until then a press of a complete draft
+//! does nothing); Restart with's markers for changed settings; the composer search; recent setups, Browse and the folder
+//! check, with its warning on the folder field; managed checkouts, with their folder and name placeholders; the escaped
+//! display of a prompt, wrapper prefix, Custom flags, seeded model, command line or resume command holding invisible
+//! characters, with Clear wrapper prefix, Clear agent command and Clear resume command; and keyboard scrolling of an overflowing notice (the old region took focus once it overflowed;
+//! today's refusals are one or two lines). The model field is `model_field`, the host picker `host_picker`.
 
 use std::rc::Rc;
 
@@ -48,8 +47,8 @@ use super::request::{Target, capitalized};
 use super::words::{agent_note, effort_label, permission_display};
 use crate::assets::Icon;
 use crate::components::{
-    self, Button, Checkbox, DialogFrame, HoverHelp, RadioGroup, RadioOption, Role, TabOption,
-    TabStrip, TextInput, TextInputEvent, TextInputState, Tier,
+    self, Button, Checkbox, DialogFrame, HoverHelp, RadioGroup, RadioOption, Role, Select,
+    SelectOption, TabOption, TabStrip, TextInput, TextInputEvent, TextInputState, Tier,
 };
 use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
@@ -74,6 +73,9 @@ const LABEL_GAP: f32 = 12.;
 const SECTION_GAP: f32 = 20.;
 /// `.create-session-form .dialog-tile .action-icon`: the header tile's glyph size.
 const TILE_ICON: f32 = 22.;
+/// The Command tab's agent type select's value for no declared agent; every other value is an agent's label, which are
+/// unique.
+const NO_AGENT: &str = "none";
 /// The initial prompt starts three rows high, as the old `<textarea rows=3>`.
 const PROMPT_ROWS: usize = 3;
 
@@ -1034,6 +1036,57 @@ impl Launcher {
             )
             .into_any_element(),
         );
+        // The declared agent type (old `.launch-command-agent`): which agent the command runs, if any, so Farhelm can
+        // track and resume it. Restart with holds it, so there it is not drawn; the footer still names it.
+        if !self.draft.holds(Field::AgentType) {
+            let (on_agent, on_agent_enter) = (weak.clone(), weak.clone());
+            let options = std::iter::once(SelectOption::new(
+                NO_AGENT,
+                "None",
+                HoverHelp::tooltip(
+                    "None: declare no agent type; Farhelm does not track or resume the command's agent",
+                ),
+            ))
+            .chain(LaunchHarness::ALL.iter().map(|harness| {
+                let label = harness_label(*harness);
+                SelectOption::new(
+                    label,
+                    label,
+                    HoverHelp::tooltip(format!("{label}: the command runs {label}")),
+                )
+            }));
+            fields.push(
+                row(
+                    "launcher-command-agent-row",
+                    "Agent type",
+                    Select::new(
+                        "launcher-command-agent",
+                        "Agent type",
+                        HoverHelp::tooltip(
+                            "The agent this command runs, if any, so Farhelm can track and resume it",
+                        ),
+                        Role::ComboBox,
+                    )
+                    .options(options)
+                    .chosen(self.draft.command.agent.map_or(NO_AGENT, harness_label))
+                    .on_choose(move |value, _, cx| {
+                        let agent = LaunchHarness::ALL
+                            .iter()
+                            .copied()
+                            .find(|harness| harness_label(*harness) == value.as_ref());
+                        let _ = on_agent.update(cx, |launcher, cx| {
+                            launcher.draft.choose_command_agent(agent);
+                            launcher.changed(cx);
+                        });
+                    })
+                    .on_enter(move |window, cx| {
+                        let _ = on_agent_enter.update(cx, |launcher, cx| launcher.press(window, cx));
+                    }),
+                    palette,
+                )
+                .into_any_element(),
+            );
+        }
         if self.draft.command.agent.is_some() {
             fields.push(
                 help_line(
@@ -1043,7 +1096,7 @@ impl Launcher {
                 .into_any_element(),
             );
             if !matches!(self.draft.mode, Mode::RestartWith(_)) {
-                let on_resume = weak.clone();
+                let (on_resume, on_resume_enter) = (weak.clone(), weak.clone());
                 fields.push(
                     div()
                         .pl(px(LABEL_COLUMN + LABEL_GAP))
@@ -1062,6 +1115,10 @@ impl Launcher {
                                     launcher.draft.choose_command_resume(on);
                                     launcher.changed(cx);
                                 });
+                            })
+                            .on_enter(move |window, cx| {
+                                let _ =
+                                    on_resume_enter.update(cx, |launcher, cx| launcher.press(window, cx));
                             }),
                         )
                         .into_any_element(),
