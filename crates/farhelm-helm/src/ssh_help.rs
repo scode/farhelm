@@ -3,9 +3,11 @@
 //! The response deliberately contains ready-to-paste commands, not a state
 //! directory clients would have to interpret. No probe, authentication or
 //! connection starts here; even unreachable registered destinations are useful.
+//! The reply's types are `farhelm_proto::ssh_help`'s, which the GUI decodes.
 
 use axum::{extract::State, response::IntoResponse};
-use serde::{Deserialize, Serialize};
+use farhelm_proto::ssh_help::{Help, HostCommands};
+use serde::Deserialize;
 use std::sync::Arc;
 
 use crate::{
@@ -19,24 +21,6 @@ use crate::{
 #[derive(Deserialize)]
 pub(crate) struct Request {
     destination: Option<String>,
-}
-
-/// One destination's commands, with unavailable connection kinds omitted.
-#[derive(Serialize)]
-struct HostCommands {
-    name: String,
-    destination: String,
-    sessions: Option<String>,
-    setup: Option<String>,
-}
-
-/// All inability-to-share explanations belong to the helm path, not each host.
-/// Keeping them once at the top also handles a helm with no SSH hosts yet.
-#[derive(Serialize)]
-struct Help {
-    unavailable: Vec<String>,
-    hosts: Vec<HostCommands>,
-    extra: Option<HostCommands>,
 }
 
 /// Compose both purposes from one source, including for a destination not yet added.
