@@ -3122,7 +3122,7 @@ fn dismissing_the_tunnel_notice_does_not_reach_the_terminal(cx: &mut TestAppCont
 
 /// Allow can meet another preferences save still in flight (an earlier Allow whose answer has not come, or a Settings
 /// change); the click must then say so rather than do nothing. Specified: with one consent save unanswered, a second
-/// Allow sends nothing more and the notice says another change to the preferences is still being saved.
+/// Allow sends nothing more and the notice gives a save's busy line ("Not saved: " and the store's shared reason).
 #[gpui::test]
 fn a_second_allow_while_consent_is_still_saving_says_so(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -3146,7 +3146,7 @@ fn a_second_allow_while_consent_is_still_saving_says_so(cx: &mut TestAppContext)
     assert_eq!(h.helm.commands(), [], "no second save");
     assert_eq!(
         h.tunnel_notice().as_deref(),
-        Some("Another change to the preferences is still being saved; try again")
+        Some("Not saved: another operation was in progress. Try again.")
     );
 }
 

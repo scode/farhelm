@@ -44,6 +44,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
+- **Tunnels from remote sessions on Linux.** The desktop app opens Cmd/Ctrl-click tunnels (and approval cards' Tunnel
+  and open) only in the Mac app; on Linux the pill, the consent switch and the card's Tunnel and open are not offered.
+  Port them to the Linux desktop app: the tunnel consent switch in Settings → Terminal, Ctrl-click to tunnel a loopback
+  link, the tunnel pill, and the approval card's Tunnel and open, with the same consent and refusal rules as the Mac.
+
 - **Restore automatic recovery from a withdrawn waiting update.** On 2026-10-14 the signed release advisories plan was
   narrowed to warning about a withdrawn running version and refusing to install a withdrawn release; a withdrawn release
   that is already installed and waiting for a restart now needs manual recovery, and an ordinary relaunch may still open
