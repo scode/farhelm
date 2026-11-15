@@ -53,6 +53,9 @@
 //!
 //! The Checkouts section glyph is the old app's `FolderIcon`, in its own 12-unit box with the same 1.2 stroke.
 //!
+//! The Branch glyph, a template destination's Managed checkout choice, is the old app's `BranchIcon`, in the same
+//! 12-unit box and stroke.
+//!
 //! The host menu's Update glyph is the old app's too (`ActionGlyph::Update`), in the same box and stroke.
 //!
 //! The harness marks (`Harness*`, the agent mark on a session row) are not drawn here: each file is generated from the
@@ -214,7 +217,8 @@ pub enum Icon {
     /// The same bolt filled: the template that holds the quick-launch mark. The outline is drawn too, so the two
     /// bolts are the same size, as SPEC.md wants ("at the same size").
     BoltFilled,
-    /// A folder: the Settings dialog's Checkouts section (the old app's `FolderIcon`, its 12-pixel box kept).
+    /// A folder: the Settings dialog's Checkouts section (the old app's `FolderIcon`, its 12-pixel box kept), and the
+    /// Folder choice of a template's destination.
     Folder,
     /// The first of the harness marks, one per `marks::HarnessGlyph`, in that enum's order: each the mark's geometry from
     /// `marks.rs` drawn in its 12-unit box (`docs/harness-marks.md`). Cursor's cube.
@@ -247,6 +251,9 @@ pub enum Icon {
     PermissionUnknown,
     /// A bell, unfilled: the Settings dialog's Notifications section (the old app's quiet `BellIcon`).
     Bell,
+    /// A branch: the Managed checkout choice of a template's destination (the old app's `BranchIcon`, its 12-pixel box
+    /// kept).
+    Branch,
     /// A question mark in a circle: the host rail foot's Help button, drawn in the Settings gear's 16-pixel box and
     /// stroke so the two read as a pair (the old app's `HelpIcon`).
     Help,
@@ -331,6 +338,7 @@ impl Icon {
         Icon::PermissionOwnSetting,
         Icon::PermissionUnknown,
         Icon::Bell,
+        Icon::Branch,
         Icon::Help,
         Icon::External,
         Icon::Adjust,
@@ -407,6 +415,7 @@ impl Icon {
             Icon::PermissionOwnSetting => "icons/permission-own-setting.svg",
             Icon::PermissionUnknown => "icons/permission-unknown.svg",
             Icon::Bell => "icons/bell.svg",
+            Icon::Branch => "icons/branch.svg",
             Icon::Help => "icons/help.svg",
             Icon::External => "icons/external.svg",
             Icon::Adjust => "icons/adjust.svg",
@@ -502,6 +511,7 @@ impl Assets {
             "icons/permission-unknown.svg" => {
                 Some(include_bytes!("../assets/icons/permission-unknown.svg"))
             }
+            "icons/branch.svg" => Some(include_bytes!("../assets/icons/branch.svg")),
             "icons/update.svg" => Some(include_bytes!("../assets/icons/update.svg")),
             "icons/refresh.svg" => Some(include_bytes!("../assets/icons/refresh.svg")),
             "icons/document.svg" => Some(include_bytes!("../assets/icons/document.svg")),

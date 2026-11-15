@@ -13,7 +13,7 @@ use farhelm_proto::ui_channel::{
     PREFERENCES_KEY, Preferences,
 };
 use gpui::{
-    Context, IntoElement, ParentElement as _, Render, Styled as _, TestAppContext,
+    Context, FocusHandle, IntoElement, ParentElement as _, Render, Styled as _, TestAppContext,
     VisualTestContext, Window, div, px, size,
 };
 
@@ -28,12 +28,25 @@ use crate::{layers, root};
 
 /// The root view the tests open Templates from: the Templates button the list header will draw, and a second button
 /// standing in for a shortcut that found nothing to launch and opens Templates with a hint.
-struct Header {
-    root: root::Attachment,
+pub(super) struct Header {
+    pub(super) root: root::Attachment,
+    /// The Templates button's focus handle, which the dialog returns focus to when it closes.
+    pub(super) templates: FocusHandle,
+}
+
+impl Header {
+    /// The header of a new window, its Templates button with a focus handle of its own.
+    pub(super) fn new(window: &mut Window, cx: &mut Context<Self>) -> Header {
+        Header {
+            root: root::attach(window, cx),
+            templates: cx.focus_handle().tab_stop(true),
+        }
+    }
 }
 
 impl Render for Header {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let templates = self.templates.clone();
         let content = div()
             .size_full()
             .p(px(20.))
@@ -44,9 +57,10 @@ impl Render for Header {
                     super::button_help(cx),
                     Role::Button,
                 )
-                .on_click(|_, window, cx| {
+                .focus(&self.templates)
+                .on_click(move |_, window, cx| {
                     let mark = Mark::take(cx);
-                    super::open(&mark, window, cx);
+                    super::open(&templates, &mark, window, cx);
                 }),
             )
             .child(
@@ -56,7 +70,7 @@ impl Render for Header {
                     HoverHelp::tooltip("Stands in for a number key with no template"),
                     Role::Button,
                 )
-                .on_click(|_, window, cx| {
+                .on_click(move |_, window, cx| {
                     let mark = Mark::take(cx);
                     super::open_with_hint(Hint::NumberKey, &mark, window, cx);
                 }),
@@ -65,7 +79,7 @@ impl Render for Header {
     }
 }
 
-fn template(name: &str, fields: TemplateFields) -> LaunchTemplate {
+pub(super) fn template(name: &str, fields: TemplateFields) -> LaunchTemplate {
     LaunchTemplate {
         name: name.into(),
         fields,
@@ -95,7 +109,10 @@ fn templates() -> Vec<LaunchTemplate> {
 }
 
 /// The templates collection holding `templates`, in their order, available or not.
-fn templates_state(templates: &[LaunchTemplate], availability: Availability) -> CollectionState {
+pub(super) fn templates_state(
+    templates: &[LaunchTemplate],
+    availability: Availability,
+) -> CollectionState {
     let keys: Vec<&str> = templates
         .iter()
         .map(|template| template.name.as_str())
@@ -117,7 +134,7 @@ fn templates_state(templates: &[LaunchTemplate], availability: Availability) -> 
 }
 
 /// The preferences collection, with `marked` as the ⚡ template.
-fn preferences_state(marked: Option<&str>) -> CollectionState {
+pub(super) fn preferences_state(marked: Option<&str>) -> CollectionState {
     let preferences = Preferences {
         quick_launch_template: marked.map(str::to_owned),
         ..Preferences::default()
@@ -133,7 +150,7 @@ fn preferences_state(marked: Option<&str>) -> CollectionState {
 }
 
 /// The helm pushes the templates collection as `templates`.
-fn push(
+pub(super) fn push(
     helm: &mut FakeHelm,
     templates: &[LaunchTemplate],
     availability: Availability,
@@ -151,7 +168,7 @@ fn push(
 
 /// The app over the fake helm holding `templates` and a preference row marking `marked`, in a window large enough for
 /// the whole dialog. Nothing is open yet.
-fn open_header<'a>(
+pub(super) fn open_header<'a>(
     cx: &'a mut TestAppContext,
     templates: &[LaunchTemplate],
     marked: Option<&str>,
@@ -162,20 +179,18 @@ fn open_header<'a>(
         preferences_state(marked),
     ]);
     cx.run_until_parked();
-    let (_, window) = test_support::open_view(cx, |window, cx| Header {
-        root: root::attach(window, cx),
-    });
+    let (_, window) = test_support::open_view(cx, Header::new);
     window.simulate_resize(size(px(1600.), px(1000.)));
     settle(window);
     (helm, window)
 }
 
-fn any_open(cx: &mut VisualTestContext) -> bool {
+pub(super) fn any_open(cx: &mut VisualTestContext) -> bool {
     cx.update(|window, cx| layers::any_open(window, cx))
 }
 
 /// Every line of text the window painted, joined with single spaces.
-fn painted(cx: &mut VisualTestContext) -> String {
+pub(super) fn painted(cx: &mut VisualTestContext) -> String {
     let lines: Vec<String> = frame(cx)
         .into_iter()
         .flat_map(|node| node.texts.into_iter().map(|line| line.text.to_string()))
@@ -308,6 +323,66 @@ fn escape_closes_the_dialog(cx: &mut TestAppContext) {
     assert!(any_open(cx), "the premise: the dialog is open");
     keys(cx, "escape");
     assert!(!any_open(cx));
+}
+
+/// The Templates button names itself as where closing returns focus, so focus comes back to it on every platform. On
+/// macOS a click leaves a button unfocused, and returning focus to what held it before the click would leave the user
+/// somewhere other than the button they used (the old app returned focus to the Templates button by name). Specified:
+/// with clicks not focusing controls, as on macOS, the button opens the dialog without holding focus, and Escape puts
+/// focus on it.
+#[gpui::test]
+fn closing_returns_focus_to_the_templates_button(cx: &mut TestAppContext) {
+    let (_helm, cx) = open_header(cx, &templates(), None);
+    cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
+    assert_ne!(
+        test_support::focused_id(cx).as_deref(),
+        Some("templates-button"),
+        "the premise: the button does not hold focus before the click"
+    );
+    click(cx, "templates-button");
+    assert!(any_open(cx), "the premise: the dialog opened");
+    keys(cx, "escape");
+    assert!(!any_open(cx));
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("templates-button")
+    );
+}
+
+/// A shortcut that opens Templates with a hint is a key press, which moved no focus, so closing returns focus to
+/// wherever it was (SPEC.md: "Closing something the user opened returns focus to where it was before it opened"),
+/// usually the terminal. Specified: with focus on one control (the Templates button) and clicks not focusing controls,
+/// as on macOS, a press of the stand-in shortcut's button opens Templates through the hint entry point, and Escape puts
+/// focus back on the Templates button, where it was, not on the button that was pressed.
+#[gpui::test]
+fn closing_a_hint_opened_dialog_returns_focus_where_it_was(cx: &mut TestAppContext) {
+    let (_helm, cx) = open_header(cx, &templates(), None);
+    cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
+    // Tab to the Templates button: the header has only a few stops, so a bounded walk finds it or fails loudly.
+    for _ in 0..4 {
+        if test_support::focused_id(cx).as_deref() == Some("templates-button") {
+            break;
+        }
+        keys(cx, "tab");
+    }
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("templates-button"),
+        "the premise: focus starts on the Templates button"
+    );
+    click(cx, "unbound-key");
+    assert!(any_open(cx), "the premise: the dialog opened");
+    assert_ne!(
+        test_support::focused_id(cx).as_deref(),
+        Some("templates-button"),
+        "the premise: focus moved into the dialog"
+    );
+    keys(cx, "escape");
+    assert!(!any_open(cx));
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("templates-button")
+    );
 }
 
 /// The header Close closes the dialog through the layer manager's dismissal, the same path Escape takes, so the editor's
@@ -676,4 +751,29 @@ fn the_key_menu_closes_when_its_template_is_gone(cx: &mut TestAppContext) {
     settle(cx);
     assert!(!any_open_menu(cx), "the menu closed with its row");
     assert!(any_open(cx), "the dialog stays");
+}
+
+/// The key menu closes back onto its key button (the old menu returned focus there), also on macOS, where the click
+/// that opened it left the button unfocused and returning focus to what held it before would put the user back
+/// elsewhere. Specified: with clicks not focusing controls, the key button opens the menu without holding focus, and
+/// Escape closes only the menu and puts focus on the button.
+#[gpui::test]
+fn escape_from_the_key_menu_returns_focus_to_its_button(cx: &mut TestAppContext) {
+    let (_helm, cx) = open_header(cx, &templates(), None);
+    cx.update(|_, cx| focus::set_click_focuses_controls(false, cx));
+    click(cx, "templates-button");
+    assert_ne!(
+        test_support::focused_id(cx).as_deref(),
+        Some("template-key-my-codex"),
+        "the premise: the key button does not hold focus before the click"
+    );
+    click(cx, "template-key-my-codex");
+    assert!(any_open_menu(cx), "the premise: the menu is open");
+    keys(cx, "escape");
+    assert!(!any_open_menu(cx), "Escape closed the menu");
+    assert!(any_open(cx), "and only the menu");
+    assert_eq!(
+        test_support::focused_id(cx).as_deref(),
+        Some("template-key-my-codex")
+    );
 }

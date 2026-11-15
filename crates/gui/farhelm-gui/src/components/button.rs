@@ -114,6 +114,18 @@ pub enum Tier {
     /// the monospace face, given as [`Button::content`]) is the quiet `--fg-2` with no key and the accent once one is
     /// bound (`bound`). The same hover note as [`Tier::QuickMark`].
     NumberKey { bound: bool },
+    /// `.templates-row`: a template's row in the Templates list, a ghost as wide as its row (`width: 100%`) whose
+    /// content (the template's name over its summary, given as [`Button::content`]) sits at its left, 10 by 12 pixels
+    /// in, in the primary ink, with the control hover fill under the pointer. The row whose template the editor holds is
+    /// drawn through [`Button::pressed`] as the old sheet drew it: the accent fill inside the accent edge, one step up
+    /// the accent family under the pointer, and the inverse ring inside the edge. The content draws its own lines, so a
+    /// pressed row's summary takes `--on-accent-dim` there, not here. The Templates editor's "+ Add field" menu draws its
+    /// entries in this tier too, left-aligned with the same hover fill.
+    TemplateRow,
+    /// `.templates-remove`: the ✕ that removes a field from a template, a ghost 30 pixels wide and 34 high (the height
+    /// of the field's control beside it, so the ✕ is centered on the control), in the quiet `--fg-1` ink that turns
+    /// `--danger` with the control hover fill under the pointer.
+    FieldRemove,
     /// `.host-icon-choice`: one of the host settings' icon choices, a 36-pixel square on the well with a dim edge, its
     /// content (the host's mark) centered, and the control hover fill under the pointer. Chosen
     /// ([`Button::pressed`]), it takes the accent fill with the accent edge, as a [`Tier::Nav`] entry does, and keeps
@@ -141,6 +153,10 @@ const QUICK_MARK_PAD: (f32, f32) = (10., 5.);
 const TUNNEL_PAD: (f32, f32) = (2., 4.);
 /// The [`Tier::NumberKey`] box's padding on every side.
 const NUMBER_KEY_PAD: f32 = 4.;
+/// The [`Tier::FieldRemove`] box: `.templates-remove`'s `width: 30px; height: 34px`.
+const FIELD_REMOVE_SIZE: (f32, f32) = (30., 34.);
+/// The [`Tier::TemplateRow`] box's padding, vertical then horizontal (`.templates-row`: `10px 12px`).
+const TEMPLATE_ROW_PAD: (f32, f32) = (10., 12.);
 
 /// The [`Tier::RowMenu`] box's height: 14-pixel text at `line-height: 1.4`.
 const ROW_MENU_HEIGHT: f32 = 19.6;
@@ -448,7 +464,7 @@ impl Button {
                 palette.on_fill,
             );
         }
-        if self.pressed == Some(true) && self.tier == Tier::IconChoice {
+        if self.pressed == Some(true) && matches!(self.tier, Tier::IconChoice | Tier::TemplateRow) {
             return (
                 Some(palette.accent_fill),
                 palette.accent_fill_hover,
@@ -490,7 +506,7 @@ impl Button {
             palette.fg_2,
         );
         match self.tier {
-            Tier::Ghost | Tier::RowMenu { on_fill: false } => {
+            Tier::Ghost | Tier::RowMenu { on_fill: false } | Tier::FieldRemove => {
                 (None, palette.control_hover, None, palette.fg_1)
             }
             // Returned above, before the pressed looks.
@@ -514,7 +530,7 @@ impl Button {
                 palette.fg_0,
             ),
             Tier::Rail => (None, palette.bg_2, None, palette.fg_1),
-            Tier::Nav => (None, palette.control_hover, None, palette.fg_0),
+            Tier::Nav | Tier::TemplateRow => (None, palette.control_hover, None, palette.fg_0),
             Tier::IconChoice => (
                 Some(palette.well),
                 palette.control_hover,
@@ -590,13 +606,18 @@ impl RenderOnce for Button {
             Tier::Ghost | Tier::Neutral | Tier::Primary | Tier::Danger if self.compact => {
                 (px(COMPACT_PAD.0), px(COMPACT_PAD.1))
             }
-            Tier::Rail | Tier::Link | Tier::Readout { .. } | Tier::IconChoice => (px(0.), px(0.)),
+            Tier::Rail
+            | Tier::Link
+            | Tier::Readout { .. }
+            | Tier::IconChoice
+            | Tier::FieldRemove => (px(0.), px(0.)),
             Tier::ColorChoice => (px(COLOR_CHOICE_PAD), px(COLOR_CHOICE_PAD)),
             Tier::Chip => (px(CHIP_PAD.0), px(CHIP_PAD.1)),
             Tier::Nav => (px(NAV_PAD.0), px(NAV_PAD.1)),
             Tier::QuickMark { .. } => (px(QUICK_MARK_PAD.0), px(QUICK_MARK_PAD.1)),
             Tier::NumberKey { .. } => (px(NUMBER_KEY_PAD), px(NUMBER_KEY_PAD)),
             Tier::Tunnel => (px(TUNNEL_PAD.0), px(TUNNEL_PAD.1)),
+            Tier::TemplateRow => (px(TEMPLATE_ROW_PAD.0), px(TEMPLATE_ROW_PAD.1)),
             Tier::HostUpdate { .. } => (px(HOST_UPDATE_PAD.0), px(HOST_UPDATE_PAD.1)),
             Tier::Ghost
             | Tier::Neutral
@@ -630,6 +651,8 @@ impl RenderOnce for Button {
             | Tier::Nav
             | Tier::QuickMark { .. }
             | Tier::NumberKey { .. }
+            | Tier::TemplateRow
+            | Tier::FieldRemove
             | Tier::IconChoice
             | Tier::ColorChoice
             | Tier::Tunnel
@@ -736,6 +759,17 @@ impl RenderOnce for Button {
                     .min_w_0()
                     .text_size(metrics::TEXT_MD)
                     .line_height(px(NAV_LINE_HEIGHT))
+            })
+            // A template's row fills its row's width and lays its lines out from the left (`text-align: left`); the
+            // lines may shrink, so a long name or summary is cut rather than widening the list.
+            .when(self.tier == Tier::TemplateRow, |button| {
+                button.w_full().min_w_0().justify_start()
+            })
+            .when(self.tier == Tier::FieldRemove, |button| {
+                button
+                    .w(px(FIELD_REMOVE_SIZE.0))
+                    .h(px(FIELD_REMOVE_SIZE.1))
+                    .flex_none()
             });
         button = button.when_some(fill, |button, fill| button.bg(theme::color(fill)));
         // The old navigation entries showed keyboard focus by their ring alone, without `.btn`'s focus fill; of the
@@ -790,9 +824,15 @@ impl RenderOnce for Button {
             );
         }
         if active {
-            button = button
-                .cursor_pointer()
-                .hover(|style| style.bg(theme::color(hover_fill)));
+            // The field's ✕ also turns red under the pointer (`.templates-remove:hover { color: var(--danger) }`).
+            let hover_ink = (self.tier == Tier::FieldRemove).then_some(palette.danger);
+            button = button.cursor_pointer().hover(move |style| {
+                let style = style.bg(theme::color(hover_fill));
+                match hover_ink {
+                    Some(ink) => style.text_color(theme::color(ink)),
+                    None => style,
+                }
+            });
         } else if enabled && self.busy && self.tier == Tier::Neutral {
             // The old sheet's `cursor: not-allowed` on the `aria-disabled` header Restart, which still answers the
             // hover. Only the neutral tier: the old busy Save (a primary) kept the button's cursor.
@@ -811,6 +851,8 @@ impl RenderOnce for Button {
                     | Tier::Nav
                     | Tier::QuickMark { .. }
                     | Tier::NumberKey { .. }
+                    | Tier::TemplateRow
+                    | Tier::FieldRemove
                     | Tier::IconChoice
                     | Tier::ColorChoice
                     | Tier::HostUpdate { .. }

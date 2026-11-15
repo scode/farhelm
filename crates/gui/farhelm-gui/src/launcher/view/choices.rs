@@ -22,20 +22,19 @@
 
 use farhelm_proto::launcher::{EFFORT_ORDER, compatible_efforts};
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
-use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission, split_permission_flags};
+use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission};
 use gpui::{
     AnyElement, App, Context, Div, InteractiveElement as _, IntoElement, ParentElement as _,
     SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
-use super::{LABEL_COLUMN, LABEL_GAP, Launcher, help_line, row};
+use super::{LABEL_COLUMN, LABEL_GAP, Launcher, row};
 use crate::components::{
-    Button, HoverHelp, RadioGroup, RadioOption, Role, Select, SelectOption, TextInput, Tier,
+    Button, CustomFlags, HoverHelp, RadioGroup, RadioOption, Role, Select, SelectOption, TextInput,
+    Tier,
 };
 use crate::focus::{self, Mark};
-use crate::host_text::{self, HostSentence, HostText};
 use crate::launcher::draft::{Edit, Field, Mode, RestartBaseline, harness_label};
-use crate::launcher::request::capitalized;
 use crate::launcher::words::{HARNESS_PICKER_ORDER, PERMISSION_DOCS, guarded_permission_help};
 use crate::permission::words::{
     effort_label, permission_display, permission_help, permission_tooltip,
@@ -388,102 +387,35 @@ impl Launcher {
         row("launcher-permissions-row", "Permissions", controls, palette).into_any_element()
     }
 
-    /// The Custom flags editor (old `CustomPermissionFlags`): the flags as typed, what they mean, and the words they
-    /// parse to (each its own escaped box, so a hidden character shows), or why they do not parse.
+    /// The Custom flags editor (old `CustomPermissionFlags`): the flags as typed, beside their label, in the shared
+    /// Custom flags block ([`CustomFlags`]), which says what they mean and draws the words they parse to (each its own
+    /// escaped box, so a hidden character shows), or why they do not parse, lined up under the field.
     pub(super) fn flags_editor(
         &self,
         harness: Option<LaunchHarness>,
         palette: &theme::Palette,
     ) -> AnyElement {
         let agent = harness.map_or("the agent", harness_label);
-        let mut rows = vec![
-            row(
-                "launcher-flags-row",
+        let field = row(
+            "launcher-flags-row",
+            "Permission flags",
+            TextInput::new(
+                "launcher-flags",
+                &self.flags,
                 "Permission flags",
-                TextInput::new(
-                    "launcher-flags",
-                    &self.flags,
-                    "Permission flags",
-                    HoverHelp::tooltip(permission_tooltip(LaunchPermission::Custom)),
-                )
-                .monospace(),
-                palette,
+                HoverHelp::tooltip(permission_tooltip(LaunchPermission::Custom)),
             )
-            .into_any_element(),
-            help_line(
-                format!(
-                    "Passed to {agent} instead of Farhelm's permission flags. You are responsible for ensuring they \
-                     only change permissions. Farhelm does not check them, so this session counts as YOLO."
-                ),
-                palette,
-            )
-            .into_any_element(),
-        ];
-        match split_permission_flags(&self.draft.agent.permission_flags) {
-            Ok(words) => {
-                let words: Vec<HostText> = words
-                    .iter()
-                    .map(|word| HostText::from_host(word.as_str()))
-                    .collect();
-                // Named as the old `aria-label="Permission arguments"` list read, each word escaped and the words
-                // apart by commas, so `--a 'b c'` (two words) and `--a b c` (three) do not sound the same.
-                let name = words
-                    .iter()
-                    .enumerate()
-                    .fold(
-                        HostSentence::new("launcher-flag-words-name").text("Permission arguments:"),
-                        |name, (index, word)| {
-                            name.text(if index == 0 { " " } else { ", " }).host(word)
-                        },
-                    )
-                    .accessible_name();
-                rows.push(
-                    div()
-                        .id("launcher-flag-words")
-                        .role(Role::Label)
-                        .aria_label(name)
-                        .pl(px(LABEL_COLUMN + LABEL_GAP))
-                        .flex()
-                        .flex_wrap()
-                        .gap(px(4.))
-                        .children(words.iter().map(|word| {
-                            host_text::element(word)
-                                .px(px(5.))
-                                .border_1()
-                                .border_color(theme::color(palette.border))
-                                .font_family(crate::assets::TERMINAL_FONT)
-                        }))
-                        .into_any_element(),
-                );
-            }
-            Err(error) => {
-                let words = capitalized(&error);
-                rows.push(
-                    div()
-                        .id("launcher-flags-error")
-                        .role(Role::Alert)
-                        .aria_label(words.clone())
-                        .pl(px(LABEL_COLUMN + LABEL_GAP))
-                        .text_size(metrics::TEXT_SM)
-                        // `.create-session-form .launch-composer-error`: the launcher's errors are amber, red being
-                        // kept for danger.
-                        .text_color(theme::color(palette.warn_bright))
-                        .child(words)
-                        .into_any_element(),
-                );
-            }
-        }
-        // `.custom-permission-choice`: the whole editor set off by a warning stripe at its start, since these flags
-        // make the session YOLO.
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(6.))
-            .border_l_2()
-            .border_color(theme::color(palette.warn))
-            .pl(px(10.))
-            .children(rows)
-            .into_any_element()
+            .monospace(),
+            palette,
+        );
+        CustomFlags::new(
+            "launcher",
+            field,
+            self.draft.agent.permission_flags.clone(),
+            agent,
+        )
+        .indent(px(LABEL_COLUMN + LABEL_GAP))
+        .into_any_element()
     }
 }
 
