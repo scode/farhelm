@@ -12,8 +12,8 @@
 //! `components/button.rs`, and so on), so a change to one control touches one test file rather than a file every
 //! control's PR edits. Two files test the layer's shared rules from `components/mod.rs` instead of a control:
 //! `hover_help.rs` (hover help and its tooltip) and `enter_choice.rs` (the choice controls' Enter rule). `transition.rs`
-//! tests the one-shot entrance (`components/transition.rs`), which draws no control. A new control's tests go in a new
-//! file here, declared below.
+//! tests the one-shot entrance (`components/transition.rs`), and `spinner.rs` the stepped spinner's turn
+//! (`components/spinner.rs`); neither draws a control. A new control's tests go in a new file here, declared below.
 //!
 //! This file holds only the step helpers that tests of more than one component use: reading the tooltip and waiting
 //! out the hover delay, sending a key's press and release separately (GPUI's keyboard click happens on the release),
@@ -38,6 +38,7 @@ mod scroll_box;
 mod scrollbar;
 mod select;
 mod sequence_pill;
+mod spinner;
 mod status_mark;
 mod tab_strip;
 mod text_input;

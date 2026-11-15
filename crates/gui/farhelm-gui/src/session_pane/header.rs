@@ -53,7 +53,7 @@ use gpui::{
 use super::SessionPane;
 use crate::actions::DELETE_SESSION_SHORTCUT_NAME;
 use crate::assets::Icon;
-use crate::components::{Button, HoverHelp, Tier};
+use crate::components::{Button, HoverHelp, Tier, spinner_icon};
 use crate::desktop::title_band::{self, Row};
 use crate::focus::Mark;
 use crate::layers::{self, Anchor, LayerId, Subject};
@@ -472,7 +472,7 @@ fn action_button(
                 .flex_row()
                 .items_center()
                 .gap(px(4.))
-                .child(delete::spinner_icon(shown.step, px(12.), ink))
+                .child(spinner_icon(shown.step, px(12.), ink))
                 .child(stop::PROGRESS_LABEL),
         );
     }
@@ -511,6 +511,6 @@ fn delete_progress(
         .whitespace_nowrap()
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(ink)
-        .child(delete::spinner_icon(step, px(12.), ink))
+        .child(spinner_icon(step, px(12.), ink))
         .child(label)
 }

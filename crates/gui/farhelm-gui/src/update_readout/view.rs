@@ -40,13 +40,14 @@ use super::{
     inline_presentation, readout_control, readout_marks,
 };
 use crate::assets::{self, Icon};
-use crate::components::{Button, HoverHelp, MenuHeader, MenuItem, Role, StatusMark, Tier};
+use crate::components::{
+    Button, HoverHelp, MenuHeader, MenuItem, Role, Spinner, StatusMark, Tier, spinner_icon,
+};
 use crate::desktop::title_band;
 use crate::desktop::updates::{self, Updater};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId, Popover};
-use crate::session_list::delete;
 use crate::theme::{self, metrics};
 use crate::{render_count, ticker};
 
@@ -112,7 +113,7 @@ pub struct VersionReadout {
     /// Up to date's expiry, while one is pending; replacing it cancels the older one.
     expiry: Option<ticker::Deadline>,
     /// The turn of whatever spins, held only while something spins and the window is active.
-    spinner: Option<delete::Spinner>,
+    spinner: Option<Spinner>,
     /// The one focus handle the check button and the toggle share (see the module docs).
     focus: FocusHandle,
     /// Where the menu opens: beside the toggle, drawn while the toggle is.
@@ -346,11 +347,7 @@ impl VersionReadout {
                     .flex_none()
                     // Tests find the ring by this; it records nothing outside test builds.
                     .debug_selector(|| "app-update-ring".into())
-                    .child(delete::spinner_icon(
-                        step,
-                        px(12.),
-                        theme::color(palette.accent),
-                    )),
+                    .child(spinner_icon(step, px(12.), theme::color(palette.accent))),
             )
         });
         let element = if shown == InlineStatus::Failed {
@@ -413,7 +410,7 @@ impl Render for VersionReadout {
             || presentation.separate_progress_spinner;
         let spins = spins && ticker::is_active(window, cx);
         if spins != self.spinner.is_some() {
-            self.spinner = spins.then(|| delete::Spinner::start(window, cx));
+            self.spinner = spins.then(|| Spinner::start(window, cx));
         }
         // The menu belongs to the toggle: once no update waits, its anchor is no longer drawn and the layer manager
         // closes it, returning focus to the shared handle, now the check button's.

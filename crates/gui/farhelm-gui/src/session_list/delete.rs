@@ -18,13 +18,13 @@
 //!   ([`in_flight`], and the row's line in [`super::outcome`], which says how long a refusal stays).
 //! - **A pending Delete shows as an expected wait.** The row shows a spinner and what is happening in place of its
 //!   title, in the accent rather than in danger red (the user just confirmed this, so the wait is the outcome they asked
-//!   for), and in the fill's ink on the selected row. The title stays the row's accessible name. The spinner turns one
-//!   45-degree step per animation tick, eight steps per 0.8-second turn as the old `steps(8)` animation did, from one
-//!   handle the list holds ([`Spinner`]) while a Delete shows and its window is active.
+//!   for), and in the fill's ink on the selected row. The title stays the row's accessible name. The spinner is the
+//!   component layer's stepped one ([`Spinner`](crate::components::Spinner)), turned by one handle the list holds
+//!   while a Delete shows and its window is active.
 //!
 //! While the open session's Delete is in flight, the main pane says the same over its terminal and holds back the
 //! terminal's own notices (`session_pane.rs`), reading the same [`in_flight`] and [`progress_label`] the row does and
-//! turning its own [`Spinner`].
+//! turning its own [`Spinner`](crate::components::Spinner).
 //!
 //! The open session's header asks its own Delete question (`session_pane/header.rs`), and the Delete shortcut asks it
 //! through the header, from these same functions ([`begin`]): beside the header's Delete button, and even for a session
@@ -40,28 +40,24 @@
 //! stays open, and the helm refuses what it then sends.
 
 use std::collections::HashSet;
-use std::f32::consts::TAU;
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::DeleteGuard;
 use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
-    App, AppContext as _, BorrowAppContext as _, Context, ElementId, Entity, FontWeight, Global,
-    Hsla, InteractiveElement, IntoElement, ParentElement, Pixels, Role, SharedString,
-    StatefulInteractiveElement as _, Styled, Subscription, Svg, Transformation, Window, div, px,
-    radians, svg,
+    App, BorrowAppContext as _, Context, ElementId, FontWeight, Global, InteractiveElement,
+    IntoElement, ParentElement, Role, SharedString, StatefulInteractiveElement as _, Styled,
+    Window, div, px,
 };
 
 use super::{SessionList, menu};
-use crate::assets::Icon;
-use crate::components::{HoverHelp, Tier};
+use crate::components::{HoverHelp, Tier, spinner_icon};
 use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
 use crate::operations::{Command, OpKey, Outcome, Work};
 use crate::prompt::{Answer, Question};
-use crate::session::PerSession;
+use crate::session::{self, PerSession};
 use crate::theme::{self, metrics};
-use crate::{session, ticker};
 
 // ---- What a Delete of a row asks and sends ---------------------------------------------------------------------------
 
@@ -335,51 +331,6 @@ pub(crate) fn progress_label(guard: DeleteGuard) -> &'static str {
     }
 }
 
-/// How many steps the spinner's turn has: `steps(8)` in the old animation.
-const SPINNER_STEPS: u8 = 8;
-
-/// The spinner's turn, which the list holds while any row shows a pending Delete and its window is active, as it holds
-/// the running pulse, and drops otherwise: a live animation handle keeps the ticker's timer firing ten times a second,
-/// which an inactive window has no use for. Every pending row draws the same step, so one handle serves them all. The
-/// main pane holds one of its own, on the same terms, for its scrim, and so does the version readout, for its check glyph
-/// and its ring (`update_readout::view`).
-///
-/// The step is counted from the ticker's notifications of the turn's own entity: the ticker notifies it once per tick
-/// and nothing else does, so the count is the number of ticks it has seen. The view that holds the spinner observes
-/// the entity to redraw.
-pub(crate) struct Spinner {
-    turn: Entity<Turn>,
-    _redraw: Subscription,
-}
-
-/// See [`Spinner`].
-pub(super) struct Turn {
-    step: u8,
-    _animating: ticker::Animating,
-    _ticks: Subscription,
-}
-
-impl Spinner {
-    /// A spinner starting at its first step, redrawing the view `cx` belongs to on every step.
-    pub(crate) fn start<V: 'static>(window: &Window, cx: &mut Context<V>) -> Spinner {
-        let turn = cx.new(|cx| Turn {
-            step: 0,
-            _animating: ticker::animate(window, cx),
-            _ticks: cx
-                .observe_self(|turn: &mut Turn, _| turn.step = (turn.step + 1) % SPINNER_STEPS),
-        });
-        Spinner {
-            _redraw: cx.observe(&turn, |_, _, cx| cx.notify()),
-            turn,
-        }
-    }
-
-    /// The step to draw, `0..8`.
-    pub(crate) fn step(&self, cx: &App) -> u8 {
-        self.turn.read(cx).step
-    }
-}
-
 /// The row's in-progress mark for `key`'s pending Delete, sent with `guard`: the spinner at `step` and
 /// [`progress_label`], drawn where the title would be. In the accent, or in the fill's ink on the selected row
 /// (`.session-row.selected .delete-progress`), where the accent would vanish into the accent fill.
@@ -415,19 +366,6 @@ pub(super) fn progress(
         .text_color(ink)
         .child(spinner_icon(step, px(12.), ink))
         .child(progress_label(guard))
-}
-
-/// The spinner's icon at `step`, `size` square, in `ink`: the row draws it at the old `.delete-spinner`'s 12 pixels,
-/// and the pane's scrim at its card's 16.
-pub(crate) fn spinner_icon(step: u8, size: Pixels, ink: Hsla) -> Svg {
-    svg()
-        .path(Icon::Spinner.path())
-        .size(size)
-        .flex_none()
-        .text_color(ink)
-        .with_transformation(Transformation::rotate(radians(
-            f32::from(step) * TAU / f32::from(SPINNER_STEPS),
-        )))
 }
 
 #[cfg(test)]
