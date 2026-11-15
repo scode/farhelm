@@ -23,6 +23,7 @@ mod disclosure;
 mod style;
 #[cfg(test)]
 mod tests;
+pub(crate) mod tunnels;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -575,6 +576,11 @@ impl TerminalView {
         link: &TerminalLink,
     ) -> Option<farhelm_grid_model::LinkDisclosure> {
         self.model.link_disclosure(link)
+    }
+
+    /// The view cell the pointer rests on, as its owner last set it ([`TerminalView::set_hover`]).
+    pub fn hover_cell(&self) -> Option<(u16, u16)> {
+        self.hover
     }
 
     /// The pointer now rests on view cell `cell`, (column, row) of what is shown (`None`: off the screen); redraws

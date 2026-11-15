@@ -2312,17 +2312,19 @@ fn the_display_follows_wrapped_rows_and_returns_after_a_click(cx: &mut TestAppCo
     );
 }
 
-/// The refusal's advice has to work: after a refused click, hovering again (moving off the link and back) brings the
-/// display back and a click then opens. Until the pointer moves, the display stays away, so it does not sit over the
-/// explanation, which a press elsewhere then clears. Once, a refusal kept every display away until the next press, so
-/// hovering again showed nothing and the next click was refused too.
+/// The refusal's advice has to work: after a refused click, hovering again brings the display back and a click then
+/// opens. Until the pointer moves, the display stays away, so it does not sit over the explanation, which a press
+/// elsewhere then clears. Once, a refusal kept every display away until the next press, so hovering again showed
+/// nothing and the next click was refused too; and once, a move to another cell of the same link did not count,
+/// since nothing redraws for it. Specified: no display while the pointer stays put; a bare move to another cell of the
+/// link, with no other cause for a frame, shows it; a click then opens.
 #[gpui::test]
 fn hovering_again_after_a_refusal_shows_the_display_and_a_click_opens(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.attach_hyperlink("click here", "https://example.com/page");
     let owner = h.owner.clone();
     h.choose(&owner);
-    let (on, off) = (h.at_cell(2, 0), h.at_cell(15, 0));
+    let on = h.at_cell(2, 0);
     h.rest_on(on);
     h.cx.update(|_, cx| {
         let shown = owner.read(cx).disclosure.as_ref().unwrap().drawn.clone();
@@ -2340,18 +2342,61 @@ fn hovering_again_after_a_refusal_shows_the_display_and_a_click_opens(cx: &mut T
         (false, false),
         "no display while the pointer stays put"
     );
-    h.rest_on(off);
-    h.rest_on(on);
+    let next = h.at_cell(3, 0);
+    h.cx.simulate_mouse_move(next, None, Modifiers::none());
+    settle(h.cx);
     assert_eq!(
         h.disclosure_shown(),
         (true, false),
-        "hovering again shows the display"
+        "hovering again, within the link, shows the display"
     );
-    h.click_at(on);
+    h.click_at(next);
     assert_eq!(
         h.cx.opened_url().as_deref(),
         Some("https://example.com/page"),
         "and a click opens"
+    );
+}
+
+/// Escape with focus outside the terminal closes the display (the layer manager's Escape rule for a popover); the
+/// display must then stay closed while the pointer rests, or it reopens at once and the Escape does nothing visible.
+/// Once, it did. Specified: a display put away with no press, by the layer manager's own Escape dismissal
+/// (`layers::dismiss_top`, which Escape with focus outside the terminal calls), stays gone through further frames;
+/// moving the pointer to another cell of the link shows it again, with no other cause for a frame.
+#[gpui::test]
+fn a_display_closed_without_a_press_stays_closed_until_the_pointer_moves(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.attach_hyperlink("click here", "https://example.com/page");
+    let on = h.at_cell(2, 0);
+    h.rest_on(on);
+    assert_eq!(
+        h.disclosure_shown(),
+        (true, false),
+        "the premise: the display shows"
+    );
+    h.cx.update(|window, cx| {
+        assert!(
+            layers::dismiss_top(window, cx),
+            "the premise: Escape put a layer away"
+        );
+    });
+    settle(h.cx);
+    redraw(h.cx);
+    settle(h.cx);
+    redraw(h.cx);
+    assert_eq!(
+        h.disclosure_shown(),
+        (false, false),
+        "closed, it stays closed"
+    );
+    // A bare move, no forced frame: within one link, nothing but the terminal itself asks for one.
+    let next = h.at_cell(3, 0);
+    h.cx.simulate_mouse_move(next, None, Modifiers::none());
+    settle(h.cx);
+    assert_eq!(
+        h.disclosure_shown(),
+        (true, false),
+        "hovering again shows it"
     );
 }
 
@@ -2375,6 +2420,696 @@ fn a_click_on_a_file_hyperlink_says_nothing(cx: &mut TestAppContext) {
     assert!(
         h.cx.debug_bounds("terminal-link-refusal").is_none(),
         "no refusal"
+    );
+}
+
+// ---- Tunnels to a remote host's loopback ---------------------------------------------------------------------------
+
+/// A dev server's address as a remote program prints it.
+const LOOPBACK_LINE: &str = "serving http://localhost:5173/app?x=1";
+const LOOPBACK_URL: &str = "http://localhost:5173/app?x=1";
+
+/// The hint the display carries for [`LOOPBACK_URL`] on the host the fake helm names.
+const LOOPBACK_HINT: &str = "This is port 5173 on build-box, not on this Mac. ⌘-click to open it through a tunnel. A \
+                             plain click opens it on this Mac.";
+
+/// Cmd, as the Mac's ⌘ key is held for a click.
+fn cmd() -> Modifiers {
+    Modifiers {
+        platform: true,
+        ..Modifiers::none()
+    }
+}
+
+impl Harness<'_> {
+    /// Decide the tunnel offer as the Mac app does, whatever machine runs the test.
+    fn on_a_mac(&mut self) {
+        let owner = self.owner.clone();
+        self.cx.update(|_, cx| {
+            owner.update(cx, |owner, _| owner.set_platform(Platform::Mac));
+        });
+    }
+
+    /// Answer the one command the terminal has sent, which must be its tunnel read, as a helm whose session runs on
+    /// the host `build-box`, remote when `available`.
+    fn answer_tunnel_read(&mut self, available: bool) {
+        let commands = self.helm.commands();
+        assert_eq!(
+            commands
+                .iter()
+                .map(|command| (command.method, command.path.as_str()))
+                .collect::<Vec<_>>(),
+            [(farhelm_helm_client::Method::Get, "/api/sessions/s1/tunnels")],
+            "the premise: the terminal read its session's tunnels once"
+        );
+        self.helm.reply(
+            commands[0].id,
+            200,
+            Some(serde_json::json!({
+                "available": available,
+                "host_name": "build-box",
+                "consent": false,
+                "tunnels": [],
+            })),
+        );
+        settle(self.cx);
+        redraw(self.cx);
+    }
+
+    /// The tunnel hint the open destination display carries, as a screen reader reads it.
+    fn hint(&mut self) -> Option<String> {
+        self.read(|owner, _| {
+            owner
+                .disclosure
+                .as_ref()
+                .and_then(|shown| shown.hint.as_ref())
+                .map(|hint| hint.accessible_name().to_string())
+        })
+    }
+
+    /// Push the shared tunnel consent preference as the helm does.
+    fn tunnel_consent(&mut self, given: bool) {
+        self.helm
+            .push(farhelm_proto::ui_channel::CollectionChanges {
+                collection: farhelm_proto::ui_channel::Collection::Preferences,
+                meta: test_support::meta(&[farhelm_proto::ui_channel::PREFERENCES_KEY]),
+                upsert: vec![farhelm_proto::ui_channel::KeyedEntry {
+                    key: farhelm_proto::ui_channel::PREFERENCES_KEY.into(),
+                    value: serde_json::json!({ "tunnel_consent": given }),
+                }],
+                remove: Vec::new(),
+            });
+        settle(self.cx);
+    }
+
+    /// A press and release at `at` with `modifiers` held, the pointer at rest there already.
+    fn click_with(&mut self, at: Point<Pixels>, modifiers: Modifiers) {
+        self.cx
+            .simulate_mouse_down(at, MouseButton::Left, modifiers);
+        self.cx.simulate_mouse_up(at, MouseButton::Left, modifiers);
+        settle(self.cx);
+    }
+}
+
+/// SPEC.md's localhost tunnels: in the Mac app, a loopback address printed in a remote session's terminal shows a
+/// display naming the port and host and saying a plain click still opens it on this Mac, which a printed address
+/// otherwise never gets. Specified: hovering it reads the session's tunnels once; once the helm says the host is
+/// remote, the display shows with the old app's hint, and a plain click opens the address unchanged on this Mac.
+#[gpui::test]
+fn a_loopback_address_in_a_remote_session_offers_a_tunnel_on_a_mac(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.on_a_mac();
+    h.attach_showing(LOOPBACK_LINE);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    assert_eq!(
+        h.helm.commands(),
+        [],
+        "nothing is read before a loopback link is hovered"
+    );
+    let on = h.at_cell(12, 0);
+    h.rest_on(on);
+    h.answer_tunnel_read(true);
+    assert_eq!(
+        h.disclosure_shown(),
+        (true, false),
+        "a display, for a printed address"
+    );
+    assert_eq!(h.hint().as_deref(), Some(LOOPBACK_HINT));
+    assert!(
+        h.cx.debug_bounds(tunnels::HINT_ID).is_some(),
+        "and the hint is drawn"
+    );
+    h.click_with(on, Modifiers::none());
+    assert_eq!(
+        h.cx.opened_url().as_deref(),
+        Some(LOOPBACK_URL),
+        "a plain click opens it here"
+    );
+    assert_eq!(h.helm.commands(), [], "and asks the helm nothing");
+}
+
+/// Off a Mac there is no tunnel to offer, so the terminal does not even ask the helm about one. Specified: with the
+/// platform decided as Linux, hovering a loopback address sends nothing and shows no display.
+#[gpui::test]
+fn off_a_mac_a_loopback_address_reads_nothing_and_shows_nothing(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let owner = h.owner.clone();
+    h.cx.update(|_, cx| owner.update(cx, |owner, _| owner.set_platform(Platform::Linux)));
+    h.attach_showing(LOOPBACK_LINE);
+    h.choose(&owner);
+    let at = h.at_cell(12, 0);
+    h.rest_on(at);
+    assert_eq!(h.helm.commands(), [], "nothing is read");
+    assert_eq!(h.disclosure_shown(), (false, false));
+}
+
+/// A local session's loopback address is this Mac's own, so a plain click is already right and there is nothing to
+/// offer. Specified: when the helm answers `available: false`, hovering shows no display.
+#[gpui::test]
+fn a_local_sessions_loopback_address_gets_no_offer(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.on_a_mac();
+    h.attach_showing(LOOPBACK_LINE);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let at = h.at_cell(12, 0);
+    h.rest_on(at);
+    h.answer_tunnel_read(false);
+    assert_eq!(h.disclosure_shown(), (false, false));
+}
+
+/// With the link choice that leaves clicks to the program, Farhelm opens nothing on a click, tunnel or not, so the
+/// hint would promise something a click does not do. Specified: under "program" a remote session's loopback address
+/// gets no hint and no display.
+#[gpui::test]
+fn no_tunnel_is_offered_when_the_program_owns_clicks(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.on_a_mac();
+    h.link_click("program");
+    h.attach_showing(LOOPBACK_LINE);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let at = h.at_cell(12, 0);
+    h.rest_on(at);
+    h.answer_tunnel_read(true);
+    assert_eq!(h.hint(), None);
+    assert_eq!(h.disclosure_shown(), (false, false));
+}
+
+/// SPEC.md: "Before the first tunnel opens, the user must accept the security warning", consent being a shared helm
+/// preference that is off until accepted; and the helm, not the app, opens the browser at the tunnel's own address.
+/// Specified: a Cmd-click without consent asks the warning and sends nothing; Allow saves `tunnel_consent: true`, and
+/// once that is saved the link goes to the helm's open route as printed; nothing opens in the app itself, and the
+/// tunnels are read again after the open answers.
+#[gpui::test]
+fn a_cmd_click_asks_the_warning_then_opens_the_tunnel_through_the_helm(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.on_a_mac();
+    h.attach_showing(LOOPBACK_LINE);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let on = h.at_cell(12, 0);
+    h.rest_on(on);
+    h.answer_tunnel_read(true);
+    h.click_with(on, cmd());
+    assert!(
+        h.cx.debug_bounds("prompt").is_some(),
+        "the warning asks first"
+    );
+    assert_eq!(
+        h.helm.commands(),
+        [],
+        "and nothing is sent before it is answered"
+    );
+    click(h.cx, "prompt-confirm");
+    let save = h.helm.commands();
+    assert_eq!(
+        save.iter()
+            .map(|c| (c.method, c.path.as_str(), c.body.clone()))
+            .collect::<Vec<_>>(),
+        [(
+            farhelm_helm_client::Method::Put,
+            "/api/preferences",
+            Some(serde_json::json!({ "tunnel_consent": true }))
+        )],
+        "Allow saves consent"
+    );
+    h.helm.reply(save[0].id, 204, None);
+    settle(h.cx);
+    let open = h.helm.commands();
+    assert_eq!(
+        open.iter()
+            .map(|c| (c.method, c.path.as_str(), c.body.clone()))
+            .collect::<Vec<_>>(),
+        [(
+            farhelm_helm_client::Method::Post,
+            "/api/sessions/s1/tunnels/open",
+            Some(serde_json::json!({ "url": LOOPBACK_URL }))
+        )],
+        "then the link goes to the helm as printed"
+    );
+    h.helm.reply(
+        open[0].id,
+        200,
+        Some(serde_json::json!({
+            "tunnel": { "id": "t1", "local_port": 54321, "remote_port": 5173 },
+            "url": "http://127.0.0.1:54321/app?x=1",
+        })),
+    );
+    settle(h.cx);
+    assert_eq!(
+        h.cx.opened_url(),
+        None,
+        "the helm opened the browser, not the app"
+    );
+    assert_eq!(
+        h.helm
+            .commands()
+            .iter()
+            .map(|c| (c.method, c.path.clone()))
+            .collect::<Vec<_>>(),
+        [(
+            farhelm_helm_client::Method::Get,
+            "/api/sessions/s1/tunnels".to_string()
+        )],
+        "and the tunnels are read again"
+    );
+    assert!(
+        h.cx.debug_bounds(tunnels::NOTICE_ID).is_none(),
+        "nothing failed"
+    );
+}
+
+/// The warning is a real choice: declining it must leave everything as it was, and say nothing, since nothing failed.
+/// Specified: Cancel sends nothing and shows no notice.
+#[gpui::test]
+fn declining_the_warning_opens_nothing_and_says_nothing(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.on_a_mac();
+    h.attach_showing(LOOPBACK_LINE);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let on = h.at_cell(12, 0);
+    h.rest_on(on);
+    h.answer_tunnel_read(true);
+    h.click_with(on, cmd());
+    click(h.cx, "prompt-cancel");
+    assert_eq!(h.helm.commands(), []);
+    assert_eq!(h.cx.opened_url(), None);
+    assert!(h.cx.debug_bounds(tunnels::NOTICE_ID).is_none());
+}
+
+/// Once consent is given (here or in another client: it is a shared preference), Cmd-click opens at once; a refusal is
+/// shown in the helm's words in a notice that stays until dismissed. Only Cmd alone means a tunnel: with another
+/// modifier the click opens the address as printed, as a plain click does. Specified: with consent pushed, Cmd-click
+/// sends the open with no warning; the helm's refusal shows in the notice; Dismiss puts it away; Cmd+Shift opens the
+/// address in the app.
+#[gpui::test]
+fn with_consent_a_cmd_click_opens_at_once_and_a_refusal_shows_until_dismissed(
+    cx: &mut TestAppContext,
+) {
+    let mut h = harness(cx);
+    h.on_a_mac();
+    h.tunnel_consent(true);
+    h.attach_showing(LOOPBACK_LINE);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let on = h.at_cell(12, 0);
+    h.rest_on(on);
+    h.answer_tunnel_read(true);
+    h.click_with(on, cmd());
+    assert!(
+        h.cx.debug_bounds("prompt").is_none(),
+        "no warning once consent is given"
+    );
+    let open = h.helm.commands();
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].path, "/api/sessions/s1/tunnels/open");
+    h.helm.reply(
+        open[0].id,
+        409,
+        Some(serde_json::json!("the helm is shutting down")),
+    );
+    settle(h.cx);
+    assert!(
+        h.cx.debug_bounds(tunnels::NOTICE_ID).is_some(),
+        "the refusal shows"
+    );
+    assert_eq!(
+        h.read(|owner, cx| owner
+            .tunnels()
+            .read(cx)
+            .notice()
+            .map(|n| n.raw().to_string())),
+        Some("the helm is shutting down".to_string()),
+        "in the helm's words"
+    );
+    let reread = h.helm.commands();
+    assert_eq!(reread.len(), 1);
+    assert_eq!(
+        reread[0].path, "/api/sessions/s1/tunnels",
+        "the premise: the re-read"
+    );
+    h.helm.reply(
+        reread[0].id,
+        200,
+        Some(serde_json::json!({"available": true, "host_name": "build-box", "consent": true, "tunnels": []})),
+    );
+    settle(h.cx);
+    assert!(
+        h.cx.debug_bounds(tunnels::NOTICE_ID).is_some(),
+        "a successful read after it leaves it up"
+    );
+    // The pointer goes to the button, leaving the link and so its display, which would otherwise cover the notice.
+    let dismiss = test_support::center(h.cx, "terminal-tunnel-notice-dismiss");
+    h.rest_on(dismiss);
+    click(h.cx, "terminal-tunnel-notice-dismiss");
+    settle(h.cx);
+    redraw(h.cx);
+    assert!(
+        h.cx.debug_bounds(tunnels::NOTICE_ID).is_none(),
+        "Dismiss puts it away"
+    );
+    let shift = Modifiers {
+        shift: true,
+        ..cmd()
+    };
+    let at = h.at_cell(13, 0);
+    h.rest_on(at);
+    h.click_with(at, shift);
+    assert_eq!(
+        h.cx.opened_url().as_deref(),
+        Some(LOOPBACK_URL),
+        "Cmd+Shift opens it as printed"
+    );
+    assert_eq!(h.helm.commands(), []);
+}
+
+/// A printed loopback address with a tunnel hint is disclosed like a program's hyperlink, so its display is a
+/// safeguard too: the hint is what tells the user a plain click reaches this Mac rather than the remote host, and the
+/// old app refused a click on such an address, raw or tunneled, while its display was not fully visible. Specified:
+/// with the display faked as having run past the window's edge, a plain click opens nothing and explains why, and a
+/// Cmd-click asks no warning and sends nothing.
+#[gpui::test]
+fn a_hinted_address_whose_display_is_not_fully_visible_is_refused(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.on_a_mac();
+    h.attach_showing(LOOPBACK_LINE);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let on = h.at_cell(12, 0);
+    h.rest_on(on);
+    h.answer_tunnel_read(true);
+    let off_screen = |h: &mut Harness<'_>| {
+        let owner = h.owner.clone();
+        h.cx.update(|_, cx| {
+            let shown = owner.read(cx).disclosure.as_ref().unwrap().drawn.clone();
+            let (bounds, window) = shown.get().unwrap();
+            shown.set(Some((
+                Bounds::new(point(bounds.origin.x, window.height - px(4.)), bounds.size),
+                window,
+            )));
+        });
+    };
+    off_screen(&mut h);
+    h.click_with(on, Modifiers::none());
+    assert_eq!(h.cx.opened_url(), None, "a plain click opens nothing");
+    assert!(
+        h.cx.debug_bounds("terminal-link-refusal").is_some(),
+        "and says why"
+    );
+    let back = h.at_cell(13, 0);
+    h.rest_on(back);
+    off_screen(&mut h);
+    h.click_with(back, cmd());
+    assert!(
+        h.cx.debug_bounds("prompt").is_none(),
+        "a Cmd-click asks nothing"
+    );
+    assert!(
+        h.cx.debug_bounds("terminal-link-refusal").is_some(),
+        "and is refused, saying why"
+    );
+    assert_eq!(h.helm.commands(), [], "and sends nothing");
+}
+
+impl Harness<'_> {
+    /// The steps every Cmd-click test shares: on a Mac, a remote session printing [`LOOPBACK_LINE`], consent given,
+    /// the pointer resting on the address with its tunnel hint shown. Returns where the address is.
+    fn tunnel_offered(&mut self) -> Point<Pixels> {
+        self.on_a_mac();
+        self.tunnel_consent(true);
+        self.attach_showing(LOOPBACK_LINE);
+        let owner = self.owner.clone();
+        self.choose(&owner);
+        let on = self.at_cell(12, 0);
+        self.rest_on(on);
+        self.answer_tunnel_read(true);
+        assert_eq!(
+            self.hint().as_deref(),
+            Some(LOOPBACK_HINT),
+            "the premise: a tunnel is offered"
+        );
+        on
+    }
+
+    /// The tunnel notice's words, as the helm or the app wrote them.
+    fn tunnel_notice(&mut self) -> Option<String> {
+        self.read(|owner, cx| {
+            owner
+                .tunnels()
+                .read(cx)
+                .notice()
+                .map(|notice| notice.raw().to_string())
+        })
+    }
+}
+
+/// Only Cmd alone means a tunnel (the old app's rule): Cmd with Control, Option or fn has other meanings or none, and
+/// a click that is not the tunnel gesture opens the address as printed, as the hint says a plain click does.
+/// Specified: Cmd+Control, Cmd+Option and Cmd+fn send the helm nothing and ask no warning; the address opens as
+/// printed.
+#[gpui::test]
+fn cmd_with_another_modifier_is_not_the_tunnel_gesture(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let on = h.tunnel_offered();
+    for (name, modifiers) in [
+        (
+            "control",
+            Modifiers {
+                control: true,
+                ..cmd()
+            },
+        ),
+        ("option", Modifiers { alt: true, ..cmd() }),
+        (
+            "fn",
+            Modifiers {
+                function: true,
+                ..cmd()
+            },
+        ),
+    ] {
+        h.click_with(on, modifiers);
+        assert_eq!(h.helm.commands(), [], "Cmd+{name} sends the helm nothing");
+        assert!(h.cx.debug_bounds("prompt").is_none(), "nor asks anything");
+        assert!(
+            h.cx.debug_bounds("terminal-link-refusal").is_none(),
+            "and the click went through, as a plain one does"
+        );
+    }
+    // The test platform keeps only the last address opened, so this shows that the clicks opened the address as
+    // printed, not that each did; the helm hearing nothing of any of them is the point.
+    assert_eq!(h.cx.opened_url().as_deref(), Some(LOOPBACK_URL));
+}
+
+/// The old app ran one tunnel action at a time and said so when a second came; a second open sent while the first
+/// is out would race it for the same listener. Specified: a Cmd-click while the session's open is still in flight
+/// sends nothing more and shows "Another tunnel action is still waiting".
+#[gpui::test]
+fn a_second_open_while_one_is_in_flight_says_so(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let on = h.tunnel_offered();
+    h.click_with(on, cmd());
+    assert_eq!(
+        h.helm.commands().len(),
+        1,
+        "the premise: the first open is out"
+    );
+    h.click_with(on, cmd());
+    assert_eq!(h.helm.commands(), [], "no second open");
+    assert_eq!(
+        h.tunnel_notice().as_deref(),
+        Some("Another tunnel action is still waiting")
+    );
+}
+
+/// Allow is only half the answer: if the helm refuses to store consent, no tunnel may open, and the user must hear
+/// why. Specified: a refused consent save shows the helm's words in the notice and sends no open.
+#[gpui::test]
+fn a_refused_consent_save_shows_why_and_opens_nothing(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.on_a_mac();
+    h.attach_showing(LOOPBACK_LINE);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let on = h.at_cell(12, 0);
+    h.rest_on(on);
+    h.answer_tunnel_read(true);
+    h.click_with(on, cmd());
+    click(h.cx, "prompt-confirm");
+    let save = h.helm.commands();
+    assert_eq!(save.len(), 1);
+    assert_eq!(
+        save[0].path, "/api/preferences",
+        "the premise: Allow's consent save"
+    );
+    h.helm.reply(
+        save[0].id,
+        500,
+        Some(serde_json::json!("the store is read-only")),
+    );
+    settle(h.cx);
+    assert_eq!(h.helm.commands(), [], "no open");
+    assert_eq!(h.tunnel_notice().as_deref(), Some("the store is read-only"));
+}
+
+/// A failed read must not cost the offer for as long as the terminal is open, nor be sent again every frame while
+/// the pointer rests. Specified: a refused tunnel read shows in the notice; while the pointer stays on the address
+/// nothing more is sent; once it has left (here to dismiss the notice, which sits over the address's row) and comes
+/// back, the read is sent again, and that answer brings the hint.
+#[gpui::test]
+fn a_failed_tunnel_read_shows_why_and_is_tried_again_on_the_next_hover(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.on_a_mac();
+    h.attach_showing(LOOPBACK_LINE);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let on = h.at_cell(12, 0);
+    h.rest_on(on);
+    let read = h.helm.commands();
+    assert_eq!(read.len(), 1);
+    h.helm
+        .reply(read[0].id, 404, Some(serde_json::json!("no such session")));
+    settle(h.cx);
+    redraw(h.cx);
+    assert_eq!(h.tunnel_notice().as_deref(), Some("no such session"));
+    redraw(h.cx);
+    redraw(h.cx);
+    assert_eq!(
+        h.helm.commands(),
+        [],
+        "not again while the pointer stays on the address"
+    );
+    let dismiss = test_support::center(h.cx, "terminal-tunnel-notice-dismiss");
+    h.rest_on(dismiss);
+    click(h.cx, "terminal-tunnel-notice-dismiss");
+    settle(h.cx);
+    redraw(h.cx);
+    h.rest_on(on);
+    h.answer_tunnel_read(true);
+    assert_eq!(h.hint().as_deref(), Some(LOOPBACK_HINT));
+}
+
+/// The notice sits over the terminal's top rows, so a press on it must be the notice's alone: pressing Dismiss must
+/// not also select, report a click to a program that asked for mouse reports, or open a link printed under it.
+/// Specified: with mouse reporting on, clicking Dismiss puts the notice away and sends the program nothing.
+#[gpui::test]
+fn dismissing_the_tunnel_notice_does_not_reach_the_terminal(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    let on = h.tunnel_offered();
+    h.fake().output(mouse_mode("click"));
+    settle(h.cx);
+    h.click_with(on, cmd());
+    let open = h.helm.commands();
+    h.helm.reply(
+        open[0].id,
+        409,
+        Some(serde_json::json!("the helm is shutting down")),
+    );
+    settle(h.cx);
+    let reread = h.helm.commands();
+    h.helm.reply(
+        reread[0].id,
+        200,
+        Some(serde_json::json!({"available": true, "host_name": "build-box", "consent": true, "tunnels": []})),
+    );
+    settle(h.cx);
+    redraw(h.cx);
+    let _ = h.sent();
+    let dismiss = test_support::center(h.cx, "terminal-tunnel-notice-dismiss");
+    let grid = h.read(|owner, _| owner.grid_origin.unwrap());
+    assert!(
+        dismiss.y > grid.y && dismiss.x > grid.x,
+        "the premise: Dismiss lies over the grid, where a press would otherwise be reported"
+    );
+    h.rest_on(dismiss);
+    click(h.cx, "terminal-tunnel-notice-dismiss");
+    settle(h.cx);
+    redraw(h.cx);
+    assert!(
+        h.cx.debug_bounds(tunnels::NOTICE_ID).is_none(),
+        "Dismiss puts it away"
+    );
+    assert_eq!(h.sent(), [], "and the program heard nothing of the press");
+}
+
+/// Allow can meet another preferences save still in flight (an earlier Allow whose answer has not come, or a Settings
+/// change); the click must then say so rather than do nothing. Specified: with one consent save unanswered, a second
+/// Allow sends nothing more and the notice says another change to the preferences is still being saved.
+#[gpui::test]
+fn a_second_allow_while_consent_is_still_saving_says_so(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.on_a_mac();
+    h.attach_showing(LOOPBACK_LINE);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let on = h.at_cell(12, 0);
+    h.rest_on(on);
+    h.answer_tunnel_read(true);
+    h.click_with(on, cmd());
+    click(h.cx, "prompt-confirm");
+    assert_eq!(
+        h.helm.commands().len(),
+        1,
+        "the premise: the first consent save is out"
+    );
+    h.rest_on(on);
+    h.click_with(on, cmd());
+    click(h.cx, "prompt-confirm");
+    assert_eq!(h.helm.commands(), [], "no second save");
+    assert_eq!(
+        h.tunnel_notice().as_deref(),
+        Some("Another change to the preferences is still being saved; try again")
+    );
+}
+
+/// Whether a click tunnels is decided at the press, with the admission: an address that had no hint (and so no display
+/// to check) when pressed must not tunnel because the session's tunnels were read before the release. Specified: a
+/// Cmd press on the address before the read answers, released after it does, asks no warning, sends the helm nothing
+/// and opens the address as printed.
+#[gpui::test]
+fn a_tunnel_offer_arriving_mid_click_does_not_turn_it_into_a_tunnel(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.on_a_mac();
+    h.tunnel_consent(true);
+    h.attach_showing(LOOPBACK_LINE);
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let on = h.at_cell(12, 0);
+    h.rest_on(on);
+    h.cx.simulate_mouse_down(on, MouseButton::Left, cmd());
+    settle(h.cx);
+    h.answer_tunnel_read(true);
+    h.cx.simulate_mouse_up(on, MouseButton::Left, cmd());
+    settle(h.cx);
+    assert!(h.cx.debug_bounds("prompt").is_none());
+    assert_eq!(h.helm.commands(), [], "no tunnel");
+    assert_eq!(
+        h.cx.opened_url().as_deref(),
+        Some(LOOPBACK_URL),
+        "opened as printed"
+    );
+}
+
+/// SPEC.md: the hover "preserves any OSC hyperlink mismatch warning". A program's hyperlink whose text names one site
+/// while it goes to the remote host's loopback gets both: the loud warning first, the tunnel hint after it.
+#[gpui::test]
+fn a_lookalike_loopback_hyperlink_keeps_its_warning_and_adds_the_hint(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.on_a_mac();
+    h.attach_hyperlink("https://bank.example/", "http://localhost:5173/app?x=1");
+    let owner = h.owner.clone();
+    h.choose(&owner);
+    let at = h.at_cell(4, 0);
+    h.rest_on(at);
+    h.answer_tunnel_read(true);
+    assert_eq!(h.disclosure_shown(), (true, true), "the warning stays");
+    assert_eq!(
+        h.hint().as_deref(),
+        Some(LOOPBACK_HINT),
+        "and the hint is added"
     );
 }
 
