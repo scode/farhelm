@@ -19,8 +19,10 @@
 //! - **Resolving.** Each reference becomes the template the store holds under that name now. On the page, a ⚡ or number
 //!   key with nothing usable bound opens Templates with its hint, and a name the store no longer has opens New with a
 //!   refusal saying so; in the launcher both are refusals shown there, and nothing opens. While the helm reports its
-//!   templates unavailable, every press is refused with the old app's words for a failed read. Every refusal, a
-//!   sequence's included, is a [`Refusal`] routed by one function ([`refused`]).
+//!   templates unavailable, every press is refused with the old app's words for a failed read, and so is a ⚡ or
+//!   number-key press while the shortcut bindings cannot be known (the preferences unavailable, or not arrived): the
+//!   old app read both afresh for each press and refused when either read failed. Every refusal, a sequence's
+//!   included, is a [`Refusal`] routed by one function ([`refused`]).
 //! - **Applying.** The templates are applied all or nothing, through [`super::apply`], the only path by which a template
 //!   changes a draft, and always against the model catalog the launcher read: in the launcher to its draft, each press
 //!   or completed sequence its own refusal unit; on the page to New's prefill, in a launcher prepared out of sight
@@ -88,16 +90,30 @@ pub enum Reference {
     Name(String),
 }
 
+impl Reference {
+    /// Whether resolving this reference reads the store's ⚡ mark or number keys, so it cannot be resolved while they
+    /// are unknown.
+    fn reads_bindings(&self) -> bool {
+        match self {
+            Reference::Mark | Reference::Key(_) => true,
+            Reference::Name(_) => false,
+        }
+    }
+}
+
 /// Quick launch `references`, pressed from `origin`, in `window`: the module docs' path. Call it from the handler of the
 /// user's press (or a sequence's Enter, or a list's pick).
 pub fn dispatch(origin: Origin, references: &[Reference], window: &mut Window, cx: &mut App) {
     if references.is_empty() || refused_unavailable(window, cx) {
         return;
     }
+    let Some(bindings) = known_bindings(references, window, cx) else {
+        return;
+    };
     if let Some(launcher) = entry::open_launcher(window, cx) {
-        in_launcher(&launcher, references, window, cx);
+        in_launcher(&launcher, references, &bindings, window, cx);
     } else if on_page(window, cx) {
-        on_the_page(origin, references, window, cx);
+        on_the_page(origin, references, &bindings, window, cx);
     }
 }
 
@@ -139,6 +155,25 @@ pub(super) fn refused_unavailable(window: &mut Window, cx: &mut App) -> bool {
     };
     refused(&Refusal::Unavailable(error), window, cx);
     true
+}
+
+/// The bindings `references` resolve through, or `None` once the press is refused because they cannot be known
+/// ([`Bindings::read`]), as the old app refused a press whose fresh preference read failed, with that read's words
+/// ("Couldn't prepare quick launch:" on the page, "Couldn't load templates:" in the launcher; it read the preferences
+/// and the templates as one step). Acting on them instead would open Templates to mark a template that may hold ⚡
+/// already, or say a key is unbound when it is not. A press that names its templates by name (a sequence's resolved
+/// names, a list's pick) reads no binding and goes on with whatever the store holds, which it never consults.
+fn known_bindings(references: &[Reference], window: &mut Window, cx: &mut App) -> Option<Bindings> {
+    if !references.iter().any(Reference::reads_bindings) {
+        return Some(Bindings::current(cx));
+    }
+    match Bindings::read(cx) {
+        Ok(bindings) => Some(bindings),
+        Err(unread) => {
+            refused(&Refusal::from(unread), window, cx);
+            None
+        }
+    }
 }
 
 /// The helm's words for why its templates are unavailable, if it reports them so; `None` before the first snapshot.
@@ -342,8 +377,14 @@ fn on_page(window: &Window, cx: &mut App) -> bool {
 
 /// The page's half of [`dispatch`]: resolve, then prepare New's prefill out of sight, apply once the catalog is read,
 /// and launch unseen or show New saying why not.
-fn on_the_page(origin: Origin, references: &[Reference], window: &mut Window, cx: &mut App) {
-    let templates = match resolve(references, &Bindings::current(cx), &stored_templates(cx)) {
+fn on_the_page(
+    origin: Origin,
+    references: &[Reference],
+    bindings: &Bindings,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let templates = match resolve(references, bindings, &stored_templates(cx)) {
         Ok(templates) => templates,
         Err(refusal) => return refused(&refusal, window, cx),
     };
@@ -382,6 +423,7 @@ fn on_the_page(origin: Origin, references: &[Reference], window: &mut Window, cx
 fn in_launcher(
     launcher: &Entity<Launcher>,
     references: &[Reference],
+    bindings: &Bindings,
     window: &mut Window,
     cx: &mut App,
 ) {
@@ -390,7 +432,7 @@ fn in_launcher(
     if launcher.read(cx).save_panel_open() {
         return;
     }
-    let resolved = resolve(references, &Bindings::current(cx), &stored_templates(cx));
+    let resolved = resolve(references, bindings, &stored_templates(cx));
     launcher.update(cx, |launcher, cx| {
         launcher.apply_batch(
             move |draft, catalog, cx| {
