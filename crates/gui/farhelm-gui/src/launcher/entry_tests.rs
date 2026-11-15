@@ -290,17 +290,25 @@ fn new_waits_for_a_host_change(cx: &mut TestAppContext) {
     let (mut helm, cx) = window_with(cx, None);
     let path = start_host_change(cx, HostChange::Probe);
     cx.run_until_parked();
-    let probe = helm
-        .commands()
-        .into_iter()
-        .find(|command| command.path == path)
+    let sent = helm.commands();
+    let probe = sent
+        .iter()
+        .position(|command| command.path == path)
         .expect("the premise: the probe is in flight");
     assert!(
         !cx.update(|_, cx| new_available(cx)),
         "New is unavailable while the probe is out"
     );
     assert!(!new(cx), "and opens nothing");
-    helm.reply(probe.id, 200, Some(json!({})));
+    // The fake answers in order: what the window sent before the probe (each connected host's trash read) goes first.
+    for earlier in &sent[..probe] {
+        assert_eq!(
+            earlier.path, "/api/checkout-trash/list",
+            "the premise: only trash reads went out before the probe"
+        );
+        helm.reply(earlier.id, 200, None);
+    }
+    helm.reply(sent[probe].id, 200, Some(json!({})));
     settle(cx);
     assert!(new(cx), "with the probe answered, New opens");
 }
