@@ -2109,6 +2109,34 @@ class Smoke(unittest.TestCase):
         self.ok("wait", "--gone", LAUNCHER_SUMMARY)
         self.assertEqual(set(listed_titles()), before, "nothing was started or replaced")
 
+    # ---- A row menu's arrow key (71), on a session of its own -------------------------------------------------------
+
+    def test_71_up_on_a_rows_closed_button_opens_its_menu_on_delete(self) -> None:
+        """A keyboard user reaches a row's commands through its actions button, and the old toggle opened its menu on
+        Up at its last command, Delete, so Delete is one key away rather than a walk through the menu. This is the one
+        smoke step that presses an arrow on a menu's toggle through the platform's real key path; the in-process tests
+        cover Down and the menu's own keys. Specified, on a basic fake-agent session this step creates under a title of
+        its own and never opens: a click on its actions button opens its menu and Escape closes it with focus on the
+        button; Up then opens the menu with focus on Delete, and Escape returns focus to the button."""
+        fixtures = json.loads((RUN / "run.json").read_text())["binaries"]["fixtures"]
+        title = f"Row menu keys {uuid.uuid4().hex[:8]}"
+        body = gui_agent.seed_body(0, gui_agent.SESSION_CWD, fixtures)
+        body["title"] = title
+        gui_agent.helm_request(RUN, "POST", "/api/sessions", body)
+        self.ok("wait", "--text", title)
+        button = rf'button "Session actions for {re.escape(title)}" \[focused\]'
+
+        self.ok("click", f"text:Session actions for {title}")
+        self.ok("wait", "--text", MENU_DESCRIPTION)
+        self.ok("press", "escape")
+        self.ok("wait", "--gone", MENU_DESCRIPTION)
+        self.assertRegex(self.ok("snapshot", "-i"), button, "premise: focus is on the row's actions button")
+        self.ok("press", "up")
+        self.ok("wait", "--text", MENU_DESCRIPTION)
+        self.assertRegex(self.ok("snapshot", "-i"), r'menuitem "Delete" \[focused\]', "Up opens on Delete")
+        self.ok("press", "escape")
+        self.ok("wait", "--gone", MENU_DESCRIPTION)
+        self.assertRegex(self.ok("snapshot", "-i"), button, "Escape returns focus to the button")
 
 def waiting_approvals() -> list[dict]:
     """The requests the helm holds for the user's answer, oldest first (`GET /api/approvals`)."""

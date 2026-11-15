@@ -1,6 +1,6 @@
-//! Tests of a session row's actions menu, its Rename and its Delete: the menu's placement and focus, Rename opening the
-//! editor for its row, the question and the precondition each request carries, what a pending or refused Delete shows,
-//! the selection while a Delete runs, and the Delete shortcut.
+//! Tests of a session row's actions menu, its Rename and its Delete: the menu's placement, keys, focus and one
+//! highlight, Rename opening the editor for its row, the question and the precondition each request carries, what a
+//! pending or refused Delete shows, the selection while a Delete runs, and the Delete shortcut.
 //!
 //! Everything runs in the real main view over the helm client's fake, as the list's own tests do, and reads what the
 //! window sent from the fake and what it drew from GPUI's driver record of the frame. Controls are found by their ids:
@@ -15,7 +15,7 @@ use farhelm_proto::ui_channel::{
 };
 use gpui::{
     Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, PlatformInput, Point,
-    TestAppContext, VisualTestContext,
+    TestAppContext, VisualTestContext, px,
 };
 use serde_json::{Value, json};
 
@@ -165,13 +165,15 @@ pub(super) fn click_at(at: Point<Pixels>) -> [PlatformInput; 2] {
 /// its first command, keeps Tab inside, and Escape gives focus back to the button that opened it, on every platform.
 /// Opening a row's menu is not opening its session, which would switch what the user is looking at. Run under macOS's
 /// click rule, where the click leaves the button unfocused, so only the menu naming its button as the return target
-/// brings focus back there. Specified: clicking b's menu button opens the menu below the button with focus on its first
-/// command, Rename, its header names b and says "Codex · Running", a is still the open session and nothing is sent;
+/// brings focus back there. Specified: clicking b's menu button opens the menu beside the button, the layer manager's
+/// beside placement (its left edge the button's right edge plus 10 and its top the button's top less 4, each rounded
+/// to a whole pixel; `layers_tests.rs` pins that placement and its clamp for any anchor), with focus on its first
+/// command, Rename; its header names b and says "Codex · Running", a is still the open session and nothing is sent;
 /// Tab moves through Mark unread (b reads seen), Pin to top, Clone, Replace with…, Replace, Stop and Delete, in the old
 /// menu's order (the separators between their groups take no focus), and then wraps to Rename, staying in the menu;
 /// Escape closes the menu and focus is on b's button.
 #[gpui::test]
-fn the_menu_opens_below_its_button_holds_focus_and_leaves_the_selection(cx: &mut TestAppContext) {
+fn the_menu_opens_beside_its_button_holds_focus_and_leaves_the_selection(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
     assert_eq!(selected(cx).as_deref(), Some("a"), "the premise: a is open");
     deletes(&mut fake);
@@ -185,9 +187,13 @@ fn the_menu_opens_below_its_button_holds_focus_and_leaves_the_selection(cx: &mut
     test_support::click(cx, "session-menu-b");
     let button = test_support::bounds(cx, "session-menu-b");
     let menu = test_support::bounds(cx, "session-menu");
-    assert!(
-        menu.top() >= button.bottom(),
-        "the menu is below its button: {menu:?} under {button:?}"
+    assert_eq!(
+        menu.origin,
+        gpui::point(
+            (button.right() + px(10.)).round(),
+            (button.top() - px(4.)).round()
+        ),
+        "the menu is beside its button: {menu:?} beside {button:?}"
     );
     assert_eq!(focused_id(cx).as_deref(), Some("session-menu-rename"));
     assert_eq!(
@@ -238,6 +244,120 @@ fn a_pushed_removal_of_the_row_closes_its_menu(cx: &mut TestAppContext) {
         cx.update(|window, cx| window.focused(cx).is_some()),
         "focus recovered rather than being left on b's button, which went with its row"
     );
+}
+
+// ---- The menu's keys and its one highlight --------------------------------------------------------------------------
+
+/// SPEC.md has menus "use their own arrow keys", and the old row menu's closed toggle opened on Down at its first
+/// command and on Up at its last (`closed_toggle_key_intent` in `menu_panel.rs` at reference commit `24bc0580`), so a
+/// keyboard user never opens the menu and then walks to its far end. Home and End are the old menu's too, and the layer
+/// manager's menu context does not bind them. Run under macOS's click rule, so focus is on the button only because the
+/// closing menu returned it there. Specified: with a open and b's button focused (its menu opened by a click and closed
+/// by Escape), Down opens b's menu with focus on Rename; End moves to Delete and Home back to Rename; Escape closes it
+/// with focus on b's button; Up opens it with focus on Delete; Escape again returns focus to the button; a is still
+/// the open session and nothing is sent. (A modified or held arrow opening nothing is pinned once, for every toggle, by
+/// `components/tests/menu_keys.rs`.)
+#[gpui::test]
+fn down_and_up_on_the_closed_button_open_the_menu_on_its_first_and_last_command(
+    cx: &mut TestAppContext,
+) {
+    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
+    deletes(&mut fake);
+    cx.update(|_, cx| crate::focus::set_click_focuses_controls(false, cx));
+    test_support::click(cx, "session-menu-b");
+    test_support::keys(cx, "escape");
+    assert!(!any_layer(cx), "the premise: the menu is closed");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("session-menu-b"),
+        "the premise: b's button holds focus"
+    );
+
+    test_support::keys(cx, "down");
+    assert!(drawn(cx, "session-menu"), "Down opened the menu");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-rename"));
+    test_support::keys(cx, "end");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-delete"));
+    test_support::keys(cx, "home");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-rename"));
+    test_support::keys(cx, "escape");
+    assert!(!any_layer(cx));
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-b"));
+
+    test_support::keys(cx, "up");
+    assert!(drawn(cx, "session-menu"), "Up opened the menu");
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-delete"));
+    test_support::keys(cx, "escape");
+    assert!(!any_layer(cx));
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-b"));
+
+    assert_eq!(selected(cx).as_deref(), Some("a"));
+    assert_eq!(sent(&mut fake), []);
+}
+
+/// SPEC.md, "Things changing underneath": "A menu has one highlight. Whichever moved last, the pointer or the keys,
+/// sets it, and Enter acts on the highlighted item." The old app once painted two fills at once, the first command's
+/// for focus and the hovered one's for hover, and Enter then ran the focused one; `menu-highlight.spec.ts` at reference
+/// commit `24bc0580` pinned the fix ("session menu shares one highlight between hover and arrow keys"). Here a
+/// command's fill is drawn from focus alone ([`crate::components::MenuItem`]), so one focused command is one highlight,
+/// and this pins that the pointer and the keys move that one focus. Specified: with b's menu open on Rename, the
+/// pointer entering Clone moves focus to Clone; with the pointer resting there, Down moves it to Replace with…, Up back
+/// to Clone and Up again to Pin to top, and a redraw leaves it there; the pointer leaving the menu leaves the highlight
+/// where it is, and entering Clone again takes it there; Enter then runs Clone, opening the launcher with its "Launch"
+/// action, never Rename's editor.
+#[gpui::test]
+fn the_pointer_and_the_arrows_move_one_highlight_and_enter_runs_it(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
+    deletes(&mut fake);
+    test_support::click(cx, "session-menu-b");
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("session-menu-rename"),
+        "the premise: the menu starts on Rename"
+    );
+    let clone = test_support::center(cx, "session-menu-clone");
+    // Off the menu, over the list to its left, level with Clone.
+    let menu = test_support::bounds(cx, "session-menu");
+    let away = gpui::point(menu.left() - px(40.), clone.y);
+    assert!(
+        !menu.contains(&away),
+        "the premise: the parking point is outside the menu"
+    );
+
+    cx.simulate_mouse_move(clone, None, Modifiers::none());
+    test_support::settle(cx);
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-clone"));
+    for (key, expected) in [
+        ("down", "session-menu-replace-with"),
+        ("up", "session-menu-clone"),
+        ("up", "session-menu-pin"),
+    ] {
+        test_support::keys(cx, key);
+        assert_eq!(focused_id(cx).as_deref(), Some(expected), "after {key}");
+    }
+    test_support::redraw(cx);
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("session-menu-pin"),
+        "the resting pointer does not take the highlight back"
+    );
+
+    cx.simulate_mouse_move(away, None, Modifiers::none());
+    test_support::settle(cx);
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some("session-menu-pin"),
+        "leaving the menu leaves the highlight where it is"
+    );
+    cx.simulate_mouse_move(clone, None, Modifiers::none());
+    test_support::settle(cx);
+    assert_eq!(focused_id(cx).as_deref(), Some("session-menu-clone"));
+
+    test_support::keys(cx, "enter");
+    assert!(!drawn(cx, "session-menu"), "the menu closed");
+    assert!(!drawn(cx, "rename"), "Rename did not run");
+    let action = launch_action(cx);
+    assert!(action.starts_with("Launch"), "Clone ran: {action}");
 }
 
 // ---- Clone and Replace with -----------------------------------------------------------------------------------------
@@ -438,9 +558,10 @@ fn only_the_open_rows_rename_names_the_shortcut(cx: &mut TestAppContext) {
 /// it kills the agent, quotes the title on a line of its own and, for a managed checkout, says what happens to it. A
 /// click on the question's empty space keeps focus on Confirm (SPEC.md gives the row Delete question that rule), so the
 /// Enter after it still answers what the user was looking at. Specified, by keys after the menu opens: Up to Delete
-/// (wrapping from Rename to the last command) and Enter asks with focus on Confirm and sends nothing; the question's
-/// lines are the consequence, the quoted title and the checkout line; a click on the question's empty space leaves
-/// focus on Confirm; Enter then sends the Delete with no precondition flag and closes the question.
+/// (wrapping from Rename to the last command) and Enter asks with focus on Confirm and sends nothing, the question
+/// standing beside the row (right of its menu button, as the old app turned the menu into the question); its lines are
+/// the consequence, the quoted title and the checkout line; a click on the question's empty space leaves focus on
+/// Confirm; Enter then sends the Delete with no precondition flag and closes the question.
 #[gpui::test]
 fn delete_then_enter_asks_about_a_live_session_and_enter_deletes_it(cx: &mut TestAppContext) {
     let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0)], false));
@@ -454,6 +575,14 @@ fn delete_then_enter_asks_about_a_live_session_and_enter_deletes_it(cx: &mut Tes
     );
     test_support::keys(cx, "enter");
     assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
+    let (question, button) = (
+        test_support::bounds(cx, "prompt"),
+        test_support::bounds(cx, "session-menu-a"),
+    );
+    assert!(
+        question.left() > button.right(),
+        "asked beside the row, from the anchor its menu opened on: {question:?} right of {button:?}"
+    );
     let texts = painted(&frame(cx));
     for line in [
         "Still running — deleting kills the agent:",

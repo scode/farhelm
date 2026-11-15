@@ -457,14 +457,15 @@ fn a_scroll_over_the_rows_counts_as_movement(cx: &mut TestAppContext) {
     assert_eq!(row_order(&frame(cx)), ["c", "b", "a"]);
 }
 
-/// A row's menu opens below its button and covers part of the rows, so a pointer resting on the menu reads as off the
-/// rows; when the menu closes under it, releasing the hold would reorder the rows under a pointer that never moved,
-/// which is what the hold exists to prevent. GPUI keeps the pointer's last position after it leaves the window, so the
-/// close also asks whether the pointer is in the window; GPUI's test window never says so on Linux, so the test hands
-/// the list each answer. Specified: with the pointer in the window, a's menu opened by a click and the order pushed as
-/// c, b, a, the pointer moved onto the menu where it lies over the rows, and the menu closed with Escape, the rows stay
-/// a, b, c, and once the pointer leaves the rows the helm's order shows; the same close with the pointer reported out of
-/// the window (its last position still on the menu) releases the hold at once.
+/// A row's menu opens beside its button, past the sidebar's edge, but in a window too narrow for that the layer
+/// manager's clamp pushes it back over part of the rows, so a pointer resting on the menu reads as off the rows; when
+/// the menu closes under it, releasing the hold would reorder the rows under a pointer that never moved, which is what
+/// the hold exists to prevent. GPUI keeps the pointer's last position after it leaves the window, so the close also
+/// asks whether the pointer is in the window; GPUI's test window never says so on Linux, so the test hands the list
+/// each answer. Specified: in a window 560 pixels wide, with the pointer in the window, a's menu opened by a click and
+/// the order pushed as c, b, a, the pointer moved onto the menu where it lies over the rows, and the menu closed with
+/// Escape, the rows stay a, b, c, and once the pointer leaves the rows the helm's order shows; the same close with the
+/// pointer reported out of the window (its last position still on the menu) releases the hold at once.
 #[gpui::test]
 fn a_menu_closing_over_the_rows_keeps_the_hold(cx: &mut TestAppContext) {
     let rows = [(session("a"), 0), (session("b"), 0), (session("c"), 0)];
@@ -472,6 +473,9 @@ fn a_menu_closing_over_the_rows_keeps_the_hold(cx: &mut TestAppContext) {
     fake.connect(snapshot(&rows, false));
     cx.run_until_parked();
     let (main, cx) = test_support::open_view(cx, MainView::new);
+    // Narrower than the sidebar and a menu beside it, so the menu is clamped back over the rows.
+    cx.simulate_resize(gpui::size(px(560.), px(700.)));
+    test_support::settle(cx);
     let list = cx.update(|_, cx| main.read(cx).session_list().clone());
     let mut close_on_menu =
         |in_window: fn(&gpui::Window) -> bool, order: [&str; 3], cx: &mut VisualTestContext| {

@@ -2225,7 +2225,7 @@ fn session_lists_then(state: &SceneState, window: &mut Window, cx: &mut App) -> 
     session_lists(state, window, cx)
 }
 
-/// The waiting row's actions menu, open below its button with Rename, its first command, highlighted (reference
+/// The waiting row's actions menu, open beside its button with Rename, its first command, highlighted (reference
 /// `session-row-menu`).
 fn session_row_menu_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     session_list_then(
@@ -2420,7 +2420,7 @@ fn press_bell_b(_: &Entity<SessionList>, state: &SceneState, window: &mut Window
 /// The waiting row's Delete question, asked from its row as the menu's Delete asks it (reference
 /// `row-delete-confirmation`): its tab, its running agent, its quoted title and its managed checkout. The
 /// `anchored-prompt` golden pins the prompt's own look with made-up wording; this one pins the row's wording and where
-/// it sits over the list.
+/// it sits beside the list.
 fn row_delete_confirmation_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     session_list_then(
         state,
@@ -4683,8 +4683,9 @@ static SCENES: &[Scene] = &[
     Scene {
         name: "session-row-menu",
         // The app's minimum window height, so the whole menu shows, Delete last, since Clone and Replace with joined
-        // it.
-        size: (420., 560.),
+        // it; wide enough, with the sidebar centred, for the menu beside it, where it opens, rather than pushed back
+        // over the list by the window's edge.
+        size: (920., 560.),
         draw: session_lists_then,
         setup: session_row_menu_setup,
     },
@@ -4722,7 +4723,8 @@ static SCENES: &[Scene] = &[
     },
     Scene {
         name: "row-delete-confirmation",
-        size: (420., 418.),
+        // Wide enough, with the sidebar centred, for the question beside it, where it opens from the row's menu button.
+        size: (1000., 418.),
         draw: session_lists_then,
         setup: row_delete_confirmation_setup,
     },
