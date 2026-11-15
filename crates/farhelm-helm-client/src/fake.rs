@@ -276,6 +276,7 @@ mod tests {
                 availability: farhelm_proto::ui_channel::Availability::Available,
                 order: vec![],
                 counts: None,
+                selected_outside_query: None,
             },
             upsert: vec![],
             remove: vec![],

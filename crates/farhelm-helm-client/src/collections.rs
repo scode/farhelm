@@ -16,6 +16,12 @@
 //! [`Collections`] is the one copy of this state. Views read it through [`Collections::ordered`] and
 //! [`Collections::get`], which hand out references; a view that kept its own copy of an entry would be a second
 //! store that the next change silently leaves behind.
+//!
+//! The session list can hold one entry that is not part of the list: the session the GUI has open, carried while the
+//! session query's filter or the listing cap leaves it out, which its metadata names
+//! (`CollectionMeta::selected_outside_query`). Its key is not in the order, so [`Collections::ordered`] and every list
+//! drawn from the order skip it, while [`Collections::get`] finds it like any entry, which is what lets the open
+//! session's pane read its current state from here.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -273,7 +279,9 @@ impl Collections {
     }
 
     /// The entries of `T`'s collection in the helm's order. A key the order names but no entry carries is skipped:
-    /// the helm keeps the last available order while a collection is unavailable, and its entries may be gone.
+    /// the helm keeps the last available order while a collection is unavailable, and its entries may be gone. The
+    /// entry carried outside the query (`CollectionMeta::selected_outside_query`) is not in the order, so it is not
+    /// here.
     pub fn ordered<T: Pushed>(&self) -> Vec<&T> {
         let Some(stored) = self.stored.get(&T::COLLECTION) else {
             return Vec::new();
@@ -287,7 +295,7 @@ impl Collections {
             .collect()
     }
 
-    /// One entry of `T`'s collection by key.
+    /// One entry of `T`'s collection by key, the entry carried outside the query included.
     pub fn get<T: Pushed>(&self, key: &str) -> Option<&T> {
         T::from_entry(self.stored.get(&T::COLLECTION)?.entries.get(key)?)
     }
@@ -347,6 +355,7 @@ mod tests {
             availability: Availability::Available,
             order: order.iter().map(|key| key.to_string()).collect(),
             counts: None,
+            selected_outside_query: None,
         }
     }
 
@@ -482,6 +491,78 @@ mod tests {
             differences.contains(&"Preferences: held but not in the snapshot".to_string()),
             "{differences:?}"
         );
+    }
+
+    /// The open session's pane, header and Rename read its row from here also while the session query's filter or the
+    /// listing cap leaves it out of the list, so the helm carries it with its key named in the metadata
+    /// (`selected_outside_query`) and kept out of the order. The store must keep that entry out of what a list draws
+    /// while a lookup by key finds it, and follow it through the ordinary changes: the filter starting to match it
+    /// (listed, unmarked, nothing resent) and its removal. Checked against a fresh snapshot at each step.
+    #[test]
+    fn the_session_carried_outside_the_query_is_found_by_key_but_not_listed() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../farhelm-helm/http-contract/session-list.json"
+        ))
+        .unwrap();
+        let session = |key: &str| KeyedEntry {
+            key: key.into(),
+            value: fixture["sessions"][0].clone(),
+        };
+        let sessions = |order: &[&str], carried: Option<&str>| {
+            let mut meta = meta(order);
+            meta.selected_outside_query = carried.map(str::to_owned);
+            let entries = order.iter().chain(carried.as_ref()).map(|key| session(key));
+            decode_state(CollectionState {
+                collection: Collection::Sessions,
+                meta,
+                entries: entries.collect(),
+            })
+            .unwrap()
+        };
+        let shown = |held: &Collections| {
+            (
+                held.ordered::<SessionRow>().len(),
+                held.get::<SessionRow>("open").is_some(),
+                held.meta(Collection::Sessions)
+                    .and_then(|meta| meta.selected_outside_query.clone()),
+            )
+        };
+
+        let mut held = Collections::default();
+        held.install(&[sessions(&["a", "b"], Some("open"))]);
+        assert_eq!(
+            shown(&held),
+            (2, true, Some("open".into())),
+            "the list skips the carried session and a lookup finds it"
+        );
+
+        held.apply(&changes(
+            Collection::Sessions,
+            &["a", "b", "open"],
+            vec![],
+            &[],
+        ));
+        assert_eq!(
+            held.check_against(&[sessions(&["a", "b", "open"], None)]),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            shown(&held),
+            (3, true, None),
+            "once the query matches it, it is an ordinary listed session"
+        );
+
+        held.apply(&changes(
+            Collection::Sessions,
+            &["a", "b"],
+            vec![],
+            &["open"],
+        ));
+        assert_eq!(
+            held.check_against(&[sessions(&["a", "b"], None)]),
+            Vec::<String>::new()
+        );
+        assert_eq!(shown(&held), (2, false, None));
     }
 
     /// An entry that is not its collection's type cannot be filed, and a half-decoded message would leave the list
