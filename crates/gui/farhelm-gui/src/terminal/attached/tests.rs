@@ -663,7 +663,8 @@ fn a_programs_clipboard_write_reaches_the_clipboard(cx: &mut TestAppContext) {
 /// A detach that waits for the user shows "Detached:" with the helm's reason, escaped as host text, and a Take
 /// control button that attaches again through the displacing route. A refusal shows the old app's "Connection error"
 /// and offers the same, since the stream waits for Take control there too: without the button the terminal would stay
-/// dead until the session is reopened. A closed tab offers nothing, since there is nothing left to take.
+/// dead until the session is reopened. A tab closed after it was attached says nothing at all: the session view drops
+/// it moments later, and SPEC.md has a reaped tab disappear silently.
 #[gpui::test]
 fn detached_and_refused_offer_take_control(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -708,8 +709,29 @@ fn detached_and_refused_offer_take_control(cx: &mut TestAppContext) {
     h.fake()
         .detach(Some(DetachCode::TabClosed), "the tab was closed");
     settle(h.cx);
-    assert!(!h.status().unwrap().take_control);
+    assert_eq!(h.status(), None, "a closed tab goes silently");
     assert!(h.cx.debug_bounds("terminal-take-control").is_none());
+}
+
+/// A tab the helm cannot attach (the supervisor never minted it, or it went before the attach) is detached as a closed
+/// tab before anything was shown. Unlike a tab that was attached and then reaped, it is not about to be dropped by the
+/// session view, so it must say why its pane is blank (the old spec's "a tab the supervisor cannot attach explains
+/// itself instead of showing a blank pane"), and offer nothing to take. Specified: a stream detached as a closed tab
+/// before its first replay shows "Detached: " with the helm's reason and no Take control.
+#[gpui::test]
+fn a_tab_closed_before_it_was_ever_attached_explains_itself(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.fake().attach();
+    h.fake()
+        .detach(Some(DetachCode::TabClosed), "no such terminal tab");
+    settle(h.cx);
+    let line = h.status().expect("the blank pane says why");
+    assert_eq!(line.words, "Detached: ");
+    assert_eq!(
+        line.reason.as_ref().map(HostText::raw),
+        Some("no such terminal tab")
+    );
+    assert!(!line.take_control);
 }
 
 /// A message the grid model refuses ends the stream: the owner closes it, says "Terminal stream error:" with the
