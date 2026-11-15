@@ -15,7 +15,7 @@ use super::view_tests::{codex, draft, fixture_hosts, launcher_with_hosts, name_o
 use crate::test_support::{self, keys, settle};
 
 /// `harness` launched with `model`, `effort` and `permissions`.
-fn chosen(
+pub(super) fn chosen(
     harness: LaunchHarness,
     model: Option<&str>,
     effort: Option<LaunchEffort>,
@@ -34,7 +34,7 @@ fn chosen(
 }
 
 /// One launch in the helm's history, of `selection` in the folder `cwd`.
-fn launched(cwd: &str, selection: &LaunchSelection) -> Value {
+pub(super) fn launched(cwd: &str, selection: &LaunchSelection) -> Value {
     json!({
         "host": 1,
         "github_repo": null,
@@ -47,12 +47,12 @@ fn launched(cwd: &str, selection: &LaunchSelection) -> Value {
 }
 
 /// The helm's history answer holding `launches`, newest first.
-fn history(launches: Vec<Value>) -> Value {
+pub(super) fn history(launches: Vec<Value>) -> Value {
     json!({ "launches": launches, "folders": [], "checkout_config_revision": 1 })
 }
 
 /// Answer every command the window sent since the last call: the history read with `answer`, the rest with no body.
-fn answer_history(helm: &mut FakeHelm, cx: &mut VisualTestContext, answer: &Value) {
+pub(super) fn answer_history(helm: &mut FakeHelm, cx: &mut VisualTestContext, answer: &Value) {
     cx.run_until_parked();
     let mut read = false;
     for command in helm.commands() {
@@ -68,7 +68,7 @@ fn answer_history(helm: &mut FakeHelm, cx: &mut VisualTestContext, answer: &Valu
 }
 
 /// The creates (`POST /api/sessions`) the window sent since the last call; everything else is answered with no body.
-fn creates(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<FakeCommand> {
+pub(super) fn creates(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<FakeCommand> {
     cx.run_until_parked();
     let mut creates = Vec::new();
     for command in helm.commands() {
@@ -88,7 +88,7 @@ fn strip_shown(cx: &mut VisualTestContext) -> bool {
 }
 
 /// The YOLO Codex setup and the default Claude one, both in `/tmp`.
-fn two_setups() -> Value {
+pub(super) fn two_setups() -> Value {
     history(vec![
         launched(
             "/tmp",
@@ -104,7 +104,7 @@ fn two_setups() -> Value {
 }
 
 /// New on host1 in `/tmp` with `answer` as its history.
-fn new_in_tmp<'a>(
+pub(super) fn new_in_tmp<'a>(
     cx: &'a mut TestAppContext,
     answer: &Value,
 ) -> (FakeHelm, &'a mut VisualTestContext) {
@@ -400,4 +400,19 @@ fn focus_follows_the_setup_when_the_rows_change(cx: &mut TestAppContext) {
         json!("/tmp"),
         "the folder setup launched"
     );
+}
+
+/// A row's name and hover help draw a custom model id escaped, as every host value is. Why: the model id is whatever
+/// the user typed, and a hidden direction mark in it would otherwise reorder the words a screen reader and the hover
+/// help say (SPEC.md: host text is escaped "including in accessible names").
+#[gpui::test]
+fn a_row_names_a_custom_model_escaped(cx: &mut TestAppContext) {
+    let answer = history(vec![launched(
+        "/tmp",
+        &chosen(LaunchHarness::Codex, Some("m\u{202e}x"), None, None),
+    )]);
+    let (_helm, cx) = new_in_tmp(cx, &answer);
+    let name = name_of(cx, "launcher-recent-0").unwrap_or_default();
+    assert!(name.contains("Model: m<U+202E>x"), "{name}");
+    assert!(!name.contains('\u{202e}'), "{name}");
 }

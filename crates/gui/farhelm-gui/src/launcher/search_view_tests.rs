@@ -10,9 +10,12 @@ use farhelm_proto::{LaunchHarness, LaunchPermission, RestartOffer};
 use gpui::{TestAppContext, VisualTestContext};
 
 use super::draft::{LaunchDraft, Tab};
+use super::recents_view_tests::{
+    answer_history, chosen, creates, history, launched, new_in_tmp, two_setups,
+};
 use super::view_tests::{
     answer_catalog, codex, draft, fixture_hosts, launcher_on, launcher_with_hosts, name_of, read,
-    shown_refusal,
+    selected_state, shown_refusal,
 };
 use crate::test_support::{self, keys, settle};
 
@@ -630,4 +633,282 @@ fn unavailable_templates_are_the_reason_in_the_results(cx: &mut TestAppContext) 
         Some("Couldn't load templates: busy")
     );
     assert_eq!(name_of(cx, "launcher-search-option-0"), None, "no row");
+}
+
+// ---- Rows from the launch history ----------------------------------------------------------------------------------
+
+/// The helm's history answer holding no launches and the one saved folder `path`.
+fn saved_folder(path: &str) -> serde_json::Value {
+    let mut answer = history(Vec::new());
+    answer["folders"] = serde_json::json!([{
+        "host": 1,
+        "canonical_cwd": path,
+        "canonical_proven": true,
+        "display_cwd": path,
+        "created_at": 1,
+        "creation_seq": null,
+    }]);
+    answer
+}
+
+/// A recent setup taken from search fills the draft as a click on the strip's row does (its choices, its folder, the
+/// Agent tab), empties the box and keeps focus there, and launches nothing, from Enter either. Why: the old search's
+/// Recent row only filled; SPEC.md's "Enter on a focused row launches" is the strip's row, which has focus, not a
+/// search row picked from the box (old `sidebar.spec.ts` composer search recents, and `apply_search_result`'s Recent
+/// arm).
+#[gpui::test]
+fn a_recent_setup_from_search_fills_and_launches_nothing(cx: &mut TestAppContext) {
+    // The launcher starts at home, so only taking the setup can put the folder in `/tmp`.
+    let (mut helm, cx) = launcher_with_hosts(
+        cx,
+        LaunchDraft::new(Some(1), "~".into(), None),
+        fixture_hosts(&[0]),
+    );
+    answer_history(&mut helm, cx, &two_setups());
+    assert_eq!(
+        draft(cx).folder.value(),
+        "~",
+        "the premise: the launcher starts at home"
+    );
+    test_support::click(cx, "launcher-tabs-Command");
+    test_support::click(cx, "launcher-search-row");
+    type_in(cx, "recent:claude");
+    let name = name_of(cx, "launcher-search-option-0").unwrap_or_default();
+    assert!(
+        name.starts_with("Recent setup: /tmp · ") && name.contains(" · Claude · "),
+        "the premise: the Claude setup is the first row: {name}"
+    );
+    keys(cx, "enter");
+    let filled = draft(cx);
+    assert_eq!(filled.tab, Tab::Agent);
+    assert_eq!(filled.agent.harness, Some(LaunchHarness::Claude));
+    assert_eq!(filled.folder.value(), "/tmp");
+    assert_eq!(search_text(cx), "");
+    assert!(search_focused(cx));
+    assert!(
+        creates(&mut helm, cx).is_empty(),
+        "Enter here launches nothing"
+    );
+}
+
+/// A saved folder taken from search becomes the folder, and the field shows it (that the folder list then stops
+/// filtering is `folder_list_tests::a_path_from_search_does_not_filter_the_next_list`, through the same arm). Why:
+/// SPEC.md, "Creation": the launch-composer search matches "folders and recent setups", and "Folder search uses that
+/// bounded history".
+#[gpui::test]
+fn a_saved_folder_from_search_sets_the_folder(cx: &mut TestAppContext) {
+    let (_helm, cx) = new_in_tmp(cx, &saved_folder("/srv/project"));
+    type_in(cx, "project");
+    assert_eq!(
+        name_of(cx, "launcher-search-option-0").as_deref(),
+        Some("Use this path: /srv/project"),
+        "the premise: the saved folder is offered"
+    );
+    keys(cx, "enter");
+    assert_eq!(draft(cx).folder.value(), "/srv/project");
+    assert_eq!(
+        read(cx, |launcher, _, cx| launcher.folder.text(cx).to_string()),
+        "/srv/project",
+        "the folder field follows the draft"
+    );
+}
+
+/// A model from a past launch that the catalog does not list chooses the agent type it ran with and the model as that
+/// type's custom id. Why: a custom model typed once is offered again, and it only means something to its own agent
+/// type (old `search_offers_a_used_custom_model_with_its_harness`, taken).
+#[gpui::test]
+fn a_past_model_from_search_chooses_its_agent_type(cx: &mut TestAppContext) {
+    let answer = history(vec![launched(
+        "/tmp",
+        &chosen(LaunchHarness::Claude, Some("custom-x"), None, None),
+    )]);
+    let (_helm, cx) = new_in_tmp(cx, &answer);
+    assert_eq!(draft(cx).agent.harness, None, "the premise: no agent type");
+    type_in(cx, "model:custom");
+    keys(cx, "enter");
+    let chosen = draft(cx);
+    assert_eq!(chosen.agent.harness, Some(LaunchHarness::Claude));
+    assert_eq!(chosen.agent.model.as_deref(), Some("custom-x"));
+    assert_eq!(chosen.agent.model_owner, Some(LaunchHarness::Claude));
+}
+
+/// Restart with refuses a recent setup and a saved folder from search with the destination's words, and Replace with
+/// takes a recent setup (it holds only the host). A setup with a retired container choice is refused above the box
+/// with the shared reason. Why: SPEC.md, "Restart with": "Search results and recent setups that set a held field are
+/// still refused", and a container setup supports Delete only (old `retired_recent_is_refused_without_changing_the_draft`).
+#[gpui::test]
+fn history_rows_are_refused_where_they_cannot_apply(cx: &mut TestAppContext) {
+    let mut answer = history(vec![launched(
+        "/src/project",
+        &chosen(LaunchHarness::Codex, None, None, None),
+    )]);
+    answer["folders"] = saved_folder("/srv/project")["folders"].clone();
+    let mut source = super::draft_tests::session(codex(None, None, None));
+    source.restart_offer = RestartOffer::Resume;
+    let (mut helm, cx) = launcher_with_hosts(
+        cx,
+        LaunchDraft::restart_with("missing", &source, Some(1)).unwrap(),
+        fixture_hosts(&[0]),
+    );
+    answer_history(&mut helm, cx, &answer);
+    test_support::click(cx, "launcher-search-row");
+    let before = draft(cx);
+    type_in(cx, "recent:");
+    keys(cx, "enter");
+    assert_eq!(
+        name_of(cx, "launcher-search-refusal").as_deref(),
+        Some("destination cannot change here: this dialog keeps destination fixed for restart")
+    );
+    assert_eq!(draft(cx), before, "nothing changed");
+    for _ in 0.."recent:".len() {
+        keys(cx, "backspace");
+    }
+    type_in(cx, "folder:project");
+    assert_eq!(
+        name_of(cx, "launcher-search-option-0").as_deref(),
+        Some("Use this path: /srv/project"),
+        "the premise: the saved folder is offered"
+    );
+    keys(cx, "enter");
+    assert_eq!(
+        name_of(cx, "launcher-search-refusal").as_deref(),
+        Some("destination cannot change here: this dialog keeps destination fixed for restart")
+    );
+    assert_eq!(draft(cx), before, "nothing changed");
+
+    let replaced = super::draft_tests::session(codex(None, None, None));
+    let (mut helm, cx) = launcher_with_hosts(
+        cx,
+        LaunchDraft::replace_with("a", &replaced, Some(1)),
+        fixture_hosts(&[0]),
+    );
+    answer_history(&mut helm, cx, &answer);
+    type_in(cx, "recent:project");
+    keys(cx, "enter");
+    assert_eq!(name_of(cx, "launcher-search-refusal"), None);
+    assert_eq!(
+        draft(cx).folder.value(),
+        "/src/project",
+        "Replace with takes it"
+    );
+
+    let mut retired = chosen(LaunchHarness::Codex, None, None, None);
+    retired.container = Some(
+        serde_json::from_value(
+            serde_json::json!({ "engine": "podman", "image": "old", "api_proxy_port": 1 }),
+        )
+        .unwrap(),
+    );
+    let (_helm, cx) = new_in_tmp(cx, &history(vec![launched("/tmp", &retired)]));
+    let before = draft(cx);
+    type_in(cx, "recent:");
+    keys(cx, "enter");
+    assert!(
+        name_of(cx, "launcher-search-refusal").is_some_and(|words| words.contains("Delete only")),
+        "the shared reason is said above the box"
+    );
+    assert_eq!(draft(cx), before, "nothing changed");
+    assert_eq!(search_text(cx), "recent:", "the box keeps its text");
+}
+
+/// A saved folder taken from search while a managed checkout is chosen leaves the checkout for that folder, and keeps
+/// the tab and its command as they were. Why: the folder is an ordinary launch's destination, so it must not clone a
+/// repository or take a checkout's ownership just because one was chosen before (old `github-checkouts.spec.ts`, "an
+/// unlabeled folder result replaces fresh intent without cloning").
+#[gpui::test]
+fn a_saved_folder_from_search_leaves_a_managed_checkout(cx: &mut TestAppContext) {
+    let mut checkout = LaunchDraft::new(Some(1), "/tmp".into(), None);
+    checkout.choose_tab(Tab::Command);
+    checkout.choose_destination(super::draft::DestinationKind::Checkout);
+    checkout.choose_repository(farhelm_proto::GithubRepo {
+        owner: "acme".into(),
+        name: "bar".into(),
+    });
+    let (mut helm, cx) = launcher_with_hosts(cx, checkout, fixture_hosts(&[0]));
+    answer_history(&mut helm, cx, &saved_folder("/srv/project"));
+    assert_eq!(
+        draft(cx).destination_kind(),
+        super::draft::DestinationKind::Checkout,
+        "the premise: a managed checkout is chosen"
+    );
+    type_in(cx, "project");
+    keys(cx, "enter");
+    let after = draft(cx);
+    assert_eq!(
+        after.destination_kind(),
+        super::draft::DestinationKind::Folder
+    );
+    assert_eq!(after.folder.value(), "/srv/project");
+    assert_eq!(after.tab, Tab::Command, "the tab stays");
+}
+
+/// Type `o`, move the highlight down one row, let `answer` rebuild the rows, and press Enter: what the launcher chose
+/// shows which row Enter took. Returns the agent type the first row of `o` names, which is the row the text names.
+fn arrow_then_answer(
+    cx: &mut TestAppContext,
+    answer: impl FnOnce(&mut farhelm_helm_client::fake::FakeHelm, &mut VisualTestContext),
+) -> (Option<LaunchHarness>, LaunchHarness) {
+    let (mut helm, cx) = launcher_with_hosts(
+        cx,
+        LaunchDraft::new(Some(1), "~".into(), None),
+        fixture_hosts(&[0]),
+    );
+    type_in(cx, "o");
+    let first = read(cx, |launcher, _, cx| launcher.search_results(cx).rows);
+    let (Some(super::search::Row::Harness(named)), Some(_)) = (first.first(), first.get(1)) else {
+        panic!("the premise: `o` names an agent type first and offers another row: {first:?}");
+    };
+    let named = *named;
+    keys(cx, "down");
+    assert_eq!(
+        selected_state(cx, "launcher-search-option-1"),
+        Some(true),
+        "the premise: Down highlighted the second row"
+    );
+    answer(&mut helm, cx);
+    let rows = read(cx, |launcher, _, cx| launcher.search_results(cx).rows);
+    assert_ne!(rows, first, "the premise: the answer rebuilt the rows");
+    keys(cx, "enter");
+    (draft(cx).agent.harness, named)
+}
+
+/// A history answer that arrives while the results are open puts the highlight back on the row the text names, so
+/// Enter takes that row rather than whatever row now sits at the index the arrow left. Why: the highlight is an index
+/// into rows the answer rebuilds (it adds saved folders, recent setups and past models); the folder list drops its
+/// highlight for the same reason.
+#[gpui::test]
+fn a_history_answer_resets_the_search_highlight(cx: &mut TestAppContext) {
+    let (chosen_harness, named) = arrow_then_answer(cx, |helm, cx| {
+        answer_history(
+            helm,
+            cx,
+            &history(vec![launched(
+                "/tmp",
+                &chosen(LaunchHarness::Codex, Some("o-model"), None, None),
+            )]),
+        )
+    });
+    assert_eq!(
+        chosen_harness,
+        Some(named),
+        "Enter took the row the text names"
+    );
+}
+
+/// The catalog's answer resets the highlight the same way: it adds its models and drops past models it turns out to
+/// list. Why: as for the history answer, Enter must not take a row the arrow never reached.
+#[gpui::test]
+fn a_catalog_answer_resets_the_search_highlight(cx: &mut TestAppContext) {
+    let (chosen_harness, named) = arrow_then_answer(cx, |helm, cx| {
+        answer_catalog(
+            helm,
+            cx,
+            Some(serde_json::json!([{ "id": "o-cat", "harness": "codex", "efforts": [] }])),
+        )
+    });
+    assert_eq!(
+        chosen_harness,
+        Some(named),
+        "Enter took the row the text names"
+    );
 }
