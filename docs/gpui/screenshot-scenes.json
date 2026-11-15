@@ -997,13 +997,18 @@
     },
     {
       "golden": "template-editor",
-      "title": "The Templates dialog with codex-deep open in its editor: name, switch, agent type, model with its suggestions, effort, Duplicate and Save (no Delete yet)",
+      "title": "The Templates dialog with codex-deep open in its editor: name, switch, agent type, model with its suggestions, effort, Duplicate, Delete and Save",
       "reference": "template-editor"
     },
     {
       "golden": "template-number-menu",
       "title": "codex-deep's number-key menu over the open editor, under the shared menu header",
       "reference": "template-number-menu"
+    },
+    {
+      "golden": "template-leave-question",
+      "title": "The editor's leave question at its foot after an unsaved rename: Keep editing, Discard, and Save focused",
+      "reference": "template-leave-question"
     },
     {
       "golden": "settings-sessions",
