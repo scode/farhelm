@@ -36,6 +36,8 @@
 //!   terminal's tunnel warning, whose Allow saves the consent, and shows the stored choice until the helm pushes it
 //!   ([`terminal`]). App's switch is not the helm's at all: it writes the desktop app's own setting through its
 //!   updater, at once and with a final answer, so it has no draft and never holds the preference row's key ([`app`]).
+//!   Containers saves no choice at all: it shows what the helm reads from its container hosts, and its Refresh and
+//!   confirmed Deletes are plain commands, not operations on a key ([`containers`]).
 //!
 //! NOTE: Quick flips do not follow the old app's "newest-choice" rule. Its preference queue coalesced a field's clicks,
 //! sent only the newest, and reported a failure only for the newest click. Here the operation store admits one request
@@ -65,6 +67,7 @@ mod checkout_field;
 mod checkouts;
 mod choices;
 mod configured;
+mod containers;
 #[cfg(test)]
 mod credential_tests;
 mod credentials;
@@ -323,6 +326,8 @@ pub(crate) enum Section {
     Sessions,
     Appearance,
     Hosts,
+    /// Whether each container host can run containers, and the containers this helm left behind ([`containers`]).
+    Containers,
     Credentials,
     Terminal,
     Checkouts,
@@ -340,6 +345,7 @@ impl Section {
         Section::Sessions,
         Section::Appearance,
         Section::Hosts,
+        Section::Containers,
         Section::Credentials,
         Section::Terminal,
         Section::Checkouts,
@@ -357,6 +363,7 @@ impl Section {
             Section::Sessions
             | Section::Appearance
             | Section::Hosts
+            | Section::Containers
             | Section::Credentials
             | Section::Terminal
             | Section::Checkouts
@@ -371,6 +378,7 @@ impl Section {
             Section::Sessions => "sessions",
             Section::Appearance => "appearance",
             Section::Hosts => "hosts",
+            Section::Containers => "containers",
             Section::Credentials => "credentials",
             Section::Terminal => "terminal",
             Section::Checkouts => "checkouts",
@@ -386,6 +394,7 @@ impl Section {
             Section::Sessions => "Sessions",
             Section::Appearance => "Appearance",
             Section::Hosts => "Hosts",
+            Section::Containers => "Containers",
             Section::Credentials => "Credentials",
             Section::Terminal => "Terminal",
             Section::Checkouts => "Checkouts",
@@ -401,6 +410,8 @@ impl Section {
             Section::Sessions => Icon::Sessions,
             Section::Appearance => Icon::Appearance,
             Section::Hosts => Icon::Hosts,
+            // The old app drew Containers with the Hosts glyph too (`settings_section_icon`).
+            Section::Containers => Icon::Hosts,
             Section::Credentials => Icon::Lock,
             Section::Terminal => Icon::Terminal,
             Section::Checkouts => Icon::Folder,
@@ -417,13 +428,15 @@ impl Section {
     /// unavailable until the section's read answers ([`open_at_agent_trust`]), and for Checkouts, whose first control
     /// is a text field that is read-only until its read answers, and Notifications, whose controls are unavailable
     /// until its read answers ([`ntfy`]), and Credentials, whose controls wait for its reads too ([`credentials`]);
-    /// only their goldens open at any of these. `None` for App as well, whose switch is not a preference [`Choice`]:
-    /// [`SettingsDialog::start`] gives it its own handle.
+    /// only their goldens open at any of these. `None` for Containers too, whose first control, Refresh, belongs to a
+    /// view made as the section first shows ([`containers`]); only its golden opens there. `None` for App as well,
+    /// whose switch is not a preference [`Choice`]: [`SettingsDialog::start`] gives it its own handle.
     fn first(self) -> Option<Choice> {
         match self {
             Section::Sessions => Some(Choice::SkipSessionConfirmations),
             Section::Appearance => None,
             Section::Hosts => Some(Choice::AutoUpdateRemoteHosts),
+            Section::Containers => None,
             Section::Credentials => None,
             Section::Terminal => None,
             Section::Checkouts => None,
@@ -461,6 +474,9 @@ pub(crate) struct SettingsDialog {
     /// Notifications' ntfy alerts form, made the first time the section is shown in this opening, which is when it
     /// reads the helm's settings (the pattern Agent trust follows).
     ntfy: Option<Entity<ntfy::NtfyAlerts>>,
+    /// The Containers section, made the first time it is shown in this opening, which is when it reads the helm's
+    /// container hosts and leftovers (the pattern Agent trust follows).
+    containers: Option<Entity<containers::Containers>>,
     /// App's automatic-updates switch: its focus handle and the reason its last press was not saved ([`app`]).
     app: app::AppUpdates,
     /// The Credentials section, made the first time it is shown in this opening; it reads the catalog then and each
@@ -523,6 +539,7 @@ impl SettingsDialog {
             checkout_fields: None,
             spare: Configured::new(),
             ntfy: None,
+            containers: None,
             app: app::AppUpdates::new(cx.focus_handle().tab_stop(true)),
             credentials: None,
             focus_on: None,
@@ -554,11 +571,15 @@ impl SettingsDialog {
 
     /// Show `section`. Every section's state stays as it is: only which one is drawn changes. Showing Agent trust for
     /// the first time in this opening reads the agents' trust choices, and showing Checkouts for the first time makes
-    /// its fields (which read their routes) and reads the spare switch, and showing Notifications for the first time
-    /// makes its form, which reads the helm's ntfy settings. Showing Credentials makes it the first time, and reads its
-    /// catalog every time.
+    /// its fields (which read their routes) and reads the spare switch, showing Notifications for the first time
+    /// makes its form, which reads the helm's ntfy settings, and showing Containers for the first time makes its
+    /// section, which reads the container hosts and leftovers. Showing Credentials makes it the first time, and reads
+    /// its catalog every time.
     fn show(&mut self, section: Section, window: &mut Window, cx: &mut Context<Self>) {
         self.shown = section;
+        if section == Section::Containers && self.containers.is_none() {
+            self.containers = Some(cx.new(containers::Containers::new));
+        }
         if section == Section::Notifications && self.ntfy.is_none() {
             self.ntfy = Some(cx.new(|cx| ntfy::NtfyAlerts::new(window, cx)));
         }
@@ -891,6 +912,11 @@ impl SettingsDialog {
                 self.switch(Choice::SkipHostSetupConfirmation, preferences, cx),
                 self.switch(Choice::SkipHostRemoveConfirmation, preferences, cx),
             ],
+            Section::Containers => self
+                .containers
+                .iter()
+                .map(|section| section.clone().into_any_element())
+                .collect(),
             Section::Terminal => {
                 let weak = cx.weak_entity();
                 let mut body: Vec<AnyElement> = terminal::links(
