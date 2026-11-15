@@ -127,6 +127,9 @@ conflicted across all of it.
 | Rail notices                    | `crates/gui/farhelm-gui/src/rail_notices.rs`                                                                                                                                                                                                                                                                                   | [reported](#rail-notices)                | none                                  |
 | Launching                       | `crates/gui/farhelm-gui/src/launcher/launch.rs`                                                                                                                                                                                                                                                                                | [reported](#launching)                   | none                                  |
 | Template shortcuts              | `crates/gui/farhelm-gui/src/templates/shortcuts.rs`                                                                                                                                                                                                                                                                            | [reported](#template-shortcuts)          | none                                  |
+| Session rename                  | `crates/gui/farhelm-gui/src/session_list/rename.rs`                                                                                                                                                                                                                                                                            | [reported](#session-rename)              | none                                  |
+| Template rows                   | `crates/gui/farhelm-gui/src/templates/rows.rs`                                                                                                                                                                                                                                                                                 | [reported](#template-rows)               | none                                  |
+| Template dispatch               | `crates/gui/farhelm-gui/src/templates/dispatch.rs`                                                                                                                                                                                                                                                                             | [reported](#template-dispatch)           | none                                  |
 
 ## Extension points and lint exceptions, by foundation
 
@@ -137,8 +140,9 @@ One subsection per row of the main table, in its order, with the text its third 
 Extension points: reported: `lib.rs`, for a new area module (its `pub mod` line and its bullet in the module docs), and
 `Cargo.toml`, for a dependency an area needs. `bootstrap.rs` has none, since it carries the startup order every app-wide
 global depends on; its desktop integration seams (menus, quitting on close, the window's saved frame and chrome, the
-notices, the updater, second launches) are calls into the area module `desktop.rs`; the bootstrap reads no field of its
-types, so the area fills them in without touching `bootstrap.rs`.
+notices, the updater, second launches) are calls into the area module `desktop.rs`, and its one status-sound seam, the
+host's player, is handed to other-dialogs' `sounds::install_player`; the bootstrap reads no field of their types, so the
+areas fill them in without touching `bootstrap.rs`.
 
 Lint exceptions: none.
 
@@ -745,11 +749,12 @@ Lint exceptions: none.
 
 ### Templates dialog entry
 
-Extension points: reported, the whole file: owned by the templates-and-quick-launch area, which built it. Another area
-uses two of its items: the session list's Templates button opens the dialog and shows its help (`open`, `button_help`,
-sidebar-and-session-view). The table holds only whole paths, so the row covers the whole module root and the owner's own
-changes to it are reported too; the review gate passes those that leave the shared items alone. Another area's change
-follows the pattern already there, and the review gate judges it.
+Extension points: reported, the whole file: owned by the templates-and-quick-launch area, which built it. Other areas
+use four of its items: the session list's Templates button opens the dialog and shows its help (`open`, `button_help`,
+sidebar-and-session-view), and the launcher opens the dialog on a template its Save as template just stored and hands a
+quick launch's new session over to be named (`open_at`, `name_quick_launched`). The table holds only whole paths, so the
+row covers the whole module root and the owner's own changes to it are reported too; the review gate passes those that
+leave the shared items alone. Another area's change follows the pattern already there, and the review gate judges it.
 
 Lint exceptions: none.
 
@@ -849,6 +854,31 @@ Lint exceptions: none.
 Extension points: reported, the whole file: owned by the templates-and-quick-launch area, which built it, and shared
 with other-dialogs, whose Keyboard shortcuts overview lists the ⚡ chord and the number keys from the templates that
 hold them (`Bindings`, `KEYS`). Another area's change follows the pattern already there, and the review gate judges it.
+
+Lint exceptions: none.
+
+### Session rename
+
+Extension points: reported, the whole file: owned by the sidebar-and-session-view area, which built it, and shared with
+templates-and-quick-launch, whose quick launch opens the Rename editor in naming mode on the session it just created and
+opened (`open_naming`). Another area's change follows the pattern already there, and the review gate judges it.
+
+Lint exceptions: none.
+
+### Template rows
+
+Extension points: reported, the whole file: owned by the templates-and-quick-launch area, which built it as the template
+search the template lists are to share (neither the quick switcher's templates section nor the Cmd+J list is built yet),
+and shared with the launcher, whose `tl:` search lists and matches templates through it (`rows`, `Row`, `matches`).
+Another area's change follows the pattern already there, and the review gate judges it.
+
+Lint exceptions: none.
+
+### Template dispatch
+
+Extension points: reported, the whole file: owned by the templates-and-quick-launch area, which built it, and shared
+with the launcher, whose `tl:` search applies a taken template row through it (`search_row_batch`). Another area's
+change follows the pattern already there, and the review gate judges it.
 
 Lint exceptions: none.
 
@@ -1006,3 +1036,6 @@ conflict marker.
 | Rail notices           | `crates/gui/farhelm-gui/src/rail_notices.rs`           | `reported`    |
 | Launching              | `crates/gui/farhelm-gui/src/launcher/launch.rs`        | `reported`    |
 | Template shortcuts     | `crates/gui/farhelm-gui/src/templates/shortcuts.rs`    | `reported`    |
+| Session rename         | `crates/gui/farhelm-gui/src/session_list/rename.rs`    | `reported`    |
+| Template rows          | `crates/gui/farhelm-gui/src/templates/rows.rs`         | `reported`    |
+| Template dispatch      | `crates/gui/farhelm-gui/src/templates/dispatch.rs`     | `reported`    |
