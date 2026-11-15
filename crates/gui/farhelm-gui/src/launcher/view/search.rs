@@ -20,6 +20,11 @@
 //!   the Agent tab, where they belong. A row that would change what this launcher holds fixed (Restart with's agent
 //!   type, host, folder and name; Replace with's host) is refused above the box, even when it names the current value;
 //!   the box keeps its text, and the results close so the reason shows.
+//! - **A `tl:` row** applies its template to the draft through the templates' own application path, as a template
+//!   shortcut's press in the open launcher does (`crate::templates::dispatch::search_row_batch`); a template that
+//!   does not apply changes nothing, and the launcher's refusal note says why above the box, where the old launcher
+//!   said why a template did not apply. While the helm cannot give its templates, `tl:` shows the helm's words in
+//!   the results instead of rows.
 //!
 //! What the box holds besides the draft (the open results, the highlight, the last refusal) is the launcher's alone;
 //! what is typed is the field's own text, read when the rows are needed, never copied.
@@ -35,7 +40,7 @@ use super::Launcher;
 use crate::components::{HoverHelp, OptionRow, Role, Vertical};
 use crate::focus::{self, Mark};
 use crate::launcher::draft::{Field, Mode, Tab};
-use crate::launcher::search::{Inputs, Results, Row, search};
+use crate::launcher::search::{Inputs, Results, Row, Scope, scoped, search};
 use crate::layers::{self, Anchor, LayerId, Popover};
 use crate::theme::{self, metrics};
 
@@ -76,6 +81,12 @@ impl Launcher {
             .into_iter()
             .cloned()
             .collect();
+        // Every template, as the templates' own rows give them, which the search filters; only a `tl:` query reads them.
+        let templates = if scoped(&query).0 == Scope::Templates {
+            crate::templates::rows::rows("", cx)
+        } else {
+            Ok(Vec::new())
+        };
         search(&Inputs {
             query: &query,
             tab: self.draft.tab,
@@ -84,6 +95,7 @@ impl Launcher {
             catalog: self.catalog.as_deref(),
             catalog_pending: self.catalog.is_none() && self.catalog_error.is_none(),
             hosts: &hosts,
+            templates: templates.as_deref(),
         })
     }
 
@@ -100,7 +112,7 @@ impl Launcher {
         self.search_box.refusal = None;
         let results = self.search_results(cx);
         self.search_box.active = results.default;
-        if results.rows.is_empty() && results.message.is_none() {
+        if results.rows.is_empty() && results.message.is_none() && results.reason.is_none() {
             self.close_search(window, cx);
         } else if !self.search_open(window, cx) {
             self.open_search(window, cx);
@@ -198,7 +210,11 @@ impl Launcher {
             Row::Host { .. } => (Field::Host, "host"),
             Row::UsePath(_) => (Field::Destination, "destination"),
             Row::Name(_) => (Field::Name, "session name"),
-            Row::Model { .. } | Row::Effort(_) | Row::Permission(_) => return None,
+            // A template's own fields are checked against what the launcher holds when it applies, which removes the
+            // ones repeating a held value and refuses the rest (`crate::templates::apply`).
+            Row::Model { .. } | Row::Effort(_) | Row::Permission(_) | Row::Template(_) => {
+                return None;
+            }
         };
         self.draft.holds(field).then_some(words)
     }
@@ -227,6 +243,13 @@ impl Launcher {
             // Choosing an agent type makes the tab Agent itself; a model of the agent already chosen does not, so the
             // model row switches it first.
             Row::Harness(harness) => self.choose_harness(harness, window, cx),
+            // Through the templates' application path, as a template shortcut's press in the open launcher: it waits
+            // for the catalog read if that is out, and a refusal changes nothing and is said above the box.
+            Row::Template(name) => self.apply_batch(
+                crate::templates::dispatch::search_row_batch(name),
+                window,
+                cx,
+            ),
             Row::Model { id, harness } => {
                 self.draft.choose_tab(Tab::Agent);
                 let wrapper = self.remembered_wrapper(harness, cx);
@@ -306,7 +329,23 @@ impl Launcher {
         .on_vertical(move |arrow, window, cx| {
             let _ = weak.update(cx, |launcher, cx| launcher.search_arrow(arrow, window, cx));
         });
-        // Above the box, where the old launcher said why a taken row changed nothing, in the launcher's plain
+        // Above the box, where the old launcher said why a template did not apply (a taken `tl:` row, a shortcut's
+        // press or sequence here, a quick launch that opened New instead), as its own alert.
+        // One plain line in the warning ink, as the box's own refusal below it and the old template error were.
+        let note = match &self.note {
+            Some(super::Note::Refusal(sentence)) => Some(
+                div()
+                    .id("launcher-note")
+                    .debug_selector(|| "launcher-note".into())
+                    .role(Role::Status)
+                    .aria_label(sentence.accessible_name())
+                    .text_size(metrics::TEXT_SM)
+                    .text_color(theme::color(palette.warn))
+                    .child(sentence.clone()),
+            ),
+            Some(super::Note::Banner(_)) | None => None,
+        };
+        // Above the box too, where the old launcher said why a taken row changed nothing, in the launcher's plain
         // warning ink like its other inline refusals.
         let refusal = self.search_box.refusal.clone().map(|words| {
             div()
@@ -324,10 +363,37 @@ impl Launcher {
             .flex()
             .flex_col()
             .gap(px(6.))
+            .children(note)
             .children(refusal)
-            .child(div().relative().child(field).child(tracker))
+            .child(
+                div()
+                    // Tests compare what is drawn above the box with the box itself.
+                    .debug_selector(|| "launcher-search-box".into())
+                    .relative()
+                    .child(field)
+                    .child(tracker),
+            )
             .into_any_element()
     }
+}
+
+/// The results area's status line under `id`, in place of rows: the search's own message, or why the templates cannot
+/// be listed. `label` is its accessible name.
+fn status_line(
+    id: &'static str,
+    label: SharedString,
+    ink: theme::Token,
+    child: impl IntoElement,
+) -> AnyElement {
+    div()
+        .id(id)
+        .role(Role::Status)
+        .aria_label(label)
+        .p(px(6.))
+        .text_size(metrics::TEXT_MD)
+        .text_color(theme::color(ink))
+        .child(child)
+        .into_any_element()
 }
 
 /// The open results, drawn from the launcher's state, and kept scrolled so the highlighted row is in view.
@@ -394,17 +460,22 @@ impl Render for SearchRows {
             } else {
                 palette.fg_1
             };
-            children.push(
-                div()
-                    .id("launcher-search-message")
-                    .role(Role::Status)
-                    .aria_label(message.text)
-                    .p(px(6.))
-                    .text_size(metrics::TEXT_MD)
-                    .text_color(theme::color(ink))
-                    .child(message.text)
-                    .into_any_element(),
-            );
+            children.push(status_line(
+                "launcher-search-message",
+                message.text.into(),
+                ink,
+                message.text,
+            ));
+        }
+        // Why `tl:` offers no rows while the helm cannot give its templates: the helm's words, escaped.
+        if let Some(reason) = results.reason.clone() {
+            let label = reason.accessible_name();
+            children.push(status_line(
+                "launcher-search-reason",
+                label,
+                palette.warn_bright,
+                reason,
+            ));
         }
         // The child index of the highlighted row, for scrolling it into view. Headings and rows are all the list's
         // own children, so the scroll handle can find any row; the old list nested each group in a `role="group"`

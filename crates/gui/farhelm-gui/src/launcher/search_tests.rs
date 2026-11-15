@@ -1,7 +1,7 @@
 //! Tests of the composer search's rules: what a query means, which rows it offers in which order, which row is
 //! preselected and what an empty result says. Ported from the old app's `launch_composer.rs` search tests at reference
 //! commit `24bc0580` (named in each test's docs), minus the rows whose data the app does not read yet (recent setups,
-//! folder history, history models, repositories, templates).
+//! folder history, history models, repositories).
 //!
 //! Every test calls [`search`] with plain inputs, no window: the search is a function of the query and the draft's
 //! values, so the view's tests only need to show that a row it draws applies.
@@ -14,7 +14,9 @@ use super::draft::Tab;
 use super::search::{
     Group, Inputs, Message, Results, Row, Scope, SearchPermission, scoped, search,
 };
+use crate::host_text::{HostSentence, HostText};
 use crate::hosts::tests::{aliased, connected, connecting, host};
+use crate::templates::rows::Row as TemplateRow;
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
 
@@ -56,8 +58,9 @@ fn hosts() -> Vec<HostView> {
     ]
 }
 
-/// What a search reads: the tab, the chosen agent type and model, the catalog and whether its read is still out, and
-/// the registry's hosts. The constructors start from [`catalog`] as read and [`hosts`], with no model chosen.
+/// What a search reads: the tab, the chosen agent type and model, the catalog and whether its read is still out, the
+/// registry's hosts and the templates' rows. The constructors start from [`catalog`] as read and [`hosts`], with no
+/// model chosen and no templates.
 struct Draft {
     tab: Tab,
     harness: Option<LaunchHarness>,
@@ -65,6 +68,7 @@ struct Draft {
     catalog: Option<Vec<LaunchCatalogModel>>,
     catalog_pending: bool,
     hosts: Vec<HostView>,
+    templates: Result<Vec<TemplateRow>, HostSentence>,
 }
 
 impl Draft {
@@ -76,6 +80,7 @@ impl Draft {
             catalog: Some(catalog()),
             catalog_pending: false,
             hosts: hosts(),
+            templates: Ok(Vec::new()),
         }
     }
 
@@ -95,6 +100,7 @@ impl Draft {
             catalog: self.catalog.as_deref(),
             catalog_pending: self.catalog_pending,
             hosts: &self.hosts,
+            templates: self.templates.as_deref(),
         })
     }
 
@@ -120,6 +126,33 @@ fn efforts(list: &[Option<LaunchEffort>]) -> Vec<Row> {
 
 fn name(text: &str) -> Vec<Row> {
     vec![Row::Name(text.to_owned())]
+}
+
+/// A draft on the Agent tab with no agent type, holding the templates `names` in that order, as the templates' rows
+/// give them (only the name matters to the search).
+fn with_templates(names: &[&str]) -> Draft {
+    Draft {
+        templates: Ok(names
+            .iter()
+            .map(|name| TemplateRow {
+                name: (*name).to_owned(),
+                summary: Vec::new(),
+                marked: false,
+                key: None,
+            })
+            .collect()),
+        ..Draft::agent(None)
+    }
+}
+
+/// The template rows of `rows`, by name.
+fn template_names(rows: &[Row]) -> Vec<&str> {
+    rows.iter()
+        .filter_map(|row| match row {
+            Row::Template(name) => Some(name.as_str()),
+            _ => None,
+        })
+        .collect()
 }
 
 // ---- The query -----------------------------------------------------------------------------------------------------
@@ -652,4 +685,90 @@ fn row_words_and_help_escape_host_values() {
         Row::Effort(None).words("w").accessible_name().as_ref(),
         "Effort: Default"
     );
+}
+
+// ---- Templates -------------------------------------------------------------------------------------------------------
+
+/// SPEC.md: "`tl:name` in the search box offers templates by name". Only the `tl:` scope offers them, by a
+/// case-insensitive part of the name (`tl:` alone lists them all), and an exact name is preselected: an unlabelled
+/// query is about the launch being built, so template names there would crowd out its agent types and models (old
+/// `templates_are_offered_only_under_tl`). Specified: with `my-codex` and `Web-Builder`, `tl:web` offers
+/// `Web-Builder` alone; `TL:` offers both in order; `codex` offers no template; `tl:ÉCR` finds `écrire-project` (Unicode
+/// case folding); `tl:my-codex` offers it under the Templates group, preselected.
+#[test]
+fn templates_are_offered_only_under_tl() {
+    let draft = with_templates(&["my-codex", "Web-Builder"]);
+    assert_eq!(draft.rows("tl:web"), [Row::Template("Web-Builder".into())]);
+    assert_eq!(
+        template_names(&draft.rows("TL:")),
+        ["my-codex", "Web-Builder"]
+    );
+    assert!(
+        template_names(&draft.rows("codex")).is_empty(),
+        "unlabelled: no templates"
+    );
+    // The filter folds case as Rust's Unicode lowercase does, which ASCII folding would not: `ÉCR` finds `écrire`.
+    let accented = with_templates(&["écrire-project", "web"]);
+    assert_eq!(template_names(&accented.rows("tl:ÉCR")), ["écrire-project"]);
+    let results = draft.search("tl:my-codex");
+    assert_eq!(results.groups()[0].0, Group::Templates);
+    assert_eq!(results.default, 0);
+}
+
+/// The exact-name preselection must fold case the way template names are matched, Unicode lowercase both ways, or
+/// Enter would apply the first partial name rather than the full name typed (old
+/// `template_exact_priority_uses_unicode_lowercase`). Specified: with `<name>-project` listed before `<name>`, both
+/// match, and the second is preselected, for `écrire` against `Écrire` and `ÉCRIRE` against `écrire`.
+#[test]
+fn the_exact_template_name_is_preselected_by_unicode_lowercase() {
+    for (query, exact) in [("écrire", "Écrire"), ("ÉCRIRE", "écrire")] {
+        let project = format!("{exact}-project");
+        let draft = with_templates(&[project.as_str(), exact]);
+        let results = draft.search(&format!("tl:{query}"));
+        assert_eq!(results.rows.len(), 2, "{query}: both names match");
+        assert_eq!(results.default, 1, "{query}: the exact name is preselected");
+    }
+}
+
+/// The groups keep the old order, Templates between Harnesses and Models, so a later group added in its place never
+/// moves the template rows. Specified: the group order ranks Harnesses, Templates, Models; the group is headed
+/// "Templates"; a template row reads "Template: " and the name, escaped, with the old hover help.
+#[test]
+fn template_rows_sit_between_harnesses_and_models_in_the_old_words() {
+    assert_eq!(Group::Harnesses as u8 + 1, Group::Templates as u8);
+    assert_eq!(Group::Templates as u8 + 1, Group::Models as u8);
+    assert_eq!(Group::Templates.label(), "Templates");
+    let row = Row::Template("a\u{202e}b".into());
+    assert_eq!(
+        row.words("w").accessible_name().as_ref(),
+        "Template: a<U+202E>b"
+    );
+    assert_eq!(
+        row.help(None, "h").accessible_name().as_ref(),
+        "Apply this template's settings to the draft"
+    );
+}
+
+/// SPEC.md: a template list that cannot be read is "a reason shown in the results area". Saying "No template matches"
+/// instead would tell the user their template is gone. Specified: with the templates unavailable, `tl:` offers no rows
+/// and no message, and its reason is the one the templates give ("Couldn't load templates: busy").
+#[test]
+fn unavailable_templates_are_the_reason_under_tl() {
+    let reason = HostSentence::new("r")
+        .text("Couldn't load templates: ")
+        .host(&HostText::from_host("busy"));
+    let draft = Draft {
+        templates: Err(reason),
+        ..Draft::agent(None)
+    };
+    let results = draft.search("tl:");
+    assert_eq!((results.rows.len(), results.message), (0, None));
+    assert_eq!(
+        results
+            .reason
+            .map(|reason| reason.accessible_name().to_string())
+            .as_deref(),
+        Some("Couldn't load templates: busy")
+    );
+    assert_eq!(draft.search("codex").reason, None, "only under tl:");
 }

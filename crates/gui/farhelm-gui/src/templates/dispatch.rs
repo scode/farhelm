@@ -153,6 +153,62 @@ pub(super) fn unavailable(cx: &App) -> Option<String> {
     })
 }
 
+/// The edit a taken `tl:` row makes in the open launcher (`launcher::view::search`): the template the store holds
+/// under `name` when the batch applies, through [`apply::apply`] against the launcher's catalog, as a press of a
+/// template shortcut there is (SPEC.md: "`tl:name` in the search box offers templates by name, and accepting one
+/// applies it"). It keeps the launch kind unless the template sets one, as applying a template always does. Its
+/// refusals are the old launcher's words for a `tl:` acceptance, changing nothing: a failed template read is
+/// "Couldn't load templates: <the helm's words>; search tl: and retry", a name the store no longer has is "No
+/// template is named \"<name>\"; it may have been deleted", and a template that does not apply says why in
+/// [`apply::apply`]'s words alone.
+pub(crate) fn search_row_batch(
+    name: String,
+) -> impl FnOnce(&mut LaunchDraft, Catalog<'_>, &App) -> Result<BatchApplied, HostSentence> + 'static
+{
+    move |draft, catalog, cx| {
+        if let Some(error) = unavailable(cx) {
+            return Err(sentence(
+                LAUNCHER_REFUSAL,
+                &[
+                    Part::Words("Couldn't load templates: ".to_owned()),
+                    Part::Host(error),
+                    Part::Words("; search tl: and retry".to_owned()),
+                ],
+            ));
+        }
+        let Some(template) = stored_templates(cx)
+            .into_iter()
+            .find(|template| template.name == name)
+        else {
+            return Err(sentence(
+                LAUNCHER_REFUSAL,
+                &[
+                    Part::Words("No template is named \"".to_owned()),
+                    Part::Host(name),
+                    Part::Words("\"; it may have been deleted".to_owned()),
+                ],
+            ));
+        };
+        apply_in_launcher(draft, &[template], catalog, cx)
+    }
+}
+
+/// Apply `templates` to the open launcher's draft as one batch ([`apply_from_store`]), saying the refusal, if any, in
+/// the launcher's words: a template press's or a taken `tl:` row's.
+fn apply_in_launcher(
+    draft: &mut LaunchDraft,
+    templates: &[LaunchTemplate],
+    catalog: Catalog<'_>,
+    cx: &App,
+) -> Result<BatchApplied, HostSentence> {
+    apply_from_store(draft, templates, catalog, cx)
+        .map(|applied| BatchApplied {
+            notice: applied.notice,
+            note: None,
+        })
+        .map_err(|refusal| sentence(LAUNCHER_REFUSAL, &[Part::Host(refusal)]))
+}
+
 /// A pick of the template named `name` in the quick switcher's templates section: open New on its prefill at once and
 /// apply the template to it, never launching (SPEC.md: "Picking one opens New with its edits applied, without using
 /// the query as the session name ... Neither name nor template pick launches a session"), as the old switcher opened
@@ -332,12 +388,7 @@ fn in_launcher(
             move |draft, catalog, cx| {
                 let templates = resolved
                     .map_err(|refusal| sentence(LAUNCHER_REFUSAL, &refusal.launcher_sentence()))?;
-                apply_from_store(draft, &templates, catalog, cx)
-                    .map(|applied| BatchApplied {
-                        notice: applied.notice,
-                        note: None,
-                    })
-                    .map_err(|refusal| sentence(LAUNCHER_REFUSAL, &[Part::Host(refusal)]))
+                apply_in_launcher(draft, &templates, catalog, cx)
             },
             window,
             cx,
