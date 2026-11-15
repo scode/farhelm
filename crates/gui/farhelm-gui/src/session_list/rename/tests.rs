@@ -16,14 +16,14 @@ use gpui::{
 use serde_json::{Value, json};
 
 use super::RenameEditor;
-use crate::actions::{RENAME_SESSION_CHORD, TERMINAL_CONTEXT};
+use crate::actions::RENAME_SESSION_CHORD;
 use crate::layers;
 use crate::main_view::MainView;
 use crate::operations::OpKey;
 use crate::session;
 use crate::session_list::tests::{Fixture, listing, preferences, session};
 use crate::test_support::started;
-use crate::test_support::{self, frame, keys, settle};
+use crate::test_support::{self, any_open, frame, keys, settle, terminal_focused};
 
 /// The editor [`super::open`] opened last, recorded in test builds only, so a test can read its draft and field.
 pub(super) struct Opened(pub(super) WeakEntity<RenameEditor>);
@@ -122,10 +122,6 @@ fn editor(cx: &mut VisualTestContext) -> Entity<RenameEditor> {
     editor.expect("the premise: an editor is open")
 }
 
-fn any_open(cx: &mut VisualTestContext) -> bool {
-    cx.update(|window, cx| layers::any_open(window, cx))
-}
-
 /// The editor's field text.
 fn field(cx: &mut VisualTestContext) -> String {
     let editor = editor(cx);
@@ -142,16 +138,6 @@ fn field_focused(cx: &mut VisualTestContext) -> bool {
             .input()
             .focus_handle(cx)
             .is_focused(window)
-    })
-}
-
-/// Whether a session terminal holds focus: the focused element's key context stack is a terminal's.
-fn terminal_focused(cx: &mut VisualTestContext) -> bool {
-    cx.update(|window, _| {
-        window
-            .context_stack()
-            .iter()
-            .any(|context| context.contains(TERMINAL_CONTEXT))
     })
 }
 
