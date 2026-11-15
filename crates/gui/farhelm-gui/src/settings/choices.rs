@@ -17,9 +17,11 @@ use gpui::{
     App, Div, FocusHandle, InteractiveElement as _, ParentElement as _, Role, SharedString,
     Stateful, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
+use serde::de::DeserializeOwned;
 
 use crate::components::{Checkbox, HoverHelp};
 use crate::drafts::Draft;
+use crate::host_text::HostText;
 use crate::operations::{Command, Work};
 use crate::theme::{self, metrics};
 
@@ -32,7 +34,7 @@ pub(super) const LABEL_LINE_HEIGHT: f32 = 19.4;
 /// `.host-settings-help`'s line height in Settings: `line-height: 1.6` at its 12 pixels.
 pub(super) const HELP_LINE_HEIGHT: f32 = 19.2;
 /// `.host-settings-section .setting-group`'s gap: a description sits this close under its own label.
-const GROUP_GAP: f32 = 4.;
+pub(super) const GROUP_GAP: f32 = 4.;
 
 /// One preference switch in Settings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -319,6 +321,31 @@ pub(super) fn patch(field: &str, value: serde_json::Value) -> Result<Command, Pa
         Some(serde_json::Value::Object(body)),
         "PUT /api/preferences",
     ))
+}
+
+/// Read a route the helm does not push, as Settings' sections do once per opening (the pattern the migration's
+/// orchestrator settled for such reads): `on_read` gets the answer decoded as `T`, or why the helm did not give one. A
+/// path that does not build is a failed read too, so a control never waits on a read that was not sent.
+///
+/// `on_read` runs once whenever a request was sent (or the path failed), and never without a UI session, which leaves
+/// nothing waiting: Settings does not open without a session, and a reset closes it. Whenever it runs, it runs on its
+/// own, after the update that called this has returned, as [`crate::operations::read`]'s answers do, so a caller may
+/// send the read from inside its own update and have `on_read` update it.
+pub(super) fn read_route<T: DeserializeOwned + 'static>(
+    path: Result<ApiPath, PathError>,
+    shown: impl Into<String>,
+    cx: &mut App,
+    on_read: impl FnOnce(Result<T, HostText>, &mut App) + 'static,
+) {
+    match path {
+        Ok(path) => {
+            crate::operations::read(path, shown, cx, on_read);
+        }
+        Err(error) => {
+            let reason = HostText::from_host(error.to_string());
+            cx.defer(move |cx| on_read(Err(reason), cx));
+        }
+    }
 }
 
 /// The line under a choice after the helm refused its save, drawn as an alert under the element id `id` so tests and

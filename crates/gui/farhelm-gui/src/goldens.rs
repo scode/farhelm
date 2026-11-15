@@ -1789,12 +1789,14 @@ fn rename_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
 }
 
 /// The Settings dialog over the fake helm's preference row, opened at `section` as the gear opens it (references
-/// `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-terminal` and `settings-agent-trust`): focus
-/// on the section's first switch (on the dialog itself at Appearance, Terminal and Agent trust), naming on because the
-/// row stores no choice for it, and automatic remote-host updates turned on so the Hosts picture shows a switch in each
-/// state. Agent trust's reads of each agent's trust, sent as it opens, are answered at once with the trust off and the
-/// hint not dismissed; nothing else is answered. The opener is the scene's ring handle, which stands in for the gear.
-/// The fake and the connection are kept for the scene's life, like the Rename editor's.
+/// `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-terminal`, `settings-checkouts` and
+/// `settings-agent-trust`): focus on the section's first switch (on the dialog itself at Appearance, Terminal,
+/// Checkouts and Agent trust), naming on because the row stores no choice for it, and automatic remote-host updates
+/// turned on so the Hosts picture shows a switch in each state. Agent trust's reads of each agent's trust, sent as it
+/// opens, are answered at once with the trust off and the hint not dismissed, and Checkouts' reads as the reference
+/// stack had them: no default folder, no post-clone command, and a checkout kept ready; nothing else is answered. The
+/// opener is the scene's ring handle, which stands in for the gear. The fake and the connection are kept for the
+/// scene's life, like the Rename editor's.
 fn settings_scene(
     state: &SceneState,
     section: crate::settings::Section,
@@ -1831,10 +1833,17 @@ fn settings_scene(
         for read in helm.commands() {
             let trust = read.path.starts_with("/api/checkout-claude-trust")
                 || read.path.starts_with("/api/checkout-agent-trust/");
-            if trust {
-                let answer = serde_json::json!({ "enabled": false, "hint_dismissed": false });
-                helm.reply(read.id, 200, Some(answer));
-            }
+            let answer = if trust {
+                serde_json::json!({ "enabled": false, "hint_dismissed": false })
+            } else {
+                match read.path.as_str() {
+                    "/api/checkout-root" => serde_json::json!({ "root": null }),
+                    "/api/checkout-post-clone" => serde_json::json!({ "command": null }),
+                    "/api/checkout-spare" => serde_json::json!({ "enabled": true }),
+                    _ => continue,
+                }
+            };
+            helm.reply(read.id, 200, Some(answer));
         }
     });
     let mut keep = state.keep.borrow_mut();
@@ -1955,6 +1964,12 @@ fn host_add_dialog_setup(state: &SceneState, window: &mut Window, cx: &mut App) 
     keep.push(Box::new(helm));
     keep.push(Box::new(connection));
     keep.push(Box::new(watch));
+}
+
+/// Settings at Checkouts, its fields empty and the spare switch on, as in the reference. Focus starts on the dialog
+/// itself (`Section::first`), so no ring shows.
+fn settings_checkouts_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    settings_scene(state, crate::settings::Section::Checkouts, window, cx);
 }
 
 /// Settings at Agent trust, every agent's trust off and every hint shown, as in the reference. Focus starts on the
@@ -2310,6 +2325,12 @@ static SCENES: &[Scene] = &[
         size: (800., 830.),
         draw: empty,
         setup: settings_terminal_setup,
+    },
+    Scene {
+        name: "settings-checkouts",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_checkouts_setup,
     },
     Scene {
         name: "settings-agent-trust",

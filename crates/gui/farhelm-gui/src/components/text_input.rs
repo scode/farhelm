@@ -387,8 +387,10 @@ impl TextInput {
     }
 
     /// Draw the text in the monospace face, as the old launcher drew its paths, model ids, wrapper prefix and command
-    /// lines (`var(--font-mono)`, JetBrains Mono, which the app bundles for the terminal). One-line fields only: no
-    /// multi-line field has needed it, so the other kinds ignore it.
+    /// lines (`var(--font-mono)`, JetBrains Mono, which the app bundles for the terminal). The single-line field and
+    /// the growing box take it (Settings' post-clone command is a growing box of shell text, the old
+    /// `.checkout-post-clone-field textarea`); the field that keeps line breaks ignores it, since no such field has
+    /// needed it.
     pub fn monospace(mut self) -> Self {
         self.monospace = true;
         self
@@ -507,7 +509,10 @@ impl RenderOnce for TextInput {
                     .bg(theme::color(palette.well))
                     .rounded(metrics::RADIUS_SM)
                     .text_size(metrics::TEXT_MD)
-                    .line_height(metrics::GROWING_LINE_HEIGHT),
+                    .line_height(metrics::GROWING_LINE_HEIGHT)
+                    .when(self.monospace, |area| {
+                        area.font_family(crate::assets::TERMINAL_FONT)
+                    }),
             ),
         }
     }

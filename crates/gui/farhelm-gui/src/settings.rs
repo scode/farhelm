@@ -13,8 +13,8 @@
 //! - **The sections.** A list of section buttons on the left, each with its icon and full label and the solid selection
 //!   fill on the one shown, and the shown section beside it under a heading of the same name. Only the sections this
 //!   build has are listed, in SPEC.md's order ([`Section::ALL`]). Each section's state lives in the dialog for as long
-//!   as it is open, so a hidden section keeps its pending saves and failure lines (and, once sections with text fields
-//!   exist, their unsaved text); only the shown one is drawn, so Tab never reaches a hidden control.
+//!   as it is open, so a hidden section keeps its pending saves, failure lines and unsaved text (Checkouts' fields);
+//!   only the shown one is drawn, so Tab never reaches a hidden control.
 //! - **Opening and closing.** [`open`] is the gear's entry point. It opens at Sessions with focus on its first switch
 //!   (SPEC.md: "The gear always opens sessions and focuses its first switch"). [`open_at_agent_trust`] is a trust
 //!   hint's: it opens at Agent trust and puts focus on that agent's switch once the switch can take it. Escape, the
@@ -23,10 +23,13 @@
 //!   helm's reply then settles nothing on screen, and the store already shows the result).
 //! - **Saving a choice.** Every switch here, Appearance's choice and Terminal's link choice save one field of the
 //!   helm's preference row at once, with [`crate::drafts::save`] under [`OpKey::preferences`]; Agent trust's trust
-//!   switches save the same way through their own routes ([`agent_trust`]). While the save is in flight the control
-//!   shows the value being saved (its draft); otherwise it shows what the helm stores, so a refused save shows the
-//!   stored value again, with the failure line under the control until its next save starts (SPEC.md: "A failed save
-//!   restores the last known value and shows an adjacent error"). Nothing is optimistic, queued, retried or read back.
+//!   switches and Checkouts' spare switch save the same way through their own routes ([`configured`]). While the save
+//!   is in flight the control shows the value being saved (its draft); otherwise it shows what the helm stores, so a
+//!   refused save shows the stored value again, with the failure line under the control until its next save starts
+//!   (SPEC.md: "A failed save restores the last known value and shows an adjacent error"). Nothing is optimistic,
+//!   queued, retried or read back. Checkouts' folder and post-clone command are the exception: each is a text field
+//!   the user saves explicitly, a [`CheckoutField`] of its own, which keeps a refused draft for correction and reads
+//!   its route back after a done save ([`checkout_field`]).
 //!
 //! NOTE: Quick flips do not follow the old app's "newest-choice" rule. Its preference queue coalesced a field's clicks,
 //! sent only the newest, and reported a failure only for the newest click. Here the operation store admits one request
@@ -42,16 +45,22 @@
 //! wide and below ("‹ Settings" back to the list) is not built, since the window's minimum width is above it. A
 //! section switch does not move focus to the shown section's heading, as the old app did so a keyboard user went on
 //! from there: the focus coordinator moves focus to a control only while no layer is open, and the heading is not a
-//! control. The section list is not pinned while a long section scrolls (the old `position: sticky`); no section here
-//! is long enough to scroll at the minimum window size.
+//! control. The section list is not pinned while a long section scrolls (the old `position: sticky`). Checkouts is
+//! taller than the dialog's body even at the dialog's full height, by about 30 pixels: its last control, the docs
+//! link, sits at the body's foot, its descenders and underline cut by the footer until the user scrolls. The header is
+//! taller than the old one, and the docs link has a line of its own.
 
 mod agent_trust;
 mod appearance;
+mod checkout_field;
+mod checkouts;
 mod choices;
+mod configured;
 mod terminal;
 #[cfg(test)]
 mod tests;
 
+use farhelm_helm_client::PathError;
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
 use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, Context, Entity, FocusHandle, FontWeight,
@@ -64,14 +73,16 @@ use crate::components::{Button, DialogFrame, HoverHelp, Tier};
 use crate::drafts::{self, Draft};
 use crate::focus::{self, Mark, ReturnTo};
 use crate::layers::{self, Dialog, LayerId};
-use crate::operations::{OpKey, Outcome};
+use crate::operations::{Command, OpKey, Outcome};
 use crate::session;
 use crate::theme::{self, Preference};
 
-use agent_trust::{Known, Trust};
+use agent_trust::Trust;
 use choices::{Choice, Switch};
+use configured::Configured;
 
 pub use agent_trust::TrustAgent;
+pub use checkout_field::{CheckoutField, FolderScope, Saved};
 use terminal::LinkClick;
 
 /// Hands the helm's stored appearance to the theme, for the main view's subscription to the current UI session. It
@@ -102,8 +113,8 @@ const SUMMARY: &str = "For every host on this helm, and for this device";
 
 /// The footer's note, the old desktop app's words.
 ///
-/// NOTE: It names editors that later sections bring (credentials, the Tensorlake API key, ntfy alerts, checkout fields
-/// and file types); none of them is built yet, and every choice built so far saves immediately.
+/// NOTE: It names the dialog's explicit-save editors; of them, only Checkouts' fields are built so far (the others come
+/// with their sections).
 const FOOTER_NOTE: &str = "Most choices save immediately; credentials, the Tensorlake API key, ntfy alerts, checkout \
                            fields and file types use Save.";
 
@@ -186,8 +197,10 @@ fn open_dialog(
     )?;
     dialog.update(cx, |dialog, cx| {
         dialog.layer = Some(layer);
-        dialog.show(section, cx);
+        dialog.show(section, window, cx);
     });
+    #[cfg(test)]
+    cx.set_global(tests::Opened(dialog.downgrade()));
     Some((layer, dialog, container))
 }
 
@@ -259,6 +272,7 @@ pub(crate) enum Section {
     Appearance,
     Hosts,
     Terminal,
+    Checkouts,
     AgentTrust,
 }
 
@@ -271,6 +285,7 @@ impl Section {
         Section::Appearance,
         Section::Hosts,
         Section::Terminal,
+        Section::Checkouts,
         Section::AgentTrust,
     ];
 
@@ -281,6 +296,7 @@ impl Section {
             Section::Appearance => "appearance",
             Section::Hosts => "hosts",
             Section::Terminal => "terminal",
+            Section::Checkouts => "checkouts",
             Section::AgentTrust => "agent-trust",
         }
     }
@@ -292,6 +308,7 @@ impl Section {
             Section::Appearance => "Appearance",
             Section::Hosts => "Hosts",
             Section::Terminal => "Terminal",
+            Section::Checkouts => "Checkouts",
             Section::AgentTrust => "Agent trust",
         }
     }
@@ -303,6 +320,7 @@ impl Section {
             Section::Appearance => Icon::Appearance,
             Section::Hosts => Icon::Hosts,
             Section::Terminal => Icon::Terminal,
+            Section::Checkouts => Icon::Folder,
             Section::AgentTrust => Icon::AgentTrust,
         }
     }
@@ -311,13 +329,15 @@ impl Section {
     /// Terminal, whose first control is a radio group: its options' focus handles live in the component's own element
     /// state, out of the dialog's reach, so opening there focuses the dialog itself (see [`open_at`]). Nothing in the
     /// app opens Settings at either; only their goldens do. `None` for Agent trust too, whose first switch is
-    /// unavailable until the section's read answers ([`open_at_agent_trust`]).
+    /// unavailable until the section's read answers ([`open_at_agent_trust`]), and for Checkouts, whose first control
+    /// is a text field that is read-only until its read answers, and which only its golden opens at.
     fn first(self) -> Option<Choice> {
         match self {
             Section::Sessions => Some(Choice::SkipSessionConfirmations),
             Section::Appearance => None,
             Section::Hosts => Some(Choice::AutoUpdateRemoteHosts),
             Section::Terminal => None,
+            Section::Checkouts => None,
             Section::AgentTrust => None,
         }
     }
@@ -339,11 +359,22 @@ pub(crate) struct SettingsDialog {
     /// the first time it is shown in this opening; `trust_read` says whether it was sent.
     trust: Vec<Trust>,
     trust_read: bool,
+    /// Checkouts' two explicitly saved fields, made the first time the section is shown in this opening, which is when
+    /// they read their routes (the pattern Agent trust follows).
+    checkout_fields: Option<CheckoutFields>,
+    /// Checkouts' spare switch. Its read is sent with the fields', so `checkout_fields` also says whether it was sent.
+    spare: Configured,
     /// The handover a trust hint asked for ([`open_at_agent_trust`]), until its agent's read answers. Left set if that
     /// read fails, which is harmless: the read is sent once per opening, so nothing can match it again in this opening.
     focus_on: Option<Handover>,
     /// Set right after the layer opens; what the close controls dismiss.
     layer: Option<LayerId>,
+}
+
+/// Checkouts' text fields, each a view of its own ([`CheckoutField`]) that the dialog draws as a child.
+struct CheckoutFields {
+    folder: Entity<CheckoutField>,
+    post_clone: Entity<CheckoutField>,
 }
 
 /// What a trust hint's entry point asks of the dialog ([`open_at_agent_trust`]): once `agent`'s read answers, focus
@@ -378,12 +409,13 @@ impl SettingsDialog {
                 .iter()
                 .map(|&agent| Trust {
                     agent,
-                    known: Known::Reading,
-                    draft: Draft::load(false),
+                    state: Configured::new(),
                     focus: cx.focus_handle().tab_stop(true),
                 })
                 .collect(),
             trust_read: false,
+            checkout_fields: None,
+            spare: Configured::new(),
             focus_on: None,
             layer: None,
         }
@@ -405,9 +437,25 @@ impl SettingsDialog {
     }
 
     /// Show `section`. Every section's state stays as it is: only which one is drawn changes. Showing Agent trust for
-    /// the first time in this opening reads the agents' trust choices.
-    fn show(&mut self, section: Section, cx: &mut Context<Self>) {
+    /// the first time in this opening reads the agents' trust choices, and showing Checkouts for the first time makes
+    /// its fields (which read their routes) and reads the spare switch.
+    fn show(&mut self, section: Section, window: &mut Window, cx: &mut Context<Self>) {
         self.shown = section;
+        if section == Section::Checkouts && self.checkout_fields.is_none() {
+            self.checkout_fields = Some(CheckoutFields {
+                folder: cx.new(|cx| {
+                    CheckoutField::folder(FolderScope::Default, checkouts::FOLDER_NOTE, window, cx)
+                }),
+                post_clone: cx.new(|cx| CheckoutField::post_clone(window, cx)),
+            });
+            let dialog = cx.weak_entity();
+            checkouts::read_spare(cx, move |answer, cx| {
+                let _ = dialog.update(cx, |dialog, cx| {
+                    dialog.spare.read_answered(answer);
+                    cx.notify();
+                });
+            });
+        }
         if section == Section::AgentTrust && !self.trust_read {
             self.trust_read = true;
             for agent in TrustAgent::ALL {
@@ -429,10 +477,7 @@ impl SettingsDialog {
         cx: &mut Context<Self>,
     ) {
         let trust = &mut self.trust[agent.index()];
-        trust.known = match answer {
-            Ok(enabled) => Known::Read(enabled),
-            Err(reason) => Known::Unreadable(reason),
-        };
+        trust.state.read_answered(answer);
         // The switch takes focus from the dialog itself ([`open_at_agent_trust`]). This borrows
         // `focus::move_within_control` outside its documented callers (a radio group's arrows and an inline question).
         // It is safe here for the same two reasons those are: it moves focus only from the dialog itself, which still
@@ -442,7 +487,7 @@ impl SettingsDialog {
         //
         // TODO: switch to `focus::focus_in_layer`, under the same mark, once it accepts a target that is not drawn yet;
         // it also scrolls the switch into view.
-        if trust.available()
+        if trust.state.available()
             && let Some(handover) = self.focus_on.take_if(|handover| handover.agent == agent)
             && !focus::has_moved_on(&handover.mark, cx)
         {
@@ -455,28 +500,36 @@ impl SettingsDialog {
         cx.notify();
     }
 
-    /// The user turned `agent`'s trust switch to `on`: save it through the agent's trust route, under the preference
-    /// row's key like every Settings choice ([`agent_trust`]). Once the helm has done it, that is the choice the
+    /// The user turned a switch over helm configuration to `on` (an agent's trust, Checkouts' spare switch): save it
+    /// with `command`, through the switch's own route, under the preference row's key like every Settings choice
+    /// ([`configured`]; [`agent_trust`] says why the key is shared). `state` reaches the switch in the dialog, and
+    /// `what` names it in the log when the save does not start. Once the helm has done it, that is the choice the
     /// section holds; a refusal leaves the choice read before.
-    fn toggle_trust(&mut self, agent: TrustAgent, on: bool, cx: &mut Context<Self>) {
-        let index = agent.index();
-        if !self.trust[index].available() || !self.trust[index].draft.edit(on) {
+    fn toggle_configured(
+        &mut self,
+        what: impl std::fmt::Debug,
+        state: impl Fn(&mut Self) -> &mut Configured + Copy + 'static,
+        on: bool,
+        command: impl FnOnce(bool) -> Result<Command, PathError>,
+        cx: &mut Context<Self>,
+    ) {
+        if !state(self).available() || !state(self).draft.edit(on) {
             return;
         }
         let started = drafts::save(
             self,
-            move |dialog: &mut SettingsDialog| &mut dialog.trust[index].draft,
+            move |dialog: &mut SettingsDialog| &mut state(dialog).draft,
             &OpKey::preferences(),
-            |on| agent.command(*on),
+            |on| command(*on),
             cx,
             move |dialog, settled, _| {
                 if matches!(settled.outcome, Outcome::Done(_)) {
-                    dialog.trust[index].known = Known::Read(on);
+                    state(dialog).saved(on);
                 }
             },
         );
         if let Err(not_started) = started {
-            tracing::debug!(?agent, ?not_started, "agent trust not saved");
+            tracing::debug!(?what, ?not_started, "configuration switch not saved");
         }
     }
 
@@ -612,6 +665,31 @@ impl SettingsDialog {
                 .map(IntoElement::into_any_element)
                 .collect()
             }
+            Section::Checkouts => {
+                let weak = cx.weak_entity();
+                let spare = checkouts::spare(
+                    &self.spare,
+                    move |on, _, cx| {
+                        let _ = weak.update(cx, |dialog, cx| {
+                            dialog.toggle_configured(
+                                "checkout spare",
+                                |dialog| &mut dialog.spare,
+                                on,
+                                checkouts::spare_command,
+                                cx,
+                            )
+                        });
+                    },
+                    cx,
+                );
+                let mut body = Vec::new();
+                if let Some(fields) = &self.checkout_fields {
+                    body.push(fields.folder.clone().into_any_element());
+                    body.push(fields.post_clone.clone().into_any_element());
+                }
+                body.push(spare.into_any_element());
+                body
+            }
             Section::AgentTrust => self
                 .trust
                 .iter()
@@ -623,7 +701,16 @@ impl SettingsDialog {
                         trust,
                         index == 0,
                         move |on, _, cx| {
-                            let _ = weak.update(cx, |dialog, cx| dialog.toggle_trust(agent, on, cx));
+                            let _ = weak.update(cx, |dialog, cx| {
+                                let index = agent.index();
+                                dialog.toggle_configured(
+                                    agent,
+                                    move |dialog| &mut dialog.trust[index].state,
+                                    on,
+                                    |on| agent.command(on),
+                                    cx,
+                                )
+                            });
                         },
                         |choice| self.switch(choice, preferences, cx),
                         cx,
@@ -682,8 +769,8 @@ impl Render for SettingsDialog {
                 .tier(Tier::Nav)
                 .icon(section.icon())
                 .pressed(section == self.shown)
-                .on_click(move |_, _, cx| {
-                    let _ = weak.update(cx, |dialog, cx| dialog.show(section, cx));
+                .on_click(move |_, window, cx| {
+                    let _ = weak.update(cx, |dialog, cx| dialog.show(section, window, cx));
                 })
             }));
         // `.app-settings-panel`: the shown section under its heading.
