@@ -32,13 +32,14 @@
 //!   the user saves explicitly, a [`CheckoutField`] of its own, which keeps a refused draft for correction and reads
 //!   its route back after a done save ([`checkout_field`]). So are Notifications' ntfy alerts: a form the user saves
 //!   explicitly, a view of its own ([`ntfy`]). So is Credentials, whose named secrets each save under their own key,
-//!   with the Tensorlake API key form above them ([`credentials`], [`tensorlake_key`]). Terminal's tunnel switch saves
-//!   like a switch only when turned off; turned on, it asks the terminal's tunnel warning, whose Allow saves the
-//!   consent, and shows the stored choice until the helm pushes it ([`terminal`]). App's switch is not the helm's at
-//!   all: it writes the desktop app's own setting through its updater, at once and with a final answer, so it has no
-//!   draft and never holds the preference row's key ([`app`]). Containers saves no choice at all: it shows what the
-//!   helm reads from its container hosts, and its Refresh and confirmed Deletes are plain commands, not operations on a
-//!   key ([`containers`]).
+//!   with the Tensorlake API key form above them ([`credentials`], [`tensorlake_key`]). Recipes saves no choice the
+//!   dialog shows: it lists the helm's recipes, and its snapshot builds are accepted work under each recipe's own key
+//!   ([`recipes`]). Terminal's tunnel switch saves like a switch only when turned off; turned on, it asks the terminal's
+//!   tunnel warning, whose Allow saves the consent, and shows the stored choice until the helm pushes it
+//!   ([`terminal`]). App's switch is not the helm's at all: it writes the desktop app's own setting through its
+//!   updater, at once and with a final answer, so it has no draft and never holds the preference row's key ([`app`]).
+//!   Containers saves no choice at all: it shows what the helm reads from its container hosts, and its Refresh and
+//!   confirmed Deletes are plain commands, not operations on a key ([`containers`]).
 //!
 //! NOTE: Quick flips do not follow the old app's "newest-choice" rule. Its preference queue coalesced a field's clicks,
 //! sent only the newest, and reported a failure only for the newest click. Here the operation store admits one request
@@ -73,6 +74,9 @@ mod containers;
 mod credential_tests;
 mod credentials;
 mod ntfy;
+#[cfg(test)]
+mod recipe_tests;
+mod recipes;
 mod refused;
 mod tensorlake_key;
 mod terminal;
@@ -329,6 +333,7 @@ pub(crate) enum Section {
     Sessions,
     Appearance,
     Hosts,
+    Recipes,
     /// Whether each container host can run containers, and the containers this helm left behind ([`containers`]).
     Containers,
     Credentials,
@@ -348,6 +353,7 @@ impl Section {
         Section::Sessions,
         Section::Appearance,
         Section::Hosts,
+        Section::Recipes,
         Section::Containers,
         Section::Credentials,
         Section::Terminal,
@@ -366,6 +372,7 @@ impl Section {
             Section::Sessions
             | Section::Appearance
             | Section::Hosts
+            | Section::Recipes
             | Section::Containers
             | Section::Credentials
             | Section::Terminal
@@ -381,6 +388,7 @@ impl Section {
             Section::Sessions => "sessions",
             Section::Appearance => "appearance",
             Section::Hosts => "hosts",
+            Section::Recipes => "recipes",
             Section::Containers => "containers",
             Section::Credentials => "credentials",
             Section::Terminal => "terminal",
@@ -397,6 +405,7 @@ impl Section {
             Section::Sessions => "Sessions",
             Section::Appearance => "Appearance",
             Section::Hosts => "Hosts",
+            Section::Recipes => "Recipes",
             Section::Containers => "Containers",
             Section::Credentials => "Credentials",
             Section::Terminal => "Terminal",
@@ -413,6 +422,7 @@ impl Section {
             Section::Sessions => Icon::Sessions,
             Section::Appearance => Icon::Appearance,
             Section::Hosts => Icon::Hosts,
+            Section::Recipes => Icon::Folder,
             // The old app drew Containers with the Hosts glyph too (`settings_section_icon`).
             Section::Containers => Icon::Hosts,
             Section::Credentials => Icon::Lock,
@@ -429,18 +439,19 @@ impl Section {
     /// state, out of the dialog's reach, so opening there focuses the dialog itself (see [`open_at`]). Nothing in the
     /// app opens Settings at either; only their goldens do. `None` for Agent trust too, whose first switch is
     /// unavailable until the section's read answers ([`open_at_agent_trust`]), and for Checkouts, whose first control
-    /// is a text field that is read-only until its read answers, and Credentials, whose controls wait for its reads too
-    /// ([`credentials`]); only their goldens open at any of these. `None` for Containers too, whose first control,
-    /// Refresh, belongs to a view made as the section first shows ([`containers`]); only its golden opens there. `None`
-    /// for Notifications too, although its first control, the waiting sound's switch, could take focus: nothing in the
-    /// app opens Settings there (only its golden and its tests do), and the ntfy form's tests walk Tab from the dialog
-    /// itself. `None` for App as well, whose switch is not a preference [`Choice`]: [`SettingsDialog::start`] gives it
-    /// its own handle.
+    /// is a text field that is read-only until its read answers, and Credentials and Recipes, whose controls wait for
+    /// their reads too ([`credentials`], [`recipes`]); only their goldens open at any of these. `None` for Containers
+    /// too, whose first control, Refresh, belongs to a view made as the section first shows ([`containers`]); only its
+    /// golden opens there. `None` for Notifications too, although its first control, the waiting sound's switch, could
+    /// take focus: nothing in the app opens Settings there (only its golden and its tests do), and the ntfy form's tests
+    /// walk Tab from the dialog itself. `None` for App as well, whose switch is not a preference [`Choice`]:
+    /// [`SettingsDialog::start`] gives it its own handle.
     fn first(self) -> Option<Choice> {
         match self {
             Section::Sessions => Some(Choice::SkipSessionConfirmations),
             Section::Appearance => None,
             Section::Hosts => Some(Choice::AutoUpdateRemoteHosts),
+            Section::Recipes => None,
             Section::Containers => None,
             Section::Credentials => None,
             Section::Terminal => None,
@@ -490,6 +501,9 @@ pub(crate) struct SettingsDialog {
     /// What this opening knows of the Tensorlake account, shared by every Tensorlake API key form in it (SPEC.md: a
     /// save or clear in either form updates both); made with the first section that draws one, which reads it then.
     tensorlake: Option<Entity<TensorlakeAccount>>,
+    /// The Recipes section, made the first time it is shown in this opening. Its rows are the pushed catalog; it reads
+    /// only the Tensorlake account, then and each time it is shown again ([`recipes`]).
+    recipes: Option<Entity<recipes::Recipes>>,
     /// The handover a trust hint asked for ([`open_at_agent_trust`]), until its agent's read answers. Left set if that
     /// read fails, which is harmless: the read is sent once per opening, so nothing can match it again in this opening.
     focus_on: Option<Handover>,
@@ -551,6 +565,7 @@ impl SettingsDialog {
             app: app::AppUpdates::new(cx.focus_handle().tab_stop(true)),
             credentials: None,
             tensorlake: None,
+            recipes: None,
             focus_on: None,
             layer: None,
             refused: Refused::default(),
@@ -583,7 +598,8 @@ impl SettingsDialog {
     /// its fields (which read their routes) and reads the spare switch, showing Notifications for the first time
     /// makes its form, which reads the helm's ntfy settings, and showing Containers for the first time makes its
     /// section, which reads the container hosts and leftovers. Showing Credentials makes it the first time, which reads
-    /// the Tensorlake account too if no section has yet, and reads its catalog every time.
+    /// the Tensorlake account too if no section has yet, and reads its catalog every time; showing Recipes makes it the
+    /// first time, and reads the Tensorlake account every time.
     fn show(&mut self, section: Section, window: &mut Window, cx: &mut Context<Self>) {
         self.shown = section;
         if section == Section::Containers && self.containers.is_none() {
@@ -606,6 +622,17 @@ impl SettingsDialog {
                         Some(cx.new(|cx| credentials::Credentials::new(key, window, cx)));
                 }
             }
+        }
+        if section == Section::Recipes {
+            match &self.recipes {
+                // Shown again: the catalog is pushed, but whether an API key is saved is not, so that is read again
+                // ([`recipes`]).
+                Some(section) => section.update(cx, |section, cx| section.read_account(cx)),
+                None => self.recipes = Some(cx.new(recipes::Recipes::new)),
+            }
+        } else if let Some(recipes) = &self.recipes {
+            // Undrawn from now on: it must not keep holding the running pulse ([`recipes::Recipes::hidden`]).
+            recipes.update(cx, |recipes, _| recipes.hidden());
         }
         if section == Section::Checkouts && self.checkout_fields.is_none() {
             self.checkout_fields = Some(CheckoutFields {
@@ -1081,6 +1108,11 @@ impl SettingsDialog {
             }
             Section::Credentials => self
                 .credentials
+                .iter()
+                .map(|section| section.clone().into_any_element())
+                .collect(),
+            Section::Recipes => self
+                .recipes
                 .iter()
                 .map(|section| section.clone().into_any_element())
                 .collect(),
