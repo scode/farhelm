@@ -54,6 +54,14 @@
 //! The Checkouts section glyph is the old app's `FolderIcon`, in its own 12-unit box with the same 1.2 stroke.
 //!
 //! The host menu's Update glyph is the old app's too (`ActionGlyph::Update`), in the same box and stroke.
+//!
+//! The harness marks (`Harness*`, the agent mark on a session row) are not drawn here: each file is generated from the
+//! geometry in [`crate::marks`], the one source for those shapes and their provenance, and a test in the GUI's harness
+//! module (`every_harness_icon_is_its_mark_rendered` in `harness.rs`) fails when a file and its mark disagree, so a mark
+//! is changed in `marks.rs` and its file regenerated, never edited by hand
+//! (`docs/harness-marks.md`, "Drawing the marks"). The four permission marks (`Permission*`) are the old app's
+//! `PermissionIcon` drawings at the reference commit, in its 12-unit box with the 1.25 stroke and round caps and joins;
+//! the own-setting shield is the plain one dashed.
 
 use std::borrow::Cow;
 
@@ -184,6 +192,35 @@ pub enum Icon {
     BoltFilled,
     /// A folder: the Settings dialog's Checkouts section (the old app's `FolderIcon`, its 12-pixel box kept).
     Folder,
+    /// The first of the harness marks, one per `marks::HarnessGlyph`, in that enum's order: each the mark's geometry from
+    /// `marks.rs` drawn in its 12-unit box (`docs/harness-marks.md`). Cursor's cube.
+    HarnessCursor,
+    /// Codex: the OpenAI blossom.
+    HarnessCodex,
+    /// Claude: Farhelm's own starburst.
+    HarnessClaude,
+    /// Muse: the community stroked M.
+    HarnessMuse,
+    /// Goose: its official silhouette.
+    HarnessGoose,
+    /// Pi: its pixel-grid badge.
+    HarnessPi,
+    /// OMP: its block-style pi.
+    HarnessOmp,
+    /// Grok: Farhelm's own block G.
+    HarnessGrok,
+    /// OpenCode: its favicon ring.
+    HarnessOpenCode,
+    /// A command no agent type was declared for: Farhelm's own window with a prompt.
+    HarnessTerminal,
+    /// A shield struck through: a session whose launch is YOLO, or was seen running without checks.
+    PermissionYolo,
+    /// A plain shield: an agent launch in guarded or an approval mode, or a command asserted not to be YOLO.
+    PermissionShielded,
+    /// A dashed shield: the agent's own setting, which Farhelm never classified.
+    PermissionOwnSetting,
+    /// A question mark: a command from before launch kinds, which carries no YOLO assertion.
+    PermissionUnknown,
 }
 
 impl Icon {
@@ -236,6 +273,20 @@ impl Icon {
         Icon::Bolt,
         Icon::BoltFilled,
         Icon::Folder,
+        Icon::HarnessCursor,
+        Icon::HarnessCodex,
+        Icon::HarnessClaude,
+        Icon::HarnessMuse,
+        Icon::HarnessGoose,
+        Icon::HarnessPi,
+        Icon::HarnessOmp,
+        Icon::HarnessGrok,
+        Icon::HarnessOpenCode,
+        Icon::HarnessTerminal,
+        Icon::PermissionYolo,
+        Icon::PermissionShielded,
+        Icon::PermissionOwnSetting,
+        Icon::PermissionUnknown,
     ];
 }
 
@@ -287,6 +338,20 @@ impl Icon {
             Icon::Bolt => "icons/bolt.svg",
             Icon::BoltFilled => "icons/bolt-filled.svg",
             Icon::Folder => "icons/folder.svg",
+            Icon::HarnessCursor => "icons/harness-cursor.svg",
+            Icon::HarnessCodex => "icons/harness-codex.svg",
+            Icon::HarnessClaude => "icons/harness-claude.svg",
+            Icon::HarnessMuse => "icons/harness-muse.svg",
+            Icon::HarnessGoose => "icons/harness-goose.svg",
+            Icon::HarnessPi => "icons/harness-pi.svg",
+            Icon::HarnessOmp => "icons/harness-omp.svg",
+            Icon::HarnessGrok => "icons/harness-grok.svg",
+            Icon::HarnessOpenCode => "icons/harness-opencode.svg",
+            Icon::HarnessTerminal => "icons/harness-terminal.svg",
+            Icon::PermissionYolo => "icons/permission-yolo.svg",
+            Icon::PermissionShielded => "icons/permission-shielded.svg",
+            Icon::PermissionOwnSetting => "icons/permission-own-setting.svg",
+            Icon::PermissionUnknown => "icons/permission-unknown.svg",
         }
     }
 }
@@ -347,6 +412,36 @@ impl Assets {
             "icons/terminal.svg" => Some(include_bytes!("../assets/icons/terminal.svg")),
             "icons/agent-trust.svg" => Some(include_bytes!("../assets/icons/agent-trust.svg")),
             "icons/folder.svg" => Some(include_bytes!("../assets/icons/folder.svg")),
+            "icons/harness-cursor.svg" => {
+                Some(include_bytes!("../assets/icons/harness-cursor.svg"))
+            }
+            "icons/harness-codex.svg" => Some(include_bytes!("../assets/icons/harness-codex.svg")),
+            "icons/harness-claude.svg" => {
+                Some(include_bytes!("../assets/icons/harness-claude.svg"))
+            }
+            "icons/harness-muse.svg" => Some(include_bytes!("../assets/icons/harness-muse.svg")),
+            "icons/harness-goose.svg" => Some(include_bytes!("../assets/icons/harness-goose.svg")),
+            "icons/harness-pi.svg" => Some(include_bytes!("../assets/icons/harness-pi.svg")),
+            "icons/harness-omp.svg" => Some(include_bytes!("../assets/icons/harness-omp.svg")),
+            "icons/harness-grok.svg" => Some(include_bytes!("../assets/icons/harness-grok.svg")),
+            "icons/harness-opencode.svg" => {
+                Some(include_bytes!("../assets/icons/harness-opencode.svg"))
+            }
+            "icons/harness-terminal.svg" => {
+                Some(include_bytes!("../assets/icons/harness-terminal.svg"))
+            }
+            "icons/permission-yolo.svg" => {
+                Some(include_bytes!("../assets/icons/permission-yolo.svg"))
+            }
+            "icons/permission-shielded.svg" => {
+                Some(include_bytes!("../assets/icons/permission-shielded.svg"))
+            }
+            "icons/permission-own-setting.svg" => {
+                Some(include_bytes!("../assets/icons/permission-own-setting.svg"))
+            }
+            "icons/permission-unknown.svg" => {
+                Some(include_bytes!("../assets/icons/permission-unknown.svg"))
+            }
             "icons/update.svg" => Some(include_bytes!("../assets/icons/update.svg")),
             WORDMARK_DARK => Some(include_bytes!(
                 "../../../../packaging/farhelm-desktop/wordmark-dark.svg"

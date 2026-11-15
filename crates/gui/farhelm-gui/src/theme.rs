@@ -155,6 +155,10 @@ pub struct Palette {
     pub shadow_dialog: Token,
     /// `--host-icon-*`, in the host color order lavender, orchid, teal, steel, sand, copper, red.
     pub host: [Token; 7],
+    /// `--harness-*`, the agent marks' identity colors, in the order claude, muse, cursor, pi, omp, grok, opencode
+    /// (`docs/harness-marks.md`, "Colors", has each one's source). Codex, Goose and the Terminal mark have none: they
+    /// keep the agent track's `--fg-1`, as their owners' terms or Farhelm's own choice ask.
+    pub harness: [Token; 7],
 }
 
 /// The old app's "Steel" dark appearance.
@@ -216,6 +220,15 @@ pub const DARK: Palette = Palette {
         rgb_token(0xd7a180),
         rgb_token(0xe69c9c),
     ],
+    harness: [
+        rgb_token(0xd97757),
+        rgb_token(0x456bff),
+        rgb_token(0x2fbfaf),
+        rgb_token(0x4d9abf),
+        rgb_token(0x9b4dff),
+        rgb_token(0xd8b839),
+        rgb_token(0x83b94b),
+    ],
 };
 
 /// The old app's "Steel" light appearance. Layout and type are shared with dark; only roles change.
@@ -276,6 +289,15 @@ pub const LIGHT: Palette = Palette {
         rgb_token(0x75603b),
         rgb_token(0x8b5233),
         rgb_token(0xa14646),
+    ],
+    harness: [
+        rgb_token(0xd25e39),
+        rgb_token(0x456bff),
+        rgb_token(0x249084),
+        rgb_token(0x3e89ad),
+        rgb_token(0x9b4dff),
+        rgb_token(0x987f1e),
+        rgb_token(0x638d37),
     ],
 };
 

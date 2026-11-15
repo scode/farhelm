@@ -65,10 +65,11 @@ prints. (They used to ship inside the web bundle that `farhelm` embedded; that b
 
 ## Harness marks
 
-The session sidebar's harness marks in `crates/gui/farhelm-gui/src/marks.rs` vendor geometry from the sources below.
-Each is used with unaltered geometry apart from a uniform scale into the shared 12-unit box; `docs/harness-marks.md`
-records why each mark was chosen, its color treatment and what the owner's terms allow. Marks not listed here (Claude,
-Grok, Terminal) are Farhelm's own drawings.
+The session sidebar's harness marks in `crates/gui/farhelm-gui/src/marks.rs` vendor geometry from the sources below. The
+same geometry also ships as the generated pictures `crates/gui/farhelm-gui/assets/icons/harness-*.svg`, whose paths are
+byte for byte those in `marks.rs`. Each is used with unaltered geometry apart from a uniform scale into the shared
+12-unit box; `docs/harness-marks.md` records why each mark was chosen, its color treatment and what the owner's terms
+allow. Marks not listed here (Claude, Grok, Terminal) are Farhelm's own drawings.
 
 ## OpenCode sidebar mark
 

@@ -183,6 +183,24 @@ rather than this provenance record, where they would go stale.
    and looks worse.
 4. Compute the transform from the exact bounding box using the rule above, and record the box in the comment beside it.
    Never use an SVG `text` element.
+5. Give the new glyph its answers in `crates/gui/farhelm-gui/src/harness.rs` (its icon and its ink; the compiler names
+   every match that needs one), add its icon to `assets.rs`, and generate its file as "Drawing the marks" says.
+
+## Drawing the marks
+
+GPUI draws a picture only from an SVG file, so each mark also exists as one, `assets/icons/harness-<token>.svg` in the
+GUI crate. Those files are generated from `marks.rs` and are never edited by hand: the markup is the old inline SVG's
+(the mark's paths in `currentColor` inside one group carrying its recorded transform, in the 12-unit box), and the paths
+are the same bytes as the constants, so the files carry no geometry of their own and need no provenance of their own.
+The test `every_harness_icon_is_its_mark_rendered` in the GUI crate's `harness.rs` renders every mark and fails when a
+file differs. After changing a mark, regenerate the files with that module's ignored test,
+`cargo test -p farhelm-gui --lib write_harness_mark_svgs -- --ignored`, and look at what changed.
+
+The row draws a mark in a 10-pixel square centred in its 10 by 12 pixel cell, where the old slot drew the 12-unit box at
+10 by 12 with the browser's default aspect rule, which comes to the same square. GPUI would draw it the same way in the
+whole cell: its SVG element scales a picture by the box's width alone, keeping the aspect ratio, and centres the result
+in the box (`rasterize_tree` and `Window::paint_svg` in the vendored GPUI), so the square is the explicit form of what
+either size draws.
 
 ## Host marks
 

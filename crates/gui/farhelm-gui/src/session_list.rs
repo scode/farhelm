@@ -110,6 +110,7 @@ pub(crate) mod rename;
 pub(crate) mod replace;
 pub(crate) mod restart;
 mod row;
+mod row_marks;
 pub(crate) mod seen;
 pub(crate) mod selection;
 mod status;
@@ -126,6 +127,9 @@ pub(crate) mod menu_tests;
 
 #[cfg(test)]
 mod row_tests;
+
+#[cfg(test)]
+mod row_marks_tests;
 
 #[cfg(test)]
 mod seen_tests;
