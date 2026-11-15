@@ -34,8 +34,15 @@ pub(super) fn creates(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<Fa
     creates_answering(helm, cx, &json!([]))
 }
 
-/// [`creates`], answering the catalog read with `catalog`, round after round until a round sends nothing but creates,
-/// so a create that waited for an answer (a quick launch's catalog read) is among them.
+/// The launch history of a host that has launched nothing yet, as the helm answers it.
+fn empty_history() -> serde_json::Value {
+    json!({ "launches": [], "folders": [], "checkout_config_revision": 1 })
+}
+
+/// [`creates`], answering the catalog read with `catalog` and every launch-history read with [`empty_history`], round
+/// after round until a round sends nothing but creates, so a create that waited for an answer (a quick launch's
+/// catalog read, or New's folder default, which settles on `~` from that empty history) is among them. The templates
+/// area's tests depend on both answers.
 pub(crate) fn creates_answering(
     helm: &mut FakeHelm,
     cx: &mut VisualTestContext,
@@ -50,6 +57,10 @@ pub(crate) fn creates_answering(
                 creates.push(command);
             } else if command.path.ends_with("launch-catalog") {
                 helm.reply(command.id, 200, Some(catalog.clone()));
+                answered = true;
+            } else if command.path.starts_with("/api/launch-history") {
+                // A host with no history, so New's folder default settles on `~` (a quick launch waits for it).
+                helm.reply(command.id, 200, Some(empty_history()));
                 answered = true;
             } else {
                 helm.reply(command.id, 200, None);

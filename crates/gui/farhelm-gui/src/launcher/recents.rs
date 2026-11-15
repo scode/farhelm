@@ -201,6 +201,17 @@ pub fn destination_label(entry: &LaunchHistoryEntry) -> String {
     }
 }
 
+/// The folder `history` makes its host's default for New: where the newest launch into a plain folder started, else
+/// `~` (SPEC.md, "Working directory"). A launch into a fresh managed checkout does not count, nor does one into a
+/// disposable environment, whose folder belongs to that environment. The helm lists launches newest first.
+pub fn remembered_folder(history: &LaunchHistoryReply) -> String {
+    history
+        .launches
+        .iter()
+        .find(|entry| entry.github_repo.is_none() && entry.target.is_none())
+        .map_or_else(|| "~".to_owned(), |entry| entry.cwd.clone())
+}
+
 /// The permission `selection` launches with, in the launcher's words; "Agent's own setting" for none.
 pub fn permission_value(selection: &LaunchSelection) -> &'static str {
     match selection.harness.request_permission(selection.permissions) {

@@ -4724,14 +4724,14 @@ Schema 30's nullable `remembered_workspace_trust` column stays in the preference
 Permission memory and structured launch history still come from the selection the user submitted
 (`CreateAcceptance::explicit_selection`), never from the supervisor's reply, per SPEC.md's rule that only explicit GUI
 selections shape GUI defaults and suggestions. The launcher derives a host's default folder from the same recent-setups
-reply it reads for the target: the `cwd` of the newest launch row without a GitHub repository. It seeds an untouched
-folder once per opening or host change, from the first reply for that target (the offered snapshot), so a feed refresh
-never reseeds. Launch is refused for an untouched folder until that reply arrives, and a hidden quick launch waits for
-it; an unreadable reply falls back to `~`, and a hidden quick launch then shows New with an explanation instead of
-launching. The default advances only when the parent-derived target agrees with the form's own host choice, and a
-permission Undo restores the default as captured when its warning appeared, reconciled with the restored destination.
-The launcher has no trust state, segment or search action. Recent setup grouping ignores historical trust, summaries
-omit it, and activating a recent clears it before composing a new launch.
+reply it reads for the target: the `cwd` of the newest launch row with neither a GitHub repository nor a disposable
+environment target. It seeds an untouched folder once per opening or host change, from the first reply for that target,
+so a later re-read (a reconnect) never reseeds. Launch is refused for an untouched folder until that reply arrives, and
+a hidden quick launch waits for it; an unreadable reply falls back to `~`, and a hidden quick launch then shows New with
+an explanation instead of launching. Whether the default is still waiting is part of the launcher's draft, so a
+permission Undo, which restores the whole draft from before the switch, restores it too; a restored waiting default
+settles from the reply current at that moment. The launcher has no trust state, segment or search action. Recent setup
+grouping ignores historical trust, summaries omit it, and activating a recent clears it before composing a new launch.
 
 `LaunchSelection.workspace_trust` remains on the wire and in stored selections: supervisors persist selections, and
 their strict decoding must still accept older fields. The helm overwrites the field from the agent trust section in
