@@ -2,14 +2,18 @@
 //! show it.
 //!
 //! SPEC_impl.md, "Notices: the notice center": it is a code owner, not a new surface. The old app decided "should the
-//! user hear about this now" in each feature, and the same event could reach the bell list, a banner and a chime by
-//! three different rules. Here a feature reports what happened ([`post`], [`withdraw`]) and the notice center alone
-//! keeps what is showing; the surfaces read [`posted`] when they draw.
+//! user hear about this now" in each feature. Here a feature reports what happened ([`post`], [`withdraw`]) and the
+//! notice center alone keeps what is showing; the surfaces read [`posted`] when they draw. A notice is never shown by
+//! its feature directly.
 //!
-//! NOTE: Only the one notice the reset needs exists so far, the generic connection-lost notice, shown as a banner at
-//! the top of the window. The bell list and notices panel, approval cards, the version-mismatch and outage cards, and
-//! chimes arrive with the areas that port them: each adds a [`Notice`] variant and the surface that draws it. A notice
-//! is never shown by its feature directly.
+//! Its surfaces are approval cards and banners, its own generic notices among them. Banners still to come, such as the
+//! version-mismatch and outage cards, arrive with the areas that port them: each adds a [`Notice`] variant and the
+//! surface that draws it. The session rows' bells with their lists, and the rail's notices panel when it comes, are
+//! not its surfaces: they draw the notification records the helm keeps and pushes, straight from the store. Nor are the
+//! status chimes, which the one sound owner decides. The migration's orchestrator drew that line on 2026-11-14.
+//!
+//! NOTE: The approval region does not read [`posted`] yet, so a late answer's notice ([`Notice::LateAnswer`]) is
+//! posted, and replaced by the next one, but shown nowhere until it does.
 
 use gpui::{App, AppContext as _, Entity, Global, SharedString};
 
