@@ -4,8 +4,9 @@
 //! attach a terminal, show its output, say when it is not live, take focus and send the program its keys. The terminal
 //! area added paste, committed text from the platform's text input, focus reports, scrollback, the local selection,
 //! mouse reporting, web links with a program's hyperlink's destination display, and the Mac's tunnel offer for a remote
-//! host's loopback links ([`super::tunnels`]) since. File links and the reconnect display with its phase and Retry come
-//! later in that work. The session pane ([`crate::session_pane`]) mounts one for
+//! host's loopback links ([`super::tunnels`]), the host-colored frame and the dimmed, inert presentation a status
+//! card stands over ([`AttachedTerminal::set_inert`]) since. File links and the reconnect display with its phase and
+//! Retry come later in that work. The session pane ([`crate::session_pane`]) mounts one for
 //! the selected session.
 //!
 //! [`AttachedTerminal`] owns one stream ([`TerminalHandle`] and [`TerminalEvents`]) and the [`TerminalView`]s that show
@@ -115,7 +116,8 @@ use farhelm_input_mapping::{
 };
 use farhelm_proto::DetachCode;
 use farhelm_proto::grid::{GridInput, MouseEventKind};
-use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
+use farhelm_proto::host_appearance::HostColor;
+use farhelm_proto::ui_channel::{HostView, PREFERENCES_KEY, Preferences, SessionRow};
 use gpui::{
     AnyElement, App, AppContext as _, Bounds, ClipboardEntry, ClipboardItem, Context,
     DispatchPhase, ElementInputHandler, Entity, EntityInputHandler, FocusHandle, HoverListenerMode,
@@ -306,11 +308,21 @@ pub struct AttachedTerminal {
     /// [`AttachedTerminal::report_focus`]). Set up on the first render, which is where the owner first has its window.
     activation: Option<Subscription>,
     _session: [Subscription; 2],
+    /// Whether the terminal is drawn dimmed and takes no input and no focus ([`AttachedTerminal::set_inert`]): set by
+    /// the session view while a status card stands over the terminal, as the unreachable-host card does.
+    inert: bool,
+    /// The cell of the last mouse report sent, where the releases [`AttachedTerminal::release_reported_buttons`]
+    /// synthesizes are placed.
+    last_report_cell: Option<(u16, u16)>,
+    /// The host identity color the thin frame around the terminal is drawn in, while the shared **Color terminal
+    /// frames by host** preference is on; `None` while it is off or the session's host is not known. Kept by the store
+    /// observer ([`AttachedTerminal::follow_store`]), which redraws only when it changes, so the terminal is not redrawn
+    /// on every push.
+    frame: Option<HostColor>,
     /// Redraws the terminal when its tunnels change, since it draws their failure notice.
     _tunnels: Subscription,
-    /// Reads the session's tunnels when the pushed state says they are due ([`AttachedTerminal::keep_tunnels_current`]):
-    /// as the terminal is made, and whenever the store changes (the session's host becoming known as remote, the shared
-    /// tunnel consent changing).
+    /// Follows the pushed state ([`AttachedTerminal::follow_store`]): reads the session's tunnels when they are due, and
+    /// keeps the frame's color, as the terminal is made and whenever the store changes.
     _tunnel_reads: session::ObservingCurrent,
     /// How many delivery turns ran, and how many times output was applied to a view, so tests can check the per-turn
     /// bound and that consecutive output is applied as one batch.
@@ -345,7 +357,7 @@ impl AttachedTerminal {
         let tunnels = cx.new(|cx| Tunnels::new(target.session.clone(), cx));
         let tunnel_watch = cx.observe(&tunnels, |_, _, cx| cx.notify());
         let tunnel_reads =
-            session::observe_current(cx, |owner: &mut Self, cx| owner.keep_tunnels_current(cx));
+            session::observe_current(cx, |owner: &mut Self, cx| owner.follow_store(cx));
         AttachedTerminal {
             target,
             hold: None,
@@ -393,6 +405,9 @@ impl AttachedTerminal {
             blink: None,
             paste: None,
             _session: subscriptions,
+            inert: false,
+            last_report_cell: None,
+            frame: None,
             _tunnels: tunnel_watch,
             _tunnel_reads: tunnel_reads,
             #[cfg(test)]
@@ -400,6 +415,42 @@ impl AttachedTerminal {
             #[cfg(test)]
             applies: 0,
         }
+    }
+
+    /// Draw the terminal dimmed and inert, or stop: the presentation the session view's status cards stand over
+    /// (SPEC.md, "Session list": an unreachable host's session keeps "a retained terminal dimmed and inert beneath" its
+    /// card).
+    ///
+    /// While inert, the terminal keeps its stream, its screen and its scrollback, and goes on drawing what arrives, but
+    /// under the old app's terminal scrim (`--scrim`, as its outage card's veil was) across the whole pane, its status
+    /// line included, which takes every press, hover and wheel turn; its grid takes no keys and no actions (no key
+    /// context, so Tab and Escape are the window's, not the program's), and nothing the user types, commits or pastes
+    /// is sent; its pane is no Tab stop, its cursor is drawn as unfocused, the platform's text input is not handed to
+    /// it, the status line's Take control and the tunnel notice, which Tab could still reach under the veil, are not
+    /// drawn, and neither is the refused-click line. Going inert ends whatever was under way: a press the program's
+    /// mouse reporting took gets its release, a selection drag or a press on a link is dropped, and a paste still
+    /// reading the clipboard is not sent.
+    ///
+    /// It moves no focus itself. The caller, which puts the card up, moves focus off the terminal (to the card, or
+    /// home) and makes something else home while it stays inert, through the focus coordinator; otherwise focus rests
+    /// on a terminal that takes nothing. The card draws itself over this, with no veil of its own. Turning it off
+    /// undoes all of it.
+    pub fn set_inert(&mut self, inert: bool, cx: &mut Context<Self>) {
+        if self.inert == inert {
+            return;
+        }
+        if inert {
+            self.release_reported_buttons();
+            self.select = None;
+            self.link_press = None;
+            // Dropping the task drops the paste still reading the clipboard, and the earlier ones it waits on, as
+            // retiring the terminal does.
+            self.paste = None;
+        }
+        self.inert = inert;
+        // A handle's Tab stop is shared by every clone of it: this changes the one the pane tracks.
+        self.focus = self.focus.clone().tab_stop(!inert);
+        cx.notify();
     }
 
     /// Whether the terminal shows its live attachment's complete screen and carries input. Input is sent only while
@@ -761,7 +812,9 @@ impl AttachedTerminal {
     /// the bottom, where it lands, as the old app did (grid-terminal.js's `sendUserInput` at the reference commit).
     /// Focus reports are the terminal's own and go through [`AttachedTerminal::send`], leaving the view where it is.
     fn send_user(&mut self, attachment: Attachment, group: Vec<GridInput>, cx: &mut Context<Self>) {
-        if !self.is_live() || group.is_empty() {
+        // An inert terminal takes no input: whatever path the user's input came by (a key, committed or pasted text,
+        // a wheel or mouse report), it stops here.
+        if !self.is_live() || group.is_empty() || self.inert {
             return;
         }
         // Input clears the selection and brings the view to the bottom, where it lands, as in the old app.
@@ -984,8 +1037,10 @@ impl AttachedTerminal {
     /// the shown view, not this owner (unless the terminal's state changed), but GPUI redraws a notified view's
     /// ancestors with it, so a program that turns the blink on reaches this too.
     fn cursor_phase(&mut self, window: &Window, cx: &mut Context<Self>) -> CursorPhase {
-        let focused =
-            self.is_live() && self.focus.is_focused(window) && ticker::is_active(window, cx);
+        let focused = self.is_live()
+            && !self.inert
+            && self.focus.is_focused(window)
+            && ticker::is_active(window, cx);
         self.window_focus = self.focus_in_active_window(window);
         self.report_focus(self.window_focus, cx);
         if !focused {
@@ -1269,7 +1324,8 @@ impl AttachedTerminal {
             sentence = sentence.host(reason);
         }
         let owner = cx.weak_entity();
-        Banner::new(sentence).when(line.take_control, |banner| {
+        // Take control is not offered under an inert terminal's veil, where Tab could still reach it.
+        Banner::new(sentence).when(line.take_control && !self.inert, |banner| {
             banner.action(
                 Button::new(
                     "terminal-take-control",
@@ -1368,10 +1424,18 @@ impl Render for AttachedTerminal {
             let owner = owner.clone();
             let focus = self.focus.clone();
             let text_input = self.text_input.clone();
+            let inert = self.inert;
             canvas(
                 |_, _, _| (),
                 move |bounds, (), window, cx| {
-                    window.handle_input(&focus, ElementInputHandler::new(bounds, text_input), cx);
+                    // An inert terminal is handed no text input: an input method composes nothing into it.
+                    if !inert {
+                        window.handle_input(
+                            &focus,
+                            ElementInputHandler::new(bounds, text_input),
+                            cx,
+                        );
+                    }
                     // A selection drag follows the pointer anywhere in the window, and ends at the release wherever
                     // it happens, as the old app's document-level listeners did. Registered in every frame, not only
                     // in frames drawn while a drag is held: a press, its moves and its release can all arrive before
@@ -1445,7 +1509,8 @@ impl Render for AttachedTerminal {
         // hides the other. Drawn outside the grid's element: a press on the notice's Dismiss must not also be a press
         // on the terminal (a selection, a mouse report, a link under it), and its button must not sit inside the
         // terminal's key context, where Tab and Escape are the program's.
-        let overlay = (refusal.is_some() || tunnel_notice.is_some()).then(|| {
+        // Neither the refusal line nor the tunnel notice (whose Dismiss Tab could reach) is drawn under the veil.
+        let overlay = (!self.inert && (refusal.is_some() || tunnel_notice.is_some())).then(|| {
             div()
                 .absolute()
                 .top(px(PANE_PADDING + 4.))
@@ -1464,13 +1529,28 @@ impl Render for AttachedTerminal {
         // The grid's area is what takes focus and keys, not the whole pane: the status line above it holds a Take
         // control button, whose own Tab and Escape the terminal's key context would otherwise give to the program
         // (`actions::TERMINAL_KEYS` binds them to nothing there), leaving a focused button with no way off it.
+        let inert = self.inert;
         let body = div()
             .id("terminal-grid")
-            .key_context(actions::TERMINAL_CONTEXT)
-            .on_key_down(cx.listener(Self::key))
-            .on_action(cx.listener(Self::paste))
-            .on_action(cx.listener(Self::select_all))
-            .on_action(cx.listener(Self::copy_selection))
+            // An inert terminal takes no keys and no actions, and its key context goes with them: keys, the menu's
+            // Paste and Select All, and Tab and Escape go on to the window as if the terminal were not focused.
+            .when(!inert, |body| {
+                body.key_context(actions::TERMINAL_CONTEXT)
+                    .on_key_down(cx.listener(Self::key))
+                    .on_action(cx.listener(Self::paste))
+                    .on_action(cx.listener(Self::select_all))
+                    .on_action(cx.listener(Self::copy_selection))
+                    .on_action(
+                        cx.listener(|owner, _: &actions::ScrollTerminalPageUp, _, cx| {
+                            owner.scroll_page(-1, cx)
+                        }),
+                    )
+                    .on_action(
+                        cx.listener(|owner, _: &actions::ScrollTerminalPageDown, _, cx| {
+                            owner.scroll_page(1, cx)
+                        }),
+                    )
+            })
             // Before anything handles the press (the layer manager closes popovers on a press outside them, the
             // destination display among them), decide whether a click on a link starting here may open it.
             .capture_any_mouse_down(cx.listener(|owner, event: &MouseDownEvent, window, cx| {
@@ -1484,16 +1564,6 @@ impl Render for AttachedTerminal {
             .when(hovering_link, |body| body.cursor_pointer())
             .on_mouse_move(
                 cx.listener(|owner, event: &MouseMoveEvent, _, cx| owner.hover_moved(event, cx)),
-            )
-            .on_action(
-                cx.listener(|owner, _: &actions::ScrollTerminalPageUp, _, cx| {
-                    owner.scroll_page(-1, cx)
-                }),
-            )
-            .on_action(
-                cx.listener(|owner, _: &actions::ScrollTerminalPageDown, _, cx| {
-                    owner.scroll_page(1, cx)
-                }),
             )
             .on_scroll(cx.listener(Self::wheel))
             // Typing does not count as the pointer leaving: the old app kept the bar shown while the pointer stayed
@@ -1560,13 +1630,62 @@ impl Render for AttachedTerminal {
                     .min_h_0()
                     .flex()
                     .flex_col()
+                    // The frame first, so the grid's content, the scrollbar among it, draws over its band, as the old
+                    // inset shadow lay beneath the terminal's content.
+                    .children(self.frame.map(|color| host_frame(color, cx)))
                     .child(body)
                     .children(overlay),
             )
             .children(placeholder)
+            // Last, over everything the pane draws: the status line and the placeholder too.
+            .children(self.inert.then(|| inert_scrim(cx)))
             .child(measure)
     }
 }
+
+/// The thin frame around a session's terminal in its host's identity color ([`AttachedTerminal::frame_color`]): a
+/// 4-pixel band inside the pane's padding, as the old app drew it (an inset shadow over the terminal's padding, so the
+/// grid neither moves nor shrinks). It takes no pointer: it draws no hitbox.
+fn host_frame(color: HostColor, cx: &App) -> AnyElement {
+    div()
+        .debug_selector(|| HOST_FRAME_ID.into())
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .bottom_0()
+        .border(px(HOST_FRAME_WIDTH))
+        .border_color(theme::color(crate::hosts::identity::tint(
+            color,
+            theme::palette(cx),
+        )))
+        .into_any_element()
+}
+
+/// The frame's selector, for tests and the bridge.
+pub(crate) const HOST_FRAME_ID: &str = "terminal-host-frame";
+
+/// The frame's width (`box-shadow: inset 0 0 0 4px`), inside the pane's padding.
+const HOST_FRAME_WIDTH: f32 = 4.;
+
+/// The veil over an inert terminal ([`AttachedTerminal::set_inert`]): the old terminal scrim (`--scrim`) across the
+/// whole pane, status line included, taking every press, hover and wheel turn, so the terminal under it is seen and not
+/// touched.
+fn inert_scrim(cx: &App) -> AnyElement {
+    div()
+        .debug_selector(|| INERT_SCRIM_ID.into())
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .bottom_0()
+        .bg(theme::color(theme::palette(cx).scrim))
+        .occlude()
+        .into_any_element()
+}
+
+/// The inert terminal's veil's element id, and the bridge's selector for it.
+pub(crate) const INERT_SCRIM_ID: &str = "terminal-inert-scrim";
 
 // ---- Links -----------------------------------------------------------------------------------------------------------
 
@@ -1846,6 +1965,67 @@ impl AttachedTerminal {
             // which would send it again every frame.
             cx.defer(move |cx| tunnels.update(cx, |tunnels, _| tunnels.rearm()));
         }
+    }
+
+    /// What the terminal takes from the pushed state, on every change of it: the tunnel reads that are due
+    /// ([`AttachedTerminal::keep_tunnels_current`]) and the frame's color ([`AttachedTerminal::frame_color`]), redrawn
+    /// only when that changed.
+    fn follow_store(&mut self, cx: &mut Context<Self>) {
+        self.keep_tunnels_current(cx);
+        let frame = self.frame_color(cx);
+        if frame != self.frame {
+            self.frame = frame;
+            cx.notify();
+        }
+    }
+
+    /// The color the thin frame around this session's terminal takes (SPEC.md: "Settings can color the thin frame
+    /// around every session's terminal with that session's host identity color"): its host's identity color while the
+    /// shared preference is on, the default color drawing in the ordinary foreground; `None` while the preference is
+    /// off or unset (it starts off), or the session or its host is not listed. Only the frame changes: the terminal's
+    /// background, palette and size stay as they are.
+    fn frame_color(&self, cx: &App) -> Option<HostColor> {
+        let store = session::current_store(cx)?;
+        let collections = store.read(cx).collections();
+        let on = collections
+            .get::<Preferences>(PREFERENCES_KEY)
+            .and_then(|preferences| preferences.color_terminal_frames)
+            == Some(true);
+        if !on {
+            return None;
+        }
+        let row = collections.get::<SessionRow>(&self.target.session)?;
+        collections
+            .get::<HostView>(&HostView::key(row.host))
+            .map(|host| host.color)
+    }
+
+    /// Tell the program that every button its mouse reporting holds came up, where the pointer was last seen, and
+    /// forget them: a terminal going inert sees no more releases, and a program left mid-drag would stay so. Sent past
+    /// [`AttachedTerminal::send_user`]'s inert guard, since this runs as the terminal goes inert.
+    fn release_reported_buttons(&mut self) {
+        let held = std::mem::take(&mut self.reporting);
+        let (Some(attachment), true) = (self.attachment, held != 0) else {
+            return;
+        };
+        let (x, y) = self.last_report_cell.unwrap_or((0, 0));
+        let releases: Vec<GridInput> = (0..3_i8)
+            .filter(|button| held & (1 << button) != 0)
+            .map(|button| GridInput::Mouse {
+                kind: MouseEventKind::Up,
+                button,
+                x,
+                y,
+                mods: 0,
+            })
+            .collect();
+        self.send(attachment, releases);
+    }
+
+    /// The frame's color as last taken from the pushed state, for tests.
+    #[cfg(test)]
+    pub(crate) fn frame(&self) -> Option<HostColor> {
+        self.frame
     }
 
     /// Read the session's tunnels when they are due ([`Tunnels::stale`]): as a remote session's terminal opens, so its
@@ -2160,6 +2340,7 @@ impl AttachedTerminal {
             y,
             mods,
         };
+        self.last_report_cell = Some((x, y));
         self.send_user(attachment, vec![report], cx);
     }
 
