@@ -4,12 +4,12 @@ Old Playwright specs (reference commit `24bc0580`; read one with `git show 24bc0
 in the GPUI app. Port behavior from SPEC.md and these specs' acceptance cases, not one spec file at a time. SPEC.md
 sections: Creation (the Templates dialog, quick launch, number keys, launcher sequences and the Cmd+J template list).
 
-| Old spec                                    | Tests | Covers                                                              | Status                                                                                                                                                                                                                                                                                                            |
-| ------------------------------------------- | ----- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tests/templates.spec.ts`                   | 48    | template bolts use a fixed outline or filled drawing for their mark | partly: the list, summaries, ⚡ and number keys (`templates::dialog_tests`, `templates::shortcuts_tests`, `templates::summary_tests`); the editor, its fields, Save, rename and Duplicate (`templates::editor_tests`, `templates::fields_tests`); leaving, deleting, `tl:` and Save as template are still to come |
-| `tests/quick-launch.spec.ts`                | 30    | quick launch submits the wrapper prefix saved in its agent template | not yet ported                                                                                                                                                                                                                                                                                                    |
-| `tests/launcher-template-shortcuts.spec.ts` | 8     | back-to-back bolt and number chords stack on New without submitting | not yet ported                                                                                                                                                                                                                                                                                                    |
-| `tests/template-list-shortcut.spec.ts`      | 4     | Cmd-J exact name launches through the fresh quick-launch path       | not yet ported                                                                                                                                                                                                                                                                                                    |
+| Old spec                                    | Tests | Covers                                                              | Status                                                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------- | ----- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/templates.spec.ts`                   | 48    | template bolts use a fixed outline or filled drawing for their mark | partly: the list, summaries, ⚡ and number keys (`templates::dialog_tests`, `templates::shortcuts_tests`, `templates::summary_tests`); the editor, its fields, Save, rename and Duplicate (`templates::editor_tests`, `templates::fields_tests`); leaving, deleting, `tl:` and Save as template are still to come       |
+| `tests/quick-launch.spec.ts`                | 30    | quick launch submits the wrapper prefix saved in its agent template | partly: the sequence's prefix, key capture, cancels, pill and Enter's empty and unbound-key cases (`templates::armed_tests`, `components::tests::sequence_pill::a_click_on_the_sequence_pill_reaches_what_it_covers`); Enter's launch, its New fallbacks and every direct shortcut wait for the quick-launch dispatcher |
+| `tests/launcher-template-shortcuts.spec.ts` | 8     | back-to-back bolt and number chords stack on New without submitting | not yet ported: a sequence inside the launcher (its "apply" pill is built, `templates::armed_tests::the_launcher_form_says_apply_and_sits_at_the_bottom`) waits for a way to tell the launcher is open and for the dispatcher's application to its draft                                                                |
+| `tests/template-list-shortcut.spec.ts`      | 4     | Cmd-J exact name launches through the fresh quick-launch path       | not yet ported                                                                                                                                                                                                                                                                                                          |
 
 ## Template cases of specs in other areas' files
 
@@ -125,6 +125,38 @@ orchestrator.
   words, not which step of the rename failed; by then the template is saved under the new name with the mark and key
   moved, and the old one is still there. Tested by
   `templates::editor_tests::a_refused_delete_of_the_old_name_shows_the_helms_words`.
+
+- **The sequence's key rules, as decided for the GPUI port.** The sequence takes keys through the actions module's key
+  capture, ported from the old armed listener's classifier (its oracle cases are
+  `templates::armed_tests::sequence_keys_are_sorted_as_the_old_classifier_did` and
+  `other_keys_sort_as_cancelling_and_passing_on`). Two cases had to be decided again. A keypad digit cancels the
+  sequence and goes on to its target, as in the old app, so a word never starts with one by accident; only a key that
+  carries its native identity can be told apart, so a keypad digit an input method commits (or the test bridge injects)
+  reads as the main row's digit. And a second prefix while armed ends the sequence and is consumed, which is what the
+  old app's cancel amounted to (its terminal dropped the chord); passed on, it would reach the prefix's binding and arm
+  a new, empty sequence.
+- **No entrance animation on the sequence pill.** The old pill faded and scaled in over 200 ms (off under reduced
+  motion). GPUI's one-shot animations are banned throughout the GUI crates, the component layer included, and only an
+  owner in the foundation ownership table's lint exceptions may switch the ban off, so the pill appears at once until
+  that exception exists.
+- **The sequence pill is centered on the main area, not the terminal.** As the old stylesheet did, the pill is centered
+  on the main pane (9 pixels lower in the Mac window with a session open). The old rule assumed a 30-pixel details bar
+  under the terminal; until the details bar is ported, the pill sits about 15 pixels above the terminal's center. Its
+  look was compared with the old `.launch-sequence-*` rules, since there is no reference screenshot of the pill; the
+  golden is `sequence-pill`.
+- **Cancels the GPUI app sees differently.** A lone Alt no longer cancels a sequence (GPUI reports a modifier alone as a
+  modifier change, with no key-down; SPEC.md names only Meta, Control and Shift as not cancelling). A dialog that opens
+  while a sequence is armed without a click or key (a result the user started finishing) ends the sequence at the next
+  key, which goes to the dialog, rather than when it opens, since nothing tells the sequence a layer opened; the pill
+  shows until then. Tested by
+  `templates::armed_tests::a_dialog_keeps_the_keyboard_from_the_prefix_and_an_armed_sequence`.
+- **Input-method text while a sequence is armed.** Text committed by an input method (a CJK source, a dead key's accent)
+  arrives without a key-down, so the capture never sees it and a focused terminal still sends it to its program. The old
+  listener cancelled on a composing key. Refusing it falls to the terminal's input handler.
+- **No sequence inside the launcher yet.** The prefix is refused while any dialog keeps the keyboard, the launcher
+  included, and the launcher's fields keep Cut whatever their selection: nothing tells the sequence the open dialog is
+  the launcher. Catching Kit's Cut in the capture phase for the launcher's fields (an additive `TextInput` builder) is
+  possible, since Kit handles Cut as an action on the field and exposes the selection, but it has no use until then.
 
 ## Superseded
 

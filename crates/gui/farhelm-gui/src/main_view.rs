@@ -27,6 +27,12 @@
 //! appearance ... an explicit choice overrides it"); the theme module decides how a choice and the system resolve to
 //! a palette.
 //!
+//! The quick-launch sequence's prefix ([`BeginSequence`]) is handled on the ground too, so it reaches the templates
+//! module from a terminal, a row or empty space; the templates module refuses it while a dialog keeps the keyboard. The
+//! main pane is what its pill is centered over ([`crate::templates::armed`]): the view draws an anchor there in every
+//! connected state, session open or not, so a pill shown on it stays put when a session opens or closes. The ground also
+//! draws the sequence's one window-wide press watcher, since a click anywhere cancels it.
+//!
 //! In the macOS window the sidebar's app bar and the session pane's top row are the window's title band
 //! (`desktop::title_band`); this view draws the band's one window-wide press watcher, gives the connection screens a
 //! band strip of their own above their content, and puts a strip of the band above any notice banner.
@@ -38,15 +44,18 @@ use gpui::{
     Window, div,
 };
 
+use crate::actions::BeginSequence;
 use crate::actions::{DeleteSession, NewSession, QuickSwitcher, RenameSession};
 use crate::components::{Banner, Button, HoverHelp, Role, Tier};
 use crate::desktop::linux_title_bar;
 use crate::desktop::title_band::{self, Row};
 use crate::focus::Mark;
+use crate::layers::Anchor;
 use crate::notices::{self, Notice};
 use crate::session_list::{self, SessionList};
 use crate::session_pane::{SessionPane, header};
 use crate::sidebar::{self, Sidebar};
+use crate::templates;
 use crate::theme::metrics;
 use crate::{launcher, layers, render_count, root, session, settings, theme};
 
@@ -76,6 +85,9 @@ pub struct MainView {
     /// The pane beside the list, kept for the window's life like the list: it remakes the selected session's terminal
     /// by itself on every change of selection or UI session.
     session_pane: Entity<SessionPane>,
+    /// The main pane's anchor as last drawn, which the sequence pill is centered over (the module docs); `None` before
+    /// the first connected frame. Kept weakly by the anchor itself, so a pill on it goes when the pane is not drawn.
+    pane_anchor: Option<Anchor>,
 }
 
 impl MainView {
@@ -101,6 +113,7 @@ impl MainView {
             sidebar: cx.new(|cx| Sidebar::new(session_list.clone(), cx)),
             session_list,
             session_pane: cx.new(|cx| SessionPane::new(window, cx)),
+            pane_anchor: None,
         }
     }
 }
@@ -127,6 +140,10 @@ impl Render for MainView {
             .map(|connection| connection.read(cx).state().clone())
             .unwrap_or(ChannelState::Connecting);
         let body = if state == ChannelState::Connected {
+            // Under its own key, apart from the pane's id, as the anchor's element state must be.
+            let pane_anchor = Anchor::for_element("main-pane-anchor", window, cx);
+            let pane_tracker = pane_anchor.track();
+            self.pane_anchor = Some(pane_anchor.clone());
             let posted: Vec<Notice> = notices::posted(cx)
                 .into_iter()
                 .filter(|notice| is_banner(*notice))
@@ -162,10 +179,13 @@ impl Render for MainView {
                         .child(
                             div()
                                 .id("main-pane")
+                                .debug_selector(|| "main-pane".into())
+                                .relative()
                                 .flex_1()
                                 .min_w(sidebar::MAIN_PANE_MIN_WIDTH)
                                 .h_full()
-                                .child(self.session_pane.clone()),
+                                .child(self.session_pane.clone())
+                                .child(pane_tracker),
                         )
                         // Drawn last, so it takes the pointer over the pane's edge. It is placed from the sidebar's
                         // width, which assumes the sidebar starts at this row's left edge and that the window redraws
@@ -205,6 +225,10 @@ impl Render for MainView {
             .on_action(|_: &NewSession, window, cx| {
                 launcher::entry::open_new(window, cx);
             })
+            // Taken whatever the sequence does with it, as a once-per-press shortcut's handler must be (`actions.rs`).
+            .on_action(cx.listener(|main, _: &BeginSequence, window, cx| {
+                templates::begin_sequence(main.pane_anchor.clone(), window, cx)
+            }))
             .size_full()
             .flex()
             .flex_col()
@@ -222,7 +246,9 @@ impl Render for MainView {
             .child(div().flex_1().min_h_0().w_full().child(body))
             // Once for the whole window: it lets the title band pair a double-click with the press before it, wherever
             // that press was (`desktop::title_band`).
-            .child(title_band::watch_presses());
+            .child(title_band::watch_presses())
+            // Once for the whole window: a press anywhere cancels an armed sequence (`templates::armed`).
+            .child(templates::watch_sequence_presses());
         root::wrap(ground, &self.root, window, cx)
     }
 }
