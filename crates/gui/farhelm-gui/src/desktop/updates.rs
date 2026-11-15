@@ -4,15 +4,16 @@
 //! the GUI crate runs no threads and reads no clock.
 //!
 //! There is at most one question every update surface asks: does an updater run? It runs only in the installed release
-//! bundle on a Mac (the desktop's `updater::start` decides that), so a devbuild, an agent build and the Linux app answer
-//! no, and show no update surface at all (SPEC.md, "Installation and updates": "Where no updater runs ... the readout
-//! stays plain text"; Settings → App shows only "in a desktop app whose updater is active"). Nothing here knows why no
-//! updater runs, so no platform or build check is repeated on this side.
+//! bundle on a Mac (the desktop's `updater::start` decides that), so a devbuild, an agent build and the Linux app
+//! answer no, and show no update surface at all (SPEC.md, "Installation and updates": "Where no updater runs ... the
+//! readout stays plain text"; Settings → App shows only "in a desktop app whose updater is active"). Nothing here knows
+//! why no updater runs, so no platform or build check is repeated on this side.
 //!
 //! The entry points other areas call are the plain functions below: [`runs`] for whether to draw a control at all,
 //! [`check_now`] for every on-demand route (the `?` menu's Check for updates, the local host row's Update; each checks
 //! and installs a newer release), and [`automatic_updates`] with [`set_automatic_updates`] for Settings → App. The
-//! version readout reads [`readout`] and observes [`entity`]; what it shows for a while after a result (Up to date's
+//! version readout (`update_readout::view`) holds the [`entity`], reads its [`Updater::readout`] and redraws when it
+//! notifies; what it shows for a while after a result (Up to date's
 //! five seconds, a dismissed failure) is its own presentation state, timed by the ticker, never kept here.
 
 use std::future::Future;
@@ -61,6 +62,13 @@ pub struct Updater {
     restart_to_update: Box<dyn Fn() -> bool>,
     set_automatic_updates: Box<dyn Fn(bool) -> Result<(), String>>,
     _feed: Task<()>,
+}
+
+impl Updater {
+    /// The readout the updater published last.
+    pub fn readout(&self) -> &Readout {
+        &self.readout
+    }
 }
 
 /// The updater entity, present only while an updater runs.
@@ -166,5 +174,7 @@ pub fn set_automatic_updates(on: bool, cx: &mut App) -> Result<(), String> {
     })
 }
 
+#[cfg(test)]
+pub(crate) mod fake;
 #[cfg(test)]
 mod tests;
