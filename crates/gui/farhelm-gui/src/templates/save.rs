@@ -12,8 +12,9 @@
 //! the folder's and the name's touched marks, and the draft's `host_chosen`, `permissions_explicit` and
 //! `wrapper_explicit`, all set by its hand-edit methods, which template application goes through too.
 //!
-//! Not here yet: a GitHub repository destination, which SPEC.md checks always; the launcher cannot hold one until its
-//! managed checkouts land, so the destination offered is always a folder.
+//! The destination offered is the snapshot's: the folder, or a managed checkout's chosen repository, which is always
+//! checked (SPEC.md: "A GitHub repository is always checked"). While a checkout is chosen the set-aside folder is not
+//! offered, and a repository field holding only typed text offers no destination.
 
 use farhelm_proto::launcher::{
     LauncherKind, TemplateDestination, TemplateFields, TemplateNameKind,

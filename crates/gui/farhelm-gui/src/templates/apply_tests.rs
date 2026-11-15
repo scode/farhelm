@@ -523,25 +523,120 @@ fn a_templates_host_reseeds_only_an_untouched_folder() {
     );
 }
 
-/// A GitHub destination cannot be applied until the launcher can hold a managed checkout; until then it is refused
-/// with a sentence that says why, rather than silently dropped (which would launch into the wrong folder).
+/// SPEC.md, "Launch templates": applying a template makes its edits "in the same way and with the same effects as making
+/// them by hand". A repository destination is the repository field's choice, so it goes through
+/// `LaunchDraft::choose_repository`, which also asks the helm for a new checkout preview; a folder destination is the
+/// folder edit, which also returns a checkout draft to that folder. Specified: a repository template makes the
+/// destination a managed checkout of that repository, chosen once, with the set-aside folder as it was; a later folder
+/// template returns the draft to that folder.
 #[test]
-fn a_github_destination_is_refused_until_managed_checkouts_exist() {
+fn a_repository_destination_chooses_that_repository() {
     let fixture = Fixture::new();
     let mut draft = new_draft();
-    let before = draft.clone();
+    let folder_before = draft.folder.clone();
     let repo = template(
         "repo",
         TemplateFields {
-            destination: Some(TemplateDestination::Github("example/project".into())),
+            destination: Some(TemplateDestination::Github("Example/Project".into())),
             ..TemplateFields::default()
         },
     );
+    fixture.apply(&mut draft, &[repo]).unwrap();
+    let checkout = draft.checkout.clone().expect("a managed checkout");
+    let chosen = checkout.repo.expect("a chosen repository");
     assert_eq!(
-        fixture.apply(&mut draft, &[repo]).unwrap_err(),
-        "Template \"repo\" was not applied: its destination is a GitHub checkout, which this launcher cannot open yet"
+        (chosen.owner.as_str(), chosen.name.as_str()),
+        ("example", "project")
     );
-    assert_eq!(draft, before);
+    assert_eq!(checkout.chosen, 1, "chosen as a hand pick is, once");
+    assert_eq!(
+        draft.folder, folder_before,
+        "the folder is set aside, not changed"
+    );
+
+    let folder = template(
+        "folder",
+        TemplateFields {
+            destination: Some(TemplateDestination::Folder("/work".into())),
+            ..TemplateFields::default()
+        },
+    );
+    fixture.apply(&mut draft, &[folder]).unwrap();
+    assert_eq!(
+        (draft.checkout.clone(), draft.folder.value().as_str()),
+        (None, "/work")
+    );
+}
+
+/// A repository the shared fold takes as text must still be one the launcher can choose, or applying it would leave the
+/// destination half-set. The old app refused it in its own two sentences: one for text that is no `owner/repo` pair at
+/// all, one for a pair the rules refuse (a URL, a branch suffix, a bad name). Specified: `not a repo` and `a/b/c` are
+/// each refused with the whole old sentence, and the draft is unchanged.
+#[test]
+fn a_destination_that_is_not_a_repository_is_refused() {
+    let fixture = Fixture::new();
+    for (text, reason) in [
+        ("not a repo", "Enter a GitHub repository as owner/repo"),
+        (
+            "a/b/c",
+            "Enter a valid GitHub owner/repo pair without a URL or branch suffix",
+        ),
+    ] {
+        let mut draft = new_draft();
+        let before = draft.clone();
+        let bad = template(
+            "bad",
+            TemplateFields {
+                destination: Some(TemplateDestination::Github(text.into())),
+                ..TemplateFields::default()
+            },
+        );
+        assert_eq!(
+            fixture.apply(&mut draft, &[bad]).unwrap_err(),
+            format!(
+                "Template \"bad\" was not applied: its destination {text:?} is not a GitHub repository ({reason})"
+            )
+        );
+        assert_eq!(draft, before);
+    }
+}
+
+/// The snapshot is what Save as template and the held-value checks read, so it must say what the launcher would launch
+/// into: the chosen repository while a checkout is chosen, never the set-aside folder, and nothing for typed repository
+/// text no one chose (the old `launcher_snapshot`: an unselected query "is an editor draft, not a reusable
+/// destination"). Specified: a typed folder, then a typed repository query, then a chosen repository, read as the
+/// folder, no destination, and the repository; applying the snapshot's destination to a fresh draft chooses it again.
+#[test]
+fn the_snapshot_reads_a_chosen_repository_as_the_destination() {
+    let fixture = Fixture::new();
+    let mut draft = new_draft();
+    draft.edit_folder("/typed".into());
+    assert_eq!(
+        snapshot(&draft, &fixture.hosts).destination,
+        Some(TemplateDestination::Folder("/typed".into()))
+    );
+    draft.edit_repository_query("example/proj".into());
+    assert_eq!(snapshot(&draft, &fixture.hosts).destination, None);
+    draft.choose_repository(farhelm_proto::parse_github_repo("example/project").unwrap());
+    let destination = snapshot(&draft, &fixture.hosts).destination;
+    assert_eq!(
+        destination,
+        Some(TemplateDestination::Github("example/project".into()))
+    );
+
+    let mut fresh = new_draft();
+    let again = template(
+        "again",
+        TemplateFields {
+            destination,
+            ..TemplateFields::default()
+        },
+    );
+    fixture.apply(&mut fresh, &[again]).unwrap();
+    assert_eq!(
+        fresh.checkout.and_then(|checkout| checkout.repo),
+        draft.checkout.and_then(|checkout| checkout.repo)
+    );
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
