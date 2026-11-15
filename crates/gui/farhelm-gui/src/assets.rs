@@ -58,7 +58,7 @@
 //! 12-unit box and stroke.
 //!
 //! The host menu's Update glyph is the old app's too (`ActionGlyph::Update`), in the same box and stroke, and so is its
-//! Uninstall glyph (`ActionGlyph::Uninstall`).
+//! Uninstall glyph (`ActionGlyph::Uninstall`) and its Adopt glyph (`ActionGlyph::Adopt`).
 //!
 //! The harness marks (`Harness*`, the agent mark on a session row) are not drawn here: each file is generated from the
 //! geometry in [`crate::marks`], the one source for those shapes and their provenance, and a test in the GUI's harness
@@ -306,6 +306,9 @@ pub enum Icon {
     /// `ActionGlyph::Uninstall`, in the 14-unit action box with the 1.2 stroke). The arrow points out of the tray
     /// because the old one's downward arrow read as downloading the installation.
     Uninstall,
+    /// A circle crossed by a plus: accept the identity a host reports, the host menu's Adopt (the old app's
+    /// `ActionGlyph::Adopt`, in the 14-unit action box with the 1.2 stroke).
+    Adopt,
     /// A padlock: the Settings dialog's Credentials section (the old app's `ActionGlyph::Lock`).
     Lock,
     /// A clipboard: the details bar's copy fields show it under the pointer and keyboard focus (the old clipboard
@@ -409,6 +412,7 @@ impl Icon {
         Icon::TrashEmpty,
         Icon::TrashFull,
         Icon::Uninstall,
+        Icon::Adopt,
         Icon::Lock,
         Icon::Clipboard,
         Icon::EndedStopped,
@@ -501,6 +505,7 @@ impl Icon {
             Icon::TrashEmpty => "icons/trash-empty.svg",
             Icon::TrashFull => "icons/trash-full.svg",
             Icon::Uninstall => "icons/uninstall.svg",
+            Icon::Adopt => "icons/adopt.svg",
             Icon::Lock => "icons/lock.svg",
             Icon::Clipboard => "icons/clipboard.svg",
             Icon::EndedStopped => "icons/ended-stopped.svg",
@@ -613,6 +618,7 @@ impl Assets {
             "icons/trash-empty.svg" => Some(include_bytes!("../assets/icons/trash-empty.svg")),
             "icons/trash-full.svg" => Some(include_bytes!("../assets/icons/trash-full.svg")),
             "icons/uninstall.svg" => Some(include_bytes!("../assets/icons/uninstall.svg")),
+            "icons/adopt.svg" => Some(include_bytes!("../assets/icons/adopt.svg")),
             "icons/lock.svg" => Some(include_bytes!("../assets/icons/lock.svg")),
             "icons/bell-filled.svg" => Some(include_bytes!("../assets/icons/bell-filled.svg")),
             WORDMARK_DARK => Some(include_bytes!(

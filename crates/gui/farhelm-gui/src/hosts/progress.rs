@@ -256,11 +256,32 @@ pub(crate) fn status(
             elapsed: now.duration_since(since).unwrap_or_default(),
         });
     }
+    // Exhaustive, so a new kind of work decides here whether a row shows it as a run about to start. Only the requests
+    // that lead to a setup, an Update or an uninstall run do; everything else (a host's Retry and Adopt, its removal, a
+    // save, and the session, tab, tunnel, question, feedback and trash work) starts no run, so the row keeps its phase
+    // words.
     match in_flight? {
         Work::Probe | Work::Setup => Some(Status::Pending(Run::Setup)),
         Work::UpdateHost => Some(Status::Pending(Run::Update)),
         Work::UninstallHost => Some(Status::Pending(Run::Uninstall)),
-        _ => None,
+        Work::RetryHost
+        | Work::AdoptHost
+        | Work::RemoveHost
+        | Work::Save
+        | Work::Rename
+        | Work::Delete(_)
+        | Work::Stop
+        | Work::Replace
+        | Work::Seen
+        | Work::Restart
+        | Work::TunnelOpen
+        | Work::TunnelClose
+        | Work::Launch
+        | Work::Answer
+        | Work::SendFeedback
+        | Work::TrashDelete
+        | Work::TabOpen
+        | Work::TabClose => None,
     }
 }
 

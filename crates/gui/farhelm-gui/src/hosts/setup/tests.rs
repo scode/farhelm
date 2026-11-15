@@ -686,18 +686,18 @@ fn choose_rerun(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> u64 {
 /// SPEC.md, "Topology": "an existing entry is set up again from its own row", and the old app's rerun probed "the
 /// registered destination" before asking again; the drive of the first Add host port found no way to try a failed setup
 /// again. The question names the host as its row does, and confirming hands the helm its one-use plan under the host's
-/// own key. Specified: the menu of a host whose setup failed starts on Re-run ("Try the failed setup again"); choosing
-/// it closes the menu and sends `POST /api/hosts/probe` for `dev@build-box` with the recorded install paths (none) and
-/// no new entry, under the host's key, while the row reads "Setting up…"; the plan opens "Set up host · build-box"
-/// with focus on Set up; Set up sends `POST /api/hosts/provision` for `p-1` under the host's key, focus returns to the
-/// row's toggle, and a refusal of it shows under the row with nothing opened.
+/// own key. Specified: the menu of a host whose setup failed starts on Retry and offers Re-run ("Try the failed setup
+/// again"); choosing it closes the menu and sends `POST /api/hosts/probe` for `dev@build-box` with the recorded install
+/// paths (none) and no new entry, under the host's key, while the row reads "Setting up…"; the plan opens "Set up host
+/// · build-box" with focus on Set up; Set up sends `POST /api/hosts/provision` for `p-1` under the host's key, focus
+/// returns to the row's toggle, and a refusal of it shows under the row with nothing opened.
 #[gpui::test]
 fn re_run_probes_the_registered_destination_and_sets_up_under_the_hosts_key(
     cx: &mut TestAppContext,
 ) {
     let (mut helm, cx) = panel_with_a_failed_setup(cx, false);
     click(cx, "host-menu-toggle-2");
-    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-rerun"));
+    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-retry"));
     assert_eq!(label(cx, "host-menu-rerun").as_deref(), Some("Re-run"));
     assert!(painted(cx).contains("Try the failed setup again"));
     click(cx, "host-menu-rerun");

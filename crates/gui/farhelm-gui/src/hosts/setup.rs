@@ -364,6 +364,36 @@ fn refuse_during_launch(offer: Offer, window: AnyWindowHandle, cx: &mut App) {
     });
 }
 
+/// Show `line` on the Hosts panel's line, saying the host menu's `action` was not started because a session launch is
+/// in flight, in place of any earlier such line. It shows until that same action starts on any host
+/// ([`forget_remedy_not_started`]), the other remedy is refused in its place, Add host opens or the UI session resets.
+pub(super) fn remedy_not_started(
+    action: super::remedies::Action,
+    line: HostSentence,
+    cx: &mut App,
+) {
+    let Some(store) = super::current_operations_id(cx) else {
+        return;
+    };
+    show(cx, |lines| {
+        lines.remedy_not_started = Some((store, action, line))
+    });
+}
+
+/// The host menu's `action` started, on any host: a line saying an `action` was not started is over, and one about the
+/// other remedy stays.
+pub(super) fn forget_remedy_not_started(action: super::remedies::Action, cx: &mut App) {
+    show(cx, |lines| {
+        if lines
+            .remedy_not_started
+            .as_ref()
+            .is_some_and(|(_, shown, _)| *shown == action)
+        {
+            lines.remedy_not_started = None;
+        }
+    });
+}
+
 /// Clear the Hosts panel's line about work not started during a launch ([`not_started`]): work of the kind it was about
 /// has started since.
 pub(super) fn forget_not_started(cx: &mut App) {
@@ -550,6 +580,11 @@ struct PanelLines {
     /// A setup, rerun or Update the app did not start because a session launch was in flight ([`not_started`]), with the
     /// id of the store current then.
     not_started: Option<(EntityId, HostSentence)>,
+    /// The latest host menu remedy (Retry or Adopt) not started because a session launch was in flight, with the
+    /// store's id and the remedy it names: a slot of its own, so other host work starting leaves it standing. It ends
+    /// when that remedy starts on any host, when the other remedy is refused in its place, when Add host opens, or on a
+    /// reset ([`remedy_not_started`]).
+    remedy_not_started: Option<(EntityId, super::remedies::Action, HostSentence)>,
 }
 
 impl Global for PanelLines {}
@@ -571,13 +606,15 @@ pub(crate) fn forget_panel_lines(cx: &mut App) {
         lines.setup = None;
         lines.stop_asking = None;
         lines.not_started = None;
+        lines.remedy_not_started = None;
     });
 }
 
 /// The Hosts panel's line, as sentences under their own ids: a setup refused after the user moved on from it, a setup,
-/// rerun or Update not started during a launch, and a refused permanent answer, while it was refused by the current UI
-/// session's helm and the preference it tried to turn on is still off (once on, the refusal no longer matters). Each of
-/// the last two only while it came from the current UI session's store. Empty when there is none.
+/// rerun or Update not started during a launch, a Retry or Adopt not started during one, and a refused permanent
+/// answer, while it was refused by the current UI session's helm and the preference it tried to turn on is still off
+/// (once on, the refusal no longer matters). Each of the last three only while it came from the current UI session's
+/// store. Empty when there is none.
 pub(crate) fn panel_lines(cx: &App) -> Vec<HostSentence> {
     let Some(lines) = cx.try_global::<PanelLines>() else {
         return Vec::new();
@@ -606,14 +643,20 @@ pub(crate) fn panel_lines(cx: &App) -> Vec<HostSentence> {
         .as_ref()
         .filter(|(store, _)| Some(*store) == current)
         .map(|(_, line)| line.clone());
+    let remedy_not_started = lines
+        .remedy_not_started
+        .as_ref()
+        .filter(|(store, _, _)| Some(*store) == current)
+        .map(|(_, _, line)| line.clone());
     setup
         .into_iter()
         .chain(not_started)
+        .chain(remedy_not_started)
         .chain(stop_asking)
         .collect()
 }
 
-// ---- The plan --------------------------------------------------------------------------------------------------------
+// ---- The plan -------------------------------------------------------------------------------------------------------
 
 /// One step of the plan, as host text.
 struct Step {

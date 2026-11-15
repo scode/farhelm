@@ -56,18 +56,16 @@ fn painted(nodes: &[DriverNode]) -> String {
         .join(" ")
 }
 
-/// Why this matters: the menu is how a user reaches a host's settings, updates it and removes it, and what it lists must
-/// be what the offers rule says for that host, so a remote host shows no command this build cannot carry out yet. Its
-/// header names the host and where it is, and focus starts on its first command that can act, as the old menu's did.
+/// Why this matters: the menu is how a user reaches a host's settings, updates it and removes it, and what it lists
+/// must be what the offers rule says for that host, so a remote host shows no command this build cannot carry out yet.
+/// Its header names the host and where it is, and focus starts on its first command, Retry, as the old menu's did.
 /// Specified: a click on `build-box`'s toggle opens the menu beside it, named "Host actions for build-box", its header
-/// reading "dev@build-box · Farhelm 0.0.0-unreleased", offering Update, which holds focus, then Settings, then
+/// reading "dev@build-box · Farhelm 0.0.0-unreleased", offering Retry, which holds focus, Update, then Settings, then
 /// Uninstall ("Remove Farhelm from this host, keeping its data") and Remove ("Forget this host"); Escape closes it with
 /// focus on the toggle. (That Update and Remove act is `hosts::update`'s and
 /// `hosts::remove`'s tests'.)
 #[gpui::test]
-fn a_remote_hosts_toggle_opens_a_menu_offering_update_settings_uninstall_and_remove(
-    cx: &mut TestAppContext,
-) {
+fn a_remote_hosts_toggle_opens_a_menu_starting_on_retry(cx: &mut TestAppContext) {
     let (_helm, cx) = open_hosts(cx);
     assert_eq!(
         label(&frame(cx), "host-menu-toggle-2"),
@@ -118,7 +116,7 @@ fn a_remote_hosts_toggle_opens_a_menu_offering_update_settings_uninstall_and_rem
         bounds(cx, "host-menu-update").origin.y < bounds(cx, "host-menu-settings").origin.y,
         "Update comes before Settings"
     );
-    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-update"));
+    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-retry"));
 
     keys(cx, "escape");
     assert!(!any_open(cx), "Escape closed it");
@@ -148,10 +146,10 @@ fn a_second_press_on_the_toggle_closes_its_menu(cx: &mut TestAppContext) {
 
 /// Why this matters: SPEC.md, "Opening and closing": closing something the user opened returns focus to where it was
 /// before it opened, on every platform, including those where clicking the button that opened it did not move focus to
-/// the button. On macOS a click leaves the toggle unfocused, so the menu must still give focus back to it, which it does
-/// by naming the toggle as its return target rather than focusing it before opening. Specified: under macOS's click
-/// rule, with focus away from `build-box`'s toggle, a click on the toggle opens its menu and Escape closes it with
-/// focus on the toggle.
+/// the button. On macOS a click leaves the toggle unfocused, so the menu must still give focus back to it, which it
+/// does by naming the toggle as its return target rather than focusing it before opening. Specified: under macOS's
+/// click rule, with focus away from `build-box`'s toggle, a click on the toggle opens its menu and Escape closes it
+/// with focus on the toggle.
 #[gpui::test]
 fn escape_on_the_menu_returns_focus_to_its_toggle_under_the_macos_click_rule(
     cx: &mut TestAppContext,
@@ -176,10 +174,10 @@ fn escape_on_the_menu_returns_focus_to_its_toggle_under_the_macos_click_rule(
 /// the local row's Update is shown greyed with that reason and must never send anything (`provisioning.spec.ts`, "the
 /// local row's update is greyed out, points at the installer, and sends nothing"). Focus must not start on it: a greyed
 /// command draws no highlight, so a menu opening there showed no mark of where Enter would go (the old menu opened on
-/// Retry, ahead of it). Specified: the local host's menu reads "Local host · Farhelm ..." and offers Update, then
-/// Settings, and neither Remove nor Uninstall; focus starts on Settings, and Up reaches the greyed Update, as the old
-/// menu's arrows reached it; its line says "Run the installer again to update this machine"; clicking it and pressing
-/// Enter on it send nothing and leave the menu open.
+/// Retry, ahead of it, as this one does). Specified: the local host's menu reads "Local host · Farhelm ..." and offers
+/// Retry, Update, then Settings, and neither Remove nor Uninstall; focus starts on Retry, and Down reaches the greyed
+/// Update, as the old menu's arrows reached it; its line says "Run the installer again to update this machine";
+/// clicking it and pressing Enter on it send nothing and leave the menu open.
 #[gpui::test]
 fn the_local_hosts_greyed_update_says_why_and_sends_nothing(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_hosts(cx);
@@ -200,8 +198,8 @@ fn the_local_hosts_greyed_update_says_why_and_sends_nothing(cx: &mut TestAppCont
         "nor uninstalled from the panel: `farhelm uninstall` there does it"
     );
     assert!(painted(&nodes).contains("Run the installer again to update this machine"));
-    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-settings"));
-    keys(cx, "up");
+    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-retry"));
+    keys(cx, "down");
     assert_eq!(focused_id(cx).as_deref(), Some("host-menu-update"));
 
     click(cx, "host-menu-update");
@@ -215,7 +213,7 @@ fn the_local_hosts_greyed_update_says_why_and_sends_nothing(cx: &mut TestAppCont
 /// it"), one of the on-demand routes "Installation and updates" lists beside the version readout and the ? menu. It
 /// must reach the updater and never the helm, which refuses to update its own machine. Specified: with a fake updater
 /// kept as the app's, the local host's menu shows "Check for a newer Farhelm and install it" in place of the installer
-/// line, and focus starts on Update, the first command that can act; Enter on it asks the updater for one check, sends
+/// line, and Down from Retry, where focus starts, reaches Update; Enter on it asks the updater for one check, sends
 /// the helm nothing, and closes the menu with focus back on its toggle.
 #[gpui::test]
 fn in_the_desktop_app_the_local_hosts_update_asks_the_updater_to_check(cx: &mut TestAppContext) {
@@ -232,6 +230,8 @@ fn in_the_desktop_app_the_local_hosts_update_asks_the_updater_to_check(cx: &mut 
     let text = painted(&nodes);
     assert!(text.contains("Check for a newer Farhelm and install it"));
     assert!(!text.contains("Run the installer again"));
+    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-retry"));
+    keys(cx, "down");
     assert_eq!(focused_id(cx).as_deref(), Some("host-menu-update"));
 
     keys(cx, "enter");
@@ -262,9 +262,9 @@ fn a_host_that_reports_no_build_reads_not_connected(cx: &mut TestAppContext) {
 /// Why this matters: a host's settings must not change under its own work in flight (an Update's plan, a save), as the
 /// old menu held Settings unavailable then (`provisioning.spec.ts`, "Update planning keeps only its own Settings
 /// unavailable"), and the old menu held Remove unavailable while the host was busy too; another host's work must not
-/// hold them. Specified: while a save is in flight on `build-box`, its menu's Remove and Settings each do nothing when
-/// clicked (no question, no dialog, nothing sent), the menu staying; `gpu-1`'s Settings opens its dialog meanwhile;
-/// once the save is answered, `build-box`'s Settings opens its dialog.
+/// hold them. Specified: while a save is in flight on `build-box`, its menu opens on Retry, and its Remove and Settings
+/// each do nothing when clicked (no question, no dialog, nothing sent), the menu staying; `gpu-1`'s Settings opens its
+/// dialog meanwhile; once the save is answered, `build-box`'s Settings opens its dialog.
 #[gpui::test]
 fn settings_waits_for_the_hosts_own_work_in_flight(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_hosts(cx);
@@ -288,6 +288,8 @@ fn settings_waits_for_the_hosts_own_work_in_flight(cx: &mut TestAppContext) {
     assert_eq!(sent.len(), 1, "the premise: work on build-box is in flight");
 
     click(cx, "host-menu-toggle-2");
+    // Every item is unavailable while the host is busy, so the menu falls back to the first one it draws.
+    assert_eq!(focused_id(cx).as_deref(), Some("host-menu-retry"));
     click(cx, "host-menu-remove");
     assert!(node(&frame(cx), "prompt").is_none(), "no question");
     assert!(helm.commands().is_empty(), "nothing sent");
@@ -315,9 +317,9 @@ fn settings_waits_for_the_hosts_own_work_in_flight(cx: &mut TestAppContext) {
 }
 
 /// Why this matters: removing a Tensorlake sandbox's host deletes the sandbox, its files and its sessions (SPEC.md,
-/// "Topology": the panel calls that Delete sandbox, and it always asks); that command is not ported yet, so the menu must
-/// not offer the ordinary Remove in its place, whose question promises the host keeps running. Specified: a connected
-/// Tensorlake host's menu offers Settings and neither Remove nor Uninstall.
+/// "Topology": the panel calls that Delete sandbox, and it always asks); that command is not ported yet, so the menu
+/// must not offer the ordinary Remove in its place, whose question promises the host keeps running. Specified: a
+/// connected Tensorlake host's menu offers Settings and neither Remove nor Uninstall.
 #[gpui::test]
 fn a_sandbox_hosts_menu_offers_no_remove(cx: &mut TestAppContext) {
     let mut listed = reference_hosts();

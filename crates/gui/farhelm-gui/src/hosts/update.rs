@@ -58,6 +58,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use super::identity::display_name;
+use super::listed;
 use super::offers::{self, Update};
 use super::refusal;
 use crate::components::{Button, HoverHelp, Role, Tier};
@@ -189,13 +190,6 @@ fn is_available(host: i64, cx: &App) -> bool {
 /// The Hosts panel's line for an Update not started during a launch, empty, under its own id.
 fn not_started_line() -> HostSentence {
     HostSentence::new("hosts-update-not-started")
-}
-
-/// Host `host` as the registry lists it now, or `None` when the window is inert or it is not listed.
-fn listed(host: i64, cx: &App) -> Option<HostView> {
-    let store = session::current_store(cx)?;
-    let collections = store.read(cx).collections();
-    collections.get::<HostView>(&HostView::key(host)).cloned()
 }
 
 /// [`start`] for `window`, once no launch holds it back.

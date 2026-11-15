@@ -414,8 +414,7 @@ Replacing tests, in `crates/gui/farhelm-gui/src/hosts/remove/tests.rs` unless na
   Restart and a Replace in flight, from the menu), and inside the question that stays up,
   `a_launch_that_started_while_the_question_was_open_refuses_its_answer` and `a_busy_host_refuses_remove_with_a_reason`;
   a question asked while the host is busy, `asked_while_the_host_is_busy_only_cancel_acts`.
-- The menu, in `crates/gui/farhelm-gui/src/hosts/menu/tests.rs`:
-  `a_remote_hosts_toggle_opens_a_menu_offering_update_settings_uninstall_and_remove`,
+- The menu, in `crates/gui/farhelm-gui/src/hosts/menu/tests.rs`: `a_remote_hosts_toggle_opens_a_menu_starting_on_retry`,
   `settings_waits_for_the_hosts_own_work_in_flight` (Remove does nothing while the host is busy),
   `the_local_hosts_greyed_update_says_why_and_sends_nothing` (no Remove on the helm's own machine) and
   `a_sandbox_hosts_menu_offers_no_remove`; which kinds remove by forgetting, `offers/tests.rs`
@@ -533,6 +532,36 @@ tests, in `crates/gui/farhelm-gui/src/hosts/uninstall/tests.rs` unless named oth
 Superseded, with no replacing test: "Settings waits while an uninstall confirmation is being planned" (the old modal
 queue; here a host's own Settings waits while its plan request is out, as for every request on its key, and no other
 host's does).
+
+## `tests/terminal-multihost.spec.ts` and `tests/provisioning.spec.ts`, Retry and Adopt
+
+The host menu's Retry tries a host's connection again now, and its Adopt accepts the identity a mismatched host reports
+(`crates/gui/farhelm-gui/src/hosts/remedies.rs`); fixing the destination instead is the host settings dialog's
+destination field. The duplicate entry's message is the phase detail the Hosts panel already drew, and its "then press
+Retry" is this Retry. Replacing tests, in `crates/gui/farhelm-gui/src/hosts/remedies/tests.rs` unless named otherwise:
+
+- "identity-mismatch-surfaced: both identities and an adopt for the reported one": both identities in the details,
+  `hosts/identity/phase/tests.rs`; the Adopt naming the reported one,
+  `adopt_sends_the_identity_it_showed_and_a_refusal_opens_the_dialog`.
+- "identity-unverified-offers-no-adopt: the remedies are named instead": `hosts/offers/tests.rs`
+  `retry_is_offered_in_every_phase_but_deletion_and_adopt_only_for_a_mismatch` and the unverified remedy line in
+  `hosts/identity/phase/tests.rs`.
+- "adopt-requires-current-identity: the displayed identity is sent, and a 409 is shown":
+  `adopt_sends_the_identity_it_showed_and_a_refusal_opens_the_dialog` and
+  `adopt_sends_the_identity_the_menu_showed_not_one_read_at_the_press`.
+- Retry, which no old case drove alone (the old menu's first item): `retry_sends_one_attempt_under_the_hosts_key`, and a
+  refusal after the user moved on, `a_refusal_after_the_user_moved_on_shows_under_the_row`. It is offered on every kind
+  of host, the local one and one this build does not know included, as the old menu offered it on every row ("the local
+  row menu contains Retry"), and in every phase but an environment's deletion (`hosts/offers/tests.rs`,
+  `each_kind_decides_its_own_offers` and `retry_is_offered_in_every_phase_but_deletion_and_adopt_only_for_a_mismatch`).
+- Fixing the destination instead (no old case): `fixing_the_destination_instead_is_the_host_settings_dialog`, and the
+  destination field's own tests in `hosts/settings/tests.rs`.
+- A launch in flight (no old case; the old page lock held both):
+  `a_launch_holds_both_back_and_each_line_lasts_until_its_own_action_starts`.
+- The look: the golden `host-menu`, with Retry first as in reference `host-menu`. No reference shows Adopt.
+
+No end-to-end step: a fake host never connects, so the scripted backend cannot stage an identity mismatch or a
+duplicate, and Retry on a fake host only restarts an attempt that fails again, which the in-process tests already pin.
 
 ## `tests/appearance.spec.ts`, partly
 
@@ -660,8 +689,8 @@ rail's avatar menu will call it) and `hosts::open_settings` (with the control it
 Replacing tests, in `crates/gui/farhelm-gui/src/hosts/menu/tests.rs` and
 `crates/gui/farhelm-gui/src/hosts/settings/tests.rs`:
 
-- The menu: `a_remote_hosts_toggle_opens_a_menu_offering_update_settings_uninstall_and_remove` (its name, header and
-  first command, and Escape back to the toggle), `the_local_hosts_greyed_update_says_why_and_sends_nothing`,
+- The menu: `a_remote_hosts_toggle_opens_a_menu_starting_on_retry` (its name, header and first command, and Escape back
+  to the toggle), `the_local_hosts_greyed_update_says_why_and_sends_nothing`,
   `settings_waits_for_the_hosts_own_work_in_flight`, `a_second_press_on_the_toggle_closes_its_menu`,
   `escape_on_the_menu_returns_focus_to_its_toggle_under_the_macos_click_rule`, and in the installed desktop app
   `in_the_desktop_app_the_local_hosts_update_asks_the_updater_to_check` (the local row's Update asks the app's updater
@@ -957,23 +986,36 @@ Where the port does not match the old app, and why. Each stays until the work na
 
 ### The host menu and host settings
 
-- **Focus starts on the first command that can act**, Re-run, the live Update or Settings, never on a greyed command.
-  The old menu started on its first command, which was always Retry, so it never started on the greyed Update either;
-  Retry is not ported, and starting on a greyed command showed no mark of where focus was, since a greyed command takes
-  no highlight. The arrow keys still reach the greyed Update, as the old ones did, and it still draws no highlight
-  there.
+- **Focus starts on the first command that can act**: Retry, as in the old menu, whenever the host is idle; while it is
+  busy, the first of the others that can act, never a greyed command, since a greyed command takes no highlight and
+  starting there showed no mark of where focus was. The arrow keys still reach every greyed command, as the old ones
+  did, and it still draws no highlight there.
+- **Adopt names its identity on the line under its label**, "Accept identity <id>", in the identity spelling, where the
+  old item's label was "Adopt <id>" and its line "Accept the supervisor's identity": a menu item's label is the app's
+  own words, and a host value is drawn through the host-text element, which the line takes.
+- **Adopt's identity is the one the host reported when the menu opened.** The old item followed the rendered state, and
+  the old page drew no new frame between the user's look and the click. GPUI dispatches a key press (Enter) after a
+  fresh frame, so an item that followed the host would send an identity the user may not have seen; the open menu keeps
+  the one it opened with, and a host that reports another meanwhile is refused by the helm, as the old contract wanted.
+- **Retry and Adopt wait for a session launch, each with its own line.** The old app held both behind its one page-wide
+  token. Here each refuses during a launch with the Hosts panel's line ("Retry <name>: not started, …", "Adopt <name>:
+  not started, …"): Adopt rewrites the registry's entry, as every host registry change does, and Retry drops a connected
+  host's connection, which can cut short a launch's create still waiting on that host (decided by the migration's
+  settings-and-hosts area on 2026-11-15). The line is the latest one refused and stays until that same remedy starts on
+  any host, the other is refused in its place, Add host opens or the UI session resets, where the old page showed no
+  line at all. A launch is not held back while a Retry request is in flight, where the old page's token held it: the
+  helm answers Retry at once, and the connection drops only after that answer.
 - **A host that reports no build reads "Farhelm not connected"** in the header. The old header showed the host's
   recorded install path (`remote_farhelm`) in the build's place.
-- **The menu offers Re-run, Update, Settings, Uninstall and Remove so far,** with the local host's Update greyed with
-  its reason, or, in the installed desktop app, live as the app's check for a newer release ("Check for a newer Farhelm
-  and install it"), whose progress and outcome show beside the version readout, as in the old app. Re-run is drawn for a
-  failed Update, and for a failed setup on an SSH host only: a Tensorlake sandbox's setup rerun probes through the
-  Tensorlake route and comes with those pieces, and a container's setup belongs to its environment's launch. Remove: see
-  "Remove host" below; Uninstall: see "Uninstall" below. Retry and Adopt are not offered yet (left out of the second
-  milestone by the migration's settings-and-hosts area on 2026-11-14; they come with the identity remedies), and the
-  toggle keeps the old hover help, which names them. The live Update's hover help is new ("Update: install this helm's
-  Farhelm version on this host", and the desktop app's local check's "Update: check for a newer Farhelm release and
-  install it"): the old menu items had none, and every menu item here has one.
+- **The menu offers Retry, Adopt, Re-run, Update, Settings, Uninstall and Remove so far,** with the local host's Update
+  greyed with its reason, or, in the installed desktop app, live as the app's check for a newer release ("Check for a
+  newer Farhelm and install it"), whose progress and outcome show beside the version readout, as in the old app. Re-run
+  is drawn for a failed Update, and for a failed setup on an SSH host only: a Tensorlake sandbox's setup rerun probes
+  through the Tensorlake route and comes with those pieces, and a container's setup belongs to its environment's launch.
+  Remove: see "Remove host" below; Uninstall: see "Uninstall" below; Retry and Adopt: see "Retry and Adopt" above. The
+  toggle keeps the old hover help. The live Update's hover help is new ("Update: install this helm's Farhelm version on
+  this host", and the desktop app's local check's "Update: check for a newer Farhelm release and install it"): the old
+  menu items had none, and every menu item here has one.
 - **One save per host at a time, and nothing goes unavailable while one runs.** Every setting saves under the host's one
   operation key, so a click on another setting of the same host while a save is in flight sends nothing (the switch or
   choice goes on showing what it showed) and "Not saved: another operation was in progress. Try again." shows where that
@@ -1138,11 +1180,14 @@ Where the port does not match the old app, and why. Each stays until the work na
   host text foundation's identity spelling, as the old app's `display_identity` did: spaces, variation selectors and
   non-ASCII look-alikes are written out as `<U+XXXX>`, so two ids the user compares never look alike
   (`install_ids_are_spelled_so_two_ids_never_look_alike` in `hosts/identity/phase/tests.rs`).
-- Interim: the remedies of a duplicate entry ("... then press Retry"), a retired entry ("Retry to start a fresh
-  connection actor ..."), a failed delete ("Retry to delete it again") and an identity mismatch ("Adopt the identity the
-  host reports ...") keep the old words, which name the host menu's Retry and Adopt. M2 offers neither (decided by the
-  migration's settings-and-hosts area on 2026-11-14). Adopt and the duplicate's Retry arrive with the identity remedies,
-  the failed delete's Retry with Delete sandbox; no piece names the retired entry's Retry yet.
+- The remedies of a duplicate entry ("... then press Retry"), a retired entry ("Retry to start a fresh connection actor
+  ...") and an identity mismatch name the host menu's Retry and Adopt, which the menu offers. The mismatch's remedy says
+  adopting "resets all five of this host's permissions to asking", where the old one said only that adopting resets the
+  host to asking before YOLO launches (SPEC.md, "Topology": adopting "resets all five permissions to asking"). It still
+  says only "fix the destination", without naming where: the host settings dialog edits an SSH host's destination, and a
+  sandbox's or a container's is not the user's to change. Interim: a failed delete's "Retry to delete it again" names
+  the environment's own Retry, which comes with Delete sandbox; the menu offers no Retry while an environment is being
+  deleted.
 - "Connecting" and the other pending phases are drawn upright and the port asks for no italics: the GUI bundles no
   italic Inter face, and the old app drew them in italics.
 - The identity mark's "Local" or "Remote" is its accessible name rather than a visually hidden word after it, with the

@@ -164,6 +164,14 @@ pub enum Work {
     /// Closing one terminal tab (`DELETE /api/sessions/{id}/tabs/{tab}`), on that tab's own key ([`OpKey::tab`]), so
     /// sibling tabs close side by side and a close holds none of the session's lifecycle actions. Not supersedable.
     TabClose,
+    /// The host menu's Retry (`POST /api/hosts/{id}/retry`), under the host's key: the helm drops the host's
+    /// connection and tries it again now, or starts a fresh connection actor for a retired entry (`hosts::remedies`).
+    /// Answered at once, with the outcome in the pushed host list. Not supersedable. It changes no registry entry.
+    RetryHost,
+    /// The host menu's Adopt (`POST /api/hosts/{id}/adopt`), under the host's key, naming the identity the menu
+    /// showed: the helm records that identity for the entry, resets the host's five permissions to asking and
+    /// connects again (`hosts::remedies`). Not supersedable. It changes the registry's entry for the host.
+    AdoptHost,
 }
 
 /// The two halves of SPEC.md's "Launches and changes to the host registry still exclude each other". Each side refuses
@@ -212,6 +220,8 @@ impl Work {
             Work::UninstallHost => false,
             Work::TabOpen => false,
             Work::TabClose => false,
+            Work::RetryHost => false,
+            Work::AdoptHost => false,
         }
     }
 
@@ -243,6 +253,8 @@ impl Work {
             Work::UninstallHost => true,
             Work::TabOpen => false,
             Work::TabClose => false,
+            Work::RetryHost => false,
+            Work::AdoptHost => true,
         }
     }
 }

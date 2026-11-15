@@ -356,8 +356,8 @@ fn phases_that_wait_for_a_person_say_what_to_do() {
             ),
             (
                 Kind::Remedy,
-                "Adopt the identity the host reports, or fix the destination; adopting resets this host to asking \
-                 before YOLO launches"
+                "Adopt the identity the host reports, or fix the destination; adopting resets all five of this host's \
+                 permissions to asking"
                     .to_owned()
             ),
         ]
