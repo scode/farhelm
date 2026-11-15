@@ -176,11 +176,12 @@ pub fn new_prefill(cx: &App) -> Option<LaunchDraft> {
 /// that refusal arrived after the user had moved on, so they have not seen it yet, and replacing its draft would lose
 /// it unseen. Clone of the session works again once that launcher is closed, or once its launch has had its reply.
 ///
-/// NOTE: Not built yet: a Clone of a session in a managed checkout starting on a fresh checkout of its repository with
-/// the `-clone` name, and choosing an existing folder restoring the source's folder and title, which come with managed
-/// checkouts; until then such a Clone keeps the source's checkout directory as an existing folder. And a Clone of a
-/// sandbox or container session targeting a fresh environment from its recipe (SPEC.md, "Sandbox sessions") comes with
-/// the environments work; until then it falls back as above, with its own note.
+/// A session in a managed checkout is cloned onto a new managed checkout of its repository, named `<title>-clone`;
+/// choosing Folder brings back its folder and title ([`LaunchDraft::clone_of`]).
+///
+/// NOTE: Not built yet: a Clone of a sandbox or container session targeting a fresh environment from its recipe
+/// (SPEC.md, "Sandbox sessions") comes with the environments work; until then it falls back as above, with its own
+/// note.
 pub fn open_clone(session: &str, window: &mut Window, cx: &mut App) -> bool {
     if layers::focus_layer_open(window, cx) || !new_available(cx) {
         return false;

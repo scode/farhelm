@@ -329,7 +329,7 @@ fn prepared(
     if !launch::still_preparing(&launcher, cx) {
         return;
     }
-    let _ = cx.update_window(window, |_, window, cx| {
+    let waiting = cx.update_window(window, |_, window, cx| {
         launcher.update(cx, |launcher, cx| {
             let next = finish(&mut launcher.draft, launcher.catalog.as_deref(), cx);
             // The fields were made from New's bare prefill; whatever happens next, a launcher that is drawn later (now,
@@ -338,7 +338,9 @@ fn prepared(
             match next {
                 Prepared::Launch { notice } => {
                     launcher.notice = notice;
-                    launcher.submit(false, mark, window, cx);
+                    // A managed checkout first waits, still out of sight, for its folder's preview, and then starts
+                    // (`checkout`), as the old app's quick launch did.
+                    launcher.submit_or_wait_for_preview(mark, window, cx)
                 }
                 Prepared::Show { note, notice } => {
                     if matches!(note, Note::Banner(_)) {
@@ -347,12 +349,16 @@ fn prepared(
                     launcher.note = Some(note);
                     launcher.notice = notice;
                     cx.notify();
+                    false
                 }
             }
         })
     });
-    // A launch that went out moved the launcher to waiting for its reply; anything else comes back to be seen.
-    launch::reveal_prepared(launcher, window, mark, cx);
+    // A launch that went out moved the launcher to waiting for its reply, and one waiting for its preview stays out of
+    // sight until that answers; anything else comes back to be seen.
+    if !matches!(waiting, Ok(true)) {
+        launch::reveal_prepared(launcher, window, mark, cx);
+    }
 }
 
 /// Read the release's model catalog for `launcher`. A failed read leaves it unread, which refuses no choice (the
@@ -751,6 +757,8 @@ impl Launcher {
         // A quick launch's banner or refusal speaks of the draft as it opened, a shortcut's refusal of the press before.
         self.note = None;
         self.save_refusal = None;
+        // The guarded answer's launch waiting for a checkout preview would launch something else than was answered.
+        self.disarm_checkout_launch();
         cx.notify();
     }
 
@@ -829,6 +837,8 @@ impl Launcher {
     /// beside the main action when the launcher is next drawn.
     pub(super) fn refused(&mut self, refused: launch::RefusedLaunch, cx: &mut Context<Self>) {
         self.pressed = false;
+        // A managed checkout's create the helm proves it never accepted takes a new preview (`checkout`).
+        self.checkout_refused(refused.unaccepted);
         self.refused = Some(refused);
         cx.notify();
     }
@@ -2132,7 +2142,8 @@ impl Render for Launcher {
             (_, Some(words)) => Some(
                 HostSentence::new("launcher-refusal-words")
                     .text(format!("{lead} "))
-                    .host(words),
+                    .host(words)
+                    .text(self.refusal_suffix()),
             ),
             _ => None,
         };
