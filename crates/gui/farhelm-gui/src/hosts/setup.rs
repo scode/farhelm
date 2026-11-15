@@ -29,7 +29,9 @@
 //!   host the helm did not add. It shows there until Add host opens again or the next setup starts.
 //! - **A refused permanent answer.** The setup goes ahead whether or not its preference save succeeds, and the dialog
 //!   that asked has closed, so a refusal of that save shows on the same panel line, "Set up new hosts without asking:"
-//!   and the helm's words, with the same lifetime; it also goes once the preference is on, or after a reset.
+//!   and the helm's words, with the same lifetime; it also goes once the preference is on, or after a reset. A save the
+//!   operation store refuses because another preference save is in flight shows there too, in the words Settings uses
+//!   for such a press ([`Refused::WORDS`]).
 //! - **The rerun of a failed setup** ([`rerun`], the host menu's Re-run) probes the host's registered destination again,
 //!   with the install paths it recorded, under the host's own key, as the old app did ("failed ADD rerun probes the
 //!   registered destination"). A supervisor that answers now is registered as it is and the row follows the pushed
@@ -58,9 +60,10 @@ use crate::assets;
 use crate::components::{HoverHelp, Tier, copy_button, with_hover_help};
 use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
-use crate::operations::{Command, OpKey, Outcome, Work};
+use crate::operations::{Command, NotStarted, OpKey, Outcome, Work};
 use crate::prompt::{self, Answer, Question};
 use crate::session;
+use crate::settings::Refused;
 use crate::theme::{self, metrics};
 
 /// The old setup confirmation's width, the Add host dialog's.
@@ -373,8 +376,8 @@ pub(crate) fn rerun(host: &HostView, mark: Mark, window: &mut Window, cx: &mut A
 
 /// Turn on "Set up new hosts without asking" for the permanent answer: only its field of the preference row, under the
 /// row's key, as Settings' switch saves it. Not retried; a refusal shows on the Hosts panel's line (the module docs).
-/// While another preference save is in flight the store refuses this one, and it is dropped (recorded in the parity
-/// file): only Settings saves under that key, and it cannot be open while this question is.
+/// While another preference save is in flight (from Settings, the templates dialog or a tunnel consent) the store refuses
+/// this one, which sends nothing and says so on the same line, so the user is not asked again later with no word why.
 fn stop_asking(cx: &mut App) {
     let Some(operations) = session::current_operations(cx) else {
         return;
@@ -399,6 +402,13 @@ fn stop_asking(cx: &mut App) {
     });
     match started {
         Ok(()) => show(cx, |lines| lines.stop_asking = None),
+        Err(NotStarted::Busy(_)) => {
+            let store = session::current_operations(cx).map(|operations| operations.entity_id());
+            let words = HostText::from_host(Refused::WORDS);
+            show(cx, |lines| {
+                lines.stop_asking = store.map(|store| (store, words))
+            });
+        }
         Err(not_started) => {
             tracing::debug!(?not_started, "the permanent answer's preference not sent")
         }

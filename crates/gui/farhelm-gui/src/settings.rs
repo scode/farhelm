@@ -34,13 +34,14 @@
 //!
 //! NOTE: Quick flips do not follow the old app's "newest-choice" rule. Its preference queue coalesced a field's clicks,
 //! sent only the newest, and reported a failure only for the newest click. Here the operation store admits one request
-//! on the preference row's key at a time, and every Settings save holds that key, so a click on any switch or radio
-//! option while any Settings save is in flight is refused and changes nothing: the control goes on showing the value in
-//! flight, and the next click after the reply acts. On the radios (Appearance, Terminal's link choice) an arrow press
-//! moves focus before it reports the choice, so a dropped arrow press still moves focus while the choice stays where it
-//! was. The helm is embedded and answers a preference write in milliseconds, so the window in which a click is dropped
-//! this way is that short. The migration's orchestrator accepted this on 2026-11-14, to be revisited only if a user
-//! meets it; closing it would take a key per field or a queue, both changes to the operation store, not here.
+//! on the preference row's key at a time, and every Settings save holds that key, so a press on any control while any
+//! Settings save is in flight sends nothing: the control goes on showing what it showed, with a line beside it saying
+//! that it was not saved because another save was in progress ([`refused`]), and the next press after the reply acts. On the radios (Appearance,
+//! Terminal's link choice) an arrow press moves focus before it reports the choice, so a refused arrow press still
+//! moves focus while the choice stays where it was. The helm is embedded and answers a preference write in
+//! milliseconds, so the window in which a press is refused this way is that short. The migration's orchestrator
+//! accepted the refusal on 2026-11-14, to be revisited only if a user meets it, and asked the same day that it say why;
+//! closing it would take a key per field or a queue, both changes to the operation store, not here.
 //!
 //! NOTE: Not ported yet, each recorded in `docs/gpui/parity/settings-and-hosts.md`. The one-pane layout at 620 pixels
 //! wide and below ("‹ Settings" back to the list) is not built, since the window's minimum width is above it. A
@@ -59,6 +60,7 @@ mod checkouts;
 mod choices;
 mod configured;
 mod ntfy;
+mod refused;
 mod terminal;
 #[cfg(test)]
 mod tests;
@@ -86,6 +88,9 @@ use configured::Configured;
 
 pub use agent_trust::TrustAgent;
 pub use checkout_field::{CheckoutField, FolderScope, Saved};
+/// The line saying why a press sent nothing, shared with the host settings dialog, whose saves share a host's key the way
+/// Settings' share the preference row's.
+pub(crate) use refused::Refused;
 use terminal::LinkClick;
 
 /// Hands the helm's stored appearance to the theme, for the main view's subscription to the current UI session. It
@@ -377,6 +382,10 @@ pub(crate) struct SettingsDialog {
     focus_on: Option<Handover>,
     /// Set right after the layer opens; what the close controls dismiss.
     layer: Option<LayerId>,
+    /// The control here whose press sent nothing last because another save held the preference row's key: the
+    /// switches, Appearance, Terminal's link choice, the spare switch and the trust switches ([`refused`]). Checkouts'
+    /// fields and the ntfy form, views of their own, keep their own.
+    refused: Refused,
 }
 
 /// Checkouts' text fields, each a view of its own ([`CheckoutField`]) that the dialog draws as a child.
@@ -426,6 +435,7 @@ impl SettingsDialog {
             ntfy: None,
             focus_on: None,
             layer: None,
+            refused: Refused::default(),
         }
     }
 
@@ -514,94 +524,109 @@ impl SettingsDialog {
     /// The user turned a switch over helm configuration to `on` (an agent's trust, Checkouts' spare switch): save it
     /// with `command`, through the switch's own route, under the preference row's key like every Settings choice
     /// ([`configured`]; [`agent_trust`] says why the key is shared). `state` reaches the switch in the dialog, and
-    /// `what` names it in the log when the save does not start. Once the helm has done it, that is the choice the
-    /// section holds; a refusal leaves the choice read before.
+    /// `control` is its element id, where a refused press is said ([`refused`]) and which names it in the log. Once the
+    /// helm has done it, that is the choice the section holds; a refusal leaves the choice read before.
     fn toggle_configured(
         &mut self,
-        what: impl std::fmt::Debug,
+        control: &'static str,
         state: impl Fn(&mut Self) -> &mut Configured + Copy + 'static,
         on: bool,
         command: impl FnOnce(bool) -> Result<Command, PathError>,
         cx: &mut Context<Self>,
     ) {
-        if !state(self).available() || !state(self).draft.edit(on) {
+        if !state(self).available() {
             return;
         }
-        let started = drafts::save(
-            self,
-            move |dialog: &mut SettingsDialog| &mut state(dialog).draft,
-            &OpKey::preferences(),
-            |on| command(*on),
-            cx,
-            move |dialog, settled, _| {
-                if matches!(settled.outcome, Outcome::Done(_)) {
-                    state(dialog).saved(on);
-                }
-            },
-        );
-        if let Err(not_started) = started {
-            tracing::debug!(?what, ?not_started, "configuration switch not saved");
+        if state(self).draft.edit(on) {
+            let started = drafts::save(
+                self,
+                move |dialog: &mut SettingsDialog| &mut state(dialog).draft,
+                &OpKey::preferences(),
+                |on| command(*on),
+                cx,
+                move |dialog, settled, _| {
+                    if matches!(settled.outcome, Outcome::Done(_)) {
+                        state(dialog).saved(on);
+                    }
+                },
+            );
+            self.refused.record(control, &started);
+            if let Err(not_started) = started {
+                tracing::debug!(control, ?not_started, "configuration switch not saved");
+            }
+        } else {
+            // The switch's own save is in flight: work on the same key.
+            self.refused.refuse(control);
         }
+        cx.notify();
     }
 
-    /// The user turned `choice`'s switch to `on`: save it as the preference row's field. Does nothing while that
-    /// switch's own save is in flight, or while any other preference save is (the operation store refuses the key; see
-    /// the module docs).
+    /// Edit the draft `field` reaches to `value`, the value the user chose, and save it as one field of the preference
+    /// row with `command`: what every switch and radio choice here does. A press whose draft refuses the edit (its own
+    /// save is in flight) or that the operation store refuses (another preference save is; see the module docs) sends
+    /// nothing, and `control`, its element id, says why ([`refused`]).
+    fn save_choice<T: Clone + PartialEq + std::fmt::Debug + 'static>(
+        &mut self,
+        control: &'static str,
+        field: impl Fn(&mut Self) -> &mut Draft<T> + Copy + 'static,
+        value: T,
+        command: impl FnOnce(&T) -> Result<Command, PathError>,
+        cx: &mut Context<Self>,
+    ) {
+        if field(self).edit(value) {
+            let started = drafts::save(
+                self,
+                field,
+                &OpKey::preferences(),
+                command,
+                cx,
+                |_, _, _| {},
+            );
+            self.refused.record(control, &started);
+            if let Err(not_started) = started {
+                tracing::debug!(control, value = ?field(self).value(), ?not_started, "preference not saved");
+            }
+        } else {
+            self.refused.refuse(control);
+        }
+        cx.notify();
+    }
+
+    /// The user turned `choice`'s switch to `on`: save it as the preference row's field ([`SettingsDialog::save_choice`]).
     fn toggle(&mut self, choice: Choice, on: bool, cx: &mut Context<Self>) {
         let index = Self::index(choice);
-        if !self.switches[index].draft.edit(on) {
-            return;
-        }
-        let started = drafts::save(
-            self,
+        self.save_choice(
+            choice.id(),
             move |dialog: &mut SettingsDialog| &mut dialog.switches[index].draft,
-            &OpKey::preferences(),
+            on,
             |on| choice.command(*on),
             cx,
-            |_, _, _| {},
         );
-        if let Err(not_started) = started {
-            tracing::debug!(?choice, ?not_started, "preference switch not saved");
-        }
     }
 
-    /// The user chose `preference` in Appearance: save it as the preference row's `appearance` field, as
-    /// [`SettingsDialog::toggle`] saves a switch, with the same refusal while any preference save is in flight. The
-    /// palette changes only once the helm stores the choice and pushes it, like every other client's.
+    /// The user chose `preference` in Appearance: save it as the preference row's `appearance` field, as a switch saves
+    /// ([`SettingsDialog::save_choice`]). The palette changes only once the helm stores the choice and pushes it, like
+    /// every other client's.
     fn choose_appearance(&mut self, preference: Preference, cx: &mut Context<Self>) {
-        if !self.appearance.edit(preference) {
-            return;
-        }
-        let started = drafts::save(
-            self,
+        self.save_choice(
+            appearance::ID,
             |dialog: &mut SettingsDialog| &mut dialog.appearance,
-            &OpKey::preferences(),
+            preference,
             |preference| appearance::command(*preference),
             cx,
-            |_, _, _| {},
         );
-        if let Err(not_started) = started {
-            tracing::debug!(?preference, ?not_started, "appearance not saved");
-        }
     }
 
-    /// The user chose `choice` for terminal web links: save it as the preference row's `terminal_link_click` field, as
-    /// [`SettingsDialog::toggle`] saves a switch, with the same refusal while any preference save is in flight.
+    /// The user chose `choice` for terminal web links: save it as the preference row's `terminal_link_click` field, as a
+    /// switch saves ([`SettingsDialog::save_choice`]).
     fn choose_link_click(&mut self, choice: LinkClick, cx: &mut Context<Self>) {
-        if !self.link_click.edit(choice) {
-            return;
-        }
-        let started = drafts::save(
-            self,
+        self.save_choice(
+            terminal::ID,
             |dialog: &mut SettingsDialog| &mut dialog.link_click,
-            &OpKey::preferences(),
+            choice,
             |choice| terminal::command(*choice),
             cx,
-            |_, _, _| {},
         );
-        if let Err(not_started) = started {
-            tracing::debug!(?choice, ?not_started, "terminal link choice not saved");
-        }
     }
 
     /// `choice`'s switch with its help and failure line, toggling through this dialog.
@@ -615,6 +640,7 @@ impl SettingsDialog {
         choices::group(
             &self.switches[Self::index(choice)],
             preferences,
+            &self.refused,
             move |on, _, cx| {
                 let _ = weak.update(cx, |dialog, cx| dialog.toggle(choice, on, cx));
             },
@@ -642,6 +668,7 @@ impl SettingsDialog {
                     appearance::section(
                         &self.appearance,
                         preferences,
+                        &self.refused,
                         move |&preference, _, cx| {
                             let _ = weak.update(cx, |dialog, cx| {
                                 dialog.choose_appearance(preference, cx);
@@ -667,6 +694,7 @@ impl SettingsDialog {
                 terminal::links(
                     &self.link_click,
                     preferences,
+                    &self.refused,
                     move |&choice, _, cx| {
                         let _ = weak.update(cx, |dialog, cx| dialog.choose_link_click(choice, cx));
                     },
@@ -680,10 +708,11 @@ impl SettingsDialog {
                 let weak = cx.weak_entity();
                 let spare = checkouts::spare(
                     &self.spare,
+                    &self.refused,
                     move |on, _, cx| {
                         let _ = weak.update(cx, |dialog, cx| {
                             dialog.toggle_configured(
-                                "checkout spare",
+                                checkouts::SPARE_ID,
                                 |dialog| &mut dialog.spare,
                                 on,
                                 checkouts::spare_command,
@@ -711,11 +740,12 @@ impl SettingsDialog {
                     agent_trust::block(
                         trust,
                         index == 0,
+                        &self.refused,
                         move |on, _, cx| {
                             let _ = weak.update(cx, |dialog, cx| {
                                 let index = agent.index();
                                 dialog.toggle_configured(
-                                    agent,
+                                    agent.id(),
                                     move |dialog| &mut dialog.trust[index].state,
                                     on,
                                     |on| agent.command(on),

@@ -19,7 +19,7 @@ use farhelm_helm_client::PathError;
 use farhelm_proto::ui_channel::Preferences;
 use gpui::{App, Div, FontWeight, ParentElement as _, Role, Styled as _, Window, div, px};
 
-use super::choices;
+use super::{Refused, choices};
 use crate::components::{HoverHelp, RadioGroup, RadioOption};
 use crate::drafts::Draft;
 use crate::operations::Command;
@@ -128,10 +128,12 @@ fn shown(draft: &Draft<Preference>, preferences: Option<&Preferences>) -> Prefer
 }
 
 /// The section's content: the help, then the "Color theme" legend over the segmented radios, then the failure line
-/// after a refused save. `on_change` is what a choice does with the chosen value.
+/// after a refused save and the line saying why a press sent nothing (`refused`, [`choices::busy_line`]). `on_change`
+/// is what a choice does with the chosen value.
 pub(super) fn section(
     draft: &Draft<Preference>,
     preferences: Option<&Preferences>,
+    refused: &Refused,
     on_change: impl Fn(&Preference, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> Div {
@@ -173,6 +175,7 @@ pub(super) fn section(
                     draft
                         .refusal()
                         .map(|_| choices::failure_line(ERROR_ID.to_owned(), FAILURE, cx)),
-                ),
+                )
+                .children(choices::busy_line(refused, ID, cx)),
         )
 }

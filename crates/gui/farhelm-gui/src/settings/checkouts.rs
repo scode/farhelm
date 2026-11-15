@@ -18,6 +18,7 @@
 use farhelm_helm_client::{ApiPath, PathError};
 use gpui::{App, Div, ParentElement as _, Role, Styled as _, Window, div, px};
 
+use super::Refused;
 use super::choices::{self, GROUP_GAP, LABEL_LINE_HEIGHT, LABEL_TEXT};
 use super::configured::{self, Configured};
 use crate::components::{Button, Checkbox, HoverHelp, Tier};
@@ -66,7 +67,8 @@ pub(super) fn read_spare(
     configured::read_enabled(spare_path(), cx, on_read);
 }
 
-/// The switch with its help, the documentation link and its failure line. `on_toggle` is what a toggle does.
+/// The switch with its help, the documentation link, its failure line and the line saying why a press sent nothing
+/// (`refused`, [`choices::busy_line`]). `on_toggle` is what a toggle does.
 ///
 /// NOTE: The link sits on its own line under the help, where the old one ended the help's last sentence: GPUI lays text
 /// out in blocks and has no inline flow for a control inside a paragraph, and the host-text sentence pieces join only
@@ -74,6 +76,7 @@ pub(super) fn read_spare(
 /// the section scrolls a little where the old one fit. Both are recorded in the parity file.
 pub(super) fn spare(
     spare: &Configured,
+    refused: &Refused,
     on_toggle: impl Fn(bool, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> Div {
@@ -119,4 +122,5 @@ pub(super) fn spare(
         // In a row of its own, so the link is as wide as its words rather than stretched across the column.
         .child(div().flex().child(link))
         .children(failure)
+        .children(choices::busy_line(refused, SPARE_ID, cx))
 }

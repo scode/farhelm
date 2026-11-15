@@ -28,12 +28,12 @@
 //! - **Permissions.** Five switches, each saving its own stored value at once on its own route, with help that
 //!   explains the current behavior.
 //! - **Saving.** Everything saves through the operation store under the host's key ([`OpKey::host`]), the checkout
-//!   folder included, which admits one request at a time: a click while another save on this host is in flight changes
-//!   nothing, whichever control it is on. A switch or a choice shows the value being saved only while its save is in
-//!   flight and the stored value otherwise, so a refused save shows the stored value again, with the helm's words under
-//!   the control until its next save starts (SPEC.md: "A failed save restores the last known value and shows an
-//!   adjacent error"). The refusal also shows under the host's row in the Hosts panel, as every refused work on a host
-//!   does.
+//!   folder included, which admits one request at a time: a press while another save on this host is in flight sends
+//!   nothing, whichever control it is on, and a line beside that control says so ([`Refused`]). A switch or a choice
+//!   shows the value being saved only while its save is in flight and the stored value otherwise, so a refused save
+//!   shows the stored value again, with the helm's words under the control until its next save starts (SPEC.md: "A
+//!   failed save restores the last known value and shows an adjacent error"). The refusal also shows under the host's
+//!   row in the Hosts panel, as every refused work on a host does.
 //! - **Opening and closing.** [`open_settings`] is the entry point. Focus starts on the first Edit (the destination's,
 //!   or the alias's on a host without one), as the old dialog's did. Escape, the header's close control and Close close
 //!   it, and focus returns to the control it was opened from (the menu's toggle); a press outside does nothing. It closes
@@ -44,8 +44,9 @@
 //! other Connection field's Edit waits for an open field, and every other control stays live. The operation store's
 //! one request per key already keeps two saves on this host from running at once, so a lock would only add a second
 //! way of saying the same thing. And the old lock's other reason, that a toggle's outcome would replace an open field's
-//! refusal in the one outcome line the dialog had, does not hold here, where every control keeps its own refusal. The
-//! cost is that a click refused for the key shows nothing; the parity file's deviations record it.
+//! refusal in the one outcome line the dialog had, does not hold here, where every control keeps its own refusal. A
+//! press refused for the key says so beside its control instead of the control being drawn unavailable; the parity
+//! file's deviations record it.
 
 mod appearance;
 #[cfg(test)]
@@ -76,7 +77,7 @@ use crate::host_text::{self, HostSentence, HostText, Line};
 use crate::layers::{self, Dialog, DismissHook, Dismissal, LayerId, Subject};
 use crate::operations::{Command, OpKey, Outcome, Work};
 use crate::session;
-use crate::settings::{CheckoutField, FolderScope};
+use crate::settings::{CheckoutField, FolderScope, Refused};
 use crate::store::HelmStore;
 use crate::theme::{self, Palette, metrics};
 
@@ -110,6 +111,8 @@ const FOLDER_NOTE: &str = "An empty field uses the default from Settings → Che
                            Changes apply to new checkouts; existing checkouts stay where they are.";
 /// The close controls' shared hover help, the old dialog's.
 const CLOSE_HELP: &str = "Close: done with this host's settings";
+/// The appearance picker's name for [`Refused`], the stem of its line ids (`-error`, `-busy`).
+const APPEARANCE: &str = "host-settings-appearance";
 
 /// Open host `host`'s settings dialog on top of everything else in `window`: the entry point the host menu's Settings
 /// calls. `opener` is the control the user opened it from (the menu's toggle), which closing returns focus to on every
@@ -224,6 +227,14 @@ impl Field {
         match self {
             Field::Destination => "destination",
             Field::Alias => "alias",
+        }
+    }
+
+    /// Its name for [`Refused`], `host-settings-<key>`, the stem of its row's line ids (`-error`, `-busy`).
+    fn control(self) -> &'static str {
+        match self {
+            Field::Destination => "host-settings-destination",
+            Field::Alias => "host-settings-alias",
         }
     }
 
@@ -463,6 +474,9 @@ pub(crate) struct HostSettingsDialog {
     /// The Checkouts section's folder field, a view of its own made with the dialog, so its read of the host's folder
     /// is sent as the dialog opens and its answer reaches only this opening.
     checkout: Entity<CheckoutField>,
+    /// The control here whose press sent nothing last because another save held the host's key (a field's Save, the
+    /// picker, a permission). The folder field, a view of its own, keeps its own.
+    refused: Refused,
     /// Set right after the layer opens; what the close controls close.
     layer: Option<LayerId>,
     /// The store's pushes, which an open field follows while untouched.
@@ -511,6 +525,7 @@ impl HostSettingsDialog {
                 )
             }),
             layer: None,
+            refused: Refused::default(),
             _pushes: pushes,
         }
     }
@@ -640,35 +655,45 @@ impl HostSettingsDialog {
                 }
             },
         );
+        // Other work on the host may be in flight, which the row then says; the draft is untouched.
+        self.refused.record(field.control(), &started);
         if let Err(not_started) = started {
-            // Other work on the host is in flight, or the window went inert; the draft is untouched.
             tracing::debug!(?field, ?not_started, "host setting not saved");
         }
+        cx.notify();
     }
 
     /// Save `value` into the draft `field` reaches at once, with `command`, under the host's key: what a switch or a
-    /// picker choice does on a click. Does nothing while that draft's own save is in flight, or while other work on the
-    /// host is (the operation store refuses the key; the draft, not saving, goes on showing the stored value).
+    /// picker choice does on a click. A press while that draft's own save is in flight, or while other work on the host
+    /// is (the operation store refuses the key), sends nothing: the draft, not saving, goes on showing the stored value,
+    /// and `control`, the element id the press was on, says why ([`Refused`]).
     fn save_now<T: Clone + PartialEq + std::fmt::Debug + 'static>(
         &mut self,
+        control: impl Into<SharedString>,
         field: impl Fn(&mut Self) -> &mut Draft<T> + Copy + 'static,
         value: T,
         command: impl FnOnce(&T) -> Result<Command, PathError>,
         cx: &mut Context<Self>,
     ) {
-        if !field(self).edit(value) {
-            return;
+        if field(self).edit(value) {
+            let key = OpKey::host(&HostView::key(self.host));
+            let started = drafts::save(self, field, &key, command, cx, |_, _, _| {});
+            self.refused.record(control, &started);
+            if let Err(not_started) = started {
+                tracing::debug!(value = ?field(self).value(), ?not_started, "host setting not saved");
+            }
+        } else {
+            // The draft's own save is in flight: work on the same key.
+            self.refused.refuse(control);
         }
-        let key = OpKey::host(&HostView::key(self.host));
-        if let Err(not_started) = drafts::save(self, field, &key, command, cx, |_, _, _| {}) {
-            tracing::debug!(value = ?field(self).value(), ?not_started, "host setting not saved");
-        }
+        cx.notify();
     }
 
     /// The user turned `permission`'s switch to `on`: save it on its route.
     fn toggle(&mut self, permission: Permission, on: bool, cx: &mut Context<Self>) {
         let (index, host) = (permission.index(), self.host);
         self.save_now(
+            permission.id(),
             move |dialog: &mut Self| &mut dialog.switches[index].draft,
             on,
             |on| permission.command(host, *on),
@@ -680,6 +705,7 @@ impl HostSettingsDialog {
     fn choose(&mut self, choice: (HostIcon, HostColor), cx: &mut Context<Self>) {
         let host = self.host;
         self.save_now(
+            APPEARANCE,
             |dialog: &mut Self| &mut dialog.appearance,
             choice,
             |choice| appearance_command(host, *choice),
@@ -935,6 +961,9 @@ impl HostSettingsDialog {
             )
             .ml(px(ROW_LABEL + ROW_GAP))
         });
+        let busy = self.refused.line(field.control(), |id, text| {
+            failure_line(id.into(), &HostText::from_host(text), palette).ml(px(ROW_LABEL + ROW_GAP))
+        });
         div()
             .flex()
             .flex_col()
@@ -959,10 +988,11 @@ impl HostSettingsDialog {
                     .child(content),
             )
             .children(refusal)
+            .children(busy)
             .into_any_element()
     }
 
-    /// Appearance: the picker ([`appearance`]) and its refusal line.
+    /// Appearance: the picker ([`appearance`]), its refusal line, and the line saying why a press sent nothing.
     fn appearance_section(
         &self,
         view: &HostView,
@@ -978,13 +1008,16 @@ impl HostSettingsDialog {
             palette,
         );
         children.extend(self.appearance.refusal().map(|refusal| {
-            failure_line("host-settings-appearance-error".into(), refusal, palette)
-                .into_any_element()
+            failure_line(format!("{APPEARANCE}-error").into(), refusal, palette).into_any_element()
+        }));
+        children.extend(self.refused.line(APPEARANCE, |id, text| {
+            failure_line(id.into(), &HostText::from_host(text), palette).into_any_element()
         }));
         section("appearance", "Appearance", false, children, palette)
     }
 
-    /// Permissions: each switch with its help and, after a refused save, the helm's words.
+    /// Permissions: each switch with its help and, after a refused save, the helm's words, then the line saying why a
+    /// press sent nothing.
     fn permissions(&self, view: &HostView, palette: &Palette, cx: &Context<Self>) -> AnyElement {
         let switch_on = |permission: Permission| {
             shown(
@@ -1031,6 +1064,9 @@ impl HostSettingsDialog {
                     )
                     .child(help(permission.help(switch_on), palette))
                     .children(failure)
+                    .children(self.refused.line(&permission.id(), |id, text| {
+                        failure_line(id.into(), &HostText::from_host(text), palette)
+                    }))
                     .into_any_element()
             })
             .collect();
