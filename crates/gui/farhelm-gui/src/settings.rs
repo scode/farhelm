@@ -32,14 +32,16 @@
 //!   the user saves explicitly, a [`CheckoutField`] of its own, which keeps a refused draft for correction and reads
 //!   its route back after a done save ([`checkout_field`]). So are Notifications' ntfy alerts: a form the user saves
 //!   explicitly, a view of its own ([`ntfy`]). So is Credentials, whose named secrets each save under their own key,
-//!   with the Tensorlake API key form above them ([`credentials`], [`tensorlake_key`]). Recipes saves no choice the
-//!   dialog shows: it lists the helm's recipes, and its snapshot builds are accepted work under each recipe's own key
-//!   ([`recipes`]). Terminal's tunnel switch saves like a switch only when turned off; turned on, it asks the terminal's
-//!   tunnel warning, whose Allow saves the consent, and shows the stored choice until the helm pushes it
-//!   ([`terminal`]). App's switch is not the helm's at all: it writes the desktop app's own setting through its
-//!   updater, at once and with a final answer, so it has no draft and never holds the preference row's key ([`app`]).
-//!   Containers saves no choice at all: it shows what the helm reads from its container hosts, and its Refresh and
-//!   confirmed Deletes are plain commands, not operations on a key ([`containers`]).
+//!   with the Tensorlake API key form above them ([`credentials`], [`tensorlake_key`]). Recipes lists the helm's
+//!   recipes, whose snapshot builds are accepted work under each recipe's own key, and edits one in place, saving the
+//!   whole recipe under that key ([`recipes`]); while Recipes shows an open editor, the dialog pins the editor's Cancel
+//!   and Save above its Close row, so they stay in view below a long form and go when another section is shown.
+//!   Terminal's tunnel switch saves like a switch only when turned off; turned on, it asks the terminal's tunnel
+//!   warning, whose Allow saves the consent, and shows the stored choice until the helm pushes it ([`terminal`]). App's
+//!   switch is not the helm's at all: it writes the desktop app's own setting through its updater, at once and with a
+//!   final answer, so it has no draft and never holds the preference row's key ([`app`]). Containers saves no choice at
+//!   all: it shows what the helm reads from its container hosts, and its Refresh and confirmed Deletes are plain
+//!   commands, not operations on a key ([`containers`]).
 //!
 //! NOTE: Quick flips do not follow the old app's "newest-choice" rule. Its preference queue coalesced a field's clicks,
 //! sent only the newest, and reported a failure only for the newest click. Here the operation store admits one request
@@ -74,6 +76,8 @@ mod containers;
 mod credential_tests;
 mod credentials;
 mod ntfy;
+#[cfg(test)]
+mod recipe_editor_tests;
 #[cfg(test)]
 mod recipe_place_tests;
 #[cfg(test)]
@@ -315,6 +319,21 @@ pub(crate) fn decide_tunnels_for_opened(platform: Platform, cx: &mut App) {
     {
         Some(dialog) => dialog.update(cx, |dialog, cx| dialog.decide_tunnels_for(platform, cx)),
         None => panic!("no Settings dialog is open to decide its tunnel switch for"),
+    }
+}
+
+/// Open a new recipe's editor in the open Settings dialog's Recipes section, as New recipe does, for the golden that
+/// pictures the editor. Panics when no dialog is open or Recipes was never shown, which would leave the golden picturing
+/// the list instead.
+#[cfg(test)]
+pub(crate) fn open_new_recipe_for_opened(window: &mut Window, cx: &mut App) {
+    let recipes = cx
+        .try_global::<tests::Opened>()
+        .and_then(|opened| opened.0.upgrade())
+        .and_then(|dialog| dialog.read(cx).recipes.clone());
+    match recipes {
+        Some(recipes) => recipes.update(cx, |recipes, cx| recipes.open_editor(None, window, cx)),
+        None => panic!("no Settings dialog shows Recipes to open the recipe editor in"),
     }
 }
 
@@ -640,7 +659,7 @@ impl SettingsDialog {
                 // Shown again: the catalog is pushed, but whether an API key is saved is not, so that is read again
                 // ([`recipes`]).
                 Some(section) => section.update(cx, |section, cx| section.read_account(cx)),
-                None => self.recipes = Some(cx.new(recipes::Recipes::new)),
+                None => self.recipes = Some(cx.new(|cx| recipes::Recipes::new(window, cx))),
             }
         } else if let Some(recipes) = &self.recipes {
             // Undrawn from now on: it must not keep holding the running pulse ([`recipes::Recipes::hidden`]).
@@ -1223,7 +1242,20 @@ impl Render for SettingsDialog {
         )
         .tier(Tier::Neutral)
         .on_click(dismiss(weak.clone()));
-        DialogFrame::new("settings", "Settings", body, vec![close])
+        // The recipe editor's answers, pinned with the footer only while Recipes shows the editor (SPEC.md: "Switching
+        // Settings sections hides those actions with the editor"), ruled off from Close, which they do not belong to.
+        let recipe_actions = self
+            .recipes
+            .as_ref()
+            .filter(|_| self.shown == Section::Recipes)
+            .and_then(|recipes| recipes.read(cx).editor())
+            .map(|editor| recipes::Editor::actions(&editor, cx));
+        let frame = DialogFrame::new("settings", "Settings", body, vec![close]);
+        let frame = match recipe_actions {
+            Some(actions) => frame.notices(actions).notices_rule(),
+            None => frame,
+        };
+        frame
             .summary(if Section::App.listed(cx) {
                 SUMMARY_WITH_APP
             } else {

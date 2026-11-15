@@ -1,5 +1,6 @@
 //! Settings → Recipes: the helm's one shared catalog of recipes, one row per recipe with its summary and its snapshot
-//! build, and the build action (Build snapshot, Rebuild snapshot, Retry).
+//! build, the build action (Build snapshot, Rebuild snapshot, Retry), and New recipe and each row's Edit, which open the
+//! recipe editor in place of the list.
 //!
 //! SPEC.md, "Topology" (the Recipes paragraphs: "The list shows each recipe's name, supported providers, base, package
 //! count, tunnel count and build status", "Saving a recipe never builds one, because a build bills", "A list refresh
@@ -45,6 +46,11 @@
 //! - **Preparation and places.** Under the built snapshot, a row says whether the snapshot new hosts and sessions start
 //!   from is ready ([`prepared`]), and above it, how the recipe stands at each container place, with a Rebuild per place
 //!   ([`places`]), from the second pushed collection, `recipe_places`.
+//! - **One editor in place.** New recipe and a row's Edit replace the list with an [`Editor`] (its own module docs
+//!   have its rules), with focus on its Back; Back, Cancel or a done save close it and put focus on New recipe. A
+//!   created or changed recipe needs no read: the helm pushes the catalog's change before it answers the save. A reply
+//!   closes only the editor that sent it, never one opened since. The editor's answers are drawn by the dialog, pinned
+//!   with its footer ([`Editor::actions`]).
 //! - **The pulse and the clock only while shown.** The running pulse is held only while a row shows a running build or
 //!   preparation, the window is active and the section is the one shown; the ticker's 30-second clock, which moves the
 //!   prepared line's ages on, only while a row shows one and the section is shown. The dialog keeps the section's state
@@ -58,12 +64,13 @@
 //! send, and qualified readiness as last checked for that reason), and the helm decides freshness again whenever a
 //! launch uses the snapshot. Decided by the migration's settings-and-hosts area on 2026-11-15, porting the old app's
 //! behavior as the migration's orchestrator asked.
-//!
-//! NOTE: Not ported yet (`docs/gpui/parity/settings-and-hosts.md`): New recipe and each row's Edit, which open the
-//! recipe editor, are not drawn until the editor exists.
 
+pub(super) mod draft;
+mod editor;
 mod places;
 pub(super) mod prepared;
+
+pub(super) use editor::Editor;
 
 use std::collections::HashSet;
 
@@ -72,14 +79,16 @@ use farhelm_proto::Place;
 use farhelm_proto::recipes::{BuildStep, BuildView, PrepareView, RecipeBase, RecipeView};
 use farhelm_proto::ui_channel::{Availability, Collection};
 use gpui::{
-    AnyElement, App, Context, Div, ElementId, FontWeight, Hsla, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, Role, SharedString, Stateful,
-    StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    AnyElement, AnyWindowHandle, App, AppContext as _, Context, Div, ElementId, Entity, EntityId,
+    FocusHandle, FontWeight, Hsla, InteractiveElement as _, IntoElement, ParentElement as _,
+    Render, Role, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Window,
+    div, px,
 };
 
 use super::choices;
 use crate::components::{Button, HoverHelp, Tier, pulse_opacity};
 use crate::environment_ui::ProviderUi;
+use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::operations::{Command, OpKey, Work};
 use crate::session;
@@ -558,11 +567,18 @@ pub(super) struct Recipes {
     /// The subscription that settles refusals whenever the pushed state changes ([`settle_refusals`]). Drawing needs
     /// none: the rows read the store while they draw, so GPUI redraws them on every push.
     _pushed: session::ObservingCurrent,
+    /// The open editor, drawn in place of the list.
+    editor: Option<Entity<Editor>>,
+    /// New recipe's focus handle, where focus goes when an editor closes.
+    new_recipe: FocusHandle,
+    /// The window the section is drawn in, for moving focus when a reply closes the editor: a reply has no window at
+    /// hand.
+    window: AnyWindowHandle,
 }
 
 impl Recipes {
     /// The section, reading the account now and asking the helm to check every container host once.
-    pub(super) fn new(cx: &mut Context<Self>) -> Self {
+    pub(super) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let recipes = Recipes {
             api_key_set: None,
             pulse: None,
@@ -571,6 +587,9 @@ impl Recipes {
             _pushed: session::observe_current(cx, |recipes: &mut Recipes, cx| {
                 settle_refusals(&mut recipes.building, cx)
             }),
+            editor: None,
+            new_recipe: cx.focus_handle().tab_stop(true),
+            window: window.window_handle(),
         };
         recipes.read_account(cx);
         // Once per opening, as the old section did when Settings opened (the places module docs).
@@ -602,6 +621,58 @@ impl Recipes {
     pub(super) fn hidden(&mut self) {
         self.pulse = None;
         self.clock = None;
+    }
+
+    /// The open editor, if any: what Settings asks to pin its answers ([`Editor::actions`]) while Recipes is shown.
+    pub(super) fn editor(&self) -> Option<Entity<Editor>> {
+        self.editor.clone()
+    }
+
+    /// Open an editor in place of the list, for `existing` or a new recipe, with focus on its Back once it is drawn,
+    /// unless the user moves on before. New recipe and a row's Edit call it, and so does the editor's golden scene.
+    pub(super) fn open_editor(
+        &mut self,
+        existing: Option<&RecipeView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mark = Mark::take(cx);
+        let parent = cx.weak_entity();
+        let editor = cx.new(|cx| Editor::new(parent, existing, window, cx));
+        let target = editor.read(cx).start();
+        self.editor = Some(editor);
+        focus::focus_in_layer(&target, &mark, window, cx);
+        cx.notify();
+    }
+
+    /// The editor `editor` (by its entity id) is done: a press of Back or Cancel, or its save's done answer. If
+    /// `editor` is still the open editor it closes, with focus on New recipe unless the user moved on since `mark`, the
+    /// press that closed it or started the save. Nothing is read: a done save's change reached the store, pushed, before
+    /// its answer. `window` is the window when the press itself closes the editor; a reply has none at hand, and then
+    /// the window the section is drawn in is updated for the move.
+    fn close_editor(
+        &mut self,
+        editor: EntityId,
+        mark: &Mark,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.editor.as_ref().map(Entity::entity_id) != Some(editor) {
+            return;
+        }
+        self.editor = None;
+        // New recipe is drawn again by the next frame; the coordinator keeps the move until then.
+        let target = self.new_recipe.clone();
+        match window {
+            Some(window) => focus::focus_in_layer(&target, mark, window, cx),
+            None => {
+                let mark = *mark;
+                let _ = self.window.update(cx, |_, window, cx| {
+                    focus::focus_in_layer(&target, &mark, window, cx)
+                });
+            }
+        }
+        cx.notify();
     }
 
     /// Whether the section holds the running pulse and the ticker's clock now, for tests of when it lets them go: a
@@ -744,6 +815,23 @@ impl Recipes {
         let refused = refusal.map(|reason| {
             choices::failure_outcome(format!("recipe-{name}-build-error"), &reason, cx)
         });
+        let edit = {
+            let weak = cx.weak_entity();
+            let editing = view.clone();
+            Button::new(
+                format!("recipe-edit-{name}"),
+                "Edit",
+                HoverHelp::tooltip("Edit this recipe"),
+                Role::Button,
+            )
+            .accessible_name(format!("Edit {name}"))
+            .tier(Tier::Neutral)
+            .on_click(move |_, window, cx| {
+                let _ = weak.update(cx, |section, cx| {
+                    section.open_editor(Some(&editing), window, cx)
+                });
+            })
+        };
         div()
             .id(ElementId::Name(format!("recipe-{name}").into()))
             .role(Role::ListItem)
@@ -781,6 +869,7 @@ impl Recipes {
                     .children(actions)
                     .children(refused),
             )
+            .child(edit)
     }
 
     /// The rows, the empty line or the loading line, whichever the pushed `catalog` calls for. A catalog the helm could
@@ -875,13 +964,20 @@ impl Render for Recipes {
         // ticker's rule, which keeps the tick loop from firing for a window nobody looks at. Hold the clock while a
         // row shows an age, whatever the window's activity, as every age's view does. Drawing means the section is
         // shown; the dialog lets both go when it is not ([`Recipes::hidden`]).
-        let recipes = || catalog.iter().flat_map(|catalog| &catalog.rows);
-        let running = recipes().any(|view| building(view) || preparing(view));
+        // The open editor replaces the rows, so then no row is shown to pulse or age.
+        let shown = if self.editor.is_none() {
+            catalog
+                .as_ref()
+                .map_or(&[][..], |catalog| &catalog.rows[..])
+        } else {
+            &[]
+        };
+        let running = shown.iter().any(|view| building(view) || preparing(view));
         let pulses = running && ticker::is_active(window, cx);
         if pulses != self.pulse.is_some() {
             self.pulse = pulses.then(|| ticker::pulse(window, cx));
         }
-        let ages = recipes().any(prepared::shows_age);
+        let ages = shown.iter().any(prepared::shows_age);
         if ages != self.clock.is_some() {
             self.clock = ages.then(|| ticker::clock(cx));
         }
@@ -893,7 +989,7 @@ impl Render for Recipes {
             self.pulse.as_ref().map_or(0, |pulse| pulse.step(cx)),
             palette.status_pulse_min,
         );
-        div()
+        let section = div()
             .id("recipes")
             .role(Role::Region)
             .aria_label("Recipes")
@@ -901,10 +997,28 @@ impl Render for Recipes {
             .flex_col()
             .gap(px(PART_GAP))
             .w_full()
-            .min_w_0()
+            .min_w_0();
+        if let Some(editor) = &self.editor {
+            return section.child(editor.clone());
+        }
+        let weak = cx.weak_entity();
+        let new_recipe = Button::new(
+            "recipe-new",
+            "New recipe",
+            HoverHelp::tooltip("Write a new recipe"),
+            Role::Button,
+        )
+        .tier(Tier::Neutral)
+        .focus(&self.new_recipe)
+        .on_click(move |_, window, cx| {
+            let _ = weak.update(cx, |section, cx| section.open_editor(None, window, cx));
+        });
+        section
             .child(choices::help(HELP, cx))
             .children(self.listing(catalog.as_ref(), &places, pulse, now, cx))
             .children(self.read_failure(catalog.as_ref(), cx))
+            // `.recipe-new`: below the list and any failure, as wide as its words.
+            .child(div().flex().child(new_recipe))
     }
 }
 

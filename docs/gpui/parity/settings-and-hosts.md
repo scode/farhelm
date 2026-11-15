@@ -723,9 +723,13 @@ unavailable while a save runs.
 ## `tests/tensorlake-recipes.spec.ts`, partly
 
 Settings → Recipes lists the shared catalog with each recipe's summary, its per-place container lines with a Rebuild per
-place, its built-snapshot status and its prepared-snapshot line, and builds snapshots. New recipe, Edit and the recipe
-editor come in later changes. Replacing tests, in `crates/gui/farhelm-gui/src/settings/recipe_tests.rs` and
-`crates/gui/farhelm-gui/src/settings/recipe_place_tests.rs`:
+place, its built-snapshot status and its prepared-snapshot line, and builds snapshots. New recipe and each row's Edit
+open the recipe editor in place of the list, with Name, Size, the Software cards and each base's fields, Ubuntu packages
+and Tunnels, and Save; the editor's credential pickers, Delete and the question before leaving with unsaved changes come
+in later changes. Replacing tests, in `crates/gui/farhelm-gui/src/settings/recipe_tests.rs`,
+`crates/gui/farhelm-gui/src/settings/recipe_place_tests.rs`,
+`crates/gui/farhelm-gui/src/settings/recipe_editor_tests.rs` and, for the editor's draft without a window,
+`crates/gui/farhelm-gui/src/settings/recipes/draft_tests.rs`:
 
 - "a recipe's snapshot builds, rebuilds, recovers from a failed step and goes with the recipe": partly. The row's status
   in every build state, with the one action each offers (Build snapshot, Rebuild snapshot, Retry, or none while a build
@@ -766,11 +770,37 @@ editor come in later changes. Replacing tests, in `crates/gui/farhelm-gui/src/se
   and the check asked on opening, its outcome brought by the helm's push of the places,
   `container_hosts_are_checked_once_and_the_push_brings_the_checks_outcome`; the look, the golden
   `settings-recipes-places`.
-- "Settings keeps recipe answers sticky and isolated to Tensorlake in ${palette}", "${agent} modes retain drafts and
-  select only named ${agent} logins", "a managed recipe is created, edited and deleted without exposing its token", "the
-  recipe editor refuses bad names, asks before leaving, and saves a custom base", "closing Settings with an unsaved
-  recipe asks first and finishes the close" and "a recipe opening preserves a newer field focus before header close":
-  wait for the recipe editor.
+- "Settings keeps recipe answers sticky and isolated to Tensorlake in ${palette}": partly. New recipe opens the editor
+  in place with focus on Back, Cancel and Save pinned with the dialog's footer above the Close row, and Back returning
+  to the list, `new_recipe_opens_the_editor_in_place_and_back_returns_to_the_list`; switching sections hides the answers
+  and keeps the editor, `switching_sections_hides_the_answers_and_keeps_the_open_editor`; the invalid name's and the
+  helm's refusals beside the pinned answers, `a_bad_name_or_size_is_refused_locally_until_the_next_edit` and
+  `a_refused_save_keeps_the_draft_and_leaves_no_refusal_under_the_row`; the editor opening at its top, Back included,
+  from a scrolled list, `the_editor_opens_at_its_top_from_a_scrolled_list`; the form locked while a save is out,
+  `while_a_save_is_out_the_form_takes_no_edit`. The look, in both palettes: the golden `settings-recipe-editor` (see
+  "Recipes" under Deviations for the answers' band). Not ported: the leave and delete questions in the answers' place,
+  which come with Delete and the question before leaving.
+- "a managed recipe is created, edited and deleted without exposing its token": partly. Creation under the recipe's key
+  with its row from the pushed catalog, `a_new_recipe_is_created_under_its_key_and_its_pushed_row_shows`; Edit with the
+  name fixed, `a_saved_recipes_name_is_fixed`; Edit then Save sending the recipe's endpoint, login and GitHub token
+  names back unchanged, `edit_then_save_sends_the_recipes_credential_choices_back_unchanged` and, without a window,
+  `an_unchanged_reopened_recipe_saves_back_unchanged` and
+  `named_endpoint_selection_survives_origin_changes_and_can_be_removed`. Not ported: choosing the GitHub token and the
+  Claude Code endpoint in the form, which wait for the credential pickers, and Delete.
+- "the recipe editor refuses bad names, asks before leaving, and saves a custom base": partly. The local name refusal,
+  `a_bad_name_or_size_is_refused_locally_until_the_next_edit`; the helm's refusal kept with the draft,
+  `a_refused_save_keeps_the_draft_and_leaves_no_refusal_under_the_row`; the cards, each base's fields, the requirements
+  note and build help, and every base's text and the packages kept across cards,
+  `each_base_card_shows_its_fields_and_keeps_every_bases_text`, `drafts_become_requests_or_local_refusals`,
+  `all_bases_reopen_with_their_packages`, `reopening_a_container_base_preserves_its_reference_and_user` and
+  `a_new_container_recipe_saves_edited_reference_and_user`; tunnel rows, `tunnel_rows_are_added_and_removed_by_row`; a
+  save refused for the recipe's build in flight, `a_save_while_the_recipes_build_is_out_says_why_and_sends_nothing`. Not
+  ported: the question before leaving.
+- "${agent} modes retain drafts and select only named ${agent} logins": partly. The draft's rules,
+  `claude_modes_keep_drafts_and_submit_only_the_selected_credentials` and
+  `codex_modes_keep_drafts_and_submit_exclusive_selections`; the pickers that use them wait for the credential pickers.
+- "closing Settings with an unsaved recipe asks first and finishes the close" and "a recipe opening preserves a newer
+  field focus before header close": wait for the question before leaving.
 
 ## Deviations
 
@@ -931,8 +961,32 @@ Where the port does not match the old app, and why. Each stays until the work na
   note read "Save an API key above to build snapshots.", which was already inaccurate in the old app, whose key forms
   were in Tensorlake and Credentials, both listed below Recipes. The key form is in Credentials here, so the note reads
   "Save an API key in Settings → Credentials to build snapshots."
-- **New recipe and Edit are not drawn yet.** Both open the recipe editor, which comes in a later change; the empty
-  list's golden lacks the reference's New recipe button for that reason.
+- **The editor's answers are a band of the dialog's footer.** The old Cancel and Save stuck to the bottom of the section
+  panel's column (`.recipe-editor-sticky-actions`, `position: sticky`), as wide as that column, with a rule above them
+  and the dialog's own footer rule under them. GPUI has no sticky positioning, so Settings pins them in its frame's
+  footer region above the Close row (the region the launcher's pinned question uses), as wide as the dialog, ruled off
+  from the Close row by a rule of its own; above them the footer's rule stands in for the old band's. Switching sections
+  hides them with the editor, as before. No reference scene pictures the editor, so the comparison is with the old
+  stylesheet; the golden `settings-recipe-editor` pins the band.
+- **The editor opens with focus on Back, not its title.** The old editor focused its title, a heading made focusable;
+  headings are not controls here. Back sits right above the title, so moving focus there brings the editor's top into
+  view as the old focus did.
+- **Size and port fields are text fields.** The old ones were number inputs with the browser's step arrows; here they
+  are plain text fields, and Save refuses anything but a whole number in the old words ("CPUs must be a whole number",
+  "Tunnel ports must be from 1 to 65535").
+- **The Name field takes any length.** The old Name input stopped taking characters at 32 (`maxlength`); the text field
+  here has no length cap, so a longer name can be typed, and Save refuses it before sending anything, with the helm's
+  shared rule's words ("A recipe name can be at most 32 characters").
+- **Every Software card dims while a save is out.** The old cards were disabled buttons during a save, which changed
+  only their cursor; here an unavailable card is drawn at half opacity, as an unavailable segment or chip of the shared
+  choice control is (its plain radio look dims only the circle), so for the length of each save all four cards dim.
+- **Until the question before leaving lands, leaving drops unsaved changes.** Back, Cancel and closing Settings close
+  the editor at once; their hover help says so ("without saving") rather than promising the old question.
+- **A refused save that lands after Settings closed shows under the recipe's row.** Settings closing drops the editor,
+  so a refusal that arrives after it has nowhere else to show; it stays on the recipe's operation key, which the row's
+  build shares, and the row shows it in the helm's words until the recipe's next build or save starts or a push shows
+  the recipe start building. The old editor dropped such a refusal unseen. A refusal the editor showed itself leaves the
+  key, so it never shows twice.
 - **A place's name comes from the pushed hosts.** The old rows named each place from `GET /api/environment-places`, and
   re-read the places whenever that list, read again on every feed notice and polled while a check ran, changed. Here the
   name is the host's own in the hosts collection the helm pushes, through the rule every host name follows, so a place

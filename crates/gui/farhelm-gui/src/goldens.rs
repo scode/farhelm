@@ -9,17 +9,17 @@
 //! cannot reach, an empty fleet, a row's open menu, a row's notification list, a row's Delete question, and a pending
 //! and a refused Delete), the Rename editor, the Send feedback dialog (as it opens, and with a remembered contact), the
 //! select closed and open, the YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer,
-//! the Settings dialog at Sessions, at Appearance, at Hosts, at Recipes (empty, with recipes in each build state, and
-//! with a recipe's per-place lines), at Credentials, at Terminal and at Agent trust, the Hosts panel (closed, with
-//! Details, with a host failing to connect, with a host's setup running and failed, with outdated hosts' inline Update,
-//! and with a host's Update running), the Add host dialog and the setup confirmation it leads to, a host's actions
-//! menu, the host settings dialog at its top and scrolled to its end, the host refusal dialog for a refused Update, the
-//! version readout while an updater runs (the check button at rest, lit, warned and focused; work in progress; a
-//! check's outcomes; the update-menu toggle; its open menu; and the reinstall hover), the title bar the Linux window
-//! draws for itself (ordinary and maximized), the Open-Source Notices window over a short fixture, and the Trash button
-//! empty, full and freeing space, and the Trash dialog, alone and asking to delete everything or one host's archives,
-//! in both appearances, compared pixel for pixel. (The terminal stays dark in both appearances, so it draws identically
-//! in both pictures; only the scene's ground around it differs.)
+//! the Settings dialog at Sessions, at Appearance, at Hosts, at Recipes (empty, with recipes in each build state, with
+//! a recipe's per-place lines, and with a new recipe's editor open), at Credentials, at Terminal and at Agent trust,
+//! the Hosts panel (closed, with Details, with a host failing to connect, with a host's setup running and failed, with
+//! outdated hosts' inline Update, and with a host's Update running), the Add host dialog and the setup confirmation it
+//! leads to, a host's actions menu, the host settings dialog at its top and scrolled to its end, the host refusal
+//! dialog for a refused Update, the version readout while an updater runs (the check button at rest, lit, warned and
+//! focused; work in progress; a check's outcomes; the update-menu toggle; its open menu; and the reinstall hover), the
+//! title bar the Linux window draws for itself (ordinary and maximized), the Open-Source Notices window over a short
+//! fixture, and the Trash button empty, full and freeing space, and the Trash dialog, alone and asking to delete
+//! everything or one host's archives, in both appearances, compared pixel for pixel. (The terminal stays dark in both
+//! appearances, so it draws identically in both pictures; only the scene's ground around it differs.)
 //!
 //! The agent approval card has its own two scenes, wide and narrow, and the Add host dialog as an agent's host add
 //! request opens it one more, in both appearances. A dialog's notices made a stop of their own have one too, focused
@@ -2837,6 +2837,9 @@ struct SettingsFixture {
     /// The platform the Terminal section decides its tunnel switch for, instead of this machine's, through the
     /// dialog's test-only setter (`settings::decide_tunnels_for_opened`) applied as it opens.
     tunnels: Option<farhelm_input_mapping::Platform>,
+    /// Open a new recipe's editor as the dialog opens (`settings::open_new_recipe_for_opened`), as New recipe does; the
+    /// section must be Recipes.
+    recipe_editor: bool,
 }
 
 /// `entries` as a pushed collection's first snapshot, each filed under the key `key` gives it, in their order.
@@ -2873,6 +2876,7 @@ fn settings_scene_with(
         places,
         hosts,
         tunnels,
+        recipe_editor,
     } = fixture;
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
@@ -2914,6 +2918,9 @@ fn settings_scene_with(
         let _ = handle.update(cx, |_, window, cx| {
             let mark = Mark::take(cx);
             crate::settings::open_at(section, &opener, &mark, window, cx);
+            if recipe_editor {
+                crate::settings::open_new_recipe_for_opened(window, cx);
+            }
         });
         if let Some(platform) = tunnels {
             crate::settings::decide_tunnels_for_opened(platform, cx);
@@ -3188,10 +3195,27 @@ fn settings_hosts_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene(state, crate::settings::Section::Hosts, window, cx);
 }
 
-/// Settings at Recipes with no recipes, as in the reference but for New recipe, which waits for the recipe editor.
-/// Focus starts on the dialog itself, since the section's controls wait for its reads.
+/// Settings at Recipes with no recipes and New recipe under "No recipes yet.", as in the reference. Focus starts on the
+/// dialog itself, since the section's controls wait for its reads.
 fn settings_recipes_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene(state, crate::settings::Section::Recipes, window, cx);
+}
+
+/// Settings at Recipes with a new recipe's editor open, as New recipe opens it, against the reference
+/// `settings-recipes`, whose set has no editor scene: the form from its top with focus on Back, Managed Ubuntu chosen
+/// among the Software cards, and the editor's Cancel and Save pinned above the Close row, ruled off from it. The
+/// dialog's body is shorter than the form, so the lower fields are below the fold, as a user first sees them.
+fn settings_recipe_editor_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    settings_scene_with(
+        state,
+        crate::settings::Section::Recipes,
+        SettingsFixture {
+            recipe_editor: true,
+            ..SettingsFixture::default()
+        },
+        window,
+        cx,
+    );
 }
 
 /// Settings at Recipes with recipes in the states a row draws differently, against the reference `settings-recipes`,
@@ -4822,6 +4846,12 @@ static SCENES: &[Scene] = &[
         size: (800., 830.),
         draw: empty,
         setup: settings_recipes_setup,
+    },
+    Scene {
+        name: "settings-recipe-editor",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_recipe_editor_setup,
     },
     Scene {
         name: "settings-recipes-rows",
