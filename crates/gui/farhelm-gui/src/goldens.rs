@@ -1,16 +1,16 @@
 //! Headless screenshot goldens: one per component, per dialog frame and per overlay kind (tooltip, once more with help
-//! in paragraphs, popover, the prompt over its veil, once more with a summary that names a host value, once more with
-//! a feature-drawn body, a header tile and a footer note, and the prompt anchored to a row's menu button),
-//! the keyboard focus ring, host-supplied text over its spoofing corpus, the notice banner, the terminal's styles and
-//! cursor shapes, an attached terminal's exit line and status line, the scrim a pending Delete puts over the open
-//! session's terminal, the session list (a fleet of every status a row draws, the open row on a host the helm cannot
-//! reach, an empty fleet, a row's open menu, a row's Delete question, and a pending and a refused Delete), the Rename
-//! editor, the select closed and open, the
+//! in paragraphs, popover, the prompt over its veil, once more with a summary that names a host value, once more with a
+//! feature-drawn body, a header tile and a footer note, and the prompt anchored to a row's menu button), the keyboard
+//! focus ring, host-supplied text over its spoofing corpus, the notice banner, the terminal's styles and cursor shapes,
+//! an attached terminal's exit line and status line, the scrim a pending Delete puts over the open session's terminal,
+//! the open session's details bar (every status and host it draws differently, and a narrow one), the session list (a
+//! fleet of every status a row draws, the open row on a host the helm cannot reach, an empty fleet, a row's open menu,
+//! a row's Delete question, and a pending and a refused Delete), the Rename editor, the select closed and open, the
 //! YOLO confirmation drawn inline in a launcher's body with its outlined permanent answer, the Settings dialog at
 //! Sessions, at Appearance, at Hosts, at Terminal and at Agent trust, the Hosts panel (closed, with Details, with a
-//! host failing to connect, and with a host's setup running and failed), the Add host dialog and the setup
-//! confirmation it leads to, a host's actions menu, and the host settings dialog at its top and scrolled to its end,
-//! in both appearances, compared pixel for pixel.
+//! host failing to connect, and with a host's setup running and failed), the Add host dialog and the setup confirmation
+//! it leads to, a host's actions menu, and the host settings dialog at its top and scrolled to its end, in both
+//! appearances, compared pixel for pixel.
 //! (The terminal stays dark in both appearances, so it draws identically in both pictures; only the scene's ground
 //! around it differs.)
 //!
@@ -1537,6 +1537,121 @@ fn terminal_delete_scrim(state: &SceneState, _: &mut Window, cx: &mut App) -> An
         .into_any_element()
 }
 
+/// The open session's details bar for every kind of status and host it draws differently, from a fake helm's snapshot:
+/// running on the local host (`Local (this machine)`, the red laptop), waiting on a remote that left its mark at the
+/// cloud, exited with a stop annotation, interrupted (the amber ended color), a launch failure whose long detail ends in
+/// an ellipsis at the badge's widest, a session nothing has classified (no badge, its age kept), one whose helm sent no
+/// host name (no host), and one on a host the helm cannot reach (its title and host only). A host the bar cannot place
+/// (no mark) needs a host list that was never read, which this scene's registry rules out; the details tests pin it.
+/// The fake and its connection are kept for the scene's life.
+fn session_details_bar_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    let row = |key, title, state: serde_json::Value, ago: i64| {
+        session(key)
+            .title(title)
+            .status(state)
+            .activity(TEST_NOW - ago)
+            .seen(Some(TEST_NOW - ago))
+    };
+    let state_of = |state: &str| serde_json::json!({ "state": state });
+    let rows = [
+        row("a", "Refactor the API client", state_of("running"), 2 * 60)
+            .host(1)
+            .host_name(crate::hosts::identity::LOCAL_NAME),
+        row("b", "Review the install docs", state_of("waiting"), 5 * 60)
+            .host_name("deploy@buildbox.example.invalid"),
+        row(
+            "c",
+            "Release notes for 0.40",
+            serde_json::json!({ "state": "exited", "exit_code": 0 }),
+            3 * 3_600,
+        )
+        .annotation("stopped by user")
+        .host_name("deploy@buildbox.example.invalid"),
+        row(
+            "h",
+            "Migrate the auth tokens",
+            state_of("interrupted"),
+            2 * 86_400,
+        )
+        .host_name("deploy@buildbox.example.invalid"),
+        row(
+            "d",
+            "Try the new agent",
+            serde_json::json!({
+                "state": "error",
+                "detail": "exec: \"claude-next\": executable file not found in $PATH",
+            }),
+            26 * 3_600,
+        )
+        .host_name("deploy@buildbox.example.invalid"),
+        row("e", "Just created", state_of("unknown"), 5)
+            .host_name("deploy@buildbox.example.invalid"),
+        row(
+            "f",
+            "An old session from before host names",
+            state_of("idle"),
+            9 * 86_400,
+        )
+        .host_name(""),
+        row(
+            "g",
+            "Benchmark on the bench box",
+            state_of("running"),
+            86_400,
+        )
+        .host(3)
+        .host_name("bench@bench.example.invalid")
+        .stale(),
+    ];
+    let order: Vec<&str> = rows.iter().map(|row| row.key).collect();
+    helm.connect(vec![
+        listing(&order, &rows),
+        hosts(&[
+            local(),
+            remote(2, "deploy@buildbox.example.invalid"),
+            remote(3, "bench@bench.example.invalid"),
+        ]),
+    ]);
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+}
+
+/// The bars of [`session_details_bar_setup`]'s sessions in listing order, one under another at a main pane's width,
+/// then the running one again in a pane too narrow for it, where its title and host are cut together. Each is drawn
+/// from the store as the pane draws it, the running mark on the pulse's first (full) step.
+fn session_details_bars(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    use crate::session_pane::details::{Details, bar};
+    use farhelm_proto::ui_channel::SessionRow;
+    let now = crate::session_list::age::seconds(ticker::wall_now(cx));
+    let Some(store) = session::current_store(cx) else {
+        return div().into_any_element();
+    };
+    let collections = store.read(cx).collections();
+    let shown: Vec<Details> = collections
+        .meta(Collection::Sessions)
+        .map(|meta| meta.order.clone())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|key| collections.get::<SessionRow>(key))
+        .map(|row| Details::of(row, collections, now))
+        .collect();
+    let narrow = shown.first().cloned();
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(8.))
+        .children(
+            shown
+                .into_iter()
+                .map(|details| div().w(px(620.)).child(bar(details, 0, cx))),
+        )
+        .children(narrow.map(|details| div().w(px(300.)).child(bar(details, 0, cx))))
+        .into_any_element()
+}
+
 /// The terminals a terminal scene's setup made, in a row.
 fn terminals(state: &SceneState, _: &mut Window, _: &mut App) -> AnyElement {
     div()
@@ -2670,6 +2785,12 @@ static SCENES: &[Scene] = &[
         size: (444., 174.),
         draw: terminal_delete_scrim,
         setup: terminal_delete_scrim_setup,
+    },
+    Scene {
+        name: "session-details-bar",
+        size: (644., 368.),
+        draw: session_details_bars,
+        setup: session_details_bar_setup,
     },
     Scene {
         name: "session-list",

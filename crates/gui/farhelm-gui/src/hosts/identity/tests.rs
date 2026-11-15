@@ -1,10 +1,11 @@
 //! Tests of a host's identity mark and of the UTC stamp, as pure functions: each color's tint, each shape's bundled
-//! drawing, and the stamp's format. The display name is pinned through the rail's identity rule, in the rail's tests
-//! (`session_list/host_rail/tests.rs`), and the phase words in `identity/phase/tests.rs`.
+//! drawing, and the stamp's format, and the local wording of a name the helm sent with a session. The display name is
+//! pinned through the rail's identity rule, in the rail's tests (`session_list/host_rail/tests.rs`), and the phase
+//! words in `identity/phase/tests.rs`.
 
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
 
-use super::{tint, utc_stamp};
+use super::{named, tint, utc_stamp};
 use crate::{assets, theme};
 
 /// A host's color names a palette token by its place in the color list (SPEC.md: host colors identify hosts), and the
@@ -48,4 +49,16 @@ fn every_host_shape_has_its_own_bundled_drawing() {
 fn utc_stamps_name_the_zone_and_hold_before_the_epoch() {
     assert_eq!(utc_stamp(1_700_000_000), "2023-11-14 22:13:20 UTC");
     assert_eq!(utc_stamp(-1), "1969-12-31 23:59:59 UTC");
+}
+
+/// The session pane's details bar names a session's host from the name the helm sent with the session, and only the
+/// local host's own registry name may read as `Local (this machine)`: a remote host the user happened to call `this
+/// machine` must not pass for the helm's own machine. Specified: `this machine` on a host known to be local reads
+/// `Local (this machine)`; the same name on a host not known to be local, and any other name on the local host, read as
+/// given.
+#[test]
+fn only_the_local_hosts_own_name_reads_local() {
+    assert_eq!(named("this machine", true).raw(), "Local (this machine)");
+    assert_eq!(named("this machine", false).raw(), "this machine");
+    assert_eq!(named("laptop", true).raw(), "laptop");
 }

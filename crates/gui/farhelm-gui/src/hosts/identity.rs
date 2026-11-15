@@ -1,5 +1,6 @@
-//! How a host is named and marked: the one home of a registered host's display name ([`display_name`]), its identity
-//! mark, its chosen shape in its chosen color ([`host_mark`]), and what its phase is called ([`phase`]).
+//! How a host is named and marked: the one home of a registered host's display name ([`display_name`], and [`named`]
+//! for a name the helm sent with a session), its identity mark, its chosen shape in its chosen color ([`host_mark`]),
+//! and what its phase is called ([`phase`]).
 //!
 //! The rail, the Hosts panel, Add host, the launcher, and the host menu and settings read these from here, so that no
 //! area reaches into another's private module for them and every surface names and marks a host the same way.
@@ -34,10 +35,19 @@ pub(crate) const LOCAL_NAME: &str = "this machine";
 /// local host under the registry's own name. An alias stays the user's word, even on the local host. Host text; the
 /// app's own words for the local host travel the same way, and escaping them changes nothing.
 pub(crate) fn display_name(host: &HostView) -> HostText {
-    if host.is_local() && host.name == LOCAL_NAME {
+    named(&host.name, host.is_local())
+}
+
+/// [`display_name`]'s rule applied to a name the helm sent elsewhere than in the registry: `name` is the helm's name
+/// for a host, and `is_local` whether the registry places that host on the helm's own machine. The session pane's
+/// details bar names a session's host this way, from the name the helm sent with the session (the old app's
+/// `gui_host_name`), so it still names a host the registry does not list, while the local host reads the same as
+/// everywhere else. A name that only matches [`LOCAL_NAME`] on a host not known to be local stays as it is.
+pub(crate) fn named(name: &str, is_local: bool) -> HostText {
+    if is_local && name == LOCAL_NAME {
         HostText::from_host("Local (this machine)")
     } else {
-        HostText::from_host(host.name.as_str())
+        HostText::from_host(name)
     }
 }
 
