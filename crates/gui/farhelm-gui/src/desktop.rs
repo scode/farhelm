@@ -6,8 +6,9 @@
 //! NOTE: This is area code, not a foundation (`docs/gpui/foundation-ownership.md`, "What is not a foundation"). It
 //! belongs to the desktop-integration area, which builds it here and under `desktop/`. It started as the stub the
 //! bootstrap's seams were cut against. The menu bar (`menu`), quitting on close, the notices window (`licenses`), the
-//! main window's frame and the macOS title band (`title_band`) are built; the Linux window's decorations are not yet,
-//! so [`dress_window`] sets the macOS options only.
+//! updater's window side (`updates`), the main window's frame and the macOS title band (`title_band`) are built; a
+//! second launch and the Linux window's decorations are not yet, so [`follow_activations`] does nothing and
+//! [`dress_window`] sets the macOS options only.
 //!
 //! The bootstrap's contract with this module is the signatures of the functions below, the names of [`FrameHost`],
 //! [`FrameFollow`], [`UpdaterHost`] and [`Activations`], and the four window options [`dress_window`] may set, nothing
@@ -49,6 +50,7 @@ pub(crate) mod menu;
 #[cfg(test)]
 mod tests;
 pub(crate) mod title_band;
+pub mod updates;
 
 // ---- The menu bar and quitting -------------------------------------------------------------------------------------
 
@@ -104,16 +106,18 @@ pub fn keep_licenses(licenses: fn() -> String, cx: &mut App) {
 
 // ---- The updater ----------------------------------------------------------------------------------------------------
 
-/// The host's updater (`Host::updater`), for the app's update surfaces. A host passes one only when an updater runs, so
-/// whether there is one is the question every update surface asks first. Empty until the desktop integration fills it
-/// in, with plain futures and boxed closures rather than the updater's own types, so the GUI crate depends on nothing of
-/// the updater's. The bootstrap passes it through whole.
-pub struct UpdaterHost {}
+/// The host's updater (`Host::updater`), for the app's update surfaces: its feed of readouts and its commands, as
+/// plain futures and boxed closures rather than the updater's own types, so the GUI crate depends on nothing of the
+/// updater's (`updates` has the fields and the rules). A host passes one only when an updater runs, so whether there is
+/// one is the question every update surface asks first. The bootstrap passes it through whole.
+pub use updates::UpdaterHost;
 
-/// Keep the host's updater for the update surfaces, `None` when no updater runs. The bootstrap calls this once, right
-/// after [`keep_licenses`] and before the window opens, so the window's first frame (its version readout) already knows
-/// whether an updater runs. The stub drops it.
-pub fn keep_updater(_updater: Option<UpdaterHost>, _cx: &mut App) {}
+/// Keep the host's updater for the update surfaces, `None` when no updater runs (`updates`). The bootstrap calls this
+/// once, right after [`keep_licenses`] and before the window opens, so the window's first frame (its version readout)
+/// already knows whether an updater runs.
+pub fn keep_updater(updater: Option<UpdaterHost>, cx: &mut App) {
+    updates::keep(updater, cx);
+}
 
 // ---- A second launch ------------------------------------------------------------------------------------------------
 
