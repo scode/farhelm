@@ -12,7 +12,9 @@
 //! lays the decisions out. All three come from what the helm stored, never from reading the command: the host mark
 //! from the registry, the agent mark and the shield from the session's launch. Which mark and name an agent type has
 //! is the GUI's per-harness vocabulary in [`crate::harness`]; nothing here compares harnesses. Which shield a launch
-//! earns is [`crate::permission`]'s, kept apart so the agent approval cards can show the same classification.
+//! earns is [`crate::permission`]'s, kept apart so the agent approval cards can show the same classification. The
+//! session pane's details bar draws the same host mark beside the session's host ([`HostMark::of`] and
+//! [`host_mark`]), so the two never disagree about where a session runs.
 //!
 //! The agent mark and the shield describe the pair together, the way the old row did: one description names the
 //! agent, what the launch's permission means and the stored command, since the shield alone cannot say which of
@@ -66,7 +68,7 @@ const AGENT_TRACK_GAP: f32 = 2.;
 
 /// Where a session runs, as far as the registry can say.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Locality {
+pub(crate) enum Locality {
     /// On the helm's own machine: the session's host is the registry's local host.
     Local,
     /// On another machine: the registry was read, and the session's host is not its local host.
@@ -265,13 +267,34 @@ pub(super) struct RowMarks {
 
 /// A host mark: where the session runs, the host's chosen shape, and its ink.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct HostMark {
-    pub(super) locality: Locality,
+pub(crate) struct HostMark {
+    pub(crate) locality: Locality,
     pub(super) icon: HostIcon,
     /// The host's chosen color, which [`identity::host_mark`] tints with.
     pub(super) color: HostColor,
     /// The ink drawn instead of that tint: `--on-fill` on the selected row, `None` elsewhere.
     pub(super) inverse: Option<Token>,
+}
+
+impl HostMark {
+    /// The host mark of `row`'s session, drawn in `inverse` instead of the host's tint when given, or `None` when the
+    /// session's host cannot be placed ([`locality`]). The row and the session pane's details bar both draw this one
+    /// decision, so the bar never marks a session the row leaves unmarked.
+    pub(crate) fn of(
+        row: &SessionRow,
+        collections: &Collections,
+        inverse: Option<Token>,
+    ) -> Option<HostMark> {
+        locality(row, collections).map(|locality| {
+            let (icon, color) = appearance(row, collections);
+            HostMark {
+                locality,
+                icon,
+                color,
+                inverse,
+            }
+        })
+    }
 }
 
 impl RowMarks {
@@ -292,15 +315,7 @@ impl RowMarks {
         let shield = permission(launch, row.info.screen_yolo);
         let ink = |own: Token| if selected { palette.on_fill } else { own };
         RowMarks {
-            host: locality(row, collections).map(|locality| {
-                let (icon, color) = appearance(row, collections);
-                HostMark {
-                    locality,
-                    icon,
-                    color,
-                    inverse: selected.then_some(palette.on_fill),
-                }
-            }),
+            host: HostMark::of(row, collections, selected.then_some(palette.on_fill)),
             // A mark with no identity color takes the agent track's foreground (the old `.session-agent`'s `--fg-1`).
             agent: (
                 glyph,
@@ -325,7 +340,7 @@ pub(super) fn picture_selector(mark_id: &str, picture: &str) -> String {
 
 /// The locality slot's mark: the host's shape at the slot's size, named `Local` or `Remote` with what that means as
 /// its hover help.
-pub(super) fn host_mark(row_id: &str, mark: HostMark, palette: &Palette) -> impl IntoElement {
+pub(crate) fn host_mark(row_id: &str, mark: HostMark, palette: &Palette) -> impl IntoElement {
     let id = SharedString::from(format!("{row_id}{HOST_ID_SUFFIX}"));
     let drawn = identity::host_mark(mark.icon, mark.color, metrics::ROW_SLOT, palette);
     // The identity tint gives way to the inverse ink on the selected row's fill (the old `.host-kind-icon` rule's

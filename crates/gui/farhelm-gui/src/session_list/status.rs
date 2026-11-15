@@ -21,6 +21,10 @@
 //! `hosts::session_unavailable_cause`. The cause is the app's own wording, never the host's: retry counts and the
 //! transport's error text belong to the session view's card, so a cause stays put while the helm keeps retrying.
 //!
+//! Other surfaces show the same badge ([`badge`]): the quick switcher, the menu header and the session pane's details
+//! bar. The bar keeps an ended status on one line and cuts it short, which a wrapping sentence cannot do, so it lays out
+//! the wording's parts itself ([`ended_words`]), decided here like every other form of it.
+//!
 //! Hover help and accessible descriptions here are the app's own words. A help that ever needs to quote a host value
 //! (an annotation, a launch failure's detail) goes through [`HoverHelp::sentence`](crate::components::HoverHelp), which
 //! escapes it; the wording a row shows on screen draws its host parts through [`Line`] for the same reason.
@@ -210,7 +214,8 @@ pub(crate) fn pulses(row: &SessionRow) -> bool {
 }
 
 /// The live mark `row` draws, or `None` for a status that draws no mark (an ended one, or one nobody classified).
-fn live(row: &SessionRow) -> Option<Live> {
+/// Visible to the crate for the session pane's details bar, which draws the list's own mark.
+pub(crate) fn live(row: &SessionRow) -> Option<Live> {
     match &row.info.status {
         SessionStatus::Running => Some(Live::Running),
         SessionStatus::Waiting => Some(Live::Waiting),
@@ -247,11 +252,51 @@ pub(crate) fn row_badge(row: &SessionRow, id: SharedString) -> Option<Badge> {
 
 /// [`badge`] and [`row_badge`]: `unknown_code` says whether an exit without a code names the code as unknown.
 fn badge_with(row: &SessionRow, id: SharedString, unknown_code: bool) -> Option<Badge> {
-    match &row.info.status {
-        SessionStatus::Unknown => None,
-        SessionStatus::Running | SessionStatus::Waiting | SessionStatus::Idle => {
-            live(row).map(Badge::Live)
+    if let Some(live) = live(row) {
+        return Some(Badge::Live(live));
+    }
+    let ended = ended_words(row, unknown_code)?;
+    Some(Badge::Ended {
+        kind: ended.kind,
+        line: ended.line(id),
+    })
+}
+
+/// An ended status's wording in its two parts: the app's words, and the one host value that may follow them (a stop
+/// annotation, a launch failure's detail). [`Badge::Ended`]'s line is these parts as one sentence; a surface that has
+/// to keep the wording on one line and cut it short (the session pane's details bar) lays the parts out itself, which a
+/// sentence, whose parts wrap as blocks, cannot do.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct EndedWords {
+    pub(crate) kind: Ended,
+    /// The app's words, with the separator before the host value when there is one: `Exited (code 0) — `.
+    pub(crate) words: String,
+    /// The host value after the words, if any.
+    pub(crate) host: Option<HostText>,
+}
+
+impl EndedWords {
+    /// The wording as one line, a sentence under `id` when it quotes the host.
+    pub(crate) fn line(&self, id: SharedString) -> Line {
+        match &self.host {
+            Some(host) => HostSentence::new(id)
+                .text(self.words.clone())
+                .host(host)
+                .into(),
+            None => Line::from(self.words.clone()),
         }
+    }
+}
+
+/// The wording of `row`'s ended status ([`badge`]'s when `unknown_code` is false, [`row_badge`]'s when true), or
+/// `None` for a live status or one nobody classified. The one place the ended wording is decided, so the row, the
+/// quick switcher, the menu header and the details bar cannot word an exit differently.
+pub(crate) fn ended_words(row: &SessionRow, unknown_code: bool) -> Option<EndedWords> {
+    match &row.info.status {
+        SessionStatus::Unknown
+        | SessionStatus::Running
+        | SessionStatus::Waiting
+        | SessionStatus::Idle => None,
         SessionStatus::Exited { exit_code } => {
             let mut words = "Exited".to_owned();
             match exit_code {
@@ -259,29 +304,25 @@ fn badge_with(row: &SessionRow, id: SharedString, unknown_code: bool) -> Option<
                 None if unknown_code => words.push_str(" (code unknown)"),
                 None => {}
             }
-            let line = match &row.info.annotation {
-                Some(annotation) => HostSentence::new(id)
-                    .text(words)
-                    .text(" — ")
-                    .host(&HostText::from_host(annotation.as_str()))
-                    .into(),
-                None => Line::from(words),
-            };
-            Some(Badge::Ended {
+            let host = row.info.annotation.as_ref().map(|annotation| {
+                words.push_str(" — ");
+                HostText::from_host(annotation.as_str())
+            });
+            Some(EndedWords {
                 kind: Ended::Exited,
-                line,
+                words,
+                host,
             })
         }
-        SessionStatus::Interrupted => Some(Badge::Ended {
+        SessionStatus::Interrupted => Some(EndedWords {
             kind: Ended::Interrupted,
-            line: "Interrupted".into(),
+            words: "Interrupted".to_owned(),
+            host: None,
         }),
-        SessionStatus::Error { detail } => Some(Badge::Ended {
+        SessionStatus::Error { detail } => Some(EndedWords {
             kind: Ended::Error,
-            line: HostSentence::new(id)
-                .text("Error — ")
-                .host(&HostText::from_host(detail.as_str()))
-                .into(),
+            words: "Error — ".to_owned(),
+            host: Some(HostText::from_host(detail.as_str())),
         }),
     }
 }

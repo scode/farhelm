@@ -4,8 +4,9 @@
 //! SPEC.md, "Session view": "Opening a session shows the agent's real TUI, live". The pane owns one
 //! [`AttachedTerminal`], for the selected session's agent terminal, and draws the session's top row above it
 //! ([`header`]: the lifecycle actions, and the left region the terminal area's tabs will take), with the lines a long
-//! Restart or Replace and a refusal add between the two. The row keeps nothing that belongs to a session either: it
-//! reads the store and the operation store while it draws.
+//! Restart or Replace and a refusal add between the two, and the details bar below it ([`details`]: the session's
+//! status, title, host and age). Neither row keeps anything that belongs to a session: both read the store and the
+//! operation store while they draw.
 //!
 //! - **One terminal, remade on every change of selection.** Choosing another session drops the terminal (which ends
 //!   its stream) and makes a new one with a fresh attachment lease. This is the old app's keyed remount (its
@@ -53,12 +54,16 @@
 //! when there are sessions it is blank, because the session list is about to open one.
 //!
 //! NOTE: Not ported yet: terminal tabs (the top row's left region holds only the terminal's open-tunnels pill until the
-//! terminal area brings them), the text size control (the terminal is drawn at the old default size), the details bar
-//! below the terminal, and the card a session without terminal contents shows instead. With no tabs, the scrim covers
-//! the agent terminal only, where the old one covered every pane.
+//! terminal area brings them), the text size control (the terminal is drawn at the old default size), the details bar's
+//! managed-checkout mark and copy buttons, the details bar of a session the list does not show (it waits for the helm
+//! to keep the open session in the listing; see [`details`]), and the card a session without terminal contents shows
+//! instead. With no tabs, the scrim covers the agent terminal only, where the old one covered every pane.
 
+pub(crate) mod details;
 pub(crate) mod header;
 
+#[cfg(test)]
+mod details_tests;
 #[cfg(test)]
 mod header_tests;
 #[cfg(test)]
@@ -67,7 +72,7 @@ mod tests;
 use farhelm_helm_client::Collections;
 use farhelm_helm_client::terminal::AttachmentLease;
 use farhelm_proto::DeleteGuard;
-use farhelm_proto::ui_channel::Collection;
+use farhelm_proto::ui_channel::{Collection, SessionRow};
 use gpui::{
     AnyElement, App, AppContext as _, Context, Div, Entity, FontWeight, Global,
     InteractiveElement as _, IntoElement, ParentElement, Render, Role, Stateful,
@@ -78,7 +83,7 @@ use crate::desktop::title_band::{self, Row};
 use crate::focus::{self, Mark};
 use crate::local_state::{self, LocalState};
 use crate::session::{self, PerSession, UiSession};
-use crate::session_list::delete;
+use crate::session_list::{age, delete};
 use crate::terminal::attached::{AttachedTerminal, TerminalTarget};
 use crate::terminal::{CellMetrics, TextSize};
 use crate::theme::metrics;
@@ -132,6 +137,13 @@ pub struct SessionPane {
     spinner: Option<delete::Spinner>,
     /// Where the top row's buttons were last drawn, and the question it opened ([`header::Header`]).
     header: header::Header,
+    /// The pulse's ticks for the details bar's running mark, held exactly while the bar shows one in an active window,
+    /// and worked out at the top of each frame like `spinner`.
+    pulse: Option<ticker::Pulsing>,
+    /// The ticker's 30-second clock, held exactly while the details bar shows an age, so the age moves on with the
+    /// rows' ages and no timer of the pane's own (SPEC_impl.md, "Animation time: the ticker"). Worked out at the top of
+    /// each frame like `spinner`.
+    clock: Option<ticker::Clock>,
     /// Act on a change of the selection, of the user's choice and of the connection.
     _observing: Vec<Subscription>,
 }
@@ -202,6 +214,8 @@ impl SessionPane {
             handled: cx.try_global::<Chosen>().map_or(0, |chosen| chosen.serial),
             spinner: None,
             header: header::Header::default(),
+            pulse: None,
+            clock: None,
             _observing: observing,
         }
     }
@@ -263,6 +277,8 @@ impl SessionPane {
 
 impl Render for SessionPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Counted in test builds, so a test can tell what redraws the pane (the details bar's clock, say).
+        crate::render_count::record("session-pane", cx);
         let shown = self
             .mounted
             .current(cx)
@@ -270,6 +286,8 @@ impl Render for SessionPane {
             .map(|mounted| (mounted.key.clone(), mounted.terminal.clone()));
         let Some((key, terminal)) = shown else {
             self.spinner = None;
+            self.pulse = None;
+            self.clock = None;
             return empty(cx);
         };
         let deleting = delete::in_flight(&key, cx);
@@ -281,9 +299,12 @@ impl Render for SessionPane {
         let step = self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx));
         let header = self.header_row(&key, step, window, cx);
         let lines = self.header_lines(&key, step, cx);
+        let bar = self.details_bar(&key, window, cx);
         // The top row, then the lines a long Restart or Replace and a refusal add, then the terminal, which takes the
         // rest of the height (SPEC.md: "The terminal loses no height in the steady state"; the lines show only while
-        // there is something to say).
+        // there is something to say), then the details bar. The bar comes last in drawing order as well as on screen,
+        // so its controls, when it has some, follow the top row and the terminal in Tab's order (SPEC.md: "Keyboard
+        // order follows the top row, terminal, then bottom bar").
         div()
             .flex()
             .flex_col()
@@ -298,7 +319,39 @@ impl Render for SessionPane {
                     .child(terminal)
                     .children(deleting.map(|guard| delete_scrim(guard, step, cx))),
             )
+            .children(bar)
             .into_any_element()
+    }
+}
+
+impl SessionPane {
+    /// The details bar for the open session filed under `key`, or `None` when the session list does not show it (see
+    /// [`details`]'s module docs) or the window has no UI session. Takes or drops the pulse and clock handles the bar
+    /// needs for this frame, as the session list does for its rows.
+    fn details_bar(
+        &mut self,
+        key: &str,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<Stateful<Div>> {
+        let now = age::seconds(ticker::wall_now(cx));
+        let shown = session::current_store(cx).and_then(|store| {
+            let collections = store.read(cx).collections();
+            collections
+                .get::<SessionRow>(key)
+                .map(|row| details::Details::of(row, collections, now))
+        });
+        let pulses =
+            shown.as_ref().is_some_and(details::Details::pulses) && ticker::is_active(window, cx);
+        if pulses != self.pulse.is_some() {
+            self.pulse = pulses.then(|| ticker::pulse(window, cx));
+        }
+        let ages = shown.as_ref().is_some_and(|shown| shown.age.is_some());
+        if ages != self.clock.is_some() {
+            self.clock = ages.then(|| ticker::clock(cx));
+        }
+        let pulse = self.pulse.as_ref().map_or(0, |pulse| pulse.step(cx));
+        shown.map(|shown| details::bar(shown, pulse, cx))
     }
 }
 

@@ -217,7 +217,7 @@ pub(crate) fn listing_meta(order: &[&str], total: u64, truncated: bool) -> Colle
 }
 
 /// The collections a store would hold after this snapshot.
-pub(super) fn collections(snapshot: Vec<CollectionState>) -> Collections {
+pub(crate) fn collections(snapshot: Vec<CollectionState>) -> Collections {
     let mut collections = Collections::default();
     let decoded: Vec<_> = snapshot
         .into_iter()
