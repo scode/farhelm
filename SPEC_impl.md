@@ -891,16 +891,44 @@ screen. A view holds one clock handle for all its rows, and a view that draws an
 wrapper cannot see the time. No row or view runs its own timer. This carries over the old rule that nothing redraws on
 its own more than 10 times a second; without it, one animating row redraws its whole list at display rate.
 
-GPUI's `with_animation` and `with_animations` are used only in the component layer, and only for one-shot transitions:
-no loops, and switched off under reduced motion.
+One-shot transitions are the exception to the ten-a-second rule, and they do not go through the ticker. One owner in the
+component layer draws them (`components::entrance`, in `crates/gui/farhelm-gui/src/components/transition.rs`), the only
+caller of GPUI's `with_animation` in the GUI crates' own code (GPUI Kit's internals animate inside the dependency, where
+the bans do not reach). The migration's orchestrator approved such an owner on 2026-11-14, for the quick-launch pill's
+entrance (SPEC.md: "a short fade and scale entrance", the old `launch-sequence-enter 200ms ease-out`), should the ticker
+be unable to carry it. It cannot. At ten ticks a second a 200 ms entrance is two or three drawn frames (its first, one
+step, its last), which reads as a jump rather than a fade, against 12 at 60 Hz and 24 at 120 Hz; a ticker handle carries
+no elapsed time to draw from, and needs a view to subscribe, which a component's element-building function does not
+have; and an inactive window gets no ticks, so an entrance started there would sit on its first, invisible frame until
+something else redrew the window, the trap the old stylesheet's note on paused animations describes. GPUI's animation
+works out its value from the executor's clock each time it draws, so it shows the state for the time that has passed,
+ends on its final state on time whether or not the window was active or drew in between, and asks for no frame once it
+ends: a bounded burst at the display's rate. Its callers pass no animation of their own, so none is told to repeat; a
+caller must keep the entrance's id the same from frame to frame, since an id that changes every frame starts a new
+entrance each frame, which never finishes and asks for a frame on every display frame. An inactive window gets the same
+transition as an active one: pausing it there leaves it invisible, and skipping it there would replay it when the window
+is activated. Under reduced motion the owner draws the final state at once, taking the setting from the ticker
+(`ticker::reduced_motion`) rather than from GPUI's own flag, so that all of the motion the app's own code draws follows
+one reading: the host's, read once at startup, which tests can drive. GPUI's flag holds GPUI Kit's own reading of the
+platform (on Linux from the desktop portal, followed live), which can differ from the host's, and under the test
+scheduler nothing writes it. `with_animations` and `with_spring` have no owner.
+
+Only the fade is drawn (a deviation from the old entrance, to surface to the maintainer): GPUI transforms only sprites,
+not quads or shadows, so the old scale from 96% needs a GPUI patch, and animating the text size instead would re-lay out
+the text every frame and add each in-between size to the glyph atlas, which never evicts. The terminal scrollbar's old
+fade (in over 100 ms, out over 800 ms) is not an entrance but a show and hide that can reverse midway, from wherever the
+fade has got to, which a one-shot transition cannot express; it stays a recorded deviation.
 
 Enforced by the clock bans under "Work that finishes later"; by `disallowed-methods` on GPUI's
 `BackgroundExecutor::timer`, `request_animation_frame` and `on_next_frame` in the GUI crates outside the ticker and the
-channel's watchdog and heartbeat, and on `with_animation` and `with_animations` outside the component layer; by a test
-that an animating row redraws at most 10 times a second and not at all while the window is inactive; and by a test that
-a view holding the clock redraws every 30 seconds in an inactive window under reduced motion and leaves no timer once it
-is gone. The wall clock itself is held by review, not by the clock bans: no lint stops GUI code from reading GPUI's
-scheduler clock outside the ticker, or a view from reading the time without holding a clock handle.
+channel's watchdog and heartbeat, and on `with_animation` everywhere but the transition owner (`with_animations` and
+`with_spring` everywhere); by a test that an animating row redraws at most 10 times a second and not at all while the
+window is inactive; by a test that a view holding the clock redraws every 30 seconds in an inactive window under reduced
+motion and leaves no timer once it is gone; and by tests that an entrance follows CSS's `ease-out` to the element's own
+opacity, asks for no frame once it ends, starts opaque with no frame under reduced motion, and in an inactive window
+ends on time and does not play again when the window is activated. The wall clock itself is held by review, not by the
+clock bans: no lint stops GUI code from reading GPUI's scheduler clock outside the ticker, or a view from reading the
+time without holding a clock handle.
 
 ### Notices: the notice center
 
@@ -1075,7 +1103,8 @@ Traps that an earlier rule already prevents get one line pointing at it.
   handle, unlike `cx.listener`.
 - **Parking is forbidden under the deterministic scheduler.** Waiting on anything woken outside GPUI's dispatcher (a
   real socket, tokio, an OS thread) panics; timers jump to their deadline. Rule: a fake, ordered, in-process channel in
-  tests, and executor timers only. Animations use the wall clock, so tests use reduced motion.
+  tests, and executor timers only. GPUI's animations read the executor's clock too, so a test advances it and delivers
+  frames with `simulate_next_frame`, which is how the entrance's tests see each frame it asks for.
 - **A hanging test may be GPUI's.** zed#66801 is an open scheduler deadlock; rule it out before blaming the app.
 - **The glyph atlas never evicts.** Every rasterized size stays in memory, so zooming the terminal grows memory without
   bound (one report, infiniterm#758, saw 286 MB after 18 hours). Rule: keep terminal text size to the existing steps

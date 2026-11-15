@@ -30,6 +30,10 @@
 //! host process once at startup and handed in ([`set_reduced_motion`]); this crate does not query the platform itself.
 //! Under reduced motion no tick loop runs at all, so nothing moves and nothing wakes ten times a second.
 //!
+//! One-shot transitions are not the ticker's: an element that fades in as it appears goes through the component layer's
+//! `components::entrance` (its module docs say why ticks cannot draw one). The setting still comes from here: the
+//! entrance asks [`reduced_motion`].
+//!
 //! The ticks are counted, and an animation whose phase changes more slowly than every tick says how often it needs to
 //! hear about it. A cursor blink ([`blink`]) changes twice a second, so its view is notified twice a second rather than
 //! ten times, and asks its [`Blinking`] handle which half of the blink it is in; each blink starts on its own shown
@@ -225,6 +229,18 @@ pub fn set_reduced_motion(reduced: bool, cx: &mut App) {
     if let Some(ticker) = installed_mut::<Ticker>(cx) {
         ticker.reduced_motion = reduced;
     }
+}
+
+/// Whether the operating system asks for reduced motion, as the host handed it in ([`set_reduced_motion`]): for motion
+/// the ticks do not drive, which must stand still under the same setting. The component layer's one-shot entrance
+/// (`components::entrance`) draws its final state at once when this is set.
+///
+/// Code that needs the setting asks this rather than GPUI's own flag (`App::reduce_motion`), so that all of the motion
+/// the app's own code draws follows one reading, the host's, which tests can drive. GPUI's flag holds GPUI Kit's own
+/// reading of the platform, which can differ from the host's (Kit's own motion follows it), and under the test
+/// scheduler nothing writes it.
+pub fn reduced_motion(cx: &App) -> bool {
+    installed::<Ticker>(cx).is_some_and(|ticker| ticker.reduced_motion)
 }
 
 /// Pin whether windows count as active (`Some`), or follow GPUI again (`None`). For runs where the platform cannot
