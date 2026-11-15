@@ -32,13 +32,14 @@ use super::SessionPane;
 use super::header::{Action, TABS_SLOT};
 use crate::actions::{DELETE_SESSION_CHORD, DELETE_SESSION_SHORTCUT_NAME};
 use crate::focus::Mark;
+use crate::launcher::launch_tests::{HostChange, start_host_change};
 use crate::main_view::MainView;
 use crate::session_list::SessionList;
 use crate::session_list::lifecycle_tests::{
     consented, drawn_inside, node_bounds, refuse_for_yolo, replace,
 };
 use crate::session_list::menu_tests::{any_layer, drawn, ended, entry, label_of};
-use crate::session_list::outcome::PROGRESS_SHOWS_AFTER;
+use crate::session_list::outcome::{self, PROGRESS_SHOWS_AFTER};
 use crate::session_list::tests::{
     Fixture, change, listing_meta, open_main, painted, selected, session,
 };
@@ -776,6 +777,185 @@ fn a_request_from_the_row_leaves_the_headers_actions_unavailable(cx: &mut TestAp
         fake.commands().iter().all(|command| !is_lifecycle(command)),
         "nothing more was sent"
     );
+}
+
+/// Restart and Replace start sessions, so they are launches, and SPEC.md, "Creation", says "Launches and changes to the
+/// host registry still exclude each other": a launch that picked its host while the registry was changing could aim at
+/// an entry the change is about to rewrite. The migration's orchestrator decided on 2026-11-15 that they wait for a
+/// host change as the launcher's Launch does, giving its reason; this pins both surfaces that offer them, which a later
+/// change could otherwise leave out of the exclusion one at a time.
+/// Specified: with Add host's probe in flight, the header's Restart and Replace and the row menu's Replace each have
+/// "Wait for the host change to finish" as their hover help, a click on each opens nothing, and nothing is sent; once
+/// the probe is answered, the header's Replace has its own help again, its Restart sends the idle session's Restart,
+/// and the menu's Replace asks and sends its Replace.
+#[gpui::test]
+fn restart_and_replace_wait_for_a_host_change(cx: &mut TestAppContext) {
+    const WAIT: &str = "Wait for the host change to finish";
+    let (mut fake, cx) = open_main(cx, snapshot_of(vec![entry(&idle("a"), 0)], false));
+    pending(&mut fake);
+    let probe = probe_alone(&mut fake, cx);
+
+    for button in ["session-header-restart", "session-header-replace"] {
+        assert_eq!(hover(cx, button).as_deref(), Some(WAIT), "{button}");
+        test_support::click(cx, button);
+        assert!(!any_layer(cx), "{button} asks nothing");
+    }
+    test_support::click(cx, "session-menu-a");
+    assert_eq!(hover(cx, "session-menu-replace").as_deref(), Some(WAIT));
+    test_support::click(cx, "session-menu-replace");
+    // What tells an unavailable item from an enabled one that asked nothing: the enabled one closes the menu.
+    assert!(
+        drawn(cx, "session-menu"),
+        "the unavailable Replace ignored the click; the menu is still open"
+    );
+    assert!(!drawn(cx, "prompt"), "the menu's Replace asks nothing");
+    test_support::keys(cx, "escape");
+    let meanwhile = fake.commands();
+    assert!(
+        meanwhile.iter().all(|command| !is_lifecycle(command)),
+        "nothing was sent during the probe"
+    );
+
+    // The fake answers in order: the probe first, then whatever else went out behind it.
+    fake.reply(probe, 200, Some(json!({})));
+    for command in meanwhile {
+        fake.reply(command.id, 200, None);
+    }
+    test_support::settle(cx);
+    assert!(
+        !cx.update(|_, cx| crate::hosts::host_change_in_flight(cx)),
+        "the premise: the host change is over"
+    );
+    // Off the buttons and back, so the tooltip is shown afresh with the help drawn now.
+    let away = test_support::center(cx, TABS_SLOT);
+    cx.simulate_mouse_move(away, None, Modifiers::none());
+    test_support::settle(cx);
+    assert_eq!(
+        hover(cx, "session-header-replace").as_deref(),
+        Some("Replace: swap this session for a fresh conversation with the same settings")
+    );
+    test_support::click(cx, "session-header-restart");
+    assert!(!any_layer(cx), "the idle agent restarts unasked");
+    assert_eq!(answered(&mut fake), [restart("a", false)]);
+    test_support::click(cx, "session-menu-a");
+    test_support::click(cx, "session-menu-replace");
+    assert!(drawn(cx, "prompt"), "the menu's Replace asks");
+    test_support::click(cx, "prompt-confirm");
+    assert_eq!(answered(&mut fake), [replace("a", false, false)]);
+}
+
+/// Start Add host's probe with nothing else outstanding, and return its envelope id, to answer it by: the fake answers
+/// in order, so the test must answer the probe before anything sent after it.
+fn probe_alone(fake: &mut FakeHelm, cx: &mut VisualTestContext) -> u64 {
+    let path = start_host_change(cx, HostChange::Probe);
+    let sent = fake.commands();
+    let [probe] = &sent[..] else {
+        panic!(
+            "the premise: only the probe went out, not {} commands",
+            sent.len()
+        );
+    };
+    assert_eq!(probe.path, path, "the premise: the probe is in flight");
+    probe.id
+}
+
+/// SPEC.md, "Errors and diagnostics": "Every failed operation surfaces a concrete, actionable error", and no dialog
+/// may close as though it succeeded. A question that opened before a host change and is confirmed during one cannot
+/// send its launch (Restart and Replace wait for host changes), so the refusal must show where the session's refusals
+/// do; before this, the question closed and nothing said why. The inline YOLO question makes this easy to reach, since
+/// it stays open while the user goes on to Add host. Specified: with a working session's Restart question open, a
+/// probe started and the question confirmed, nothing is sent and the header and the row say "Restart: Wait for the
+/// host change to finish"; once the probe is answered, the same with Replace's question and a second probe says
+/// "Replace: Wait for the host change to finish".
+#[gpui::test]
+fn a_question_confirmed_during_a_host_change_says_why(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot_of(vec![entry(&session("a"), 0)], false));
+    pending(&mut fake);
+    for (button, said) in [
+        (
+            "session-header-restart",
+            "Restart: Wait for the host change to finish",
+        ),
+        (
+            "session-header-replace",
+            "Replace: Wait for the host change to finish",
+        ),
+    ] {
+        test_support::click(cx, button);
+        assert!(drawn(cx, "prompt"), "the premise: {button} asks");
+        let probe = probe_alone(&mut fake, cx);
+        assert!(drawn(cx, "prompt"), "the premise: the question stays open");
+        test_support::click(cx, "prompt-confirm");
+        let meanwhile = fake.commands();
+        assert!(
+            meanwhile.iter().all(|command| !is_lifecycle(command)),
+            "{button}: nothing was sent"
+        );
+        for line in ["session-header-outcome-a", "session-outcome-a"] {
+            assert_eq!(label_of(cx, line).as_deref(), Some(said), "{line}");
+        }
+        fake.reply(probe, 200, Some(json!({})));
+        for command in meanwhile {
+            fake.reply(command.id, 200, None);
+        }
+        test_support::settle(cx);
+    }
+}
+
+/// While a host change is in flight only the launches wait: Stop and Delete start nothing, and a Restart that cannot
+/// resume would stay unavailable after the change, so its own reason is the one worth reading. A wider wait would block
+/// ending a runaway agent for the length of a probe, or hide why Restart never becomes available. Specified: with a
+/// probe in flight on a running session with one tab whose conversation was not captured, Stop's and Delete's help are
+/// their own, Restart's is its "Restart unavailable" reason, and Stop and Delete still ask their questions (the tab is
+/// what makes Stop ask, so that asking is what shows it was not refused).
+#[gpui::test]
+fn only_the_launches_wait_for_a_host_change(cx: &mut TestAppContext) {
+    let row = offering(&session("a"), 1, "not_captured", "codex");
+    let (mut fake, cx) = open_main(cx, snapshot_of(vec![row], false));
+    pending(&mut fake);
+    let _probe = probe_alone(&mut fake, cx);
+    assert_eq!(
+        hover(cx, "session-header-stop").as_deref(),
+        Some("Stop the agent and close its terminal tabs")
+    );
+    assert_eq!(
+        hover(cx, "session-header-delete"),
+        Some(format!(
+            "Delete: remove this session and its state, after you confirm ({DELETE_SESSION_SHORTCUT_NAME})"
+        ))
+    );
+    let restart = hover(cx, "session-header-restart").unwrap_or_default();
+    assert!(
+        restart.starts_with("Restart unavailable — "),
+        "Restart keeps its own reason: {restart}"
+    );
+    for button in ["session-header-stop", "session-header-delete"] {
+        test_support::click(cx, button);
+        assert!(drawn(cx, "prompt"), "{button} asks during the probe");
+        test_support::keys(cx, "escape");
+    }
+}
+
+/// The one-second clock keeps the app waking every second, so the waiting lines must let go of it once nothing counts;
+/// a clock kept after its request settled would wake the app every second for the rest of the session. Specified: an
+/// idle session's Restart sent and unanswered keeps one clock and no one-second clock before two seconds, takes it at
+/// two seconds, and a second after the reply keeps neither.
+#[gpui::test]
+fn the_one_second_clock_goes_with_the_last_line(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(cx, snapshot_of(vec![entry(&idle("a"), 0)], false));
+    pending(&mut fake);
+    test_support::click(cx, "session-header-restart");
+    let [(id, _, _)] = pending(&mut fake)[..] else {
+        panic!("one Restart was sent");
+    };
+    let kept = |cx: &mut VisualTestContext| cx.update(|_, cx| outcome::kept(cx));
+    assert_eq!(kept(cx), Some((false, 1)), "counting nothing yet");
+    test_support::advance(cx, PROGRESS_SHOWS_AFTER);
+    assert_eq!(kept(cx), Some((true, 1)), "counting from two seconds");
+    fake.reply(id, 200, Some(json!({})));
+    test_support::settle(cx);
+    test_support::advance(cx, Duration::from_secs(1));
+    assert_eq!(kept(cx), Some((false, 0)), "nothing kept once it settled");
 }
 
 /// The old `session-view-claims.spec.ts`: another client deleting the open session while its header Restart question

@@ -33,8 +33,9 @@
 //! Cancel, Escape or a press elsewhere is the way out. While the session has any request in flight, or the YOLO
 //! question its Replace met is open, every command here is unavailable ([`refused`]; SPEC.md: "an open lifecycle
 //! confirmation or a pending request refuses another lifecycle action"); opening the session stays possible, and other
-//! sessions' menus are untouched. A refusal or a notice from the helm shows inside the menu as well as on the row,
-//! since the open menu covers the row's own copy ([`super::outcome`]).
+//! sessions' menus are untouched. Replace also waits for a host change ([`launch_wait`]). A refusal or a notice from
+//! the helm shows inside the menu as well as on the row, since the open menu covers the row's own copy
+//! ([`super::outcome`]).
 //!
 //! NOTE: Clone and Replace with (the launcher's), Pin and the environment commands come with their areas, in the old
 //! order around these, with no placeholder meanwhile; the old row menu had no Restart, which the open session's header
@@ -62,6 +63,7 @@ use crate::components::{HoverHelp, IconButton, MenuHeader, MenuItem, Role, Tier,
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId, Popover, Subject};
+use crate::operations::{OpKey, Work};
 use crate::prompt::{self, Question};
 use crate::{local_state, session};
 
@@ -398,6 +400,52 @@ pub(crate) fn refused(key: &str, cx: &App) -> bool {
     delete::busy(key, cx) || super::replace_yolo::open(key, cx)
 }
 
+/// Why every session's plain Restart and Replace wait now, if they do: while one of this window's host-registry changes
+/// is in flight ([`crate::hosts::host_change_in_flight`]), the launcher's own reason for its Launch
+/// ([`crate::launcher::launch::HOST_CHANGE_IN_FLIGHT`]). This menu's Replace and the header's Restart and Replace draw
+/// themselves unavailable with it as their hover help, and their sends refuse ([`refuse_for_host_change`]).
+///
+/// SPEC.md, "Creation": "Launches and changes to the host registry still exclude each other". The migration's
+/// orchestrator decided on 2026-11-15 that Restart and Replace count as launches for this half of the exclusion, as
+/// they already do for the other ([`Work::creates_a_session`]); the old app's wider rule, every write waiting, is not
+/// carried over. So it is not part of [`refused`]: it concerns the window, not one session, and Rename, Stop and
+/// Delete do not wait for it. A new surface that offers either action gets the refusal through their send functions
+/// but must draw the wait itself, from this function, or its control looks ready while it does nothing.
+pub(crate) fn launch_wait(cx: &App) -> Option<&'static str> {
+    crate::hosts::host_change_in_flight(cx)
+        .then_some(crate::launcher::launch::HOST_CHANGE_IN_FLIGHT)
+}
+
+/// Refuse `key`'s `work` (a Restart or a Replace about to be sent) while a host change is in flight, and say why on
+/// the session: the reason goes in the operation store's slot for the key, which the row, its menu and the header draw
+/// as a refusal ("Replace: Wait for the host change to finish"; [`outcome`]). Returns whether it refused.
+///
+/// What reaches this is a stale press or a confirmation of a question that opened before the change started (a YOLO
+/// question stays open inline while the user goes on). SPEC.md, "Errors and diagnostics", has every failed operation
+/// surface its error and no dialog close as though it succeeded, so the refusal cannot be silent. The note
+/// ([`Operations::note`]) is written only while nothing runs on the key, since a note beside running work would
+/// outlive it, and the store refuses a second request on the key anyway.
+///
+/// [`Operations::note`]: crate::operations::Operations::note
+pub(crate) fn refuse_for_host_change(key: &str, work: Work, cx: &mut App) -> bool {
+    let Some(reason) = launch_wait(cx) else {
+        return false;
+    };
+    tracing::debug!(
+        ?work,
+        "a lifecycle request waited for a host change and was not sent"
+    );
+    if let Some(operations) = session::current_operations(cx) {
+        let key = OpKey::session(key);
+        operations.update(cx, |operations, cx| {
+            if operations.in_flight(&key).is_none() {
+                operations.note(&key, work, HostText::from_host(reason), cx);
+            }
+        });
+    }
+    true
+}
+
 /// Whether the helm-wide **Skip session confirmations** preference is on in `collections`: the lifecycle actions then go
 /// ahead on the click, and the open session's header drops "after you confirm" from its Delete's help.
 pub(crate) fn skips_questions(collections: &Collections) -> bool {
@@ -499,14 +547,17 @@ impl Render for RowMenu {
                     });
                 })
         };
+        // Replace waits for a host change, its help saying why ([`launch_wait`]).
+        let launch_wait = launch_wait(cx);
         let replace = lifecycle(
             "session-menu-replace",
             Icon::Replace,
             "Replace",
-            replace::MENU_HELP,
+            launch_wait.unwrap_or(replace::MENU_HELP),
             "Fresh conversation, same settings",
             LifecycleCommand::Replace,
-        );
+        )
+        .disabled(busy || launch_wait.is_some());
         let stop = lifecycle(
             "session-menu-stop",
             Icon::Stop,
