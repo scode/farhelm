@@ -31,13 +31,14 @@
 //!   queued, retried or read back. Checkouts' folder and post-clone command are the exception: each is a text field
 //!   the user saves explicitly, a [`CheckoutField`] of its own, which keeps a refused draft for correction and reads
 //!   its route back after a done save ([`checkout_field`]). So are Notifications' ntfy alerts: a form the user saves
-//!   explicitly, a view of its own ([`ntfy`]). So is Credentials, whose named secrets each save under their own key
-//!   ([`credentials`]). Terminal's tunnel switch saves like a switch only when turned off; turned on, it asks the
-//!   terminal's tunnel warning, whose Allow saves the consent, and shows the stored choice until the helm pushes it
-//!   ([`terminal`]). App's switch is not the helm's at all: it writes the desktop app's own setting through its
-//!   updater, at once and with a final answer, so it has no draft and never holds the preference row's key ([`app`]).
-//!   Containers saves no choice at all: it shows what the helm reads from its container hosts, and its Refresh and
-//!   confirmed Deletes are plain commands, not operations on a key ([`containers`]).
+//!   explicitly, a view of its own ([`ntfy`]). So is Credentials, whose named secrets each save under their own key,
+//!   with the Tensorlake API key form above them ([`credentials`], [`tensorlake_key`]). Terminal's tunnel switch saves
+//!   like a switch only when turned off; turned on, it asks the terminal's tunnel warning, whose Allow saves the
+//!   consent, and shows the stored choice until the helm pushes it ([`terminal`]). App's switch is not the helm's at
+//!   all: it writes the desktop app's own setting through its updater, at once and with a final answer, so it has no
+//!   draft and never holds the preference row's key ([`app`]). Containers saves no choice at all: it shows what the
+//!   helm reads from its container hosts, and its Refresh and confirmed Deletes are plain commands, not operations on a
+//!   key ([`containers`]).
 //!
 //! NOTE: Quick flips do not follow the old app's "newest-choice" rule. Its preference queue coalesced a field's clicks,
 //! sent only the newest, and reported a failure only for the newest click. Here the operation store admits one request
@@ -73,6 +74,7 @@ mod credential_tests;
 mod credentials;
 mod ntfy;
 mod refused;
+mod tensorlake_key;
 mod terminal;
 #[cfg(test)]
 mod tests;
@@ -98,6 +100,7 @@ use crate::theme::{self, Preference};
 use agent_trust::Trust;
 use choices::{Choice, Switch};
 use configured::Configured;
+use tensorlake_key::{TensorlakeAccount, TensorlakeKey};
 
 pub use agent_trust::TrustAgent;
 pub use checkout_field::{CheckoutField, FolderScope, Saved};
@@ -140,8 +143,8 @@ const SUMMARY: &str = "For every host on this helm";
 
 /// The footer's note, the old desktop app's words.
 ///
-/// NOTE: It names the dialog's explicit-save editors; of them, the Tensorlake API key form is not built yet (it joins
-/// Credentials next), nor is the file types field (it comes with Terminal's file downloads).
+/// NOTE: It names the dialog's explicit-save editors; of them, the file types field is not built yet (it comes with
+/// Terminal's file downloads).
 const FOOTER_NOTE: &str = "Most choices save immediately; credentials, the Tensorlake API key, ntfy alerts, checkout \
                            fields and file types use Save.";
 
@@ -482,6 +485,9 @@ pub(crate) struct SettingsDialog {
     /// The Credentials section, made the first time it is shown in this opening; it reads the catalog then and each
     /// time it is shown again.
     credentials: Option<Entity<credentials::Credentials>>,
+    /// What this opening knows of the Tensorlake account, shared by every Tensorlake API key form in it (SPEC.md: a
+    /// save or clear in either form updates both); made with the first section that draws one, which reads it then.
+    tensorlake: Option<Entity<TensorlakeAccount>>,
     /// The handover a trust hint asked for ([`open_at_agent_trust`]), until its agent's read answers. Left set if that
     /// read fails, which is harmless: the read is sent once per opening, so nothing can match it again in this opening.
     focus_on: Option<Handover>,
@@ -542,6 +548,7 @@ impl SettingsDialog {
             containers: None,
             app: app::AppUpdates::new(cx.focus_handle().tab_stop(true)),
             credentials: None,
+            tensorlake: None,
             focus_on: None,
             layer: None,
             refused: Refused::default(),
@@ -573,8 +580,8 @@ impl SettingsDialog {
     /// the first time in this opening reads the agents' trust choices, and showing Checkouts for the first time makes
     /// its fields (which read their routes) and reads the spare switch, showing Notifications for the first time
     /// makes its form, which reads the helm's ntfy settings, and showing Containers for the first time makes its
-    /// section, which reads the container hosts and leftovers. Showing Credentials makes it the first time, and reads
-    /// its catalog every time.
+    /// section, which reads the container hosts and leftovers. Showing Credentials makes it the first time, which reads
+    /// the Tensorlake account too if no section has yet, and reads its catalog every time.
     fn show(&mut self, section: Section, window: &mut Window, cx: &mut Context<Self>) {
         self.shown = section;
         if section == Section::Containers && self.containers.is_none() {
@@ -588,7 +595,13 @@ impl SettingsDialog {
                 // Shown again: the catalog is not pushed, so it is read again (the section's module docs).
                 Some(section) => section.update(cx, |section, cx| section.read(cx)),
                 None => {
-                    self.credentials = Some(cx.new(|cx| credentials::Credentials::new(window, cx)));
+                    let account = self
+                        .tensorlake
+                        .get_or_insert_with(|| cx.new(TensorlakeAccount::new))
+                        .clone();
+                    let key = cx.new(|cx| TensorlakeKey::new(account, window, cx));
+                    self.credentials =
+                        Some(cx.new(|cx| credentials::Credentials::new(key, window, cx)));
                 }
             }
         }
