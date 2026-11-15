@@ -293,18 +293,19 @@ impl Launcher {
             None => "Choose a harness".to_owned(),
         };
         let weak = cx.weak_entity();
-        let field = super::launcher_input(
-            "launcher-model",
-            &self.model_input,
-            "Model",
-            HoverHelp::tooltip(
-                "Model: the agent's model; type to filter, or a custom model id and Enter",
-            ),
-        )
-        .monospace()
-        .on_vertical(move |arrow, window, cx| {
-            let _ = weak.update(cx, |launcher, cx| launcher.model_arrow(arrow, window, cx));
-        });
+        let field = self
+            .launcher_input(
+                "launcher-model",
+                &self.model_input,
+                "Model",
+                HoverHelp::tooltip(
+                    "Model: the agent's model; type to filter, or a custom model id and Enter",
+                ),
+            )
+            .monospace()
+            .on_vertical(move |arrow, window, cx| {
+                let _ = weak.update(cx, |launcher, cx| launcher.model_arrow(arrow, window, cx));
+            });
         let control = div()
             .flex()
             .flex_wrap()

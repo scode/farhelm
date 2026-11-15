@@ -1208,6 +1208,10 @@ impl Launcher {
         });
         let name = panel.read(cx).name_focus(cx);
         self.save_panel = Some(panel);
+        // Template presses still waiting for the catalog read would edit the draft under the panel once it answers;
+        // while the panel is open a press changes nothing (SPEC.md, "Quick launch"), so they are dropped, as a press
+        // of Launch drops them.
+        self.waiting_batches.clear();
         self.save_refusal = None;
         self.pressed = false;
         crate::focus::focus_in_layer(&name, &mark, window, cx);
@@ -1265,21 +1269,45 @@ fn on_launcher(
     }
 }
 
-/// A text field of the launcher's, as [`TextInput::new`] makes one, where the quick-launch sequence prefix pressed with
-/// nothing selected begins a sequence (SPEC.md, "Quick-launch sequences": "In the launcher's own text fields it
-/// starts a sequence only when no text is selected; with a selection it keeps Cut";
-/// [`TextInput::on_unselected_prefix`]). The prefix's own action is dispatched from the field, so it reaches the main
-/// view's handler as the chord does from any control that is not a text field, and arms the launcher's form of the
-/// sequence, which applies to this draft. Every field the launcher draws is made here, so none keeps the prefix.
-pub(super) fn launcher_input(
-    id: impl Into<SharedString>,
-    state: &TextInputState,
-    label: impl Into<SharedString>,
-    help: HoverHelp,
-) -> TextInput {
-    TextInput::new(id, state, label, help).on_unselected_prefix(|window, cx| {
-        window.dispatch_action(Box::new(crate::actions::BeginSequence), cx)
-    })
+impl Launcher {
+    /// A text field of the launcher's, as [`TextInput::new`] makes one, where, while Save as template's panel is
+    /// closed, the quick-launch sequence prefix pressed with nothing selected begins a sequence (SPEC.md, "Quick-launch
+    /// sequences": "In the launcher's own text fields it starts a sequence only when no text is selected; with a
+    /// selection it keeps Cut"; [`TextInput::on_unselected_prefix`]). The prefix's own action is dispatched from the
+    /// field, so it reaches the main view's handler as the chord does from any control that is not a text field, and
+    /// arms the launcher's form of the sequence, which applies to this draft. Every field the launcher draws is made
+    /// here, so none keeps the prefix while the panel is closed.
+    ///
+    /// While the panel is open the fields keep the chord, as every other text field does: the old launcher let them
+    /// keep Cut then, and SPEC.md has a template shortcut consumed without changing the draft while a template is
+    /// being saved.
+    pub(super) fn launcher_input(
+        &self,
+        id: impl Into<SharedString>,
+        state: &TextInputState,
+        label: impl Into<SharedString>,
+        help: HoverHelp,
+    ) -> TextInput {
+        let input = TextInput::new(id, state, label, help);
+        if self.save_panel.is_some() {
+            return input;
+        }
+        input.on_unselected_prefix(|window, cx| {
+            window.dispatch_action(Box::new(crate::actions::BeginSequence), cx)
+        })
+    }
+
+    /// Whether Save as template's panel is open, when the template shortcuts and the sequence prefix change nothing in
+    /// this launcher (`crate::templates::dispatch`, `crate::templates::armed`).
+    pub(crate) fn save_panel_open(&self) -> bool {
+        self.save_panel.is_some()
+    }
+
+    /// The open Save as template panel, for tests that look at its own fields.
+    #[cfg(test)]
+    pub(crate) fn save_panel_for_tests(&self) -> Option<Entity<SavePanel>> {
+        self.save_panel.clone()
+    }
 }
 
 /// One labelled row: the label in the left column, its control beside it (`.launch-composer-row`). `selector` names the
@@ -1608,7 +1636,7 @@ impl Launcher {
                 row(
                     "launcher-conversation-row",
                     label,
-                    launcher_input(
+                    self.launcher_input(
                         "launcher-conversation",
                         &self.conversation,
                         label,
@@ -1649,7 +1677,7 @@ impl Launcher {
                 row(
                     "launcher-prompt-row",
                     "Initial prompt",
-                    launcher_input(
+                    self.launcher_input(
                         "launcher-prompt",
                         &self.prompt,
                         "Initial prompt",
@@ -1695,7 +1723,7 @@ impl Launcher {
             row(
                 "launcher-wrapper-row",
                 "Wrapper prefix",
-                launcher_input(
+                self.launcher_input(
                     "launcher-wrapper",
                     &self.wrapper,
                     "Wrapper prefix",
@@ -1798,7 +1826,7 @@ impl Launcher {
             row(
                 "launcher-command-row",
                 "Agent command",
-                launcher_input(
+                self.launcher_input(
                     "launcher-command",
                     &self.command,
                     "Agent command",
@@ -1948,7 +1976,7 @@ impl Launcher {
                     row(
                         "launcher-resume-command-row",
                         "Resume command",
-                        launcher_input(
+                        self.launcher_input(
                             "launcher-resume-command",
                             &self.resume,
                             "Resume command",
@@ -2011,7 +2039,7 @@ impl Render for Launcher {
             div()
                 .relative()
                 .child(
-                    launcher_input(
+                    self.launcher_input(
                         "launcher-folder",
                         &self.folder,
                         "Folder",
@@ -2039,7 +2067,7 @@ impl Render for Launcher {
             row(
                 "launcher-name-row",
                 "Name (optional)",
-                launcher_input(
+                self.launcher_input(
                     "launcher-name",
                     &self.name,
                     "Name (optional)",

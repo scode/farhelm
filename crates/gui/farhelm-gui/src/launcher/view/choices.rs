@@ -401,7 +401,7 @@ impl Launcher {
         let field = row(
             "launcher-flags-row",
             "Permission flags",
-            super::launcher_input(
+            self.launcher_input(
                 "launcher-flags",
                 &self.flags,
                 "Permission flags",

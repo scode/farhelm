@@ -229,8 +229,13 @@ pub(super) fn is_armed(cx: &App) -> bool {
 /// starts; Enter captures the bound names currently shown in the pill" holds because the pill and Enter both read this
 /// one copy. Template names are not copied; they are read from the store whenever they are needed.
 pub(super) fn begin(anchor: Option<Anchor>, window: &mut Window, cx: &mut App) {
-    let in_launcher = launcher::entry::open_launcher(window, cx).is_some();
+    let open = launcher::entry::open_launcher(window, cx);
+    let in_launcher = open.is_some();
+    // While Save as template's panel is open the prefix changes nothing in the launcher (SPEC.md, "Quick launch": "while
+    // saving a template, the chord is consumed without changing the draft"; the old launcher swallowed the prefix then).
+    let saving = open.is_some_and(|launcher| launcher.read(cx).save_panel_open());
     if (layers::focus_layer_open(window, cx) && !in_launcher)
+        || saving
         || is_armed(cx)
         || session::current_store(cx).is_none()
         || (!in_launcher && !launcher::entry::quick_launch_available(cx))
