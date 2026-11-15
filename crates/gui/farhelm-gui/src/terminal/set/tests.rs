@@ -353,6 +353,123 @@ fn a_reaped_tab_goes_silently_and_the_agent_terminal_takes_focus(cx: &mut TestAp
     assert!(window.typed_into(agent), "focus is on the agent terminal");
 }
 
+/// The old app's settled focus case with a header question open (old `terminal-replay-rename.spec.ts`, "selected tab
+/// removal preserves a header delete question's keyboard ownership"). SPEC.md, "Where focus rests": the terminal is
+/// home and "never takes focus from a control that holds it", and an open question owns the keyboard, so a reaped tab
+/// falling back to the agent terminal must not pull focus out from under the question. If it did, the user's next
+/// Enter, meant for the question, would go to the agent. Specified: with t1 chosen and live and the header's Delete
+/// question open with focus on its confirm button, t1's stream detaching as a closed tab and a row listing no tabs
+/// choose the agent terminal and leave focus on the confirm button; Escape then puts focus on the agent terminal, and a
+/// typed key reaches it.
+#[gpui::test]
+fn a_reaped_tab_leaves_focus_on_an_open_header_question(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1"]));
+    let (agent, t1) = (window.stream_of(None), window.stream_of(Some("t1")));
+    window.go_live(agent, "agent");
+    window.go_live(t1, "shell");
+    click(window.cx, T1_TAB);
+    assert_eq!(
+        window.chosen().as_deref(),
+        Some("t1"),
+        "the premise: the tab is chosen"
+    );
+    click(window.cx, "session-header-delete");
+    assert_eq!(
+        test_support::focused_id(window.cx).as_deref(),
+        Some("prompt-confirm"),
+        "the premise: the question has focus"
+    );
+
+    window.opened.borrow_mut()[t1]
+        .0
+        .detach(Some(DetachCode::TabClosed), "the tab was closed");
+    settle(window.cx);
+    window.push_tabs(&[]);
+    assert_eq!(window.chosen(), None, "the agent terminal is chosen");
+    assert_eq!(
+        test_support::focused_id(window.cx).as_deref(),
+        Some("prompt-confirm"),
+        "the question kept focus"
+    );
+
+    keys(window.cx, "escape");
+    assert!(
+        window.cx.debug_bounds("prompt").is_none(),
+        "the question closed"
+    );
+    keys(window.cx, "y");
+    assert!(window.typed_into(agent), "focus is on the agent terminal");
+}
+
+// ---- Staged replay -------------------------------------------------------------------------------------------------
+
+/// Each tab has its own catch-up (old `terminal-replay-rename.spec.ts`, "reattach-lands-at-tail (tab)"). The tab's
+/// replay must stay behind its own placeholder until the helm says it is complete: shown early it would draw half a
+/// replay, and showing the agent terminal in its place would put typing meant for the shell into the agent. Specified:
+/// with the agent terminal live and t1's replay delivered (a screen with "shell" on its first row and 100 history lines
+/// above it) but not complete, choosing t1 shows t1's catch-up placeholder and no screen; once t1's replay completes,
+/// t1 shows its screen (following the bottom, so no history line is in view), and a typed key reaches t1 and not the
+/// agent terminal.
+#[gpui::test]
+fn a_tabs_replay_is_staged_on_its_own_and_shown_at_the_bottom(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1"]));
+    let (agent, t1) = (window.stream_of(None), window.stream_of(Some("t1")));
+    window.go_live(agent, "agent");
+    {
+        let mut opened = window.opened.borrow_mut();
+        let terminal = &mut opened[t1].0;
+        let asked = terminal.attach();
+        let mut replay = screen(asked.cols, asked.rows, "shell");
+        replay[0] = serde_json::from_value(
+            json!({"t":"hello","cols":asked.cols,"rows":asked.rows,"history_cap":1000}),
+        )
+        .unwrap();
+        let rows: Vec<_> = (0..100)
+            .map(|i| {
+                let text = format!("h{i}");
+                json!({"w":false,"r":[[0,text.len(),text,[0,-1,-1]]]})
+            })
+            .collect();
+        replay.push(
+            serde_json::from_value(json!({"t":"history","first":0,"rows":rows,"cols":asked.cols}))
+                .unwrap(),
+        );
+        for message in replay {
+            terminal.output(message);
+        }
+    }
+    settle(window.cx);
+
+    click(window.cx, T1_TAB);
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+    let shown_text = |window: &mut Window| {
+        let set = window.set();
+        window.cx.update(|_, cx| {
+            set.read(cx)
+                .shown()
+                .and_then(|terminal| terminal.read(cx).terminal_text(cx))
+        })
+    };
+    assert!(
+        window.cx.debug_bounds("terminal-connecting").is_some(),
+        "t1's placeholder is drawn"
+    );
+    assert_eq!(shown_text(&mut window), None, "no half replay");
+
+    window.opened.borrow_mut()[t1].0.replay_complete();
+    settle(window.cx);
+    assert!(window.cx.debug_bounds("terminal-connecting").is_none());
+    let text = shown_text(&mut window).expect("t1's screen is shown");
+    assert_eq!(text.lines().next(), Some("shell"));
+    assert!(
+        !text.lines().any(|line| line.starts_with('h')),
+        "following the bottom: {text:?}"
+    );
+    keys(window.cx, "x");
+    assert!(window.typed_into(t1));
+    assert!(!window.typed_into(agent));
+}
+
 // ---- Takeover ------------------------------------------------------------------------------------------------------
 
 /// The helm hands all of a lease's terminals to the newest attach, so once another window took this view's terminals,
