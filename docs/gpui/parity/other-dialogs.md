@@ -147,8 +147,10 @@ button's, `trash/listing/tests.rs` the rules'):
 - "trash header and global confirmation remain reachable at width ${1000 | 360}", partly: the global question is drawn
   in the frame's pinned region above the footer, which scrolls on its own, and the focus coordinator scrolls its
   starting answer into view (`delete_all_sends_one_frozen_delete_per_reachable_host` checks the answer takes focus; the
-  `checkout-trash-confirm-all` golden shows it). Scrolling the region by keyboard waits for a foundation change (the
-  first entry under "### Trash" below). The 360-pixel width is below the app's minimum window.
+  `checkout-trash-confirm-all` golden shows it). Page Up, Page Down, Home and End scroll the region from that answer
+  back to the question's first line and forward again
+  (`page_keys_scroll_the_global_questions_region_from_its_focused_answer`). The 360-pixel width is below the app's
+  minimum window.
 - `tests/github-checkouts.spec.ts`, "trash count and cue follow the final reference, including another client": the
   count following another window's change is `reads_follow_each_hosts_connection_and_trash_epoch_only` (a moved trash
   epoch reads that host); the per-host confirmation is `a_hosts_delete_all_asks_inside_its_card_and_deletes_only_there`;
@@ -393,20 +395,16 @@ Where the port does not match the old app, and why. Each stays until the work na
   and one that timed out held the window's commands for the helm's 20-second host-wait bound, which the old app did not
   have; the window cannot tell a timeout from a quick failure (decided by the other-dialogs area's coordinator,
   2026-11-15).
-- **Waiting for a foundation change: the global question's region is not keyboard-scrollable.** SPEC.md puts the global
-  question in "its own bounded, keyboard-scrollable region directly above the footer". It is drawn in the frame's
-  bounded notices region above the footer's actions, which scrolls on its own beyond about a quarter of the window, but
-  while an answer holds focus Page Up and Page Down do not scroll it, and Tab reaches only the answers, so a warning
-  longer than the region cannot be read by keyboard. The region needs a keyboard stop of its own, or Page Up and Page
-  Down scrolling, while it holds controls; the shared frame has neither. Requested of the foundations by the
-  other-dialogs area's coordinator (2026-11-15).
 - **The question's band is the old band with the prompt's plain text.** The band is the old strip, red-tinted under a
   red rule with 10 by 12 pixels of padding, drawn only while the question is open. The words inside are the prompt's
   plain look, 13-pixel text at a line height of 19.5, where the old band had the dialog's 12-pixel text at 1.6: the
   prompt sets its own text size. The plain look also gives the question the status role and names it by its first line,
   the count and hosts, where the old band was a group named "Confirm permanent checkout deletion"; neither changes
   without changing the prompt. The global band sits on the footer's background under the footer's top rule, inside the
-  footer's own inset, rather than in a region of its own reaching the dialog's edges.
+  footer's own inset, rather than in a region of its own reaching the dialog's edges between the body and the footer.
+  That region scrolls beyond the frame's notices bound, about a quarter of the window's height, where the old one
+  scrolled beyond about a third (`max-height: 32dvh`, and 24dvh only in a window under 480 pixels tall, which the app's
+  minimum never is).
 - **Dismissing a host's question returns focus to its "Delete all on".** Close, the header's close and Escape with a
   question open dismiss the question, as in the old dialog, and return focus to the button that asked it. The old dialog
   returned focus to Delete all for the global question; for a host's it moved none, so focus left inside the band (its
