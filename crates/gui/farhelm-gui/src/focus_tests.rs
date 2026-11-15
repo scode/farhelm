@@ -11,6 +11,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
 
 use gpui::{
     AnyElement, AppContext as _, Context, FocusHandle, InteractiveElement as _, IntoElement,
@@ -19,13 +20,15 @@ use gpui::{
     TestAppContext, VisualTestContext, WeakFocusHandle, Window, div, point, px, size,
 };
 
-use crate::components::{Button, DialogFrame, HoverHelp, TextInput, TextInputState};
+use crate::components::{
+    Button, DialogFrame, HoverHelp, Select, SelectOption, TextInput, TextInputState,
+};
 use crate::focus::{self, Mark, OnPress};
 use crate::layers::{self, Anchor, Dialog};
 use crate::prompt::{self, Presentation};
 use crate::test_support::{
-    Panel, anchor_element, bounds, button, center, check, click, focused, follow, handle, is_open,
-    keys, open, open_dialog, open_dialog_returning, open_menu, question, redraw, settle,
+    Panel, advance, anchor_element, bounds, button, center, check, click, focused, follow, handle,
+    is_open, keys, open, open_dialog, open_dialog_returning, open_menu, question, redraw, settle,
 };
 
 // ---- Helpers on top of the shared harness ----------------------------------------------------------------------------
@@ -1597,6 +1600,537 @@ fn what_counts_as_the_user_moving_on(cx: &mut TestAppContext) {
     assert!(
         moved(cx, &before_arrow),
         "an arrow key in a text field is moving on"
+    );
+}
+
+// ---- Repeats of a key press that closed a layer ----------------------------------------------------------------------
+
+/// Every key-down that reached [`open_recording_terminal`]'s terminal stand-in, in order: its key, with " held" after
+/// a held repeat.
+type Typed = Rc<RefCell<Vec<String>>>;
+
+/// Open a window drawing one terminal stand-in (tracked as a terminal is) that records every key-down reaching it, and
+/// choose it, so it holds focus and is home. A layer opened now returns focus to it when it closes, as the launcher
+/// returns focus to the terminal it was opened from.
+fn open_recording_terminal(
+    cx: &mut TestAppContext,
+) -> (&mut VisualTestContext, FocusHandle, Typed) {
+    let slot = Rc::new(RefCell::new(None::<FocusHandle>));
+    let typed: Typed = Rc::default();
+    let (drawn, record) = (slot.clone(), typed.clone());
+    let cx = open(cx, move |_, _| {
+        let record = record.clone();
+        div()
+            .children(drawn.borrow().clone().map(|terminal| {
+                focus::track(
+                    div()
+                        .debug_selector(|| "terminal".into())
+                        .size(px(40.))
+                        .on_key_down(move |event: &KeyDownEvent, _, _| {
+                            let held = if event.is_held { " held" } else { "" };
+                            record
+                                .borrow_mut()
+                                .push(format!("{}{held}", event.keystroke.key));
+                        }),
+                    &terminal,
+                    OnPress::Focus,
+                )
+            }))
+            .into_any_element()
+    });
+    let terminal = handle(cx);
+    slot.replace(Some(terminal.clone()));
+    redraw(cx);
+    choose_now(cx, &terminal);
+    assert!(
+        focused(cx, &terminal),
+        "the premise: the terminal holds focus"
+    );
+    (cx, terminal, typed)
+}
+
+/// Send an auto-repeat of `key`, held down since its last press: a key-down with `is_held` set, spelled as a press
+/// of the key is ([`keys`] adds the text a key types), and check.
+fn held(cx: &mut VisualTestContext, key: &'static str) {
+    let keystroke = match Keystroke::parse(key) {
+        Ok(keystroke) => keystroke.with_simulated_ime(),
+        Err(error) => panic!("{key} is not a keystroke: {error}"),
+    };
+    cx.simulate_event(KeyDownEvent {
+        native_key: None,
+        keystroke,
+        is_held: true,
+        prefer_character_input: false,
+    });
+    check(cx);
+}
+
+/// Whether the user has moved on since `mark`.
+fn moved_on(cx: &mut VisualTestContext, mark: &Mark) -> bool {
+    cx.update(|_, cx| focus::has_moved_on(mark, cx))
+}
+
+/// Ask a question over the page and answer it with Enter, which closes it and returns focus to what held it before.
+/// Returns the mark taken right after the answer, as work that the answer starts takes its mark (a launch).
+fn answer_with_enter(cx: &mut VisualTestContext) -> Mark {
+    let layer = cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        prompt::ask(question("alpha"), None, &mark, |_, _, _| {}, window, cx)
+    });
+    settle(cx);
+    let layer = layer.expect("the question opened");
+    keys(cx, "enter");
+    assert!(
+        !is_open(cx, layer),
+        "the premise: Enter answered the question and closed it"
+    );
+    cx.update(|_, cx| Mark::take(cx))
+}
+
+/// Why this matters: SPEC.md ("Creation", "Who may move focus") says an accidental repeated Enter on the launcher's own
+/// submit does not count as moving on. Submitting closes the launcher's dialog and returns focus to its opener, often
+/// the terminal, so without this the second Enter counted (the launch would not open its session) and reached the
+/// terminal's program as a second Enter. The old app hid the launcher and left focus on the page's body, where the
+/// second press went nowhere and, within its 500 ms submit-repeat interval, did not count (`nonblocking-launch.spec.ts`
+/// at `24bc0580`: "New opens after a repeated Enter submit retargets to the released page").
+///
+/// Specified: once Enter closes a layer and focus is back on the terminal, a held repeat of that Enter, a fresh Enter
+/// at once, a fresh Enter exactly 500 ms after it (the old app ended a repeat only once more than 500 ms had passed),
+/// and a held repeat after that are neither counted (a mark taken after the answer still holds) nor delivered to the
+/// terminal. A fresh Enter 501 ms after the closing one reaches the terminal and counts as usual, and so do its own
+/// held repeats.
+#[gpui::test]
+fn a_repeat_of_the_enter_that_closed_a_layer_neither_counts_nor_reaches_the_terminal(
+    cx: &mut TestAppContext,
+) {
+    let (cx, terminal, typed) = open_recording_terminal(cx);
+    let answered = answer_with_enter(cx);
+    assert!(
+        focused(cx, &terminal),
+        "the premise: closing the question returned focus to the terminal"
+    );
+    assert!(
+        typed.borrow().is_empty(),
+        "the premise: the answering Enter itself reached only the question"
+    );
+
+    held(cx, "enter");
+    keys(cx, "enter");
+    advance(cx, Duration::from_millis(500));
+    keys(cx, "enter");
+    held(cx, "enter");
+    assert!(
+        !moved_on(cx, &answered),
+        "no repeat of the closing Enter counted as moving on"
+    );
+    assert!(
+        typed.borrow().is_empty(),
+        "no repeat of the closing Enter reached the terminal: {:?}",
+        typed.borrow()
+    );
+
+    advance(cx, Duration::from_millis(1));
+    keys(cx, "enter");
+    held(cx, "enter");
+    assert_eq!(
+        *typed.borrow(),
+        ["enter", "enter held"],
+        "a fresh Enter after the interval, and its own repeat, reached the terminal"
+    );
+    assert!(moved_on(cx, &answered), "and that Enter counted");
+}
+
+/// Why this matters: only the closing key's own repeats are swallowed, so typing goes on as usual the moment a layer
+/// closes. A different key is a new gesture, as in the old app, where any other press ended the submit's repeat.
+///
+/// Specified: after Enter closes a layer, a different key pressed at once reaches the terminal and counts as moving
+/// on, and an Enter pressed after it reaches the terminal too, although it falls within 500 ms of the closing Enter.
+#[gpui::test]
+fn a_different_key_after_the_enter_that_closed_a_layer_is_delivered_and_ends_its_repeats(
+    cx: &mut TestAppContext,
+) {
+    let (cx, _, typed) = open_recording_terminal(cx);
+    let answered = answer_with_enter(cx);
+
+    keys(cx, "a");
+    assert_eq!(*typed.borrow(), ["a"], "the other key reached the terminal");
+    assert!(moved_on(cx, &answered), "and counted as moving on");
+    keys(cx, "enter");
+    assert_eq!(
+        *typed.borrow(),
+        ["a", "enter"],
+        "an Enter after the other key is no longer a repeat of the closing one"
+    );
+}
+
+/// Why this matters: the rule covers every layer a key closes, and Escape closes the most. A held Escape must close one
+/// layer, not every layer below it and then reach the terminal's program as Escapes (SPEC.md: Escape closes the
+/// topmost layer). But Escape pressed twice in quick succession is how a user backs out of two layers, so a dismissal
+/// keeps its fresh presses.
+///
+/// Specified: with a dialog open over another over the terminal, Escape closes the top one, and a held repeat of it
+/// leaves the lower one open; a fresh Escape at once closes that one, returning focus to the terminal, and a held
+/// repeat of it does not reach the terminal, while a fresh Escape at once does (a dismissal keeps only its held
+/// repeats, even when it closes the last layer).
+#[gpui::test]
+fn a_held_escape_closes_one_layer_and_a_second_press_the_next(cx: &mut TestAppContext) {
+    let (cx, terminal, typed) = open_recording_terminal(cx);
+    let (outer, inner) = (handle(cx), handle(cx));
+    let (lower, _, _) = open_dialog(cx, vec![("outer", outer.clone())], &outer);
+    let (upper, _, _) = open_dialog(cx, vec![("inner", inner.clone())], &inner);
+
+    keys(cx, "escape");
+    assert!(
+        !is_open(cx, upper) && is_open(cx, lower),
+        "the premise: Escape closed the top dialog only"
+    );
+    held(cx, "escape");
+    assert!(
+        is_open(cx, lower),
+        "a held Escape did not close the dialog below"
+    );
+    assert!(focused(cx, &outer), "focus stayed in the dialog below");
+
+    keys(cx, "escape");
+    assert!(
+        !is_open(cx, lower),
+        "a second press of Escape closed the dialog below"
+    );
+    assert!(
+        focused(cx, &terminal),
+        "and focus went back to the terminal"
+    );
+    held(cx, "escape");
+    assert!(
+        typed.borrow().is_empty(),
+        "no held Escape reached the terminal: {:?}",
+        typed.borrow()
+    );
+    keys(cx, "escape");
+    assert_eq!(
+        *typed.borrow(),
+        ["escape"],
+        "a fresh Escape after a dismissal reached the terminal, although within 500 ms"
+    );
+}
+
+/// Why this matters: a key that closes one layer often opens the next, as a row's menu item opens its question, and
+/// that layer starts on the answer the user asked for, so a new Enter goes ahead (SPEC.md, "Opening and closing": from
+/// a row's menu, Delete then Enter deletes). Swallowing that Enter as a repeat would undo the start rule; a held one
+/// still must not answer ("Repeated or composing Enter cannot answer the new question").
+///
+/// Specified: Enter closes a question and another opens at once; a held repeat of that Enter leaves the new question
+/// unanswered, and a fresh Enter at once, within 500 ms of the first, answers it.
+#[gpui::test]
+fn a_fresh_enter_answers_a_layer_that_opened_after_the_enter_that_closed_one(
+    cx: &mut TestAppContext,
+) {
+    let (cx, _, typed) = open_recording_terminal(cx);
+    answer_with_enter(cx);
+    let answered = Rc::new(Cell::new(false));
+    let record = answered.clone();
+    let next = cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        prompt::ask(
+            question("beta"),
+            None,
+            &mark,
+            move |_, _, _| record.set(true),
+            window,
+            cx,
+        )
+    });
+    settle(cx);
+    let next = next.expect("the premise: the next question opened");
+
+    held(cx, "enter");
+    assert!(
+        is_open(cx, next) && !answered.get(),
+        "a held Enter did not answer the new question"
+    );
+    keys(cx, "enter");
+    assert!(
+        answered.get() && !is_open(cx, next),
+        "a fresh Enter answered it"
+    );
+    assert!(typed.borrow().is_empty(), "no Enter reached the terminal");
+}
+
+/// A dialog's content standing in for the launcher's form: a select whose closed control runs the dialog's main action
+/// on Enter (as the launcher's selects launch), and a button. Each counts what reached it.
+struct Composer {
+    pick: FocusHandle,
+    act: FocusHandle,
+    chosen: Rc<RefCell<Option<gpui::SharedString>>>,
+    launched: Rc<Cell<usize>>,
+    acted: Rc<Cell<usize>>,
+}
+
+impl Render for Composer {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let (chosen, launched, acted) = (
+            self.chosen.clone(),
+            self.launched.clone(),
+            self.acted.clone(),
+        );
+        let help = |words: &'static str| HoverHelp::tooltip(words);
+        let select = Select::new("pick", "Pick", help("Pick one"), gpui::Role::ComboBox)
+            .options([
+                SelectOption::new("a", "A", help("The first")),
+                SelectOption::new("b", "B", help("The second")),
+            ])
+            .on_choose(move |value, _, _| {
+                chosen.replace(Some(value.clone()));
+            })
+            .on_enter(move |_, _| launched.set(launched.get() + 1))
+            .focus(&self.pick);
+        let select = match self.chosen.borrow().clone() {
+            Some(value) => select.chosen(value),
+            None => select,
+        };
+        div()
+            .w(px(300.))
+            .p(px(20.))
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(select)
+            .child(button("act", &self.act).on_click(move |_, _, _| acted.set(acted.get() + 1)))
+    }
+}
+
+/// What a test reads back from [`open_composer`].
+struct Composed {
+    pick: FocusHandle,
+    act: FocusHandle,
+    chosen: Rc<RefCell<Option<gpui::SharedString>>>,
+    launched: Rc<Cell<usize>>,
+    acted: Rc<Cell<usize>>,
+}
+
+/// Open a [`Composer`] dialog over the page, starting on its select, for a mark taken now.
+fn open_composer(cx: &mut VisualTestContext) -> Composed {
+    let composed = Composed {
+        pick: handle(cx),
+        act: handle(cx),
+        chosen: Rc::default(),
+        launched: Rc::default(),
+        acted: Rc::default(),
+    };
+    let view = Composer {
+        pick: composed.pick.clone(),
+        act: composed.act.clone(),
+        chosen: composed.chosen.clone(),
+        launched: composed.launched.clone(),
+        acted: composed.acted.clone(),
+    };
+    let (container, start) = (handle(cx), composed.pick.clone());
+    let opened = cx.update(move |window, cx| {
+        let view = cx.new(|_| view);
+        let mark = Mark::take(cx);
+        layers::open_dialog(
+            Dialog {
+                view: view.into(),
+                container,
+                start,
+                subject: None,
+                main_action: None,
+                keeps_focus_on_empty_click: true,
+                returns_to: focus::ReturnTo::Opener,
+                on_dismiss: None,
+                placement: layers::DialogPlacement::Centered,
+                dismiss_on_outside_press: false,
+            },
+            &mark,
+            window,
+            cx,
+        )
+    });
+    settle(cx);
+    assert!(opened.is_some(), "the premise: the dialog opened");
+    composed
+}
+
+/// Why this matters: inside the launcher, Enter chooses in a select's list, which closes the list and returns focus to
+/// the select, and Enter on the closed select launches (SPEC.md, "Creation"). Typed at normal speed, that second Enter
+/// falls within 500 ms of the first; swallowing it would lose a deliberate launch without a sign. Choosing is not a
+/// submit, and the old app's native select delivered that Return to the form. The same goes for a question answered over
+/// a dialog: focus returns to a control the user is still working in.
+///
+/// Specified: in a dialog, Space opens a select's list and Enter chooses and closes it; a fresh Enter at once reaches
+/// the select's main action. Then, with focus on a button of the dialog, a question asked over it is answered with
+/// Enter, and a fresh Enter at once presses the button.
+#[gpui::test]
+fn a_fresh_enter_after_a_close_that_leaves_a_dialog_open_reaches_the_dialog(
+    cx: &mut TestAppContext,
+) {
+    let (cx, _, typed) = open_recording_terminal(cx);
+    let composed = open_composer(cx);
+    assert!(
+        focused(cx, &composed.pick),
+        "the premise: the dialog starts on its select"
+    );
+
+    keys(cx, "space");
+    assert!(
+        !focused(cx, &composed.pick),
+        "the premise: Space opened the list, which took focus"
+    );
+    keys(cx, "enter");
+    assert_eq!(
+        composed.chosen.borrow().as_deref(),
+        Some("a"),
+        "the premise: Enter chose the first option"
+    );
+    assert!(
+        focused(cx, &composed.pick),
+        "the premise: the list closed and focus went back to the select"
+    );
+    keys(cx, "enter");
+    assert_eq!(
+        composed.launched.get(),
+        1,
+        "the Enter right after choosing ran the main action"
+    );
+
+    keys(cx, "tab");
+    assert!(
+        focused(cx, &composed.act),
+        "the premise: Tab reached the button"
+    );
+    let layer = cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        prompt::ask(question("alpha"), None, &mark, |_, _, _| {}, window, cx)
+    });
+    settle(cx);
+    let layer = layer.expect("the premise: the question opened");
+    keys(cx, "enter");
+    assert!(
+        !is_open(cx, layer) && focused(cx, &composed.act),
+        "the premise: Enter answered the question and focus went back to the button"
+    );
+    keys(cx, "enter");
+    assert_eq!(
+        composed.acted.get(),
+        1,
+        "the Enter right after the answer pressed the button"
+    );
+    assert!(typed.borrow().is_empty(), "nothing reached the terminal");
+}
+
+/// Why this matters: a click is a new gesture, so it ends a closing press's repeats ("Any other fresh key press or a
+/// click ends it"), and a layer that a click closes was not closed by a key, so the key pressed before the click must
+/// not be taken as the closing press.
+///
+/// Specified: after Enter closes a layer, a click on the terminal and then Enter at once delivers that Enter. With a
+/// question open, a key pressed in it and then a click on its Cancel close it; the same key pressed at once reaches the
+/// terminal.
+#[gpui::test]
+fn a_click_ends_a_closing_press_and_a_layer_a_click_closes_swallows_nothing(
+    cx: &mut TestAppContext,
+) {
+    let (cx, terminal, typed) = open_recording_terminal(cx);
+    answer_with_enter(cx);
+    click(cx, "terminal");
+    keys(cx, "enter");
+    assert_eq!(
+        *typed.borrow(),
+        ["enter"],
+        "the Enter after the click reached the terminal"
+    );
+
+    let layer = cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        prompt::ask(question("alpha"), None, &mark, |_, _, _| {}, window, cx)
+    });
+    settle(cx);
+    let layer = layer.expect("the premise: the question opened");
+    keys(cx, "x");
+    click(cx, "prompt-cancel");
+    assert!(
+        !is_open(cx, layer) && focused(cx, &terminal),
+        "the premise: the click closed the question and focus went back to the terminal"
+    );
+    keys(cx, "x");
+    assert_eq!(
+        *typed.borrow(),
+        ["enter", "x"],
+        "the key after the click reached the terminal"
+    );
+}
+
+/// Why this matters: a layer that closes on its own (a reply, its subject going) is taken as closed by the last key
+/// press, because GPUI says nothing about when a key's handling ends. The coordinator's docs bound what that costs: the
+/// window runs from the press, so it swallows only a key still held from that press. This pins the bound.
+///
+/// Specified: a key pressed in a dialog over the terminal, then the dialog closed by its opener's code 501 ms later; a
+/// held repeat of that key does not reach the terminal, and a fresh press of it does.
+#[gpui::test]
+fn a_layer_closed_without_a_key_swallows_only_a_key_still_held(cx: &mut TestAppContext) {
+    let (cx, terminal, typed) = open_recording_terminal(cx);
+    let only = handle(cx);
+    let (layer, _, _) = open_dialog(cx, vec![("only", only.clone())], &only);
+    keys(cx, "x");
+    advance(cx, Duration::from_millis(501));
+    cx.update(|window, cx| layers::close(layer, window, cx));
+    settle(cx);
+    assert!(
+        focused(cx, &terminal),
+        "the premise: closing the dialog returned focus to the terminal"
+    );
+
+    held(cx, "x");
+    assert!(
+        typed.borrow().is_empty(),
+        "a key still held from the last press did not reach the terminal"
+    );
+    keys(cx, "x");
+    assert_eq!(
+        *typed.borrow(),
+        ["x"],
+        "a fresh press after the window reached the terminal"
+    );
+}
+
+/// Why this matters: the key capture's handler runs inside the keystroke interceptor, before GPUI matches any binding
+/// (a physical-key row's action, by contrast, is queued and runs once the key's handling is over). A layer the handler
+/// closes must be taken as closed by the press being handled, not the one before it, or its repeats would leak into
+/// whatever focus went back to.
+///
+/// Specified: with a dialog open over the terminal and a capture armed that closes the dialog on X, X closes it; a held
+/// repeat of X and a fresh X at once do not reach the terminal.
+#[gpui::test]
+fn a_layer_the_key_capture_closes_is_taken_as_closed_by_that_press(cx: &mut TestAppContext) {
+    let (cx, terminal, typed) = open_recording_terminal(cx);
+    let only = handle(cx);
+    let (layer, _, _) = open_dialog(cx, vec![("only", only.clone())], &only);
+    let armed = cx.update(move |_, cx| {
+        crate::actions::arm_key_capture(
+            move |down, window, cx| {
+                if down.keystroke.key != "x" {
+                    return crate::actions::Captured::Cancel;
+                }
+                crate::actions::disarm_key_capture(cx);
+                layers::close(layer, window, cx);
+                crate::actions::Captured::Consumed
+            },
+            |_| {},
+            cx,
+        )
+    });
+    assert!(armed, "the premise: the capture armed");
+
+    keys(cx, "x");
+    assert!(
+        !is_open(cx, layer) && focused(cx, &terminal),
+        "the premise: the capture closed the dialog and focus went back to the terminal"
+    );
+    held(cx, "x");
+    keys(cx, "x");
+    assert!(
+        typed.borrow().is_empty(),
+        "no repeat of X reached the terminal: {:?}",
+        typed.borrow()
     );
 }
 

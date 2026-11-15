@@ -386,6 +386,11 @@ pub fn install(cx: &mut App) {
 /// The capture goes first so that it sees the number-key chords and Escape before their rows and bindings take them; a
 /// key it cancels on is judged by the rest as it would be with nothing armed (a held repeat stays a repeat).
 ///
+/// Before all of that, the focus coordinator records the key for "the user moved on" (`focus::note_press`), so that a
+/// layer the capture or a row's action closes is taken as closed by this press. A key it swallows, a repeat of a press
+/// that closed a layer, still goes to an armed capture first, which decides what a repeat does, and is then stopped
+/// before any row or binding acts on it.
+///
 /// It does not check GPUI's character-input preference, under which bindings would not run at all: on macOS and
 /// Wayland only GPUI's replay of a held-back chord key asks for it, and a replay never reaches an interceptor. Were a
 /// platform to ask for it, dropping a listed shortcut's repeat would still be what SPEC.md wants.
@@ -393,7 +398,8 @@ fn intercept(event: &KeystrokeEvent, window: &mut Window, cx: &mut App) {
     let Some(down) = &event.key_down else {
         return;
     };
-    if captured(down, window, cx) {
+    let swallowed = crate::focus::note_press(down, window, cx);
+    if captured(down, window, cx) || swallowed {
         cx.stop_propagation();
     } else if let Some(row) = physical_on(THIS_PLATFORM, down) {
         if !(down.is_held && once_per_press(row.action)) {
