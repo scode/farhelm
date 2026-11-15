@@ -237,14 +237,19 @@ create bound their host wait at 20 seconds (`HOST_REPLY_BOUND` in the helm's ses
 host timed out while the work continues; the GUI's watchdog therefore waits longer than that. The launcher's host reads
 (Browse and its folder check, the checkout preview, the repository search) stop waiting at the same bound and drop the
 read, since nothing is left to finish; the host's own scan may still run as long as SPEC.md's "Slow hosts" allows, and a
-repository search that times out keeps its recent repositories. Host management's routes that can wait as long answer
-within the same bound, each saying where its late outcome shows: a host probe (a supervisor that answers late is still
-registered, so it appears in the pushed hosts list; otherwise the user probes again), an Update's plan (nothing changed,
-so the user asks again), and a destination or alias change, which waits for any setup or update running on that host
-(SPEC.md, "Waiting between operations on one host") and lands when the run ends; those two first refuse at once what the
-registry already refuses, so the reply that they are still waiting is not given for a change that cannot land as things
-stand. Environment and sandbox deletes, Suspend, Resume and the uninstall plan are not bounded yet and are bounded, or
-take the accepted form, when the work that ports them needs it.
+repository search that times out keeps its recent repositories. The trash routes are bounded the same way (decided by
+the migration's orchestrator on 2026-11-14, in place of an accepted form for trash deletion): a listing drops its read,
+and a delete replies that the host timed out while its cleanup runs on, a late answer that accepted a checkout advancing
+the host's Trash epoch so the Trash button and dialog read the host again, while a listing still queued behind such a
+cleanup when the bound passes says that, not that the host timed out; a supervisor of the helm's protocol moves the
+selected folders aside and answers without waiting for their removal, so only a hung host meets the bound. Host
+management's routes that can wait as long answer within the same bound, each saying where its late outcome shows: a host
+probe (a supervisor that answers late is still registered, so it appears in the pushed hosts list; otherwise the user
+probes again), an Update's plan (nothing changed, so the user asks again), and a destination or alias change, which
+waits for any setup or update running on that host (SPEC.md, "Waiting between operations on one host") and lands when
+the run ends; those two first refuse at once what the registry already refuses, so the reply that they are still waiting
+is not given for a change that cannot land as things stand. Environment and sandbox deletes, Suspend, Resume and the
+uninstall plan are not bounded yet and are bounded, or take the accepted form, when the work that ports them needs it.
 
 The helm runs each command through its existing HTTP router in process, so a command gets the same handlers, validation
 and authentication middleware as an HTTP request. There is no second, typed command API. A reply relays the response's
@@ -273,12 +278,12 @@ Serial admission only works if every handler replies promptly, so every handler 
   and the user sees that, but it never leaks into the transport. Bounding a handler's host wait is preferred over adding
   an accepted form.
 - A command whose normal duration can exceed the host-wait bound uses the accepted form: provisioning, host update,
-  trash deletion, recipe builds, and sandbox and container (environment) session creates, which take minutes. Every
-  other command bounds its host wait. A later click therefore waits behind at most one bounded command, never behind a
-  long launch. Each route converted to accepted names the state that carries its eventual outcome (success, partial
-  result or refusal). Reuse existing domain progress where it exists; otherwise the outcome goes in one bounded
-  operation-result collection keyed by envelope id, with explicit completion and removal rules. "Accepted" settles the
-  transport watchdog. It does not mean the work succeeded.
+  recipe builds, and sandbox and container (environment) session creates, which take minutes. Every other command bounds
+  its host wait. A later click therefore waits behind at most one bounded command, never behind a long launch. Each
+  route converted to accepted names the state that carries its eventual outcome (success, partial result or refusal).
+  Reuse existing domain progress where it exists; otherwise the outcome goes in one bounded operation-result collection
+  keyed by envelope id, with explicit completion and removal rules. "Accepted" settles the transport watchdog. It does
+  not mean the work succeeded.
 - Routes are converted as the work that first ports them needs them, not in a sweep.
 
 Every change a command causes is pushed before that command's reply. When the GUI sees "done", its store already shows
@@ -3319,10 +3324,11 @@ its host incarnation at click time, requires the full host listing to be eligibl
 completion path without a confirmation. Each host receives one frozen batch, with independent host tasks. Confirmed bulk
 submission closes the modal before starting those requests; the persistent `TrashControl` owns their lifetime. An entry
 Delete leaves it open, and closing it does not cancel the accepted request. Connection identity is rechecked before
-dispatch. The fifteen-minute trash deadline remains for older supervisors that still remove inside the request; the
-ordinary mutation deadline stays sixty seconds. A capable host's accepted IDs stay in the local listing, count and size
-totals as removing, with any old failure cleared, until a later listing confirms absence. Older hosts keep optimistic
-removal on the receipt. A capable receipt starts the existing completion poll immediately, including for an accepted
+dispatch. The helm bounds its wait for the delete's answer as it does for other host commands (see "The UI channel"):
+the helm only talks to supervisors of its own protocol, and those answer once the folders are moved aside; the ordinary
+mutation deadline is sixty seconds. A capable host's accepted IDs stay in the local listing, count and size totals as
+removing, with any old failure cleared, until a later listing confirms absence. Older hosts keep optimistic removal on
+the receipt. A capable receipt starts the existing completion poll immediately, including for an accepted
 diagnostic-only ID, so a failed immediate refresh cannot lose its outcome. The row's Retry uses the same single-ID
 selection and guards as Delete; queued or running rows offer no second action. Failure text and time participate in the
 existing layout-settle fence because they can move other rows' destructive buttons. Only the persistent trash icon turns

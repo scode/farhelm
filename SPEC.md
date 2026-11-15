@@ -1811,13 +1811,15 @@ inside their host sections. Initial focus stays on footer Close; sequential Tab 
 footer actions. Confirming a bulk delete closes the dialog immediately and sends one request per host with its frozen
 IDs; the hosts progress independently. An entry's own Delete keeps the dialog open. On a host that reports accepted
 cleanup, the row stays marked as removing until a later listing confirms it is gone; older hosts keep their existing
-row-disappearance behavior. Close, header close and Escape remain available during that request. A trash delete is long
-work the helm accepts at once: it reports the deletion's progress and each entry's result as ordinary state, so nothing
-in the window waits on the request. Trash deletes do not block other actions, while the trash control prevents
-overlapping deletes of its own. The listing is rechecked after the deletes settle. Refusals the helm reports remain
-visible on the next dialog opening, and the trash button's tooltip tells the user to open the trash to see why. Notices
-for a host disappear when a successful host registry refresh confirms that the host has been removed; disconnection or a
-failed refresh does not acknowledge them.
+row-disappearance behavior. Close, header close and Escape remain available during that request. A trash delete answers
+once the host has moved the selected folders aside, with each entry's result; the removal itself runs on, and its
+progress shows as ordinary state, so nothing in the window waits on it. A delete on a host that does not answer within
+the usual wait gets a timeout reply while its cleanup goes on, and Trash then shows the checkouts it removes (decided by
+the GPUI migration's orchestrator on 2026-11-14). Trash deletes do not block other actions, while the trash control
+prevents overlapping deletes of its own. The listing is rechecked after the deletes settle. Refusals the helm reports
+remain visible on the next dialog opening, and the trash button's tooltip tells the user to open the trash to see why.
+Notices for a host disappear when a successful host registry refresh confirms that the host has been removed;
+disconnection or a failed refresh does not acknowledge them.
 
 While a trash delete the helm accepted is still running or a host reports that it is freeing space, only the trash
 button's can turns upside down and bobs (static but still upside down under Reduce Motion). Its tooltip names the hosts
