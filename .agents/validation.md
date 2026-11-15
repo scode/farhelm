@@ -766,6 +766,26 @@ systemd or SSH substrate ran.
   switcher, host rail (Add host among its entries) and its foot (Hosts and the Settings gear), status segments, host
   menu, Remove host and host Update, sidebar width or divider, terminal attach, paste, text input or scrollback, the
   order menu, the bridge's wiring, the app's startup or `scripts/gui-agent.py` change.
+- `python3 scripts/record-test-run.py --kind development --selection 'Linux app lifecycle' --concurrency 'one app run, launched again in order' --termination-grace 30 -- python3 -B scripts/gui-lifecycle.py`
+  — the Linux desktop app's lifecycle end to end (`scripts/gui-lifecycle.py`), on headless Mutter through
+  `scripts/gui-agent.py`'s run machinery with one seeded fake-agent session, relaunching the app on one state directory,
+  in order: a fresh launch draws the session's row, its helm lists the local host connected and the session live, and a
+  supervisor is recorded and running; a launch whose state directory is a plain file exits 1 with one plain
+  `farhelm-desktop: ` line and no panic; a launch without `WAYLAND_DISPLAY` exits 1 with the Wayland refusal and creates
+  no state directory; the window frame is saved while the app runs, at the window's size; a second launch on the same
+  state directory, without `WAYLAND_DISPLAY`, exits 0 saying it asked the open app to come forward, and the open app
+  logs the request with its activation token; a click on the Linux title bar's Close quits the app the orderly way,
+  removes the second-launch socket and leaves the supervisor running; a relaunch reuses that supervisor (same pid and
+  start time), lists the session again as live and has a new helm credential, the old one refused; after SIGKILL the
+  supervisor survives and the stale socket refuses connections, and a relaunch reuses the supervisor, lists the session
+  as live and answers at a live socket; SIGTERM quits the way Close does, and a 900 by 650 frame saved then reopens the
+  window at that size; and the title bar's Maximize makes the app save the maximized state with that ordinary frame
+  kept, after a quit by Close the relaunched window opens maximized, and quit again by SIGTERM it still saves maximized
+  with that ordinary frame. The ordinary size is written between launches because the bridge cannot resize a window on
+  headless Mutter. Linux only; needs what `gui-agent.py start` needs there; it builds the app first unless given
+  `--no-build`. CI does not run it. Run it when the desktop app's startup, quit, second-launch forwarding, Wayland
+  refusal, supervisor decisions, window frame saving or restoring, the Linux title bar's Close or Maximize, or
+  `scripts/gui-agent.py` change.
 - `sh -n scripts/install.sh && shellcheck scripts/install.sh scripts/test-install-sh.sh` — the curl-installer is POSIX
   `sh` run unread on a fresh machine (`curl | sh`), so a syntax slip or a shellcheck-catchable bug in it gets caught
   before the slower Rust-side asset-table parity test in `assets.rs` would notice. `test-install-sh.sh` is bash, not
