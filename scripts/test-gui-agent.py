@@ -156,6 +156,18 @@ class EnvironmentTest(unittest.TestCase):
         self.assertNotIn("FARHELM_DESKTOP_AGENT_APPEARANCE", pairs)
         self.assertNotIn(gui_agent.SCRIPTED_HOSTS_ENV, pairs)
 
+    def test_start_dialogs_are_off_unless_the_run_asks_for_them(self):
+        """Every run's helm is fresh, so a run that let the Welcome card open would act on the card with its first
+        click or key instead of on the app. Specified: by default the app gets `off` under the name its agent-build
+        startup overrides read, and `--start-dialogs` (`start_dialogs=True`) leaves the variable unset, which is the
+        app's real start."""
+        args = gui_agent.app_env_args(pathlib.Path("/tmp/run"), {"farhelm": "/t/f"})
+        pairs = dict(arg.split("=", 1) for arg in args[1::2])
+        self.assertEqual(pairs["FARHELM_DESKTOP_AGENT_START_DIALOGS"], "off")
+        args = gui_agent.app_env_args(pathlib.Path("/tmp/run"), {"farhelm": "/t/f"}, start_dialogs=True)
+        pairs = dict(arg.split("=", 1) for arg in args[1::2])
+        self.assertNotIn("FARHELM_DESKTOP_AGENT_START_DIALOGS", pairs)
+
     def test_scripted_hosts_reach_the_helm_from_inside_its_state(self):
         """`--scripted-hosts` is how end-to-end steps add, set up, update and fail fake SSH hosts through the real helm.
         The helm accepts the backend only from a private directory inside its own state directory holding its exact

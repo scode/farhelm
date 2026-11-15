@@ -428,7 +428,7 @@ mod tests {
             let narrow = size(px(900.), px(700.));
             cx.set_global(Overrides {
                 window_size: Some(narrow),
-                preference: None,
+                ..Overrides::default()
             });
             let options = window_options_at(Some(WindowBounds::Maximized(saved())), cx);
             assert_eq!(

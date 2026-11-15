@@ -1,5 +1,7 @@
 //! Startup overrides for agent builds: the first window's size and a forced appearance, so a screenshot batch can
-//! capture the app light and dark, narrow and wide, without a resize or theme command in the bridge.
+//! capture the app light and dark, narrow and wide, without a resize or theme command in the bridge; and the start
+//! dialogs turned off, so a bridge run's first step acts on the app rather than on a Welcome card its fresh helm has
+//! never seen.
 //!
 //! NOTE: Only agent builds (the `agent` feature, which optimized builds refuse) read these values. The rest of this
 //! module is compiled into every build, so that the bootstrap has one way to read the overrides and ordinary test runs
@@ -7,13 +9,16 @@
 //! does. These are test hooks, not settings: the real appearance choice is the user's preference, which the helm's
 //! preferences hold (the maintainer decided on 2026-11-13 that appearance is a helm preference, not a per-device one),
 //! and a forced appearance wins over that stored choice for as long as the run lasts; the window's real size is its
-//! saved frame or the first-launch default.
+//! saved frame or the first-launch default. Turning the start dialogs off decides the window's start for the run
+//! without writing anything: the helm still holds the Welcome card unseen and the announcements pending.
 //! Nothing here is persisted, and the app never offers it.
 //!
 //! The harness (`scripts/gui-agent.py start --window-size WxH --appearance light|dark`) passes the values through the
 //! app's environment, the same way it passes the desktop app's other agent-build variables
-//! (`crates/farhelm-desktop/src/agent.rs`). With both unset an agent build starts like any other. A value that does not
-//! parse fails startup rather than being ignored, so a batch never captures the default look under a wrong label.
+//! (`crates/farhelm-desktop/src/agent.rs`). It turns the start dialogs off on every run unless given `--start-dialogs`,
+//! because every run starts a fresh helm. With every variable unset an agent build starts like any other. A value that
+//! does not parse fails startup rather than being ignored, so a batch never captures the default look under a wrong
+//! label, and a run never acts on a card it meant to keep closed.
 
 // The bridge's socket is unauthenticated, and on a Mac the local agent sessions run as the same user, so a build that
 // contains it lets any of them click Allow on its own approval card (SPEC_impl.md, "How the rules are enforced"). Shipped
@@ -41,6 +46,10 @@ pub const WINDOW_SIZE_ENV: &str = "FARHELM_DESKTOP_AGENT_WINDOW_SIZE";
 /// helm's stored choice is.
 pub const APPEARANCE_ENV: &str = "FARHELM_DESKTOP_AGENT_APPEARANCE";
 
+/// `off` keeps the dialogs a window opens on its own at start and reset (the Welcome card, then the announcement
+/// batch) closed for the run; [`start_dialogs_off`] says why. `off` is the only value: unset is the real behavior.
+pub const START_DIALOGS_ENV: &str = "FARHELM_DESKTOP_AGENT_START_DIALOGS";
+
 /// What an agent run asked the app to start with. Installed as a global by the bootstrap before anything reads it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Overrides {
@@ -49,6 +58,8 @@ pub struct Overrides {
     /// Replaces the starting preference (System) for the whole run: neither the system's appearance nor the helm's
     /// stored choice decides the palette.
     pub preference: Option<Preference>,
+    /// The start dialogs stay closed for the whole run; read through [`start_dialogs_off`].
+    pub start_dialogs_off: bool,
 }
 
 impl Global for Overrides {}
@@ -60,6 +71,7 @@ pub fn from_env() -> anyhow::Result<Overrides> {
     parse(
         var(WINDOW_SIZE_ENV)?.as_deref(),
         var(APPEARANCE_ENV)?.as_deref(),
+        var(START_DIALOGS_ENV)?.as_deref(),
     )
 }
 
@@ -73,8 +85,12 @@ fn var(name: &str) -> anyhow::Result<Option<String>> {
     }
 }
 
-/// Parse the two values. Kept apart from [`from_env`] so tests never touch the process environment.
-pub fn parse(window_size: Option<&str>, appearance: Option<&str>) -> anyhow::Result<Overrides> {
+/// Parse the variables' values. Kept apart from [`from_env`] so tests never touch the process environment.
+pub fn parse(
+    window_size: Option<&str>,
+    appearance: Option<&str>,
+    start_dialogs: Option<&str>,
+) -> anyhow::Result<Overrides> {
     let window_size = window_size
         .map(|text| {
             let parsed = text
@@ -96,9 +112,15 @@ pub fn parse(window_size: Option<&str>, appearance: Option<&str>) -> anyhow::Res
             _ => anyhow::bail!("{APPEARANCE_ENV} must be light or dark, not {text:?}"),
         })
         .transpose()?;
+    let start_dialogs_off = match start_dialogs {
+        None => false,
+        Some("off") => true,
+        Some(text) => anyhow::bail!("{START_DIALOGS_ENV} must be off or unset, not {text:?}"),
+    };
     Ok(Overrides {
         window_size,
         preference,
+        start_dialogs_off,
     })
 }
 
@@ -106,6 +128,30 @@ pub fn parse(window_size: Option<&str>, appearance: Option<&str>) -> anyhow::Res
 /// not install its own. Optional by design, unlike the foundations' globals ([`crate::bootstrap::installed`]).
 pub fn current(cx: &App) -> Overrides {
     cx.try_global::<Overrides>().copied().unwrap_or_default()
+}
+
+/// Whether an agent run turned the start dialogs off. When true, the window's own start decision (SPEC.md, "Welcome
+/// card" and "Announcements": the Welcome card on a helm that has not seen it, then the pending announcement batch)
+/// counts as already made for every window start and reset of this run: the caller opens nothing, reads no preference
+/// for it and writes nothing, so the card stays unseen, no announcement is recorded shown, and the helm's state is what
+/// the real behavior would find. Only that automatic decision may read this; an open the user asks for (Help's
+/// Welcome, and its Announcements history once this helm has one) must not consult it. On a run's fresh helm the
+/// history stays empty, so Help offers no Announcements item.
+///
+/// Why it exists: the bridge (`scripts/gui-agent.py start`) gives every run a fresh helm, so without this every run
+/// would start under the Welcome card, and its first click or key would act on the card. Nothing can mark the card
+/// seen before the window's first snapshot, since the helm answers requests only once it is up. A run passes
+/// `--start-dialogs` to see the real start.
+///
+/// False in every build but an agent build, and in a test that did not install overrides turning it off:
+///
+/// ```ignore
+/// if agent_startup::start_dialogs_off(cx) {
+///     return; // the start decision is made: nothing opens, nothing is written
+/// }
+/// ```
+pub fn start_dialogs_off(cx: &App) -> bool {
+    current(cx).start_dialogs_off
 }
 
 #[cfg(test)]
@@ -119,19 +165,54 @@ mod tests {
     /// A batch labels each capture with the theme and size it asked for, so the values must reach the app exactly.
     #[test]
     fn both_values_parse() {
-        let overrides = parse(Some("900x700"), Some("dark")).unwrap();
+        let overrides = parse(Some("900x700"), Some("dark"), None).unwrap();
         assert_eq!(overrides.window_size, Some(size(px(900.), px(700.))));
         assert_eq!(overrides.preference, Some(Preference::Dark));
         assert_eq!(
-            parse(None, Some("light")).unwrap().preference,
+            parse(None, Some("light"), None).unwrap().preference,
             Some(Preference::Light)
         );
+    }
+
+    /// Every bridge run starts a fresh helm, which would open the Welcome card over the app; `off` must reach the app
+    /// as the start dialogs turned off, or a run's first click lands on the card. Specifies that `off` turns them off
+    /// and changes nothing else, and that unset leaves them on.
+    #[test]
+    fn start_dialogs_off_parses() {
+        assert_eq!(
+            parse(None, None, Some("off")).unwrap(),
+            Overrides {
+                start_dialogs_off: true,
+                ..Overrides::default()
+            }
+        );
+        assert!(
+            !parse(Some("900x700"), Some("dark"), None)
+                .unwrap()
+                .start_dialogs_off
+        );
+    }
+
+    /// The welcome module reads the decision through the accessor, so it must report what was installed, and report
+    /// the real behavior (dialogs on) where nothing was: every build but an agent build.
+    #[gpui::test]
+    fn the_accessor_reports_the_installed_start_dialogs(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            assert!(!start_dialogs_off(cx), "nothing installed: dialogs on");
+            cx.set_global(Overrides {
+                start_dialogs_off: true,
+                ..Overrides::default()
+            });
+            assert!(start_dialogs_off(cx));
+            cx.set_global(Overrides::default());
+            assert!(!start_dialogs_off(cx));
+        });
     }
 
     /// An agent build launched without the variables (by hand, say) starts exactly like an ordinary build.
     #[test]
     fn nothing_set_overrides_nothing() {
-        assert_eq!(parse(None, None).unwrap(), Overrides::default());
+        assert_eq!(parse(None, None, None).unwrap(), Overrides::default());
     }
 
     /// The override replaces the first-launch size the main window asks for, so a batch's narrow and wide captures
@@ -142,7 +223,7 @@ mod tests {
             let narrow = size(px(900.), px(700.));
             cx.set_global(Overrides {
                 window_size: Some(narrow),
-                preference: None,
+                ..Overrides::default()
             });
             let options = crate::bootstrap::window_options(cx);
             let bounds = options.window_bounds.unwrap().get_bounds();
@@ -164,8 +245,8 @@ mod tests {
             assert_eq!(cx.window_appearance(), WindowAppearance::Light);
             assert!(!theme::resolve(Preference::System, cx.window_appearance()).dark);
             cx.set_global(Overrides {
-                window_size: None,
                 preference: Some(Preference::Dark),
+                ..Overrides::default()
             });
             crate::bootstrap::install_app_state(cx).unwrap();
             assert!(theme::palette(cx).dark);
@@ -183,16 +264,21 @@ mod tests {
         });
     }
 
-    /// A typo must fail the launch: ignoring it would capture the default look under the label the batch asked for.
+    /// A typo must fail the launch: ignoring it would capture the default look under the label the batch asked for, or
+    /// leave the Welcome card over the app a run meant to drive.
     #[test]
     fn a_malformed_value_is_an_error_naming_its_variable() {
         for bad in ["900", "900x", "x700", "0x700", "900x-1", "900X700", "wide"] {
-            let error = parse(Some(bad), None).unwrap_err().to_string();
+            let error = parse(Some(bad), None, None).unwrap_err().to_string();
             assert!(error.contains(WINDOW_SIZE_ENV), "{bad}: {error}");
         }
         for bad in ["system", "Dark", ""] {
-            let error = parse(None, Some(bad)).unwrap_err().to_string();
+            let error = parse(None, Some(bad), None).unwrap_err().to_string();
             assert!(error.contains(APPEARANCE_ENV), "{bad}: {error}");
+        }
+        for bad in ["on", "Off", "false", "0", ""] {
+            let error = parse(None, None, Some(bad)).unwrap_err().to_string();
+            assert!(error.contains(START_DIALOGS_ENV), "{bad}: {error}");
         }
     }
 }

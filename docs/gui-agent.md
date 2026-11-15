@@ -39,9 +39,13 @@ margin and a 1-pixel border on every side, and the 34-pixel title bar the window
 `screenshot` captures too) and `--appearance light|dark` (start in that palette whatever the system's appearance). The
 last two are test hooks of agent builds, passed to the app as environment variables that
 `crates/gui/farhelm-gui/src/agent_startup.rs` reads, so a screenshot batch can capture each theme and size; they are not
-the app's appearance setting, and a value the app cannot parse makes it refuse to start. `--scripted-hosts` gives the
-app fake SSH hosts (see "Scripted hosts"). It builds with whatever `CARGO_TARGET_DIR` you set. If `start` fails or is
-interrupted, run `stop` anyway: it releases whatever `start` had already taken, the lock included.
+the app's appearance setting, and a value the app cannot parse makes it refuse to start. `--start-dialogs` lets the
+window's start dialogs open: the Welcome card, which a helm that has not seen it opens at window start, and the
+announcement batch after it. Without the option `start` keeps them closed for the run (another agent-build variable the
+same file reads), because every run's helm is fresh and the card would otherwise sit over the app and take the run's
+first click or key; nothing is marked seen. `--scripted-hosts` gives the app fake SSH hosts (see "Scripted hosts"). It
+builds with whatever `CARGO_TARGET_DIR` you set. If `start` fails or is interrupted, run `stop` anyway: it releases
+whatever `start` had already taken, the lock included.
 
 To compare the app with the old app's reference pictures, `scripts/gui-screenshot-batch.py` drives these same commands
 over a fixed scene list and writes one browsable page (`docs/gpui/screenshot-batch.md`). `scripts/gui-e2e-smoke.py` is a
