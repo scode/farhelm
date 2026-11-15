@@ -3684,7 +3684,8 @@ pub(crate) async fn rename_session(
 /// the host leaving the hosts list once it succeeds and staying listed, with
 /// the reason only in the log, if it fails
 /// (`environment::podman::list_leftovers` and `delete_leftover`,
-/// `hosts::remove_host`).
+/// `hosts::remove_host`). The Tensorlake settings routes that wait on
+/// Tensorlake's API use the same bound (SPEC_impl.md, "The UI channel").
 ///
 /// Only the HTTP routes are bounded. Every other caller of the shared work
 /// (`do_delete_session`, `do_rename_session`, `do_stop_session`,
